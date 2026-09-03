@@ -40,6 +40,10 @@ def _ignore_retired(
     return {key: item for key, item in value.items() if key not in retired}
 
 
+# pueue's group name grammar; the daemon only validates shape and passes the
+# value through as the pueue group / systemd cgroup slice suffix.
+_POOL_NAME = re.compile(r"[a-z][a-z0-9-]{0,63}")
+
 MAX_OPERATION_PARAMETERS = 32
 MAX_PARAMETER_LIST_ITEMS = 32
 MAX_PARAMETER_STRING_LENGTH = 128
@@ -416,16 +420,9 @@ class ProjectOperation:
     result: str
     verdict: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS
-    exclusive_keys: tuple[str, ...] = ()
-    dependencies: tuple[str, ...] = ()
-    scratch: str = "none"
     parameters: tuple[OperationParameter, ...] = ()
     plan_node: bool = False
     schedule: str | None = None
-    # "queued": starting this operation cancels its own earlier queued jobs.
-    # Correct only where a later run subsumes an earlier one, as for a cache
-    # prebuild whose input has moved on.
-    supersede: str = "none"
     # "default": the operation runs only on the project's main checkout. A
     # complete corpus run belongs to the master boundary, not to a lane that
     # cannot get affected selection.
@@ -488,13 +485,9 @@ class ProjectOperation:
             "result": self.result,
             "verdict": {key: list(value) for key, value in self.verdict.items()},
             "timeout_seconds": self.timeout_seconds,
-            "exclusive_keys": list(self.exclusive_keys),
-            "dependencies": list(self.dependencies),
-            "scratch": self.scratch,
             "parameters": [parameter.catalog_row() for parameter in self.parameters],
             "plan_node": self.plan_node,
             "schedule": self.schedule,
-            "supersede": self.supersede,
             "checkout": self.checkout,
         }
 
@@ -1046,18 +1039,22 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
             "verdict",
             # Accepted and ignored: descriptors still declare it.
             "cache",
-            "exclusive_keys",
-            "dependencies",
-            "scratch",
             "parameters",
             "timeout_seconds",
             "plan_node",
             "schedule",
-            "supersede",
             "checkout",
         }
         definition = _ignore_retired(
-            definition, f"operations.{name}", {"estimate_memory_bytes"}
+            definition,
+            f"operations.{name}",
+            {
+                "estimate_memory_bytes",
+                "exclusive_keys",
+                "dependencies",
+                "scratch",
+                "supersede",
+            },
         )
         if set(definition) - allowed_operation:
             raise ProjectConfigError(
@@ -1071,7 +1068,7 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
         command = _string_list(definition.get("exec"), f"operations.{name}.exec")
         pool = definition.get("pool", "normal")
         result = definition.get("result", "exit")
-        if pool not in {"interactive", "normal", "bulk", "pytest"}:
+        if not _POOL_NAME.fullmatch(pool):
             raise ProjectConfigError(f"operations.{name}.pool is invalid")
         if result not in {"exit", "json", "pytest"}:
             raise ProjectConfigError(f"operations.{name}.result is invalid")
@@ -1084,20 +1081,9 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
                 f"operations.{name}.timeout_seconds must be between 1 and "
                 f"{MAX_DECLARED_OPERATION_TIMEOUT_SECONDS}"
             )
-        dependencies = _optional_string_list(
-            definition.get("dependencies"), f"operations.{name}.dependencies"
-        )
-        if name in dependencies or len(set(dependencies)) != len(dependencies):
-            raise ProjectConfigError(f"operations.{name}.dependencies is invalid")
-        scratch = definition.get("scratch", "none")
-        if scratch not in {"none", "tmpfs", "nvme"}:
-            raise ProjectConfigError(f"operations.{name}.scratch is invalid")
         plan_node = definition.get("plan_node", False)
         if not isinstance(plan_node, bool):
             raise ProjectConfigError(f"operations.{name}.plan_node is invalid")
-        supersede = definition.get("supersede", "none")
-        if supersede not in {"none", "queued"}:
-            raise ProjectConfigError(f"operations.{name}.supersede is invalid")
         checkout_policy = definition.get("checkout", "any")
         if checkout_policy not in {"any", "default"}:
             raise ProjectConfigError(f"operations.{name}.checkout is invalid")
@@ -1123,59 +1109,15 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
                 result=result,
                 verdict=verdict,
                 timeout_seconds=timeout_seconds,
-                exclusive_keys=_optional_string_list(
-                    definition.get("exclusive_keys"),
-                    f"operations.{name}.exclusive_keys",
-                ),
-                dependencies=dependencies,
-                scratch=scratch,
                 parameters=_operation_parameters(
                     definition.get("parameters"), f"operations.{name}.parameters"
                 ),
                 plan_node=plan_node,
-                supersede=supersede,
                 schedule=schedule,
                 checkout=checkout_policy,
             )
         )
     operation_names = {operation.name for operation in operations}
-    unknown_dependencies = {
-        dependency
-        for operation in operations
-        for dependency in operation.dependencies
-        if dependency not in operation_names
-    }
-    if unknown_dependencies:
-        raise ProjectConfigError(
-            f"{descriptor} operation dependency/dependencies are undeclared: "
-            + ", ".join(sorted(unknown_dependencies))
-        )
-    required_parameter_operations = {
-        operation.name
-        for operation in operations
-        if any(parameter.required for parameter in operation.parameters)
-    }
-    invalid_parameter_dependencies = {
-        dependency
-        for operation in operations
-        for dependency in operation.dependencies
-        if dependency in required_parameter_operations
-    }
-    if invalid_parameter_dependencies:
-        raise ProjectConfigError(
-            f"{descriptor} operation dependencies cannot target operations with required parameters: "
-            + ", ".join(sorted(invalid_parameter_dependencies))
-        )
-    invalid_required_parameter_operations = {
-        operation.name
-        for operation in operations
-        if operation.dependencies and operation.name in required_parameter_operations
-    }
-    if invalid_required_parameter_operations:
-        raise ProjectConfigError(
-            f"{descriptor} operations with required parameters cannot declare dependencies: "
-            + ", ".join(sorted(invalid_required_parameter_operations))
-        )
     invalid_scheduled_operations = {
         operation.name
         for operation in operations

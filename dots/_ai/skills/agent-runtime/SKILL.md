@@ -40,13 +40,12 @@ Verbs: `status`, `shell`, `agent`, `project`, `workspace`, `events`, `lane`,
 
 ## Jobs
 
-`start`, `fire`, `get`, `retry`, `list`, `wait`, `logs`, `result`, `cancel`,
-`admission`.
+`start`, `fire`, `get`, `retry`, `list`, `wait`, `logs`, `result`, `cancel`.
 
 - List declared operations with `agentctl project operations <project>`.
 - `agentctl job start <project> <operation> [--workspace <id>]
-[--parameters-json …] [--wait]`. The descriptor owns environment, resources,
-  dependencies, result contract, and timeout.
+[--parameters-json …] [--wait]`. The descriptor owns environment, pool,
+  result contract, and timeout.
 - Observe with `job get`, `job logs`, `job list --kind <kind>`, `job wait`;
   read the typed artifact with `job result`. Agent jobs are
   `--kind attested-agent`.
@@ -69,24 +68,11 @@ Ownership deletes them, never a clock:
   the previous record. Read a result before re-running the operation that
   produced it.
 
-### Admission
+### Session subagents run outside pueue
 
-`agentctl job admission [--project <p>]` shows holders, queue order, and the
-blocking arithmetic; a queued job's own record names `blocked_by`.
-
-- Concurrency is the only per-pool bound: `interactive` 4, `normal` 5, `bulk`
-  1, `pytest` 1, `agent` 16. There is no memory metering. Memory is bounded by
-  the slice hierarchy — `sinnixd.slice` carries `MemoryHigh` and
-  `MemorySwapMax` for the whole job plane.
-- Sustained host IO stall (`io_full_avg60` ≥ 25%) blocks new non-interactive
-  admissions. It never cancels running work.
-- Declared `exclusive_keys` serialize operations that share a resource.
-
-### Session subagents run outside admission
-
-Subagents spawned inside a Claude session are not jobs and are not admitted.
-Give them an explicit bound: one pytest at a time, `-n 2`, or route the heavy
-step through `agentctl job start`.
+Subagents spawned inside a Claude session are not jobs and pueue never sees
+them. Give them an explicit bound: one pytest at a time, `-n 2`, or route the
+heavy step through `agentctl job start`.
 
 ## Agents
 

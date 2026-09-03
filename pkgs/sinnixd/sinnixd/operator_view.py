@@ -429,7 +429,6 @@ def build_campaign_status(
     project_id: str,
     records: Iterable[Any],
     board: CampaignBoard,
-    admission: Mapping[str, Any],
     *,
     coordinator_label: str | None = None,
     now: datetime | None = None,
@@ -453,34 +452,6 @@ def build_campaign_status(
         if len(labels) == 1:
             coordinator_label = next(iter(labels))
 
-    pools = _mapping(admission.get("pools"))
-    slots = {
-        name: {
-            "workers": _mapping(value).get("workers"),
-            "occupied": len(_mapping(value).get("holders", []))
-            if isinstance(_mapping(value).get("holders", []), list)
-            else 0,
-        }
-        for name, value in sorted(pools.items())
-        if isinstance(name, str)
-    }
-    host = _mapping(admission.get("host"))
-    head = (
-        _mapping(_mapping(admission).get("queue", [])[0])
-        if isinstance(_mapping(admission).get("queue", []), list)
-        and _mapping(admission).get("queue")
-        else {}
-    )
-    admission_digest = {
-        "pools": slots,
-        "io_full_avg60": host.get("io_full_avg60"),
-        "head_of_queue": {
-            key: head.get(key)
-            for key in ("job_id", "pool", "blocked_by", "position")
-            if key in head
-        }
-        or None,
-    }
     current = now or datetime.now(UTC)
     errors = []
     for item in board.errors:
@@ -516,7 +487,6 @@ def build_campaign_status(
         "master_corpus": master_corpus,
         "lanes_next": lanes_next,
         "coordinator_label": coordinator_label,
-        "admission": admission_digest,
         "errors": errors[-8:],
         "board_updated_at": board.updated_at,
     }

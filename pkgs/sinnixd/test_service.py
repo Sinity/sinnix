@@ -53,7 +53,6 @@ from sinnixd.delivery import (
 from sinnixd.environment import build_environment
 from sinnixd.jobs import (
     DEFAULT_TIMEOUT_SECONDS,
-    IO_FULL_BLOCK_THRESHOLD,
     MAX_LOG_ARTIFACT_BYTES,
     SYSTEMD_COMMAND_TIMEOUT_SECONDS,
     GenericJobs,
@@ -178,41 +177,6 @@ def test_runtime_status_lists_the_dispatchable_operations(tmp_path: Path) -> Non
 
     assert response.ok and response.payload is not None
     assert response.payload.inline["operations"] == sorted(SUPPORTED_OPERATIONS)
-
-
-def test_admission_ledger_is_operator_only_and_has_empty_shape(tmp_path: Path) -> None:
-    service = SinnixdService(ProjectCatalog([]), jobs=generic_jobs(tmp_path))
-
-    response = service.dispatch(request("job.admission", "systemd-jobs"))
-
-    assert response.ok and response.payload is not None
-    assert response.payload.inline["claims"] == {}
-    assert response.payload.inline["queue"] == []
-    assert set(response.payload.inline["pools"]) == {
-        "interactive",
-        "normal",
-        "bulk",
-        "pytest",
-        "agent",
-    }
-    denied = service.dispatch(
-        request("job.admission", "systemd-jobs", principal="agent-control")
-    )
-    assert not denied.ok
-    assert denied.error is not None
-    assert denied.error.code == ErrorCode.POLICY_DENIED
-
-
-def test_admission_estimate_reset_requires_explicit_all_for_fleet_clear(
-    tmp_path: Path,
-) -> None:
-    service = SinnixdService(ProjectCatalog([]), jobs=generic_jobs(tmp_path))
-
-    response = service.dispatch(request("job.admission.reset", "systemd-jobs"))
-
-    assert not response.ok
-    assert response.error is not None
-    assert response.error.code == ErrorCode.INVALID_ARGUMENT
 
 
 @pytest.mark.parametrize(
@@ -350,25 +314,6 @@ def test_a_refused_request_is_reported_to_the_daemon_log(
     log = capfd.readouterr().err
     assert "request failed:" in log
     assert "correlation_id=unknown" in log
-
-
-def test_agentctl_admission_maps_to_read_only_job_verb(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    captured: dict[str, RequestEnvelope] = {}
-
-    def fake_call(socket_path, request_value):
-        captured["request"] = request_value
-        return {"schema": 1, "ok": True}
-
-    monkeypatch.setattr(sys, "argv", ["agentctl", "job", "admission"])
-    monkeypatch.setattr(cli_module, "call", fake_call)
-
-    assert cli_module.main() == 0
-    assert captured["request"].operation == "job.admission"
-    assert captured["request"].owner == "systemd-jobs"
-    assert captured["request"].principal == "operator"
-    assert captured["request"].arguments == {}
 
 
 def test_agentctl_job_list_exposes_service_pagination(
@@ -774,60 +719,6 @@ def test_project_operation_parameter_count_remains_bounded(tmp_path: Path) -> No
         ProjectCatalog([tmp_path])
 
 
-def test_operation_dependencies_reject_required_parameter_targets(
-    tmp_path: Path,
-) -> None:
-    """Anti-vacuity: dependencies have no parameter payload to satisfy required inputs."""
-    write_adapter(tmp_path)
-    descriptor = tmp_path / ".agentctl" / "project.toml"
-    descriptor.write_text(
-        descriptor.read_text()
-        + """
-[operations.depends_on_required]
-description = "Depend on a parameterized operation"
-exec = ["fixture-check"]
-pool = "normal"
-result = "exit"
-cache = "none"
-dependencies = ["verify_closure"]
-"""
-    )
-
-    with pytest.raises(ProjectConfigError, match="required parameters.*verify_closure"):
-        ProjectCatalog([tmp_path])
-
-
-def test_required_parameter_operations_reject_dependencies(tmp_path: Path) -> None:
-    """Anti-vacuity: required input validation cannot follow dependency launch."""
-    write_adapter(tmp_path)
-    descriptor = tmp_path / ".agentctl" / "project.toml"
-    descriptor.write_text(
-        descriptor.read_text()
-        + """
-[operations.required_with_dependency]
-description = "Run a required operation after a dependency"
-exec = ["fixture-check"]
-pool = "normal"
-result = "exit"
-cache = "none"
-dependencies = ["check"]
-
-[operations.required_with_dependency.parameters.bead_id]
-type = "string"
-position = 1
-required = true
-max_length = 128
-grammar = "safe-token"
-"""
-    )
-
-    with pytest.raises(
-        ProjectConfigError,
-        match="cannot declare dependencies.*required_with_dependency",
-    ):
-        ProjectCatalog([tmp_path])
-
-
 @pytest.mark.parametrize(
     "value",
     ("true", '"3600"', "0", "-1", str(MAX_DECLARED_OPERATION_TIMEOUT_SECONDS + 1)),
@@ -901,52 +792,6 @@ def test_declared_operation_timeout_defaults_and_survives_launch_recovery(
         ).timeout_seconds
         == DEFAULT_TIMEOUT_SECONDS
     )
-
-
-def test_nix_develop_payload_receives_job_owned_tmpdir_after_environment_entry(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The Nix shell's transient TMPDIR must not replace durable job scratch."""
-    monkeypatch.setenv("SINNIXD_NVME_SCRATCH_ROOT", str(tmp_path / "scratch"))
-    write_adapter(tmp_path)
-    descriptor = tmp_path / ".agentctl" / "project.toml"
-    descriptor.write_text(
-        descriptor.read_text()
-        .replace('kind = "fixture"', 'kind = "nix-develop"')
-        .replace(
-            'command = ["fixture-env", "--command"]',
-            'command = ["nix", "develop", "--command"]',
-        )
-        .replace(
-            'exclusive_keys = ["fixture:check"]',
-            'exclusive_keys = ["fixture:check"]\nscratch = "nvme"',
-        )
-    )
-    systemd = FakeSystemdJobs()
-    jobs = generic_jobs(tmp_path, systemd)
-    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
-
-    started = service.dispatch(
-        request(
-            "job.start", "systemd-jobs", {"project_id": "fixture", "operation": "check"}
-        )
-    )
-
-    assert started.ok and started.payload is not None
-    record = jobs.store.load(started.payload.inline["job_id"])
-    assert record.scratch_path is not None
-    expected = str(record.scratch_path)
-    command, environment = jobs.store.declared_launch(record.job_id)
-    assert command == (
-        "nix",
-        "develop",
-        "--command",
-        "env",
-        f"TMPDIR={expected}",
-        "fixture-check",
-    )
-    assert "TMPDIR" not in environment
-    assert "TMPDIR" not in systemd.started[0]["environment"]
 
 
 def test_concurrent_start_and_get_do_not_take_historical_terminal_locks(
@@ -1036,157 +881,6 @@ def test_concurrent_start_and_get_do_not_take_historical_terminal_locks(
     monkeypatch.setattr(store, "list", original_list)
 
 
-def test_queued_service_cancellation_wins_the_admission_start_interleaving(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Admission re-reads the locked record, so cancellation cannot be overwritten by submitted."""
-    write_adapter(tmp_path)
-    systemd = FakeSystemdJobs(
-        properties={"LoadState": "not-found", "ActiveState": "inactive"}
-    )
-    store = GenericJobStore(tmp_path / "state")
-    jobs = GenericJobs(
-        systemd,
-        store,
-        wait_poll_seconds=0.001,
-        pressure_probe=lambda: {
-            "io_full_avg60": IO_FULL_BLOCK_THRESHOLD,
-        },
-    )
-    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
-    started = service.dispatch(
-        request(
-            "job.start",
-            "systemd-jobs",
-            {"project_id": "fixture", "operation": "service"},
-        )
-    )
-    assert started.ok and started.payload is not None
-    job_id = started.payload.inline["job_id"]
-    assert started.payload.inline["state"]["phase"] == "queued"
-
-    before_start, resume_admission, cancellation_saved = (
-        threading.Event(),
-        threading.Event(),
-        threading.Event(),
-    )
-    original_save = store.save
-
-    def save_and_signal(record):
-        original_save(record)
-        if record.job_id == job_id and record.state.get("phase") == "cancelled":
-            cancellation_saved.set()
-
-    def pause_before_start(candidate: str) -> None:
-        assert candidate == job_id
-        before_start.set()
-        assert resume_admission.wait(5)
-
-    monkeypatch.setattr(store, "save", save_and_signal)
-    jobs.before_admission_start = pause_before_start
-    jobs.pressure_probe = lambda: {"memory_full_avg10": 0.0}
-
-    def admit() -> None:
-        with jobs._admission_lock:
-            jobs._admit_locked()
-
-    admission_thread = threading.Thread(target=admit)
-    admission_thread.start()
-    assert before_start.wait(1)
-    cancellation_thread = threading.Thread(
-        target=lambda: jobs.cancel(job_id, reason="test-cancel")
-    )
-    cancellation_thread.start()
-    assert cancellation_saved.wait(1)
-    resume_admission.set()
-    admission_thread.join(5)
-    cancellation_thread.join(5)
-
-    record = store.load(job_id)
-    assert not admission_thread.is_alive() and not cancellation_thread.is_alive()
-    assert systemd.started == []
-    assert record.state["phase"] == "cancelled" and record.state["terminal"]
-
-
-def test_queued_declared_cancellation_survives_service_refresh_and_restart(
-    tmp_path: Path,
-) -> None:
-    """Anti-vacuity: a queued cancellation stays terminal when its unit never existed."""
-    write_adapter(tmp_path)
-    systemd = FakeSystemdJobs(
-        properties={"LoadState": "not-found", "ActiveState": "inactive"}
-    )
-    store = GenericJobStore(tmp_path / "state")
-    jobs = GenericJobs(
-        systemd,
-        store,
-        wait_poll_seconds=0.001,
-        pressure_probe=lambda: {
-            "io_full_avg60": IO_FULL_BLOCK_THRESHOLD,
-        },
-    )
-    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
-    started = service.dispatch(
-        request(
-            "job.start",
-            "systemd-jobs",
-            {"project_id": "fixture", "operation": "service"},
-        )
-    )
-    assert started.ok and started.payload is not None
-    job_id = started.payload.inline["job_id"]
-    assert started.payload.inline["state"]["phase"] == "queued"
-
-    cancelled = service.dispatch(
-        request("job.cancel", "systemd-jobs", {"job_id": job_id})
-    )
-    assert cancelled.ok and cancelled.payload is not None
-    assert cancelled.payload.inline["state"]["phase"] == "cancelled"
-    assert cancelled.payload.inline["state"]["launch_evidence"] == "not-started"
-
-    def assert_cancelled_truth(current: SinnixdService) -> None:
-        for _ in range(2):
-            refreshed = current.dispatch(
-                request("job.get", "systemd-jobs", {"job_id": job_id})
-            )
-            assert refreshed.ok and refreshed.payload is not None
-            assert (
-                refreshed.payload.inline["state"] == cancelled.payload.inline["state"]
-            )
-
-            listed = current.dispatch(request("job.list", "systemd-jobs", {}))
-            assert listed.ok and listed.payload is not None
-            assert listed.payload.inline["jobs"][0]["job_id"] == job_id
-            assert (
-                listed.payload.inline["jobs"][0]["state"]
-                == cancelled.payload.inline["state"]
-            )
-
-            result = current.dispatch(
-                request("job.result", "systemd-jobs", {"job_id": job_id})
-            )
-            assert not result.ok
-            assert result.error is not None
-            assert result.error.code.value == "RESULT_INVALID"
-            assert result.error.message == "job exit result is unavailable"
-            assert result.payload is None
-
-    assert_cancelled_truth(service)
-
-    restarted = SinnixdService(
-        ProjectCatalog([tmp_path]),
-        jobs=GenericJobs(
-            FakeSystemdJobs(
-                properties={"LoadState": "not-found", "ActiveState": "inactive"}
-            ),
-            GenericJobStore(store.root),
-            wait_poll_seconds=0.001,
-            pressure_probe=lambda: {"memory_full_avg10": 0.0},
-        ),
-    )
-    assert_cancelled_truth(restarted)
-
-
 def test_declared_missing_unit_without_cancellation_evidence_stays_missing(
     tmp_path: Path,
 ) -> None:
@@ -1222,61 +916,6 @@ def test_declared_missing_unit_without_cancellation_evidence_stays_missing(
     assert result.error is not None
     assert result.error.code.value == "RESULT_INVALID"
     assert result.error.message == "job exit result is unavailable"
-
-
-def test_dependency_admission_never_nests_candidate_and_dependency_job_locks(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Malformed durable dependency cycles cannot create a cross-process job-lock cycle during admission."""
-    store = GenericJobStore(tmp_path / "state")
-    jobs = GenericJobs(FakeSystemdJobs(), store, wait_poll_seconds=0.001)
-    first_id, second_id = str(uuid4()), str(uuid4())
-
-    def queued_record(job_id: str, dependency_id: str):
-        record = store.create(
-            GenericJobSpec(
-                kind="declared-operation",
-                command=("fixture-service",),
-                working_directory=str(tmp_path),
-                environment={},
-                project_id="fixture",
-                operation="service",
-                parameter_digest="0" * 64,
-                result_kind="exit-status",
-                dependency_job_ids=(dependency_id,),
-            ),
-            job_id,
-        )
-        store.write_declared_launch(
-            job_id, record.spec.command, record.spec.environment
-        )
-        store.save(
-            jobs._with_state(
-                record, {"phase": "queued", "terminal": False, "observed_at": "fixture"}
-            )
-        )
-
-    queued_record(first_id, second_id)
-    queued_record(second_id, first_id)
-    original_locked = store.locked
-    held: list[str] = []
-
-    @contextmanager
-    def reject_nested_job_locks(job_id: str):
-        assert not held, f"nested job locks: {held!r} then {job_id}"
-        held.append(job_id)
-        try:
-            with original_locked(job_id):
-                yield
-        finally:
-            held.pop()
-
-    monkeypatch.setattr(store, "locked", reject_nested_job_locks)
-    with jobs._admission_lock:
-        jobs._admit_locked()
-
-    assert store.load(first_id).state["phase"] == "waiting-dependencies"
-    assert store.load(second_id).state["phase"] == "waiting-dependencies"
 
 
 def test_typed_runner_keeps_the_one_hour_timeout_identity_bound(
@@ -4194,78 +3833,6 @@ def test_seal_output_composes_through_exact_head_into_delivery_validation(
         delivery_gate._verified_workspace(
             workspace["workspace_id"], verifier_id, packet_id
         )
-
-
-def test_admission_revalidates_queued_declared_workspace_before_systemd_launch(
-    tmp_path: Path,
-) -> None:
-    """A queued declared service whose checkout HEAD moved must terminalize before it reaches systemd."""
-    write_adapter(tmp_path)
-    descriptor = tmp_path / ".agentctl" / "project.toml"
-    descriptor.write_text(
-        descriptor.read_text().replace(
-            'cache = "none"\n\n[operations.service.service]',
-            'cache = "none"\n\n[operations.service.service]',
-        )
-    )
-    initialize_git_checkout(tmp_path)
-    systemd = FakeSystemdJobs(
-        properties={"LoadState": "not-found", "ActiveState": "inactive"}
-    )
-    jobs = GenericJobs(
-        systemd,
-        GenericJobStore(tmp_path / "state"),
-        wait_poll_seconds=0.001,
-        pressure_probe=lambda: {
-            "io_full_avg60": IO_FULL_BLOCK_THRESHOLD,
-        },
-    )
-    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
-    workspace = service.workspaces.create(
-        project_id="fixture",
-        name="queued-drift",
-        branch="feature/queued-drift",
-        base="HEAD",
-    )
-    started = service.dispatch(
-        request(
-            "job.start",
-            "systemd-jobs",
-            {
-                "project_id": "fixture",
-                "operation": "service",
-                "workspace_id": workspace["workspace_id"],
-            },
-        )
-    )
-    assert started.ok and started.payload is not None
-    assert started.payload.inline["state"]["phase"] == "queued"
-    path = Path(workspace["path"])
-    (path / "drift.txt").write_text("changed HEAD before admission\n")
-    subprocess.run(["git", "-C", str(path), "add", "drift.txt"], check=True)
-    subprocess.run(
-        [
-            "git",
-            "-C",
-            str(path),
-            "-c",
-            "user.name=Fixture",
-            "-c",
-            "user.email=fixture@example.test",
-            "commit",
-            "--quiet",
-            "-m",
-            "drift",
-        ],
-        check=True,
-    )
-    jobs.pressure_probe = lambda: {"memory_full_avg10": 0.0}
-    jobs._admit_locked()
-
-    record = jobs.store.load(started.payload.inline["job_id"])
-    assert record.state["phase"] == "launch-failed"
-    assert record.state["terminal"]
-    assert systemd.started == []
 
 
 def test_declared_runner_revalidates_bound_checkout_at_payload_exec_boundary(
@@ -7675,8 +7242,6 @@ class _RowFaultJobs(jobs_module.GenericJobs):
     def __init__(self, records, fail_ids):  # noqa: D107 - test stub
         self._records = records
         self._fail_ids = fail_ids
-        self._admission_lock = threading.Lock()
-        self.__dict__["_admit_locked"] = lambda: None
         self.store = SimpleNamespace(
             list=lambda: list(records),
             active_records=lambda: [r for r in records if not r.state["terminal"]],

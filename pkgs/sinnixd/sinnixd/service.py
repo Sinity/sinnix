@@ -23,7 +23,6 @@ from .contracts import TypedJobContracts
 from .delivery import DeliveryError, GitHubDelivery
 from .delivery_runner import DELIVERY_INPUT_SCHEMA_VERSION, delivery_runner_executable
 from .jobs import (
-    AdmissionConflictError,
     GenericJobs,
     GenericJobSpec,
     GenericJobStore,
@@ -70,8 +69,6 @@ READ_ONLY_OPERATIONS = frozenset(
         "workspace.list",
         "workspace.get",
         "workspace.review-status",
-        "job.admission",
-        "job.admission.explain",
         "job.get",
         "job.list",
         "job.wait",
@@ -230,7 +227,7 @@ class SinnixdService:
             )
         except JobAuthorizationError as error:
             return self._error(request, owner_name, ErrorCode.POLICY_DENIED, str(error))
-        except (AdmissionConflictError, WaveDrainedError) as error:
+        except WaveDrainedError as error:
             return self._error(
                 request, owner_name, ErrorCode.RESOURCE_DEFERRED, str(error)
             )
@@ -436,7 +433,6 @@ class SinnixdService:
             project_id,
             self.jobs.store.list(),
             board,
-            self.jobs.admission_ledger(),
             coordinator_label=label,
             state_root=self.jobs.store.root,
             project_root=self.projects.get(project_id).root,
@@ -863,7 +859,6 @@ class SinnixdService:
                 "parameters",
                 "dimensions",
                 "exclusive_keys",
-                "reject_conflicts",
                 "coordinator_label",
             }
         ):
@@ -886,29 +881,9 @@ class SinnixdService:
                 parameters=arguments.get("parameters"),
                 dimensions=arguments.get("dimensions"),
                 exclusive_keys=arguments.get("exclusive_keys", ()),
-                reject_conflicts=arguments.get("reject_conflicts", False),
                 coordinator_label=arguments.get("coordinator_label"),
             )
         )
-
-    def _op_job_admission(
-        self,
-        arguments: Mapping[str, Any],
-        correlation_id: str,
-        principal: str,
-    ) -> dict[str, Any]:
-        if principal != "operator":
-            raise JobAuthorizationError(
-                "job admission ledger requires the operator principal"
-            )
-        if set(arguments) - {"project_id"}:
-            raise ValueError("job.admission accepts optional project_id")
-        project_id = arguments.get("project_id")
-        if project_id is not None and (
-            not isinstance(project_id, str) or not project_id
-        ):
-            raise ValueError("job.admission project_id must be non-empty")
-        return self.jobs.admission_ledger(project_id)
 
     def _op_job_get(
         self,
@@ -1254,7 +1229,6 @@ _HANDLERS: dict[
     "job.fire": SinnixdService._op_job_fire,
     "job.shell.start": SinnixdService._op_job_shell_start,
     "job.agent.start": SinnixdService._op_job_agent_start,
-    "job.admission": SinnixdService._op_job_admission,
     "job.get": SinnixdService._op_job_get,
     "job.retry": SinnixdService._op_job_retry,
     "job.list": SinnixdService._op_job_list,

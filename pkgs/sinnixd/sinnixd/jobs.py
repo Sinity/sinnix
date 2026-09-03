@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import contextlib
 import fcntl
 import hashlib
 import json
@@ -16,7 +15,7 @@ import subprocess
 import sys
 import time
 import traceback
-from collections.abc import Callable, Mapping, MutableMapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
@@ -55,44 +54,11 @@ JOB_UNIT_PREFIX = "sinnixd-job-"
 SYSTEMD_ERROR_CODE = "systemd-job-error"
 SCHEDULE_STATE_SCHEMA_VERSION = 1
 SCHEDULE_UNIT_PREFIX = "sinnixd-schedule-"
-ADMISSION_SCHEMA_VERSION = 2
 CAPACITY_SCHEMA_VERSION = 1
 CAPACITY_RETRY_DELAYS_SECONDS = (5, 30, 120)
-# Sustained IO stall blocks new admissions and never evicts. Measured
-# 2026-09-02 12:29Z: io full avg10 76% under eight concurrent normal-pool
-# jobs, against single digits on an idle host.
-IO_FULL_BLOCK_THRESHOLD = 25.0
-POOL_SLICES = {
-    "interactive": "sinnixd-work-interactive.slice",
-    "normal": "sinnixd-work-normal.slice",
-    "bulk": "sinnixd-work-bulk.slice",
-    "pytest": "sinnixd-work-pytest.slice",
-    "agent": "sinnixd-work-agent.slice",
-}
-# memory_max is the hard cgroup ceiling every unit in the pool runs under
-# (raised to a declared estimate when one is larger); swap_max bounds how
-# far a unit may push the host into swap. Admission estimates bound nothing
-# by themselves: an integrator lane admitted at the 1 GiB default peaked at
-# 19.3 GB on 2026-09-01 and drove swap to 97% before systemd-oomd acted.
-# Concurrency is the only per-pool bound. Memory belongs to the slice
-# hierarchy: sinnixd.slice carries MemoryHigh and MemorySwapMax for the whole
-# job plane and the desktop slices carry MemoryLow, so jobs collectively use
-# what is left without any admission arithmetic on bytes.
-POOL_POLICIES = {
-    # Operator-facing work; four is a screenful of concurrent shells.
-    "interactive": {"workers": 4},
-    # Harvests and gates are disk-bound: eight saturated the disk (io full
-    # avg10 25% over five minutes, 2026-09-02 11:30Z), three starved the queue.
-    "normal": {"workers": 5},
-    # One whole-corpus or reindex run on the host at a time.
-    "bulk": {"workers": 1},
-    # One test run at a time: a run writes a scratch archive per test and two
-    # of them saturate the disk for every other process.
-    "pytest": {"workers": 1},
-    # Agent lanes are API-bound; the cap guards CPU-burst collision on 24
-    # threads.
-    "agent": {"workers": 16},
-}
+# pueue's group name grammar; sinnixd only validates shape and passes it
+# through as the systemd cgroup slice suffix.
+_POOL_NAME = re.compile(r"[a-z][a-z0-9-]{0,63}")
 
 
 def default_state_dir() -> Path:
@@ -108,21 +74,6 @@ class SystemdJobError(RuntimeError):
 
 class SystemdJobTimeout(SystemdJobError):
     """Raised only when the bounded systemd subprocess times out."""
-
-
-class AdmissionConflictError(ValueError):
-    """A keyed packet lane overlaps a currently running keyed lane."""
-
-    code = "conflict-key-overlap"
-
-    def __init__(self, conflicts: Mapping[str, Sequence[str]]) -> None:
-        self.conflicts = {
-            key: tuple(sorted(job_ids)) for key, job_ids in sorted(conflicts.items())
-        }
-        details = ", ".join(
-            f"{key} ({'/'.join(job_ids)})" for key, job_ids in self.conflicts.items()
-        )
-        super().__init__(f"packet launch refused: {self.code}; overlap: {details}")
 
 
 def scheduled_operation_id(project_id: str, operation_name: str) -> str:
@@ -375,7 +326,7 @@ class UserSystemdJobs:
             "--user",
             "--quiet",
             f"--unit={unit}",
-            f"--slice={POOL_SLICES[pool]}",
+            f"--slice=sinnixd-work-{pool}.slice",
             f"--property=WorkingDirectory={working_directory}",
             f"--property=RuntimeMaxSec={timeout_seconds}s",
             *(
@@ -633,78 +584,6 @@ def notify_job_exit(
         connection.connect(str(socket_path))
         connection.sendall(struct.pack("!I", len(payload)) + payload)
         connection.recv(4)
-
-
-def host_pressure() -> Mapping[str, float]:
-    """Read host capacity and stall evidence without acting on cgroups."""
-    values: dict[str, float] = {
-        "memory_full_avg10": 100.0,
-        "memory_full_avg60": 100.0,
-        "io_full_avg10": 100.0,
-        "memory_total_bytes": 0.0,
-        "memory_available_bytes": 0.0,
-        "swap_total_bytes": 0.0,
-        "swap_free_bytes": 0.0,
-        "managed_memory_bytes": 0.0,
-    }
-
-    def pressure_average(resource: str, kind: str, average: str) -> float:
-        for line in Path(f"/proc/pressure/{resource}").read_text().splitlines():
-            if line.startswith(f"{kind} "):
-                for item in line.split()[1:]:
-                    key, _, value = item.partition("=")
-                    if key == average:
-                        return float(value)
-        raise ValueError(f"{resource} PSI lacks {kind} {average}")
-
-    for average, key in (
-        ("avg10", "memory_full_avg10"),
-        ("avg60", "memory_full_avg60"),
-    ):
-        try:
-            values[key] = pressure_average("memory", "full", average)
-        except (OSError, ValueError):
-            pass
-    try:
-        values["io_full_avg10"] = pressure_average("io", "full", "avg10")
-    except (OSError, ValueError):
-        pass
-
-    try:
-        meminfo = {}
-        for line in Path("/proc/meminfo").read_text().splitlines():
-            name, separator, raw = line.partition(":")
-            if separator and raw.strip().endswith(" kB"):
-                meminfo[name] = int(raw.strip().removesuffix(" kB")) * 1024
-        for source, target in (
-            ("MemTotal", "memory_total_bytes"),
-            ("MemAvailable", "memory_available_bytes"),
-            ("SwapTotal", "swap_total_bytes"),
-            ("SwapFree", "swap_free_bytes"),
-        ):
-            values[target] = float(meminfo[source])
-    except (KeyError, OSError, ValueError):
-        pass
-
-    uid = os.getuid()
-    managed_memory = (
-        CGROUP_ROOT
-        / "user.slice"
-        / f"user-{uid}.slice"
-        / f"user@{uid}.service"
-        / "sinnixd.slice"
-        / "sinnixd-work.slice"
-        / "memory.current"
-    )
-    try:
-        values["managed_memory_bytes"] = float(managed_memory.read_text().strip())
-    except (OSError, ValueError):
-        pass
-    return values
-
-
-def _unmetered_pressure() -> Mapping[str, float]:
-    return {}
 
 
 def _cgroup_inactive_file(properties: Mapping[str, str]) -> int:
@@ -1023,7 +902,7 @@ class GenericJobSpec:
             raise ValueError("job result verdict requires a JSON result")
         if not isinstance(self.result_verdict, Mapping):
             raise ValueError("job result verdict is invalid")
-        if self.pool not in POOL_POLICIES:
+        if not _POOL_NAME.fullmatch(self.pool):
             raise ValueError("job pool is invalid")
         if any(not isinstance(key, str) or not key for key in self.exclusive_keys):
             raise ValueError("job exclusive keys are invalid")
@@ -1319,10 +1198,6 @@ class GenericJobStore:
     def nvme_scratch_root(self) -> Path:
         configured = os.environ.get("SINNIXD_NVME_SCRATCH_ROOT")
         return Path(configured) if configured else Path("/realm/tmp/work/sinnixd")
-
-    @property
-    def admission_path(self) -> Path:
-        return self.root / "admission.json"
 
     @property
     def capacity_path(self) -> Path:
@@ -1880,16 +1755,10 @@ class GenericJobs:
     systemd: SystemdJobs
     store: GenericJobStore
     wait_poll_seconds: float = 1.0
-    admission_retry_seconds: float = 1.0
-    pressure_probe: Callable[[], Mapping[str, float]] = _unmetered_pressure
-    before_admission_start: Callable[[str], None] | None = None
     notify_socket: Path | None = None
     event_spool_path: Path | None = None
     recover_on_init: bool = True
     events: TerminalEvents = field(default_factory=TerminalEvents, repr=False)
-    _admission_lock: RLock = field(default_factory=RLock, init=False, repr=False)
-    _admission_written: str | None = field(default=None, init=False, repr=False)
-    _admission_observed_at: float = field(default=0.0, init=False, repr=False)
     _spooled: set[str] = field(default_factory=set, init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -1904,7 +1773,6 @@ class GenericJobs:
             self.store.active_records() if self.store.records_root.exists() else []
         )
         self.store.cleanup_inactive_scratch(records)
-        finalized: list[GenericJobRecord] = []
         for record in records:
             with self.store.locked(record.job_id):
                 record = self.store.load(record.job_id)
@@ -1917,14 +1785,6 @@ class GenericJobs:
                     self._finalize_terminal(record)
                 else:
                     self._get_locked(record.job_id)
-                    record = self.store.load(record.job_id)
-                    if record.state.get("terminal"):
-                        finalized.append(record)
-        if finalized:
-            with self._admission_lock:
-                state = self._admission_state()
-                for record in finalized:
-                    self._finish_admission(record, state)
 
     def register_schedules(
         self,
@@ -2048,7 +1908,7 @@ class GenericJobs:
     ) -> GenericJobRecord:
         """Recover the record/input publication window without guessing at systemd.
 
-        A complete private input proves the durable intent can be queued.  An
+        A complete private input proves the durable intent can launch. An
         incomplete input is terminal only when systemd authoritatively reports
         that no unit exists; otherwise recovery retains the record.
         """
@@ -2073,179 +1933,8 @@ class GenericJobs:
             )
             self.store.save(failed)
             return failed
-        queued = self._with_state(
-            record,
-            {
-                "phase": "queued",
-                "terminal": False,
-                "observed_at": _timestamp(),
-                "dependencies": list(record.spec.dependency_job_ids),
-                "admission": {"pool": record.spec.pool},
-            },
-        )
-        self.store.save(queued)
-        return queued
-
-    def _admission_state(self) -> dict[str, Any]:
-        path = self.store.admission_path
-        empty = {
-            "schema_version": ADMISSION_SCHEMA_VERSION,
-            "active": {},
-            "claims": {},
-        }
-        if not path.exists():
-            return dict(empty)
-        try:
-            value = json.loads(path.read_text())
-        except (OSError, json.JSONDecodeError):
-            # Conservatively recover by forgetting optimizations. Existing
-            # records/systemd evidence still determine all real jobs.
-            return dict(empty)
-        if not isinstance(value, Mapping) or value.get("schema_version") not in {
-            1,
-            ADMISSION_SCHEMA_VERSION,
-        }:
-            return dict(empty)
-        if not isinstance(value.get("active"), Mapping):
-            return dict(empty)
-        return {
-            "schema_version": ADMISSION_SCHEMA_VERSION,
-            "active": dict(value["active"]),
-            "claims": (
-                dict(value["claims"])
-                if isinstance(value.get("claims"), Mapping)
-                else {}
-            ),
-        }
-
-    def _admission_claim(self, record: GenericJobRecord) -> dict[str, Any]:
-        return {
-            "job_id": record.job_id,
-            "pool": record.spec.pool,
-            "exclusive_keys": list(record.spec.exclusive_keys),
-            "created_at": record.created_at,
-            "project_id": record.spec.project_id,
-            "operation": record.spec.operation,
-        }
-
-    def admission_ledger(self, project_id: str | None = None) -> dict[str, Any]:
-        """Return the durable admission claims and their current arithmetic."""
-        with self._admission_lock:
-            self._admit_locked()
-            state = self._admission_state()
-            records = self.store.active_records()
-            if project_id is not None:
-                records = tuple(
-                    record for record in records if record.spec.project_id == project_id
-                )
-            managed = [
-                record
-                for record in records
-                if record.spec.kind in {"declared-operation", "attested-agent"}
-                and not record.state.get("terminal")
-            ]
-            active = [
-                record
-                for record in managed
-                if record.state.get("phase")
-                in {
-                    "submitted",
-                    "running",
-                    "cancelling",
-                    "stopping",
-                    "launch-unknown",
-                    "observation-unknown",
-                    "outcome-unknown",
-                }
-            ]
-            queued = [
-                record
-                for record in managed
-                if record.state.get("phase") in {"queued", "waiting-dependencies"}
-            ]
-            pressure = self.pressure_probe()
-            holders = [
-                {
-                    **dict(state["claims"].get(record.job_id, {})),
-                    "phase": record.state.get("phase"),
-                }
-                for record in sorted(active, key=_job_order_key)
-            ]
-            queue = []
-            for position, record in enumerate(
-                sorted(queued, key=lambda item: (item.created_at, item.job_id)), 1
-            ):
-                pool_active = [
-                    item for item in active if item.spec.pool == record.spec.pool
-                ]
-                policy = POOL_POLICIES[record.spec.pool]
-                exclusive = sorted(
-                    {
-                        key
-                        for item in active
-                        for key in item.spec.exclusive_keys
-                        if key in record.spec.exclusive_keys
-                    }
-                )
-                blocked_by = record.state.get("admission", {}).get("blocked_by", [])
-                queue.append(
-                    {
-                        "position": position,
-                        "job_id": record.job_id,
-                        "phase": record.state.get("phase"),
-                        "pool": record.spec.pool,
-                        "blocked_by": list(blocked_by)
-                        if isinstance(blocked_by, list)
-                        else [],
-                        "arithmetic": {
-                            "pool_workers": {
-                                "occupied": len(pool_active),
-                                "limit": policy["workers"],
-                            },
-                            "exclusive_keys": exclusive,
-                        },
-                    }
-                )
-            return {
-                "schema_version": ADMISSION_SCHEMA_VERSION,
-                "pools": {
-                    name: {
-                        "workers": policy["workers"],
-                        "holders": [
-                            holder for holder in holders if holder.get("pool") == name
-                        ],
-                    }
-                    for name, policy in POOL_POLICIES.items()
-                },
-                "host": {
-                    "io_full_avg60": float(pressure.get("io_full_avg60", 0.0)),
-                },
-                "claims": dict(state["claims"]),
-                "queue": queue,
-            }
-
-    def _save_admission_state(self, value: Mapping[str, Any]) -> None:
-        """Persist the admission snapshot when it changed.
-
-        Observe paths recompute admission on every call; an unchanged
-        snapshot must not cost two fsyncs on the state disk each time.
-        """
-        path = self.store.admission_path
-        text = json.dumps(value, sort_keys=True) + "\n"
-        if self._admission_written is None and path.exists():
-            with contextlib.suppress(OSError):
-                self._admission_written = path.read_text()
-        if text == self._admission_written:
-            return
-        _ensure_durable_directory(path.parent)
-        temporary = path.with_suffix(".json.tmp")
-        with open(temporary, "w", encoding="utf-8") as handle:
-            handle.write(text)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
-        _fsync_directory(path.parent)
-        self._admission_written = text
+        self._launch_declared(record, record.spec)
+        return self.store.load(record.job_id)
 
     def _capacity_state(self) -> dict[str, Any]:
         path = self.store.capacity_path
@@ -2307,20 +1996,17 @@ class GenericJobs:
             return None
 
     def _prepare_capacity_retry(self, record: GenericJobRecord) -> GenericJobRecord:
+        """Relaunch a capacity-blocked attested-agent job once its cooldown elapses."""
         retry_at = self._capacity_retry_at(record)
         if retry_at is None or datetime.now(UTC) < retry_at:
             return record
-        queued = self._with_state(
-            record,
-            {
-                **record.state,
-                "phase": "queued",
-                "terminal": False,
-                "observed_at": _timestamp(),
-            },
-        )
-        self.store.save(queued)
-        return queued
+        command, environment = self.store.agent_launch(record.job_id)
+        if record.result_path:
+            record.result_path.unlink(missing_ok=True)
+            record.result_path.with_suffix(".overflow").unlink(missing_ok=True)
+            _completion_marker_path(record.log_path).unlink(missing_ok=True)
+        self._launch(record, record.spec, command=command, environment=environment)
+        return self.store.load(record.job_id)
 
     def _job_environment(
         self,
@@ -2362,108 +2048,199 @@ class GenericJobs:
             return None
         return target
 
-    def _active_key_conflicts(self, keys: Sequence[str]) -> dict[str, tuple[str, ...]]:
-        requested = set(keys)
-        if not requested:
-            return {}
-        running_phases = {
-            "submitted",
-            "running",
-            "cancelling",
-            "stopping",
-            "launch-unknown",
-            "observation-unknown",
-            "outcome-unknown",
-        }
-        conflicts: dict[str, list[str]] = {}
-        for record in self.store.active_records():
+    def _launch(
+        self,
+        record: GenericJobRecord,
+        spec: GenericJobSpec,
+        *,
+        command: Sequence[str] | None = None,
+        environment: Mapping[str, str] | None = None,
+    ) -> dict[str, Any]:
+        try:
+            self.systemd.start(
+                unit=record.unit,
+                command=command if command is not None else spec.command,
+                working_directory=spec.working_directory,
+                environment=self._job_environment(record, environment),
+                timeout_seconds=spec.timeout_seconds,
+                log_path=record.log_path,
+                pool=spec.pool,
+                json_result_path=record.result_path
+                if spec.result_kind in {"json", "pytest"}
+                else None,
+                **self._notify_arguments(record.job_id),
+            )
+        except SystemdJobError:
+            return self._reconcile_launch_error(record)
+        submitted = self._with_state(
+            record,
+            {"phase": "submitted", "terminal": False, "observed_at": _timestamp()},
+        )
+        self.store.save(submitted)
+        return self._public(submitted, submitted.state)
+
+    def _launch_declared(
+        self, record: GenericJobRecord, spec: GenericJobSpec
+    ) -> dict[str, Any]:
+        """Launch a declared operation through the contract runner.
+
+        The runner re-validates the bound checkout at its own exec boundary,
+        closing the check-to-exec interval instead of trusting the checkout
+        binding captured when the record was created.
+        """
+        try:
+            command, environment = self.store.declared_launch(record.job_id)
+            checkout = spec.checkout
+            if checkout is not None:
+                checkout_binding = dict(checkout)
+                if checkout_binding.get("checkout_id") == "default":
+                    # Default-checkout operations (scheduled runs, project-root
+                    # jobs) follow the project head: master moving between
+                    # record creation and launch is normal, not identity
+                    # drift. Workspace-bound jobs keep exact-head binding —
+                    # their verification receipts are only meaningful at the
+                    # recorded commit.
+                    resolved = subprocess.run(
+                        [
+                            "git",
+                            "-C",
+                            str(checkout_binding.get("path", "")),
+                            "rev-parse",
+                            "HEAD",
+                        ],
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                        check=False,
+                    )
+                    refreshed = resolved.stdout.strip()
+                    if resolved.returncode == 0 and re.fullmatch(
+                        r"[0-9a-f]{40}", refreshed
+                    ):
+                        checkout_binding["head"] = refreshed
+                        record = replace(
+                            record, spec=replace(record.spec, checkout=checkout_binding)
+                        )
+                        self.store.save(record)
+                        environment = {
+                            **environment,
+                            "SINNIXD_CHECKOUT_HEAD": refreshed,
+                        }
+                revalidate_registered_checkout(checkout_binding)
+                from .contracts import contract_runner_executable
+
+                command = (
+                    str(contract_runner_executable()),
+                    "--declared",
+                    "--job-id",
+                    record.job_id,
+                    "--unit",
+                    record.unit,
+                    "--state-root",
+                    str(self.store.root),
+                )
+        except SystemdJobError:
+            return self._reconcile_launch_error(record)
+        except (JobRecordError, ProjectConfigError) as launch_error:
+            terminal = self._with_state(
+                record,
+                {
+                    "phase": (
+                        "checkout-missing"
+                        if self._checkout_path_missing(record)
+                        else "launch-failed"
+                    ),
+                    "terminal": True,
+                    "launch_evidence": "not-started",
+                    "error": (
+                        {
+                            "code": "checkout-missing",
+                            "message": "registered checkout is unavailable",
+                        }
+                        if self._checkout_path_missing(record)
+                        else {
+                            "code": "launch-refused",
+                            "message": str(launch_error),
+                        }
+                    ),
+                    "observed_at": _timestamp(),
+                },
+            )
+            self.store.save(terminal)
+            self._finalize_terminal(terminal)
+            return self._public(terminal, terminal.state)
+        return self._launch(record, spec, command=command, environment=environment)
+
+    def _dependency_block(self, spec: GenericJobSpec) -> Mapping[str, Any] | None:
+        """Return the blocking state a job with unmet dependencies must carry.
+
+        `None` means every dependency has succeeded. Only declared-operation
+        and attested-agent jobs may hold a non-terminal block (`waiting-
+        dependencies`); every other kind is a caller error, not a queue.
+        """
+        for job_id in spec.dependency_job_ids:
+            try:
+                with self.store.locked(job_id):
+                    dependency = self._get_locked(job_id)
+            except JobRecordError:
+                return {
+                    "phase": "dependency-failed",
+                    "terminal": True,
+                    "launch_evidence": "not-started",
+                    "observed_at": _timestamp(),
+                }
             if (
-                record.spec.kind != "attested-agent"
-                or record.state.get("phase") not in running_phases
-                or record.state.get("terminal")
+                dependency["state"].get("terminal")
+                and dependency["state"].get("phase") != "succeeded"
             ):
-                continue
-            for key in requested.intersection(record.spec.exclusive_keys):
-                conflicts.setdefault(key, []).append(record.job_id)
-        return {key: tuple(value) for key, value in conflicts.items()}
+                return {
+                    "phase": "dependency-failed",
+                    "terminal": True,
+                    "launch_evidence": "not-started",
+                    "observed_at": _timestamp(),
+                    "dependencies": list(spec.dependency_job_ids),
+                }
+            if not dependency["state"].get("terminal"):
+                return {
+                    "phase": "waiting-dependencies",
+                    "terminal": False,
+                    "observed_at": _timestamp(),
+                    "dependencies": list(spec.dependency_job_ids),
+                }
+        return None
 
     def start(
         self,
         spec: GenericJobSpec,
         job_id: str | None = None,
-        *,
-        reject_conflicts: bool = False,
     ) -> dict[str, Any]:
         candidate = job_id or str(uuid4())
-        if spec.kind == "attested-agent":
-            with self._admission_lock:
-                self._admit_locked()
-                if reject_conflicts:
-                    conflicts = self._active_key_conflicts(spec.exclusive_keys)
-                    if conflicts:
-                        raise AdmissionConflictError(conflicts)
-                with self.store.locked(candidate):
-                    record = self.store.create(spec, candidate)
-                    launch_path = self.store.inputs_root / f"{candidate}.agent-launch"
-                    if not launch_path.exists():
-                        self.store.write_agent_launch(
-                            candidate, spec.command, spec.environment
-                        )
-                    queued = self._with_state(
-                        record,
-                        {
-                            "phase": "queued",
-                            "terminal": False,
-                            "observed_at": _timestamp(),
-                            "admission": {"pool": spec.pool},
-                        },
-                    )
-                    self.store.save(queued)
-                self._admit_locked()
-                record = self.store.load(candidate)
-                return self._public(record, record.state)
-        # The immediate path never revisits a job, so an unmet dependency must
-        # settle here: a terminally failed one fails the job before launch and
-        # a live one is a caller error rather than a silent unchecked launch.
-        # Dependency locks are taken before the candidate lock, matching the
-        # admission loop's ordering.
-        immediate_block = (
-            self._dependency_block(spec) if spec.dependency_job_ids else None
-        )
+        # Dependency observations acquire their own job locks; do them before
+        # the candidate lock so a dependency chain never nests job locks.
+        blocked = self._dependency_block(spec) if spec.dependency_job_ids else None
         with self.store.locked(candidate):
             record = self.store.create(spec, candidate)
-            if immediate_block is not None:
-                if not immediate_block.get("terminal"):
+            if spec.kind == "attested-agent":
+                launch_path = self.store.inputs_root / f"{candidate}.agent-launch"
+                if not launch_path.exists():
+                    self.store.write_agent_launch(
+                        candidate, spec.command, spec.environment
+                    )
+            if blocked is not None:
+                if not blocked.get("terminal") and spec.kind not in {
+                    "declared-operation",
+                    "attested-agent",
+                }:
                     raise SystemdJobError(
                         "immediate job dependencies are not terminal; "
                         "use a queued job kind for dependency waiting"
                     )
-                blocked_record = self._with_state(record, immediate_block)
+                blocked_record = self._with_state(record, blocked)
                 self.store.save(blocked_record)
-                self._finalize_terminal(blocked_record)
+                if blocked.get("terminal"):
+                    self._finalize_terminal(blocked_record)
                 return self._public(blocked_record, blocked_record.state)
-            try:
-                self.systemd.start(
-                    unit=record.unit,
-                    command=spec.command,
-                    working_directory=spec.working_directory,
-                    environment=self._job_environment(record),
-                    timeout_seconds=spec.timeout_seconds,
-                    log_path=record.log_path,
-                    pool=spec.pool,
-                    json_result_path=record.result_path
-                    if spec.result_kind in {"json", "pytest"}
-                    else None,
-                    **self._notify_arguments(record.job_id),
-                )
-            except SystemdJobError:
-                return self._reconcile_launch_error(record)
-            submitted = self._with_state(
-                record,
-                {"phase": "submitted", "terminal": False, "observed_at": _timestamp()},
-            )
-            self.store.save(submitted)
-            return self._public(submitted, submitted.state)
+            return self._launch(record, spec)
 
     def start_declared(
         self,
@@ -2484,35 +2261,6 @@ class GenericJobs:
             )
         if checkout is not None and checkout.project_id != project.project_id:
             raise ValueError("declared job checkout belongs to another project")
-        with self._admission_lock:
-            return self._start_declared_locked(
-                project,
-                operation,
-                correlation_id,
-                principal,
-                parameters,
-                checkout,
-                (),
-                contract or {},
-                tuple(dependency_job_ids),
-                dimensions,
-            )
-
-    def _start_declared_locked(
-        self,
-        project: ProjectAdapter,
-        operation: ProjectOperation,
-        correlation_id: str,
-        principal: str,
-        parameters: Mapping[str, Any],
-        checkout: RegisteredCheckout | None,
-        lineage: tuple[str, ...],
-        contract: Mapping[str, Any],
-        external_dependency_job_ids: tuple[str, ...] = (),
-        dimensions: Mapping[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        if operation.name in lineage:
-            raise ValueError("declared operation dependency cycle")
         if (
             operation.checkout == "default"
             and checkout is not None
@@ -2522,33 +2270,12 @@ class GenericJobs:
                 f"operation {operation.name} runs only on the default checkout, "
                 f"not {checkout.checkout_id}"
             )
-        dependency_jobs = tuple(
-            self._start_declared_locked(
-                project,
-                project.operation(name),
-                correlation_id,
-                principal,
-                {},
-                checkout,
-                (*lineage, operation.name),
-                {},
-            )
-            for name in operation.dependencies
-        )
-        dependency_ids = tuple(job["job_id"] for job in dependency_jobs)
-        if lineage:
-            external_ids: tuple[str, ...] = ()
-        else:
-            external_ids = external_dependency_job_ids
-        for dependency_id in external_ids:
+        dependency_ids = tuple(dependency_job_ids)
+        for dependency_id in dependency_ids:
             self.store.load(dependency_id)
-        dependency_ids = (*external_ids, *dependency_ids)
         operation_argv, parameter_digest = operation.derive_argv(parameters)
         workdir = checkout.path if checkout is not None else project.root
         environment = project.environment.values()
-        state = self._admission_state()
-        if operation.supersede == "queued":
-            self._supersede_queued(project.project_id, operation.name, principal, state)
         job_id = str(uuid4())
         environment.update(
             {
@@ -2565,39 +2292,26 @@ class GenericJobs:
                     "SINNIXD_CHECKOUT_HEAD": checkout.head,
                 }
             )
-
-        def build_spec() -> GenericJobSpec:
-            launch_environment = dict(environment)
-            scratch_path = self.store.scratch_path_for(operation.scratch, job_id)
-            payload_overrides: dict[str, str] = {}
-            if scratch_path is not None:
-                payload_overrides["TMPDIR"] = str(scratch_path)
-            return GenericJobSpec(
-                kind="declared-operation",
-                command=project.environment.command_for(
-                    operation_argv, overrides=payload_overrides
-                ),
-                working_directory=str(workdir),
-                environment=launch_environment,
-                project_id=project.project_id,
-                operation=operation.name,
-                parameter_digest=parameter_digest,
-                principal=principal,
-                timeout_seconds=operation.timeout_seconds,
-                checkout=checkout.to_dict() if checkout is not None else None,
-                contract=dict(contract),
-                result_kind={"exit": "exit-status", "json": "json", "pytest": "pytest"}[
-                    operation.result
-                ],
-                result_verdict=operation.verdict,
-                pool=operation.pool,
-                exclusive_keys=operation.exclusive_keys,
-                dependency_job_ids=dependency_ids,
-                scratch=operation.scratch,
-                dimensions=_dimensions(dimensions or {}) if not lineage else {},
-            )
-
-        spec = build_spec()
+        spec = GenericJobSpec(
+            kind="declared-operation",
+            command=project.environment.command_for(operation_argv),
+            working_directory=str(workdir),
+            environment=environment,
+            project_id=project.project_id,
+            operation=operation.name,
+            parameter_digest=parameter_digest,
+            principal=principal,
+            timeout_seconds=operation.timeout_seconds,
+            checkout=checkout.to_dict() if checkout is not None else None,
+            contract=dict(contract or {}),
+            result_kind={"exit": "exit-status", "json": "json", "pytest": "pytest"}[
+                operation.result
+            ],
+            result_verdict=operation.verdict,
+            pool=operation.pool,
+            dependency_job_ids=dependency_ids,
+            dimensions=_dimensions(dimensions or {}),
+        )
         record = self.store.create(spec, job_id)
         try:
             self.store.write_declared_launch(
@@ -2606,60 +2320,14 @@ class GenericJobs:
         except BaseException:
             self.store.cleanup_scratch(record)
             raise
-        queued = self._with_state(
-            record,
-            {
-                "phase": "queued",
-                "terminal": False,
-                "observed_at": _timestamp(),
-                "dependencies": list(dependency_ids),
-                "admission": {"pool": spec.pool},
-            },
-        )
-        self.store.save(queued)
-        self._save_admission_state(state)
-        self._admit_locked()
-        record = self.store.load(job_id)
-        return self._public(record, record.state)
-
-    def _supersede_queued(
-        self,
-        project_id: str,
-        operation_name: str,
-        principal: str,
-        state: MutableMapping[str, Any],
-    ) -> None:
-        """Cancel this operation's own not-yet-started jobs.
-
-        A superseding operation's later run subsumes its earlier ones, so a
-        queue of them is waste that also holds admission capacity.
-        """
-        for record in self.store.active_records():
-            if record.state.get("phase") not in {"queued", "waiting-dependencies"}:
-                continue
-            if (
-                record.spec.project_id != project_id
-                or record.spec.operation != operation_name
-                or record.spec.principal != principal
-            ):
-                continue
-            with self.store.locked(record.job_id):
-                current = self.store.load(record.job_id)
-                if current.state.get("terminal"):
-                    continue
-                superseded = self._with_state(
-                    current,
-                    {
-                        "phase": "cancelled",
-                        "terminal": True,
-                        "launch_evidence": "not-started",
-                        "superseded": True,
-                        "observed_at": _timestamp(),
-                    },
-                )
-                self.store.save(superseded)
-            self._finalize_terminal(superseded)
-            self._finish_admission(superseded, state)
+        blocked = self._dependency_block(spec) if spec.dependency_job_ids else None
+        if blocked is not None:
+            blocked_record = self._with_state(record, blocked)
+            self.store.save(blocked_record)
+            if blocked.get("terminal"):
+                self._finalize_terminal(blocked_record)
+            return self._public(blocked_record, blocked_record.state)
+        return self._launch_declared(record, spec)
 
     @classmethod
     def _memory_observation(cls, record: GenericJobRecord) -> dict[str, Any]:
@@ -2701,21 +2369,6 @@ class GenericJobs:
         }
 
     @staticmethod
-    def _queued_seconds(record: "GenericJobRecord") -> float:
-        try:
-            started = datetime.fromisoformat(record.created_at)
-        except (TypeError, ValueError):
-            return 0.0
-        if started.tzinfo is None:
-            started = started.replace(tzinfo=UTC)
-        return (datetime.now(UTC) - started).total_seconds()
-
-    @staticmethod
-    def _host_pressure_blocks(pressure: Mapping[str, float]) -> bool:
-        """Sustained IO stall stops new admissions and never costs running work."""
-        return float(pressure.get("io_full_avg60", 0.0)) >= IO_FULL_BLOCK_THRESHOLD
-
-    @staticmethod
     def _systemd_memory(properties: Mapping[str, str]) -> int:
         values: list[int] = []
         for name in ("MemoryCurrent", "MemorySwapCurrent"):
@@ -2732,387 +2385,23 @@ class GenericJobs:
         peak = GenericJobs._memory_peak(properties)
         return peak or 0
 
-    ADMISSION_OBSERVE_INTERVAL_SECONDS = 2.0
-
-    def _admit_observed(self) -> None:
-        """Admission for read paths: at most once per interval.
-
-        Reads carry no new admission evidence of their own; a poll storm
-        must not turn into a full admission pass per request.
-        """
-        now = time.monotonic()
-        if now - self._admission_observed_at < self.ADMISSION_OBSERVE_INTERVAL_SECONDS:
-            return
-        self._admission_observed_at = now
-        self._admit_locked()
-
-    def _admit_locked(self) -> None:
-        state = self._admission_state()
-        records = self.store.active_records()
-        for snapshot in records:
-            if snapshot.state.get("phase") != "capacity":
-                continue
-            with self.store.locked(snapshot.job_id):
-                current = self.store.load(snapshot.job_id)
-                self._prepare_capacity_retry(current)
-        records = sorted(self.store.active_records(), key=_job_order_key)
-        active: dict[str, list[GenericJobRecord]] = {pool: [] for pool in POOL_POLICIES}
-        for record in records:
-            if (
-                record.spec.kind in {"declared-operation", "attested-agent"}
-                and not record.state.get("terminal")
-                and record.state.get("phase")
-                in {
-                    "submitted",
-                    "running",
-                    "cancelling",
-                    "stopping",
-                    "launch-unknown",
-                    "observation-unknown",
-                    "outcome-unknown",
-                }
-            ):
-                active[record.spec.pool].append(record)
-        state["claims"] = {
-            record.job_id: self._admission_claim(record)
-            for pool_records in active.values()
-            for record in pool_records
-        }
-        self._save_admission_state(state)
-        pressure = self.pressure_probe()
-        host_pressure_blocked = self._host_pressure_blocks(pressure)
-        for snapshot in records:
-            if snapshot.spec.kind not in {"declared-operation", "attested-agent"}:
-                continue
-            # Dependency observations acquire their own job locks.  Do them
-            # before the candidate lock so admission never nests job locks in
-            # an order determined by the dependency graph.
-            blocked = self._dependency_block(snapshot.spec)
-            terminal_blocked: GenericJobRecord | None = None
-            with self.store.locked(snapshot.job_id):
-                record = self.store.load(snapshot.job_id)
-                if record.state.get("terminal") or record.state.get("phase") not in {
-                    "queued",
-                    "waiting-dependencies",
-                }:
-                    continue
-                if blocked is not None:
-                    updated = self._with_state(record, blocked)
-                    self.store.save(updated)
-                    if blocked.get("terminal"):
-                        self._finalize_terminal(updated)
-                        terminal_blocked = updated
-                else:
-                    policy = POOL_POLICIES[record.spec.pool]
-                    exclusive = {
-                        key
-                        for pool_records in active.values()
-                        for item in pool_records
-                        for key in item.spec.exclusive_keys
-                    }
-                    blocked_by = [
-                        reason
-                        for reason, blocked_now in (
-                            (
-                                "pool-workers",
-                                len(active[record.spec.pool]) >= policy["workers"],
-                            ),
-                            (
-                                "exclusive-key",
-                                bool(
-                                    exclusive.intersection(record.spec.exclusive_keys)
-                                ),
-                            ),
-                            (
-                                "host-pressure",
-                                record.spec.pool != "interactive"
-                                and host_pressure_blocked,
-                            ),
-                        )
-                        if blocked_now
-                    ]
-                    if blocked_by:
-                        admission = {
-                            **(
-                                dict(record.state.get("admission", {}))
-                                if isinstance(record.state.get("admission"), Mapping)
-                                else {}
-                            ),
-                            "blocked_by": blocked_by,
-                            "host": {
-                                "io_full_avg60": float(
-                                    pressure.get("io_full_avg60", 0.0)
-                                ),
-                            },
-                        }
-                        previous_admission = record.state.get("admission")
-                        previous_blocked_by = (
-                            previous_admission.get("blocked_by")
-                            if isinstance(previous_admission, Mapping)
-                            else None
-                        )
-                        if previous_blocked_by != blocked_by:
-                            self.store.save(
-                                self._with_state(
-                                    record,
-                                    {
-                                        **record.state,
-                                        "observed_at": _timestamp(),
-                                        "admission": admission,
-                                    },
-                                )
-                            )
-                        continue
-            if terminal_blocked is not None:
-                self._finish_admission(terminal_blocked, state)
-                continue
-            if blocked is not None:
-                continue
-            if self.before_admission_start is not None:
-                self.before_admission_start(record.job_id)
-            terminal: GenericJobRecord | None = None
-            submitted: GenericJobRecord | None = None
-            with self.store.locked(record.job_id):
-                current = self.store.load(record.job_id)
-                if current.state.get("terminal") or current.state.get("phase") not in {
-                    "queued",
-                    "waiting-dependencies",
-                }:
-                    continue
-                try:
-                    if current.spec.kind == "declared-operation":
-                        command, environment = self.store.declared_launch(
-                            current.job_id
-                        )
-                    else:
-                        command, environment = self.store.agent_launch(current.job_id)
-                    self.store.prepare_scratch(current)
-                    if current.spec.kind == "attested-agent" and current.result_path:
-                        current.result_path.unlink(missing_ok=True)
-                        current.result_path.with_suffix(".overflow").unlink(
-                            missing_ok=True
-                        )
-                        _completion_marker_path(current.log_path).unlink(
-                            missing_ok=True
-                        )
-                    if (
-                        current.spec.kind == "declared-operation"
-                        and current.spec.checkout is not None
-                    ):
-                        checkout_binding = dict(current.spec.checkout)
-                        if checkout_binding.get("checkout_id") == "default":
-                            # Default-checkout operations (scheduled runs,
-                            # project-root jobs) follow the project head: the
-                            # binding head was captured when the job was
-                            # created, and master moving in between is normal,
-                            # not identity drift. Workspace-bound jobs keep
-                            # exact-head binding — their verification receipts
-                            # are only meaningful at the recorded commit.
-                            resolved = subprocess.run(
-                                [
-                                    "git",
-                                    "-C",
-                                    str(checkout_binding.get("path", "")),
-                                    "rev-parse",
-                                    "HEAD",
-                                ],
-                                capture_output=True,
-                                text=True,
-                                timeout=30,
-                                check=False,
-                            )
-                            refreshed = resolved.stdout.strip()
-                            if resolved.returncode == 0 and re.fullmatch(
-                                r"[0-9a-f]{40}", refreshed
-                            ):
-                                checkout_binding["head"] = refreshed
-                                current = replace(
-                                    current,
-                                    spec=replace(
-                                        current.spec, checkout=checkout_binding
-                                    ),
-                                )
-                                self.store.save(current)
-                                # The unit environment carries the same
-                                # binding the runner proves against the
-                                # record; a refreshed record with an
-                                # enqueue-time environment fails every
-                                # queued default-checkout job once master
-                                # moves (three corpus runs on 2026-09-02).
-                                environment = {
-                                    **environment,
-                                    "SINNIXD_CHECKOUT_HEAD": refreshed,
-                                }
-                        revalidate_registered_checkout(checkout_binding)
-                        # The contract runner repeats this proof in the unit
-                        # before it execs the project command. Git worktrees
-                        # have no lock we can share with arbitrary writers, so
-                        # this closes the check-to-exec interval as well as the
-                        # admission boundary itself.
-                        from .contracts import contract_runner_executable
-
-                        command = (
-                            str(contract_runner_executable()),
-                            "--declared",
-                            "--job-id",
-                            current.job_id,
-                            "--unit",
-                            current.unit,
-                            "--state-root",
-                            str(self.store.root),
-                        )
-                    self.systemd.start(
-                        unit=current.unit,
-                        command=command,
-                        working_directory=current.spec.working_directory,
-                        environment=self._job_environment(current, environment),
-                        timeout_seconds=current.spec.timeout_seconds,
-                        log_path=current.log_path,
-                        pool=current.spec.pool,
-                        json_result_path=current.result_path
-                        if current.spec.result_kind in {"json", "pytest"}
-                        else None,
-                        **self._notify_arguments(current.job_id),
-                    )
-                except SystemdJobError:
-                    self._reconcile_launch_error(current)
-                    terminal = self.store.load(current.job_id)
-                except (JobRecordError, ProjectConfigError) as launch_error:
-                    terminal = self._with_state(
-                        current,
-                        {
-                            "phase": (
-                                "checkout-missing"
-                                if self._checkout_path_missing(current)
-                                else "launch-failed"
-                            ),
-                            "terminal": True,
-                            "launch_evidence": "not-started",
-                            "error": (
-                                {
-                                    "code": "checkout-missing",
-                                    "message": "registered checkout is unavailable",
-                                }
-                                if self._checkout_path_missing(current)
-                                else {
-                                    "code": "launch-refused",
-                                    "message": str(launch_error),
-                                }
-                            ),
-                            "observed_at": _timestamp(),
-                        },
-                    )
-                    self.store.save(terminal)
-                    self._finalize_terminal(terminal)
-                else:
-                    admission = (
-                        dict(current.state.get("admission", {}))
-                        if isinstance(current.state.get("admission"), Mapping)
-                        else {}
-                    )
-                    admission.pop("blocked_by", None)
-                    admission.pop("host", None)
-                    submitted = self._with_state(
-                        current,
-                        {
-                            **current.state,
-                            "phase": "submitted",
-                            "terminal": False,
-                            "admission": admission,
-                            "admitted_at": _timestamp(),
-                            "observed_at": _timestamp(),
-                        },
-                    )
-                    self.store.save(submitted)
-            if terminal is not None and terminal.state.get("terminal"):
-                self._finalize_terminal(terminal)
-                self._finish_admission(terminal, state)
-            elif submitted is not None:
-                active[submitted.spec.pool].append(submitted)
-        state["claims"] = {
-            record.job_id: self._admission_claim(record)
-            for pool_records in active.values()
-            for record in pool_records
-        }
-        self._save_admission_state(state)
-
     SCHEDULE_RECONCILE_INTERVAL_SECONDS = 300.0
     schedule_reconcile: Callable[[], None] | None = None
 
-    def run_admission_scheduler(self, stop_event: Event) -> None:
-        """Protect the host and retry queued admission independently of clients."""
-        last_schedule_reconcile = 0.0
+    def run_schedule_reconciler(self, stop_event: Event) -> None:
+        """Reconcile OnCalendar timers independently of clients."""
         while not stop_event.is_set():
             # Timer registration is a convergence loop, not a startup act: a
             # back-to-back restart raced registration to an empty durable map
             # and every scheduled operation (the nightly corpus included)
             # silently disarmed until the next restart (2026-09-01 21:49).
-            if (
-                self.schedule_reconcile is not None
-                and time.monotonic() - last_schedule_reconcile
-                >= self.SCHEDULE_RECONCILE_INTERVAL_SECONDS
-            ):
-                last_schedule_reconcile = time.monotonic()
+            if self.schedule_reconcile is not None:
                 try:
                     self.schedule_reconcile()
                 except Exception:
-                    print(
-                        "admission scheduler: schedule reconcile failed",
-                        file=sys.stderr,
-                    )
+                    print("schedule reconciler: reconcile failed", file=sys.stderr)
                     traceback.print_exc()
-            # One failed sweep must not end the daemon. An exception escaping
-            # here kills the only thread that owns the active set, orphaning
-            # every running unit and wedging all later admission.
-            try:
-                with self._admission_lock:
-                    self._admit_locked()
-            except Exception:
-                print("admission scheduler: admission sweep failed", file=sys.stderr)
-                traceback.print_exc()
-            stop_event.wait(self.admission_retry_seconds)
-
-    def _dependency_block(self, spec: GenericJobSpec) -> Mapping[str, Any] | None:
-        for job_id in spec.dependency_job_ids:
-            try:
-                with self.store.locked(job_id):
-                    dependency = self._get_locked(job_id)
-            except JobRecordError:
-                return {
-                    "phase": "dependency-failed",
-                    "terminal": True,
-                    "launch_evidence": "not-started",
-                    "observed_at": _timestamp(),
-                }
-            if (
-                dependency["state"].get("terminal")
-                and dependency["state"].get("phase") != "succeeded"
-            ):
-                return {
-                    "phase": "dependency-failed",
-                    "terminal": True,
-                    "launch_evidence": "not-started",
-                    "observed_at": _timestamp(),
-                    "dependencies": list(spec.dependency_job_ids),
-                }
-            if not dependency["state"].get("terminal"):
-                return {
-                    "phase": "waiting-dependencies",
-                    "terminal": False,
-                    "observed_at": _timestamp(),
-                    "dependencies": list(spec.dependency_job_ids),
-                }
-        return None
-
-    def _finish_admission(
-        self, record: GenericJobRecord, state: dict[str, Any]
-    ) -> None:
-        with self.store.locked(record.job_id):
-            record = self.store.load(record.job_id)
-            if record.admission_estimate_recorded:
-                return
-            self._save_admission_state(state)
-            self.store.save(replace(record, admission_estimate_recorded=True))
+            stop_event.wait(self.SCHEDULE_RECONCILE_INTERVAL_SECONDS)
 
     def _finalize_terminal(self, record: GenericJobRecord) -> None:
         """Handle a just-observed terminal transition exactly once per process.
@@ -3373,14 +2662,7 @@ class GenericJobs:
 
     def get(self, job_id: str) -> dict[str, Any]:
         with self.store.locked(job_id):
-            status = self._get_locked(job_id)
-        with self._admission_lock:
-            if status["state"].get("terminal"):
-                self._finish_admission(self.store.load(job_id), self._admission_state())
-                self._admit_locked()
-            else:
-                self._admit_observed()
-        return status
+            return self._get_locked(job_id)
 
     def list(
         self,
@@ -3408,8 +2690,6 @@ class GenericJobs:
             "phases": sorted(set(phases)),
             "project_id": project_id,
         }
-        with self._admission_lock:
-            self._admit_observed()
         source_records = (
             self.store.active_records() if active_only else self.store.list()
         )
@@ -3445,8 +2725,6 @@ class GenericJobs:
                 f"wait timeout_seconds must be between 1 and {MAX_WAIT_SECONDS}"
             )
         deadline = time.monotonic() + timeout_seconds
-        with self._admission_lock:
-            self._admit_locked()
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -3576,13 +2854,8 @@ class GenericJobs:
                         "cancel_requested": True,
                         "already_terminal": False,
                     }
-        with self._admission_lock:
-            if terminal is not None:
-                self._finalize_terminal(terminal)
-                self._finish_admission(terminal, self._admission_state())
-            elif response["state"].get("terminal"):
-                self._finish_admission(self.store.load(job_id), self._admission_state())
-            self._admit_locked()
+        if terminal is not None:
+            self._finalize_terminal(terminal)
         return response
 
     def logs(
@@ -3716,9 +2989,18 @@ class GenericJobs:
             if retry_at is not None and datetime.now(UTC) < retry_at:
                 return self._public(record, record.state)
             record = self._prepare_capacity_retry(record)
-            if record.state.get("phase") == "queued":
+            if record.state.get("phase") == "capacity":
                 return self._public(record, record.state)
-        if record.state.get("phase") in {"queued", "waiting-dependencies"}:
+        if record.state.get("phase") == "waiting-dependencies":
+            blocked = self._dependency_block(record.spec)
+            if blocked is None:
+                if record.spec.kind == "declared-operation":
+                    return self._launch_declared(record, record.spec)
+                return self._launch(record, record.spec)
+            if blocked.get("terminal"):
+                record = self._with_state(record, blocked)
+                self.store.save(record)
+                self._finalize_terminal(record)
             return self._public(record, record.state)
         if record.state.get(
             "terminal"
