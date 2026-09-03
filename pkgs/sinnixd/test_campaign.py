@@ -494,3 +494,37 @@ def test_a_dry_run_plans_without_touching_the_queue_or_the_job_store(  # type: i
     assert (
         sorted(path.name for path in runner.jobs.store.root.rglob("*.json")) == before
     )
+
+
+def test_advance_honours_the_wave_limit(tmp_path, monkeypatch, fake_pueue) -> None:  # type: ignore[no-untyped-def]
+    """`--limit` bounds the resume planner, not only fresh-bead launches.
+
+    Anti-vacuity: the deployed planner dispatched all 37 lanes under
+    `--limit 8`. Three dispatchable lanes with limit 2 must plan exactly two
+    and report the third as skipped for the limit.
+    """
+    from sinnixd.lane_facts import Pull
+
+    runner = _runner(tmp_path)
+    monkeypatch.setattr(runner, "_repo_slug", staticmethod(lambda root: "o/r"))
+    monkeypatch.setattr("sinnixd.lane_facts.closed_bead_ids", lambda root, **k: ())
+    lanes = [
+        _lane_facts(),
+        _lane_facts(verify_job=("vvvvvvvv-1", "succeeded")),
+        _lane_facts(
+            clean_receipt=True,
+            pull=Pull(
+                number=7,
+                url="https://github.test/pull/7",
+                mergeable=False,
+                checks_status=None,
+            ),
+        ),
+    ]
+    monkeypatch.setattr("sinnixd.lane_facts.collect", lambda *a, **k: lanes)
+
+    result = runner.advance("polylogue", dry_run=True, limit=2)
+
+    assert [entry["action"] for entry in result["planned"]] == ["verify", "harvest"]
+    assert [entry["reason"] for entry in result["skipped"]] == ["wave limit reached"]
+    assert fake_pueue.added == []
