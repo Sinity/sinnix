@@ -21,16 +21,11 @@ state below. It holds no campaign state itself.
 
 ## Who drives
 
-The reactor is stopped after every deploy:
-
-```
-systemctl --user stop sinnixd-reactor
-```
-
-Refill is opt-in. With the reactor stopped, the operator or the coordinating
-agent takes every step by hand: `campaign view` to see what needs attention,
-`campaign run` or `packet launch` to dispatch, the declared `harvest`
-operation to publish, `campaign log` to explain one lane.
+`campaign run` is a one-shot planner: it dispatches every managed lane's next
+action once and exits. The operator or the coordinating agent takes every
+step by hand: `campaign view` to see what needs attention, `campaign run` or
+`packet launch` to dispatch, the declared `harvest` operation to publish,
+`campaign log` to explain one lane.
 
 ## Capability map
 
@@ -50,10 +45,8 @@ Look for the verb before writing any procedure: `agentctl <verb> --help`.
 | land a workspace                          | `agentctl workspace land <ws> --job <verify-job>`                                                               |
 | dispose after a GitHub merge              | `agentctl workspace finish <ws>`                                                                                |
 | delete a workspace and everything it owns | `agentctl workspace drop <ws> [--force]`                                                                        |
-| protect work before risky integration     | `agentctl workspace checkpoint <ws>` / `restore <ws> <cp> [--recreate]`                                         |
 | review state of a workspace               | `agentctl workspace review-status <ws>`                                                                         |
 | run a declared operation                  | `agentctl job start <p> <operation> [--workspace <ws>] [--wait]`                                                |
-| see what blocks the queue                 | `agentctl job admission [--project <p>]`                                                                        |
 | wait on work                              | `agentctl job wait <id>`, `agentctl plan wait <id>`                                                             |
 
 Task mutations go through `bd` directly; see [[task-backend]].
@@ -128,8 +121,7 @@ branch, in the same worktree.
 
 **Substrate defects** are next work items: file instances in the owning
 project's Beads with reproduction evidence. Deploy sinnixd through the devshell
-`switch` wrapper while no lane is mid-launch; jobs survive daemon restarts, and
-the reactor stays stopped afterwards.
+`switch` wrapper while no lane is mid-launch; jobs survive daemon restarts.
 
 ## Cost discipline
 

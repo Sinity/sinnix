@@ -17,10 +17,10 @@ execute self-sufficiently; mechanics route through AgentCTL.
    per lane.
 3. Read the result, decide, dispatch the next wave.
 
-The reactor is stopped after every deploy (`systemctl --user stop
-sinnixd-reactor`) and refill is opt-in. The operator or the coordinating agent
-steers: `campaign view`, `campaign log`, `campaign run`, `packet launch`, and
-the declared `harvest` operation.
+`campaign run` is a one-shot planner: each invocation dispatches every
+managed lane's next action once and exits. The operator or the coordinating
+agent steers: `campaign view`, `campaign log`, `campaign run`, `packet
+launch`, and the declared `harvest` operation.
 
 ## Model selection
 
