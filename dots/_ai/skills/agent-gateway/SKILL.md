@@ -4,8 +4,8 @@ description: Use when invoking, inspecting, or documenting Sinnix Agent Gateway 
 ---
 
 <!-- GENERATED FILE. DO NOT EDIT. -->
-<!-- gateway-catalog-revision: v2-g2.10-context-events -->
-<!-- gateway-catalog-sha256: 65c2cba708186a4858fca7f3750ea9366782f3072272410a99e6b7dac61100d2 -->
+<!-- gateway-catalog-revision: v2-g3.0-pueue-jobs -->
+<!-- gateway-catalog-sha256: 885e3a2cee22a5488d8cc0dd289312bb9105a7f9679c8a247afeda5dbb919548 -->
 
 # Agent Gateway V2
 
@@ -24,7 +24,7 @@ The CLI invokes the matching MCP verb through the same server runtime and princi
 - Project orientation: call `projects.context` with a canonical `sinnix://projects/<project>` ref and `intent=project`, then follow the returned checkout and task-authority refs.
 - Beads triage: call `beads.query` with bounded project IDs, a view or native filters, and only the includes needed for the decision.
 - Bulk Beads changes: call `beads.changeset` with `operation=preview`, inspect every planned step and source revision, then replay the same request with the returned preview digest and `operation=apply`.
-- Work or review a bead: use `agent.for_bead` only with the canonical bead ref and explicit checkout. Use `projects.context` with `intent=bead.work` or `bead.review` to inspect assignment and evidence.
+- Start a lane for a bead: `agent.for_bead` with the canonical bead ref; agentctl compiles the prompt, creates the worktree and queues the agent. Review the job afterwards with `projects.context` and `intent=job.review`.
 - Incident orientation: use `machine.query` for one bounded owner-selected section and `audit.events` for recent gateway receipts. Do not reconstruct a whole-machine view locally.
 - Browser or desktop manipulation: discover or use the canonical gateway-owned browser page or desktop ref, then invoke `browser.operate` or `desktop.operate` as operator. Existing operator tabs are never accepted as implicit targets.
 - Machine action: discover a canonical machine target, query `machine.query` with `operation=actions` for the current owner revision, then supply it with the reason, idempotency key, and preconditions to `machine.operate`.
@@ -33,4 +33,4 @@ The CLI invokes the matching MCP verb through the same server runtime and princi
 
 The gateway is the preferred route for typed, principal-scoped Beads work. The direct owner fallback is `bd 1.1.0-dev` against the project’s canonical standalone Dolt workspace, resolved through the project’s canonical worktree and `.beads/redirect`. Dolt is the authority for ordinary mutations. `issues.jsonl` is an optional JSONL export, not a write authority. Use the gateway `beads.operate` action with `snapshot.publish` when an explicit deterministic snapshot is required. Snapshot publication does not imply a Git commit or a Dolt push. Use `sync.push` or `sync.pull` explicitly for Dolt synchronization. Never hand-author `bd` argv when the gateway catalog exposes the needed action.
 
-Catalog revision: `v2-g2.10-context-events`. Catalog SHA-256: `65c2cba708186a4858fca7f3750ea9366782f3072272410a99e6b7dac61100d2`.
+Catalog revision: `v2-g3.0-pueue-jobs`. Catalog SHA-256: `885e3a2cee22a5488d8cc0dd289312bb9105a7f9679c8a247afeda5dbb919548`.

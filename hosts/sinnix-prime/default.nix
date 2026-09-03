@@ -73,8 +73,8 @@
               "self"
             ];
           };
-          approvedManifestHash = "78d04f9a59828ec9c5283058b5b4f39f9fbdf4bc6ee2b2db22861221e51fc87e";
-          approvedActionCatalogHash = "1290616ae8088b94b609af056d1b7314989b216bdaad678423204b6bc47ff93e";
+          approvedManifestHash = "cfd50dd8df6f0ca39a46d66d3cbdd8a0965f688eef25c8df484cea48c857046b";
+          approvedActionCatalogHash = "0b631beb9cbb6aaf9441963d1cc82dddd6c36862ea321a467e4e242dc5f0027a";
         };
       };
     };

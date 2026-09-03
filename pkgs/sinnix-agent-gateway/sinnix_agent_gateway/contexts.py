@@ -212,28 +212,6 @@ CONTEXT_INTENTS: dict[str, ContextIntentSpec] = {
             ("changes", 8_000),
         ),
     ),
-    "bead.work": ContextIntentSpec(
-        "bead.work",
-        64_000,
-        (
-            ("bead", 18_000),
-            ("project", 12_000),
-            ("checkout", 12_000),
-            ("assignment", 14_000),
-            ("blockers", 8_000),
-        ),
-    ),
-    "bead.review": ContextIntentSpec(
-        "bead.review",
-        64_000,
-        (
-            ("bead", 16_000),
-            ("job", 16_000),
-            ("checkout", 12_000),
-            ("diff", 12_000),
-            ("evidence", 8_000),
-        ),
-    ),
     "job.review": ContextIntentSpec(
         "job.review",
         56_000,

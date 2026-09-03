@@ -33,9 +33,9 @@ def test_generated_prompts_use_canonical_refs_and_principal_filtered_catalog() -
     assert {row["name"] for row in generator.list()} == {
         spec.name for spec in PROMPT_SPECS
     }
-    messages = generator.generate("work-bead", {"ref": "sinnix://projects/p/beads/b"})
+    messages = generator.generate("review-job", {"ref": "sinnix://jobs/41"})
     body = json.loads(messages[0]["content"]["text"])
-    assert body["target_ref"] == "sinnix://projects/p/beads/b"
+    assert body["target_ref"] == "sinnix://jobs/41"
     assert body["context_ref"] == body["target_ref"]
     assert body["action_catalog_revision"] == "catalog-rev"
     assert "does not grant mutation authority" in " ".join(body["instructions"])
@@ -63,10 +63,10 @@ def test_prompt_registry_visibility_intent_kind_and_bounds_are_enforced() -> Non
         generator.generate(
             "orient-project", {"ref": "sinnix://browser/agent-workspace"}
         )
-    with pytest.raises(ValueError, match="job_ref"):
+    with pytest.raises(ValueError, match="not recognized"):
         generator.generate(
-            "work-bead",
-            {"ref": "sinnix://projects/p/beads/b", "job_ref": "sinnix://projects/p"},
+            "review-job",
+            {"ref": "sinnix://jobs/41", "job_ref": "sinnix://projects/p"},
         )
     with pytest.raises(ValueError, match="input bound"):
         generator.generate(

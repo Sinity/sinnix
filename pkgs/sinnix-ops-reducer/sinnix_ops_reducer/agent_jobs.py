@@ -45,7 +45,11 @@ class AgentCtlClient:
         """Groups and the newest jobs: what the reducer publishes every refresh."""
         jobs = self.list()
         kept = jobs[-MAX_SNAPSHOT_JOBS:]
-        return {"groups": self.groups(), "jobs": kept, "truncated": len(jobs) > len(kept)}
+        return {
+            "groups": self.groups(),
+            "jobs": kept,
+            "truncated": len(jobs) > len(kept),
+        }
 
     def groups(self) -> dict[str, dict[str, Any]]:
         document = self._call((self.pueue_command, "status", "--json"))
@@ -70,7 +74,9 @@ class AgentCtlClient:
             group = found.get(str(task.get("group") or ""))
             status = task.get("status")
             name = (
-                next(iter(status), "") if isinstance(status, dict) else str(status or "")
+                next(iter(status), "")
+                if isinstance(status, dict)
+                else str(status or "")
             ).lower()
             if group is not None and name in {"running", "queued", "paused"}:
                 group[name] += 1

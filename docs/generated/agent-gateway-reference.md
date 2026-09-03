@@ -1,12 +1,12 @@
 <!-- GENERATED FILE. DO NOT EDIT. -->
-<!-- gateway-catalog-revision: v2-g2.10-context-events -->
-<!-- gateway-catalog-sha256: 65c2cba708186a4858fca7f3750ea9366782f3072272410a99e6b7dac61100d2 -->
+<!-- gateway-catalog-revision: v2-g3.0-pueue-jobs -->
+<!-- gateway-catalog-sha256: 885e3a2cee22a5488d8cc0dd289312bb9105a7f9679c8a247afeda5dbb919548 -->
 
 # Sinnix Agent Gateway V2 reference
 
 This reference is generated from `sinnix_agent_gateway.registry.REGISTRY`. The catalog hash changes when an action, resource, schema, route, principal, bound, or example changes.
 
-Revision: `v2-g2.10-context-events`. Catalog SHA-256: `65c2cba708186a4858fca7f3750ea9366782f3072272410a99e6b7dac61100d2`.
+Revision: `v2-g3.0-pueue-jobs`. Catalog SHA-256: `885e3a2cee22a5488d8cc0dd289312bb9105a7f9679c8a247afeda5dbb919548`.
 
 ## Ten CLI verbs
 
@@ -389,7 +389,7 @@ Examples:
 
 Query canonical project-qualified Beads resources with bounded snapshot paging and explicit coverage.
 
-Owner route: `beads.query`. Principals: `observer, operator`. Typed failures: `deadline, invalid_request, not_found, owner_failed, policy_denied, response_bound, unavailable`.
+Owner route: `beads.query`. Principals: `agent-control, observer, operator`. Typed failures: `deadline, invalid_request, not_found, owner_failed, policy_denied, response_bound, unavailable`.
 
 Input schema:
 
@@ -587,7 +587,7 @@ Examples:
 
 ### `projects.context`
 
-Compose Git and bounded task orientation for one canonical project.
+Compose orientation, triage or incident context for one canonical project, or review one queued job.
 
 Owner route: `project_context.context`. Principals: `agent-control, observer, operator`. Typed failures: `deadline, invalid_request, not_found, owner_failed, policy_denied, response_bound, unavailable`.
 
@@ -616,17 +616,9 @@ Input schema:
         "project",
         "project.orientation",
         "project.triage",
-        "bead.work",
-        "bead.review",
         "job.review",
         "incident"
       ]
-    },
-    "job_ref": {
-      "maxLength": 2048,
-      "minLength": 1,
-      "pattern": "^sinnix://jobs/[^/]+$",
-      "type": "string"
     },
     "reason": {
       "maxLength": 2000,
@@ -636,7 +628,7 @@ Input schema:
     "ref": {
       "maxLength": 2048,
       "minLength": 1,
-      "pattern": "^sinnix://(?:projects/[^/]+(?:/beads/[^/]+)?|jobs/[^/]+)$",
+      "pattern": "^sinnix://(?:projects/[^/]+(?:/checkouts/[^/]+)?|jobs/[^/]+)$",
       "type": "string"
     },
     "request_id": {
@@ -728,7 +720,7 @@ Examples:
 
 ### `jobs.wait`
 
-Wait for a bounded interval on one daemon-owned job reference.
+Wait for a bounded interval on one queued job reference.
 
 Owner route: `job.wait`. Principals: `agent-control, observer, operator`. Typed failures: `deadline, invalid_request, not_found, owner_failed, policy_denied, response_bound, unavailable`.
 
@@ -1013,8 +1005,7 @@ Input schema:
         "unclaim",
         "unrelate",
         "update",
-        "reparent",
-        "close_with_evidence"
+        "reparent"
       ]
     },
     "parameters": {
@@ -1294,8 +1285,7 @@ Input schema:
                   "unclaim",
                   "unrelate",
                   "update",
-                  "reparent",
-                  "close_with_evidence"
+                  "reparent"
                 ]
               },
               "parameters": {
@@ -1562,7 +1552,6 @@ Input schema:
   "properties": {
     "action": {
       "enum": [
-        "focus",
         "interrupt",
         "freeze",
         "thaw",
@@ -1648,7 +1637,7 @@ Examples:
 
 ### `operations.run`
 
-Start one project-declared operation through the daemon-owned generic job route.
+Queue one project-declared operation in its declared pool, on the main checkout or a worktree.
 
 Owner route: `job.start`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, policy_denied, response_bound, unavailable`.
 
@@ -1720,9 +1709,9 @@ Examples:
 
 ### `agent.for_bead`
 
-Claim an optional canonical Beads task, launch one attested coding agent in an explicit checkout, and retain task provenance in the daemon job manifest.
+Start a lane for one canonical Beads task: agentctl compiles the prompt, creates the worktree and queues the agent; the bead's model policy applies unless backend, model and effort are given.
 
-Owner route: `job.agent.start`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, response_bound, unavailable`.
+Owner route: `job.agent.start`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, policy_denied, response_bound, unavailable`.
 
 Input schema:
 
@@ -1735,27 +1724,8 @@ Input schema:
       "minLength": 1,
       "type": "string"
     },
-    "assignment_ref": {
-      "maxLength": 2048,
-      "minLength": 1,
-      "pattern": "^sinnix://jobs/[^/]+$",
-      "type": "string"
-    },
     "backend": {
       "enum": ["claude", "codex", "gemini", "grok", "antigravity"]
-    },
-    "checkout_id": {
-      "maxLength": 128,
-      "minLength": 1,
-      "type": "string"
-    },
-    "claim_mode": {
-      "default": "none",
-      "enum": ["none", "claim"]
-    },
-    "credential_profile": {
-      "default": "subscription",
-      "enum": ["subscription", "api"]
     },
     "deadline_at": {
       "type": "number"
@@ -1763,10 +1733,6 @@ Input schema:
     "idempotency_key": {
       "maxLength": 256,
       "minLength": 1,
-      "type": "string"
-    },
-    "instructions": {
-      "maxLength": 32000,
       "type": "string"
     },
     "model": {
@@ -1794,23 +1760,9 @@ Input schema:
       "maxLength": 128,
       "minLength": 1,
       "type": "string"
-    },
-    "timeout_seconds": {
-      "default": 3600,
-      "maximum": 3600,
-      "minimum": 1,
-      "type": "integer"
     }
   },
-  "required": [
-    "ref",
-    "checkout_id",
-    "backend",
-    "model",
-    "reasoning_effort",
-    "idempotency_key",
-    "request_id"
-  ],
+  "required": ["ref", "idempotency_key"],
   "type": "object"
 }
 ```
@@ -1820,18 +1772,16 @@ Examples:
 ```json
 {
   "backend": "codex",
-  "checkout_id": "default",
   "idempotency_key": "bead-agent-example",
   "model": "gpt-5.6-terra",
   "reasoning_effort": "high",
-  "ref": "sinnix://projects/sinnix/beads/sinnix-example",
-  "request_id": "2e46daf5-e9b1-4c6e-b99d-bcd46631730b"
+  "ref": "sinnix://projects/sinnix/beads/sinnix-example"
 }
 ```
 
 ### `jobs.cancel`
 
-Request cancellation for one phase-checked daemon job and return the owner truth without asserting terminal completion.
+Kill one phase-checked queued job and return the queue's answer without asserting terminal completion.
 
 Owner route: `job.cancel`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, policy_denied, precondition_failed, response_bound, unavailable`.
 
@@ -2122,7 +2072,7 @@ Examples:
 
 ### `shell.run`
 
-Start one typed operator-shell job and return its daemon-owned handle.
+Queue one argv in the interactive pool inside a checkout's declared environment and return its job handle.
 
 Owner route: `job.shell.start`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, policy_denied, response_bound, unavailable`.
 
@@ -3109,7 +3059,7 @@ No example is declared. Discover the live schema before invoking this action.
 
 ### `jobs.query`
 
-List bounded daemon-owned job summaries with canonical job references.
+List bounded queued-job summaries with canonical job references.
 
 Owner route: `job.list`. Principals: `agent-control, observer, operator`. Typed failures: `deadline, invalid_request, not_found, owner_failed, policy_denied, response_bound, unavailable`.
 

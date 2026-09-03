@@ -350,7 +350,9 @@ class ActionService:
             try:
                 job = self.agent_jobs.get(target["job_id"])
             except AgentCtlError as error:
-                raise ActionError(f"agentctl job lookup failed: {error}", 503) from error
+                raise ActionError(
+                    f"agentctl job lookup failed: {error}", 503
+                ) from error
             if job.get("terminal") is True:
                 raise ActionError("job is already terminal", 409)
             return {"kind": "job", "job": self._job_state(job)}

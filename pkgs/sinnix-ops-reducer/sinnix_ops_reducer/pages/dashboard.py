@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+from .queue import active_jobs
 from .shell import (
     ACTION_SCRIPT,
     badge,
@@ -22,7 +23,6 @@ from .shell import (
     row,
     tile,
 )
-from .queue import active_jobs
 from .work import live_work_card, running_ledger
 
 
@@ -159,7 +159,9 @@ def verdict(
         )
         activity.append(f"running {named}")
     if jobs:
-        activity.append(f"{len(jobs)} job{'s' if len(jobs) != 1 else ''} queued or running")
+        activity.append(
+            f"{len(jobs)} job{'s' if len(jobs) != 1 else ''} queued or running"
+        )
     if not activity:
         activity.append("no named work is running")
 
@@ -431,7 +433,9 @@ def render_dashboard(
             "info" if in_flight else "",
             "/work/#running",
         ),
-        tile(str(len(jobs)), "jobs queued or running", "info" if jobs else "", "/work/"),
+        tile(
+            str(len(jobs)), "jobs queued or running", "info" if jobs else "", "/work/"
+        ),
     ]
     if memory:
         share = memory[0] / memory[1]

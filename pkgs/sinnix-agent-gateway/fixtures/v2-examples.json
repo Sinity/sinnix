@@ -1,5 +1,5 @@
 {
-  "action_catalog_hash": "65c2cba708186a4858fca7f3750ea9366782f3072272410a99e6b7dac61100d2",
+  "action_catalog_hash": "885e3a2cee22a5488d8cc0dd289312bb9105a7f9679c8a247afeda5dbb919548",
   "examples": [
     {
       "action": "gateway.status",
@@ -321,21 +321,17 @@
       "cli_input": {
         "action_name": "agent.for_bead",
         "backend": "codex",
-        "checkout_id": "default",
         "idempotency_key": "bead-agent-example",
         "model": "gpt-5.6-terra",
         "reasoning_effort": "high",
-        "ref": "sinnix://projects/sinnix/beads/sinnix-example",
-        "request_id": "2e46daf5-e9b1-4c6e-b99d-bcd46631730b"
+        "ref": "sinnix://projects/sinnix/beads/sinnix-example"
       },
       "input": {
         "backend": "codex",
-        "checkout_id": "default",
         "idempotency_key": "bead-agent-example",
         "model": "gpt-5.6-terra",
         "reasoning_effort": "high",
-        "ref": "sinnix://projects/sinnix/beads/sinnix-example",
-        "request_id": "2e46daf5-e9b1-4c6e-b99d-bcd46631730b"
+        "ref": "sinnix://projects/sinnix/beads/sinnix-example"
       },
       "verb": "run"
     },
@@ -596,6 +592,6 @@
       "verb": "query"
     }
   ],
-  "revision": "v2-g2.10-context-events",
+  "revision": "v2-g3.0-pueue-jobs",
   "schema": "sinnix.gateway-cli-fixtures.v1"
 }

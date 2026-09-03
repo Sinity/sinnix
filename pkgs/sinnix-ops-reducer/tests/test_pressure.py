@@ -322,8 +322,7 @@ def fake_proc(tmp_path: Path) -> Path:
     proc = tmp_path / "proc"
     proc.mkdir()
     agent_job = (
-        "/user.slice/user-1000.slice/user@1000.service/agent.slice/"
-        "run-r1a2b3c4.scope"
+        "/user.slice/user-1000.slice/user@1000.service/agent.slice/run-r1a2b3c4.scope"
     )
     # The measured C3 shape: modest resident set, enormous swap.
     write_process(
@@ -346,8 +345,7 @@ def fake_proc(tmp_path: Path) -> Path:
         "rustc",
         6_291_456,
         1_048_576,
-        "/user.slice/user-1000.slice/user@1000.service/build.slice/"
-        "run-r5d6e7f8.scope",
+        "/user.slice/user-1000.slice/user@1000.service/build.slice/run-r5d6e7f8.scope",
         "rustc --edition 2021 src/main.rs",
     )
     # A tool invocation placed inside a build: cheap to re-run in isolation,
