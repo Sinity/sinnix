@@ -146,6 +146,16 @@ let
   }
   // extraSurface;
 
+  # The user manager exports TMPDIR into every unit it starts, and that path
+  # is read-only inside ProtectSystem=strict, so every mktemp in the lane
+  # fails and the lane silently captures nothing. A lane with PrivateTmp has
+  # a writable /tmp of its own; point TMPDIR there unless the lane already
+  # said where its tmp lives.
+  lanePrivateTmpEnv = lib.optional (
+    privateTmp && !(lib.any (e: lib.hasPrefix "TMPDIR=" e) environment)
+  ) "TMPDIR=/tmp";
+  laneEnvironment = environment ++ lanePrivateTmpEnv;
+
   baseOverrides = {
     ExecStart = execStart;
     NoNewPrivileges = true;
@@ -153,7 +163,7 @@ let
     ProtectHome = "read-only";
     ReadWritePaths = resolvedWritablePaths;
   }
-  // lib.optionalAttrs (environment != [ ]) { Environment = environment; }
+  // lib.optionalAttrs (laneEnvironment != [ ]) { Environment = laneEnvironment; }
   // lib.optionalAttrs (runtimeDirectory != null) { RuntimeDirectory = runtimeDirectory; }
   // lib.optionalAttrs (runtimeDirectoryPreserve != null) {
     RuntimeDirectoryPreserve = runtimeDirectoryPreserve;

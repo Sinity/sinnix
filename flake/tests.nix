@@ -58,6 +58,7 @@ in
     ./tests/sinex-user-mile.nix
     ./tests/dots-shell.nix
     ./tests/earlyoom.nix
+    ./tests/tmp-sweep.nix
     ./tests/activitywatch.nix
   ];
 

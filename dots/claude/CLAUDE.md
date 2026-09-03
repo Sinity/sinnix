@@ -106,6 +106,8 @@ is wear-limited — no gratuitous writes; NVMe is `/realm`.
   under `/realm/state/tasks/<project>`)
 - `/realm/tmp/work/` — throwaway analysis output (aged 30d); never heavy work
   in `/tmp` (small tmpfs). `/realm/worktrees/` — compile-heavy checkouts.
+  `TMPDIR` is `/realm/tmp/<user>`, swept of unheld `nix-shell.*` trees by a
+  user timer.
 - Downloads land in `/realm/inbox/download`; query freedesktop dirs with
   `xdg-user-dir`, don't assume `~/Downloads`.
 - Home is impermanent (rebuilt each boot from `/persist` + Home Manager).
