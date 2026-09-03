@@ -95,6 +95,14 @@ Deleted verbs and their native replacements:
   so sinnixd reads the descriptor's placement, not the invoking user's.
 - **`wt remove` is asynchronous.** A caller that drops a workspace and then
   reports it gone must pass `--foreground`.
+- **pueue runs the command through a shell.** It joins a task's arguments into
+  one string, so `pueue add -- sh -c 'a; b'` becomes three shell words. `--escape`
+  quotes every argument, and the queued command is one wrapper taking a single
+  unspaced path, so sinnixd's fixed-argv contract survives the queue.
+- **`pueue log --json` publishes a tail.** `--full` is required, or a result
+  parser reads a truncation as the whole run.
+- **pueue has no per-task timeout.** The wrapper enforces the descriptor's
+  `timeout_seconds` and reports 124, because nothing else will.
 - **`pueue remove` is not retention.** Tasks are forgotten when the workspace
   that owns them is dropped, never on a timer.
 
