@@ -7,10 +7,11 @@ import os
 import socket
 import sys
 from pathlib import Path
+from typing import Any
 
 from . import capabilities, feedback, health, pages
 from .actions import ActionService
-from .agent_jobs import AgentCtlClient
+from .agent_jobs import AgentCtlClient, AgentCtlError
 from .ambient import product_source
 from .clodex_usage import clodex_usage
 from .feedback import CoalescingTrigger, FeedbackSpool
@@ -31,6 +32,24 @@ class UnixConnection(http.client.HTTPConnection):
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.sock.settimeout(self.timeout)
         self.sock.connect(self.path)
+
+
+def lane_views(
+    agentctl: AgentCtlClient,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Every project's `agentctl view`, with the projects that refused named."""
+    views: list[dict[str, Any]] = []
+    errors: list[str] = []
+    try:
+        projects = agentctl.projects()
+    except AgentCtlError as error:
+        return views, [str(error)]
+    for project in projects:
+        try:
+            views.append(agentctl.view(project))
+        except AgentCtlError as error:
+            errors.append(f"{project}: {error}")
+    return views, errors
 
 
 def post_failure(socket_path: Path, unit: str, result: str) -> bool:
@@ -265,13 +284,14 @@ def main() -> None:
         runtime_root=root, state_dir=args.state_dir, feedback_dir=args.feedback_dir
     )
     token = ensure_token(layer.token_path)
+    agentctl = AgentCtlClient(args.agentctl)
     reducer = Reducer(
         layer.snapshot_path,
         layer.token_path,
         observe_source(observe_command),
         layer.reducer_state_path,
         ambient_source=product_source(args.ambient_product),
-        agent_jobs_source=AgentCtlClient(args.agentctl).list,
+        agent_jobs_source=agentctl.snapshot,
         clodex_usage_source=lambda: clodex_usage(args.clodex_usage),
     )
     reducer.anchor_event_path = args.anchor_events or (root / "afk-resume.json")
@@ -280,7 +300,7 @@ def main() -> None:
         reducer.snapshot,
         args.inventory,
         layer.receipts_path,
-        agent_jobs=AgentCtlClient(args.agentctl),
+        agent_jobs=agentctl,
     )
     elicit = (
         CoalescingTrigger(args.elicit_command.split()) if args.elicit_command else None
@@ -299,4 +319,5 @@ def main() -> None:
         elicit_model_dir=args.elicit_model_dir,
         capability_index_path=args.capability_index,
         usage_census_path=args.usage_census,
+        lanes_source=lambda: lane_views(agentctl),
     )

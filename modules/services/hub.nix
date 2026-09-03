@@ -69,7 +69,7 @@
 # ── Why there is no second control plane ────────────────────────────────────
 # Every button on every page posts to the ops-reducer's existing action API
 # through a reverse-proxied path. That API owns admission (targets must be
-# attested runtime-inventory units, attested AgentCTL jobs, or admitted
+# attested runtime-inventory units, queued jobs, or admitted
 # processes), optimistic concurrency (expected_revision), idempotency keys, and
 # receipts. The hub adds no shell-out, no sudo, and no privileged helper.
 {

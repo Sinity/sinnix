@@ -40,17 +40,22 @@ process list. It can, because sinnix already names its own work:
 
 - **Project commands in flight** come from the project ledger. A row is
   "sinex is running `test`, in flight 3m 14s, developer-build".
-- **AgentCTL jobs** show the declared operation or lane agent, checkout,
-  lifecycle, and cancellation control from `agentctl job list`.
+- **Queue** is pueue's groups, one per pool, with running and queued counts;
+  a paused group is the backpressure timer holding new work back.
+- **Jobs** are pueue's tasks as `agentctl job list` reduces them — label,
+  phase, group, elapsed time — with an interrupt on any task that is not yet
+  terminal.
+- **Lanes** are `agentctl view` per project, read when the page is
+  requested: each worktree with its bead, stage, agent and pull request.
 - **Slice budgets** show the resource policy carried by declared services and
-  AgentCTL jobs.
+  queued jobs.
 
 ### What the page can and cannot do
 
 Lifecycle control goes through the reducer's action API and nowhere else, so
 the page can only offer what that API accepts: `start`/`stop`/`restart` on an
-attested inventory unit that declares `observe.restartable`, `interrupt` on an
-AgentCTL attested agent job, and `stop` on an admitted `{pid, start_ticks}`
+attested inventory unit that declares `observe.restartable`, `interrupt` on a
+queued job that is not terminal, and `stop` on an admitted `{pid, start_ticks}`
 process (sinnix-mble — see "Unshackling the hub" below). A process is admitted
 by live cgroup membership — only inside `agent.slice`, `build.slice`, or a slice the
 runtime inventory itself marks sacrificial — never by name, so the button is

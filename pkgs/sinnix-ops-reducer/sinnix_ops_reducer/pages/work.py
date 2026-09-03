@@ -5,7 +5,9 @@ from __future__ import annotations
 import datetime as dt
 from typing import Any
 
-from .probes import project_of
+from collections.abc import Callable
+
+from .queue import active_jobs, jobs_card, lanes_card, queue_card
 from .shell import (
     ACTION_SCRIPT,
     age_since,
@@ -23,6 +25,8 @@ from .shell import (
     row,
     tile,
 )
+
+LanesSource = Callable[[], tuple[list[dict[str, Any]], list[str]]]
 
 
 def slice_rows(state: dict[str, Any]) -> list[dict[str, Any]]:
@@ -93,14 +97,6 @@ def ledger_rows(state: dict[str, Any]) -> list[dict[str, Any]]:
     return ledger
 
 
-def agentctl_jobs(state: dict[str, Any]) -> list[dict[str, Any]]:
-    agentctl = state.get("agentctl")
-    jobs = agentctl.get("jobs") if isinstance(agentctl, dict) else None
-    return (
-        [job for job in jobs if isinstance(job, dict)] if isinstance(jobs, list) else []
-    )
-
-
 def running_ledger(state: dict[str, Any]) -> list[dict[str, Any]]:
     return [entry for entry in ledger_rows(state) if entry.get("status") == "running"]
 
@@ -127,7 +123,7 @@ def live_work_card(state: dict[str, Any], now: dt.datetime) -> str:
         return card(
             "Running now",
             empty("No named project operation is in flight."),
-            "AgentCTL project operations",
+            "declared project operations",
             wide=True,
             anchor="running",
         )
@@ -161,7 +157,7 @@ def slices_card(state: dict[str, Any]) -> str:
         blocks += row(headline + meter(entry["current"], limit), meta)
     return (
         '<section class="card"><h2>Slice budgets</h2>'
-        '<p class="sub">Where declared services and AgentCTL jobs run, and what they are allowed to '
+        '<p class="sub">Where declared services and queued jobs run, and what they are allowed to '
         "cost. Sacrificial slices carry real ceilings; the protected ones do "
         "not.</p>"
         f"{blocks}</section>"
@@ -204,52 +200,12 @@ def ledger_card(state: dict[str, Any], now: dt.datetime) -> str:
     )
 
 
-def agent_jobs_card(state: dict[str, Any], now: dt.datetime) -> str:
-    jobs = agentctl_jobs(state)
-    jobs.sort(key=lambda job: str(job.get("created_at") or ""), reverse=True)
-    if not jobs:
-        return card("Agent jobs", empty("AgentCTL has no recorded agent jobs"))
-    blocks = ""
-    for job in jobs[:10]:
-        job_id = str(job.get("job_id") or "")
-        state = job.get("state") if isinstance(job.get("state"), dict) else {}
-        contract = job.get("contract") if isinstance(job.get("contract"), dict) else {}
-        checkout = job.get("checkout") if isinstance(job.get("checkout"), dict) else {}
-        lifecycle = str(state.get("phase") or "unknown")
-        tone = {"succeeded": "ok", "failed": "bad", "cancelled": "muted"}.get(
-            lifecycle, "info"
-        )
-        label = (
-            contract.get("backend") or job.get("operation") or job.get("kind") or "job"
-        )
-        headline = f"<strong>{esc(label)}</strong> <code>{esc(project_of(checkout.get('path')) or job.get('project_id') or '?')}</code>"
-        meta = [
-            badge(lifecycle, tone),
-            esc(age_since(state.get("observed_at") or job.get("created_at"), now)),
-        ]
-        if contract.get("effort"):
-            meta.append(f"effort {esc(contract['effort'])}")
-        controls = ""
-        if state.get("terminal") is not True and job.get("kind") == "attested-agent":
-            controls = (
-                f"<button class=\"act danger\" onclick=\"act('interrupt','job_id',"
-                f"'{esc(job_id)}',this)\">interrupt</button>"
-            )
-        blocks += row(headline, meta, controls)
-    return (
-        '<section class="card wide"><h2>AgentCTL jobs, recently</h2>'
-        '<p class="sub">Named AgentCTL operations and attested jobs with typed lifecycle state. '
-        "An interrupt is delegated to Sinnixd, whose systemd record supplies the "
-        "cancellation outcome.</p>"
-        f"{blocks}</section>"
-    )
-
-
 def render_work(
     manifest: dict[str, Any],
     snapshot: dict[str, Any] | None,
     inventory: dict[str, Any] | None,
     generated: str,
+    lanes_source: LanesSource | None = None,
 ) -> str:
     host = str(manifest.get("host", "sinnix"))
     now = dt.datetime.now(dt.timezone.utc)
@@ -268,21 +224,24 @@ def render_work(
     body += (
         '<div class="tiles">'
         + tile(str(len(in_flight)), "commands in flight", "info" if in_flight else "")
-        + tile(str(len(agentctl_jobs(state))), "AgentCTL jobs")
+        + tile(str(len(active_jobs(state))), "jobs queued or running")
         + tile(
             str(failed_recent), "of last 10 runs failed", "bad" if failed_recent else ""
         )
         + "</div>"
     )
     body += live_work_card(state, now)
+    body += queue_card(state)
     body += slices_card(state)
+    body += jobs_card(state, now)
+    views, errors = lanes_source() if lanes_source is not None else ([], [])
+    body += lanes_card(views, errors)
     body += ledger_card(state, now)
-    body += agent_jobs_card(state, now)
     body += log_card()
     if snapshot is None:
         body += card(
             "Reducer snapshot unavailable",
-            '<p class="sub">Slice budgets, the project ledger, and AgentCTL jobs need the reducer.</p>',
+            '<p class="sub">Slice budgets, the queue, the jobs and the project ledger need the reducer.</p>',
             wide=True,
         )
     return page(

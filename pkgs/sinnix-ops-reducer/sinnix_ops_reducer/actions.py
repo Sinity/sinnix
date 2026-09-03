@@ -108,78 +108,6 @@ def process_admitted_slices(inventory: dict[str, Any] | None) -> set[str]:
     return PROCESS_ADMITTED_BASE_SLICES | sacrificial_slices(inventory)
 
 
-def focus_registered_session(job: dict[str, Any]) -> dict[str, Any]:
-    """Verify Kitty and Hyprland identities before focusing the registered target."""
-
-    correlation = job.get("correlation")
-    if not isinstance(correlation, dict):
-        raise ActionError("job has no registered terminal target", 409)
-    socket_path = correlation.get("kitty_socket")
-    kitty_window_id = correlation.get("kitty_window_id")
-    hyprland_address = correlation.get("hyprland_address")
-    if not all(
-        isinstance(value, str) and value
-        for value in (socket_path, kitty_window_id, hyprland_address)
-    ):
-        raise ActionError("job terminal target is incomplete", 409)
-
-    def run(command: list[str]) -> subprocess.CompletedProcess[str]:
-        try:
-            result = subprocess.run(
-                command, capture_output=True, text=True, timeout=5, check=False
-            )
-        except (OSError, subprocess.TimeoutExpired) as error:
-            raise ActionError(
-                f"focus verification unavailable: {type(error).__name__}", 503
-            ) from error
-        if result.returncode != 0:
-            raise ActionError("focus target verification failed", 409)
-        return result
-
-    endpoint = f"unix:{socket_path}"
-    try:
-        kitty_windows = json.loads(run(["kitty", "@", "--to", endpoint, "ls"]).stdout)
-    except (json.JSONDecodeError, TypeError) as error:
-        raise ActionError("Kitty target inventory is malformed", 409) from error
-    matches = [
-        window
-        for os_window in kitty_windows
-        if isinstance(kitty_windows, list)
-        for tab in os_window.get("tabs", [])
-        if isinstance(os_window, dict)
-        for window in tab.get("windows", [])
-        if isinstance(tab, dict)
-        if str(window.get("id")) == kitty_window_id
-    ]
-    if len(matches) != 1:
-        raise ActionError("registered Kitty window is not unique", 409)
-    run(
-        [
-            "kitty",
-            "@",
-            "--to",
-            endpoint,
-            "focus-window",
-            "--match",
-            f"id:{kitty_window_id}",
-        ]
-    )
-    run(["hyprctl", "dispatch", "focuswindow", f"address:{hyprland_address}"])
-    try:
-        active = json.loads(run(["hyprctl", "-j", "activewindow"]).stdout)
-    except (json.JSONDecodeError, TypeError) as error:
-        raise ActionError("Hyprland focus verification is malformed", 409) from error
-    if str(active.get("address")) != hyprland_address:
-        raise ActionError("Hyprland focused window does not match registration", 409)
-    return {
-        "target": {
-            "kitty_window_id": kitty_window_id,
-            "hyprland_address": hyprland_address,
-        },
-        "status": "verified",
-    }
-
-
 ACTION_FIELDS = {
     "action",
     "target",
@@ -189,7 +117,6 @@ ACTION_FIELDS = {
     "parameters",
 }
 ACTIONS = {
-    "focus",
     "interrupt",
     "freeze",
     "thaw",
@@ -235,7 +162,7 @@ def validate_request(value: Any) -> dict[str, Any]:
         raise ActionError("target must contain only job_id, unit, or process")
     if sum(key in target for key in ("job_id", "unit", "process")) != 1:
         raise ActionError(
-            "target must identify exactly one attested job, runtime unit, or process"
+            "target must identify exactly one job, runtime unit, or process"
         )
     if "process" in target:
         process = target["process"]
@@ -264,10 +191,10 @@ def validate_request(value: Any) -> dict[str, Any]:
     parameters = value["parameters"]
     if not isinstance(parameters, dict):
         raise ActionError("parameters must be an object")
-    if "job_id" in target and action not in {"focus", "interrupt"}:
-        raise ActionError("job targets only support focus and interrupt")
-    if action == "focus" and "unit" in target:
-        raise ActionError("focus requires an attested job target")
+    if "job_id" in target and action != "interrupt":
+        raise ActionError("job targets only support interrupt")
+    if action == "interrupt" and "job_id" not in target:
+        raise ActionError("interrupt requires a job target")
     if (
         action in {"set_policy", "reset_policy", "park", "thaw"}
         and "unit" not in target
@@ -423,12 +350,10 @@ class ActionService:
             try:
                 job = self.agent_jobs.get(target["job_id"])
             except AgentCtlError as error:
-                raise ActionError(
-                    f"AgentCTL job lookup failed: {error}", 503
-                ) from error
-            if job.get("kind") != "attested-agent":
-                raise ActionError("job target is not an attested agent job", 403)
-            return {"kind": "job", "job": job}
+                raise ActionError(f"agentctl job lookup failed: {error}", 503) from error
+            if job.get("terminal") is True:
+                raise ActionError("job is already terminal", 409)
+            return {"kind": "job", "job": self._job_state(job)}
         if "process" in target:
             process = target["process"]
             return self._resolve_process(process["pid"], process["start_ticks"])
@@ -628,30 +553,26 @@ class ActionService:
 
     @staticmethod
     def _job_state(job: Any) -> dict[str, Any]:
+        """The job row as agentctl prints it, bounded to the fields a receipt reads."""
         if not isinstance(job, dict):
             return {}
-        contract = job.get("contract") if isinstance(job.get("contract"), dict) else {}
-        state = job.get("state") if isinstance(job.get("state"), dict) else {}
-        checkout = job.get("checkout") if isinstance(job.get("checkout"), dict) else {}
         return {
-            "job_id": job.get("job_id"),
-            "kind": job.get("kind"),
-            "project_id": job.get("project_id"),
-            "checkout": {
-                key: checkout.get(key)
-                for key in ("checkout_id", "path", "head")
-                if key in checkout
-            },
-            "contract": {
-                key: contract.get(key)
-                for key in ("backend", "model", "effort", "result")
-                if key in contract
-            },
-            "state": {
-                key: state.get(key)
-                for key in ("phase", "terminal", "observed_at", "cancellation")
-                if key in state
-            },
+            key: job.get(key)
+            for key in (
+                "job_id",
+                "label",
+                "kind",
+                "project",
+                "operation",
+                "group",
+                "phase",
+                "terminal",
+                "exit_code",
+                "path",
+                "started_at",
+                "ended_at",
+            )
+            if key in job
         }
 
     def execute(self, raw: Any) -> dict[str, Any]:
@@ -704,11 +625,9 @@ class ActionService:
                 "resolved": resolved,
             },
             "previous_state": previous_target_state,
-            # Re-probed after the adapter ran, not the same pre-action copy:
-            # for unit targets this reflects the systemctl state the
-            # action actually produced. Job interrupts carry the typed
-            # AgentCTL cancellation response, so record that authoritative
-            # state instead of a stale pre-action snapshot.
+            # Re-probed after the adapter ran: for unit targets the systemctl
+            # state the action produced; for a job the row agentctl returned
+            # from the cancel.
             "resulting_state": (
                 {"kind": "job", "job": self._job_state(adapter_receipt.get("job"))}
                 if resolved.get("kind") == "job" and isinstance(adapter_receipt, dict)
@@ -728,16 +647,12 @@ class ActionService:
         self, request: dict[str, Any], resolved: dict[str, Any]
     ) -> dict[str, Any]:
         action = request["action"]
-        if action == "focus":
-            return {"name": action, **focus_registered_session(resolved["job"])}
         if action == "interrupt":
             job_id = resolved["job"]["job_id"]
             try:
                 return {"name": action, "job": self.agent_jobs.cancel(job_id)}
             except AgentCtlError as error:
-                raise ActionError(
-                    f"AgentCTL cancellation failed: {error}", 503
-                ) from error
+                raise ActionError(f"agentctl cancel failed: {error}", 503) from error
         elif resolved.get("kind") == "process":
             # Not a systemd unit -- there is nothing for systemctl to
             # target, so this is the one adapter branch that does not shell

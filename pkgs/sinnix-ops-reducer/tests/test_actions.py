@@ -74,14 +74,9 @@ class FakeAgentJobs:
         job = self.get(job_id)
         self.cancelled.append(job_id)
         return job | {
-            "state": {
-                "phase": "cancelled",
-                "terminal": True,
-                "observed_at": "2026-08-23T10:00:00Z",
-                "cancellation": {"stop_acknowledged_at": "2026-08-23T10:00:00Z"},
-            },
-            "cancel_requested": True,
-            "already_terminal": False,
+            "phase": "cancelled",
+            "terminal": True,
+            "ended_at": "2026-08-23T10:00:00Z",
         }
 
 
@@ -92,11 +87,15 @@ def test_action_fixtures_are_attested_and_idempotent_across_restart(
     inventory(inventory_path)
     job = {
         "job_id": "job-1",
+        "label": "sinnix:lane:sinnix-1",
         "kind": "attested-agent",
-        "project_id": "sinnix",
-        "checkout": {"checkout_id": "default", "path": "/realm/project/sinnix"},
-        "contract": {"backend": "codex", "model": "fixture", "effort": "high"},
-        "state": {"phase": "running", "terminal": False},
+        "project": "sinnix",
+        "operation": "lane:sinnix-1",
+        "group": "agent",
+        "phase": "running",
+        "terminal": False,
+        "exit_code": None,
+        "path": "/realm/worktrees/sinnix-feature-packet-sinnix-1",
     }
     state = {"jobs": [job]}
     reducer = Reducer(
@@ -121,12 +120,11 @@ def test_action_fixtures_are_attested_and_idempotent_across_restart(
         agent_jobs=FakeAgentJobs([job]),
         unit_state_prober=fake_unit_state_prober,
     )
-    first = actions.execute(request("focus", {"job_id": "job-1"}))
+    first = actions.execute(request("interrupt", {"job_id": "job-1"}))
     assert first["schema"] == "sinnix-ops-action-v1"
-    assert actions.execute(request("focus", {"job_id": "job-1"})) == first
-    assert calls == ["focus"]
+    assert actions.execute(request("interrupt", {"job_id": "job-1"})) == first
+    assert calls == ["interrupt"]
     for action, target, key in [
-        ("interrupt", {"job_id": "job-1"}, "k2"),
         ("freeze", {"unit": "safe"}, "k3"),
         ("thaw", {"unit": "safe"}, "k4"),
         ("reset_policy", {"unit": "safe"}, "k5"),
@@ -182,7 +180,7 @@ def test_action_rejects_unknown_pid_stale_revision_and_unsafe_unit(
     with pytest.raises(ActionError, match="another request"):
         actions.execute(request("reset_policy", {"unit": "safe"}, key="fixed"))
     # Lifecycle verbs share restart's admission gate and take no parameters,
-    # and they refuse attested-job targets the way every unit verb does.
+    # and they refuse job targets the way every unit verb does.
     for action in ("start", "stop"):
         with pytest.raises(ActionError, match="restartable"):
             actions.execute(request(action, {"unit": "fixed"}, key=f"{action}-fixed"))
@@ -193,7 +191,7 @@ def test_action_rejects_unknown_pid_stale_revision_and_unsafe_unit(
                     "parameters": {"mode": "graceful"},
                 }
             )
-        with pytest.raises(ActionError, match="focus and interrupt"):
+        with pytest.raises(ActionError, match="only support interrupt"):
             validate_request(request(action, {"job_id": "job-1"}, key=f"{action}-job"))
 
 
@@ -298,11 +296,15 @@ def test_interrupt_uses_agentctl_and_records_its_cancellation_truth(
     inventory(inventory_path)
     job = {
         "job_id": "job-1",
+        "label": "sinnix:lane:sinnix-1",
         "kind": "attested-agent",
-        "project_id": "sinnix",
-        "checkout": {"checkout_id": "default", "path": "/realm/project/sinnix"},
-        "contract": {"backend": "codex", "model": "fixture", "effort": "high"},
-        "state": {"phase": "running", "terminal": False},
+        "project": "sinnix",
+        "operation": "lane:sinnix-1",
+        "group": "agent",
+        "phase": "running",
+        "terminal": False,
+        "exit_code": None,
+        "path": "/realm/worktrees/sinnix-feature-packet-sinnix-1",
     }
     reducer = Reducer(
         tmp_path / "status.json", tmp_path / "token", lambda: {"jobs": []}
@@ -318,17 +320,19 @@ def test_interrupt_uses_agentctl_and_records_its_cancellation_truth(
     )
     receipt = actions.execute(request("interrupt", {"job_id": "job-1"}))
     assert agent_jobs.cancelled == ["job-1"]
-    assert receipt["adapter"]["job"]["cancel_requested"] is True
-    assert receipt["resulting_state"]["job"]["state"]["phase"] == "cancelled"
+    assert receipt["previous_state"]["job"]["phase"] == "running"
+    assert receipt["resulting_state"]["job"]["phase"] == "cancelled"
+    assert receipt["resulting_state"]["job"]["terminal"] is True
 
-    with pytest.raises(ActionError, match="attested agent"):
+    # A terminal task has nothing to interrupt; the refusal is a receipt too.
+    with pytest.raises(ActionError, match="already terminal"):
         ActionService(
             reducer.snapshot,
             inventory_path,
             tmp_path / "other-receipts.json",
-            agent_jobs=FakeAgentJobs([job | {"kind": "declared-operation"}]),
+            agent_jobs=FakeAgentJobs([job | {"phase": "succeeded", "terminal": True}]),
             unit_state_prober=fake_unit_state_prober,
-        ).execute(request("interrupt", {"job_id": "job-1"}, key="declared"))
+        ).execute(request("interrupt", {"job_id": "job-1"}, key="terminal"))
 
 
 def test_receipt_size_stays_bounded_by_the_resolved_target_not_the_system(
@@ -355,7 +359,6 @@ def test_receipt_size_stays_bounded_by_the_resolved_target_not_the_system(
             "execution": {
                 "pid": 1000 + i,
                 "proc_start": "1",
-                "service_unit": f"sinnixd-job-unrelated-{i}.service",
                 "cgroup": f"/unrelated-{i}",
             },
             "history": ["x" * 200] * 20,
@@ -670,7 +673,7 @@ def test_process_stop_refuses_a_start_ticks_mismatch_or_a_dead_pid(
         if pid == 200:
             # Live, but a DIFFERENT start_ticks than the caller observed --
             # the pid was reused by an unrelated process.
-            return (999999, "sinnixd-job-other.service", "agent.slice")
+            return (999999, "run-rother.scope", "agent.slice")
         return None  # pid 300: no such process at all
 
     actions = make_process_actions(tmp_path, prober)

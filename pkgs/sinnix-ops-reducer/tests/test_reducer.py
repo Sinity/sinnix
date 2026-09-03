@@ -28,7 +28,11 @@ def test_healthy_stale_missing_and_malformed_sources_are_distinct(
     missing = reducer.refresh()
     malformed = reducer.refresh()
     assert healthy["sources"]["sinnix-observe"]["status"] == "healthy"
-    assert healthy["state"]["agentctl"] == {"jobs": [], "truncated": False}
+    assert healthy["state"]["agentctl"] == {
+        "groups": {},
+        "jobs": [],
+        "truncated": False,
+    }
     assert stale["sources"]["sinnix-observe"]["status"] == "unavailable"
     assert missing["sources"]["sinnix-observe"]["degradation"] == "missing"
     assert (
@@ -79,20 +83,38 @@ def test_agentctl_failure_degrades_only_the_job_source(tmp_path: Path) -> None:
         "freshness": "unknown",
         "degradation": "socket unavailable",
     }
-    assert snapshot["state"]["agentctl"] == {"jobs": [], "truncated": False}
+    assert snapshot["state"]["agentctl"] == {
+        "groups": {},
+        "jobs": [],
+        "truncated": False,
+    }
 
 
-def test_agentctl_jobs_survive_into_reducer_state(tmp_path: Path) -> None:
+def test_job_plane_survives_into_reducer_state(tmp_path: Path) -> None:
     jobs = [
         {"job_id": number, "label": "p:op", "phase": "running"} for number in range(100)
     ]
+    groups = {"agent": {"status": "Paused", "parallel": 4, "running": 1, "queued": 2}}
     reducer = Reducer(
         tmp_path / "status.json",
         tmp_path / "token",
         lambda: {"report": 1},
-        agent_jobs_source=lambda: {"jobs": jobs, "truncated": True},
+        agent_jobs_source=lambda: {"groups": groups, "jobs": jobs, "truncated": True},
     )
 
     snapshot = reducer.refresh()
 
-    assert snapshot["state"]["agentctl"] == {"jobs": jobs, "truncated": True}
+    assert snapshot["state"]["agentctl"] == {
+        "groups": groups,
+        "jobs": jobs,
+        "truncated": True,
+    }
+    # A payload without groups is not a job-plane snapshot: the source
+    # degrades rather than publishing half of one.
+    partial = Reducer(
+        tmp_path / "status2.json",
+        tmp_path / "token",
+        lambda: {"report": 1},
+        agent_jobs_source=lambda: {"jobs": jobs, "truncated": False},
+    ).refresh()
+    assert partial["sources"]["agentctl"]["status"] == "unavailable"
