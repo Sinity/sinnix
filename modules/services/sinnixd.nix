@@ -28,25 +28,23 @@ mkServiceModule {
         throw "sinnix.services.sinnixd.projectRoots must contain unique absolute project roots";
     description = "Explicit project roots whose .agentctl/project.toml descriptors agentctl reads; no parent directory is scanned.";
   };
-  extraOptions.refill = lib.mkOption {
-    type = lib.types.attrsOf (
-      lib.types.submodule {
-        options = {
-          limit = lib.mkOption {
-            type = lib.types.ints.positive;
-            default = 1;
-            description = "Lanes started per firing.";
-          };
-          onCalendar = lib.mkOption {
-            type = lib.types.str;
-            default = "hourly";
-            description = "OnCalendar expression of the refill timer.";
-          };
-        };
-      }
-    );
-    default = { };
-    description = "Opt-in refill timers by project id: each firing runs `agentctl refill <project> --limit N`.";
+  extraOptions.refill = {
+    enable = lib.mkEnableOption "the opt-in refill timer: each firing runs `agentctl refill <project> --limit N`";
+    project = lib.mkOption {
+      type = lib.types.str;
+      default = "polylogue";
+      description = "The project id whose ready beads the timer starts lanes for.";
+    };
+    limit = lib.mkOption {
+      type = lib.types.ints.positive;
+      default = 1;
+      description = "Lanes started per firing.";
+    };
+    onCalendar = lib.mkOption {
+      type = lib.types.str;
+      default = "hourly";
+      description = "OnCalendar expression of the refill timer.";
+    };
   };
   extraOptions.agentRunner = lib.mkOption {
     type = lib.types.str;
@@ -105,28 +103,25 @@ mkServiceModule {
           };
         }
       )
-      (lib.mkMerge (
-        lib.mapAttrsToList (
-          project: refill:
-          lib.sinnix.mkScheduledJob
-            {
-              inherit config;
-              unitName = "sinnixd-refill-${project}";
-              description = "Start lanes for ready ${project} beads";
-            }
-            {
-              manager = "user";
-              resourceClass = "background-maintenance";
-              execStart = "${scriptPkgs.sinnixd}/bin/agentctl refill ${lib.escapeShellArg project} --limit ${toString refill.limit}";
-              serviceConfig = {
-                TimeoutStartSec = "10min";
-              };
-              timer = {
-                onCalendar = refill.onCalendar;
-                description = "Start lanes for ready ${project} beads";
-              };
-            }
-        ) cfg.refill
+      (lib.mkIf cfg.refill.enable (
+        lib.sinnix.mkScheduledJob
+          {
+            inherit config;
+            unitName = "sinnixd-refill";
+            description = "Start lanes for ready ${cfg.refill.project} beads";
+          }
+          {
+            manager = "user";
+            resourceClass = "background-maintenance";
+            execStart = "${scriptPkgs.sinnixd}/bin/agentctl refill ${lib.escapeShellArg cfg.refill.project} --limit ${toString cfg.refill.limit}";
+            serviceConfig = {
+              TimeoutStartSec = "10min";
+            };
+            timer = {
+              onCalendar = cfg.refill.onCalendar;
+              description = "Start lanes for ready ${cfg.refill.project} beads";
+            };
+          }
       ))
       {
         environment.etc."sinnix/agentctl.json".text = builtins.toJSON {
