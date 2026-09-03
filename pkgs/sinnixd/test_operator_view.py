@@ -77,8 +77,7 @@ def test_checks_name_every_stuck_thing_and_nothing_else() -> None:
         _job("22222222", "harvest", "running", "packet-polylogue-a", 45),
         _job("33333333", "verify_quick", "running", "packet-polylogue-a", 3),
     ]
-    problems = checks(STATUS, jobs, now=NOW, reactor_active=False, last_dispatch=None)
-    assert problems[0].startswith("reactor is STOPPED")
+    problems = checks(STATUS, jobs, now=NOW)
     assert any("master corpus is RED: 398" in p for p in problems)
     assert any("verify_affected packet-polylogue-b queued 25m" in p for p in problems)
     assert any("harvest packet-polylogue-a running 45m" in p for p in problems)
@@ -98,28 +97,17 @@ def test_checks_name_every_stuck_thing_and_nothing_else() -> None:
         },
         [],
         now=NOW,
-        reactor_active=True,
-        last_dispatch=NOW.isoformat(),
     )
     assert quiet == []
 
 
 def test_overview_orders_lanes_by_urgency_and_hides_idle() -> None:
-    text = render_overview(
-        STATUS,
-        [],
-        now=NOW,
-        reactor_active=True,
-        last_dispatch=(NOW - timedelta(minutes=9)).isoformat(),
-    )
-    assert "reactor has not dispatched for 9m" in text
+    text = render_overview(STATUS, [], now=NOW)
     assert text.index("packet-polylogue-a") < text.index("packet-polylogue-b")
     assert "1 idle/done: packet-polylogue-c" in text
     assert "PR 7 ci-red 1 flags" in text
     ghost = _job("99999999", "harvest", "capacity", "packet-polylogue-old", 60 * 48)
-    text = render_overview(
-        STATUS, [ghost], now=NOW, reactor_active=True, last_dispatch=NOW.isoformat()
-    )
+    text = render_overview(STATUS, [ghost], now=NOW)
     assert "0 active, 1 ghosts older than a day" in text
 
 

@@ -11,11 +11,9 @@ from __future__ import annotations
 import json
 from collections import Counter
 from collections.abc import Iterable, Mapping
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-
-from .reactor import CampaignBoard
 
 # Waits longer than these are worth a look; the loop should have moved on.
 STALE_QUEUED_SECONDS = 20 * 60
@@ -26,7 +24,6 @@ STALE_RUNNING_SECONDS = {
     "verify_all": 120 * 60,
 }
 STALE_LANE_WAIT_SECONDS = 6 * 60 * 60
-REACTOR_TICK_STALE_SECONDS = 5 * 60
 GHOST_SECONDS = 24 * 60 * 60
 
 ACTIVE_PHASES = frozenset(
@@ -116,45 +113,14 @@ def _job_workspace(job: Mapping[str, Any]) -> str:
     return str(checkout.get("path") or "").rsplit("/", 1)[-1]
 
 
-def _reactor_last_dispatch(spool: Path) -> str | None:
-    """Timestamp of the newest reactor dispatch event, read from the tail of the spool."""
-    try:
-        size = spool.stat().st_size
-        with spool.open("rb") as handle:
-            handle.seek(max(0, size - 512_000))
-            tail = handle.read().decode("utf-8", "replace").splitlines()
-    except OSError:
-        return None
-    for line in reversed(tail):
-        if '"kind":"dispatch"' in line or '"kind": "dispatch"' in line:
-            try:
-                return str(json.loads(line).get("emitted_at") or "")
-            except json.JSONDecodeError:
-                continue
-    return None
-
-
 def checks(
     status: Mapping[str, Any],
     jobs: Iterable[Mapping[str, Any]],
     *,
     now: datetime,
-    reactor_active: bool,
-    last_dispatch: str | None,
 ) -> list[str]:
     """Unequivocal 'should be happening' checks; each line names one thing that is not."""
     problems: list[str] = []
-    if not reactor_active:
-        problems.append(
-            "reactor is STOPPED: nothing advances until `systemctl --user start sinnixd-reactor`"
-        )
-    elif (
-        last_dispatch is None
-        or _seconds_since(last_dispatch, now) > REACTOR_TICK_STALE_SECONDS
-    ):
-        problems.append(
-            f"reactor has not dispatched for {_age(last_dispatch, now)} (lanes may all be waiting; see below)"
-        )
     corpus = status.get("master_corpus") or {}
     if not corpus:
         problems.append("no complete corpus run on record")
@@ -197,22 +163,13 @@ def render_overview(
     jobs: list[dict[str, Any]],
     *,
     now: datetime | None = None,
-    reactor_active: bool,
-    last_dispatch: str | None,
 ) -> str:
     """One screen: health checks, lanes by next action, active jobs, corpus."""
     moment = now or datetime.now(UTC)
     lines: list[str] = []
-    problems = checks(
-        status,
-        jobs,
-        now=moment,
-        reactor_active=reactor_active,
-        last_dispatch=last_dispatch,
-    )
+    problems = checks(status, jobs, now=moment)
     lines.append(
-        f"== {status.get('project_id')} at {moment.astimezone().strftime('%Y-%m-%d %H:%M')} "
-        f"| reactor {'active' if reactor_active else 'STOPPED'}, last dispatch {_age(last_dispatch, moment)} ago"
+        f"== {status.get('project_id')} at {moment.astimezone().strftime('%Y-%m-%d %H:%M')}"
     )
     lines.append("== needs attention" if problems else "== nothing needs attention")
     lines.extend(f"  ! {item}" for item in problems)
@@ -293,13 +250,6 @@ def render_overview(
     ]
     if idle:
         lines.append(f"  ({len(idle)} idle/done: {', '.join(sorted(idle))[:200]})")
-    errors = status.get("errors") or []
-    if errors:
-        lines.append(f"== last errors ({len(errors)})")
-        for item in errors[-5:]:
-            lines.append(
-                f"  {str(item.get('at') or item.get('recorded_at') or '')[:16]} {str(item.get('message') or item)[:120]}"
-            )
     return "\n".join(lines)
 
 
@@ -397,7 +347,6 @@ def render_lane_log(
 
 
 MAX_LANES = 64
-ERROR_MAX_AGE = timedelta(hours=24)
 
 
 def _mapping(value: Any) -> Mapping[str, Any]:
@@ -428,17 +377,15 @@ def _label(record: Any) -> str | None:
 def build_campaign_status(
     project_id: str,
     records: Iterable[Any],
-    board: CampaignBoard,
     *,
     coordinator_label: str | None = None,
-    now: datetime | None = None,
     state_root: Path | None = None,
     project_root: Path | None = None,
 ) -> dict[str, Any]:
     """Compose a bounded digest without retaining coordinator state.
 
     The lane view is `lanes_next`: the facts of every managed workspace and
-    the action they imply, read fresh from the same module the reactor
+    the action they imply, read fresh from the same module `campaign run`
     dispatches from.
     """
     if coordinator_label is None:
@@ -452,12 +399,6 @@ def build_campaign_status(
         if len(labels) == 1:
             coordinator_label = next(iter(labels))
 
-    current = now or datetime.now(UTC)
-    errors = []
-    for item in board.errors:
-        at = _parse(item.get("at"))
-        if at is not None and current - at <= ERROR_MAX_AGE:
-            errors.append(dict(item))
     lanes_next: list[dict[str, Any]] = []
     master_corpus: dict[str, Any] | None = None
     if state_root is not None:
@@ -487,8 +428,6 @@ def build_campaign_status(
         "master_corpus": master_corpus,
         "lanes_next": lanes_next,
         "coordinator_label": coordinator_label,
-        "errors": errors[-8:],
-        "board_updated_at": board.updated_at,
     }
 
 

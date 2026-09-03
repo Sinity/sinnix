@@ -89,22 +89,11 @@ class Action:
         return {"kind": self.kind, "reason": self.reason}
 
 
-# An agent lane needs this long to reach its first commit; re-dispatching
-# sooner piles a second agent into the same worktree.
-AGENT_LAUNCH_COOLDOWN_SECONDS = 900.0
-AGENT_ACTIONS = frozenset({"retry", "integrate", "rebase", "review-fix"})
-
-
-def _seconds_since(stamp: str, now: datetime | None) -> float | None:
-    if not stamp:
-        return None
-    try:
-        moment = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    if moment.tzinfo is None:
-        moment = moment.replace(tzinfo=UTC)
-    return ((now or datetime.now(UTC)) - moment).total_seconds()
+# Actions that name work a dispatcher can start; every other action (wait,
+# idle, done, park, await-sweep) is a fact for the status view, not a step.
+DISPATCHABLE_ACTIONS = frozenset(
+    {"verify", "harvest", "publish", "integrate", "rebase", "review-fix", "retry"}
+)
 
 
 def _dormant(facts: LaneFacts, now: datetime | None) -> bool:
@@ -128,23 +117,9 @@ def advance(facts: LaneFacts, *, now: datetime | None = None) -> Action:
     """The next action for one lane, from its facts alone.
 
     Ordered by what must be true before anything else may happen; every
-    branch names its reason so the status view and the reactor say the same
-    thing. An agent launch within the cooldown blocks the next one whatever
-    its outcome: a launch that died in preflight must not be repeated until
-    the host has had time to change.
+    branch names its reason so the status view and the dispatcher say the
+    same thing.
     """
-    action = _advance(facts, now)
-    if action.kind in AGENT_ACTIONS:
-        since = _seconds_since(facts.agent_launched_at, now)
-        if since is not None and since < AGENT_LAUNCH_COOLDOWN_SECONDS:
-            return Action(
-                "wait",
-                f"agent launched {int(since)}s ago; {action.kind} after cooldown",
-            )
-    return action
-
-
-def _advance(facts: LaneFacts, now: datetime | None) -> Action:
     if facts.bead_closed:
         return Action("done", "bead closed")
     if _dormant(facts, now):
@@ -751,6 +726,7 @@ def lane_view(facts: LaneFacts) -> dict[str, Any]:
 
 __all__ = [
     "Action",
+    "DISPATCHABLE_ACTIONS",
     "LaneFacts",
     "Pull",
     "Receipt",

@@ -43,7 +43,6 @@
   sinnix.persistence.enable = true;
   sinnix.services = {
     sinnixd.enable = true;
-    campaign-reactor.enable = true;
     github-runner-polylogue.enable = true;
     agent-gateway = {
       enable = true;
