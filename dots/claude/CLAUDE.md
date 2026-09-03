@@ -170,11 +170,10 @@ reconstruct:
   merged and removes its worktree.
 - **Merge gate**: branch protection + the required verify check +
   `gh pr merge --auto --squash`, armed by `agentctl lane publish <worktree>`.
-  There are no receipts, authorizations, or integrators.
 - **Operating loop**: merge everything in progress, then ONE corpus run
   (`agentctl job start <project> verify_all`); never per-lane corpus runs.
 - A fresh session resumes from those verbs plus the project's memory index;
-  nothing campaign-critical may live only in a chat context.
+  nothing a lane depends on may live only in a chat context.
 
 ## Ambient control (browser, desktop, terminal)
 

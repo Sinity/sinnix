@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Native backend translation for the Sinnixd attested-agent contract.
+# The backend adapter `agentctl lane start` queues: one prompt file, one backend invocation.
 set -euo pipefail
 
 agent=""
@@ -15,8 +15,8 @@ usage() {
   cat <<'EOF'
 Usage: run_agent_prompt.sh --agent <backend> --workdir <path> --prompt-file <path> --last-file <path> --model <model> --reasoning-effort <effort> [--credential-profile subscription|api] [--resume-session-id <id>]
 
-This is Sinnixd's private backend adapter. AgentCTL owns job identity, logs,
-results, cancellation, timeouts, workspaces, and durable records.
+This is agentctl's private backend adapter. pueue owns the job's identity, log,
+result, cancellation and timeout; this script only builds the backend argv.
 EOF
 }
 

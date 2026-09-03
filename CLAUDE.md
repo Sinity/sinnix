@@ -1,9 +1,10 @@
 # Sinnix
 
 Sinnix is the declarative NixOS/user-environment configuration for the primary
-workstation and the home of the common local execution/workspace service,
-`sinnixd`. Keep configuration declarative, generated surfaces reproducible, and
-host behavior observable without encoding operational rituals in agent prose.
+workstation and the home of `agentctl`, the CLI that queues declared project
+operations and runs coding-agent lanes. Keep configuration declarative,
+generated surfaces reproducible, and host behavior observable without encoding
+operational rituals in agent prose.
 
 ## Public boundary
 
@@ -24,7 +25,7 @@ modules/
   services/             fixed system/user services
   lib/                  module factories and shared Nix helpers
 pkgs/
-  sinnixd/              common job/workspace/agent/service/task runtime
+  sinnixd/              agentctl: jobs over pueue, lanes over worktrunk, gh and bd
   sinnix-agent-gateway/ typed gateway transport, policy, and action catalog
 scripts/                small independently packaged utilities
 dots/                   managed user configuration and agent instructions
@@ -34,14 +35,15 @@ The ownership boundaries are:
 
 - Nix modules own fixed services, packages, files, secrets, users, mounts, and
   activation.
-- `sinnixd` owns transient jobs, queueing, resource admission, workspaces,
-  coding-agent sessions, on-demand local services/MCP leases, and task-backend
-  access.
+- `agentctl` owns the project descriptors, the prompt compiled from a bead,
+  the launch-input and result-artifact contract of a queued command, and one
+  operator screen. pueue owns the queue and every process; worktrunk owns
+  worktrees; GitHub owns PRs and merge; Beads owns tasks.
 - The gateway owns principal/capability policy and high-level machine/project
-  tools; it calls `sinnixd` for execution and does not implement another job
+  tools; it calls `agentctl` for execution and does not implement another job
   controller.
-- Project adapters own repository semantics such as setup, checks, result
-  parsing, fingerprints, and conflict keys.
+- Project descriptors (`.agentctl/project.toml`) own repository semantics:
+  environment, declared operations, result parsing, lane defaults.
 - Systemd remains live process/service authority. Do not duplicate its process
   tree, timeout, signal, or result state in shell supervisors.
 
@@ -70,17 +72,12 @@ Keep option ownership local:
 - fixed-service settings are written directly on the owning unit when they are
   semantically required.
 
-## `sinnixd` boundary
+## `agentctl` boundary
 
-The runtime exposes one Unix-socket API and `agentctl` CLI. It owns:
-
-- jobs and dependencies;
-- pool-concurrency admission (memory belongs to the slice hierarchy);
-- worktree/workspace lifecycle and checkpoints;
-- coding-agent backend/session binding;
-- on-demand local service leases;
-- task-backend adapters;
-- structured state for the hub/gateway.
+`agentctl` is an in-process CLI (`docs/sinnixd.md`). A job is a pueue task in
+the operation's pool; a lane is a worktrunk worktree with an agent in it and a
+PR that merges itself. Verbs: `project`, `job`, `lane`, `refill`, `view`,
+`events`, `schedule`.
 
 It does not own product-domain concurrency. For example, Sinex work-item byte,
 rate, and destructive-operation budgets remain inside Sinex.
@@ -94,41 +91,39 @@ Do not recreate any of the retired forms:
 - no gateway-local job manifests;
 - no job/instance controller scripts in skills;
 - no process ownership inferred from command lines;
-- no orphan MCP sweeper after service-lease cutover.
+- no orphan MCP sweeper.
 
 ## Resource policy
 
-Declared operations choose an admission pool (`interactive`, `normal`, `bulk`,
-`pytest`, `agent`) and provide scratch placement and exact conflict keys.
-Admission bounds concurrency per pool and blocks new non-interactive work under
-sustained host IO stall; memory is bounded by the slice hierarchy, not by
-per-job arithmetic. Sinnixd owns the transient systemd units. Fixed
-runtime surfaces use the resource classes and slice budgets declared in
+Declared operations choose a pueue group (`interactive`, `normal`, `bulk`,
+`pytest`, `agent`). The group bounds concurrency; `sinnixd-backpressure.timer`
+pauses groups under sustained host IO or memory stall; memory is bounded by
+the slice hierarchy, not by per-job arithmetic. Fixed runtime surfaces use the
+resource classes and slice budgets declared in
 `flake/data/runtime-defaults.nix`; do not restate those values here.
 
-Hard `MemoryMax` is reserved for explicit safety boundaries. Environment
-construction, scratch ownership, logging, timeout, cancellation, and process
-cleanup are common runtime policy, not project recipes.
+Hard `MemoryMax` is reserved for explicit safety boundaries (an agent lane's
+scope). Environment construction, scratch ownership, logging, timeout,
+cancellation, and process cleanup are common runtime policy, not project
+recipes.
 
-Nix build concurrency remains a Nix concern. The scheduler controls how many
-large Nix operations enter the machine; it does not wrap every `nix` command by
+Nix build concurrency remains a Nix concern. The `bulk` group controls how many
+large Nix operations enter the machine; nothing wraps `nix` commands by
 basename.
 
-## Fixed services and on-demand services
+## Fixed services and scheduled operations
 
 Fixed services remain ordinary NixOS/Home Manager units. Define direct resource
 settings only where the service itself requires them.
 
-Project MCP servers and optional developer services are registered as
-`sinnixd` service specs. They start on first lease, remain shared while leased,
-and stop after bounded idle time. Clients normally connect through the single
-Sinnix MCP frontend; do not duplicate project-server launch configuration in
-Claude, Codex, Gemini, VS Code, and the gateway.
+Project MCP servers are launched by the clients' generated MCP profiles
+(`flake/data/mcp-registry.nix`); do not duplicate project-server launch
+configuration per client.
 
-Timers should trigger semantic operations, not reproduce execution mechanics.
-For example, a timer may submit `sinex:cache-prebuild` keyed by the locked Sinex
-revision or `lynchpin:materialize-default`; the runtime owns deduplication,
-queueing, logs, limits, and completion.
+Timers trigger declared operations, not execution mechanics: a descriptor's
+`schedule` field becomes one transient timer running `agentctl job fire`, and a
+service module's timer submits `agentctl job start <project> <operation>`.
+pueue owns queueing, logs, limits, and completion.
 
 ## Configuration and generated surfaces
 
@@ -142,8 +137,8 @@ queueing, logs, limits, and completion.
   dotfile sweep. Avoid parallel hand-managed copies.
 - Port, project, service, MCP, and capture registries must reject duplicate
   identities during evaluation.
-- Runtime inventory contains fixed services/captures and current `sinnixd`
-  endpoint metadata, not copied resource-class inheritance.
+- Runtime inventory contains fixed services and captures, not copied
+  resource-class inheritance.
 
 ## Agent surfaces
 
@@ -153,9 +148,9 @@ The managed agent configuration should be small:
 - compact project skills plus common runtime/review/investigation skills;
 - Polylogue capture hooks;
 - one destructive-command guard;
-- the shared AgentCTL workspace and job lifecycle.
+- the shared `agentctl` job and lane lifecycle.
 
-Model/effort is a field of the agent launch request. The daemon records every
+Model/effort is a field of every lane launch. The event spool records every
 launch. Do not maintain shell-parsed dispatch ledgers or subagent stop ledgers.
 
 ## Development workflow
@@ -174,13 +169,12 @@ heavy operations use project operations:
 agentctl project operations sinnix
 agentctl job start sinnix check
 agentctl job start sinnix lint
-agentctl workspace create sinnix <name> --branch feature/<name>
-agentctl workspace land <workspace-id> --job <verified-job-id>
+wt switch --create <branch> --no-cd -y
 ```
 
-The Sinnix project adapter supplies the exact Nix environment and commands.
-Never hand-reconstruct a service environment or invoke `systemd-run` for a
-project check.
+The project descriptor supplies the exact Nix environment and commands. Never
+hand-reconstruct a service environment or invoke `systemd-run` for a project
+check.
 
 ## Verification
 
@@ -222,7 +216,7 @@ without explicit task authority and direct preservation checks.
 
 - external overview: `README.md`;
 - module/service architecture: owning module headers and `docs/`;
-- runtime API and project adapter schema: `docs/sinnixd.md`;
+- `agentctl` verbs and the project descriptor schema: `docs/sinnixd.md`;
 - gateway capability contract: `docs/agent-gateway.md` and its generated reference;
 - agent skills: `dots/_ai/skills/`.
 

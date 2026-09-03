@@ -40,9 +40,8 @@ process list. It can, because sinnix already names its own work:
 
 - **Project commands in flight** come from the project ledger. A row is
   "sinex is running `test`, in flight 3m 14s, developer-build".
-- **AgentCTL jobs** show the declared operation or attested agent, registered
-  checkout, lifecycle, and cancellation control from the canonical Sinnixd
-  record.
+- **AgentCTL jobs** show the declared operation or lane agent, checkout,
+  lifecycle, and cancellation control from `agentctl job list`.
 - **Slice budgets** show the resource policy carried by declared services and
   AgentCTL jobs.
 

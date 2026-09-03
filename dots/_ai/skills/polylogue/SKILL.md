@@ -49,6 +49,6 @@ merge/master boundaries. Per-PR CI runs the quick gate, so local verification
 is still required. Do not scrape `.cache/verify` as an inter-project
 contract; publish stable evidence through an explicit export surface.
 
-Product work uses feature branches and squash-merged PRs. Generic workspace,
-job, and task lifecycle belongs to AgentCTL and the shared runtime skills, not
+Product work uses feature branches and squash-merged PRs. Generic lane,
+job, and task lifecycle belongs to `agentctl` and the shared runtime skills, not
 the contributor-facing project contract.

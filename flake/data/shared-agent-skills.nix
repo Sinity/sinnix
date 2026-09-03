@@ -25,7 +25,6 @@
   "review-land"
   "skill-authoring"
   "task-backend"
-  "vocabulary"
   "writing-for-agents"
   "writing-style"
 ]

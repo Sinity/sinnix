@@ -12,7 +12,7 @@
 # scripts/sinnix-sinex-cache-push.
 #
 # The timer submits the operation through the operator's user manager;
-# Sinnixd runs the build and cache push under the declared project contract.
+# pueue runs the build and cache push under the declared project contract.
 {
   mkServiceModule,
   lib,

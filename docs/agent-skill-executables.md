@@ -1,12 +1,12 @@
 # Agent skill executable ownership
 
-This audit records every executable beneath `dots/_ai/skills`. AgentCTL is the only retained lifecycle owner. The allowed native runner is a private argv translator called by Sinnixd; no skill executable owns job state, cancellation, retries, manifests, or process cleanup.
+This audit records every executable beneath `dots/_ai/skills`. pueue, through `agentctl`, is the only job lifecycle owner. The allowed native runner is a private argv translator queued by `agentctl lane start`; no skill executable owns job state, cancellation, retries, manifests, or process cleanup.
 
 | Executable                                                   | Positive caller                               | Retained role                                              |
 | ------------------------------------------------------------ | --------------------------------------------- | ---------------------------------------------------------- |
 | `orchestrate/scripts/build_plan_batch_prompts.py`            | `orchestrate` skill                           | Writes operator-reviewed prompt files only.                |
 | `orchestrate/scripts/probe_agent_runtime.sh`                 | `orchestrate` skill                           | Direct vendor and quota availability probe.                |
-| `agent-runtime/scripts/run_agent_prompt.sh`                  | Sinnixd service contract                      | Private backend argv translator for an attested job.       |
+| `agent-runtime/scripts/run_agent_prompt.sh`                  | `agentctl lane start`                         | Private backend argv translator for a lane's agent job.    |
 | `chatgpt-conversations/scripts/sinnix-chatgpt-conversations` | `chatgpt-conversations` skill                 | Read-only conversation extraction from the shared browser. |
 | `desktop-control-plane/scripts/chrome-control.sh`            | Agent module and desktop-control-plane skill  | Visible browser UI helper.                                 |
 | `desktop-control-plane/scripts/hypr-control.sh`              | Agent module and desktop-control-plane skill  | Visible window-manager UI helper.                          |
