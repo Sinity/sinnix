@@ -268,16 +268,14 @@ def test_advance_dispatches_each_lanes_next_action(tmp_path, monkeypatch) -> Non
         (
             _lane_facts(
                 clean_receipt=True,
-                pull=Pull(number=7, head="h" * 40, verdict="conflict", findings=0),
+                pull=Pull(
+                    number=7,
+                    url="https://github.test/pull/7",
+                    mergeable=False,
+                    checks_status=None,
+                ),
             ),
             ("rebase", "packet-p-9"),
-        ),
-        (
-            _lane_facts(
-                clean_receipt=True,
-                pull=Pull(number=7, head="h" * 40, verdict="findings", findings=2),
-            ),
-            ("review-fix", "packet-p-9"),
         ),
         (
             _lane_facts(lane_phase="timed_out", receipt=None, lane_job="job-77"),
