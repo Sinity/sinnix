@@ -15,8 +15,8 @@ from typing import Any, Mapping, Sequence
 
 from . import pueue
 from .config import Config
-from .launch import job_view
 from .lanes import LaneRow, lane_rows
+from .launch import job_view
 from .packets import PacketError, SubprocessBdReader
 from .projects import ProjectAdapter
 from .pueue import PueueError, Task
@@ -47,9 +47,16 @@ class Snapshot:
                 for name, status in sorted(self.groups.items())
             },
             "jobs": [job_view(task) for task in self.tasks],
-            "lanes": [lane_dict(row, agents.get(row.bead or ""), self.now) for row in self.lanes],
+            "lanes": [
+                lane_dict(row, agents.get(row.bead or ""), self.now)
+                for row in self.lanes
+            ],
             "ready": [
-                {"id": bead.get("id"), "title": bead.get("title"), "type": bead.get("issue_type")}
+                {
+                    "id": bead.get("id"),
+                    "title": bead.get("title"),
+                    "type": bead.get("issue_type"),
+                }
                 for bead in self.ready
             ],
             "errors": list(self.errors),
@@ -99,7 +106,13 @@ def _checks(pull: Mapping[str, Any]) -> str:
         status = str(check.get("status") or "").upper()
         if verdict in {"SUCCESS", "NEUTRAL", "SKIPPED"}:
             outcomes.append("pass")
-        elif verdict in {"FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED"}:
+        elif verdict in {
+            "FAILURE",
+            "ERROR",
+            "CANCELLED",
+            "TIMED_OUT",
+            "ACTION_REQUIRED",
+        }:
             outcomes.append("fail")
         elif status and status != "COMPLETED":
             outcomes.append("pending")
@@ -195,11 +208,21 @@ def lane_dict(row: LaneRow, agent: Task | None, now: datetime) -> dict[str, Any]
 
 
 def _group_counts(tasks: Sequence[Task], group: str) -> dict[str, int]:
-    counts = Counter(task.status.lower() for task in tasks if task.group == group and not task.terminal)
-    return {"running": counts.get("running", 0), "queued": counts.get("queued", 0), "paused": counts.get("paused", 0)}
+    counts = Counter(
+        task.status.lower()
+        for task in tasks
+        if task.group == group and not task.terminal
+    )
+    return {
+        "running": counts.get("running", 0),
+        "queued": counts.get("queued", 0),
+        "paused": counts.get("paused", 0),
+    }
 
 
-def collect(config: Config, project: ProjectAdapter, *, now: datetime | None = None) -> Snapshot:
+def collect(
+    config: Config, project: ProjectAdapter, *, now: datetime | None = None
+) -> Snapshot:
     errors: list[str] = []
     prefix = f"{project.project_id}:"
     try:
@@ -253,14 +276,20 @@ def table(headers: Sequence[str], rows: Sequence[Sequence[Any]]) -> str:
 
 def render(snapshot: Snapshot) -> str:
     now = snapshot.now
-    lines = [f"== {snapshot.project_id} at {now.astimezone().strftime('%Y-%m-%d %H:%M')}"]
+    lines = [
+        f"== {snapshot.project_id} at {now.astimezone().strftime('%Y-%m-%d %H:%M')}"
+    ]
     lines.extend(f"  ! {error}" for error in snapshot.errors)
 
     group_text = []
     for group, status in sorted(snapshot.groups.items()):
         counts = _group_counts(snapshot.tasks, group)
-        detail = " ".join(f"{count} {state}" for state, count in counts.items() if count)
-        group_text.append(f"{group} {detail or 'idle'}{' PAUSED' if status == 'Paused' else ''}")
+        detail = " ".join(
+            f"{count} {state}" for state, count in counts.items() if count
+        )
+        group_text.append(
+            f"{group} {detail or 'idle'}{' PAUSED' if status == 'Paused' else ''}"
+        )
     lines.append("== queue: " + (" · ".join(group_text) or "pueue unavailable"))
 
     failed = [
@@ -270,10 +299,14 @@ def render(snapshot: Snapshot) -> str:
     ]
     failed.sort(key=lambda task: task.ended_at or "", reverse=True)
     agents = agents_by_bead(snapshot.tasks)
-    lane_facts = [(row, lane_stage(row, agents.get(row.bead or ""))) for row in snapshot.lanes]
+    lane_facts = [
+        (row, lane_stage(row, agents.get(row.bead or ""))) for row in snapshot.lanes
+    ]
     attention = [
-        (row, stage) for row, (stage, _next) in lane_facts
-        if stage in {"conflicting", "checks failing", "changes requested"} or stage.endswith(("failed", "timed-out", "refused", "cancelled"))
+        (row, stage)
+        for row, (stage, _next) in lane_facts
+        if stage in {"conflicting", "checks failing", "changes requested"}
+        or stage.endswith(("failed", "timed-out", "refused", "cancelled"))
     ]
     if failed or attention:
         lines.append("== needs attention")
@@ -307,13 +340,17 @@ def render(snapshot: Snapshot) -> str:
                     )
                     for task in active
                 ],
-            ).replace("\n", "\n  ").join(("  ", ""))
+            )
+            .replace("\n", "\n  ")
+            .join(("  ", ""))
         )
 
     lines.append(f"== lanes: {len(snapshot.lanes)}")
     if lane_facts:
         rows = []
-        for row, (stage, following) in sorted(lane_facts, key=lambda item: item[0].worktree.branch or ""):
+        for row, (stage, following) in sorted(
+            lane_facts, key=lambda item: item[0].worktree.branch or ""
+        ):
             agent = agents.get(row.bead or "")
             since = (agent.started_at or agent.enqueued_at) if agent else None
             pull = pr_summary(row.pr)
@@ -325,7 +362,9 @@ def render(snapshot: Snapshot) -> str:
             )
             rows.append(
                 (
-                    row.worktree.path.name if row.worktree.path else row.worktree.branch,
+                    row.worktree.path.name
+                    if row.worktree.path
+                    else row.worktree.branch,
                     row.bead or "",
                     stage + (" dirty" if row.worktree.dirty else ""),
                     f"{local_clock(since)} {age(since, now)}" if since else "-",

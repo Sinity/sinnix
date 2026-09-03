@@ -34,7 +34,9 @@ class AgentCtlClient:
 
     def list(self) -> dict[str, Any]:
         value = self._call(("job", "list"))
-        if not isinstance(value, list) or any(not isinstance(job, dict) for job in value):
+        if not isinstance(value, list) or any(
+            not isinstance(job, dict) for job in value
+        ):
             raise AgentCtlError("agentctl job list did not print a job array")
         # The reducer snapshot is bounded; the newest tasks are the ones a
         # dashboard reads.
@@ -49,7 +51,9 @@ class AgentCtlClient:
 
     def _job_response(self, arguments: Sequence[str]) -> dict[str, Any]:
         value = self._call(arguments)
-        if not isinstance(value, dict) or not isinstance(value.get("job_id"), (int, str)):
+        if not isinstance(value, dict) or not isinstance(
+            value.get("job_id"), (int, str)
+        ):
             raise AgentCtlError("agentctl job response has no job ID")
         return value
 

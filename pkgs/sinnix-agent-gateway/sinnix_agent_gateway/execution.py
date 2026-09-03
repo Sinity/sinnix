@@ -74,7 +74,9 @@ def _decode_cursor(cursor: str) -> tuple[str, str]:
     try:
         value = json.loads(base64.urlsafe_b64decode(cursor.encode()).decode())
     except (ValueError, json.JSONDecodeError) as error:
-        raise _Refusal(ErrorCode.STALE_CURSOR, "job list cursor is unreadable") from error
+        raise _Refusal(
+            ErrorCode.STALE_CURSOR, "job list cursor is unreadable"
+        ) from error
     if (
         not isinstance(value, list)
         or len(value) != 2
@@ -201,9 +203,7 @@ class LocalJobs:
             raise _Refusal(ErrorCode.INVALID_ARGUMENT, str(error)) from error
         workspace_id = arguments.get("workspace_id")
         workspace = (
-            None
-            if workspace_id is None
-            else self._worktree(project, workspace_id)
+            None if workspace_id is None else self._worktree(project, workspace_id)
         )
         job = launch.start_operation(
             self.config, project, operation, workspace=workspace

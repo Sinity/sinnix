@@ -103,12 +103,16 @@ class FakePueue:
         self.killed.append(task_id)
         task = self._tasks.get(task_id)
         if task is not None and not task.terminal:
-            self._tasks[task_id] = replace(task, status="Done", result="Killed", exit_code=None)
+            self._tasks[task_id] = replace(
+                task, status="Done", result="Killed", exit_code=None
+            )
 
     def restart(self, task_id: int) -> None:
         self.restarted.append(task_id)
         task = self._tasks[task_id]
-        self._tasks[task_id] = replace(task, status="Queued", result=None, exit_code=None)
+        self._tasks[task_id] = replace(
+            task, status="Queued", result=None, exit_code=None
+        )
 
     def remove(self, task_ids: Sequence[int]) -> None:
         for task_id in task_ids:
@@ -125,7 +129,9 @@ class FakePueue:
             raise PueueError(f"fixture task {task_id} never reached a terminal state")
         return task
 
-    def finish_when_waited(self, task_id: int, transition: Callable[["FakePueue"], None]) -> None:
+    def finish_when_waited(
+        self, task_id: int, transition: Callable[["FakePueue"], None]
+    ) -> None:
         self._on_wait[task_id] = transition
 
     def groups_status(self) -> dict[str, str]:
@@ -146,12 +152,22 @@ class FakePueue:
         self._set(task_id, status="Queued")
 
     def succeed(self, task_id: int, *, exit_code: int = 0) -> None:
-        self._set(task_id, status="Done", result="Success", exit_code=exit_code,
-                  ended_at="2026-09-03T08:10:00+00:00")
+        self._set(
+            task_id,
+            status="Done",
+            result="Success",
+            exit_code=exit_code,
+            ended_at="2026-09-03T08:10:00+00:00",
+        )
 
     def fail(self, task_id: int, *, exit_code: int) -> None:
-        self._set(task_id, status="Done", result="Failed", exit_code=exit_code,
-                  ended_at="2026-09-03T08:10:00+00:00")
+        self._set(
+            task_id,
+            status="Done",
+            result="Failed",
+            exit_code=exit_code,
+            ended_at="2026-09-03T08:10:00+00:00",
+        )
 
     def dependency_fail(self, task_id: int) -> None:
         self._set(task_id, status="Done", result="DependencyFailed")
@@ -176,8 +192,17 @@ class FakePueue:
 def fake_pueue(monkeypatch: pytest.MonkeyPatch) -> FakePueue:
     fake = FakePueue()
     for name in (
-        "add", "tasks", "task", "kill", "restart", "remove", "wait",
-        "groups_status", "pause", "resume", "log",
+        "add",
+        "tasks",
+        "task",
+        "kill",
+        "restart",
+        "remove",
+        "wait",
+        "groups_status",
+        "pause",
+        "resume",
+        "log",
     ):
         monkeypatch.setattr(pueue_module, name, getattr(fake, name))
     monkeypatch.setattr(pueue_module, "groups", lambda: dict(fake.groups))
@@ -282,7 +307,9 @@ def write_project(root: Path, *, worktrees: Path | None = None) -> Path:
     (root / ".agentctl" / "project.toml").write_text(
         DESCRIPTOR.format(worktrees=worktrees or root.parent / "worktrees")
     )
-    (root / "contract.md").write_text("# Worker contract\n\nCommit by path, push, never merge.\n")
+    (root / "contract.md").write_text(
+        "# Worker contract\n\nCommit by path, push, never merge.\n"
+    )
     (root / "atlas").mkdir(exist_ok=True)
     (root / "atlas" / "core.md").write_text("# core\n")
     return root

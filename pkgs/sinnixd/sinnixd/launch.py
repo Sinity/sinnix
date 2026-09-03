@@ -150,7 +150,8 @@ def fire(
         raise JobError(f"{project.project_id}.{operation.name} declares no schedule")
     label = label_for(project.project_id, operation.name)
     active = [
-        task for task in pueue.tasks().values()
+        task
+        for task in pueue.tasks().values()
         if task.label == label and not task.terminal
     ]
     if active:
@@ -260,7 +261,9 @@ def result(config: Config, task_id: int) -> dict[str, Any]:
         return {**view, "kind": "exit", "value": None}
     raw = path.read_bytes()
     if len(raw) > MAX_RESULT_BYTES:
-        raise JobError(f"result artifact for task {task_id} exceeds {MAX_RESULT_BYTES} bytes")
+        raise JobError(
+            f"result artifact for task {task_id} exceeds {MAX_RESULT_BYTES} bytes"
+        )
     text = raw.decode("utf-8", "replace")
     try:
         value: Any = json.loads(text)
