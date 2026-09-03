@@ -33,7 +33,9 @@ PUEUE_STATUS = {
 def test_snapshot_reads_groups_from_pueue_and_jobs_from_agentctl_as_json() -> None:
     """Red if `--json` is dropped (agentctl prints a table) or if the group
     counts stop coming from pueue's own task states."""
-    jobs = [{"job_id": number, "label": "p:op"} for number in range(MAX_SNAPSHOT_JOBS + 5)]
+    jobs = [
+        {"job_id": number, "label": "p:op"} for number in range(MAX_SNAPSHOT_JOBS + 5)
+    ]
     calls: list[list[str]] = []
 
     def runner(command, **_kwargs):
@@ -50,8 +52,20 @@ def test_snapshot_reads_groups_from_pueue_and_jobs_from_agentctl_as_json() -> No
         ["fixture-pueue", "status", "--json"],
     ]
     assert snapshot["groups"] == {
-        "agent": {"status": "Paused", "parallel": 4, "running": 1, "queued": 1, "paused": 1},
-        "pytest": {"status": "Running", "parallel": 1, "running": 0, "queued": 0, "paused": 0},
+        "agent": {
+            "status": "Paused",
+            "parallel": 4,
+            "running": 1,
+            "queued": 1,
+            "paused": 1,
+        },
+        "pytest": {
+            "status": "Running",
+            "parallel": 1,
+            "running": 0,
+            "queued": 0,
+            "paused": 0,
+        },
     }
     assert snapshot["truncated"] is True
     assert len(snapshot["jobs"]) == MAX_SNAPSHOT_JOBS
@@ -99,7 +113,9 @@ def test_projects_and_view_read_the_operator_screen_per_project() -> None:
         calls.append((command, kwargs["timeout"]))
         if command[-2:] == ["project", "list"]:
             return response({"projects": [{"id": "sinnix"}, {"id": "polylogue"}, {}]})
-        return response({"schema": "sinnix.agentctl.view.v2", "lanes": [], "errors": []})
+        return response(
+            {"schema": "sinnix.agentctl.view.v2", "lanes": [], "errors": []}
+        )
 
     client = AgentCtlClient("fixture-agentctl", runner=runner)
     assert client.projects() == ["sinnix", "polylogue"]

@@ -1,7 +1,8 @@
 """The gateway's job owner: agentctl's launch and lane routes, called in process.
 
-Every operation answers with a ResponseEnvelope; a refusal is an ErrorEnvelope
-whose code the gateway's own error classes cover, never an exception.
+A job is a pueue task. Every operation answers with a ResponseEnvelope; a
+refusal is an ErrorEnvelope whose code the gateway's own error classes cover,
+never an exception.
 """
 
 from __future__ import annotations
@@ -23,11 +24,13 @@ from sinnixd.config import Config, ConfigError, load_config, resolve_project
 from sinnixd.packets import PacketError
 from sinnixd.projects import ProjectConfigError
 from sinnixd.pueue import PueueError
+from sinnixd.worktrunk import WorktrunkError
 
 OWNER = "systemd-jobs"
 JOB_LIST_ORDERING = "created_at_desc_job_id_desc"
 DEFAULT_CHECKOUT = "default"
-AGENT_OPERATION = "agent"
+SHELL_OPERATION = "shell"
+SHELL_GROUP = "interactive"
 MAX_LOG_BYTES = 262_144
 
 
@@ -62,6 +65,15 @@ def _require_str(arguments: Mapping[str, Any], name: str) -> str:
     return value
 
 
+def _optional_str(arguments: Mapping[str, Any], name: str) -> str | None:
+    value = arguments.get(name)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value:
+        raise _Refusal(ErrorCode.INVALID_ARGUMENT, f"{name} must be a non-empty string")
+    return value
+
+
 def _sort_key(job: Mapping[str, Any]) -> tuple[str, str]:
     return (str(job.get("enqueued_at") or ""), str(job.get("job_id")))
 
@@ -91,12 +103,10 @@ def job_payload(job: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "job_id": str(job.get("job_id")),
         "label": job.get("label"),
+        "kind": job.get("kind"),
         "project_id": job.get("project"),
         "operation": job.get("operation"),
         "group": job.get("group"),
-        "principal": None,
-        "contract": {},
-        "artifacts": {},
         "checkout": {"path": job.get("path")},
         "state": {
             "phase": job.get("phase"),
@@ -138,6 +148,7 @@ class LocalJobs:
         except (
             launch.JobError,
             lanes.LaneError,
+            WorktrunkError,
             ConfigError,
             PacketError,
             ProjectConfigError,
@@ -277,34 +288,58 @@ class LocalJobs:
         }
 
     def _agent_start(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        """A lane: agentctl compiles the prompt, creates the worktree, queues the agent."""
         project = self._project(_require_str(arguments, "project_id"))
-        worktree = self._worktree(project, arguments.get("checkout_id"))
-        binding = arguments.get("bead_binding")
-        bead_ref = binding.get("bead_ref") if isinstance(binding, Mapping) else None
-        bead_id = (
-            str(bead_ref).rsplit("/", 1)[-1] if isinstance(bead_ref, str) else "adhoc"
-        )
-        extra: dict[str, Any] = {}
-        timeout_seconds = arguments.get("timeout_seconds")
-        if isinstance(timeout_seconds, int) and not isinstance(timeout_seconds, bool):
-            extra["timeout_seconds"] = timeout_seconds
-        job = lanes.queue_agent(
+        lane = lanes.lane_start(
             self.config,
             project,
-            operation=AGENT_OPERATION,
-            bead_id=bead_id,
-            worktree=worktree,
-            prompt=_require_str(arguments, "prompt"),
-            prompt_name=f"{bead_id}.prompt.md",
-            backend=_require_str(arguments, "backend"),
-            model=_require_str(arguments, "model"),
-            effort=_require_str(arguments, "effort"),
-            **extra,
+            _require_str(arguments, "bead_id"),
+            backend=_optional_str(arguments, "backend"),
+            model=_optional_str(arguments, "model"),
+            effort=_optional_str(arguments, "effort"),
         )
-        return job_payload(job)
+        return {
+            **job_payload(lane["job"]),
+            "lane": {
+                key: lane[key]
+                for key in (
+                    "bead",
+                    "beads",
+                    "branch",
+                    "worktree",
+                    "backend",
+                    "model",
+                    "effort",
+                )
+            },
+        }
 
     def _shell_start(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
-        raise _Refusal(
-            ErrorCode.POLICY_DENIED,
-            "the job owner runs declared operations and lane agents only",
+        """One argv queued in the interactive pool, inside the project's environment."""
+        project = self._project(_require_str(arguments, "project_id"))
+        worktree = self._worktree(project, arguments.get("checkout_id"))
+        argv = arguments.get("argv")
+        if (
+            not isinstance(argv, list)
+            or not argv
+            or any(not isinstance(item, str) or not item for item in argv)
+        ):
+            raise _Refusal(ErrorCode.INVALID_ARGUMENT, "argv must be a non-empty list")
+        cwd = (worktree / str(arguments.get("cwd") or ".")).resolve()
+        if worktree.resolve() not in (cwd, *cwd.parents):
+            raise _Refusal(ErrorCode.POLICY_DENIED, "cwd must stay inside the checkout")
+        if not cwd.is_dir():
+            raise _Refusal(ErrorCode.INVALID_ARGUMENT, f"cwd does not exist: {cwd}")
+        job = launch.enqueue(
+            self.config,
+            project=project,
+            operation=SHELL_OPERATION,
+            label=launch.label_for(project.project_id, SHELL_OPERATION),
+            group=SHELL_GROUP,
+            argv=project.environment.command_for(argv),
+            working_directory=cwd,
+            timeout_seconds=_require_int(arguments, "timeout_seconds"),
+            result_kind="exit",
+            environment=project.environment.values(),
         )
+        return job_payload(job)

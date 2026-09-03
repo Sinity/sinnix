@@ -111,25 +111,4 @@ class V2ManifestEnvelope(GatewayModel):
     error: dict[str, Any] | None = None
 
 
-class ProjectReadRequest(GatewayModel):
-    project_id: str = Field(min_length=1, max_length=128)
-    path: str = Field(min_length=1, max_length=4096)
-    start_line: int = Field(default=1, ge=1, le=10_000_000)
-    end_line: int | None = Field(default=None, ge=1, le=10_000_000)
-    max_bytes: int = Field(default=64_000, ge=1, le=262_144)
-
-
-class AgentLaunchRequest(GatewayModel):
-    project_id: str = Field(min_length=1, max_length=128)
-    checkout_id: str | None = Field(default=None, min_length=1, max_length=128)
-    prompt: str = Field(min_length=1, max_length=200_000)
-    backend: str = Field(pattern="^(claude|codex|gemini|grok|antigravity)$")
-    model: str = Field(min_length=1, max_length=256)
-    reasoning_effort: str = Field(min_length=1, max_length=32)
-    timeout_seconds: int = Field(default=3_600, ge=1, le=3_600)
-    credential_profile: str = Field(
-        default="subscription", pattern="^(subscription|api)$"
-    )
-
-
 JsonObject = dict[str, Any]

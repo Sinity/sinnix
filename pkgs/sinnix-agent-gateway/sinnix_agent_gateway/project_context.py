@@ -23,12 +23,7 @@ class ProjectContextService:
     def context(self, project_id: str) -> dict[str, Any]:
         self.principal.require(Capability.PROJECT_READ)
         summary = self.projects.summary(project_id)
-        if self.principal.name == "agent-control":
-            tasks: dict[str, Any] = {
-                "availability": "unavailable",
-                "reason": "assigned Beads context requires a bound job reference",
-            }
-        elif Capability.TASK_READ not in self.principal.capabilities:
+        if Capability.TASK_READ not in self.principal.capabilities:
             tasks: dict[str, Any] = {
                 "availability": "unavailable",
                 "reason": "task.read is not granted to this principal",

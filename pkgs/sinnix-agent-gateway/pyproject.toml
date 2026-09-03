@@ -16,5 +16,3 @@ sinnix-agent-gateway-generate = "sinnix_agent_gateway.gateway_codegen:main"
 [tool.setuptools.packages.find]
 include = ["sinnix_agent_gateway*"]
 
-[tool.setuptools.package-data]
-sinnix_agent_gateway = ["legacy_manifest_v1.json"]

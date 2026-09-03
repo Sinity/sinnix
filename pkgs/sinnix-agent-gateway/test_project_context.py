@@ -153,21 +153,3 @@ def test_project_context_reports_unavailable_task_owner_without_hiding_git(
         "reason": "no beads project found",
         "next_route": "query:beads.query",
     }
-
-
-def test_project_context_does_not_expose_ready_tasks_to_agent_control(
-    tmp_path: Path,
-) -> None:
-    projects = project_service(tmp_path, "agent-control")
-    beads = FakeBeads({"unexpected": True})
-    context = ProjectContextService(
-        Principal.for_name("agent-control"), projects, beads
-    )  # type: ignore[arg-type]
-
-    result = context.context("fixture")
-
-    assert result["tasks"] == {
-        "availability": "unavailable",
-        "reason": "assigned Beads context requires a bound job reference",
-    }
-    assert beads.calls == []

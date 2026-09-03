@@ -169,7 +169,7 @@ The CLI invokes the matching MCP verb through the same server runtime and princi
 - Project orientation: call `{context}` with a canonical `sinnix://projects/<project>` ref and `intent=project`, then follow the returned checkout and task-authority refs.
 - Beads triage: call `{triage}` with bounded project IDs, a view or native filters, and only the includes needed for the decision.
 - Bulk Beads changes: call `{changeset}` with `operation=preview`, inspect every planned step and source revision, then replay the same request with the returned preview digest and `operation=apply`.
-- Work or review a bead: use `{agent}` only with the canonical bead ref and explicit checkout. Use `projects.context` with `intent=bead.work` or `bead.review` to inspect assignment and evidence.
+- Start a lane for a bead: `{agent}` with the canonical bead ref; agentctl compiles the prompt, creates the worktree and queues the agent. Review the job afterwards with `projects.context` and `intent=job.review`.
 - Incident orientation: use `machine.query` for one bounded owner-selected section and `audit.events` for recent gateway receipts. Do not reconstruct a whole-machine view locally.
 - Browser or desktop manipulation: discover or use the canonical gateway-owned browser page or desktop ref, then invoke `{browser}` or `{desktop}` as operator. Existing operator tabs are never accepted as implicit targets.
 - Machine action: discover a canonical machine target, query `machine.query` with `operation=actions` for the current owner revision, then supply it with the reason, idempotency key, and preconditions to `machine.operate`.

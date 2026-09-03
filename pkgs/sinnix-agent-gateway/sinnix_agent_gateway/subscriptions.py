@@ -35,12 +35,11 @@ EVENTS_RESOURCE_URI = "sinnix://gateway/v2/events"
 
 
 class EventSpoolPublisher:
-    """Turn newly durable daemon events into MCP resource-update pushes.
+    """Turn new rows of agentctl's event spool into MCP resource-update pushes.
 
-    The spool is the daemon's durable handoff.  This publisher only keeps a
-    best-effort cursor over it: a missed notification is recovered when the
-    coordinator reads the resource, and a partial final line is retained for
-    the next pass.
+    This publisher only keeps a best-effort cursor over the spool: a missed
+    notification is recovered when the client reads the resource, and a
+    partial final line is retained for the next pass.
     """
 
     def __init__(self, spool: Path, bus: Any) -> None:

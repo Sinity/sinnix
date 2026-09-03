@@ -59,7 +59,7 @@ def _templates_overlap(left: RefTemplate, right: RefTemplate) -> bool:
 class CatalogRegistry:
     """One declaration registry for V2 resource and action contracts."""
 
-    revision = "v2-g2.10-context-events"
+    revision = "v2-g3.0-pueue-jobs"
 
     def __init__(
         self,
@@ -385,7 +385,6 @@ EMPTY_OBJECT_SCHEMA: dict[str, Any] = _with_request_controls(
 )
 V2_ENVELOPE_SCHEMA: dict[str, Any] = V2ToolEnvelope.model_json_schema()
 MACHINE_OPERATIONS = (
-    "focus",
     "interrupt",
     "freeze",
     "thaw",
@@ -551,15 +550,7 @@ AGENT_FOR_BEAD_SCHEMA: dict[str, Any] = _with_request_controls(
     {
         "type": "object",
         "additionalProperties": False,
-        "required": [
-            "ref",
-            "checkout_id",
-            "backend",
-            "model",
-            "reasoning_effort",
-            "idempotency_key",
-            "request_id",
-        ],
+        "required": ["ref", "idempotency_key"],
         "properties": {
             "ref": {
                 "type": "string",
@@ -567,28 +558,9 @@ AGENT_FOR_BEAD_SCHEMA: dict[str, Any] = _with_request_controls(
                 "maxLength": 2_048,
                 "pattern": "^sinnix://projects/[^/]+/beads/[^/]+$",
             },
-            "checkout_id": {"type": "string", "minLength": 1, "maxLength": 128},
-            "claim_mode": {"enum": ["none", "claim"], "default": "none"},
-            "assignment_ref": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 2_048,
-                "pattern": "^sinnix://jobs/[^/]+$",
-            },
-            "instructions": {"type": "string", "maxLength": 32_000},
             "backend": {"enum": ["claude", "codex", "gemini", "grok", "antigravity"]},
             "model": {"type": "string", "minLength": 1, "maxLength": 256},
             "reasoning_effort": {"type": "string", "minLength": 1, "maxLength": 32},
-            "timeout_seconds": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 3_600,
-                "default": 3_600,
-            },
-            "credential_profile": {
-                "enum": ["subscription", "api"],
-                "default": "subscription",
-            },
         },
     }
 )
@@ -670,25 +642,17 @@ PROJECT_CONTEXT_SCHEMA: dict[str, Any] = _with_request_controls(
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 2_048,
-                "pattern": "^sinnix://(?:projects/[^/]+(?:/beads/[^/]+)?|jobs/[^/]+)$",
+                "pattern": "^sinnix://(?:projects/[^/]+(?:/checkouts/[^/]+)?|jobs/[^/]+)$",
             },
             "intent": {
                 "enum": [
                     "project",
                     "project.orientation",
                     "project.triage",
-                    "bead.work",
-                    "bead.review",
                     "job.review",
                     "incident",
                 ],
                 "default": "project.orientation",
-            },
-            "job_ref": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 2_048,
-                "pattern": "^sinnix://jobs/[^/]+$",
             },
         },
     }
@@ -795,7 +759,6 @@ BEADS_CHANGE_SCHEMA = _owner_change_schema(
         "unrelate",
         "update",
         "reparent",
-        "close_with_evidence",
     ),
     precondition_properties={
         "expected_task_revision": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
@@ -1348,7 +1311,7 @@ def _owner_query_actions() -> tuple[ActionSpec, ...]:
             resource_kinds=("job",),
             receipt_policy="audit",
             examples=({"input": {"parameters": {"limit": 100}}},),
-            documentation="List bounded daemon-owned job summaries with canonical job references.",
+            documentation="List bounded queued-job summaries with canonical job references.",
         ),
     )
 
@@ -1377,7 +1340,6 @@ def build_registry() -> CatalogRegistry:
             "beads",
             ("summary", "history", "graph"),
             True,
-            principals=frozenset({"observer", "operator"}),
         ),
         ResourceSpec(
             "task_authority",
@@ -1604,7 +1566,7 @@ def build_registry() -> CatalogRegistry:
             owner="beads",
             route="beads.query",
             effect=EffectMode.READ,
-            principals=frozenset({"observer", "operator"}),
+            principals=frozenset({"observer", "agent-control", "operator"}),
             input_schema=BEADS_QUERY_SCHEMA,
             output_schema=V2_ENVELOPE_SCHEMA,
             resource_kinds=("project", "bead", "task_authority"),
@@ -1637,9 +1599,9 @@ def build_registry() -> CatalogRegistry:
             principals=frozenset({"observer", "agent-control", "operator"}),
             input_schema=PROJECT_CONTEXT_SCHEMA,
             output_schema=V2_ENVELOPE_SCHEMA,
-            resource_kinds=("project", "checkout", "bead", "task_authority"),
+            resource_kinds=("project", "checkout", "job"),
             examples=({"input": {"ref": "sinnix://projects/sinnix"}},),
-            documentation="Compose Git and bounded task orientation for one canonical project.",
+            documentation="Compose orientation, triage or incident context for one canonical project, or review one queued job.",
         ),
         ActionSpec(
             name="audit.events",
@@ -1675,7 +1637,7 @@ def build_registry() -> CatalogRegistry:
                     }
                 },
             ),
-            documentation="Wait for a bounded interval on one daemon-owned job reference.",
+            documentation="Wait for a bounded interval on one queued job reference.",
         ),
         ActionSpec(
             name="projects.change",
@@ -1904,7 +1866,7 @@ def build_registry() -> CatalogRegistry:
                     }
                 },
             ),
-            documentation="Start one project-declared operation through the daemon-owned generic job route.",
+            documentation="Queue one project-declared operation in its declared pool, on the main checkout or a worktree.",
         ),
         ActionSpec(
             name="agent.for_bead",
@@ -1916,23 +1878,21 @@ def build_registry() -> CatalogRegistry:
             principals=frozenset({"agent-control", "operator"}),
             input_schema=AGENT_FOR_BEAD_SCHEMA,
             output_schema=V2_ENVELOPE_SCHEMA,
-            resource_kinds=("project", "checkout", "bead", "job"),
+            resource_kinds=("project", "bead", "job"),
             supports_idempotency=True,
             receipt_policy="audit",
             examples=(
                 {
                     "input": {
                         "ref": "sinnix://projects/sinnix/beads/sinnix-example",
-                        "checkout_id": "default",
                         "backend": "codex",
                         "model": "gpt-5.6-terra",
                         "reasoning_effort": "high",
-                        "request_id": "2e46daf5-e9b1-4c6e-b99d-bcd46631730b",
                         "idempotency_key": "bead-agent-example",
                     }
                 },
             ),
-            documentation="Claim an optional canonical Beads task, launch one attested coding agent in an explicit checkout, and retain task provenance in the daemon job manifest.",
+            documentation="Start a lane for one canonical Beads task: agentctl compiles the prompt, creates the worktree and queues the agent; the bead's model policy applies unless backend, model and effort are given.",
         ),
         ActionSpec(
             name="jobs.cancel",
@@ -1957,7 +1917,7 @@ def build_registry() -> CatalogRegistry:
                     }
                 },
             ),
-            documentation="Request cancellation for one phase-checked daemon job and return the owner truth without asserting terminal completion.",
+            documentation="Kill one phase-checked queued job and return the queue's answer without asserting terminal completion.",
         ),
         ActionSpec(
             name="desktop.operate",
@@ -2059,7 +2019,7 @@ def build_registry() -> CatalogRegistry:
                     }
                 },
             ),
-            documentation="Start one typed operator-shell job and return its daemon-owned handle.",
+            documentation="Queue one argv in the interactive pool inside a checkout's declared environment and return its job handle.",
         ),
     )
 
@@ -2071,8 +2031,6 @@ def build_registry() -> CatalogRegistry:
             failures.update({"conflict", "idempotency_conflict"})
         if action.name in {"mcp.change", "mcp.query", "projects.change"}:
             failures.add("unsupported_capability")
-        if action.name == "agent.for_bead":
-            failures.add("partial_completion")
         schema = dict(action.input_schema)
         properties = dict(schema.get("properties", {}))
         if not action.supports_precondition:

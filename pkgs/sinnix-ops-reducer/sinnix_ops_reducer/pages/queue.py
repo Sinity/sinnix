@@ -33,7 +33,9 @@ def job_plane(state: dict[str, Any]) -> dict[str, Any]:
 
 def jobs_of(state: dict[str, Any]) -> list[dict[str, Any]]:
     jobs = job_plane(state).get("jobs")
-    return [job for job in jobs if isinstance(job, dict)] if isinstance(jobs, list) else []
+    return (
+        [job for job in jobs if isinstance(job, dict)] if isinstance(jobs, list) else []
+    )
 
 
 def groups_of(state: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -108,7 +110,9 @@ def jobs_card(state: dict[str, Any], now: dt.datetime) -> str:
         reverse=True,
     )
     if not jobs:
-        return card("Jobs", empty("no pueue tasks"), "declared operations and lane agents")
+        return card(
+            "Jobs", empty("no pueue tasks"), "declared operations and lane agents"
+        )
     blocks = "".join(job_row(job, now) for job in jobs[:12])
     truncated = job_plane(state).get("truncated") is True
     return (
@@ -136,7 +140,12 @@ def lane_row(lane: dict[str, Any]) -> str:
     if lane.get("next"):
         meta.append(esc(str(lane["next"])))
     tone = "warn" if lane.get("dirty") else ""
-    return row(f"<strong>{esc(str(lane.get('lane') or lane.get('branch') or '?'))}</strong>", meta, "", tone)
+    return row(
+        f"<strong>{esc(str(lane.get('lane') or lane.get('branch') or '?'))}</strong>",
+        meta,
+        "",
+        tone,
+    )
 
 
 def lanes_card(views: list[dict[str, Any]], errors: list[str]) -> str:

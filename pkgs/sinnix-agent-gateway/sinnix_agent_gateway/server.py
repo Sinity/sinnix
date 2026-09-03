@@ -23,7 +23,6 @@ from .bindings import TargetToolBinding, TargetToolBindings
 from .config import GatewayConfig
 from .contracts import ActionSpec, EffectMode, OwnerRoute, VerbFamily
 from .mcp_broker import McpEnvironmentError
-from .parity import legacy_parity_contract
 from .prompts import PROMPT_SPECS, PromptGenerator
 from .registry import REGISTRY, CatalogSearch, RegistryError
 from .results import ProtocolError, derive_cursor_key
@@ -434,7 +433,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
     mcp = MCPServer(
         name="sinnix-agent-gateway",
         title="Sinnix Agent Gateway",
-        description="Principal-scoped project, machine, and attested-agent control plane.",
+        description="Principal-scoped project, machine, and job control plane.",
         instructions=(
             f"Active principal: {principal_name}. Start with catalog, then use canonical refs. "
             "All outputs are bounded; unavailable evidence is reported explicitly."
@@ -465,13 +464,6 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
         """Return generated V2 resource and action documentation rows."""
         return _bounded_resource_json(
             runtime, REGISTRY.documentation_rows(principal_name), "documentation"
-        )
-
-    @mcp.resource("sinnix://gateway/v2/legacy-parity")
-    def gateway_v2_legacy_parity() -> str:
-        """Return the executable legacy-to-V2 parity contract."""
-        return _bounded_resource_json(
-            runtime, legacy_parity_contract(REGISTRY), "legacy-parity"
         )
 
     @mcp.resource(EVENTS_RESOURCE_URI)
@@ -806,7 +798,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             deadline_at: float | None = None,
             preconditions: dict[str, Any] | None = None,
         ) -> V2ManifestEnvelope:
-            """Resolve a canonical resource, including bounded daemon job status or output."""
+            """Resolve a canonical resource, including bounded job status or output."""
             action = target_bindings.action_for_tool("get", principal=principal_name)
             response = runtime.execute_v2(
                 action,
@@ -898,7 +890,6 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
         async def context(
             ref: str,
             intent: str = "project.orientation",
-            job_ref: str | None = None,
             request_id: str | None = None,
             actor: str | None = None,
             reason: str | None = None,
@@ -906,13 +897,13 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             deadline_at: float | None = None,
             preconditions: dict[str, Any] | None = None,
         ) -> V2ManifestEnvelope:
-            """Compose project, assigned Beads-task, or evidence-review context."""
+            """Compose project orientation, triage, job review, or incident context."""
             action = target_bindings.action_for_tool(
                 "context", principal=principal_name
             )
 
             async def callback() -> dict[str, Any]:
-                return runtime.v2_context(ref, intent, job_ref)
+                return runtime.v2_context(ref, intent)
 
             response = await runtime.execute_v2_async(
                 action,
@@ -920,7 +911,6 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                 {
                     "ref": ref,
                     "intent": intent,
-                    "job_ref": job_ref,
                     "request_id": request_id,
                     "actor": actor,
                     "reason": reason,
@@ -985,7 +975,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             preconditions: dict[str, Any] | None = None,
             ctx: Context | None = None,
         ) -> V2ManifestEnvelope:
-            """Wait for a bounded interval on one daemon-owned job reference."""
+            """Wait for a bounded interval on one queued job reference."""
             action = target_bindings.action_for_tool("wait", principal=principal_name)
             response = await runtime.execute_v2_async(
                 action,
@@ -1023,14 +1013,9 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             project_id: str | None = None,
             checkout_id: str | None = None,
             argv: list[str] | None = None,
-            prompt: str | None = None,
             backend: str | None = None,
             model: str | None = None,
             reasoning_effort: str | None = None,
-            credential_profile: str = "subscription",
-            claim_mode: str = "none",
-            assignment_ref: str | None = None,
-            instructions: str | None = None,
             cwd: str = ".",
             timeout_seconds: int | None = None,
             operation: str | None = None,
@@ -1042,21 +1027,16 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             deadline_at: float | None = None,
             preconditions: dict[str, Any] | None = None,
         ) -> V2ManifestEnvelope:
-            """Start one catalog-declared shell or attested-agent job by action name."""
+            """Queue one catalog-declared shell command, declared operation, or lane agent by action name."""
             request = {
                 "action_name": action_name,
                 "ref": ref,
                 "project_id": project_id,
                 "checkout_id": checkout_id,
                 "argv": argv,
-                "prompt": prompt,
                 "backend": backend,
                 "model": model,
                 "reasoning_effort": reasoning_effort,
-                "credential_profile": credential_profile,
-                "claim_mode": claim_mode,
-                "assignment_ref": assignment_ref,
-                "instructions": instructions,
                 "cwd": cwd,
                 "timeout_seconds": timeout_seconds,
                 "operation": operation,
@@ -1100,18 +1080,9 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                     def callback():
                         return runtime.v2_run_for_bead(
                             reference=ref,
-                            checkout_id=checkout_id,
-                            claim_mode=claim_mode,
-                            assignment_ref=assignment_ref,
-                            instructions=instructions,
                             backend=backend,
                             model=model,
                             reasoning_effort=reasoning_effort,
-                            timeout_seconds=3_600
-                            if timeout_seconds is None
-                            else timeout_seconds,
-                            credential_profile=credential_profile,
-                            request_id=request_id,
                         )
                 elif action.route is OwnerRoute.JOB_START:
                     if (
@@ -1120,14 +1091,12 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                             for value in (
                                 checkout_id,
                                 argv,
-                                prompt,
                                 backend,
                                 model,
                                 reasoning_effort,
                                 timeout_seconds,
                             )
                         )
-                        or credential_profile != "subscription"
                         or cwd != "."
                     ):
 

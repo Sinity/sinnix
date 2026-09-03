@@ -140,40 +140,35 @@ def test_declared_contexts_are_bounded_and_isolate_unavailable_components() -> N
 
 def test_component_budget_marks_only_the_oversized_component_unavailable() -> None:
     result = ContextComposer().compose(
-        "bead.work",
-        "sinnix://projects/fixture/beads/fixture-1",
+        "project.triage",
+        "sinnix://projects/fixture",
         [
-            ComponentSpec(
-                "bead",
-                128,
-                lambda: ComponentResult.available("bead", {"body": "x" * 1_000}),
-            ),
             ComponentSpec(
                 "project",
                 12_000,
                 lambda: ComponentResult.available("project", {"ok": True}),
             ),
             ComponentSpec(
-                "checkout",
-                12_000,
-                lambda: ComponentResult.available("checkout", {"ok": True}),
+                "open_beads",
+                128,
+                lambda: ComponentResult.available("open_beads", {"body": "x" * 1_000}),
             ),
             ComponentSpec(
-                "assignment",
+                "stale_claims",
                 14_000,
-                lambda: ComponentResult.available("assignment", {"ok": True}),
+                lambda: ComponentResult.available("stale_claims", {"ok": True}),
             ),
             ComponentSpec(
-                "blockers",
+                "changes",
                 8_000,
-                lambda: ComponentResult.available("blockers", {"ok": True}),
+                lambda: ComponentResult.available("changes", {"ok": True}),
             ),
         ],
     )
     rows = {row["name"]: row for row in result["components"]}
-    assert rows["bead"]["status"] == "unavailable"
+    assert rows["open_beads"]["status"] == "unavailable"
     assert rows["project"]["status"] == "available"
-    assert "data" not in rows["bead"]
+    assert "data" not in rows["open_beads"]
 
 
 def test_revision_cache_never_reuses_a_different_owner_revision() -> None:

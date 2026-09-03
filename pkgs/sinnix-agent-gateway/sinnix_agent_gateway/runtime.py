@@ -7,7 +7,7 @@ import json
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Mapping, TypeVar, cast
+from typing import Any, Awaitable, Callable, Mapping
 from uuid import uuid4
 
 import anyio
@@ -36,7 +36,6 @@ from .desktop import DesktopService
 from .events import EventCursorError, NormalizedEventService
 from .execution import LocalJobs
 from .files import HostFileService
-from .legacy_manifest import LEGACY_MANIFEST
 from .machine_actions import MachineActionService
 from .mcp_broker import McpBrokerService
 from .memory import MemoryService
@@ -47,13 +46,11 @@ from .redaction import public_error
 from .registry import MACHINE_OPERATIONS, REGISTRY, CatalogSearch, RegistryError
 from .results import ProtocolError, RequestContext, ResultError, ResultService
 from .route_preflight import GatewayRoutePreflight
-from .schemas import AgentLaunchRequest, V2ToolEnvelope
+from .schemas import V2ToolEnvelope
 from .sessions import SessionLogService
 from .terminals import TerminalService
 from .timeline import TimelineService
 from .waits import BoundedWaitService, WaitEvidence, WaitRequest, WaitTarget
-
-T = TypeVar("T")
 
 DAEMON_ERROR_CLASSES = {
     ErrorCode.INVALID_ARGUMENT: "invalid_request",
@@ -74,8 +71,6 @@ AUDITED_READ_TOOL = ToolAnnotations(
     openWorldHint=False,
 )
 
-LEGACY_OPERATOR_MANIFEST_BYTES = LEGACY_MANIFEST["canonical_bytes"]
-LEGACY_OPERATOR_TOOL_COUNT = len(LEGACY_MANIFEST["tools"])
 TOKEN_ESTIMATE_BYTES_PER_TOKEN = 4
 IDEMPOTENT_RUN_TOOL = ToolAnnotations(
     readOnlyHint=False,
@@ -142,11 +137,6 @@ def manifest_measurement(manifest: Mapping[str, Any]) -> dict[str, Any]:
         "schema": "sinnix.gateway-schema-measurement.v1",
         "canonical_bytes": canonical_bytes,
         "tool_count": len(manifest.get("tools", [])),
-        "baseline": {
-            "source_commit": LEGACY_MANIFEST["source_commit"],
-            "canonical_bytes": LEGACY_OPERATOR_MANIFEST_BYTES,
-            "tool_count": LEGACY_OPERATOR_TOOL_COUNT,
-        },
         "token_lane": {
             "status": "estimated",
             "method": "canonical_bytes_divided_by_4",
@@ -185,7 +175,7 @@ class Runtime:
     artifacts: ArtifactService
     audit: AuditService
     results: ResultService
-    sinnixd: LocalJobs
+    jobs: LocalJobs
     observe: ObserveService
     machine_actions: MachineActionService
     desktop: DesktopService
@@ -221,7 +211,7 @@ class Runtime:
             artifacts=artifacts,
             audit=AuditService(config, principal),
             results=ResultService(config, principal, artifacts),
-            sinnixd=LocalJobs(),
+            jobs=LocalJobs(),
             observe=ObserveService(config, principal, artifacts),
             machine_actions=MachineActionService(config, principal),
             desktop=DesktopService(config, principal, artifacts),
@@ -437,7 +427,7 @@ class Runtime:
             str(resource.ref_template.format(values)),
         )
 
-    def _sinnixd_job(
+    def _job(
         self,
         operation: str,
         arguments: Mapping[str, Any],
@@ -452,10 +442,10 @@ class Runtime:
             principal=principal or self.principal.name,
             arguments=dict(arguments),
         )
-        response = self.sinnixd.dispatch(request)
+        response = self.jobs.dispatch(request)
         if response.owner != "systemd-jobs":
             raise ProtocolError(
-                "owner_failed", "sinnixd response violates the job-owner contract"
+                "owner_failed", "job owner response violates its contract"
             )
         if response.error is not None:
             details = response.error.details.inline
@@ -466,7 +456,7 @@ class Runtime:
             )
         if response.payload is None or not isinstance(response.payload.inline, Mapping):
             raise ProtocolError(
-                "owner_failed", "sinnixd job response must contain an inline object"
+                "owner_failed", "job owner response must contain an inline object"
             )
         return dict(response.payload.inline)
 
@@ -510,9 +500,7 @@ class Runtime:
             **result,
         }
 
-    def compose_context(
-        self, reference: str, intent: str, job_ref: str | None = None
-    ) -> dict[str, Any]:
+    def compose_context(self, reference: str, intent: str) -> dict[str, Any]:
         if intent == "project":
             intent = "project.orientation"
         if intent not in CONTEXT_INTENTS:
@@ -521,35 +509,19 @@ class Runtime:
             resource, values = REGISTRY.resolve(reference)
         except RegistryError as exc:
             raise ProtocolError("not_found", "context target is not canonical") from exc
-        if intent in {"project.orientation", "project.triage", "incident"}:
-            if resource.kind not in {"project", "checkout"}:
-                raise ProtocolError(
-                    "invalid_request", f"{intent} requires a project reference"
-                )
-            project_id = values["project_id"]
-            target_ref = str(resource.ref_template.format(values))
-        elif intent in {"bead.work", "bead.review"}:
-            if resource.kind != "bead":
-                raise ProtocolError(
-                    "invalid_request", f"{intent} requires a Beads reference"
-                )
-            project_id = values["project_id"]
-            target_ref = str(resource.ref_template.format(values))
-        else:
+        if intent == "job.review":
             if resource.kind != "job":
                 raise ProtocolError(
                     "invalid_request", "job.review requires a job reference"
                 )
             project_id = None
-            target_ref = str(resource.ref_template.format(values))
-        if self.principal.name == "agent-control" and intent in {
-            "project.orientation",
-            "project.triage",
-        }:
-            raise PolicyError(
-                "agent-control project context is limited to an assigned Beads job"
-            )
-
+        else:
+            if resource.kind not in {"project", "checkout"}:
+                raise ProtocolError(
+                    "invalid_request", f"{intent} requires a project reference"
+                )
+            project_id = values["project_id"]
+        target_ref = str(resource.ref_template.format(values))
         declared = dict(CONTEXT_INTENTS[intent].components)
 
         def component(
@@ -592,41 +564,6 @@ class Runtime:
             if project_id
             else None
         )
-        assigned_bead: Mapping[str, Any] | None = None
-        review_job_observation: dict[str, Any] | None = None
-        if intent == "bead.review" and self.principal.name != "agent-control":
-            if not isinstance(job_ref, str):
-                raise ProtocolError("invalid_request", "bead.review requires job_ref")
-            _job_resource, job_values, _canonical_job_ref = self._resource_reference(
-                job_ref, {"job"}, "bead.review requires a canonical job reference"
-            )
-            review_job_observation = self._sinnixd_job(
-                "job.get", {"job_id": job_values["job_id"]}
-            )
-            binding = review_job_observation.get("contract", {}).get("bead_binding")
-            if (
-                not isinstance(binding, Mapping)
-                or binding.get("bead_ref") != target_ref
-                or binding.get("project_ref") != project_ref
-            ):
-                raise ProtocolError(
-                    "precondition_failed", "job is not the requested Beads assignment"
-                )
-        if (
-            intent in {"bead.work", "bead.review"}
-            and self.principal.name == "agent-control"
-        ):
-            self._assigned_bead_job(target_ref, project_id, None, job_ref)
-            assigned_bead = self.beads.get(
-                project_id,
-                values["bead_id"],
-                includes=(
-                    ["blockers", "dependencies", "dependents", "children", "refs"]
-                    if intent == "bead.work"
-                    else ["history", "events", "dependencies", "dependents", "refs"]
-                ),
-            )
-            self._assigned_bead_job(target_ref, project_id, assigned_bead, job_ref)
         components: list[ComponentSpec] = []
         if intent == "project.orientation":
             assert project_id is not None
@@ -682,113 +619,6 @@ class Runtime:
                     project_ref,
                 ),
             ]
-        elif intent == "bead.work":
-            bead_ref = target_ref
-            bead_id = values["bead_id"]
-            components = [
-                component(
-                    "bead",
-                    lambda: (
-                        assigned_bead
-                        if assigned_bead is not None
-                        else self.beads.get(
-                            project_id,
-                            bead_id,
-                            includes=[
-                                "blockers",
-                                "dependencies",
-                                "dependents",
-                                "children",
-                                "refs",
-                            ],
-                        )
-                    ),
-                    bead_ref,
-                ),
-                component(
-                    "project", lambda: self.projects.summary(project_id), project_ref
-                ),
-                component(
-                    "checkout",
-                    lambda: self.projects.checkout(project_id, "default"),
-                    REGISTRY.reference(
-                        "checkout", {"project_id": project_id, "checkout_id": "default"}
-                    ),
-                ),
-                component(
-                    "assignment",
-                    lambda: self._context_assignment(bead_ref, project_id, job_ref),
-                    job_ref,
-                ),
-                component(
-                    "blockers",
-                    lambda: self.beads.graph(
-                        project_id,
-                        bead_id,
-                        direction="down",
-                        edge_type="blocks",
-                        max_rows=50,
-                    ),
-                    f"{bead_ref}/blockers",
-                ),
-            ]
-        elif intent == "bead.review":
-            if not isinstance(job_ref, str):
-                raise ProtocolError("invalid_request", "bead.review requires job_ref")
-            _job_resource, job_values, canonical_job_ref = self._resource_reference(
-                job_ref, {"job"}, "bead.review requires a canonical job reference"
-            )
-            review_bead = assigned_bead
-            bead_id = values["bead_id"]
-            job_observation: dict[str, Any] | None = review_job_observation
-
-            def job() -> dict[str, Any]:
-                nonlocal job_observation
-                if job_observation is None:
-                    job_observation = self._sinnixd_job(
-                        "job.get", {"job_id": job_values["job_id"]}
-                    )
-                return job_observation
-
-            components = [
-                component(
-                    "bead",
-                    lambda: (
-                        review_bead
-                        if review_bead is not None
-                        else self.beads.get(
-                            project_id,
-                            bead_id,
-                            includes=[
-                                "history",
-                                "events",
-                                "dependencies",
-                                "dependents",
-                                "refs",
-                            ],
-                        )
-                    ),
-                    target_ref,
-                ),
-                component("job", job, canonical_job_ref),
-                component(
-                    "checkout",
-                    lambda: self.projects.checkout(project_id, "default"),
-                    REGISTRY.reference(
-                        "checkout", {"project_id": project_id, "checkout_id": "default"}
-                    ),
-                ),
-                component(
-                    "diff",
-                    lambda: self.projects.diff(project_id, None, None),
-                    project_ref,
-                ),
-                component(
-                    "evidence",
-                    lambda: self._review_evidence(job_values["job_id"], job()),
-                    canonical_job_ref,
-                ),
-            ]
         elif intent == "job.review":
             job_id = values["job_id"]
             job_observation: dict[str, Any] | None = None
@@ -796,14 +626,14 @@ class Runtime:
             def job_value() -> dict[str, Any]:
                 nonlocal job_observation
                 if job_observation is None:
-                    job_observation = self._sinnixd_job("job.get", {"job_id": job_id})
+                    job_observation = self._job("job.get", {"job_id": job_id})
                 return job_observation
 
             components = [
                 component("job", job_value, target_ref),
                 component(
                     "result",
-                    lambda: self._sinnixd_job(
+                    lambda: self._job(
                         "job.result", {"job_id": job_id, "max_bytes": 64_000}
                     ),
                     target_ref,
@@ -838,23 +668,6 @@ class Runtime:
             ]
         context = self.context_composer.compose(intent, target_ref, components)
         by_name = {row["name"]: row for row in context["components"]}
-        if (
-            intent == "bead.review"
-            and by_name.get("job", {}).get("status") == "available"
-        ):
-            job_data = by_name["job"].get("data")
-            binding = (
-                job_data.get("contract", {}).get("bead_binding")
-                if isinstance(job_data, Mapping)
-                else None
-            )
-            if (
-                not isinstance(binding, Mapping)
-                or binding.get("bead_ref") != target_ref
-            ):
-                raise ProtocolError(
-                    "precondition_failed", "job is not the requested Beads assignment"
-                )
         compatibility: dict[str, Any] = {}
         if intent == "project.orientation" and all(
             by_name.get(name, {}).get("status") == "available"
@@ -867,7 +680,7 @@ class Runtime:
                     "authority": by_name["authority"]["data"],
                 }
             )
-        elif intent in {"bead.work", "job.review", "incident"}:
+        elif intent in {"job.review", "incident"}:
             compatibility.update(
                 {
                     name: row["data"]
@@ -875,61 +688,6 @@ class Runtime:
                     if row.get("status") == "available" and "data" in row
                 }
             )
-        elif intent == "bead.review":
-            if all(
-                by_name.get(name, {}).get("status") == "available"
-                for name in ("bead", "job", "checkout", "evidence")
-            ):
-                bead_data = by_name["bead"]["data"]
-                job_data = by_name["job"]["data"]
-                checkout_data = by_name["checkout"]["data"]
-                binding = (
-                    job_data.get("contract", {}).get("bead_binding")
-                    if isinstance(job_data, Mapping)
-                    else None
-                )
-                launch_checkout = (
-                    job_data.get("checkout") if isinstance(job_data, Mapping) else None
-                )
-                current_checkout = (
-                    checkout_data.get("checkout")
-                    if isinstance(checkout_data, Mapping)
-                    else None
-                )
-                if (
-                    isinstance(binding, Mapping)
-                    and isinstance(launch_checkout, Mapping)
-                    and isinstance(current_checkout, Mapping)
-                ):
-                    try:
-                        compatibility = {
-                            "bead": {"launch": dict(binding), "current": bead_data},
-                            "job": {
-                                "ref": by_name["job"].get("source_ref"),
-                                **job_data,
-                            },
-                            "checkout": {
-                                "launch": dict(launch_checkout),
-                                "current": dict(current_checkout),
-                                "commit_range": self.projects.commit_range(
-                                    values["project_id"],
-                                    launch_checkout["checkout_id"],
-                                    launch_checkout["head"],
-                                    current_checkout["head"],
-                                ),
-                            },
-                            "evidence": by_name["evidence"]["data"],
-                            "revision_mismatch": {
-                                "task_revision": binding.get("task_revision")
-                                != bead_data.get("task_revision"),
-                                "task_etag": binding.get("task_etag")
-                                != bead_data.get("etag"),
-                                "code_revision": launch_checkout.get("head")
-                                != current_checkout.get("head"),
-                            },
-                        }
-                    except (KeyError, TypeError, ValueError):
-                        compatibility = {}
         if compatibility:
             candidate = {**context, **compatibility}
             if (
@@ -957,355 +715,53 @@ class Runtime:
         self.context_snapshots.put(context)
         return {"ref": target_ref, **context}
 
-    def _context_assignment(
-        self, bead_ref: str, project_id: str, job_ref: str | None
-    ) -> dict[str, Any]:
-        if self.principal.name == "agent-control":
-            job, binding, checkout, assignment_ref = self._assigned_bead_job(
-                bead_ref, project_id, None, job_ref
-            )
-            return {
-                "ref": assignment_ref,
-                "job": job,
-                "binding": dict(binding),
-                "checkout": checkout,
-            }
-        jobs = self.v2_jobs_query({"limit": 50})
-        return {
-            "jobs": [
-                job
-                for job in jobs.get("jobs", [])
-                if isinstance(job.get("contract"), Mapping)
-                and job["contract"].get("bead_binding", {}).get("bead_ref") == bead_ref
-            ]
-        }
-
-    def v2_context(
-        self, reference: str, intent: str = "project", job_ref: str | None = None
-    ) -> dict[str, Any]:
-        return self.compose_context(reference, intent, job_ref)
-
-    def _assigned_bead_job(
-        self,
-        bead_ref: str,
-        project_id: str,
-        bead: Mapping[str, Any] | None,
-        job_ref: str | None,
-    ) -> tuple[dict[str, Any], Mapping[str, Any], dict[str, Any], str]:
-        if not isinstance(job_ref, str):
-            raise ProtocolError(
-                "precondition_failed",
-                "agent-control Beads context requires an assignment job ref",
-            )
-        _resource, values, canonical_job_ref = self._resource_reference(
-            job_ref,
-            {"job"},
-            "agent-control assignment requires a canonical job reference",
-        )
-        job = self._sinnixd_job("job.get", {"job_id": values["job_id"]})
-        binding = job.get("contract", {}).get("bead_binding")
-        checkout = job.get("checkout")
-        if (
-            job.get("principal") != "agent-control"
-            or not isinstance(binding, Mapping)
-            or binding.get("bead_ref") != bead_ref
-            or binding.get("project_ref")
-            != REGISTRY.reference("project", {"project_id": project_id})
-            or not isinstance(checkout, Mapping)
-            or not isinstance(checkout.get("checkout_id"), str)
-            or binding.get("checkout_ref")
-            != REGISTRY.reference(
-                "checkout",
-                {"project_id": project_id, "checkout_id": checkout["checkout_id"]},
-            )
-        ):
-            raise ProtocolError(
-                "precondition_failed",
-                "job is not the requested agent-control Beads assignment",
-            )
-        if bead is not None:
-            self._assert_assignment_current(binding, bead)
-        return job, binding, dict(checkout), canonical_job_ref
-
-    @staticmethod
-    def _assert_assignment_current(
-        binding: Mapping[str, Any], bead: Mapping[str, Any]
-    ) -> None:
-        if binding.get("task_revision") != bead.get("task_revision") or binding.get(
-            "task_etag"
-        ) != bead.get("etag"):
-            raise ProtocolError(
-                "precondition_failed", "agent-control Beads assignment is stale"
-            )
-
-    def _review_evidence(self, job_id: str, job: Mapping[str, Any]) -> dict[str, Any]:
-        artifacts = job.get("artifacts")
-        declared_result = (
-            artifacts.get("result") if isinstance(artifacts, Mapping) else None
-        )
-        tests = {
-            "availability": "unavailable",
-            "reason": "bead-bound attested-agent jobs declare no structured test result",
-        }
-        if not isinstance(declared_result, Mapping):
-            return {
-                "result": {
-                    "availability": "unavailable",
-                    "reason": "job declares no result artifact",
-                },
-                "tests": tests,
-            }
-        try:
-            observed = self._sinnixd_job(
-                "job.result", {"job_id": job_id, "max_bytes": 64_000}
-            )
-        except ProtocolError as exc:
-            return {
-                "result": {
-                    "availability": "unavailable",
-                    "artifact": dict(declared_result),
-                    "failure_code": exc.code,
-                },
-                "tests": tests,
-            }
-        if observed.get("job_id") != job_id:
-            raise ProtocolError(
-                "owner_failed",
-                "sinnixd result response does not match the reviewed job",
-            )
-        artifact = observed.get("artifact")
-        if not isinstance(artifact, Mapping) or artifact.get(
-            "ref"
-        ) != declared_result.get("ref"):
-            raise ProtocolError(
-                "owner_failed",
-                "sinnixd result does not match the declared job artifact",
-            )
-        return {
-            "result": {
-                "availability": "available",
-                "artifact": dict(declared_result),
-                "observation": observed,
-            },
-            "tests": tests,
-        }
+    def v2_context(self, reference: str, intent: str = "project") -> dict[str, Any]:
+        return self.compose_context(reference, intent)
 
     def v2_run_for_bead(
         self,
         *,
         reference: str | None,
-        checkout_id: str | None,
-        claim_mode: str,
-        assignment_ref: str | None,
-        instructions: str | None,
         backend: str | None,
         model: str | None,
         reasoning_effort: str | None,
-        timeout_seconds: int,
-        credential_profile: str,
-        request_id: str | None,
     ) -> dict[str, Any]:
+        """A lane for one bead: agentctl compiles the prompt, creates the worktree, queues the agent."""
         self.principal.require(Capability.JOB_START)
-        if self.principal.name not in {"agent-control", "operator"}:
-            raise PolicyError(
-                "bead-bound agent jobs require agent-control or operator authority"
-            )
-        if not isinstance(request_id, str):
-            raise ProtocolError(
-                "invalid_request", "bead-bound agent launch requires request_id"
-            )
         _resource, values, bead_ref = self._resource_reference(
-            reference or "",
-            {"bead"},
-            "bead-bound agent launch requires a canonical Beads reference",
+            reference or "", {"bead"}, "a lane requires a canonical Beads reference"
         )
-        if not isinstance(checkout_id, str) or not checkout_id:
-            raise ProtocolError(
-                "invalid_request",
-                "bead-bound agent launch requires an explicit checkout_id",
-            )
-        if claim_mode not in {"none", "claim"}:
-            raise ProtocolError("invalid_request", "claim_mode must be none or claim")
-        project_id, bead_id = values["project_id"], values["bead_id"]
-        self.projects.checkout(project_id, checkout_id)["checkout"]
-        project_ref = REGISTRY.reference("project", {"project_id": project_id})
-        checkout_ref = REGISTRY.reference(
-            "checkout", {"project_id": project_id, "checkout_id": checkout_id}
-        )
-        claim_receipt: dict[str, Any] | None = None
-        claim_ref: str | None = None
-        parent_assignment_ref: str | None = None
-        if self.principal.name == "agent-control":
-            if claim_mode != "none":
-                raise PolicyError("agent-control cannot claim Beads tasks")
-            _assignment_job, binding, assigned_checkout, parent_assignment_ref = (
-                self._assigned_bead_job(bead_ref, project_id, None, assignment_ref)
-            )
-            if (
-                assigned_checkout["checkout_id"] != checkout_id
-                or binding.get("checkout_ref") != checkout_ref
+        for name, value in (
+            ("backend", backend),
+            ("model", model),
+            ("reasoning_effort", reasoning_effort),
+        ):
+            if value is not None and (
+                not isinstance(value, str) or not 1 <= len(value) <= 256
             ):
-                raise ProtocolError(
-                    "precondition_failed",
-                    "agent-control launch must use its assigned checkout",
-                )
-        bead = self.beads.get(
-            project_id,
-            bead_id,
-            includes=["blockers", "dependencies", "dependents", "children", "refs"],
+                raise ProtocolError("invalid_request", f"{name} is malformed")
+        result = self._job(
+            "job.agent.start",
+            {
+                "project_id": values["project_id"],
+                "bead_id": values["bead_id"],
+                "backend": backend,
+                "model": model,
+                "effort": reasoning_effort,
+            },
         )
-        if self.principal.name == "agent-control":
-            self._assert_assignment_current(binding, bead)
-        if claim_mode == "claim":
-            claim = self.beads.change(
-                project_id,
-                "claim",
-                {"id": bead_id},
-                preconditions={
-                    "expected_task_revision": bead["task_revision"],
-                    "expected_etag": bead["etag"],
-                },
-            )
-            after = claim.get("after")
-            if not isinstance(after, Mapping):
-                raise ProtocolError(
-                    "owner_failed", "Beads claim omitted its after state"
-                )
-            bead = dict(after)
-            claim_ref = f"{bead_ref}/claims/{bead['etag']}"
-            claim_receipt = {
-                "ref": claim_ref,
-                "owner_route": claim.get("owner_route"),
-                "before_revision": claim.get("before_revision"),
-                "after_revision": claim.get("after_revision"),
-                "owner_history_ref": claim.get("owner_history_ref"),
-            }
-        binding = {
-            "bead_ref": bead_ref,
-            "project_ref": project_ref,
-            "checkout_ref": checkout_ref,
-            "task_revision": bead["task_revision"],
-            "task_etag": bead["etag"],
-            "claim_ref": claim_ref,
-            "claim_receipt": claim_receipt,
-            "request_id": request_id,
-            "assignment_ref": parent_assignment_ref,
-        }
-        metadata = bead.get("metadata")
-        encoded_scope = (
-            metadata.get("write_scope") if isinstance(metadata, Mapping) else None
-        )
-        if isinstance(encoded_scope, str):
-            try:
-                write_scope = json.loads(encoded_scope)
-            except json.JSONDecodeError as error:
-                raise ProtocolError(
-                    "invalid_request", "Bead write_scope metadata must be a JSON array"
-                ) from error
-            if not isinstance(write_scope, list):
-                raise ProtocolError(
-                    "invalid_request", "Bead write_scope metadata must be a JSON array"
-                )
-            binding["write_scope"] = write_scope
-        assigned_context = {
-            "bead": bead,
-            "project_ref": project_ref,
-            "checkout_ref": checkout_ref,
-            "worker_authority": "task.read only; task mutation and closure require an explicit operator call",
-        }
-        prompt = (
-            "Work the assigned canonical Beads task. Read the supplied context, make and verify the requested code change in the assigned checkout, and report evidence plus residuals. Do not mutate or close Beads.\n\n"
-            + json.dumps(assigned_context, sort_keys=True, separators=(",", ":"))
-            + (
-                "\n\nOperator instructions:\n" + instructions
-                if isinstance(instructions, str) and instructions
-                else ""
-            )
-        )
-        request = AgentLaunchRequest(
-            project_id=project_id,
-            checkout_id=checkout_id,
-            prompt=prompt,
-            backend=backend,
-            model=model,
-            reasoning_effort=reasoning_effort,
-            timeout_seconds=timeout_seconds,
-            credential_profile=credential_profile,
-        )
-        try:
-            result = self._sinnixd_job(
-                "job.agent.start",
-                {
-                    "project_id": request.project_id,
-                    "checkout_id": request.checkout_id,
-                    "prompt": request.prompt,
-                    "backend": request.backend,
-                    "model": request.model,
-                    "effort": request.reasoning_effort,
-                    "credential_profile": request.credential_profile,
-                    "timeout_seconds": request.timeout_seconds,
-                    "result": "last-message",
-                    "bead_binding": binding,
-                },
-                principal="agent-control",
-            )
-        except ProtocolError as exc:
-            if claim_ref is None:
-                raise
-            raise ProtocolError(
-                "partial_completion",
-                "Beads claim succeeded but agent launch failed",
-                details={
-                    "bead_ref": bead_ref,
-                    "project_ref": project_ref,
-                    "checkout_ref": checkout_ref,
-                    "claim_ref": claim_ref,
-                    "claim_receipt": claim_receipt,
-                    "request_id": request_id,
-                    "launch_error": {
-                        "code": exc.code,
-                        "details": exc.details,
-                    },
-                },
-            ) from exc
-        if result.get("state", {}).get("phase") == "launch-failed":
-            job_id = result.get("job_id")
-            launch_details = {
-                "bead_ref": bead_ref,
-                "project_ref": project_ref,
-                "checkout_ref": checkout_ref,
-                "claim_ref": claim_ref,
-                "claim_receipt": claim_receipt,
-                "request_id": request_id,
-            }
-            if isinstance(job_id, str) and job_id:
-                launch_details["job_ref"] = REGISTRY.reference(
-                    "job", {"job_id": job_id}
-                )
-            raise ProtocolError(
-                "partial_completion" if claim_ref else "owner_failed",
-                "Beads claim succeeded but agent launch failed"
-                if claim_ref
-                else "agent launch failed",
-                details=launch_details,
-            )
         job_id = result.get("job_id")
         if not isinstance(job_id, str) or not job_id:
             raise ProtocolError(
-                "owner_failed", "sinnixd bead-agent start response omitted the job ID"
+                "owner_failed", "lane start response omitted the job ID"
             )
         return {
             **result,
             "ref": REGISTRY.reference("job", {"job_id": job_id}),
             "bead_ref": bead_ref,
-            "project_ref": project_ref,
-            "checkout_ref": checkout_ref,
-            "claim_ref": claim_ref,
-            "claim_receipt": claim_receipt,
-            "assignment_ref": parent_assignment_ref,
-            "atomicity": "native_claim_then_daemon_launch"
-            if claim_ref
-            else "daemon_launch",
+            "project_ref": REGISTRY.reference(
+                "project", {"project_id": values["project_id"]}
+            ),
         }
 
     def v2_events(
@@ -1419,9 +875,9 @@ class Runtime:
             job_id = values["job_id"]
             self.principal.require(Capability.JOB_READ)
             if projection == "summary":
-                result = self._sinnixd_job("job.get", {"job_id": job_id})
+                result = self._job("job.get", {"job_id": job_id})
             elif projection == "log":
-                result = self._sinnixd_job(
+                result = self._job(
                     "job.logs",
                     {"job_id": job_id, "offset": offset, "max_bytes": max_bytes},
                 )
@@ -1430,13 +886,13 @@ class Runtime:
                     raise ProtocolError(
                         "invalid_request", "job result does not support offsets"
                     )
-                result = self._sinnixd_job(
+                result = self._job(
                     "job.result", {"job_id": job_id, "max_bytes": max_bytes}
                 )
             if result.get("job_id") != job_id:
                 raise ProtocolError(
                     "owner_failed",
-                    "sinnixd get response does not match the requested job",
+                    "job owner get response does not match the requested job",
                 )
             return {
                 "ref": canonical_ref,
@@ -1633,7 +1089,7 @@ class Runtime:
             raise ProtocolError(
                 "invalid_request", "run timeout_seconds must be between 1 and 3600"
             )
-        result = self._sinnixd_job(
+        result = self._job(
             "job.shell.start",
             {
                 "project_id": project_id,
@@ -1648,7 +1104,7 @@ class Runtime:
         job_id = result.get("job_id")
         if not isinstance(job_id, str) or not job_id:
             raise ProtocolError(
-                "owner_failed", "sinnixd start response omitted the job ID"
+                "owner_failed", "job owner start response omitted the job ID"
             )
         return {
             **result,
@@ -1685,12 +1141,12 @@ class Runtime:
         }
         if workspace_id is not None:
             arguments["workspace_id"] = workspace_id
-        result = self._sinnixd_job("job.start", arguments)
+        result = self._job("job.start", arguments)
         job_id = result.get("job_id")
         if not isinstance(job_id, str) or not job_id:
             raise ProtocolError(
                 "owner_failed",
-                "sinnixd declared-operation start response omitted the job ID",
+                "job owner declared-operation start response omitted the job ID",
             )
         return {**result, "ref": REGISTRY.reference("job", {"job_id": job_id})}
 
@@ -1897,10 +1353,6 @@ class Runtime:
         return response
 
     def v2_beads_query(self, parameters: Mapping[str, Any]) -> dict[str, Any]:
-        if self.principal.name == "agent-control":
-            raise PolicyError(
-                "agent-control Beads reads require an assigned Beads context"
-            )
         values = self._parameters(parameters)
         graph = values.pop("graph", None)
         memory = values.pop("memory", None)
@@ -1944,16 +1396,6 @@ class Runtime:
             "ref does not identify a canonical project or bead",
         )
         mutation = self._parameters(parameters)
-        if operation == "close_with_evidence":
-            if resource.kind != "bead":
-                raise ProtocolError(
-                    "invalid_request",
-                    "close_with_evidence requires a canonical Beads ref",
-                )
-            result = self._close_with_evidence(
-                values["project_id"], values["bead_id"], canonical_ref, mutation
-            )
-            return {"ref": canonical_ref, **result}
         if resource.kind == "bead":
             mutation.setdefault("id", values["bead_id"])
         result = self.beads.change(
@@ -1965,93 +1407,6 @@ class Runtime:
             preview_digest=mutation.pop("preview_digest", None),
         )
         return {"ref": canonical_ref, **result}
-
-    def _close_with_evidence(
-        self, project_id: str, bead_id: str, bead_ref: str, values: Mapping[str, Any]
-    ) -> dict[str, Any]:
-        required = {
-            "verdict",
-            "residuals",
-            "evidence_refs",
-            "job_ref",
-            "code_revision",
-            "task_revision",
-            "task_etag",
-        }
-        if set(values) != required:
-            raise ProtocolError(
-                "invalid_request",
-                "close_with_evidence requires a complete evidence record",
-            )
-        job_ref = values["job_ref"]
-        _resource, job_values, canonical_job_ref = self._resource_reference(
-            job_ref, {"job"}, "close_with_evidence requires a canonical job ref"
-        )
-        job = self._sinnixd_job("job.get", {"job_id": job_values["job_id"]})
-        if job.get("state", {}).get("phase") != "succeeded":
-            raise ProtocolError(
-                "precondition_failed", "failed or cancelled jobs cannot close a bead"
-            )
-        binding = job.get("contract", {}).get("bead_binding")
-        if not isinstance(binding, Mapping) or binding.get("bead_ref") != bead_ref:
-            raise ProtocolError(
-                "precondition_failed", "job is not bound to the requested bead"
-            )
-        checkout = job.get("checkout")
-        if not isinstance(checkout, Mapping) or not isinstance(
-            checkout.get("checkout_id"), str
-        ):
-            raise ProtocolError(
-                "owner_failed", "bead-bound job omitted its checkout identity"
-            )
-        current_checkout = self.projects.checkout(project_id, checkout["checkout_id"])[
-            "checkout"
-        ]
-        if values["code_revision"] != current_checkout.get("head"):
-            raise ProtocolError(
-                "precondition_failed",
-                "code_revision does not match the current checkout",
-            )
-        current = self.beads.get(project_id, bead_id)
-        if values["task_revision"] != current.get("task_revision") or values[
-            "task_etag"
-        ] != current.get("etag"):
-            raise ProtocolError(
-                "precondition_failed", "task revision does not match the current bead"
-            )
-        if not isinstance(values["residuals"], list) or not isinstance(
-            values["evidence_refs"], list
-        ):
-            raise ProtocolError(
-                "invalid_request", "closure residuals and evidence_refs must be lists"
-            )
-        evidence = {
-            "schema": "sinnix.bead-close-evidence.v1",
-            "verdict": values["verdict"],
-            "residuals": values["residuals"],
-            "evidence_refs": values["evidence_refs"],
-            "job_ref": canonical_job_ref,
-            "code_revision": values["code_revision"],
-            "task_revision": values["task_revision"],
-            "task_etag": values["task_etag"],
-            "launch_code_revision": checkout.get("head"),
-            "launch_task_revision": binding.get("task_revision"),
-            "launch_task_etag": binding.get("task_etag"),
-        }
-        mutation = self.beads.change(
-            project_id,
-            "close",
-            {
-                "id": bead_id,
-                "reason": json.dumps(evidence, sort_keys=True, separators=(",", ":")),
-                "force": True,
-            },
-            preconditions={
-                "expected_task_revision": current["task_revision"],
-                "expected_etag": current["etag"],
-            },
-        )
-        return {"closure": evidence, "bead": mutation}
 
     def v2_beads_changeset(
         self,
@@ -2348,23 +1703,23 @@ class Runtime:
             raise ProtocolError("invalid_request", "expected_phase is malformed")
         job_id = values["job_id"]
         self.principal.require(Capability.JOB_CANCEL)
-        status = self._sinnixd_job("job.get", {"job_id": job_id})
+        status = self._job("job.get", {"job_id": job_id})
         if status.get("job_id") != job_id:
             raise ProtocolError(
                 "owner_failed",
-                "sinnixd status response does not match the requested job",
+                "job owner status response does not match the requested job",
             )
         state = status.get("state")
         phase = state.get("phase") if isinstance(state, Mapping) else None
         if phase != expected_phase:
             raise ProtocolError("precondition_failed", "job phase no longer matches")
-        cancelled = self._sinnixd_job("job.cancel", {"job_id": job_id})
+        cancelled = self._job("job.cancel", {"job_id": job_id})
         if cancelled.get("job_id") != job_id or not isinstance(
             cancelled.get("cancel_requested"), bool
         ):
             raise ProtocolError(
                 "owner_failed",
-                "sinnixd cancel response does not prove cancellation truth",
+                "job owner cancel response does not prove cancellation truth",
             )
         return {
             "ref": str(resource.ref_template.format(values)),
@@ -2409,13 +1764,13 @@ class Runtime:
                 )
             job_id = values["job_id"]
             self.principal.require(Capability.JOB_READ)
-            result = self._sinnixd_job(
+            result = self._job(
                 "job.wait", {"job_id": job_id, "timeout_seconds": timeout_seconds}
             )
             if result.get("job_id") != job_id:
                 raise ProtocolError(
                     "owner_failed",
-                    "sinnixd wait response does not match the requested job",
+                    "job owner wait response does not match the requested job",
                 )
             if result.get("timed_out") is True:
                 evidence = result.get("state", result)
@@ -2486,7 +1841,7 @@ class Runtime:
                 }
             if cancelled is None:
                 result = await anyio.to_thread.run_sync(
-                    self._sinnixd_job,
+                    self._job,
                     "job.wait",
                     {"job_id": values["job_id"], "timeout_seconds": timeout_seconds},
                     abandon_on_cancel=True,
@@ -2497,7 +1852,7 @@ class Runtime:
 
                 async def wait_for_owner() -> None:
                     result_box["result"] = await anyio.to_thread.run_sync(
-                        self._sinnixd_job,
+                        self._job,
                         "job.wait",
                         {
                             "job_id": values["job_id"],
@@ -2548,7 +1903,7 @@ class Runtime:
             if result.get("job_id") != values["job_id"]:
                 raise ProtocolError(
                     "owner_failed",
-                    "sinnixd wait response does not match the requested job",
+                    "job owner wait response does not match the requested job",
                 )
             return {
                 **result,
@@ -2679,17 +2034,15 @@ class Runtime:
         arguments: dict[str, Any] = {"limit": limit}
         if cursor is not None:
             arguments["cursor"] = cursor
-        response = self._sinnixd_job("job.list", arguments)
+        response = self._job("job.list", arguments)
         jobs = response.get("jobs")
         if not isinstance(jobs, list) or any(
             not isinstance(job, Mapping) for job in jobs
         ):
-            raise ProtocolError(
-                "owner_failed", "sinnixd job list response is malformed"
-            )
+            raise ProtocolError("owner_failed", "job owner list response is malformed")
         if len(jobs) > limit:
             raise ProtocolError(
-                "owner_failed", "sinnixd job list response exceeds its bound"
+                "owner_failed", "job owner list response exceeds its bound"
             )
         total = response.get("total")
         truncated = response.get("truncated")
@@ -2713,18 +2066,18 @@ class Runtime:
             or any(not isinstance(value, str) for value in snapshot["ceiling"])
         ):
             raise ProtocolError(
-                "owner_failed", "sinnixd job list response omits paging metadata"
+                "owner_failed", "job owner list response omits paging metadata"
             )
         if truncated != (next_cursor is not None):
             raise ProtocolError(
-                "owner_failed", "sinnixd job list paging metadata is inconsistent"
+                "owner_failed", "job owner list paging metadata is inconsistent"
             )
         rows: list[dict[str, Any]] = []
         for job in jobs:
             job_id = job.get("job_id")
             if not isinstance(job_id, str) or not job_id:
                 raise ProtocolError(
-                    "owner_failed", "sinnixd job list response omitted a job ID"
+                    "owner_failed", "job owner list response omitted a job ID"
                 )
             rows.append({"ref": REGISTRY.reference("job", {"job_id": job_id}), **job})
         return {
@@ -2735,52 +2088,6 @@ class Runtime:
             "next_cursor": next_cursor,
             "snapshot": dict(snapshot),
         }
-
-    def _record_result(
-        self, operation: str, result: Any, request_sha256: str | None = None
-    ) -> dict[str, Any]:
-        payload: dict[str, Any] = {}
-        if isinstance(result, dict):
-            for key in (
-                "job_id",
-                "artifact_id",
-                "project_id",
-                "receipt_id",
-                "unit",
-                "path",
-                "destination",
-                "operation",
-                "sha256",
-                "previous_sha256",
-                "bytes",
-                "created",
-                "removed",
-                "identity",
-                "exit_status",
-                "timed_out",
-                "truncated",
-                "cwd",
-                "accepted",
-                "cancelled",
-                "already_terminal",
-                "kind",
-                "server",
-                "tool",
-                "mode",
-            ):
-                value = result.get(key)
-                if isinstance(value, (str, int, float, bool)):
-                    payload[key] = value
-            artifact_ids = result.get("artifact_ids")
-            if isinstance(artifact_ids, list) and all(
-                isinstance(value, str) for value in artifact_ids
-            ):
-                payload["artifact_ids"] = artifact_ids
-            if "job_id" in payload:
-                payload["correlation_id"] = payload["job_id"]
-        if request_sha256 is not None:
-            payload["request_sha256"] = request_sha256
-        return self.audit.append(operation, "ok", payload)
 
     @staticmethod
     def _resource_refs(result: Any) -> list[str]:
@@ -3234,38 +2541,6 @@ class Runtime:
             if writer is not None:
                 writer.abort()
             return self._v2_failure(action, exc, context)
-
-    def execute(self, operation: str, callback: Callable[[], T]) -> T:
-        try:
-            result = callback()
-        except OwnerDiagnosticError as exc:
-            self.audit.append(
-                operation, "error", self._diagnostic_payload(exc.response)
-            )
-            return cast(T, {"operation": operation, **exc.response})
-        except Exception as exc:
-            message = public_error(exc)
-            self.audit.append(operation, "error", {"error": message})
-            raise ValueError(message) from None
-        self._record_result(operation, result)
-        return result
-
-    async def execute_async(
-        self, operation: str, callback: Callable[[], Awaitable[T]]
-    ) -> T:
-        try:
-            result = await callback()
-        except OwnerDiagnosticError as exc:
-            self.audit.append(
-                operation, "error", self._diagnostic_payload(exc.response)
-            )
-            return cast(T, {"operation": operation, **exc.response})
-        except Exception as exc:
-            message = public_error(exc)
-            self.audit.append(operation, "error", {"error": message})
-            raise ValueError(message) from None
-        self._record_result(operation, result)
-        return result
 
 
 def _principal_contract(principal_name: str) -> str:

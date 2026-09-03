@@ -26,10 +26,7 @@ PROMPT_SPECS = (
     PromptSpec(
         "triage-beads", "project.triage", "Triage bounded Beads work for one project."
     ),
-    PromptSpec("work-bead", "bead.work", "Prepare to work one canonical Beads task."),
-    PromptSpec(
-        "review-job", "job.review", "Review one daemon-owned job and its evidence."
-    ),
+    PromptSpec("review-job", "job.review", "Review one queued job and its evidence."),
     PromptSpec(
         "incident-orient", "incident", "Orient on current runtime incident evidence."
     ),
@@ -38,8 +35,6 @@ PROMPT_SPECS = (
 PROMPT_KINDS = {
     "project.orientation": frozenset({"project", "checkout"}),
     "project.triage": frozenset({"project", "checkout"}),
-    "bead.work": frozenset({"bead"}),
-    "bead.review": frozenset({"bead"}),
     "job.review": frozenset({"job"}),
     "incident": frozenset({"project"}),
 }
@@ -65,11 +60,6 @@ class PromptGenerator:
                         "name": "ref",
                         "description": "Canonical Sinnix target reference",
                         "required": True,
-                    },
-                    {
-                        "name": "job_ref",
-                        "description": "Canonical assigned job reference",
-                        "required": False,
                     },
                 ],
             }
@@ -104,7 +94,7 @@ class PromptGenerator:
             > MAX_PROMPT_INPUT_BYTES
         ):
             raise ValueError("prompt arguments exceed their input bound")
-        unknown = set(values) - {"ref", "job_ref"}
+        unknown = set(values) - {"ref"}
         if unknown:
             raise ValueError(f"prompt arguments are not recognized: {sorted(unknown)}")
         ref = values.get("ref")
@@ -115,15 +105,6 @@ class PromptGenerator:
             raise ValueError(
                 f"prompt {spec.name} does not accept resource kind {resource.kind!r}"
             )
-        job_ref = values.get("job_ref")
-        if job_ref is not None:
-            if not isinstance(job_ref, str):
-                raise ValueError("prompt job_ref must be a canonical job reference")
-            job_resource, _ = self._resolve_visible(job_ref)
-            if job_resource.kind != "job":
-                raise ValueError("prompt job_ref must resolve to a job resource")
-            if spec.intent not in {"bead.review", "job.review", "bead.work"}:
-                raise ValueError("this prompt does not accept a job_ref")
         catalog = self.catalog(self.principal)
         actions = [
             {
@@ -142,7 +123,6 @@ class PromptGenerator:
             "intent": spec.intent,
             "principal": self.principal,
             "target_ref": ref,
-            "job_ref": job_ref,
             "context_ref": ref,
             "action_catalog_revision": catalog.get("revision"),
             "actions": actions,

@@ -159,7 +159,6 @@ def test_action_failure_contracts_follow_public_controls_and_owner_capabilities(
     assert REGISTRY.action("agent.for_bead").typed_failures == read_failures | {
         "conflict",
         "idempotency_conflict",
-        "partial_completion",
     }
     assert REGISTRY.action("mcp.change").typed_failures == read_failures | {
         "conflict",
@@ -391,7 +390,6 @@ def test_catalog_search_filters_resource_kind_and_text() -> None:
         "gateway.catalog",
         "resources.get",
         "beads.query",
-        "projects.context",
         "beads.change",
         "beads.changeset",
         "agent.for_bead",
@@ -402,7 +400,7 @@ def test_catalog_search_filters_resource_kind_and_text() -> None:
             "contract_ref": "sinnix://gateway/v2/resources/bead",
             "ref_template": "sinnix://projects/{project_id}/beads/{bead_id}",
             "owner": "beads",
-            "principals": ["observer", "operator"],
+            "principals": ["agent-control", "observer", "operator"],
             "readable_projections": ["summary", "history", "graph"],
             "supports_query": True,
             "availability": "declared",
@@ -473,15 +471,10 @@ def test_run_and_wait_contracts_are_closed_and_authority_scoped() -> None:
     assert agent["route"] == "job.agent.start"
     assert agent["principals"] == ["agent-control", "operator"]
     assert agent["input_schema"]["additionalProperties"] is False
-    assert agent["input_schema"]["required"] == [
-        "ref",
-        "checkout_id",
-        "backend",
-        "model",
-        "reasoning_effort",
-        "idempotency_key",
-        "request_id",
-    ]
+    assert agent["input_schema"]["required"] == ["ref", "idempotency_key"]
+    assert set(agent["input_schema"]["properties"]).isdisjoint(
+        {"checkout_id", "claim_mode", "assignment_ref", "instructions", "prompt"}
+    )
     assert wait["verb"] == "wait"
     assert wait["effect"] == "read"
     assert wait["owner"] == "systemd-jobs"
@@ -634,8 +627,7 @@ def test_query_context_and_events_contracts_bind_existing_read_owners() -> None:
     beads = REGISTRY.action_schema("beads.query", "observer")["action"]
     assert beads["owner"] == "beads"
     assert beads["route"] == "beads.query"
-    with pytest.raises(RegistryError, match="cannot read action"):
-        REGISTRY.action_schema("beads.query", "agent-control")
+    assert beads["principals"] == ["agent-control", "observer", "operator"]
     assert (
         beads["input_schema"]["properties"]["parameters"]["properties"]["cursor"][
             "maxLength"
@@ -684,6 +676,14 @@ def test_query_context_and_events_contracts_bind_existing_read_owners() -> None:
     assert context["route"] == "project_context.context"
     assert context["input_schema"]["additionalProperties"] is False
     assert context["input_schema"]["required"] == ["ref"]
+    assert "job_ref" not in context["input_schema"]["properties"]
+    assert context["input_schema"]["properties"]["intent"]["enum"] == [
+        "project",
+        "project.orientation",
+        "project.triage",
+        "job.review",
+        "incident",
+    ]
     assert events["verb"] == "events"
     assert events["owner"] == "audit"
     assert events["route"] == "audit.tail"

@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import datetime as dt
-from typing import Any
-
 from collections.abc import Callable
+from typing import Any
 
 from .queue import active_jobs, jobs_card, lanes_card, queue_card
 from .shell import (

@@ -27,7 +27,7 @@ from sinnix_agent_gateway.projects import ProjectError
 from sinnix_agent_gateway.registry import REGISTRY
 from sinnix_agent_gateway.results import ProtocolError
 from sinnix_agent_gateway.server import _bounded_resource_json, _query_owner
-from sinnix_mcp.execution import ExecutionResult, OwnerDiagnosticError
+from sinnix_mcp.execution import ExecutionResult
 
 
 def config(tmp_path: Path, *, observer_read: bool = True) -> GatewayConfig:
@@ -114,14 +114,8 @@ def test_official_sdk_principals_expose_only_protocol_verbs(tmp_path: Path) -> N
         "schema": "sinnix.gateway-schema-measurement.v1",
         "canonical_bytes": operator["measurement"]["canonical_bytes"],
         "tool_count": 10,
-        "baseline": {
-            "source_commit": "e5980a67eae343f954f695c46a8fadda83961a03",
-            "canonical_bytes": 30_350,
-            "tool_count": 49,
-        },
         "token_lane": operator["measurement"]["token_lane"],
     }
-    assert operator["measurement"]["canonical_bytes"] < 30_350
     assert operator["measurement"]["token_lane"] == {
         "status": "estimated",
         "method": "canonical_bytes_divided_by_4",
@@ -254,10 +248,6 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                     "sinnix://gateway/v2/documentation"
                 )
                 documentation_rows = json.loads(documentation.contents[0].text)
-                parity = await session.read_resource(
-                    "sinnix://gateway/v2/legacy-parity"
-                )
-                parity_rows = json.loads(parity.contents[0].text)
                 assert action_contract["action"]["schema_ref"] == (
                     "sinnix://gateway/v2/actions/gateway.catalog"
                 )
@@ -266,7 +256,7 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                     "contract_ref": "sinnix://gateway/v2/resources/bead",
                     "kind": "bead",
                     "owner": "beads",
-                    "principals": ["observer", "operator"],
+                    "principals": ["agent-control", "observer", "operator"],
                     "readable_projections": ["summary", "history", "graph"],
                     "ref_template": "sinnix://projects/{project_id}/beads/{bead_id}",
                     "supports_query": True,
@@ -287,8 +277,6 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                     "sessions.query",
                     "mcp.query",
                 } <= {row["name"] for row in documentation_rows["actions"]}
-                assert parity_rows["legacy_manifest"]["tool_count"] == 49
-                assert len(parity_rows["rows"]) == 49
                 assert all(
                     "observer" in row["principals"]
                     for row in documentation_rows["resources"]
@@ -525,7 +513,7 @@ def test_production_wait_route_runs_without_mcp_request_context(
     runtime = server._sinnix_revision_publisher.runtime
     monkeypatch.setattr(
         runtime,
-        "_sinnixd_job",
+        "_job",
         lambda operation, arguments: {
             "job_id": arguments["job_id"],
             "state": {"phase": "succeeded", "terminal": True},
@@ -563,7 +551,7 @@ def test_production_job_wait_route_cancels_owner_wait(
         threading.Event().wait(0.5)
         return {"job_id": "fixture-job", "state": {"phase": "running"}}
 
-    monkeypatch.setattr(runtime, "_sinnixd_job", delayed_owner)
+    monkeypatch.setattr(runtime, "_job", delayed_owner)
     cancelled = anyio.Event()
     context = Context(mcp_server=server)
     context._request_context = SimpleNamespace(
@@ -1435,133 +1423,6 @@ def test_v2_events_are_principal_scoped_and_receipted(tmp_path: Path) -> None:
         f"sinnix://receipts/{audit_events[0]['event_id']}"
     ]
     assert response["receipt"]["ref"].startswith("sinnix://receipts/")
-
-
-def test_runtime_returns_owner_diagnostic_and_audits_its_reference(
-    tmp_path: Path,
-) -> None:
-    runtime = Runtime.create(config(tmp_path), "observer")
-    response = {
-        "available": False,
-        "failure_class": "command_timeout",
-        "route": "terminal-kitty",
-        "exit_status": None,
-        "timed_out": True,
-        "output_exceeded": False,
-        "diagnostic_artifact_id": "fixture-artifact",
-    }
-
-    def fail() -> None:
-        raise OwnerDiagnosticError(response)
-
-    assert runtime.execute("terminal_read", fail) == {
-        "operation": "terminal_read",
-        **response,
-    }
-    event = runtime.audit.tail(1)["events"][0]
-    assert event["outcome"] == "error"
-    assert event["payload"] == {
-        "failure_class": "command_timeout",
-        "route": "terminal-kitty",
-        "exit_status": None,
-        "timed_out": True,
-        "output_exceeded": False,
-        "diagnostic_artifact_id": "fixture-artifact",
-    }
-
-
-def test_runtime_audit_carries_returned_job_correlation(tmp_path: Path) -> None:
-    runtime = Runtime.create(config(tmp_path), "agent-control")
-    runtime.execute(
-        "agent.for_bead", lambda: {"job_id": "job-correlation", "secret": "hidden"}
-    )
-    payload = runtime.audit.tail(1)["events"][0]["payload"]
-    assert payload == {"job_id": "job-correlation", "correlation_id": "job-correlation"}
-
-
-def test_runtime_audit_carries_upstream_mcp_target(tmp_path: Path) -> None:
-    runtime = Runtime.create(config(tmp_path), "observer")
-    runtime.execute(
-        "mcp.query",
-        lambda: {
-            "server": "fixture",
-            "tool": "fixture_read",
-            "mode": "read",
-            "secret": "hidden",
-        },
-    )
-
-    assert runtime.audit.tail(1)["events"][0]["payload"] == {
-        "server": "fixture",
-        "tool": "fixture_read",
-        "mode": "read",
-    }
-
-
-def test_runtime_audit_carries_returned_transient_unit(tmp_path: Path) -> None:
-    runtime = Runtime.create(config(tmp_path), "operator")
-    runtime.execute(
-        "shell.run",
-        lambda: {"unit": "sinnix-gateway-run-fixture.service", "secret": "hidden"},
-    )
-    payload = runtime.audit.tail(1)["events"][0]["payload"]
-    assert payload == {"unit": "sinnix-gateway-run-fixture.service"}
-
-
-def test_runtime_audit_carries_daemon_job_identity(tmp_path: Path) -> None:
-    runtime = Runtime.create(config(tmp_path), "operator")
-    runtime.execute(
-        "shell.run",
-        lambda: {
-            "job_id": "shell-fixture",
-            "unit": "sinnixd-job-shell-fixture.service",
-            "secret": "hidden",
-        },
-    )
-
-    payload = runtime.audit.tail(1)["events"][0]["payload"]
-
-    assert payload == {
-        "job_id": "shell-fixture",
-        "unit": "sinnixd-job-shell-fixture.service",
-        "correlation_id": "shell-fixture",
-    }
-
-
-def test_runtime_audit_carries_returned_owner_receipt(tmp_path: Path) -> None:
-    runtime = Runtime.create(config(tmp_path), "operator")
-    runtime.execute(
-        "machine_action",
-        lambda: {"receipt_id": "owner-receipt", "secret": "hidden"},
-    )
-    payload = runtime.audit.tail(1)["events"][0]["payload"]
-    assert payload == {"receipt_id": "owner-receipt"}
-
-
-def test_runtime_audit_carries_file_mutation_receipt(tmp_path: Path) -> None:
-    runtime = Runtime.create(config(tmp_path), "operator")
-    runtime.execute(
-        "files.change",
-        lambda: {
-            "operation": "move",
-            "path": "/realm/tmp/work/gateway-demo/fixture.txt",
-            "destination": "/realm/tmp/work/gateway-demo/moved.txt",
-            "bytes": 7,
-            "previous_sha256": None,
-            "sha256": "fixture-hash",
-            "secret": "hidden",
-        },
-    )
-
-    payload = runtime.audit.tail(1)["events"][0]["payload"]
-
-    assert payload == {
-        "operation": "move",
-        "path": "/realm/tmp/work/gateway-demo/fixture.txt",
-        "destination": "/realm/tmp/work/gateway-demo/moved.txt",
-        "bytes": 7,
-        "sha256": "fixture-hash",
-    }
 
 
 def test_gateway_status_reports_distinct_manifest_provenance(tmp_path: Path) -> None:

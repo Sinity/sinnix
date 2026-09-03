@@ -452,7 +452,7 @@ class NormalizedEventService:
                     ],
                 }
                 observed_revision = _digest(observation)
-                sources["sinnixd.jobs"] = {
+                sources["jobs"] = {
                     "availability": "available",
                     "count": len(jobs) if isinstance(jobs, list) else 0,
                     "revision": observed_revision,
@@ -461,7 +461,7 @@ class NormalizedEventService:
                     event = self._event(
                         event_id=f"jobs:{observed_revision}",
                         kind="job_state",
-                        source="sinnixd.jobs",
+                        source="jobs",
                         source_revision=observed_revision,
                         data={
                             "snapshot": observation["snapshot"],
@@ -477,7 +477,7 @@ class NormalizedEventService:
                 if isinstance(page, Mapping) and page.get("next_cursor"):
                     truncated = True
             except Exception as exc:
-                sources["sinnixd.jobs"] = {
+                sources["jobs"] = {
                     "availability": "unavailable",
                     "reason": str(exc),
                 }

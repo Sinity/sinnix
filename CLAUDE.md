@@ -40,8 +40,8 @@ The ownership boundaries are:
   operator screen. pueue owns the queue and every process; worktrunk owns
   worktrees; GitHub owns PRs and merge; Beads owns tasks.
 - The gateway owns principal/capability policy and high-level machine/project
-  tools; it calls `agentctl` for execution and does not implement another job
-  controller.
+  tools; it calls agentctl's launch and lane routes in process and does not
+  implement another job controller.
 - Project descriptors (`.agentctl/project.toml`) own repository semantics:
   environment, declared operations, result parsing, lane defaults.
 - Systemd remains live process/service authority. Do not duplicate its process
