@@ -48,7 +48,8 @@ heavy step through `agentctl job start`.
 
 ## Lanes
 
-A lane is a worktree with an agent in it and a PR that merges itself.
+A lane is a worktree with an agent producing a candidate commit. Publication
+combines compatible candidates according to the repository's policy.
 
 - `agentctl lane start <project> <bead> [--backend B --model M --effort E]`
   compiles the prompt from the bead (and its open dispatch group), creates
@@ -60,9 +61,8 @@ A lane is a worktree with an agent in it and a PR that merges itself.
 - `agentctl lane rebase <project> <bead>` queues an agent with the rebase
   prompt into the bead's existing worktree. Uncommitted work there belongs to
   the new agent.
-- `agentctl lane publish <worktree>` pushes, opens the PR under the bead's
-  type-prefixed subject (body from `.lane/body.md`), and arms
-  `gh pr merge --auto --squash`. It refuses a dirty worktree.
+- `agentctl lane publish <worktree>` publishes an integrated batch in a
+  repository that lands through PRs. It refuses a dirty worktree.
 - `agentctl lane sync <project>` closes the beads of merged lanes and removes
   their worktrees; the rest are listed with their state and PR.
 - `agentctl refill <project> --limit N [--dry-run]` starts lanes for ready
@@ -82,7 +82,7 @@ Agents have `lane` on PATH:
 
 - `lane task` prints the dispatch prompt (`.lane/prompt.md`).
 - `lane verify` runs the project's quick verification as a job and waits.
-- `lane publish` is `agentctl lane publish` on the current worktree.
+- `lane publish` is reserved for a coordinator-owned integration worktree.
 - `lane done report.md` requires a clean tree, pushes the branch, and emits
   the report as the final message. `lane done --incomplete report.md` pushes
   committed WIP and marks the report partial.
