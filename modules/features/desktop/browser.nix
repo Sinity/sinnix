@@ -95,16 +95,6 @@ mkFeatureModule {
                 "target_url"
               ];
             }
-            {
-              name = "browser-agent-actions";
-              path = "${activityRoot}/browser-agent-actions";
-              eventDriven = true;
-              requiredPayloadFields = [
-                "page_url"
-                "selection_text"
-                "instruction"
-              ];
-            }
           ];
         };
         sinnix-reading-stack-widget = {
