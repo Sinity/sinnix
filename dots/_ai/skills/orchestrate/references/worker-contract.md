@@ -13,9 +13,11 @@ repeated here.
 2. **Verify your own work.** Focused runs are `devtools test <selection>`.
    Run the static gate with `lane verify`; it submits the declared
    `verify_quick` operation to pueue and waits for that task. Do not invoke
-   `devtools verify --quick` directly inside a lane. The affected and complete
-   test tiers run once, as declared jobs, after you finish; the harness
-   refuses them inside a lane. Fix, test, iterate until green. Do not spawn
+   `devtools verify --quick` directly inside a lane. Do not start or wait for
+   affected or complete verification. GitHub starts affected verification
+   after publication, and the coordinator starts one complete run after the
+   merge batch. The harness refuses both tiers inside a lane. Fix, test,
+   iterate until green. Do not spawn
    review subagents — hosted PR review and the test oracle are the check.
    `devtools verify` selects from the checkout's one testmon datafile
    (`.cache/testmon/testmondata`) and writes back; a corrupt or foreign
