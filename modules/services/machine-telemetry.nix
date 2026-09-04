@@ -24,6 +24,7 @@ let
   # Lives on /realm, not /persist (worn MX500); still inside the /realm
   # btrbk→borg coverage.
   backupRoot = "/realm/state/db-dumps/machine-telemetry";
+  backupSnapshotRoot = "${realmRoot}/state/machine-telemetry-backup-snapshots";
   manifestPath = "${dataDir}/manifest.json";
   username = config.sinnix.user.name;
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
@@ -224,16 +225,38 @@ mkServiceModule {
             stamp="$(date -u +%Y%m%dT%H%M%SZ)"
             final=${lib.escapeShellArg backupRoot}/telemetry-"$stamp".sqlite.zst
 
-            sinnix-sqlite-backup ${lib.escapeShellArg dbPath} "$final"
+            snapshot="${backupSnapshotRoot}/telemetry-$stamp"
+            cleanup() {
+              if [ -d "$snapshot" ]; then
+                btrfs subvolume delete "$snapshot" >/dev/null
+              fi
+            }
+            trap cleanup EXIT
+
+            # The database is NOCOW, so cloning its file is not a reliable
+            # constant-time operation. A read-only subvolume snapshot freezes
+            # the checkpointed input; the helper then compresses it directly.
+            sqlite3 ${lib.escapeShellArg dbPath} 'PRAGMA wal_checkpoint(TRUNCATE);'
+            if [ -e ${lib.escapeShellArg "${dbPath}-wal"} ]; then
+              echo "machine telemetry WAL remained after checkpoint" >&2
+              exit 1
+            fi
+            btrfs subvolume snapshot -r ${lib.escapeShellArg dbRoot} "$snapshot"
+            sinnix-sqlite-backup --immutable-source "$snapshot/telemetry.sqlite" "$final"
+            chown ${lib.escapeShellArg username}:users "$final"
 
           '';
           path = [
             pkgs.coreutils
             pkgs.findutils
             pkgs.gawk
+            pkgs.btrfs-progs
+            pkgs.sqlite
             scriptPkgs.sinnix-sqlite-backup
           ];
-          user = username;
+          # Btrfs subvolume snapshots require CAP_SYS_ADMIN; the published
+          # artifact is handed back to the operator below.
+          user = "root";
           serviceConfig = {
             Group = "users";
             TimeoutStartSec = "30min";
@@ -250,6 +273,7 @@ mkServiceModule {
             unitConfig.RequiresMountsFor = [
               dbRoot
               backupRoot
+              backupSnapshotRoot
             ];
             restartIfChanged = false;
           };
@@ -273,6 +297,7 @@ mkServiceModule {
           "d ${dataDir}/experiments 0775 ${username} users -"
           "d ${dataDir}/legacy 0775 ${username} users -"
           "d ${backupRoot} 0700 ${username} users -"
+          "d ${backupSnapshotRoot} 0700 ${username} users -"
         ];
 
         systemd.services.machine-telemetry-db-scaffold = {
