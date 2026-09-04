@@ -74,7 +74,7 @@
             ];
           };
           approvedManifestHash = "cfd50dd8df6f0ca39a46d66d3cbdd8a0965f688eef25c8df484cea48c857046b";
-          approvedActionCatalogHash = "0b631beb9cbb6aaf9441963d1cc82dddd6c36862ea321a467e4e242dc5f0027a";
+          approvedActionCatalogHash = "b26d0613cb94c432743e4c01a7347434a2f7fa2d784ce6a317dd48951ece6321";
         };
       };
     };
