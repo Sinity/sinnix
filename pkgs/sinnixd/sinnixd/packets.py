@@ -250,7 +250,9 @@ class PacketConfig:
             or model == self.default_model
         ):
             resolved = model
-        elif not any(model.startswith(prefix) for prefix in BACKEND_MODEL_PREFIXES.values()):
+        elif not any(
+            model.startswith(prefix) for prefix in BACKEND_MODEL_PREFIXES.values()
+        ):
             raise PacketError(f"unknown model alias {model!r}; valid aliases: {valid}")
         else:
             resolved = model
@@ -264,7 +266,9 @@ class PacketConfig:
             resolved.startswith(prefix) for prefix in BACKEND_MODEL_PREFIXES.values()
         )
         if known_model and not resolved.startswith(expected_prefix):
-            raise PacketError(f"model {resolved!r} is incompatible with backend {backend!r}")
+            raise PacketError(
+                f"model {resolved!r} is incompatible with backend {backend!r}"
+            )
         return resolved
 
 
