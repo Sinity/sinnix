@@ -106,6 +106,16 @@ def test_a_malformed_agent_ceiling_is_a_typed_refusal(tmp_path: Path) -> None:
         load_project_adapter(root)
 
 
+def test_default_agent_ceiling_is_per_lane(tmp_path: Path) -> None:
+    root = write_project(tmp_path / "p")
+    descriptor = root / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text().replace('agent_memory_max = "10G"\n', "")
+    )
+
+    assert load_project_adapter(root).workspace.agent_memory_max == "4G"
+
+
 def test_a_required_variable_missing_at_launch_fails_loudly(
     project_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

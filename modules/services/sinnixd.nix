@@ -74,9 +74,8 @@ mkServiceModule {
           };
           timer = {
             # Full-stall averages are 60-second means, so sampling faster reads
-            # the same number twice. One group is frozen or thawed per tick, so
-            # freezing agent, normal and bulk takes three minutes: the queue
-            # backs off in steps rather than stopping the host at once.
+            # the same number twice. One group is paused or resumed per tick,
+            # with the signal-specific order defined by sinnixd-backpressure.
             onUnitActiveSec = 60;
             onBootSec = 60;
             description = "Freeze the job queue while the host is stalled";

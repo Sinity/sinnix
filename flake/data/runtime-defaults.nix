@@ -343,13 +343,6 @@ rec {
         # A little swap absorbs a burst; more of it is where the host went to
         # die (14 GB of swap, ten-minute preflights, 2026-09-02).
         MemorySwapMax = "2G";
-        ManagedOOMSwap = "kill";
-        # Same reasoning as background.slice above: kill a wedged scope, not a
-        # busy one. Lane verification phases legitimately stall past 10% for
-        # seconds at a time; at 10%/5s oomd killed healthy lanes mid-verify.
-        ManagedOOMMemoryPressure = "kill";
-        ManagedOOMMemoryPressureLimit = "50%";
-        ManagedOOMMemoryPressureDurationSec = "30s";
       };
       sinnixd-work = {
         IOAccounting = true;
@@ -367,7 +360,6 @@ rec {
         CPUWeight = 400;
         IOWeight = 300;
         MemoryHigh = "8G";
-        MemoryMax = "10G";
         MemorySwapMax = "0";
       };
       sinnixd-pueue-pytest = {

@@ -27,8 +27,8 @@ from .queue_run import (
     MAX_LOG_BYTES,
     MAX_RESULT_BYTES,
     REFUSED_EXIT_CODE,
-    scope_unit_for,
     TIMEOUT_EXIT_CODE,
+    scope_unit_for,
 )
 
 QUEUE_RUN_EXECUTABLE = "sinnixd-queue-run"
