@@ -11,6 +11,7 @@ from conftest import FakeBd, FakePueue, bead, read_launch
 from sinnixd import lanes
 from sinnixd.config import Config
 from sinnixd.lanes import LaneError
+from sinnixd.packets import PacketError
 from sinnixd.projects import load_project_adapter
 from sinnixd.worktrunk import Worktree, WorktrunkError
 
@@ -164,6 +165,27 @@ def test_lane_start_refuses_a_bead_that_already_has_a_worktree(
     with pytest.raises(LaneError, match="already has a worktree"):
         lanes.lane_start(config, project, "fx-1")
     assert fake_pueue.added == []
+
+
+def test_lane_start_resolves_model_alias_and_refuses_unknown_before_mutation(
+    fake_pueue: FakePueue,
+    fake_wt: dict[str, Any],
+    fake_bd: FakeBd,
+    config: Config,
+    project_root: Path,
+) -> None:
+    project = load_project_adapter(project_root)
+
+    started = lanes.lane_start(config, project, "fx-1", model="luna")
+    launch = read_launch(config, fake_pueue.task(started["job"]["job_id"]))
+    assert launch["argv"][launch["argv"].index("--model") + 1] == "gpt-5.6-luna"
+
+    fake_pueue.added.clear()
+    fake_wt["created"].clear()
+    with pytest.raises(PacketError, match=r"unknown model alias 'moon'.*luna"):
+        lanes.lane_start(config, project, "fx-2", model="moon")
+    assert fake_pueue.added == []
+    assert fake_wt["created"] == []
 
 
 def test_lane_start_refuses_without_an_executable_runner(
