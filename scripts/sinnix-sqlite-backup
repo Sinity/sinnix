@@ -21,6 +21,7 @@ class BackupCancelled(Exception):
 
 cancel_requested = False
 FULL_INTEGRITY_PAGE_LIMIT = 100_000
+QUICK_CHECK_PROGRESS_OPS = 10_000
 # Every sidecar cleanup() ever creates ends in one of these compound
 # suffixes: raw_path (".tmp"), its journal/WAL siblings (".tmp-journal",
 # ".tmp-wal"), and compressed_path (output suffix + ".tmp", e.g. ".zst.tmp",
@@ -78,6 +79,35 @@ def run_command(command: list[str]) -> None:
         raise subprocess.CalledProcessError(process.returncode, command)
 
 
+def require_quick_check(connection: sqlite3.Connection) -> None:
+    """Reject a corrupt immutable snapshot while allowing cancellation."""
+
+    def interrupt_if_cancelled() -> int:
+        return int(cancel_requested)
+
+    connection.set_progress_handler(interrupt_if_cancelled, QUICK_CHECK_PROGRESS_OPS)
+    try:
+        integrity = connection.execute("PRAGMA quick_check(1)").fetchone()
+    except sqlite3.OperationalError:
+        if cancel_requested:
+            raise BackupCancelled from None
+        raise
+    finally:
+        connection.set_progress_handler(None, 0)
+    if cancel_requested:
+        raise BackupCancelled
+    if integrity != ("ok",):
+        raise RuntimeError(f"SQLite quick_check failed: {integrity!r}")
+    print("SQLite quick_check(1): ok")
+
+
+def compress(source_path: Path, compressed_path: Path) -> None:
+    run_command(["zstd", "-T1", "-q", "-f", str(source_path), "-o", str(compressed_path)])
+    if not compressed_path.is_file() or compressed_path.stat().st_size == 0:
+        raise RuntimeError("SQLite compression produced no artifact")
+    print("SQLite compression: ok")
+
+
 def backup_database(
     source_path: Path, output_path: Path, *, immutable_source: bool = False
 ) -> None:
@@ -106,16 +136,10 @@ def backup_database(
                 f"file:{source_path}?mode=ro&immutable=1", uri=True, timeout=5.0
             )
             source.execute("PRAGMA busy_timeout=5000")
-            page_count = source.execute("PRAGMA page_count").fetchone()[0]
-            if page_count <= FULL_INTEGRITY_PAGE_LIMIT:
-                integrity = source.execute("PRAGMA integrity_check").fetchone()
-                if integrity != ("ok",):
-                    raise RuntimeError(f"SQLite integrity_check failed: {integrity!r}")
-            else:
-                source.execute("PRAGMA schema_version").fetchone()
+            require_quick_check(source)
             source.close()
             source = None
-            run_command(["zstd", "-T1", "-q", "-f", str(source_path), "-o", str(compressed_path)])
+            compress(source_path, compressed_path)
             os.chmod(compressed_path, 0o600)
             os.replace(compressed_path, output_path)
             os.chmod(output_path, 0o600)
@@ -156,7 +180,7 @@ def backup_database(
             target.execute("PRAGMA schema_version").fetchone()
         target.close()
         target = None
-        run_command(["zstd", "-T1", "-q", "-f", str(raw_path), "-o", str(compressed_path)])
+        compress(raw_path, compressed_path)
         os.chmod(compressed_path, 0o600)
         os.replace(compressed_path, output_path)
         os.chmod(output_path, 0o600)
