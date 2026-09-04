@@ -9,6 +9,13 @@ wrapper carries those between agentctl and the command:
 The path is the only argument because pueue joins a task's arguments into one
 string for its shell; a single unspaced path cannot be re-split whatever the
 shell does with it.
+
+That path also names the task's containment. The workload runs in a transient
+scope called ``sinnixd-pueue-<pueue group>-<launch input stem>.scope``, both
+halves of which a reader can recover from ``pueue status`` alone, so a canceller
+reaps the whole cgroup without this wrapper's help and without the launch input
+still existing. Launch input basenames must therefore be unique among live
+tasks.
 """
 
 from __future__ import annotations
@@ -41,6 +48,16 @@ REFUSED_EXIT_CODE = 125
 RESULT_KINDS = frozenset({"exit", "json", "pytest", "last-message"})
 POOL_NAME = re.compile(r"[a-z][a-z0-9-]{0,63}\Z")
 POOL_SLICE_PREFIX = "sinnixd-pueue"
+
+# A transient scope setting agentctl passes through to `systemd-run -p`. Only
+# `MemoryMax=` is written today, by a lane launch; the pattern keeps a launch
+# input from turning into arbitrary systemd-run argv.
+SCOPE_PROPERTY = re.compile(r"[A-Za-z][A-Za-z0-9]*=\S+\Z")
+
+# How long a reap waits for a cgroup or a process group to drain before it
+# reports what is left. Stopping a scope is a cgroup kill and returns in
+# milliseconds; this bounds the pathological case, not the normal one.
+REAP_GRACE_SECONDS = 5.0
 
 _REQUIRED_FIELDS = (
     "job_id",
@@ -96,26 +113,57 @@ def _read_input(path: Path) -> dict[str, Any]:
         not isinstance(pool, str) or POOL_NAME.fullmatch(pool) is None
     ):
         raise QueueInputError("launch input pool must be a lowercase pueue group name")
+    properties = value.get("scope_properties")
+    if properties is not None and (
+        not isinstance(properties, list)
+        or not all(
+            isinstance(item, str) and SCOPE_PROPERTY.fullmatch(item)
+            for item in properties
+        )
+    ):
+        raise QueueInputError(
+            "launch input scope_properties must be systemd NAME=VALUE settings"
+        )
     return value
 
 
-def scope_unit_for(job_id: object, pool: str) -> str:
-    """Name the transient scope that carries one queued task's workload."""
-    safe_job_id = re.sub(r"[^A-Za-z0-9_.-]", "-", str(job_id)).strip("-") or "job"
-    return f"{POOL_SLICE_PREFIX}-{pool}-{safe_job_id[:160]}.scope"
+def scope_pool(group: str | None) -> str | None:
+    """A pueue group as a slice name component."""
+    if not isinstance(group, str):
+        return None
+    return re.sub(r"[^a-z0-9-]+", "-", group.strip().lower()).strip("-") or None
 
 
-def _scoped_command(launch: Mapping[str, Any]) -> tuple[list[str], str | None]:
-    """Put new launches in the slice for their declared pueue pool.
+def scope_unit_for(reference: object, pool: str) -> str:
+    """Name the transient scope carrying the task whose launch input is ``reference``.
 
-    Launches from before pool scopes were introduced have no ``pool`` field;
-    retaining their direct execution keeps historical retries readable. Every
-    launch produced by ``agentctl`` carries the field.
+    ``reference`` is the launch input path's basename without its suffix, so a
+    canceller reading only ``pueue status`` names the same unit the wrapper
+    created.
     """
-    pool = launch.get("pool")
+    safe = re.sub(r"[^A-Za-z0-9_.-]", "-", str(reference)).strip("-") or "job"
+    return f"{POOL_SLICE_PREFIX}-{pool}-{safe[:160]}.scope"
+
+
+def _scoped_command(
+    launch: Mapping[str, Any], reference: str
+) -> tuple[list[str], str | None]:
+    """Contain the workload in the scope named for its launch input and group.
+
+    The pueue group comes from ``PUEUE_GROUP``, which pueued exports into every
+    task it spawns, so a launch input written by another repository is contained
+    exactly like one agentctl wrote. Invoked outside the queue there is no group
+    and no scope: nothing but the caller can cancel such a run.
+    """
+    pool = scope_pool(os.environ.get("PUEUE_GROUP")) or scope_pool(launch.get("pool"))
     if pool is None:
         return list(launch["argv"]), None
-    unit = scope_unit_for(launch["job_id"], pool)
+    unit = scope_unit_for(reference, pool)
+    properties = [
+        argument
+        for value in launch.get("scope_properties") or ()
+        for argument in ("-p", value)
+    ]
     return (
         [
             "systemd-run",
@@ -125,6 +173,7 @@ def _scoped_command(launch: Mapping[str, Any]) -> tuple[list[str], str | None]:
             "--collect",
             f"--unit={unit}",
             f"--slice={POOL_SLICE_PREFIX}-{pool}.slice",
+            *properties,
             "--",
             *launch["argv"],
         ],
@@ -183,22 +232,117 @@ def _terminate(process: subprocess.Popen[bytes]) -> None:
         process.wait(timeout=10)
 
 
-def _stop_scope(unit: str | None) -> None:
-    """Stop a transient scope when the queue runner times out."""
-    if unit is None:
-        return
+def scope_control_group(unit: str) -> Path | None:
+    """The cgroup directory a live transient scope owns."""
     try:
-        subprocess.run(
-            ["systemctl", "--user", "stop", unit],
+        completed = subprocess.run(
+            ["systemctl", "--user", "show", "--property=ControlGroup", "--value", unit],
             capture_output=True,
+            text=True,
             check=False,
             timeout=10,
         )
     except (OSError, subprocess.TimeoutExpired):
-        return
+        return None
+    path = completed.stdout.strip()
+    return Path(f"/sys/fs/cgroup{path}") if path.startswith("/") else None
 
 
-def run(launch: Mapping[str, Any]) -> int:
+def cgroup_processes(control_group: Path | None) -> list[int]:
+    """Every process in a cgroup and its descendants.
+
+    A process may leave its session and its process group; it cannot leave the
+    cgroup it was placed in, so this is the complete membership of a scope.
+    """
+    if control_group is None:
+        return []
+    found: set[int] = set()
+    for procs in control_group.rglob("cgroup.procs"):
+        try:
+            found.update(int(line) for line in procs.read_text().split())
+        except (OSError, ValueError):
+            continue
+    return sorted(found)
+
+
+def stop_scope(unit: str | None) -> dict[str, Any]:
+    """Stop a transient scope and report what, if anything, outlived it."""
+    if unit is None:
+        return {"unit": None, "stopped": False, "survivors": []}
+    control_group = scope_control_group(unit)
+    try:
+        completed = subprocess.run(
+            ["systemctl", "--user", "stop", unit],
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
+        stopped = completed.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        stopped = False
+    deadline = time.monotonic() + REAP_GRACE_SECONDS
+    survivors = cgroup_processes(control_group)
+    while survivors and time.monotonic() < deadline:
+        for pid in survivors:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except OSError:
+                continue
+        time.sleep(0.1)
+        survivors = cgroup_processes(control_group)
+    return {"unit": unit, "stopped": stopped, "survivors": survivors}
+
+
+def process_group_members(pgid: int) -> list[int]:
+    """Every live process in a process group.
+
+    Zombies are excluded: one holds its group id until its parent reaps it, so
+    signalling the group would otherwise never look finished.
+    """
+    members: list[int] = []
+    for entry in Path("/proc").iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            # comm can contain spaces and parentheses; the fields after the
+            # last ')' are state onwards, of which the third is the group.
+            fields = (entry / "stat").read_text().rpartition(")")[2].split()
+        except OSError:
+            continue
+        if len(fields) < 3 or fields[0] == "Z":
+            continue
+        try:
+            if int(fields[2]) == pgid:
+                members.append(int(entry.name))
+        except ValueError:
+            continue
+    return sorted(members)
+
+
+def reap_process_group(pgid: int) -> bool:
+    """Signal a process group until it is gone; True when nothing is left.
+
+    The fallback for a run with no scope. It reaches only processes that stayed
+    in the group, which is why containment is the cgroup and not this.
+    """
+    for number in (signal.SIGTERM, signal.SIGKILL):
+        if not process_group_members(pgid):
+            return True
+        try:
+            os.killpg(pgid, number)
+        except ProcessLookupError:
+            continue
+        except PermissionError:
+            return False
+        deadline = time.monotonic() + REAP_GRACE_SECONDS / 2
+        while time.monotonic() < deadline:
+            time.sleep(0.05)
+            if not process_group_members(pgid):
+                return True
+    return not process_group_members(pgid)
+
+
+def run(launch: Mapping[str, Any], *, reference: str) -> int:
     """Run one queued command and leave its bounded artifacts behind."""
     log_path = Path(launch["log_path"])
     spool_path = (
@@ -214,6 +358,7 @@ def run(launch: Mapping[str, Any]) -> int:
         )
         return REFUSED_EXIT_CODE
 
+    command, scope_unit = _scoped_command(launch, reference)
     append_event(
         spool_path,
         {
@@ -226,7 +371,7 @@ def run(launch: Mapping[str, Any]) -> int:
             "project": launch["project_id"],
             "operation": launch["operation"],
             "pool": launch.get("pool"),
-            "scope_unit": launch.get("scope_unit"),
+            "scope_unit": scope_unit,
             "phase": "started",
             "working_directory": launch["working_directory"],
         },
@@ -246,7 +391,6 @@ def run(launch: Mapping[str, Any]) -> int:
             "SINNIXD_QUEUE_WORKER": "1",
         }
     )
-    command, scope_unit = _scoped_command(launch)
     with open(log_path, "wb") as log:
         stdout: Any = log
         result_file = None
@@ -281,7 +425,7 @@ def run(launch: Mapping[str, Any]) -> int:
         try:
             returncode = process.wait(timeout=launch["timeout_seconds"])
         except subprocess.TimeoutExpired:
-            _stop_scope(scope_unit)
+            stop_scope(scope_unit)
             _terminate(process)
             log.write(f"timed out after {launch['timeout_seconds']} seconds\n".encode())
             returncode = TIMEOUT_EXIT_CODE
@@ -307,7 +451,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
         return REFUSED_EXIT_CODE
     # The input stays for `pueue restart`: a retry re-executes this same
     # command line. It is mode 0600 and lives with the task that names it.
-    return run(launch)
+    return run(launch, reference=parsed.launch_input.stem)
 
 
 if __name__ == "__main__":  # pragma: no cover - console entry point

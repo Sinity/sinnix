@@ -13,7 +13,6 @@ import hashlib
 import json
 import os
 import re
-import signal
 import subprocess
 import time
 import uuid
@@ -29,13 +28,16 @@ from .queue_run import (
     MAX_RESULT_BYTES,
     REFUSED_EXIT_CODE,
     TIMEOUT_EXIT_CODE,
+    reap_process_group,
+    scope_pool,
     scope_unit_for,
+    stop_scope,
 )
 
 QUEUE_RUN_EXECUTABLE = "sinnixd-queue-run"
-_LAUNCH_REFERENCE = re.compile(
-    r"sinnixd-queue-run (?P<path>\S+/inputs/(?P<ref>[A-Za-z0-9._-]+)\.json)"
-)
+# Any queued task that runs the wrapper, whoever wrote its launch input: the
+# input path is the task's handle on its artifacts and its scope.
+_LAUNCH_REFERENCE = re.compile(r"sinnixd-queue-run (?P<path>/\S+\.json)")
 _RESULT_KINDS = {"exit": "exit", "json": "json", "pytest": "pytest"}
 
 
@@ -102,11 +104,10 @@ def _environment_receipt(
     return {"digest": "sha256:" + hashlib.sha256(encoded).hexdigest()}
 
 
-def _launch_input(config: Config, task: Task) -> dict[str, Any] | None:
-    reference = launch_reference(task)
-    if reference is None:
+def _launch_input(task: Task) -> dict[str, Any] | None:
+    path = launch_input_path(task)
+    if path is None:
         return None
-    path = config.inputs_dir / f"{reference}.json"
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
@@ -115,7 +116,6 @@ def _launch_input(config: Config, task: Task) -> dict[str, Any] | None:
 
 
 def _matching_task(
-    config: Config,
     project: ProjectAdapter,
     operation: ProjectOperation,
     working_directory: Path,
@@ -126,7 +126,7 @@ def _matching_task(
     for task in sorted(pueue.tasks().values(), key=lambda item: item.task_id):
         if task.label != label:
             continue
-        launch_input = _launch_input(config, task)
+        launch_input = _launch_input(task)
         if launch_input is None:
             continue
         if (
@@ -154,6 +154,7 @@ def enqueue(
     environment: Mapping[str, str],
     kind: str = "declared-operation",
     after: Sequence[int] = (),
+    scope_properties: Sequence[str] = (),
     tree_receipt: Mapping[str, Any] | None = None,
     environment_receipt: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
@@ -165,7 +166,6 @@ def enqueue(
         "project_id": project.project_id,
         "operation": operation,
         "pool": group,
-        "scope_unit": scope_unit_for(reference, group),
         "kind": kind,
         "label": label,
         "argv": list(argv),
@@ -176,6 +176,8 @@ def enqueue(
         "log_path": str(log_path),
         "event_spool_path": str(config.event_spool),
     }
+    if scope_properties:
+        launch["scope_properties"] = list(scope_properties)
     if tree_receipt is not None:
         launch["tree_receipt"] = dict(tree_receipt)
     if environment_receipt is not None:
@@ -257,7 +259,6 @@ def _start_operation(
                 project, operation, environment, extra_argv
             )
             existing = _matching_task(
-                config,
                 project,
                 operation,
                 working_directory,
@@ -265,7 +266,7 @@ def _start_operation(
                 environment_receipt,
             )
             if existing is not None:
-                existing_input = _launch_input(config, existing) or {}
+                existing_input = _launch_input(existing) or {}
                 return {
                     **job_view(existing),
                     "reused": True,
@@ -360,9 +361,25 @@ def phase_of(task: Task) -> str:
     return "failed"
 
 
-def launch_reference(task: Task) -> str | None:
+def launch_input_path(task: Task) -> Path | None:
     match = _LAUNCH_REFERENCE.search(task.command)
-    return match.group("ref") if match else None
+    return Path(match.group("path")) if match else None
+
+
+def launch_reference(task: Task) -> str | None:
+    path = launch_input_path(task)
+    return path.stem if path is not None else None
+
+
+def scope_unit(task: Task) -> str | None:
+    """The transient scope holding this task's workload.
+
+    Derived from the queue's own record so a cancel reaches the cgroup after the
+    wrapper is gone and after the launch input its owner wrote has been deleted.
+    """
+    reference = launch_reference(task)
+    pool = scope_pool(task.group)
+    return scope_unit_for(reference, pool) if reference and pool else None
 
 
 def job_view(task: Task) -> dict[str, Any]:
@@ -410,6 +427,17 @@ def get_job(task_id: int) -> dict[str, Any]:
 
 
 def _artifact(config: Config, task: Task, suffix: str) -> Path | None:
+    """Where a task's log or result lands.
+
+    The launch input declares its own paths; a task whose input agentctl wrote
+    keeps them under the state directory, and one written by another repository
+    keeps them in that checkout.
+    """
+    declared = (_launch_input(task) or {}).get(
+        {".log": "log_path", ".result": "result_path"}[suffix]
+    )
+    if isinstance(declared, str) and declared:
+        return Path(declared)
     reference = launch_reference(task)
     return config.jobs_dir / f"{reference}{suffix}" if reference else None
 
@@ -450,40 +478,36 @@ def result(config: Config, task_id: int) -> dict[str, Any]:
     return {**view, "kind": "artifact", "value": value}
 
 
-def cancel(config: Config, task_id: int) -> dict[str, Any]:
-    """Ask pueue to kill the task, then reap the process group the wrapper led.
+def _recorded_process_group(config: Config, task: Task) -> int | None:
+    """The group the running command leads, as its wrapper recorded it."""
+    log_path = _artifact(config, task, ".log")
+    if log_path is None:
+        return None
+    try:
+        return int(Path(f"{log_path}.pgid").read_text().strip())
+    except (OSError, ValueError):
+        return None
 
-    pueue kills with SIGKILL, which the wrapper cannot catch; the command's
-    own session survives unless someone signals the group it recorded.
+
+def cancel(config: Config, task_id: int) -> dict[str, Any]:
+    """Kill the task through pueue, then reap everything it started.
+
+    pueue kills with SIGKILL, which the wrapper cannot catch, so the workload is
+    reaped from outside: its scope's cgroup holds every descendant, including
+    those that left the process group. Both handles are read before the kill,
+    while the wrapper still holds them.
     """
     task = _task(task_id)
+    unit = scope_unit(task)
+    pgid = _recorded_process_group(config, task)
     pueue.kill(task_id)
-    reference = launch_reference(task)
-    if reference is not None:
-        input_path = config.inputs_dir / f"{reference}.json"
-        try:
-            launch_input = json.loads(input_path.read_text(encoding="utf-8"))
-            scope_unit = launch_input.get("scope_unit")
-        except (OSError, json.JSONDecodeError):
-            scope_unit = None
-        if isinstance(scope_unit, str):
-            try:
-                subprocess.run(
-                    ["systemctl", "--user", "stop", scope_unit],
-                    capture_output=True,
-                    check=False,
-                    timeout=10,
-                )
-            except (OSError, subprocess.TimeoutExpired):
-                pass
-    group_path = _artifact(config, task, ".log.pgid")
-    if group_path is not None:
-        try:
-            pgid = int(group_path.read_text().strip())
-            os.killpg(pgid, signal.SIGTERM)
-        except (OSError, ValueError):
-            pass
-    return get_job(task_id)
+    reaped: dict[str, Any] = {"scope": stop_scope(unit)}
+    # Stopping the scope killed its cgroup, which held every descendant. The
+    # recorded group is the fallback for a run that had no scope, and reaching
+    # for it after a successful stop would signal whatever inherited the number.
+    if not reaped["scope"]["stopped"] and pgid is not None:
+        reaped["process_group"] = {"pgid": pgid, "reaped": reap_process_group(pgid)}
+    return {**get_job(task_id), "reaped": reaped}
 
 
 def retry(task_id: int) -> dict[str, Any]:
