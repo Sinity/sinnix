@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -73,12 +74,15 @@ def pull(
     auto: bool = False,
     state: str = "OPEN",
     review: str = "",
+    head: str = "h",
+    body: str = "",
 ) -> dict[str, Any]:
     return {
         "number": number,
         "state": state,
+        "body": body,
         "mergeable": mergeable,
-        "headRefOid": "h",
+        "headRefOid": head,
         "reviewDecision": review,
         "reviews": [
             {
@@ -94,6 +98,23 @@ def pull(
             {"__typename": "CheckRun", "status": "COMPLETED", "conclusion": checks}
         ],
     }
+
+
+def merged_pull(
+    number: int, branch: str, bead_id: str, *, head: str = "h"
+) -> dict[str, Any]:
+    """A merged PR whose publication marker binds this bead, branch and head."""
+    marker = json.dumps(
+        {"bead": bead_id, "branch": branch, "head": head},
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return pull(
+        number,
+        state="MERGED",
+        head=head,
+        body=f"Landed.\n\n<!-- sinnixd:lane-publication {marker} -->\n",
+    )
 
 
 def snapshot(**overrides: Any) -> operator_view.Snapshot:
@@ -133,36 +154,129 @@ def snapshot(**overrides: Any) -> operator_view.Snapshot:
             lane("feature/packet/fx-4", "fx-4"),
             lane("feature/packet/fx-5", "fx-5", pr=pull(45, auto=True)),
             lane("feature/packet/fx-6", "fx-6", state="integrated"),
+            lane(
+                "feature/packet/fx-7",
+                "fx-7",
+                pr=merged_pull(47, "feature/packet/fx-7", "fx-7"),
+                state="integrated",
+            ),
         ),
         "ready": (bead("fx-9", "Ready work"),),
+        "beads": {"fx-7": bead("fx-7", "Landed work")},
     }
     values.update(overrides)
     return operator_view.Snapshot(**values)
 
 
-def test_stage_and_next_follow_from_pr_then_agent_facts() -> None:
-    """Breaks if a conflicting PR, a red check, or a failed agent stops naming its next step."""
-    stages = {
+def stages_of(snap: operator_view.Snapshot) -> dict[str, tuple[str, str]]:
+    agents = operator_view.agents_by_bead(snap.tasks)
+    return {
         row.bead: operator_view.lane_stage(
-            row, operator_view.agents_by_bead(snapshot().tasks).get(row.bead)
+            row, agents.get(row.bead or ""), snap.beads.get(row.bead or "")
         )
-        for row in snapshot().lanes
+        for row in snap.lanes
     }
-    assert stages["fx-1"] == ("conflicting", "lane rebase")
+
+
+def test_stage_and_next_follow_from_the_queue_then_pr_then_agent_facts() -> None:
+    """Breaks if a conflicting PR, a red check, or a failed agent stops naming its next step."""
+    stages = stages_of(snapshot())
+    assert stages["fx-1"] == ("lane running", "wait")
     assert stages["fx-2"] == ("checks failing", "fix in lane, push")
     assert stages["fx-3"] == ("idle", "lane rebase or publish")
     assert stages["fx-4"] == ("lane failed", "job logs, then lane rebase")
     assert stages["fx-5"] == ("auto-merge armed", "wait for merge")
-    assert stages["fx-6"] == ("merged", "lane sync")
-    running = operator_view.lane_stage(
-        lane("b", "fx-1"), task(2, "fixture:lane:fx-1", group="agent")
+    assert stages["fx-7"] == ("merged", "lane sync")
+    conflicting = operator_view.lane_stage(
+        lane("feature/packet/fx-1", "fx-1", pr=pull(41, mergeable="CONFLICTING")), None
     )
-    assert running == ("lane running", "wait")
+    assert conflicting == ("conflicting", "lane rebase")
     done = operator_view.lane_stage(
         lane("b", "fx-2"),
         task(4, "fixture:lane:fx-2", status="Done", result="Success", group="agent"),
     )
     assert done == ("unpublished", "lane publish")
+
+
+def test_a_lane_is_merged_only_through_a_merged_pr_that_binds_it() -> None:
+    """Breaks if wt's integrated verdict or an unbound merged PR reads as completion."""
+    fresh = lane("feature/packet/fx-6", "fx-6", state="integrated")
+    assert operator_view.lane_stage(fresh, None) == ("idle", "lane rebase or publish")
+    bound = lane(
+        "feature/packet/fx-7",
+        "fx-7",
+        pr=merged_pull(47, "feature/packet/fx-7", "fx-7"),
+        state="integrated",
+    )
+    assert operator_view.lane_stage(bound, None, bead("fx-7", "Landed work")) == (
+        "merged",
+        "lane sync",
+    )
+    # The lane's branch was moved onto the squash commit after its PR merged:
+    # nothing of its own is left, and lane sync names the failed binding.
+    past_head = lane(
+        "feature/packet/fx-7",
+        "fx-7",
+        pr=merged_pull(47, "feature/packet/fx-7", "fx-7", head="earlier"),
+        state="integrated",
+    )
+    assert operator_view.lane_stage(past_head, None, bead("fx-7", "Landed work")) == (
+        "merged PR is not this head",
+        "lane sync",
+    )
+    # The same PR with work pushed after the merge: this head is unpublished.
+    ahead = lane(
+        "feature/packet/fx-7",
+        "fx-7",
+        pr=merged_pull(47, "feature/packet/fx-7", "fx-7", head="earlier"),
+    )
+    assert operator_view.lane_stage(ahead, None, bead("fx-7", "Landed work")) == (
+        "merged PR is not this head",
+        "lane publish",
+    )
+    other_bead = lane(
+        "feature/packet/fx-7",
+        "fx-7",
+        pr=merged_pull(47, "feature/packet/fx-7", "fx-8"),
+        state="integrated",
+    )
+    assert operator_view.lane_stage(other_bead, None, bead("fx-7", "Landed work")) == (
+        "merged PR is not this head",
+        "lane sync",
+    )
+
+
+def test_a_lane_with_an_unfinished_job_reports_that_job() -> None:
+    """Breaks if branch or PR state is read before the queue, sending work at a live lane."""
+    fresh = lane("feature/packet/fx-1", "fx-1", state="integrated")
+    running = task(2, "fixture:lane:fx-1", group="agent")
+    assert operator_view.lane_stage(fresh, running) == ("lane running", "wait")
+    conflicting = lane(
+        "feature/packet/fx-1", "fx-1", pr=pull(41, mergeable="CONFLICTING")
+    )
+    queued = task(9, "fixture:rebase:fx-1", status="Queued", group="agent")
+    assert operator_view.lane_stage(conflicting, queued) == ("rebase queued", "wait")
+    landed = lane(
+        "feature/packet/fx-7",
+        "fx-7",
+        pr=merged_pull(47, "feature/packet/fx-7", "fx-7"),
+        state="integrated",
+    )
+    assert operator_view.lane_stage(landed, running, bead("fx-7", "Landed work")) == (
+        "lane running",
+        "wait",
+    )
+
+
+def test_no_lane_next_action_merges_by_hand() -> None:
+    """Breaks if an open PR's next action is a gh merge instead of the armed gate."""
+    green = lane("feature/packet/fx-5", "fx-5", pr=pull(45))
+    assert operator_view.lane_stage(green, None) == ("pr open", "lane publish")
+    assert not [
+        following
+        for _stage, following in stages_of(snapshot()).values()
+        if following.startswith("gh ")
+    ]
 
 
 def test_render_shows_groups_attention_jobs_lanes_with_timing_and_ready() -> None:
@@ -172,26 +286,23 @@ def test_render_shows_groups_attention_jobs_lanes_with_timing_and_ready() -> Non
     assert "normal idle PAUSED" in text
     assert "agent 1 running" in text
     assert "! job 3 fixture:check failed exit 2 at" in text and "(20m ago)" in text
-    assert "! feature-packet-fx-1 conflicting PR #41" in text
     assert "! feature-packet-fx-2 checks failing PR #42" in text
     assert "! feature-packet-fx-4 lane failed" in text
     assert "== jobs: 2 active" in text
-    assert "== lanes: 6" in text
+    assert "== lanes: 7" in text
     lane_lines = {
         line.split()[0]: line
         for line in text.splitlines()
         if line.strip().startswith("feature-packet-")
     }
-    assert (
-        "lane running" in lane_lines["feature-packet-fx-1"]
-        or "conflicting" in lane_lines["feature-packet-fx-1"]
-    )
+    assert "lane running" in lane_lines["feature-packet-fx-1"]
     assert "#2" in lane_lines["feature-packet-fx-1"]
     assert "30m" in lane_lines["feature-packet-fx-1"]
     assert "#41 open checks:pass auto" in lane_lines["feature-packet-fx-1"]
-    assert lane_lines["feature-packet-fx-1"].rstrip().endswith("lane rebase")
+    assert lane_lines["feature-packet-fx-1"].rstrip().endswith("wait")
     assert "idle dirty" in lane_lines["feature-packet-fx-3"]
-    assert lane_lines["feature-packet-fx-6"].rstrip().endswith("lane sync")
+    assert lane_lines["feature-packet-fx-6"].rstrip().endswith("lane rebase or publish")
+    assert lane_lines["feature-packet-fx-7"].rstrip().endswith("lane sync")
     assert "== ready: 1 beads" in text and "fx-9" in text
 
 
@@ -296,10 +407,8 @@ def test_to_dict_carries_stage_next_timing_and_group_counts() -> None:
     }
     assert payload["groups"]["agent"]["running"] == 1
     lanes = {row["bead"]: row for row in payload["lanes"]}
-    assert (
-        lanes["fx-1"]["stage"] == "conflicting"
-        and lanes["fx-1"]["next"] == "lane rebase"
-    )
+    assert lanes["fx-1"]["stage"] == "lane running" and lanes["fx-1"]["next"] == "wait"
+    assert lanes["fx-7"]["stage"] == "merged" and lanes["fx-7"]["next"] == "lane sync"
     assert (
         lanes["fx-1"]["elapsed"] == "30m"
         and lanes["fx-1"]["since"] == "2026-09-03T08:30:00+00:00"
