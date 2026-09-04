@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from . import launch, worktrunk
+from . import launch, pueue, worktrunk
 from .config import Config
 from .limits import MAX_AGENT_TIMEOUT_SECONDS
 from .packets import (
@@ -29,10 +29,12 @@ from .packets import (
     rebase_prompt,
 )
 from .projects import ProjectAdapter, ProjectConfigError, load_project_adapter
+from .pueue import PueueError, Task
 from .worktrunk import Worktree, WorktrunkError
 
 LANE_OPERATION = "lane"
 REBASE_OPERATION = "rebase"
+AGENT_OPERATIONS = frozenset({LANE_OPERATION, REBASE_OPERATION})
 # The agent pool. Its slice is the job plane, where pueued's own tasks live, so
 # an agent's memory counts against the plane's budget and not the desktop's.
 AGENT_GROUP = "agent"
@@ -951,6 +953,41 @@ def lane_rows(project: ProjectAdapter, *, full: bool = False) -> list[LaneRow]:
     return rows
 
 
+def _remaining_row(row: LaneRow, *, reason: str | None = None) -> dict[str, Any]:
+    """One reported lane: what it is, and why the sweep left it standing."""
+    tree = row.worktree
+    return {
+        "branch": tree.branch,
+        "worktree": str(tree.path) if tree.path else None,
+        "bead": row.bead,
+        "state": tree.state,
+        "dirty": tree.dirty,
+        "pr": row.pr.get("number") if row.pr else None,
+        "pr_state": row.pr.get("state") if row.pr else None,
+        **({"reason": reason} if reason else {}),
+    }
+
+
+def _active_job(row: LaneRow, tasks: Sequence[Task]) -> Task | None:
+    """The unfinished job that owns this lane: its agent, or one in its worktree.
+
+    A lane an agent still holds has no completion state to read: its branch may
+    be empty, integrated, or carry a previous round's merged PR, and none of
+    that says the work is done.
+    """
+    path = row.worktree.path.resolve() if row.worktree.path else None
+    for task in tasks:
+        if task.terminal:
+            continue
+        _, _, operation = task.label.partition(":")
+        kind, _, bead = operation.partition(":")
+        if row.bead is not None and bead == row.bead and kind in AGENT_OPERATIONS:
+            return task
+        if path is not None and task.path and Path(task.path).resolve() == path:
+            return task
+    return None
+
+
 def lane_sync(
     config: Config, project: ProjectAdapter, *, actor: str = "agentctl"
 ) -> dict[str, Any]:
@@ -959,43 +996,50 @@ def lane_sync(
     removed: list[str] = []
     remaining: list[dict[str, Any]] = []
     reader = SubprocessBdReader(project.root)
+    try:
+        tasks = [
+            task
+            for task in pueue.tasks().values()
+            if task.label.startswith(f"{project.project_id}:")
+        ]
+    except PueueError as error:
+        # Removing a worktree an agent is working in destroys uncommitted work,
+        # so a sweep that cannot see the queue does nothing at all.
+        raise LaneError(f"pueue cannot say which lanes are active: {error}") from error
     for row in lane_rows(project):
         tree = row.worktree
         assert tree.branch is not None
+        active = _active_job(row, tasks)
+        if active is not None:
+            remaining.append(
+                _remaining_row(
+                    row,
+                    reason=f"job {active.task_id} ({active.label}) is "
+                    f"{active.status.lower()}",
+                )
+            )
+            continue
         bead = None
         if row.bead is not None:
             try:
                 bead = reader.show(row.bead)
             except PacketError:
                 pass
+        # A merged PR bound to this bead, branch and head is the whole of the
+        # completion evidence: wt's integrated verdict also holds for a branch
+        # that has nothing on it yet.
         pr_matches, pr_reason = _merged_pr_matches_tree(row, bead)
-        merged = pr_matches or (tree.integrated and row.pr is None)
-        if not merged:
-            remaining.append(
-                {
-                    "branch": tree.branch,
-                    "worktree": str(tree.path) if tree.path else None,
-                    "bead": row.bead,
-                    "state": tree.state,
-                    "dirty": tree.dirty,
-                    "pr": row.pr.get("number") if row.pr else None,
-                    "pr_state": row.pr.get("state") if row.pr else None,
-                    **({"reason": pr_reason} if pr_reason else {}),
-                }
-            )
+        if not pr_matches:
+            if pr_reason is None and tree.integrated:
+                pr_reason = "branch integrated but no merged PR publishes this bead"
+            remaining.append(_remaining_row(row, reason=pr_reason))
             continue
+        assert row.pr is not None
         if tree.dirty:
             remaining.append(
-                {
-                    "branch": tree.branch,
-                    "worktree": str(tree.path) if tree.path else None,
-                    "bead": row.bead,
-                    "state": tree.state,
-                    "dirty": True,
-                    "pr": row.pr.get("number") if row.pr else None,
-                    "pr_state": "MERGED",
-                    "reason": "merged but the worktree has uncommitted changes",
-                }
+                _remaining_row(
+                    row, reason="merged but the worktree has uncommitted changes"
+                )
             )
             continue
         # One lane that cannot be removed (a locked worktree an agent still
@@ -1003,23 +1047,11 @@ def lane_sync(
         try:
             worktrunk.worktrunk_remove(project.root, tree.branch)
         except (WorktrunkError, LaneError) as error:
-            remaining.append(
-                {
-                    "branch": tree.branch,
-                    "worktree": str(tree.path) if tree.path else None,
-                    "bead": row.bead,
-                    "state": tree.state,
-                    "dirty": tree.dirty,
-                    "pr": row.pr.get("number") if row.pr else None,
-                    "pr_state": "MERGED",
-                    "reason": str(error),
-                }
-            )
+            remaining.append(_remaining_row(row, reason=str(error)))
             continue
         removed.append(tree.branch)
         if row.bead is not None:
             if bead is not None and bead.get("status") not in {"closed"}:
-                pr_ref = f"PR #{row.pr['number']}" if row.pr else "branch integrated"
                 # The merge is the fact; whoever the bead was assigned to no
                 # longer owns it. A bd refusal is reported, not fatal.
                 try:
@@ -1032,14 +1064,12 @@ def lane_sync(
                             "--actor",
                             actor,
                             "--reason",
-                            f"merged ({pr_ref})",
+                            f"merged (PR #{row.pr['number']})",
                         ],
                         cwd=project.root,
                     )
                 except LaneError as error:
-                    remaining.append(
-                        {"branch": tree.branch, "bead": row.bead, "reason": str(error)}
-                    )
+                    remaining.append(_remaining_row(row, reason=str(error)))
                 else:
                     closed.append(row.bead)
     return {"closed": closed, "removed": removed, "remaining": remaining}
