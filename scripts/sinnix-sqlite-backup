@@ -64,7 +64,23 @@ def sweep_stale_sidecars(output_path: Path) -> None:
             pass
 
 
-def backup_database(source_path: Path, output_path: Path) -> None:
+def run_command(command: list[str]) -> None:
+    if cancel_requested:
+        raise BackupCancelled
+    process = subprocess.Popen(command)
+    while process.poll() is None:
+        if cancel_requested:
+            process.terminate()
+            process.wait()
+            raise BackupCancelled
+        time.sleep(0.05)
+    if process.returncode != 0:
+        raise subprocess.CalledProcessError(process.returncode, command)
+
+
+def backup_database(
+    source_path: Path, output_path: Path, *, immutable_source: bool = False
+) -> None:
     raw_path = output_path.with_name(output_path.name.removesuffix(".zst") + ".tmp")
     compressed_path = output_path.with_suffix(output_path.suffix + ".tmp")
     sidecars = (raw_path, raw_path.with_name(raw_path.name + "-journal"), raw_path.with_name(raw_path.name + "-wal"), compressed_path)
@@ -82,6 +98,25 @@ def backup_database(source_path: Path, output_path: Path) -> None:
     source: sqlite3.Connection | None = None
     target: sqlite3.Connection | None = None
     try:
+        if immutable_source:
+            if Path(f"{source_path}-wal").exists():
+                raise RuntimeError("immutable SQLite source must not have a WAL")
+            source = sqlite3.connect(source_path, timeout=5.0)
+            source.execute("PRAGMA busy_timeout=5000")
+            page_count = source.execute("PRAGMA page_count").fetchone()[0]
+            if page_count <= FULL_INTEGRITY_PAGE_LIMIT:
+                integrity = source.execute("PRAGMA integrity_check").fetchone()
+                if integrity != ("ok",):
+                    raise RuntimeError(f"SQLite integrity_check failed: {integrity!r}")
+            else:
+                source.execute("PRAGMA schema_version").fetchone()
+            source.close()
+            source = None
+            run_command(["zstd", "-T1", "-q", "-f", str(source_path), "-o", str(compressed_path)])
+            os.chmod(compressed_path, 0o600)
+            os.replace(compressed_path, output_path)
+            os.chmod(output_path, 0o600)
+            return
         source = sqlite3.connect(source_path, timeout=5.0)
         source.execute("PRAGMA busy_timeout=5000")
         # Ask SQLite to advance the WAL before taking the filesystem copy. A
@@ -91,7 +126,7 @@ def backup_database(source_path: Path, output_path: Path) -> None:
         source.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchone()
         source.close()
         source = None
-        subprocess.run(["cp", "--sparse=always", str(source_path), str(raw_path)], check=True)
+        run_command(["cp", "--sparse=always", str(source_path), str(raw_path)])
         wal_path = Path(f"{source_path}-wal")
         raw_wal_path = Path(f"{raw_path}-wal")
         # A missing -wal sidecar is the CLEAN state (a parked/checkpointed
@@ -100,7 +135,7 @@ def backup_database(source_path: Path, output_path: Path) -> None:
         # SOURCE (it exits 1 -> CalledProcessError), so the "handled" branch
         # was unreachable and the first WAL-less backup failed.
         if wal_path.exists():
-            subprocess.run(["cp", "--sparse=always", str(wal_path), str(raw_wal_path)], check=True)
+            run_command(["cp", "--sparse=always", str(wal_path), str(raw_wal_path)])
         else:
             raw_wal_path.unlink(missing_ok=True)
         target = sqlite3.connect(raw_path, timeout=5.0)
@@ -118,7 +153,7 @@ def backup_database(source_path: Path, output_path: Path) -> None:
             target.execute("PRAGMA schema_version").fetchone()
         target.close()
         target = None
-        subprocess.run(["zstd", "-T1", "-q", "-f", str(raw_path), "-o", str(compressed_path)], check=True)
+        run_command(["zstd", "-T1", "-q", "-f", str(raw_path), "-o", str(compressed_path)])
         os.chmod(compressed_path, 0o600)
         os.replace(compressed_path, output_path)
         os.chmod(output_path, 0o600)
@@ -134,11 +169,16 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("source", type=Path)
     parser.add_argument("output", type=Path)
+    parser.add_argument(
+        "--immutable-source",
+        action="store_true",
+        help="compress a verified WAL-free filesystem snapshot without copying it",
+    )
     args = parser.parse_args()
     signal.signal(signal.SIGTERM, request_cancel)
     signal.signal(signal.SIGINT, request_cancel)
     try:
-        backup_database(args.source, args.output)
+        backup_database(args.source, args.output, immutable_source=args.immutable_source)
     except BackupCancelled:
         print("SQLite backup cancelled", file=sys.stderr)
         return 143
