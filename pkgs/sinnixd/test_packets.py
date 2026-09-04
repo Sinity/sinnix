@@ -79,6 +79,56 @@ def test_snapshot_carries_beads_dimensions_branch_atlas_and_the_contract(
     assert "Commit by path, push, never merge." in snapshot.prompt
 
 
+def test_snapshot_projects_rich_relationship_records_without_changing_dispatched_beads(
+    project_root: Path,
+) -> None:
+    config = PacketConfig.load(project_root)
+    rich = reader()
+    rich.beads["fx-parent"] = bead("fx-parent", "Parent", issue_type="epic")
+    rich.beads["fx-dependency"] = bead(
+        "fx-dependency", "Dependency", issue_type="bug", status="in_progress"
+    )
+    rich.beads["fx-lead"].update(
+        {
+            "comments": [{"body": "Keep this context", "author": "operator"}],
+            "parent": "fx-parent",
+            "dependencies": [
+                {
+                    **rich.beads["fx-dependency"],
+                    "dependency_type": "blocks",
+                    "dependencies": [
+                        {**rich.beads["fx-parent"], "dependency_type": "relates-to"}
+                    ],
+                }
+            ],
+        }
+    )
+
+    snapshot = compile_launch_snapshot(
+        "fx-lead", project_id="fixture", reader=rich, config=config
+    )
+
+    dispatched = next(item for item in snapshot.beads if item["id"] == "fx-lead")
+    assert dispatched["description"] == "Touch polylogue/storage/schema.py"
+    assert dispatched["comments"] == [{"body": "Keep this context", "author": "operator"}]
+    assert dispatched["parent"] == {
+        "id": "fx-parent",
+        "status": "open",
+        "issue_type": "epic",
+        "title": "Parent",
+    }
+    assert dispatched["dependencies"] == [
+        {
+            "id": "fx-dependency",
+            "status": "in_progress",
+            "issue_type": "bug",
+            "title": "Dependency",
+            "dependency_type": "blocks",
+        }
+    ]
+    assert len(snapshot.prompt.encode()) < MAX_PROMPT_BYTES
+
+
 def test_explicit_backend_model_effort_override_the_policy(project_root: Path) -> None:
     config = PacketConfig.load(project_root)
 

@@ -350,6 +350,58 @@ def _bounded(prompt: str) -> str:
     return prompt
 
 
+_RELATIONSHIP_FIELDS = (
+    "id",
+    "status",
+    "issue_type",
+    "title",
+    "dependency_type",
+    "edge",
+    "edge_type",
+    "relation",
+    "parent_id",
+)
+
+
+def _compact_relationship(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise PacketError("bd returned an invalid relationship record")
+    compact = {
+        key: value[key]
+        for key in _RELATIONSHIP_FIELDS
+        if key in value and isinstance(value[key], (str, int, float, bool, type(None)))
+    }
+    if not isinstance(compact.get("id"), str) or not compact["id"]:
+        raise PacketError("bd returned a relationship without an id")
+    return compact
+
+
+def _project_relationships(
+    bead: Mapping[str, Any], reader: BdReader
+) -> dict[str, Any]:
+    """Keep dispatched fields intact while bounding embedded graph records."""
+    projected = dict(bead)
+    for relationship_name in ("dependencies", "dependents"):
+        value = projected.get(relationship_name)
+        if value is None:
+            continue
+        if not isinstance(value, list):
+            raise PacketError(
+                f"bd returned an invalid {relationship_name} relationship list"
+            )
+        projected[relationship_name] = [
+            _compact_relationship(reader.show(item) if isinstance(item, str) else item)
+            for item in value
+        ]
+
+    parent = projected.get("parent")
+    if isinstance(parent, str) and parent:
+        projected["parent"] = _compact_relationship(reader.show(parent))
+    elif isinstance(parent, Mapping):
+        projected["parent"] = _compact_relationship(parent)
+    return projected
+
+
 def _render_prompt(snapshot: PacketSnapshot, template: str) -> str:
     payload = json.dumps(snapshot.to_dict(), indent=2, sort_keys=True)
     return _bounded(
@@ -390,7 +442,7 @@ def compile_launch_snapshot(
     effort: str | None = None,
 ) -> PacketSnapshot:
     leader_id, bead_ids = resolve_group(bead_id, reader)
-    beads = tuple(reader.show(item) for item in bead_ids)
+    beads = tuple(_project_relationships(reader.show(item), reader) for item in bead_ids)
     ordered = tuple(
         sorted(
             beads,
