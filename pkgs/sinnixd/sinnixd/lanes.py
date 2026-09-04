@@ -506,7 +506,7 @@ def pull_requests(
             str(limit),
             "--json",
             "number,url,title,headRefName,state,isDraft,mergeable,reviewDecision,"
-            "autoMergeRequest,statusCheckRollup,updatedAt",
+            "headRefOid,mergeCommit,autoMergeRequest,statusCheckRollup,updatedAt",
         ],
         cwd=root,
     )
@@ -527,6 +527,33 @@ class LaneRow:
     worktree: Worktree
     bead: str | None
     pr: Mapping[str, Any] | None
+
+
+def _merged_pr_matches_tree(row: LaneRow) -> bool:
+    """Accept a merged PR only when it describes the checkout's current head."""
+    pr = row.pr
+    tree = row.worktree
+    if pr is None or pr.get("state") != "MERGED":
+        return False
+    if pr.get("headRefOid") == tree.head and tree.head:
+        return True
+
+    # A merge commit is valid evidence for repositories that land PRs with a
+    # merge commit: the branch head must be part of that commit's ancestry.
+    merge_commit = pr.get("mergeCommit")
+    merge_oid = merge_commit.get("oid") if isinstance(merge_commit, Mapping) else None
+    if (
+        not isinstance(merge_oid, str)
+        or not merge_oid
+        or not tree.head
+        or tree.path is None
+    ):
+        return False
+    try:
+        _git(tree.path, "merge-base", "--is-ancestor", tree.head, merge_oid)
+    except LaneError:
+        return False
+    return True
 
 
 def lane_rows(project: ProjectAdapter, *, full: bool = False) -> list[LaneRow]:
@@ -558,10 +585,11 @@ def lane_sync(
     for row in lane_rows(project):
         tree = row.worktree
         assert tree.branch is not None
-        merged = tree.integrated or (
-            row.pr is not None and row.pr.get("state") == "MERGED"
-        )
+        merged = tree.integrated or _merged_pr_matches_tree(row)
         if not merged:
+            reason = None
+            if row.pr is not None and row.pr.get("state") == "MERGED":
+                reason = "merged PR does not match the current branch head"
             remaining.append(
                 {
                     "branch": tree.branch,
@@ -571,6 +599,7 @@ def lane_sync(
                     "dirty": tree.dirty,
                     "pr": row.pr.get("number") if row.pr else None,
                     "pr_state": row.pr.get("state") if row.pr else None,
+                    **({"reason": reason} if reason else {}),
                 }
             )
             continue

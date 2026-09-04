@@ -623,6 +623,7 @@ def test_lane_sync_closes_and_removes_merged_lanes_and_reports_the_rest(
             "number": 2,
             "state": "MERGED",
             "headRefName": "feature/packet/fx-2",
+            "headRefOid": "abc123",
         },
         "feature/packet/fx-3": {
             "number": 3,
@@ -649,6 +650,62 @@ def test_lane_sync_closes_and_removes_merged_lanes_and_reports_the_rest(
     remaining = {row["branch"]: row for row in synced["remaining"]}
     assert remaining["feature/packet/fx-2"]["reason"].startswith("merged but")
     assert remaining["feature/packet/fx-3"]["pr_state"] == "OPEN"
+
+
+def test_lane_sync_does_not_reuse_a_historical_merged_pr_for_a_new_branch_head(
+    fake_commands: dict[str, Any],
+    fake_wt: dict[str, Any],
+    fake_bd: FakeBd,
+    config: Config,
+    project_root: Path,
+    tmp_path: Path,
+) -> None:
+    """A branch-name match is informational when the PR merged an older head."""
+    project = load_project_adapter(project_root)
+    fake_wt["trees"] = [tree("feature/packet/fx-1", tmp_path / "a")]
+    fake_commands["prs"] = {
+        "feature/packet/fx-1": {
+            "number": 9,
+            "state": "MERGED",
+            "headRefName": "feature/packet/fx-1",
+            "headRefOid": "historical-head",
+        }
+    }
+
+    synced = lanes.lane_sync(config, project)
+
+    assert synced["closed"] == []
+    assert synced["removed"] == []
+    assert fake_wt["removed"] == []
+    remaining = synced["remaining"]
+    assert len(remaining) == 1
+    assert remaining[0]["branch"] == "feature/packet/fx-1"
+    assert remaining[0]["reason"] == "merged PR does not match the current branch head"
+
+
+def test_lane_sync_removes_a_clean_worktree_for_the_current_merged_pr_head(
+    fake_commands: dict[str, Any],
+    fake_wt: dict[str, Any],
+    fake_bd: FakeBd,
+    config: Config,
+    project_root: Path,
+    tmp_path: Path,
+) -> None:
+    project = load_project_adapter(project_root)
+    fake_wt["trees"] = [tree("feature/packet/fx-1", tmp_path / "a")]
+    fake_commands["prs"] = {
+        "feature/packet/fx-1": {
+            "number": 9,
+            "state": "MERGED",
+            "headRefName": "feature/packet/fx-1",
+            "headRefOid": "abc123",
+        }
+    }
+
+    synced = lanes.lane_sync(config, project)
+
+    assert synced["closed"] == ["fx-1"]
+    assert synced["removed"] == ["feature/packet/fx-1"]
 
 
 def test_refill_starts_ready_beads_without_a_worktree_or_pr_up_to_the_limit(
