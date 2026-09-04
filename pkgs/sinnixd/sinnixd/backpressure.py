@@ -31,10 +31,14 @@ MEMORY_FULL_FREEZE = 25.0
 # that caused the freeze. Both signals must fall well clear first.
 RESUME_BELOW = 10.0
 
-# Frozen in this order and thawed in reverse: agent lanes are the largest and
-# the most restartable, bulk is the work the operator is most likely waiting
-# on being able to finish.
-FREEZE_ORDER = ("agent", "normal", "bulk")
+# IO pressure drains test admission without delaying API-bound agents. Memory
+# pressure closes agent admission first because several harnesses have a
+# material aggregate resident set.
+CLOSE_ORDER = {
+    "io": ("pytest", "normal", "bulk"),
+    "memory": ("agent", "pytest", "normal", "bulk"),
+}
+MANAGED_GROUPS = ("agent", "pytest", "normal", "bulk")
 
 
 def read_pressure(root: Path = Path("/proc/pressure")) -> dict[str, float]:
@@ -104,11 +108,30 @@ def tick(*, spool: Path | None, pressure_root: Path = Path("/proc/pressure")) ->
     except PueueError as error:
         return {"action": "unavailable", "error": str(error), "pressure": pressure}
 
-    paused = [name for name in FREEZE_ORDER if groups.get(name) == "Paused"]
-    running = [name for name in FREEZE_ORDER if groups.get(name) == "Running"]
+    paused = [name for name in MANAGED_GROUPS if groups.get(name) == "Paused"]
     signal = over_threshold(pressure)
 
-    if signal is not None and running:
+    if signal is not None:
+        close_order = CLOSE_ORDER[signal]
+        obsolete = [name for name in paused if name not in close_order]
+        if obsolete:
+            target = obsolete[0]
+            try:
+                pueue.resume(target)
+            except PueueError as error:
+                return {"action": "failed", "group": target, "error": str(error)}
+            event = {"action": "thawed", "group": target, "signal": signal, **pressure}
+            _append(spool, event)
+            return event
+
+        running = [name for name in close_order if groups.get(name) == "Running"]
+        if not running:
+            return {
+                "action": "hold",
+                "frozen": paused,
+                "signal": signal,
+                **pressure,
+            }
         target = running[0]
         try:
             pueue.pause(target)
