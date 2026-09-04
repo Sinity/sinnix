@@ -15,7 +15,7 @@ from typing import Any, Mapping, Sequence
 
 from . import pueue
 from .config import Config
-from .lanes import LaneRow, _codex_review_gate, lane_rows
+from .lanes import LaneRow, _codex_review_gate, _merged_pr_matches_tree, lane_rows
 from .launch import job_view
 from .packets import PacketError, SubprocessBdReader
 from .projects import ProjectAdapter
@@ -35,6 +35,9 @@ class Snapshot:
     lanes: tuple[LaneRow, ...]
     ready: tuple[Mapping[str, Any], ...]
     errors: tuple[str, ...] = field(default_factory=tuple)
+    # Bead records of the lanes whose merged PR could complete them, keyed by
+    # bead id: a merge is only this lane's when the PR binds this bead.
+    beads: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         agents = agents_by_bead(self.tasks)
@@ -48,7 +51,12 @@ class Snapshot:
             },
             "jobs": [job_view(task) for task in self.tasks],
             "lanes": [
-                lane_dict(row, agents.get(row.bead or ""), self.now)
+                lane_dict(
+                    row,
+                    agents.get(row.bead or ""),
+                    self.now,
+                    self.beads.get(row.bead or ""),
+                )
                 for row in self.lanes
             ],
             "ready": [
@@ -160,11 +168,19 @@ def agents_by_bead(tasks: Sequence[Task]) -> dict[str, Task]:
     return newest
 
 
-def lane_stage(row: LaneRow, agent: Task | None) -> tuple[str, str]:
+def lane_stage(
+    row: LaneRow, agent: Task | None, bead: Mapping[str, Any] | None = None
+) -> tuple[str, str]:
     """(stage, next): what the lane's facts say it is, and what follows mechanically."""
-    tree = row.worktree
     pull = pr_summary(row.pr)
-    if tree.integrated or (pull and pull["state"] == "MERGED"):
+    # A lane whose job has not finished is that job, whatever its branch and PR
+    # look like: nothing may act on a worktree an agent still holds.
+    if agent is not None and not agent.terminal:
+        return f"{agent.label.split(':')[1]} {job_view(agent)['phase']}", "wait"
+    # Completion is a merged PR bound to this bead, branch and head — the same
+    # evidence lane sync requires. wt's integrated verdict is satisfied by a
+    # branch that carries no commit of its own.
+    if _merged_pr_matches_tree(row, bead)[0]:
         return "merged", "lane sync"
     if pull and pull["state"] == "OPEN":
         if pull["mergeable"] == "CONFLICTING":
@@ -181,25 +197,34 @@ def lane_stage(row: LaneRow, agent: Task | None) -> tuple[str, str]:
             return "Codex review pending", "wait"
         if pull["auto_merge"]:
             return "auto-merge armed", "wait for merge"
-        return "pr open", "gh pr merge --auto --squash"
+        # Publication arms the merge behind the gate; the screen never asks for
+        # a merge by hand.
+        return "pr open", "lane publish"
     if pull and pull["state"] == "CLOSED":
         return "pr closed", "lane sync or restart"
+    if pull and pull["state"] == "MERGED":
+        # The merge published an earlier head, so it does not complete this
+        # lane and lane sync will name which binding failed. The integrated
+        # verdict cannot prove completion, but it does say whether the branch
+        # still holds work of its own to publish.
+        following = "lane sync" if row.worktree.integrated else "lane publish"
+        return "merged PR is not this head", following
     if agent is not None:
         phase = job_view(agent)["phase"]
-        kind = agent.label.split(":")[1]
-        if phase in {"queued", "paused"}:
-            return f"{kind} {phase}", "wait"
-        if phase == "running":
-            return f"{kind} running", "wait"
         if phase == "succeeded":
             return "unpublished", "lane publish"
-        return f"{kind} {phase}", "job logs, then lane rebase"
+        return f"{agent.label.split(':')[1]} {phase}", "job logs, then lane rebase"
     return "idle", "lane rebase or publish"
 
 
-def lane_dict(row: LaneRow, agent: Task | None, now: datetime) -> dict[str, Any]:
+def lane_dict(
+    row: LaneRow,
+    agent: Task | None,
+    now: datetime,
+    bead: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     tree = row.worktree
-    stage, following = lane_stage(row, agent)
+    stage, following = lane_stage(row, agent, bead)
     since = agent.started_at or agent.enqueued_at if agent else None
     return {
         "lane": tree.path.name if tree.path else tree.branch,
@@ -251,11 +276,22 @@ def collect(
     except (WorktrunkError, PacketError, RuntimeError) as error:
         lanes = ()
         errors.append(f"lanes: {error}")
+    reader = SubprocessBdReader(project.root)
     try:
-        ready = tuple(SubprocessBdReader(project.root).ready())
+        ready = tuple(reader.ready())
     except PacketError as error:
         ready = ()
         errors.append(f"bd: {error}")
+    beads: dict[str, Mapping[str, Any]] = {}
+    for row in lanes:
+        if row.bead is None or row.bead in beads or row.pr is None:
+            continue
+        if row.pr.get("state") != "MERGED":
+            continue
+        try:
+            beads[row.bead] = reader.show(row.bead)
+        except PacketError as error:
+            errors.append(f"bd: {error}")
     return Snapshot(
         project_id=project.project_id,
         now=now or datetime.now(UTC),
@@ -264,6 +300,7 @@ def collect(
         lanes=lanes,
         ready=ready,
         errors=tuple(errors),
+        beads=beads,
     )
 
 
@@ -311,7 +348,13 @@ def render(snapshot: Snapshot) -> str:
     failed.sort(key=lambda task: task.ended_at or "", reverse=True)
     agents = agents_by_bead(snapshot.tasks)
     lane_facts = [
-        (row, lane_stage(row, agents.get(row.bead or ""))) for row in snapshot.lanes
+        (
+            row,
+            lane_stage(
+                row, agents.get(row.bead or ""), snapshot.beads.get(row.bead or "")
+            ),
+        )
+        for row in snapshot.lanes
     ]
     attention = [
         (row, stage)
