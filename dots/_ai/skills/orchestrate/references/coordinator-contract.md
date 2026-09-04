@@ -14,8 +14,9 @@ state below. It holds no campaign state itself; `agentctl` holds none either.
 - **Events**: one persistent watch on `agentctl events tail --follow
 --project <p>` (spool: `/realm/state/agentctl/events.jsonl`): every task's
   start and finish, and backpressure freezes, in local time.
-- **History**: per-project memory (`~/.claude/projects/<p>/memory/MEMORY.md`)
-  and the repo's `docs/atlas/`.
+- **Project rules and history**: read the repository's `CLAUDE.md` and its
+  per-project memory index (`~/.claude/projects/<p>/memory/MEMORY.md`) before
+  dispatch or integration; use `docs/atlas/` for product orientation.
 
 ## Who drives
 
@@ -34,7 +35,7 @@ Look for the verb before writing any procedure: `agentctl <verb> --help`.
 | start lanes for ready beads                | `agentctl refill <p> --limit N [--dry-run]`                         |
 | start one lane                             | `agentctl lane start <p> <bead> [--backend B --model M --effort E]` |
 | re-queue an agent into an existing lane    | `agentctl lane rebase <p> <bead> [--model M --effort E]`            |
-| publish a finished lane                    | `agentctl lane publish <worktree>` (or the worker's `lane publish`) |
+| publish an integrated product batch        | `agentctl lane publish <integration-worktree>`                     |
 | close merged beads, remove their worktrees | `agentctl lane sync <p>`                                            |
 | run a declared operation                   | `agentctl job start <p> <operation> [--workspace <path>] [--wait]`  |
 | read a job                                 | `agentctl job get\|logs\|result <id>`                               |
@@ -47,21 +48,24 @@ A missing capability is a bead against the substrate. Declared operations are
 the extension point: `.agentctl/project.toml` in the repo, live on the next
 call.
 
-Publication policy is per-repository: polylogue lands via `lane publish`
-(PR + auto-merge behind the required verify check); **sinnix publishes from
-`master` directly** — verify at exact head, merge or fast-forward, push.
+Publication policy is per-repository. Polylogue gets one PR per coherent
+integration batch. Sinnix publishes from `master` directly after one combined
+review and verification pass. Candidate lanes do not publish themselves.
 
 ## The operating loop
 
-1. `agentctl lane sync <p>`: merged lanes close their beads and lose their
-   worktrees. Excisions land as whole merges.
-2. Run the corpus once at the master boundary:
+1. Inventory live lanes, worktrees, Beads, and project rules. Integrate
+   compatible candidate commits into one coherent batch.
+2. Review and verify that combined diff, then publish according to the
+   repository policy. Close Beads only after their commits are integrated.
+3. Run the corpus once at the master boundary:
    `agentctl job start polylogue verify_all`. Never a corpus run per lane.
-3. `agentctl view <p>`; decide; `refill` or `lane start` the next wave.
+4. Remove integrated worktrees, reconcile the task state, then dispatch the
+   next ready ownership groups.
 
 **Stages on the view** and what follows mechanically: `lane queued/running`
-→ wait; `unpublished` (agent done, no PR) → `lane publish`; `pr open` →
-`gh pr merge --auto --squash` (the worker should have armed it);
+→ wait; `unpublished` → review and integrate its candidate commit; `pr open` →
+`gh pr merge --auto --squash`;
 `auto-merge armed` / `checks running` → wait; `checks failing` or `changes
 requested` → fix in the lane, push; `conflicting` → `lane rebase`;
 `lane failed/timed-out` → `job logs`, then `lane rebase`; `merged` →
@@ -70,7 +74,8 @@ requested` → fix in the lane, push; `conflicting` → `lane rebase`;
 **Refill** skips epics, beads with a worktree, and beads with an open PR; it
 dedupes nothing else. `--dry-run` lists the candidates.
 
-**Verification**: lanes run `verify_affected`; the corpus runs once at the
+**Verification**: lanes run focused tests and `verify_quick`; the integrated
+batch runs affected verification when declared; the corpus runs once at the
 master boundary as `verify_all`. `devtools verify` selects from the
 checkout's one testmon datafile and writes back; `--all` runs everything; a
 corrupt or foreign datafile stops with `graph_unusable` (delete it and
@@ -78,9 +83,10 @@ rerun). Wrongly skipped tests are acceptable, a refusal is not. A package or
 interpreter change is a reported full run. Read
 `.cache/verify/runs/<id>/run.json` receipts.
 
-**Fix loops belong in lanes.** Lanes exit rebased on current master with the
-quick gate green. A PR failing checks goes back to its lane (`lane rebase`
-with the finding in the bead note), never fixed at the coordinator's desk.
+**Fix loops preserve batch ownership.** A finding isolated to one candidate
+goes back to that lane. Integration conflicts and cross-candidate findings are
+fixed on the integration branch so several workers do not rewrite the same
+batch.
 
 **Substrate defects** are next work items: file instances in the owning
 project's Beads with reproduction evidence. Deploy sinnix through the devshell
