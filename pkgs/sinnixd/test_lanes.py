@@ -116,9 +116,10 @@ def fake_commands(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
             }
             return ""
         if argv[:3] == ["gh", "pr", "merge"]:
+            armed = None if "--disable-auto" in argv else {"enabledAt": "now"}
             for pull in state["prs"].values():
                 if str(pull["number"]) == argv[3]:
-                    pull["autoMergeRequest"] = {"enabledAt": "now"}
+                    pull["autoMergeRequest"] = armed
             return ""
         if argv[:3] == ["gh", "pr", "comment"]:
             return ""
@@ -521,6 +522,112 @@ def test_lane_publish_does_not_treat_empty_review_decision_as_codex_verdict(
     assert not any(call[:3] == ["gh", "pr", "merge"] for call in fake_commands["calls"])
 
 
+def test_lane_publish_does_not_merge_before_a_late_exact_head_codex_review(
+    fake_commands: dict[str, Any],
+    fake_pueue: FakePueue,
+    fake_bd: FakeBd,
+    config: Config,
+    project_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Merge may not be invoked or armed while the head carries no verdict.
+
+    Goes red if publication treats a missing exact-head review as mergeable:
+    the first polls carry no review at all, and the verdict lands only later.
+    """
+    worktree = _git_worktree(monkeypatch, project_root, "feature/packet/fx-1")
+    fake_pueue.finish_when_waited(1, lambda fake: fake.succeed(1))
+    unreviewed = {
+        "number": 100,
+        "url": "u",
+        "state": "OPEN",
+        "headRefName": "feature/packet/fx-1",
+        "headRefOid": "abc123",
+        "autoMergeRequest": None,
+        "reviewDecision": "",
+        "statusCheckRollup": [],
+        "reviews": [],
+        "comments": [],
+        "reactionGroups": [],
+    }
+    findings = {
+        **unreviewed,
+        "reviews": [
+            {
+                "author": {"login": "chatgpt-codex-connector[bot]"},
+                "state": "COMMENTED",
+                "commit": {"oid": "abc123"},
+            }
+        ],
+    }
+    fake_commands["pr_views"]["feature/packet/fx-1"] = [
+        unreviewed,
+        unreviewed,
+        unreviewed,
+        findings,
+    ]
+    monkeypatch.setattr(lanes.time, "sleep", lambda _: None)
+
+    published = lanes.lane_publish(config, worktree)
+
+    assert not any(call[:3] == ["gh", "pr", "merge"] for call in fake_commands["calls"])
+    assert published["auto_merge"] is False
+    assert published["review"]["status"] == "findings"
+    assert published["review"]["round"] == 1
+    assert "review round 1/2" in published["next_action"]
+
+
+def test_lane_publish_disarms_a_merge_armed_before_the_current_head(
+    fake_commands: dict[str, Any],
+    fake_pueue: FakePueue,
+    fake_bd: FakeBd,
+    config: Config,
+    project_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A merge armed for an earlier head would land the pushed head unreviewed.
+
+    Goes red if publication reads `autoMergeRequest` as permission to skip the
+    review gate, or disarms only after pushing the new head.
+    """
+    worktree = _git_worktree(
+        monkeypatch,
+        project_root,
+        "feature/packet/fx-2",
+        events=fake_commands["calls"],
+    )
+    fake_commands["prs"]["feature/packet/fx-2"] = {
+        "number": 7,
+        "url": "u",
+        "state": "OPEN",
+        "headRefName": "feature/packet/fx-2",
+        "headRefOid": "abc123",
+        "autoMergeRequest": {"enabledAt": "x"},
+        "reviewDecision": "",
+        "statusCheckRollup": [],
+        "reviews": [],
+        "comments": [],
+        "reactionGroups": [],
+    }
+    fake_pueue.finish_when_waited(1, lambda fake: fake.succeed(1))
+    clock = iter((0.0, 0.0, 0.0, 0.0, 2.0))
+    monkeypatch.setattr(lanes, "CODEX_REVIEW_TIMEOUT_SECONDS", 1)
+    monkeypatch.setattr(lanes.time, "monotonic", lambda: next(clock, 2.0))
+    monkeypatch.setattr(lanes.time, "sleep", lambda _: None)
+
+    published = lanes.lane_publish(config, worktree)
+
+    calls = fake_commands["calls"]
+    disarm = ["gh", "pr", "merge", "7", "--disable-auto"]
+    assert disarm in calls
+    assert calls.index(disarm) < calls.index("push")
+    assert not any(
+        call[:3] == ["gh", "pr", "merge"] for call in calls[calls.index("push") :]
+    )
+    assert published["auto_merge"] is False
+    assert published["review"]["status"] == "timeout"
+
+
 def test_lane_publish_leaves_exact_head_codex_findings_actionable(
     fake_commands: dict[str, Any],
     fake_pueue: FakePueue,
@@ -727,7 +834,12 @@ def test_lane_publish_reuses_an_open_pr_and_reads_the_lane_body(
     project_root: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    worktree = _git_worktree(monkeypatch, project_root, "feature/packet/fx-2")
+    worktree = _git_worktree(
+        monkeypatch,
+        project_root,
+        "feature/packet/fx-2",
+        events=fake_commands["calls"],
+    )
     (worktree / ".lane").mkdir()
     (worktree / ".lane" / "body.md").write_text("Summary written by the lane\n")
     fake_commands["prs"]["feature/packet/fx-2"] = {
@@ -735,17 +847,31 @@ def test_lane_publish_reuses_an_open_pr_and_reads_the_lane_body(
         "url": "u",
         "state": "OPEN",
         "headRefName": "feature/packet/fx-2",
+        "headRefOid": "abc123",
         "autoMergeRequest": {"enabledAt": "x"},
+        "reviewDecision": "",
+        "statusCheckRollup": [],
+        "reviews": [
+            {
+                "author": {"login": "chatgpt-codex-connector"},
+                "state": "APPROVED",
+                "commit": {"oid": "abc123"},
+            }
+        ],
+        "comments": [],
+        "reactionGroups": [],
     }
     fake_pueue.finish_when_waited(1, lambda fake: fake.succeed(1))
 
     published = lanes.lane_publish(config, worktree)
 
-    assert not any(
-        call[:3] == ["gh", "pr", "create"] for call in fake_commands["calls"]
-    )
-    assert not any(call[:3] == ["gh", "pr", "merge"] for call in fake_commands["calls"])
+    calls = fake_commands["calls"]
+    assert not any(call[:3] == ["gh", "pr", "create"] for call in calls)
+    push = calls.index("push")
+    assert calls.index(["gh", "pr", "merge", "7", "--disable-auto"]) < push
+    assert calls.index(["gh", "pr", "merge", "7", "--auto", "--squash"]) > push
     assert published["pr"] == 7 and published["created"] is False
+    assert published["auto_merge"] is True
 
 
 def test_lane_publish_reports_reviewable_pr_when_auto_merge_is_unavailable(
@@ -806,7 +932,19 @@ def test_lane_publish_uses_the_observed_remote_head_as_a_force_push_lease(
         "url": "u",
         "state": "OPEN",
         "headRefName": "feature/packet/fx-2",
-        "autoMergeRequest": {"enabledAt": "x"},
+        "headRefOid": "abc123",
+        "autoMergeRequest": None,
+        "reviewDecision": "",
+        "statusCheckRollup": [],
+        "reviews": [
+            {
+                "author": {"login": "chatgpt-codex-connector"},
+                "state": "APPROVED",
+                "commit": {"oid": "abc123"},
+            }
+        ],
+        "comments": [],
+        "reactionGroups": [],
     }
     fake_pueue.finish_when_waited(1, lambda fake: fake.succeed(1))
 
@@ -847,7 +985,7 @@ def test_lane_publish_refuses_when_the_remote_head_lease_is_rejected(
     assert not any(
         call[:3] == ["gh", "pr", "create"] for call in fake_commands["calls"]
     )
-    assert not any(call[:3] == ["gh", "pr", "merge"] for call in fake_commands["calls"])
+    assert not any("--auto" in call for call in fake_commands["calls"])
 
 
 def test_lane_publish_refuses_a_dirty_worktree_but_ignores_lane_artifacts(
