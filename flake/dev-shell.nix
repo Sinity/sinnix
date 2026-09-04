@@ -128,6 +128,10 @@
         # nh doesn't wrap build-vm; keep direct nixos-rebuild.
         test-vm = pkgs.writeShellScriptBin "test-vm" ''
           set -euo pipefail
+          if [ "''${SINNIXD_PRINCIPAL:-}" = agent-control ]; then
+            echo "sinnix test-vm: refused in a managed lane; declare a pueue operation and run it with agentctl" >&2
+            exit 64
+          fi
           ${commandRegistry.rebuildLock "test-vm"}
           ${resolveFlakeDir}
           ${localInputOverrideArgs}

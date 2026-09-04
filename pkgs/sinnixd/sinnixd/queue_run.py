@@ -442,6 +442,8 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
             "SINNIXD_QUEUE_WORKER": "1",
         }
     )
+    if pool:
+        child_environment["SINNIXD_QUEUE_POOL"] = str(pool)
     with open(log_path, "wb") as log:
         stdout: Any = log
         result_file = None
