@@ -438,6 +438,24 @@ rec {
     };
   };
 
+  # An agent CLI puts its outermost process in agent.slice unless it is
+  # already inside a declared accounting boundary. These are those
+  # boundaries: agent.slice is the interactive plane, and sinnixd.slice is the
+  # whole job plane — the coordinator, every pool slice, and the per-task
+  # scope that carries a lane's MemoryMax and its cancellation reap. Naming
+  # the outer slice rather than each pool keeps a new pool from launching an
+  # agent that escapes its own budget.
+  agentContainedSlices = [
+    "agent.slice"
+    "sinnixd.slice"
+  ];
+  # Shell `case` pattern matched against /proc/self/cgroup. The separators
+  # are load-bearing: "sinnixd-pueue-agent.slice" ends in "agent.slice"
+  # without being it.
+  agentContainedCasePattern = lib.concatMapStringsSep "|" (
+    slice: ''*"/${slice}/"*''
+  ) agentContainedSlices;
+
   baseSurfaces = {
     sshd = {
       unit = "sshd.service";

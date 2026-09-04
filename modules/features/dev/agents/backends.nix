@@ -6,6 +6,7 @@
   lib,
   pkgs,
   scriptPkgs,
+  runtimeDefaults,
   agentRuntimePath,
   hermesRuntimePath,
   sinnixCfg,
@@ -55,11 +56,13 @@ let
     secretName: lib.attrByPath [ "secrets" "paths" secretName ] "/run/agenix/${secretName}" sinnixCfg;
 
   # Put the outermost interactive agent process in the same cgroup tree as
-  # declared agent work. Processes launched from an existing managed job or
-  # agent scope already inherit the correct accounting boundary.
+  # declared agent work. A process already inside one of
+  # runtimeDefaults.agentContainedSlices stays there: re-execing out of a
+  # queued task's scope drops the lane's MemoryMax and leaves the agent
+  # behind when the task is cancelled.
   agentScopePrelude = ''
     case "$(< /proc/self/cgroup)" in
-      *"/agent.slice/"*|*"/sinnixd-work.slice/"*) ;;
+      ${runtimeDefaults.agentContainedCasePattern}) ;;
       *)
         exec ${pkgs.systemd}/bin/systemd-run --user --scope --quiet \
           --slice=agent.slice -- "$0" "$@"

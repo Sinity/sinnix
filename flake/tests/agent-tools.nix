@@ -662,7 +662,9 @@ in
             # Every outer agent wrapper must enter agent.slice before its
             # bootstrap runs. A missing scope launch leaves npm/bootstrap work
             # in the terminal session and makes the cgroup regression invisible
-            # to admission.
+            # to admission. The containment pattern is asserted verbatim so
+            # the shipped wrapper and the guard exercised by the
+            # agent-scope-guard fixture cannot diverge.
             for wrapper in \
               "$HOME/.local/bin/claude-full" \
               "$HOME/.local/bin/codex" \
@@ -670,6 +672,7 @@ in
               grep -Fq 'launch.sh' "$wrapper"
               grep -Fq '/proc/self/cgroup' "$wrapper"
               grep -Fq -- '--slice=agent.slice' "$wrapper"
+              grep -Fq -- '${runtimeDefaults.agentContainedCasePattern}' "$wrapper"
             done
             if grep -R 'MemoryHigh\|MemoryMax\|MemorySwapMax' "$HOME/.local/bin/claude-full" "$HOME/.local/bin/codex" "$HOME/.local/bin/gemini"; then
               echo "agent wrappers must not hardcode resource limits" >&2
@@ -729,6 +732,54 @@ in
             test "$PATH" = "$before_path"
             test "$(command -v direct-command)" = "$fixture_bin/direct-command"
             test "$(direct-command)" = direct
+            touch "$out"
+          '';
+      # The agent wrappers' scope decision, exercised against cgroup paths
+      # taken from this host rather than re-asserted as wrapper text. A queued
+      # task's scope is the boundary that carries the lane's MemoryMax and the
+      # cancellation reap, so an agent started inside one must stay in it,
+      # while an agent started from a terminal must still be moved.
+      agentScopeGuardFixture =
+        pkgs.runCommand "agent-scope-guard-fixture"
+          {
+            nativeBuildInputs = [ pkgs.bash ];
+          }
+          ''
+            cat > guard.sh <<'GUARD'
+            case "$1" in
+              ${runtimeDefaults.agentContainedCasePattern}) echo contained ;;
+              *) echo reexec ;;
+            esac
+            GUARD
+
+            expect() {
+              actual="$(${pkgs.bash}/bin/bash guard.sh "$2")"
+              if [ "$actual" != "$1" ]; then
+                echo "agent scope guard: expected $1 for $2, got $actual" >&2
+                exit 1
+              fi
+            }
+
+            user=/user.slice/user-1000.slice/user@1000.service
+
+            # A lane's queued task: the scope that owns its MemoryMax.
+            expect contained "0::$user/sinnixd.slice/sinnixd-pueue.slice/sinnixd-pueue-agent.slice/sinnixd-pueue-agent-sinnix-lane-sinnix-5ntw-9b15d371.scope"
+            # A pool scope systemd named, rather than one named for a launch input.
+            expect contained "0::$user/sinnixd.slice/sinnixd-pueue.slice/sinnixd-pueue-agent.slice/run-p988139-i193814380.scope"
+            # A pool other than agent still bounds what it launches.
+            expect contained "0::$user/sinnixd.slice/sinnixd-pueue.slice/sinnixd-pueue-normal.slice/run-p491309-i193318106.scope"
+            expect contained "0::$user/sinnixd.slice/sinnixd-work.slice/pueued.service"
+            expect contained "0::$user/agent.slice/run-p1088598-i193914838.scope"
+
+            # An interactive launch from a terminal has no boundary yet.
+            expect reexec "0::$user/session.slice/kitty-52885-22.scope"
+            expect reexec "0::$user/app.slice/app-chromium.scope"
+            expect reexec "0::/system.slice/system-critical.slice/sshd.service"
+            # Separator discipline: a slice merely ending in a contained name
+            # is a different slice with a different budget.
+            expect reexec "0::$user/app.slice/app-agent.slice/app-agent-stub.scope"
+            expect reexec "0::$user/app.slice/app-sinnixd.slice/app-sinnixd-stub.scope"
+
             touch "$out"
           '';
       agentctlOperationFixture =
@@ -1132,6 +1183,7 @@ in
       checks = {
         agent-resource-policy = agentResourcePolicy;
         agent-npm-bootstrap-recovery = agentNpmBootstrapRecovery;
+        agent-scope-guard = agentScopeGuardFixture;
         direnv-direct-commands = direnvDirectCommandsFixture;
         agentctl-operation-contract = agentctlOperationFixture;
         agentctl-operation-launch = agentctlOperationLaunchFixture;
