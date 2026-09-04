@@ -136,7 +136,14 @@ def backup_database(
                 f"file:{source_path}?mode=ro&immutable=1", uri=True, timeout=5.0
             )
             source.execute("PRAGMA busy_timeout=5000")
-            require_quick_check(source)
+            page_count = int(source.execute("PRAGMA page_count").fetchone()[0])
+            if page_count <= FULL_INTEGRITY_PAGE_LIMIT:
+                integrity = source.execute("PRAGMA integrity_check").fetchone()
+                if integrity != ("ok",):
+                    raise RuntimeError(f"SQLite integrity_check failed: {integrity!r}")
+                print("SQLite integrity_check: ok")
+            else:
+                require_quick_check(source)
             source.close()
             source = None
             compress(source_path, compressed_path)
