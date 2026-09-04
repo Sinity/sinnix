@@ -63,7 +63,7 @@ mkFeatureModule {
 
       jsonFormat = pkgs.formats.json { };
       yamlFormat = pkgs.formats.yaml { };
-      inherit (helpers.data) mcpRegistry agentLanes;
+      inherit (helpers.data) mcpRegistry agentLanes runtimeDefaults;
       hermesMcpServersForProfile =
         mcpProfile:
         lib.mapAttrs mcpRegistry.renderHermesServer (
@@ -239,6 +239,7 @@ mkFeatureModule {
           lib
           pkgs
           scriptPkgs
+          runtimeDefaults
           agentRuntimePath
           hermesRuntimePath
           sinnixCfg
