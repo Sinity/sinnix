@@ -98,6 +98,11 @@
             "sinnix-nav-capture-daemon"
           ];
         };
+        picker-suite = mkScriptSuite {
+          name = "sinnix-picker";
+          suiteDir = ../../pkgs/sinnix-picker/tests;
+          scripts = [ "sinnix-picker" ];
+        };
       };
     };
 }

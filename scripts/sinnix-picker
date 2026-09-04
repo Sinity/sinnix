@@ -89,11 +89,9 @@ class Entry:
     label: str
     payload: str  # url, dir path, or clipboard text
 
-    def line(self) -> str:
-        # Tab-separated: fuzzel shows/matches the whole line; we split back
-        # out the payload on the far side of the last tab on selection.
+    def display(self) -> str:
         one_line_label = self.label.replace("\t", " ").replace("\n", " ")
-        return f"[{self.category}] {one_line_label}\t{self.category}\t{self.payload}"
+        return f"[{self.category}] {one_line_label}"
 
 
 def load_history() -> list[Entry]:
@@ -300,8 +298,8 @@ def dispatch(category: str, payload: str) -> None:
 
 def main() -> int:
     entries = gather()
-    lines = [e.line() for e in entries]
-    menu_input = "\n".join(l.split("\t")[0] for l in lines)
+    menu_lines = [f"{entry.display()}\t{index}" for index, entry in enumerate(entries)]
+    menu_input = "\n".join(menu_lines)
 
     result = subprocess.run(
         ["fuzzel", "--dmenu", "--prompt", "> "],
@@ -313,13 +311,13 @@ def main() -> int:
     if result.returncode != 0 or not result.stdout.strip():
         return 0  # cancelled
 
-    selected_label = result.stdout.rstrip("\n")
-    for full_line, entry in zip(lines, entries):
-        display = full_line.split("\t")[0]
-        if display == selected_label:
-            dispatch(entry.category, entry.payload)
-            return 0
-    return 1
+    try:
+        selected_index = int(result.stdout.rstrip("\n").rsplit("\t", 1)[1])
+        entry = entries[selected_index]
+    except (IndexError, ValueError):
+        return 1
+    dispatch(entry.category, entry.payload)
+    return 0
 
 
 if __name__ == "__main__":
