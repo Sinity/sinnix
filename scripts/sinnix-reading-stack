@@ -1,6 +1,6 @@
 # @sinnix-package
 # description: Bounded, visible reading-stack -- push/pop/list/peek over a small JSON state file, durable copy via sinnix-capture
-# runtimeInputs: python3 @sinnix-capture
+# runtimeInputs: python3 @sinnix-capture @sinnix-browser-app
 # pythonPackages: @sinnix-lib
 #!/usr/bin/env python3
 """sinnix-reading-stack: the replacement for "middle-click dumps a link into
@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
@@ -48,9 +49,9 @@ from pathlib import Path
 
 from sinnix_lib.atomic_json import read_json, write_json_atomic
 
-STATE_DIR = Path.home() / ".local/state/sinnix"
+STATE_DIR = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "sinnix"
 STATE_FILE = STATE_DIR / "reading-stack.json"
-CAPTURE_ROOT = "/realm/data/activity"
+CAPTURE_ROOT = os.environ.get("SINNIX_CAPTURE_ROOT", "/realm/data/activity")
 SOFT_CAP = 20
 
 
@@ -87,9 +88,11 @@ def cmd_push(args: argparse.Namespace) -> int:
     items = _load()
     entry = {
         "url": args.url,
-        "title": args.title or args.url,
+        "title": args.title or args.anchor_text or args.url,
         "source_url": args.source_url or None,
         "source_title": args.source_title or None,
+        "anchor_text": args.anchor_text or None,
+        "note": args.note or None,
         "pushed_at": time.time(),
     }
     # De-dup by URL: re-pushing something already queued bumps it to the top
@@ -128,7 +131,7 @@ def cmd_list(args: argparse.Namespace) -> int:
     if args.compact:
         for e in items[: args.limit]:
             title = (e.get("title") or e["url"])[:60]
-            print(f"{title}\t{e['url']}")
+            print(f"{title}\t{e['url']}\t{e.get('note') or ''}")
         if len(items) > SOFT_CAP:
             print(f"-- {len(items)} total, over soft cap {SOFT_CAP} --")
     else:
@@ -141,6 +144,24 @@ def cmd_count(_args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_open(args: argparse.Namespace) -> int:
+    items = _load()
+    entry = next((item for item in items if not args.url or item["url"] == args.url), None)
+    if entry is None:
+        print("reading-stack: empty" if not args.url else f"reading-stack: no entry for {args.url}", file=sys.stderr)
+        return 1
+    try:
+        subprocess.Popen(["sinnix-browser-app", entry["url"]], start_new_session=True)
+    except FileNotFoundError:
+        print("reading-stack: sinnix-browser-app is unavailable", file=sys.stderr)
+        return 1
+    items.remove(entry)
+    _save(items)
+    _capture("pop", entry)
+    print(json.dumps(entry))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="sinnix-reading-stack")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -150,6 +171,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--title", default=None)
     p.add_argument("--source-url", default=None)
     p.add_argument("--source-title", default=None)
+    p.add_argument("--anchor-text", default=None)
+    p.add_argument("--note", default=None)
     p.set_defaults(func=cmd_push)
 
     p = sub.add_parser("pop")
@@ -163,6 +186,10 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("count")
     p.set_defaults(func=cmd_count)
+
+    p = sub.add_parser("open")
+    p.add_argument("--url", default=None, help="open and consume a queued entry; default is most-recent")
+    p.set_defaults(func=cmd_open)
 
     args = parser.parse_args(argv)
     return args.func(args)
