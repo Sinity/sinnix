@@ -39,6 +39,9 @@ AGENT_GROUP = "agent"
 AGENT_SLICE = "sinnixd-pueue-agent.slice"
 GH_TIMEOUT_SECONDS = 60
 PUSH_TIMEOUT_SECONDS = 2_400  # the push runs the repository's pre-push gate
+_PUBLICATION_MARKER = re.compile(
+    r"<!-- sinnixd:lane-publication (?P<payload>\{.*?\}) -->"
+)
 
 
 class LaneError(RuntimeError):
@@ -423,10 +426,11 @@ def lane_publish(
     bead_id = bead_id or _bead_from_branch(packets, branch)
     subject = title
     bead: Mapping[str, Any] | None = None
-    if subject is None:
-        if bead_id is None:
-            raise LaneError(f"{branch} does not name a bead; pass --bead or --title")
+    if bead_id is not None:
         bead = SubprocessBdReader(canonical.root).show(bead_id)
+    if subject is None:
+        if bead is None:
+            raise LaneError(f"{branch} does not name a bead; pass --bead or --title")
         subject = bead_subject(bead)
     body_path = body_file or (worktree / ".lane" / "body.md")
     if body_path.is_file():
@@ -444,6 +448,16 @@ def lane_publish(
 
     remote_head = _remote_head(worktree, branch)
     verification = _verify_for_publish(config, project, worktree)
+    head = _git(worktree, "rev-parse", "HEAD")
+    if bead_id is not None:
+        marker = json.dumps(
+            {"bead": bead_id, "branch": branch, "head": head},
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        if body and not body.endswith("\n"):
+            body += "\n"
+        body += f"<!-- sinnixd:lane-publication {marker} -->\n"
 
     push_arguments = ["push"]
     if remote_head is not None:
@@ -547,7 +561,7 @@ def pull_requests(
             str(limit),
             "--json",
             "number,url,title,headRefName,state,isDraft,mergeable,reviewDecision,"
-            "headRefOid,mergeCommit,autoMergeRequest,statusCheckRollup,updatedAt",
+            "headRefOid,mergeCommit,body,autoMergeRequest,statusCheckRollup,updatedAt",
         ],
         cwd=root,
     )
@@ -570,31 +584,73 @@ class LaneRow:
     pr: Mapping[str, Any] | None
 
 
-def _merged_pr_matches_tree(row: LaneRow) -> bool:
-    """Accept a merged PR only when it describes the checkout's current head."""
+def _publication_binding(body: Any) -> Mapping[str, str] | None:
+    if not isinstance(body, str):
+        return None
+    for match in reversed(tuple(_PUBLICATION_MARKER.finditer(body))):
+        try:
+            payload = json.loads(match.group("payload"))
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, Mapping):
+            continue
+        if all(isinstance(payload.get(key), str) and payload[key] for key in (
+            "bead",
+            "branch",
+            "head",
+        )):
+            return {
+                "bead": payload["bead"],
+                "branch": payload["branch"],
+                "head": payload["head"],
+            }
+    return None
+
+
+def _merged_pr_matches_tree(
+    row: LaneRow, bead: Mapping[str, Any] | None
+) -> tuple[bool, str | None]:
+    """Accept merged PR evidence only when it binds the lane's bead and head."""
     pr = row.pr
     tree = row.worktree
     if pr is None or pr.get("state") != "MERGED":
-        return False
-    if pr.get("headRefOid") == tree.head and tree.head:
-        return True
+        return False, None
+    if pr.get("headRefOid") != tree.head or not tree.head:
+        # A merge commit is valid evidence for repositories that land PRs with
+        # a merge commit: the branch head must be part of that commit's ancestry.
+        merge_commit = pr.get("mergeCommit")
+        merge_oid = (
+            merge_commit.get("oid") if isinstance(merge_commit, Mapping) else None
+        )
+        if (
+            not isinstance(merge_oid, str)
+            or not merge_oid
+            or not tree.head
+            or tree.path is None
+        ):
+            return False, "merged PR does not match the current branch head"
+        try:
+            _git(tree.path, "merge-base", "--is-ancestor", tree.head, merge_oid)
+        except LaneError:
+            return False, "merged PR does not match the current branch head"
 
-    # A merge commit is valid evidence for repositories that land PRs with a
-    # merge commit: the branch head must be part of that commit's ancestry.
-    merge_commit = pr.get("mergeCommit")
-    merge_oid = merge_commit.get("oid") if isinstance(merge_commit, Mapping) else None
-    if (
-        not isinstance(merge_oid, str)
-        or not merge_oid
-        or not tree.head
-        or tree.path is None
-    ):
-        return False
-    try:
-        _git(tree.path, "merge-base", "--is-ancestor", tree.head, merge_oid)
-    except LaneError:
-        return False
-    return True
+    if bead is None:
+        return False, "merged PR does not bind the current bead"
+    binding = _publication_binding(pr.get("body"))
+    if binding is not None:
+        if (
+            binding["bead"] == str(bead.get("id") or "")
+            and binding["branch"] == tree.branch
+            and binding["head"] == tree.head
+        ):
+            return True, None
+        return False, "merged PR does not bind the current bead"
+
+    # PRs published before the marker existed remain eligible when their
+    # generated title binds the merged PR to this bead.
+    if pr.get("title") == bead_subject(bead):
+        return True, None
+    return False, "merged PR does not bind the current bead"
 
 
 def lane_rows(project: ProjectAdapter, *, full: bool = False) -> list[LaneRow]:
@@ -626,11 +682,15 @@ def lane_sync(
     for row in lane_rows(project):
         tree = row.worktree
         assert tree.branch is not None
-        merged = tree.integrated or _merged_pr_matches_tree(row)
+        bead = None
+        if row.bead is not None:
+            try:
+                bead = reader.show(row.bead)
+            except PacketError:
+                pass
+        pr_matches, pr_reason = _merged_pr_matches_tree(row, bead)
+        merged = pr_matches or (tree.integrated and row.pr is None)
         if not merged:
-            reason = None
-            if row.pr is not None and row.pr.get("state") == "MERGED":
-                reason = "merged PR does not match the current branch head"
             remaining.append(
                 {
                     "branch": tree.branch,
@@ -640,7 +700,7 @@ def lane_sync(
                     "dirty": tree.dirty,
                     "pr": row.pr.get("number") if row.pr else None,
                     "pr_state": row.pr.get("state") if row.pr else None,
-                    **({"reason": reason} if reason else {}),
+                    **({"reason": pr_reason} if pr_reason else {}),
                 }
             )
             continue
@@ -678,10 +738,6 @@ def lane_sync(
             continue
         removed.append(tree.branch)
         if row.bead is not None:
-            try:
-                bead = reader.show(row.bead)
-            except PacketError:
-                bead = None
             if bead is not None and bead.get("status") not in {"closed"}:
                 pr_ref = f"PR #{row.pr['number']}" if row.pr else "branch integrated"
                 # The merge is the fact; whoever the bead was assigned to no
