@@ -594,11 +594,14 @@ def _publication_binding(body: Any) -> Mapping[str, str] | None:
             continue
         if not isinstance(payload, Mapping):
             continue
-        if all(isinstance(payload.get(key), str) and payload[key] for key in (
-            "bead",
-            "branch",
-            "head",
-        )):
+        if all(
+            isinstance(payload.get(key), str) and payload[key]
+            for key in (
+                "bead",
+                "branch",
+                "head",
+            )
+        ):
             return {
                 "bead": payload["bead"],
                 "branch": payload["branch"],
