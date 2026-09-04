@@ -44,6 +44,10 @@
         name: action:
         pkgs.writeShellScriptBin name ''
           set -euo pipefail
+          if [ "''${SINNIXD_PRINCIPAL:-}" = agent-control ]; then
+            echo "sinnix $name: refused in a managed lane; declare a pueue operation and run it with agentctl" >&2
+            exit 64
+          fi
           ${commandRegistry.rebuildLock name}
           ${resolveFlakeDir}
           ${avoidRepoCwdForActivation}
@@ -78,6 +82,10 @@
         check = pkgs.writeShellScriptBin "check" ''
           set -euo pipefail
           ${resolveFlakeDir}
+          if [ "''${SINNIXD_PRINCIPAL:-}" = agent-control ] \
+            && [ "''${SINNIXD_OPERATION:-}" != check ]; then
+            exec agentctl job start sinnix check --workspace "$_flake_dir" --wait -- "$@"
+          fi
           exec 9>/tmp/sinnix-switch.lock
           if ! ${pkgs.util-linux}/bin/flock --nonblock 9; then
             echo "sinnix check: another heavy nix operation is running — queued behind it (waiting for the lock)" >&2

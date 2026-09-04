@@ -20,6 +20,7 @@ from pathlib import Path
 
 import pytest
 from sinnixd import pueue
+from sinnixd.queue_run import scope_unit_for
 
 # Recorded from `pueue status --json` on pueue 4.0.4 after one failing task.
 LIVE_STATUS = {
@@ -61,7 +62,7 @@ LIVE_STATUS = {
         },
     },
     "groups": {
-        "agent": {"status": "Running", "parallel_tasks": 4},
+        "agent": {"status": "Running", "parallel_tasks": 6},
         "bulk": {"status": "Running", "parallel_tasks": 1},
         "default": {"status": "Running", "parallel_tasks": 1},
         "pytest": {"status": "Running", "parallel_tasks": 1},
@@ -194,7 +195,7 @@ def test_the_client_environment_carries_no_inherited_secret(
 
 
 def test_groups_publish_the_whole_admission_policy(stub_pueue: Path) -> None:
-    assert pueue.groups() == {"agent": 4, "bulk": 1, "default": 1, "pytest": 1}
+    assert pueue.groups() == {"agent": 6, "bulk": 1, "default": 1, "pytest": 1}
 
 
 def test_log_reads_the_whole_output_not_a_tail(stub_pueue: Path) -> None:
@@ -332,6 +333,62 @@ def test_the_adapter_drives_a_real_daemon_end_to_end(
     pueue.remove([dependent])
     assert pueue.task(dependent) is None
     assert pueue.task(failing) is not None
+
+
+def test_a_private_pueue_task_places_its_child_in_the_declared_pool_scope(
+    live_pueue: str, tmp_path: Path
+) -> None:
+    """The private daemon must observe the same cgroup boundary as production."""
+    if not Path(f"/run/user/{os.getuid()}/bus").exists():
+        pytest.skip("no user systemd bus is available")
+
+    launch_path = tmp_path / "launch.json"
+    log_path = tmp_path / "queue.log"
+    job_id = "private-job"
+    subprocess.run(["pueue", "group", "add", "pytest"], check=True)
+    subprocess.run(["pueue", "parallel", "-g", "pytest", "1"], check=True)
+    launch_path.write_text(
+        json.dumps(
+            {
+                "job_id": job_id,
+                "project_id": "fixture",
+                "operation": "verify",
+                "pool": "pytest",
+                "argv": ["sh", "-c", "cat /proc/self/cgroup"],
+                "environment": {
+                    "HOME": os.environ["HOME"],
+                    "PATH": os.environ["PATH"],
+                    "XDG_RUNTIME_DIR": f"/run/user/{os.getuid()}",
+                    "PYTHONPATH": str(Path(__file__).parent),
+                },
+                "working_directory": str(tmp_path),
+                "timeout_seconds": 30,
+                "result_kind": "exit",
+                "label": "fixture:verify:private",
+                "log_path": str(log_path),
+            }
+        )
+    )
+    task_id = pueue.add(
+        group="pytest",
+        label="fixture:verify:private",
+        command=(
+            "env",
+            f"PYTHONPATH={Path(__file__).parent}",
+            sys.executable,
+            "-m",
+            "sinnixd.queue_run",
+            str(launch_path),
+        ),
+        working_directory=tmp_path,
+    )
+
+    finished = pueue.wait(task_id, timeout_seconds=60)
+
+    assert finished.succeeded, pueue.log(task_id)
+    cgroup = log_path.read_text()
+    assert f"/{scope_unit_for(job_id, 'pytest')}" in cgroup
+    assert "/sinnixd-pueue-pytest.slice/" in cgroup
 
 
 def test_kill_reaches_the_whole_process_tree(live_pueue: str, tmp_path: Path) -> None:

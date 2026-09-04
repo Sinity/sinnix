@@ -33,6 +33,8 @@ def test_start_writes_the_launch_input_and_queues_the_wrapper_in_the_pool(
     written = json.loads(input_path.read_text())
     assert written["argv"] == ["env", "fixture-verify"]
     assert written["timeout_seconds"] == 120
+    assert written["pool"] == "pytest"
+    assert written["scope_unit"].startswith("sinnixd-pueue-pytest-")
     assert written["result_kind"] == "json"
     assert written["result_path"].endswith(".result")
     assert written["event_spool_path"] == str(config.event_spool)
@@ -42,6 +44,23 @@ def test_start_writes_the_launch_input_and_queues_the_wrapper_in_the_pool(
     assert started["project"] == "fixture"
     assert started["operation"] == "verify"
     assert started["kind"] == "declared-operation"
+
+
+def test_operation_started_by_an_agent_preserves_its_routing_principal(
+    fake_pueue: FakePueue,
+    config: Config,
+    project_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SINNIXD_PRINCIPAL", "agent-control")
+    monkeypatch.setenv("SINNIXD_LANE_BEAD", "fx-1")
+    project = load_project_adapter(project_root)
+
+    started = launch.start_operation(config, project, project.operation("check"))
+
+    written = read_launch(config, fake_pueue.task(started["job_id"]))
+    assert written["environment"]["SINNIXD_PRINCIPAL"] == "agent-control"
+    assert written["environment"]["SINNIXD_LANE_BEAD"] == "fx-1"
 
 
 def test_extra_argv_is_appended_after_the_declared_exec(
