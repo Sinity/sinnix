@@ -155,7 +155,7 @@ def test_immutable_snapshot_source_is_compressed_without_copy(tmp_path: Path) ->
     )
     assert result.returncode == 0, result.stderr
     assert output.exists()
-    assert "SQLite quick_check(1): ok" in result.stdout
+    assert "SQLite integrity_check: ok" in result.stdout
     assert "SQLite compression: ok" in result.stdout
     assert not list(tmp_path.glob("*.tmp*"))
 
