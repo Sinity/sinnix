@@ -296,17 +296,17 @@ def test_lane_publish_uses_a_new_operation_from_the_lane_descriptor(
     descriptor_text = descriptor.read_text().replace(
         '[operations.verify_quick]\ndescription = "Fixture quick verification"\n'
         'exec = ["fixture-verify-quick"]\npool = "pytest"\nresult = "exit"\n'
-        'timeout_seconds = 120\n',
+        "timeout_seconds = 120\n",
         "",
     )
     descriptor.write_text(
         descriptor_text
-        + '\n[operations.verify_quick]\n'
+        + "\n[operations.verify_quick]\n"
         + 'description = "Lane-only quick verification"\n'
         + 'exec = ["lane-verify-quick"]\n'
         + 'pool = "pytest"\n'
         + 'result = "exit"\n'
-        + 'timeout_seconds = 120\n'
+        + "timeout_seconds = 120\n"
     )
     fake_pueue.finish_when_waited(1, lambda fake: fake.succeed(1))
 
