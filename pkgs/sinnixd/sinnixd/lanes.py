@@ -27,7 +27,7 @@ from .packets import (
     compile_launch_snapshot,
     rebase_prompt,
 )
-from .projects import ProjectAdapter
+from .projects import ProjectAdapter, ProjectConfigError, load_project_adapter
 from .worktrunk import Worktree, WorktrunkError
 
 LANE_OPERATION = "lane"
@@ -48,7 +48,10 @@ class LaneError(RuntimeError):
 def _auto_merge_unavailable(error: LaneError) -> bool:
     """Recognize GitHub's refusal when repository rules cannot support auto-merge."""
     message = str(error).lower()
-    return "protected branch rules are not configured" in message
+    return (
+        "protected branch rules are not configured" in message
+        or "protected branch rules not configured" in message
+    )
 
 
 def _run(argv: Sequence[str], *, cwd: Path, timeout: float = GH_TIMEOUT_SECONDS) -> str:
@@ -264,6 +267,35 @@ def _project_root_of(worktree: Path) -> Path:
     return common.parent.resolve()
 
 
+def _publication_project(
+    config: Config, worktree: Path
+) -> tuple[ProjectAdapter, ProjectAdapter]:
+    """Resolve the registered repository and the checkout's descriptor."""
+    repository_root = _project_root_of(worktree)
+    canonical = next(
+        (
+            load_project_adapter(root)
+            for root in config.project_roots
+            if root.resolve() == repository_root
+        ),
+        None,
+    )
+    if canonical is None:
+        raise LaneError(f"repository {repository_root} is not a configured project")
+    try:
+        checkout = load_project_adapter(worktree)
+    except (OSError, ProjectConfigError) as error:
+        raise LaneError(
+            f"lane checkout has no valid project descriptor: {error}"
+        ) from error
+    if checkout.project_id != canonical.project_id:
+        raise LaneError(
+            f"lane checkout project id {checkout.project_id} does not match "
+            f"registered project {canonical.project_id}"
+        )
+    return canonical, checkout
+
+
 def _remote_head(worktree: Path, branch: str) -> str | None:
     """Return the observed remote head to use as a single-ref push lease."""
     ref = f"refs/heads/{branch}"
@@ -341,18 +373,15 @@ def lane_publish(
             + ", ".join(dirty_paths[:8])
         )
     branch = _git(worktree, "symbolic-ref", "--quiet", "--short", "HEAD")
-    root = _project_root_of(worktree)
-    from .projects import load_project_adapter
-
-    project = load_project_adapter(root)
-    packets = PacketConfig.load(root)
+    canonical, project = _publication_project(config, worktree)
+    packets = PacketConfig.load(canonical.root)
     bead_id = bead_id or _bead_from_branch(packets, branch)
     subject = title
     bead: Mapping[str, Any] | None = None
     if subject is None:
         if bead_id is None:
             raise LaneError(f"{branch} does not name a bead; pass --bead or --title")
-        bead = SubprocessBdReader(root).show(bead_id)
+        bead = SubprocessBdReader(canonical.root).show(bead_id)
         subject = bead_subject(bead)
     body_path = body_file or (worktree / ".lane" / "body.md")
     if body_path.is_file():
