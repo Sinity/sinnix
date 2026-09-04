@@ -91,6 +91,8 @@ class Entry:
 
     def display(self) -> str:
         one_line_label = self.label.replace("\t", " ").replace("\n", " ")
+        if self.category in ("hist", "mark", "stack"):
+            one_line_label = f"{one_line_label} -- {self.payload}"
         return f"[{self.category}] {one_line_label}"
 
 
