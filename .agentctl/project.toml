@@ -37,6 +37,18 @@ exec = ["check"]
 pool = "bulk"
 result = "exit"
 
+[operations.check_heavy]
+description = "Run the heavy Sinnix check tier"
+exec = ["check-heavy"]
+pool = "bulk"
+result = "exit"
+
+[operations.check_all]
+description = "Run all Sinnix semantic checks"
+exec = ["check-all"]
+pool = "bulk"
+result = "exit"
+
 [operations.check_master]
 # Master-boundary watch: sinnix has no CI, so between landings nothing tests
 # master and one red masks the next (three stacked reds cost hours of lane

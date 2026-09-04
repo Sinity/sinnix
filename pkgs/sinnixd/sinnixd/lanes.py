@@ -34,7 +34,7 @@ REBASE_OPERATION = "rebase"
 AGENT_GROUP = "agent"
 # The scope's slice: the job plane, where pueued's own tasks live, so an
 # agent's memory counts against the plane's budget and not the desktop's.
-AGENT_SLICE = "sinnixd-work.slice"
+AGENT_SLICE = "sinnixd-pueue-agent.slice"
 GH_TIMEOUT_SECONDS = 60
 PUSH_TIMEOUT_SECONDS = 2_400  # the push runs the repository's pre-push gate
 
@@ -158,6 +158,7 @@ def queue_agent(
     environment = project.environment.values()
     # Task-authority writes from an agent must not default to the operator.
     environment.setdefault("BEADS_ACTOR", f"agent-{bead_id}")
+    environment["SINNIXD_PRINCIPAL"] = "agent-control"
     environment["SINNIXD_PROJECT_ID"] = project.project_id
     environment["SINNIXD_LANE_BEAD"] = bead_id
     return launch.enqueue(

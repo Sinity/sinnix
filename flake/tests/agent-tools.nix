@@ -302,6 +302,13 @@ in
           avoidPattern = runtimeDefaults.earlyoomEmergencyAvoidPattern;
           userSlices = runtimeDefaults.slices.user;
           managedWork = userSlices.sinnixd;
+          poolSlices = lib.genAttrs [
+            "sinnixd-pueue-agent"
+            "sinnixd-pueue-pytest"
+            "sinnixd-pueue-bulk"
+            "sinnixd-pueue-normal"
+            "sinnixd-pueue-interactive"
+          ] (name: userSlices.${name});
           forbiddenAvoidTokens = [
             "bash"
             "chrome"
@@ -329,7 +336,18 @@ in
           && managedWork.ManagedOOMMemoryPressureDurationSec == "30s"
           && userSlices.app.MemoryLow == "6G"
           && userSlices.session.MemoryLow == "5G"
-        ) "sinnixd work must yield to protected interactive slices without a hard CPU or memory cap";
+          && poolSlices.sinnixd-pueue-agent.MemoryMax == "10G"
+          && poolSlices.sinnixd-pueue-pytest.MemoryHigh == "6G"
+          && poolSlices.sinnixd-pueue-pytest.MemoryMax == "8G"
+          && poolSlices.sinnixd-pueue-pytest.MemorySwapMax == "0"
+          && poolSlices.sinnixd-pueue-pytest.CPUWeight == 20
+          && poolSlices.sinnixd-pueue-pytest.IOWeight == 20
+          && poolSlices.sinnixd-pueue-bulk.MemoryHigh == "10G"
+          && poolSlices.sinnixd-pueue-bulk.MemoryMax == "14G"
+          && poolSlices.sinnixd-pueue-bulk.MemorySwapMax == "0"
+          && poolSlices.sinnixd-pueue-bulk.CPUWeight == 20
+          && poolSlices.sinnixd-pueue-bulk.IOWeight == 10
+        ) "sinnixd coordinator work must yield to protected interactive slices; pool slices own fixed caps";
         pkgs.runCommand "sinnix-agent-resource-policy-check" { } ''
           touch "$out"
         '';

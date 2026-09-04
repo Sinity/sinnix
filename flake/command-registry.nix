@@ -453,6 +453,10 @@ in
       description = "Run heavy non-default checks sequentially to keep evaluation memory bounded";
       script = ''
         ${resolveFlakeDir}
+        if [ "''${SINNIXD_PRINCIPAL:-}" = agent-control ] \
+          && [ "''${SINNIXD_OPERATION:-}" != check_heavy ]; then
+          exec agentctl job start sinnix check_heavy --workspace "$_flake_dir" --wait -- "$@"
+        fi
         cd "$_flake_dir"
 
         ${loadCheckTargets "heavyChecks"}
@@ -470,6 +474,10 @@ in
       description = "Run the default semantic checks, then the heavy non-default suite sequentially";
       script = ''
         ${resolveFlakeDir}
+        if [ "''${SINNIXD_PRINCIPAL:-}" = agent-control ] \
+          && [ "''${SINNIXD_OPERATION:-}" != check_all ]; then
+          exec agentctl job start sinnix check_all --workspace "$_flake_dir" --wait -- "$@"
+        fi
         cd "$_flake_dir"
 
         echo "Running default semantic checks..."

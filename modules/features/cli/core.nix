@@ -143,8 +143,9 @@ mkFeatureModule {
             delete-branch = true
           '';
           systemd.user.services.pueued = {
-            # Tasks are the daemon's children, so its slice is the job-plane
-            # ceiling; app.slice is reserved for the desktop.
+            # The daemon is only the queue coordinator. Each task's
+            # `sinnixd-queue-run` child enters the slice named by its declared
+            # pool, so pool concurrency and cgroup budgets remain separate.
             Service.Slice = "sinnixd-work.slice";
             # state.json carries every task's full client environment; an
             # interactive `pueue add` writes the shell's API keys into it.
@@ -161,7 +162,7 @@ mkFeatureModule {
               set -u
               pueue=${pkgs.pueue}/bin/pueue
               for _ in $(seq 1 50); do "$pueue" status >/dev/null 2>&1 && break; sleep 0.2; done
-              for spec in agent:4 pytest:1 bulk:1 normal:5 interactive:4; do
+              for spec in agent:6 pytest:1 bulk:1 normal:5 interactive:4; do
                 name=''${spec%%:*}; slots=''${spec##*:}
                 "$pueue" group add "$name" >/dev/null 2>&1 || true
                 "$pueue" parallel -g "$name" "$slots" >/dev/null

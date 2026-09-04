@@ -62,6 +62,57 @@ def test_a_successful_command_spools_its_start_and_reports_its_status(
     assert started[0]["label"] == "fixture:check:job-a"
 
 
+def test_worker_exports_queue_identity_to_the_child(tmp_path: Path) -> None:
+    launch = write_launch(
+        tmp_path,
+        argv=[
+            "sh",
+            "-c",
+            'printf \'%s %s %s\' "$SINNIXD_JOB_ID" "$SINNIXD_PROJECT_ID" "$SINNIXD_OPERATION"',
+        ],
+    )
+
+    assert main([str(launch)]) == 0
+    assert (tmp_path / "log").read_text() == "job-a fixture check"
+
+
+def test_a_declared_pool_runs_the_child_in_its_named_systemd_scope(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Breaks if a queued workload executes beside the queue runner again."""
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    recorder = tmp_path / "systemd-run-argv"
+    runner = fake_bin / "systemd-run"
+    runner.write_text(
+        "#!/bin/sh\n"
+        f"printf '%s\\n' \"$@\" > {recorder}\n"
+        "while [ \"$1\" != \"--\" ]; do shift; done\n"
+        "shift\n"
+        "exec \"$@\"\n"
+    )
+    runner.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{fake_bin}{os.pathsep}{os.environ['PATH']}")
+    launch = write_launch(
+        tmp_path,
+        pool="pytest",
+        argv=[
+            "sh",
+            "-c",
+            'printf "%s %s" "$SINNIXD_QUEUE_WORKER" "$SINNIXD_JOB_ID"',
+        ],
+    )
+
+    assert main([str(launch)]) == 0
+
+    scope_argv = recorder.read_text().splitlines()
+    assert "--scope" in scope_argv
+    assert "--collect" in scope_argv
+    assert "--unit=sinnixd-pueue-pytest-job-a.scope" in scope_argv
+    assert "--slice=sinnixd-pueue-pytest.slice" in scope_argv
+    assert (tmp_path / "log").read_text() == "1 job-a"
+
+
 def test_a_failing_command_reports_its_own_exit_status(tmp_path: Path) -> None:
     launch = write_launch(tmp_path, argv=["sh", "-c", "exit 3"])
 

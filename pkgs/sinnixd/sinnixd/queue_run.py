@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -38,6 +39,8 @@ TIMEOUT_EXIT_CODE = 124
 REFUSED_EXIT_CODE = 125
 
 RESULT_KINDS = frozenset({"exit", "json", "pytest", "last-message"})
+POOL_NAME = re.compile(r"[a-z][a-z0-9-]{0,63}\Z")
+POOL_SLICE_PREFIX = "sinnixd-pueue"
 
 _REQUIRED_FIELDS = (
     "job_id",
@@ -88,7 +91,45 @@ def _read_input(path: Path) -> dict[str, Any]:
     timeout = value["timeout_seconds"]
     if not isinstance(timeout, int) or isinstance(timeout, bool) or timeout <= 0:
         raise QueueInputError("launch input timeout_seconds must be a positive integer")
+    pool = value.get("pool")
+    if pool is not None and (
+        not isinstance(pool, str) or POOL_NAME.fullmatch(pool) is None
+    ):
+        raise QueueInputError("launch input pool must be a lowercase pueue group name")
     return value
+
+
+def scope_unit_for(job_id: object, pool: str) -> str:
+    """Name the transient scope that carries one queued task's workload."""
+    safe_job_id = re.sub(r"[^A-Za-z0-9_.-]", "-", str(job_id)).strip("-") or "job"
+    return f"{POOL_SLICE_PREFIX}-{pool}-{safe_job_id[:160]}.scope"
+
+
+def _scoped_command(launch: Mapping[str, Any]) -> tuple[list[str], str | None]:
+    """Put new launches in the slice for their declared pueue pool.
+
+    Launches from before pool scopes were introduced have no ``pool`` field;
+    retaining their direct execution keeps historical retries readable. Every
+    launch produced by ``agentctl`` carries the field.
+    """
+    pool = launch.get("pool")
+    if pool is None:
+        return list(launch["argv"]), None
+    unit = scope_unit_for(launch["job_id"], pool)
+    return (
+        [
+            "systemd-run",
+            "--user",
+            "--scope",
+            "--quiet",
+            "--collect",
+            f"--unit={unit}",
+            f"--slice={POOL_SLICE_PREFIX}-{pool}.slice",
+            "--",
+            *launch["argv"],
+        ],
+        unit,
+    )
 
 
 def append_event(spool_path: Path | None, event: Mapping[str, Any]) -> None:
@@ -142,6 +183,21 @@ def _terminate(process: subprocess.Popen[bytes]) -> None:
         process.wait(timeout=10)
 
 
+def _stop_scope(unit: str | None) -> None:
+    """Stop a transient scope when the queue runner times out."""
+    if unit is None:
+        return
+    try:
+        subprocess.run(
+            ["systemctl", "--user", "stop", unit],
+            capture_output=True,
+            check=False,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return
+
+
 def run(launch: Mapping[str, Any]) -> int:
     """Run one queued command and leave its bounded artifacts behind."""
     log_path = Path(launch["log_path"])
@@ -169,6 +225,8 @@ def run(launch: Mapping[str, Any]) -> int:
             "job_kind": launch.get("kind", "declared-operation"),
             "project": launch["project_id"],
             "operation": launch["operation"],
+            "pool": launch.get("pool"),
+            "scope_unit": launch.get("scope_unit"),
             "phase": "started",
             "working_directory": launch["working_directory"],
         },
@@ -177,6 +235,18 @@ def run(launch: Mapping[str, Any]) -> int:
     # A typed result is the command's stdout alone; stderr and everything else
     # belongs in the log, or trailing diagnostics would corrupt the document.
     capture_stdout = result_path is not None and result_kind in {"json", "pytest"}
+    # The queue is the admission boundary.  Pass its identity to the child so
+    # project-native runners can distinguish a worker from a lane-side request.
+    child_environment = dict(launch["environment"])
+    child_environment.update(
+        {
+            "SINNIXD_JOB_ID": str(launch["job_id"]),
+            "SINNIXD_PROJECT_ID": str(launch["project_id"]),
+            "SINNIXD_OPERATION": str(launch["operation"]),
+            "SINNIXD_QUEUE_WORKER": "1",
+        }
+    )
+    command, scope_unit = _scoped_command(launch)
     with open(log_path, "wb") as log:
         stdout: Any = log
         result_file = None
@@ -187,9 +257,9 @@ def run(launch: Mapping[str, Any]) -> int:
             stdout = result_file
         try:
             process = subprocess.Popen(
-                list(launch["argv"]),
+                command,
                 cwd=launch["working_directory"],
-                env=dict(launch["environment"]),
+                env=child_environment,
                 stdout=stdout,
                 stderr=log,
                 start_new_session=True,
@@ -211,6 +281,7 @@ def run(launch: Mapping[str, Any]) -> int:
         try:
             returncode = process.wait(timeout=launch["timeout_seconds"])
         except subprocess.TimeoutExpired:
+            _stop_scope(scope_unit)
             _terminate(process)
             log.write(f"timed out after {launch['timeout_seconds']} seconds\n".encode())
             returncode = TIMEOUT_EXIT_CODE

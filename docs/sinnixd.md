@@ -50,9 +50,10 @@ directory, the timeout, the result kind and the artifact paths, then runs
 `pueue add --escape -g <pool> -l <label> -- sinnixd-queue-run <input>`.
 
 `sinnixd-queue-run` is the command every task runs. It appends a `started`
-event to the spool, runs the argv with the launch environment in its own
-session, enforces the declared timeout (exit 124), refuses a vanished working
-directory (exit 125), writes the combined log to `jobs/<ref>.log` and — for
+event to the spool, starts new launches in the pool's transient systemd scope,
+runs the argv with the launch environment in its own session, enforces the
+declared timeout (exit 124), refuses a vanished working directory (exit 125),
+writes the combined log to `jobs/<ref>.log` and — for
 `json`/`pytest` results — stdout alone to `jobs/<ref>.result`, both bounded at
 64,000 bytes with an overflow marker. pueue's completion callback (declared by
 the CLI feature) appends the finish event. `job logs` and `job result` find
@@ -66,12 +67,14 @@ state, so every add goes through the adapter's scrubbed environment (`HOME`,
 real one. Add tasks by hand with `sinnix-pueue-add`, which scrubs the same
 way.
 
-Groups are the whole admission policy: `agent:4 pytest:1 bulk:1 normal:5
-interactive:4`, created on pueued start. Memory is the slice hierarchy's
-(`sinnixd.slice` MemoryHigh 20G). `sinnixd-backpressure.timer` pauses one
-group per minute while the host's `full` IO or memory stall stays above
-threshold and resumes in reverse order once clear; a paused task keeps its
-work.
+Groups admit work, and every new task's wrapper enters a transient
+`sinnixd-pueue-<pool>-<job>.scope` in the corresponding declarative
+`sinnixd-pueue-<pool>.slice`: `agent:6 pytest:1 bulk:1 normal:5
+interactive:4`. The pytest and bulk slices have fixed memory, swap, CPU, and
+IO budgets; they do not choose capacity from instantaneous free RAM.
+`sinnixd-backpressure.timer` pauses one group per minute while the host's
+`full` IO or memory stall stays above threshold and resumes in reverse order
+once clear; a paused task keeps its work.
 
 ## Lanes
 
@@ -87,19 +90,20 @@ contract appended verbatim. It creates
 `.lane/prompt.md` (0600), and queues in group `agent`:
 
 ```text
-<environment.command> systemd-run --user --scope --slice=sinnixd-work.slice \
-  -p MemoryMax=10G -- run_agent_prompt.sh --agent B --workdir W \
+<environment.command> sinnixd-queue-run <agent-launch.json>
+systemd-run --user --scope --slice=sinnixd-pueue-agent.slice \
+  --unit=sinnixd-pueue-agent-<job>.scope -- run_agent_prompt.sh --agent B --workdir W \
   --prompt-file W/.lane/prompt.md --last-file W/.lane/prompt.result.md \
   --model M --reasoning-effort E
 ```
 
-The scope keeps the agent inside the job plane under the descriptor's
-`workspace.agent_memory_max` (default 10G), the descriptor's only say in an
-agent's resources; the adapter (`agentRunner`) turns the prompt into one
-backend invocation. Provisioning the worktree (dependencies, the testmon seed
-copied from the primary checkout) is the project's `wt.toml` hooks' job. The
-environment carries `BEADS_ACTOR=agent-<bead>` so an agent's task writes are
-its own. Agent jobs cap at four hours.
+The queue runner selects the pool slice for every new task, while the agent
+scope keeps the descriptor's `workspace.agent_memory_max` (default 10G) as
+the hard ceiling for one lane. The adapter (`agentRunner`) turns the prompt
+into one backend invocation. Provisioning the worktree (dependencies, the
+testmon seed copied from the primary checkout) is the project's `wt.toml`
+hooks' job. The environment carries `BEADS_ACTOR=agent-<bead>` so an agent's
+task writes are its own. Agent jobs cap at four hours.
 
 The worker ends its lane with `lane publish` (the toolbelt) or
 `agentctl lane publish <worktree>`: push, PR titled by the bead (`fix:` for
@@ -216,8 +220,9 @@ it is the only timer that starts lanes.
 `~/.local/state/sinnixd`, and declares the timers: `sinnixd-backpressure`
 (every minute), `sinnixd-schedule` (every fifteen minutes, and two minutes
 after login), and `sinnixd-refill` when the opt-in refill is enabled. pueued itself, its groups, its completion callback and the
-`sinnixd-work.slice` placement are declared by the CLI feature
-(`modules/features/cli/core.nix`).
+`sinnixd-work.slice` coordinator placement, the pueue pool groups, and their
+pool slices are declared by the CLI feature and runtime registry
+(`modules/features/cli/core.nix`, `flake/data/runtime-defaults.nix`).
 
 `nix build .#sinnixd` runs the package suite, which drives a private pueued
 end to end for the adapter and fakes it for the launch and lane routes.

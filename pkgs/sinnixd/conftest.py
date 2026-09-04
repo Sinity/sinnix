@@ -37,7 +37,7 @@ class FakePueue:
         # does on the machine.
         default_factory=lambda: {
             "default": 1,
-            "agent": 4,
+            "agent": 6,
             "interactive": 1,
             "normal": 1,
             "pytest": 1,
