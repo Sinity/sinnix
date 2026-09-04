@@ -129,17 +129,21 @@ in
               message = "Clodex must run as an advertised local user service for Claude Code child-process routing.";
             }
             {
-              # Pre-start steps are store scripts (unit values are single
-              # lines); the alias reconciliation and the stale-patch check
-              # are asserted by script identity.
+              # Startup checks are store scripts, so unit values stay on one
+              # line rather than embedding shell bodies.
               assertion =
                 let
                   preStart = toString hm.systemd.user.services.sinnix-clodex.Service.ExecStartPre;
                 in
                 lib.hasInfix "sinnix-clodex-aliases" preStart
-                && lib.hasInfix "sinnix-clodex-patch-check" preStart
                 && !(lib.hasInfix "\n" preStart);
-              message = "Clodex startup must run alias reconciliation and the stale-patch check as one-line store scripts.";
+              message = "Clodex alias reconciliation must run as a one-line store script.";
+            }
+            {
+              assertion =
+                hm.systemd.user.services.sinnix-clodex.Service.Restart == "on-failure"
+                && lib.hasInfix "sinnix-clodex-patch-check" hm.systemd.user.services.sinnix-clodex.Service.ExecCondition;
+              message = "Clodex must skip startup when its patch check fails while restarting ordinary process failures.";
             }
             {
               assertion = lib.any (
@@ -264,9 +268,7 @@ in
       };
       agentToolsRuntimeConfig = (evalTestSpec system devAgentToolsRuntimeSpec).config;
       clodexPatchCheck =
-        builtins.elemAt
-          agentToolsRuntimeConfig.home-manager.users.${agentToolsRuntimeConfig.sinnix.user.name}.systemd.user.services.sinnix-clodex.Service.ExecStartPre
-          1;
+        agentToolsRuntimeConfig.home-manager.users.${agentToolsRuntimeConfig.sinnix.user.name}.systemd.user.services.sinnix-clodex.Service.ExecCondition;
       agentToolsCodexConfigSource =
         agentToolsRuntimeConfig.sinnix.features.dev.mcp-servers.codexConfigSource;
       agentToolsCodexFullConfigSource =
