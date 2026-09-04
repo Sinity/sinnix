@@ -27,7 +27,8 @@ refused or failed, 2 usage, 3 the waited job did not succeed.
   appended to its `exec`.
 - `job list [--project p] [--active]`, `job get <id>`, `job logs <id>`,
   `job result <id>` (the typed artifact for `json`/`pytest` results),
-  `job wait <id>`, `job cancel <id>` (kills the task and its process group),
+  `job wait <id>`, `job cancel <id>` (stops the task and kills its scope's
+  whole cgroup; a task that never started is dropped from the queue),
   `job retry <id>` (`pueue restart --in-place`).
 - **Never poll.** Every task's start and finish reaches
   `/realm/state/agentctl/events.jsonl`; watch `agentctl events tail --follow`.
@@ -36,7 +37,8 @@ refused or failed, 2 usage, 3 the waited job did not succeed.
   deadline around twice it. At the deadline, inspect progress evidence and
   cancel, repair, or extend for a stated reason.
 - Artifacts (launch input, log, result) live under `~/.local/state/sinnixd`
-  and are found by the reference in the task's own command line.
+  or the task's own working directory, and are found by the launch input the
+  task's command names.
 
 ### Session subagents run outside pueue
 
