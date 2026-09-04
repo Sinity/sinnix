@@ -369,6 +369,7 @@ rec {
         MemoryHigh = "8G";
         MemoryMax = "10G";
         MemorySwapMax = "0";
+        ManagedOOMPreference = "avoid";
       };
       sinnixd-pueue-pytest = {
         IOAccounting = true;
