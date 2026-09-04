@@ -78,7 +78,17 @@ def pull(
         "number": number,
         "state": state,
         "mergeable": mergeable,
+        "headRefOid": "h",
         "reviewDecision": review,
+        "reviews": [
+            {
+                "author": {"login": "chatgpt-codex-connector"},
+                "state": "APPROVED",
+                "commit": {"oid": "h"},
+            }
+        ],
+        "comments": [],
+        "reactionGroups": [],
         "autoMergeRequest": {"enabledAt": "x"} if auto else None,
         "statusCheckRollup": [
             {"__typename": "CheckRun", "status": "COMPLETED", "conclusion": checks}
