@@ -1,6 +1,7 @@
 {
   mkFeatureModule,
   pkgs,
+  helpers,
   ...
 }@args:
 mkFeatureModule {
@@ -39,6 +40,7 @@ mkFeatureModule {
     }:
     let
       repoRoot = config.sinnix.paths.projectRoot;
+      scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
     in
     {
       home-manager.users.${user} =
@@ -59,11 +61,16 @@ mkFeatureModule {
           # Side effect: loopback-only debug port allows local processes to
           # read cookies via CDP. Acceptable on this single-user machine.
           chromeUserDataDir = "${config.home.homeDirectory}/.config/chrome-ws";
+          navCaptureExtension = pkgs.runCommand "sinnix-nav-capture-extension" { } ''
+            mkdir -p "$out"
+            cp -R ${../../../browser-extensions/nav-capture}/. "$out/"
+          '';
           chromeArgs = lib.concatStringsSep " " [
             "--disable-features=WaylandWpColorManagerV1"
             "--remote-debugging-port=9222"
             "--remote-debugging-address=127.0.0.1"
             "--user-data-dir=${chromeUserDataDir}"
+            "--load-extension=${navCaptureExtension}"
             # Chrome-family apps register with AT-SPI but expose an empty tree
             # unless renderer accessibility is forced on. Without it the
             # capture-a11y lane sees focus events from Chrome windows with no
@@ -168,6 +175,33 @@ mkFeatureModule {
                 fi
               done
             '';
+          };
+
+          systemd.user.services = {
+            sinnix-nav-capture = {
+              Unit = {
+                Description = "Sinnix browser provenance receiver";
+                After = [ "graphical-session-pre.target" ];
+                PartOf = [ "graphical-session.target" ];
+              };
+              Service = {
+                ExecStart = "${scriptPkgs.sinnix-nav-capture-daemon}/bin/sinnix-nav-capture-daemon";
+                Restart = "on-failure";
+              };
+              Install.WantedBy = [ "graphical-session.target" ];
+            };
+            sinnix-reading-stack-widget = {
+              Unit = {
+                Description = "Visible Sinnix reading stack";
+                After = [ "graphical-session.target" ];
+                PartOf = [ "graphical-session.target" ];
+              };
+              Service = {
+                ExecStart = "${pkgs.uwsm}/bin/uwsm app -- ${pkgs.kitty}/bin/kitty --class reading-stack-widget --title reading-stack ${scriptPkgs.sinnix-reading-stack-widget}/bin/sinnix-reading-stack-widget";
+                Restart = "on-failure";
+              };
+              Install.WantedBy = [ "graphical-session.target" ];
+            };
           };
 
           xdg.desktopEntries.google-chrome = {
