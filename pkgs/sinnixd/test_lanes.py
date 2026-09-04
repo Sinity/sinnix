@@ -73,7 +73,12 @@ def fake_bd(monkeypatch: pytest.MonkeyPatch) -> FakeBd:
 @pytest.fixture
 def fake_commands(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     """Records gh/git/bd invocations; answers `gh` reads from `prs`."""
-    state: dict[str, Any] = {"calls": [], "prs": {}, "merged_heads": set()}
+    state: dict[str, Any] = {
+        "calls": [],
+        "prs": {},
+        "pr_views": {},
+        "merged_heads": set(),
+    }
 
     def run(argv: Any, *, cwd: Path, timeout: float = 60) -> str:
         argv = list(argv)
@@ -84,6 +89,9 @@ def fake_commands(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
             pull = state["prs"].get(argv[3])
             if pull is None:
                 raise LaneError("no pull requests found for branch")
+            views = state["pr_views"].get(argv[3])
+            if views:
+                pull = views.pop(0)
             return json.dumps(pull)
         if argv[:3] == ["gh", "pr", "create"]:
             head = argv[argv.index("--head") + 1]
@@ -92,7 +100,17 @@ def fake_commands(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
                 "url": f"https://example.test/pr/{head}",
                 "state": "OPEN",
                 "headRefName": head,
+                "headRefOid": "abc123",
                 "autoMergeRequest": None,
+                "reviews": [
+                    {
+                        "author": {"login": "chatgpt-codex-connector"},
+                        "state": "APPROVED",
+                        "commit": {"oid": "abc123"},
+                    }
+                ],
+                "comments": [],
+                "reactionGroups": [],
                 "title": argv[argv.index("--title") + 1],
                 "body": argv[argv.index("--body") + 1],
             }
@@ -101,6 +119,8 @@ def fake_commands(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
             for pull in state["prs"].values():
                 if str(pull["number"]) == argv[3]:
                     pull["autoMergeRequest"] = {"enabledAt": "now"}
+            return ""
+        if argv[:3] == ["gh", "pr", "comment"]:
             return ""
         if argv[:2] == ["bd", "close"]:
             state.setdefault("closed", []).append(argv[2])
@@ -451,6 +471,148 @@ def test_lane_publish_pushes_opens_the_pr_under_the_bead_subject_and_arms_auto_m
     assert ["gh", "pr", "merge", "100", "--auto", "--squash"] in fake_commands["calls"]
     assert published["pr"] == 100 and published["created"] is True
     assert published["bead"] == "fx-1"
+
+
+def test_lane_publish_does_not_treat_empty_review_decision_as_codex_verdict(
+    fake_commands: dict[str, Any],
+    fake_pueue: FakePueue,
+    fake_bd: FakeBd,
+    config: Config,
+    project_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Removing the exact-head review gate would arm auto-merge here."""
+    worktree = _git_worktree(monkeypatch, project_root, "feature/packet/fx-1")
+    fake_pueue.finish_when_waited(1, lambda fake: fake.succeed(1))
+    pending_pr = {
+        "number": 100,
+        "url": "u",
+        "state": "OPEN",
+        "headRefName": "feature/packet/fx-1",
+        "headRefOid": "abc123",
+        "autoMergeRequest": None,
+        "reviewDecision": "",
+        "statusCheckRollup": [],
+        "reviews": [],
+        "comments": [],
+        "reactionGroups": [],
+    }
+    fake_commands["pr_views"]["feature/packet/fx-1"] = [pending_pr, pending_pr]
+    clock = iter((0.0, 0.0, 0.0, 0.0, 2.0))
+    monkeypatch.setattr(lanes, "CODEX_REVIEW_TIMEOUT_SECONDS", 1)
+    monkeypatch.setattr(lanes.time, "monotonic", lambda: next(clock, 2.0))
+    monkeypatch.setattr(lanes.time, "sleep", lambda _: None)
+
+    published = lanes.lane_publish(config, worktree)
+
+    assert published["auto_merge"] is False
+    assert published["review"]["status"] == "timeout"
+    assert "rerun lane publish" in published["next_action"]
+    assert [
+        "gh",
+        "pr",
+        "comment",
+        "100",
+        "--body",
+        "@codex review",
+    ] in fake_commands["calls"]
+    assert not any(call[:3] == ["gh", "pr", "merge"] for call in fake_commands["calls"])
+
+
+def test_lane_publish_leaves_exact_head_codex_findings_actionable(
+    fake_commands: dict[str, Any],
+    fake_pueue: FakePueue,
+    fake_bd: FakeBd,
+    config: Config,
+    project_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Changing COMMENTED to clean would incorrectly arm auto-merge."""
+    worktree = _git_worktree(monkeypatch, project_root, "feature/packet/fx-1")
+    fake_pueue.finish_when_waited(1, lambda fake: fake.succeed(1))
+    findings_pr = {
+        "number": 100,
+        "url": "u",
+        "state": "OPEN",
+        "headRefName": "feature/packet/fx-1",
+        "headRefOid": "abc123",
+        "autoMergeRequest": None,
+        "reviewDecision": "",
+        "statusCheckRollup": [],
+        "reviews": [
+            {
+                "author": {"login": "chatgpt-codex-connector"},
+                "state": "COMMENTED",
+                "commit": {"oid": "abc123"},
+                "body": "automated review suggestions",
+            }
+        ],
+        "comments": [],
+        "reactionGroups": [],
+    }
+    fake_commands["pr_views"]["feature/packet/fx-1"] = [findings_pr, findings_pr]
+
+    published = lanes.lane_publish(config, worktree)
+
+    assert published["auto_merge"] is False
+    assert published["review"]["status"] == "findings"
+    assert published["review"]["round"] == 1
+    assert published["review"]["max_rounds"] == 2
+    assert "fix Codex findings" in published["next_action"]
+    assert not any(call[:3] == ["gh", "pr", "merge"] for call in fake_commands["calls"])
+
+
+def test_lane_publish_accepts_a_clean_exact_head_codex_reaction(
+    fake_commands: dict[str, Any],
+    fake_pueue: FakePueue,
+    fake_bd: FakeBd,
+    config: Config,
+    project_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    worktree = _git_worktree(monkeypatch, project_root, "feature/packet/fx-1")
+    fake_pueue.finish_when_waited(1, lambda fake: fake.succeed(1))
+    clean_pr = {
+        "number": 100,
+        "url": "u",
+        "state": "OPEN",
+        "headRefName": "feature/packet/fx-1",
+        "headRefOid": "abc123",
+        "autoMergeRequest": None,
+        "reviewDecision": "",
+        "statusCheckRollup": [],
+        "reviews": [
+            {
+                "author": {"login": "chatgpt-codex-connector[bot]"},
+                "state": "COMMENTED",
+                "commit": {"oid": "abc123"},
+            }
+        ],
+        "comments": [
+            {
+                "author": {"login": "chatgpt-codex-connector[bot]"},
+                "body": (
+                    "<!-- codex-pull-request-review-summary -->\n"
+                    "Reviewed commit: " + chr(96) + "abc123" + chr(96)
+                ),
+            }
+        ],
+        "reactionGroups": [{"content": "THUMBS_UP", "users": {"totalCount": 1}}],
+    }
+    fake_commands["pr_views"]["feature/packet/fx-1"] = [clean_pr, clean_pr]
+
+    published = lanes.lane_publish(config, worktree)
+
+    assert published["auto_merge"] is True
+    assert published["review"]["status"] == "clean"
+    assert [
+        "gh",
+        "pr",
+        "merge",
+        "100",
+        "--auto",
+        "--squash",
+    ] in fake_commands["calls"]
 
 
 def test_lane_publish_reuses_an_open_pr_and_reads_the_lane_body(

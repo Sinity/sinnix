@@ -15,7 +15,7 @@ from typing import Any, Mapping, Sequence
 
 from . import pueue
 from .config import Config
-from .lanes import LaneRow, lane_rows
+from .lanes import LaneRow, _codex_review_gate, lane_rows
 from .launch import job_view
 from .packets import PacketError, SubprocessBdReader
 from .projects import ProjectAdapter
@@ -128,6 +128,12 @@ def _checks(pull: Mapping[str, Any]) -> str:
 def pr_summary(pull: Mapping[str, Any] | None) -> dict[str, Any] | None:
     if pull is None:
         return None
+    head = pull.get("headRefOid")
+    codex_review = (
+        _codex_review_gate(pull, head)["status"]
+        if isinstance(head, str) and head
+        else "pending"
+    )
     return {
         "number": pull.get("number"),
         "state": pull.get("state"),
@@ -135,6 +141,7 @@ def pr_summary(pull: Mapping[str, Any] | None) -> dict[str, Any] | None:
         "draft": bool(pull.get("isDraft")),
         "mergeable": pull.get("mergeable"),
         "review": pull.get("reviewDecision") or None,
+        "codex_review": codex_review,
         "checks": _checks(pull),
         "auto_merge": bool(pull.get("autoMergeRequest")),
         "updated_at": pull.get("updatedAt"),
@@ -168,6 +175,10 @@ def lane_stage(row: LaneRow, agent: Task | None) -> tuple[str, str]:
             return "checks running", "wait"
         if pull["review"] == "CHANGES_REQUESTED":
             return "changes requested", "fix in lane, push"
+        if pull["codex_review"] == "findings":
+            return "Codex findings", "fix in lane, push"
+        if pull["codex_review"] == "pending":
+            return "Codex review pending", "wait"
         if pull["auto_merge"]:
             return "auto-merge armed", "wait for merge"
         return "pr open", "gh pr merge --auto --squash"
