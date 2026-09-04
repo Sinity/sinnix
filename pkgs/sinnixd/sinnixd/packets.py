@@ -433,9 +433,7 @@ def _compact_relationship(value: Any) -> dict[str, Any]:
     return compact
 
 
-def _project_relationships(
-    bead: Mapping[str, Any], reader: BdReader
-) -> dict[str, Any]:
+def _project_relationships(bead: Mapping[str, Any], reader: BdReader) -> dict[str, Any]:
     """Keep dispatched fields intact while bounding embedded graph records."""
     projected = dict(bead)
     for relationship_name in ("dependencies", "dependents"):
@@ -499,7 +497,9 @@ def compile_launch_snapshot(
     effort: str | None = None,
 ) -> PacketSnapshot:
     leader_id, bead_ids = resolve_group(bead_id, reader)
-    beads = tuple(_project_relationships(reader.show(item), reader) for item in bead_ids)
+    beads = tuple(
+        _project_relationships(reader.show(item), reader) for item in bead_ids
+    )
     ordered = tuple(
         sorted(
             beads,

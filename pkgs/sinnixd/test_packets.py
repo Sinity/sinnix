@@ -110,7 +110,9 @@ def test_snapshot_projects_rich_relationship_records_without_changing_dispatched
 
     dispatched = next(item for item in snapshot.beads if item["id"] == "fx-lead")
     assert dispatched["description"] == "Touch polylogue/storage/schema.py"
-    assert dispatched["comments"] == [{"body": "Keep this context", "author": "operator"}]
+    assert dispatched["comments"] == [
+        {"body": "Keep this context", "author": "operator"}
+    ]
     assert dispatched["parent"] == {
         "id": "fx-parent",
         "status": "open",
