@@ -49,6 +49,8 @@ CODEX_BOT_LOGINS = {
 _PUBLICATION_MARKER = re.compile(
     r"<!-- sinnixd:lane-publication (?P<payload>\{.*?\}) -->"
 )
+_CODEX_FINDING_STATES = {"CHANGES_REQUESTED", "COMMENTED"}
+_CODEX_CLEAN_MARKER = "didn't find any major issues"
 _CODEX_REVIEWED_COMMIT = re.compile(
     r"(?:\*\*\s*)?Reviewed commit:\s*`(?P<commit>[0-9a-fA-F]+)`",
     re.IGNORECASE,
@@ -402,6 +404,25 @@ def _commit_matches(reference: Any, head: str) -> bool:
     )
 
 
+def _commit_key(value: Any) -> str:
+    return value.lower() if isinstance(value, str) else ""
+
+
+def _same_commit(left: str, right: str) -> bool:
+    """True when one oid is the other's abbreviation; GitHub mixes both forms."""
+    return (
+        bool(left)
+        and bool(right)
+        and (left.startswith(right) or right.startswith(left))
+    )
+
+
+def _review_commit(review: Mapping[str, Any]) -> str:
+    commit = review.get("commit")
+    oid = commit.get("oid") if isinstance(commit, Mapping) else None
+    return _commit_key(oid or review.get("commitOid"))
+
+
 def _reviewed_commit(body: Any) -> str | None:
     if not isinstance(body, str):
         return None
@@ -409,37 +430,31 @@ def _reviewed_commit(body: Any) -> str | None:
     return match.group("commit") if match else None
 
 
-def _codex_reviews(pull: Mapping[str, Any], head: str) -> list[Mapping[str, Any]]:
-    reviews = pull.get("reviews")
-    if not isinstance(reviews, list):
+def _codex_bot_entries(pull: Mapping[str, Any], key: str) -> list[Mapping[str, Any]]:
+    entries = pull.get(key)
+    if not isinstance(entries, list):
         return []
-    exact: list[Mapping[str, Any]] = []
-    for review in reviews:
-        if not isinstance(review, Mapping) or not _is_codex_author(
-            review.get("author")
-        ):
-            continue
-        commit = review.get("commit")
-        commit_oid = commit.get("oid") if isinstance(commit, Mapping) else None
-        commit_oid = commit_oid or review.get("commitOid")
-        if _commit_matches(commit_oid, head):
-            exact.append(review)
-    return exact
+    return [
+        entry
+        for entry in entries
+        if isinstance(entry, Mapping) and _is_codex_author(entry.get("author"))
+    ]
+
+
+def _codex_reviews(pull: Mapping[str, Any], head: str) -> list[Mapping[str, Any]]:
+    return [
+        review
+        for review in _codex_bot_entries(pull, "reviews")
+        if _commit_matches(_review_commit(review), head)
+    ]
 
 
 def _codex_comments(pull: Mapping[str, Any], head: str) -> list[Mapping[str, Any]]:
-    comments = pull.get("comments")
-    if not isinstance(comments, list):
-        return []
-    exact: list[Mapping[str, Any]] = []
-    for comment in comments:
-        if not isinstance(comment, Mapping) or not _is_codex_author(
-            comment.get("author")
-        ):
-            continue
-        if _commit_matches(_reviewed_commit(comment.get("body")), head):
-            exact.append(comment)
-    return exact
+    return [
+        comment
+        for comment in _codex_bot_entries(pull, "comments")
+        if _commit_matches(_reviewed_commit(comment.get("body")), head)
+    ]
 
 
 def _has_codex_thumbsup(pull: Mapping[str, Any]) -> bool:
@@ -459,24 +474,59 @@ def _has_codex_thumbsup(pull: Mapping[str, Any]) -> bool:
     return False
 
 
+def _cleared_commits(pull: Mapping[str, Any]) -> list[str]:
+    """Commits a Codex summary comment reported as free of major issues."""
+    cleared: list[str] = []
+    for comment in _codex_bot_entries(pull, "comments"):
+        body = comment.get("body")
+        if not isinstance(body, str) or _CODEX_CLEAN_MARKER not in body.lower():
+            continue
+        commit = _commit_key(_reviewed_commit(body))
+        if commit:
+            cleared.append(commit)
+    return cleared
+
+
+def _answered_finding_rounds(pull: Mapping[str, Any], head: str) -> int:
+    """Codex finding rounds on heads a correction has already pushed past.
+
+    The PR-level thumbs-up reaction carries no commit, so an earlier head is
+    cleared only by its own summary comment.
+    """
+    cleared = _cleared_commits(pull)
+    answered: list[str] = []
+    for review in _codex_bot_entries(pull, "reviews"):
+        commit = _review_commit(review)
+        if not commit or _commit_matches(commit, head):
+            continue
+        if str(review.get("state") or "").upper() not in _CODEX_FINDING_STATES:
+            continue
+        if any(_same_commit(commit, other) for other in cleared):
+            continue
+        if not any(_same_commit(commit, other) for other in answered):
+            answered.append(commit)
+    return len(answered)
+
+
 def _codex_review_gate(pull: Mapping[str, Any], head: str) -> dict[str, Any]:
-    """Classify only hosted Codex evidence bound to the current PR head."""
+    """Verdict from the current head's Codex evidence; rounds from the PR's."""
     reviews = _codex_reviews(pull, head)
     comments = _codex_comments(pull, head)
     exact_review = reviews[-1] if reviews else None
     exact_comments = [str(comment.get("body") or "") for comment in comments]
-    clean_comment = any(
-        "didn't find any major issues" in body.lower() for body in exact_comments
-    )
+    clean_comment = any(_CODEX_CLEAN_MARKER in body.lower() for body in exact_comments)
+    # The verdict binds to this head; the round count spans the PR, so a
+    # correction does not hand the lane a fresh pair of rounds.
+    round_number = _answered_finding_rounds(pull, head) + len(reviews)
     state = str(exact_review.get("state") or "").upper() if exact_review else ""
-    if state in {"CHANGES_REQUESTED", "COMMENTED"}:
+    if state in _CODEX_FINDING_STATES:
         clean = clean_comment or (
             exact_review is not None and _has_codex_thumbsup(pull)
         )
         if not clean:
             return {
                 "status": "findings",
-                "round": len(reviews),
+                "round": round_number,
                 "evidence": "exact-head Codex review has findings",
             }
     if (
@@ -486,18 +536,18 @@ def _codex_review_gate(pull: Mapping[str, Any], head: str) -> dict[str, Any]:
     ):
         return {
             "status": "clean",
-            "round": len(reviews),
+            "round": round_number,
             "evidence": "exact-head Codex review is clean",
         }
     if state in {"PENDING", "REVIEW_REQUESTED"}:
         return {
             "status": "pending",
-            "round": len(reviews),
+            "round": round_number,
             "evidence": "hosted Codex review is still running",
         }
     return {
         "status": "pending",
-        "round": len(reviews),
+        "round": round_number,
         "evidence": "no exact-head hosted Codex review",
     }
 

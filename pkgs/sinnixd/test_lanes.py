@@ -562,6 +562,108 @@ def test_lane_publish_leaves_exact_head_codex_findings_actionable(
     assert not any(call[:3] == ["gh", "pr", "merge"] for call in fake_commands["calls"])
 
 
+def test_lane_publish_counts_answered_codex_rounds_across_corrected_heads(
+    fake_commands: dict[str, Any],
+    fake_pueue: FakePueue,
+    fake_bd: FakeBd,
+    config: Config,
+    project_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Counting only exact-head reviews would report round 1 after every push."""
+    worktree = _git_worktree(monkeypatch, project_root, "feature/packet/fx-1")
+    fake_pueue.finish_when_waited(1, lambda fake: fake.succeed(1))
+    corrected_pr = {
+        "number": 100,
+        "url": "u",
+        "state": "OPEN",
+        "headRefName": "feature/packet/fx-1",
+        "headRefOid": "abc123",
+        "autoMergeRequest": None,
+        "reviewDecision": "",
+        "statusCheckRollup": [],
+        "reviews": [
+            {
+                "author": {"login": "chatgpt-codex-connector"},
+                "state": "COMMENTED",
+                "commit": {"oid": "def456"},
+            },
+            {
+                "author": {"login": "chatgpt-codex-connector"},
+                "state": "COMMENTED",
+                "commit": {"oid": "abc123"},
+            },
+        ],
+        "comments": [],
+        "reactionGroups": [],
+    }
+    fake_commands["pr_views"]["feature/packet/fx-1"] = [corrected_pr, corrected_pr]
+
+    published = lanes.lane_publish(config, worktree)
+
+    assert published["auto_merge"] is False
+    assert published["review"]["status"] == "findings"
+    assert published["review"]["round"] == 2
+    assert published["review"]["head"] == "abc123"
+    assert "exhausted" in published["next_action"]
+    assert not any(call[:3] == ["gh", "pr", "merge"] for call in fake_commands["calls"])
+
+
+def test_lane_publish_does_not_count_a_clean_earlier_codex_head_as_a_round(
+    fake_commands: dict[str, Any],
+    fake_pueue: FakePueue,
+    fake_bd: FakeBd,
+    config: Config,
+    project_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Counting every earlier review would exhaust the rounds after one finding."""
+    worktree = _git_worktree(monkeypatch, project_root, "feature/packet/fx-1")
+    fake_pueue.finish_when_waited(1, lambda fake: fake.succeed(1))
+    findings_after_clean_pr = {
+        "number": 100,
+        "url": "u",
+        "state": "OPEN",
+        "headRefName": "feature/packet/fx-1",
+        "headRefOid": "abc123",
+        "autoMergeRequest": None,
+        "reviewDecision": "",
+        "statusCheckRollup": [],
+        "reviews": [
+            {
+                "author": {"login": "chatgpt-codex-connector"},
+                "state": "COMMENTED",
+                "commit": {"oid": "def456"},
+            },
+            {
+                "author": {"login": "chatgpt-codex-connector"},
+                "state": "COMMENTED",
+                "commit": {"oid": "abc123"},
+            },
+        ],
+        "comments": [
+            {
+                "author": {"login": "chatgpt-codex-connector"},
+                "body": (
+                    "Reviewed commit: " + chr(96) + "def456" + chr(96) + "\n"
+                    "I didn't find any major issues."
+                ),
+            }
+        ],
+        "reactionGroups": [],
+    }
+    fake_commands["pr_views"]["feature/packet/fx-1"] = [
+        findings_after_clean_pr,
+        findings_after_clean_pr,
+    ]
+
+    published = lanes.lane_publish(config, worktree)
+
+    assert published["review"]["status"] == "findings"
+    assert published["review"]["round"] == 1
+    assert "fix Codex findings" in published["next_action"]
+
+
 def test_lane_publish_accepts_a_clean_exact_head_codex_reaction(
     fake_commands: dict[str, Any],
     fake_pueue: FakePueue,
