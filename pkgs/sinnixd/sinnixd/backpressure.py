@@ -27,9 +27,10 @@ IO_FULL_FREEZE = 25.0
 # victim, which is the whole difference between freezing and thrashing.
 MEMORY_FULL_FREEZE = 25.0
 
-# A signal that caused a closure remains latched while it is at or above this
-# level. Each signal is evaluated independently, so unrelated pressure cannot
-# keep a group closed.
+# A signal that caused a closure remains latched while its current 10-second
+# pressure is at or above this level. Freeze decisions use avg60 to avoid
+# reacting to spikes; recovery uses avg10 so completed load does not hold the
+# queue closed for several stale minutes.
 RESUME_BELOW = 10.0
 
 # Conversations stay admissible under both signals. Their fixed six-slot cap
@@ -43,7 +44,12 @@ MANAGED_GROUPS = ("agent", "pytest", "normal", "bulk")
 
 def read_pressure(root: Path = Path("/proc/pressure")) -> dict[str, float]:
     """The host's `full` stall averages. Absent PSI reads as no pressure."""
-    values = {"memory_full_avg60": 0.0, "io_full_avg60": 0.0}
+    values = {
+        "memory_full_avg10": 0.0,
+        "memory_full_avg60": 0.0,
+        "io_full_avg10": 0.0,
+        "io_full_avg60": 0.0,
+    }
     for resource in ("memory", "io"):
         try:
             content = (root / resource).read_text()
@@ -55,9 +61,9 @@ def read_pressure(root: Path = Path("/proc/pressure")) -> dict[str, float]:
                 continue
             for field in fields[1:]:
                 key, _, raw = field.partition("=")
-                if key == "avg60":
+                if key in {"avg10", "avg60"}:
                     try:
-                        values[f"{resource}_full_avg60"] = float(raw)
+                        values[f"{resource}_full_{key}"] = float(raw)
                     except ValueError:
                         pass
     return values
@@ -73,15 +79,18 @@ def over_threshold(pressure: Mapping[str, float]) -> tuple[str, ...]:
     return tuple(active)
 
 
-def _signal_pressure(pressure: Mapping[str, float], signal: str) -> float:
-    return pressure.get(f"{signal}_full_avg60", 0.0)
+def _recovery_pressure(pressure: Mapping[str, float], signal: str) -> float:
+    return pressure.get(
+        f"{signal}_full_avg10",
+        pressure.get(f"{signal}_full_avg60", 0.0),
+    )
 
 
 def _desired_paused(pressure: Mapping[str, float], paused: Sequence[str]) -> set[str]:
     """Keep existing closures latched per signal until that signal clears."""
     desired: set[str] = set()
     for signal, groups in CLOSE_ORDER.items():
-        if _signal_pressure(pressure, signal) >= RESUME_BELOW:
+        if _recovery_pressure(pressure, signal) >= RESUME_BELOW:
             desired.update(group for group in paused if group in groups)
     return desired
 
