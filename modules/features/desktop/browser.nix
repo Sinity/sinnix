@@ -1,6 +1,7 @@
 {
   mkFeatureModule,
   pkgs,
+  helpers,
   ...
 }@args:
 mkFeatureModule {
@@ -39,6 +40,9 @@ mkFeatureModule {
     }:
     let
       repoRoot = config.sinnix.paths.projectRoot;
+      activityRoot = config.sinnix.paths.activityRoot;
+      navigationPort = helpers.data.ports.browserNavigation;
+      scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
     in
     {
       home-manager.users.${user} =
@@ -59,11 +63,18 @@ mkFeatureModule {
           # Side effect: loopback-only debug port allows local processes to
           # read cookies via CDP. Acceptable on this single-user machine.
           chromeUserDataDir = "${config.home.homeDirectory}/.config/chrome-ws";
+          navCaptureExtension = pkgs.runCommand "sinnix-nav-capture-extension" { } ''
+            mkdir -p "$out"
+            cp -R ${../../../browser-extensions/nav-capture}/. "$out/"
+            substituteInPlace "$out/background.js" --replace-fail \
+              '127.0.0.1:8767' '127.0.0.1:${toString navigationPort}'
+          '';
           chromeArgs = lib.concatStringsSep " " [
             "--disable-features=WaylandWpColorManagerV1"
             "--remote-debugging-port=9222"
             "--remote-debugging-address=127.0.0.1"
             "--user-data-dir=${chromeUserDataDir}"
+            "--load-extension=${navCaptureExtension}"
             # Chrome-family apps register with AT-SPI but expose an empty tree
             # unless renderer accessibility is forced on. Without it the
             # capture-a11y lane sees focus events from Chrome windows with no
@@ -170,6 +181,34 @@ mkFeatureModule {
             '';
           };
 
+          systemd.user.services = {
+            sinnix-nav-capture = {
+              Unit = {
+                Description = "Sinnix browser provenance receiver";
+                After = [ "graphical-session-pre.target" ];
+                PartOf = [ "graphical-session.target" ];
+              };
+              Service = {
+                ExecStart = "${scriptPkgs.sinnix-nav-capture-daemon}/bin/sinnix-nav-capture-daemon";
+                Environment = [ "SINNIX_NAV_CAPTURE_PORT=${toString navigationPort}" ];
+                Restart = "on-failure";
+              };
+              Install.WantedBy = [ "graphical-session.target" ];
+            };
+            sinnix-reading-stack-widget = {
+              Unit = {
+                Description = "Visible Sinnix reading stack";
+                After = [ "graphical-session.target" ];
+                PartOf = [ "graphical-session.target" ];
+              };
+              Service = {
+                ExecStart = "${pkgs.uwsm}/bin/uwsm app -- ${pkgs.kitty}/bin/kitty --class reading-stack-widget --title reading-stack ${scriptPkgs.sinnix-reading-stack-widget}/bin/sinnix-reading-stack-widget";
+                Restart = "on-failure";
+              };
+              Install.WantedBy = [ "graphical-session.target" ];
+            };
+          };
+
           xdg.desktopEntries.google-chrome = {
             name = "Google Chrome";
             genericName = "Web Browser";
@@ -184,5 +223,29 @@ mkFeatureModule {
             mimeType = chromeDesktopMimeTypes;
           };
         };
+      sinnix.persistence.home.directories = [ ".local/state/sinnix" ];
+      sinnix.runtime.surfaces.sinnix-nav-capture = {
+        unit = "sinnix-nav-capture.service";
+        manager = "user";
+        resourceClass = "capture-runtime";
+        observe = {
+          enable = true;
+          restartable = true;
+        };
+        captures = [
+          {
+            name = "browser-nav-edges";
+            path = "${activityRoot}/browser-nav-edges";
+            eventDriven = true;
+            requiredPayloadFields = [ "source_url" "target_url" ];
+          }
+          {
+            name = "reading-stack";
+            path = "${activityRoot}/reading-stack";
+            eventDriven = true;
+            requiredPayloadFields = [ "event" "url" ];
+          }
+        ];
+      };
     };
 } args

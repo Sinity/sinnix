@@ -12,6 +12,7 @@
   pkgs,
   inputs,
   config,
+  helpers,
   ...
 }@args:
 let
@@ -61,7 +62,7 @@ mkServiceModule {
 
       browserCapturePort = lib.mkOption {
         type = lib.types.port;
-        default = 8765;
+        default = helpers.data.ports.polylogue.browserCapture;
         description = ''
           Port for the browser-capture receiver. Passed as `--port` to
           `polylogued run` and written to
@@ -71,7 +72,7 @@ mkServiceModule {
 
       apiPort = lib.mkOption {
         type = lib.types.port;
-        default = 8766;
+        default = helpers.data.ports.polylogue.api;
         description = ''
           Port for the daemon HTTP API. Mapped to
           ``programs.polylogued.settings.daemon.port``.

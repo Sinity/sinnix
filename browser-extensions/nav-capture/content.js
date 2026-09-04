@@ -38,6 +38,8 @@ function postEvent(path, body) {
   }
 }
 
+let contextLink = null;
+
 function edgePayload(anchor) {
   return {
     source_url: location.href,
@@ -47,6 +49,20 @@ function edgePayload(anchor) {
     ts: Date.now() / 1000,
   };
 }
+
+document.addEventListener(
+  "contextmenu",
+  (ev) => {
+    const a = nearestAnchor(ev.target);
+    contextLink = a && a.href ? edgePayload(a) : null;
+  },
+  { capture: true }
+);
+
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type !== "link-context") return;
+  sendResponse(contextLink || {});
+});
 
 document.addEventListener(
   "click",
