@@ -391,7 +391,7 @@ async def _query_owner(
     if route is OwnerRoute.AUDIT_VERIFY:
         return runtime.audit.verify()
     if route is OwnerRoute.JOB_LIST:
-        return runtime.v2_jobs_query(values.get("parameters"))
+        return runtime.v2_jobs_query(values)
     if route is OwnerRoute.CAPTURES_QUERY:
         operation = values.pop("operation", "lanes")
         if operation == "lanes":

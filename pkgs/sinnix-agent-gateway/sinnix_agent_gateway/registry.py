@@ -801,9 +801,22 @@ BEADS_QUERY_SCHEMA: dict[str, Any] = _with_request_controls(
                             "changed_since",
                         ]
                     },
-                    "filters": {"type": "object", "maxProperties": 32},
-                    "expression": {"type": "string", "minLength": 1, "maxLength": 4000},
-                    "native_filters": {"type": "object", "maxProperties": 40},
+                    "filters": {
+                        "type": "object",
+                        "maxProperties": 32,
+                        "description": "Filter AST: field=value or field={op,value}; op is one of =, !=, >, >=, <, <=. Combine non-empty nodes with and, or, or not.",
+                    },
+                    "expression": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4000,
+                        "description": "Native Beads expression. It accepts the owner query grammar, for example status=open AND priority<=1.",
+                    },
+                    "native_filters": {
+                        "type": "object",
+                        "maxProperties": 40,
+                        "description": "Native list filters for non-query views. Supported scalar keys include title_contains, status, priority, priority_min, priority_max, assignee, parent, type, updated_after, and updated_before; label, label_any, and exclude_label accept string lists.",
+                    },
                     "order": {
                         "type": "object",
                         "additionalProperties": False,

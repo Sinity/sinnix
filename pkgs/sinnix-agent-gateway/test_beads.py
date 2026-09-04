@@ -156,6 +156,24 @@ def test_ready_query_requests_issue_rows_without_unbounded_explanation(
     assert result["coverage"]["fixture"]["total_exact"] is True
 
 
+@pytest.mark.parametrize("view", ["open", "query", "stale_claims"])
+def test_query_applies_the_caller_page_bound_before_owner_serialization(
+    tmp_path: Path, view: str
+) -> None:
+    """Red if a compact frontier still asks the owner to materialize 200 rows."""
+    beads, log = beads_service(tmp_path)
+    kwargs: dict[str, object] = {"project_ids": ["fixture"], "view": view, "limit": 10}
+    if view == "query":
+        kwargs["filters"] = {"status": "open"}
+
+    beads.query(**kwargs)
+
+    command = commands(log)[-1]
+    assert command[command.index("--limit") + 1] == "10"
+    if "--max-rows" in command:
+        assert command[command.index("--max-rows") + 1] == "10"
+
+
 def test_get_graph_and_memory_keep_owner_features_explicit(tmp_path: Path) -> None:
     beads, log = beads_service(tmp_path)
     item = beads.get(

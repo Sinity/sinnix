@@ -306,8 +306,10 @@ def _remote_head(worktree: Path, branch: str) -> str | None:
     if len(rows) != 1:
         raise LaneError(f"git ls-remote returned an unexpected result for {ref}")
     fields = rows[0].split()
-    if len(fields) != 2 or fields[1] != ref or not re.fullmatch(
-        r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})", fields[0]
+    if (
+        len(fields) != 2
+        or fields[1] != ref
+        or not re.fullmatch(r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})", fields[0])
     ):
         raise LaneError(f"git ls-remote returned an unexpected result for {ref}")
     return fields[0]
