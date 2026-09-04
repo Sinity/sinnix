@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import fcntl
 import json
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -98,13 +100,20 @@ def fake_commands(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         "prs": {},
         "pr_views": {},
         "merged_heads": set(),
+        # PRs newer than every lane's, which a bounded listing returns instead.
+        "newer_prs": [],
     }
 
     def run(argv: Any, *, cwd: Path, timeout: float = 60) -> str:
         argv = list(argv)
         state["calls"].append(argv)
         if argv[:3] == ["gh", "pr", "list"]:
-            return json.dumps(list(state["prs"].values()))
+            if "--head" in argv:
+                pull = state["prs"].get(argv[argv.index("--head") + 1])
+                return json.dumps([pull] if pull is not None else [])
+            # gh lists the newest first and truncates at --limit.
+            newest = list(state["newer_prs"]) + list(state["prs"].values())
+            return json.dumps(newest[: int(argv[argv.index("--limit") + 1])])
         if argv[:3] == ["gh", "pr", "view"]:
             pull = state["prs"].get(argv[3])
             if pull is None:
@@ -1482,3 +1491,169 @@ def test_lane_sync_refuses_when_the_queue_cannot_say_which_lanes_are_active(
         lanes.lane_sync(config, project)
 
     assert fake_wt["removed"] == []
+
+
+def test_lane_sync_resolves_a_merged_pr_older_than_the_listing_window(
+    fake_pueue: FakePueue,
+    fake_commands: dict[str, Any],
+    fake_wt: dict[str, Any],
+    fake_bd: FakeBd,
+    config: Config,
+    project_root: Path,
+    tmp_path: Path,
+) -> None:
+    """A lane whose PR merged before 300 newer ones is still a published lane."""
+    project = load_project_adapter(project_root)
+    fake_wt["trees"] = [tree("feature/packet/fx-1", tmp_path / "a", state="integrated")]
+    fake_commands["prs"] = {
+        "feature/packet/fx-1": merged_pr(9, "feature/packet/fx-1", "fx-1")
+    }
+    fake_commands["newer_prs"] = [
+        {
+            "number": 1000 + index,
+            "state": "MERGED",
+            "headRefName": f"feature/packet/other-{index}",
+            "headRefOid": "other-head",
+            "title": "fix: Another task",
+        }
+        for index in range(300)
+    ]
+
+    synced = lanes.lane_sync(config, project)
+
+    assert synced["closed"] == ["fx-1"]
+    assert synced["removed"] == ["feature/packet/fx-1"]
+    assert [
+        call
+        for call in fake_commands["calls"]
+        if call[:3] == ["gh", "pr", "list"]
+        and "--head" in call
+        and call[call.index("--head") + 1] == "feature/packet/fx-1"
+    ]
+
+
+def test_lane_sync_leaves_a_lane_started_after_its_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_pueue: FakePueue,
+    fake_commands: dict[str, Any],
+    fake_wt: dict[str, Any],
+    fake_bd: FakeBd,
+    config: Config,
+    project_root: Path,
+    tmp_path: Path,
+) -> None:
+    """The sweep's rows are a snapshot: the lane they describe can be removed and
+    started again, with a new agent, before the sweep reaches it."""
+    project = load_project_adapter(project_root)
+    fake_wt["trees"] = [tree("feature/packet/fx-1", tmp_path / "a", state="integrated")]
+    fake_commands["prs"] = {
+        "feature/packet/fx-1": merged_pr(9, "feature/packet/fx-1", "fx-1")
+    }
+    listing = lanes.worktrunk.worktrunk_list
+
+    def worktrunk_list(root: Path, *, full: bool = False) -> tuple[Worktree, ...]:
+        snapshot = listing(root, full=full)
+        if not fake_pueue.added:
+            fake_wt["trees"] = []
+            lanes.lane_start(config, project, "fx-1")
+        return snapshot
+
+    monkeypatch.setattr(lanes.worktrunk, "worktrunk_list", worktrunk_list)
+
+    synced = lanes.lane_sync(config, project)
+
+    started = fake_wt["created"][0]
+    assert started["path"].is_dir()
+    assert [item.branch for item in fake_wt["trees"]] == ["feature/packet/fx-1"]
+    assert fake_wt["removed"] == []
+    assert synced["closed"] == []
+    assert synced["removed"] == []
+    assert synced["remaining"][0]["reason"] == (
+        f"job {fake_pueue.added[0]['task_id']} (fixture:lane:fx-1) is running"
+    )
+
+
+def test_lane_sync_waits_for_a_lane_start_that_holds_the_lane_lock(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_pueue: FakePueue,
+    fake_commands: dict[str, Any],
+    fake_wt: dict[str, Any],
+    fake_bd: FakeBd,
+    config: Config,
+    project_root: Path,
+    tmp_path: Path,
+) -> None:
+    """A start creates the worktree before it queues the agent. A sweep that read
+    the queue in that window would find the lane unowned and remove it."""
+    project = load_project_adapter(project_root)
+    branch = "feature/packet/fx-1"
+    created = threading.Event()
+    queue_the_agent = threading.Event()
+    creating = lanes.worktrunk.worktrunk_create
+
+    def worktrunk_create(
+        root: Path, name: str, *, path: Path, base: str | None = None
+    ) -> Worktree:
+        worktree = creating(root, name, path=path, base=base)
+        created.set()
+        queue_the_agent.wait(10)
+        return worktree
+
+    monkeypatch.setattr(lanes.worktrunk, "worktrunk_create", worktrunk_create)
+    starting = threading.Thread(target=lanes.lane_start, args=(config, project, "fx-1"))
+    starting.start()
+    try:
+        assert created.wait(10)
+        # What the sweep sees: this lane's worktree, a merged PR that binds it,
+        # and an agent that is not in the queue yet.
+        fake_wt["trees"] = [tree(branch, tmp_path / "a", state="integrated")]
+        fake_commands["prs"] = {branch: merged_pr(9, branch, "fx-1")}
+        synced: list[dict[str, Any]] = []
+        sweeping = threading.Thread(
+            target=lambda: synced.append(lanes.lane_sync(config, project))
+        )
+        sweeping.start()
+        sweeping.join(0.5)
+        assert fake_wt["removed"] == [], "swept a lane a start still held"
+    finally:
+        queue_the_agent.set()
+    starting.join(10)
+    sweeping.join(10)
+
+    assert not sweeping.is_alive()
+    assert fake_wt["removed"] == []
+    assert synced[0]["removed"] == []
+    assert synced[0]["remaining"][0]["reason"] == (
+        f"job {fake_pueue.added[0]['task_id']} (fixture:lane:fx-1) is running"
+    )
+
+
+def test_lane_sync_reports_a_lane_another_operation_holds(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_pueue: FakePueue,
+    fake_commands: dict[str, Any],
+    fake_wt: dict[str, Any],
+    fake_bd: FakeBd,
+    config: Config,
+    project_root: Path,
+    tmp_path: Path,
+) -> None:
+    """A lane the sweep cannot take is reported; waiting for it is not forever."""
+    project = load_project_adapter(project_root)
+    branch = "feature/packet/fx-1"
+    fake_wt["trees"] = [tree(branch, tmp_path / "a", state="integrated")]
+    fake_commands["prs"] = {branch: merged_pr(9, branch, "fx-1")}
+    monkeypatch.setattr(lanes, "LANE_LOCK_WAIT_SECONDS", 0.2)
+    held = lanes.lane_lock_path(config, project, branch)
+    held.parent.mkdir(parents=True, exist_ok=True)
+
+    with held.open("a") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        synced = lanes.lane_sync(config, project)
+
+    assert fake_wt["removed"] == []
+    assert synced["closed"] == []
+    assert synced["removed"] == []
+    assert synced["remaining"][0]["reason"] == (
+        f"another lane operation holds {branch}"
+    )
