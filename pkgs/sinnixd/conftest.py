@@ -268,6 +268,7 @@ inherit = ["PATH"]
 root = "{worktrees}"
 default_base = "origin/master"
 agent_memory_max = "10G"
+verification_operations = ["verify_quick"]
 
 [packets]
 template = "contract.md"

@@ -34,11 +34,14 @@ _POOL_NAME = re.compile(r"[a-z][a-z0-9-]{0,63}")
 _ENVIRONMENT_NAME = re.compile(r"[A-Z_][A-Z0-9_]*\Z")
 MAX_OPERATION_SCHEDULE_LENGTH = 256
 RESULT_KINDS = frozenset({"exit", "json", "pytest"})
+CACHE_KINDS = frozenset({"none", "tree+environment"})
 
 # Retired descriptor tables still present in deployed descriptors. They are
 # inert here and ignored rather than taking the project out of service.
 _IGNORED_TABLES = frozenset({"conflicts", "owner_adapters", "packets"})
-_WORKSPACE_FIELDS = frozenset({"root", "default_base", "agent_memory_max"})
+_WORKSPACE_FIELDS = frozenset(
+    {"root", "default_base", "agent_memory_max", "verification_operations"}
+)
 # systemd's size grammar for MemoryMax: an integer with an optional K/M/G/T
 # suffix.
 _MEMORY_SIZE = re.compile(r"[1-9][0-9]*[KMGT]?\Z")
@@ -47,7 +50,6 @@ _IGNORED_WORKSPACE_FIELDS = frozenset(
         "provider",
         "identity_check",
         "checkpoint_untracked",
-        "verification_operations",
         "provision",
     }
 )
@@ -60,8 +62,8 @@ _OPERATION_FIELDS = frozenset(
         "timeout_seconds",
         "schedule",
         "checkout",
-        # Accepted and ignored: descriptors still declare it.
         "cache",
+        "dependencies",
     }
 )
 
@@ -117,12 +119,14 @@ class WorkspacePolicy:
     # The hard MemoryMax of one agent's scope; the descriptor's only say in
     # an agent's resources.
     agent_memory_max: str = AGENT_MEMORY_MAX
+    verification_operations: tuple[str, ...] = ()
 
     def catalog_row(self) -> dict[str, Any]:
         return {
             "root": str(self.root),
             "default_base": self.default_base,
             "agent_memory_max": self.agent_memory_max,
+            "verification_operations": list(self.verification_operations),
         }
 
 
@@ -138,6 +142,8 @@ class ProjectOperation:
     # "default": the operation runs only on the project's main checkout. A
     # complete corpus run belongs to the master boundary, not to a lane.
     checkout: str = "any"
+    cache: str = "none"
+    dependencies: tuple[str, ...] = ()
 
     def catalog_row(self) -> dict[str, Any]:
         return {
@@ -149,6 +155,8 @@ class ProjectOperation:
             "timeout_seconds": self.timeout_seconds,
             "schedule": self.schedule,
             "checkout": self.checkout,
+            "cache": self.cache,
+            "dependencies": list(self.dependencies),
         }
 
 
@@ -271,8 +279,19 @@ def _workspace(raw: Mapping[str, Any], descriptor: Path) -> WorkspacePolicy | No
         raise ProjectConfigError(
             f"{descriptor} workspace.agent_memory_max must be a systemd size such as 10G"
         )
+    verification_operations = _string_list(
+        raw_workspace.get("verification_operations"),
+        "workspace.verification_operations",
+    )
+    if len(set(verification_operations)) != len(verification_operations):
+        raise ProjectConfigError(
+            f"{descriptor} workspace.verification_operations must be unique"
+        )
     return WorkspacePolicy(
-        root=Path(root), default_base=default_base, agent_memory_max=memory_max
+        root=Path(root),
+        default_base=default_base,
+        agent_memory_max=memory_max,
+        verification_operations=verification_operations,
     )
 
 
@@ -318,6 +337,14 @@ def _operation(name: str, definition: Any, descriptor: Path) -> ProjectOperation
         raise ProjectConfigError(
             f"operations.{name}.schedule must be a non-empty OnCalendar expression"
         )
+    cache = definition.get("cache", "none")
+    if cache not in CACHE_KINDS:
+        raise ProjectConfigError(f"operations.{name}.cache is invalid")
+    dependencies = _optional_string_list(
+        definition.get("dependencies"), f"operations.{name}.dependencies"
+    )
+    if name in dependencies or len(set(dependencies)) != len(dependencies):
+        raise ProjectConfigError(f"operations.{name}.dependencies is invalid")
     return ProjectOperation(
         name=name,
         description=description,
@@ -327,6 +354,8 @@ def _operation(name: str, definition: Any, descriptor: Path) -> ProjectOperation
         timeout_seconds=timeout_seconds,
         schedule=schedule,
         checkout=checkout,
+        cache=cache,
+        dependencies=dependencies,
     )
 
 
@@ -367,6 +396,46 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
         _operation(str(name), definition, descriptor)
         for name, definition in sorted(raw_operations.items())
     )
+    operation_names = {operation.name for operation in operations}
+    unknown_dependencies = {
+        dependency
+        for operation in operations
+        for dependency in operation.dependencies
+        if dependency not in operation_names
+    }
+    if unknown_dependencies:
+        raise ProjectConfigError(
+            f"{descriptor} operation dependency/dependencies are undeclared: "
+            + ", ".join(sorted(unknown_dependencies))
+        )
+    workspace = _workspace(raw, descriptor)
+    if workspace is not None:
+        unknown_verifiers = set(workspace.verification_operations) - operation_names
+        if unknown_verifiers:
+            raise ProjectConfigError(
+                f"{descriptor} workspace verification operation(s) are undeclared: "
+                + ", ".join(sorted(unknown_verifiers))
+            )
+    visiting: set[str] = set()
+    visited: set[str] = set()
+
+    def visit(name: str) -> None:
+        if name in visiting:
+            raise ProjectConfigError(
+                f"{descriptor} operation dependencies contain a cycle"
+            )
+        if name in visited:
+            return
+        visiting.add(name)
+        for dependency in next(
+            operation for operation in operations if operation.name == name
+        ).dependencies:
+            visit(dependency)
+        visiting.remove(name)
+        visited.add(name)
+
+    for operation in operations:
+        visit(operation.name)
     return ProjectAdapter(
         project_id=project_id,
         display_name=display_name,
@@ -374,7 +443,7 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
         descriptor=descriptor,
         digest="sha256:" + hashlib.sha256(raw_bytes).hexdigest(),
         environment=_environment(raw, descriptor),
-        workspace=_workspace(raw, descriptor),
+        workspace=workspace,
         operations=operations,
     )
 

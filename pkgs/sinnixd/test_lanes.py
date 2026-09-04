@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 from conftest import FakeBd, FakePueue, bead, read_launch
-from sinnixd import lanes
+from sinnixd import lanes, launch
 from sinnixd.config import Config
 from sinnixd.lanes import LaneError
 from sinnixd.packets import PacketError
@@ -316,6 +316,51 @@ def test_lane_publish_uses_a_new_operation_from_the_lane_descriptor(
     assert fake_pueue.added[0]["label"] == "fixture:verify_quick"
     launch_input = read_launch(config, fake_pueue.task(1))
     assert launch_input["argv"][-1] == "lane-verify-quick"
+
+
+def test_lane_publish_runs_the_declared_verification_sequence_and_dependencies(
+    fake_commands: dict[str, Any],
+    fake_pueue: FakePueue,
+    fake_bd: FakeBd,
+    config: Config,
+    project_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    worktree = _git_worktree(monkeypatch, project_root, "feature/packet/fx-1")
+    descriptor = worktree / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text()
+        .replace(
+            'verification_operations = ["verify_quick"]',
+            'verification_operations = ["verify_quick", "verify"]',
+        )
+        .replace(
+            'exec = ["fixture-verify"]\npool = "pytest"',
+            'exec = ["fixture-verify"]\npool = "pytest"\ndependencies = ["check"]',
+        )
+    )
+
+    def succeed(task_id: int, *, timeout_seconds: float) -> dict[str, Any]:
+        fake_pueue.succeed(task_id)
+        return launch.job_view(fake_pueue.task(task_id))
+
+    monkeypatch.setattr(launch, "wait", succeed)
+    published = lanes.lane_publish(config, worktree)
+
+    assert [item["label"] for item in fake_pueue.added] == [
+        "fixture:verify_quick",
+        "fixture:check",
+        "fixture:verify",
+    ]
+    assert fake_pueue.added[2]["after"] == (2,)
+    assert [item["name"] for item in published["verification"]["operations"]] == [
+        "verify_quick",
+        "verify",
+    ]
+    assert [item["job_id"] for item in published["verification"]["operations"]] == [
+        1,
+        3,
+    ]
 
 
 def test_lane_publish_rejects_a_checkout_that_spoofs_project_identity(

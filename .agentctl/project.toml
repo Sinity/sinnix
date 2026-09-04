@@ -36,6 +36,7 @@ description = "Run default Sinnix checks"
 exec = ["check"]
 pool = "bulk"
 result = "exit"
+cache = "tree+environment"
 
 [operations.verify_quick]
 description = "Run maintained lint and formatting checks before lane publication"
@@ -74,6 +75,7 @@ description = "Run maintained Nix and shell linters"
 exec = ["lint"]
 pool = "normal"
 result = "exit"
+cache = "tree+environment"
 
 [operations.switch]
 description = "Build and activate the workstation configuration"

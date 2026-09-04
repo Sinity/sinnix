@@ -9,6 +9,7 @@ typed result back by the launch reference embedded in the task's command.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -60,6 +61,85 @@ def _write_private(path: Path, content: bytes) -> None:
         handle.write(content)
 
 
+def _git(path: Path, *arguments: str) -> str:
+    try:
+        completed = subprocess.run(
+            ["git", "-C", str(path), *arguments],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise JobError(f"could not read Git tree for {path}") from error
+    if completed.returncode != 0:
+        raise JobError(completed.stderr.strip() or "could not read Git tree")
+    return completed.stdout.strip()
+
+
+def _tree_receipt(path: Path) -> dict[str, Any]:
+    head = _git(path, "rev-parse", "HEAD")
+    tree = _git(path, "rev-parse", "HEAD^{tree}")
+    dirty = bool(_git(path, "status", "--porcelain=v1", "--untracked-files=all"))
+    return {"head": head, "tree": tree, "dirty": dirty}
+
+
+def _environment_receipt(
+    project: ProjectAdapter,
+    operation: ProjectOperation,
+    environment: Mapping[str, str],
+    extra_argv: Sequence[str] = (),
+) -> dict[str, str]:
+    payload = {
+        "descriptor": project.digest,
+        "kind": project.environment.kind,
+        "command": list(project.environment.command),
+        "operation": operation.name,
+        "argv": [*operation.command, *extra_argv],
+        "environment": sorted(environment.items()),
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    return {"digest": "sha256:" + hashlib.sha256(encoded).hexdigest()}
+
+
+def _launch_input(config: Config, task: Task) -> dict[str, Any] | None:
+    reference = launch_reference(task)
+    if reference is None:
+        return None
+    path = config.inputs_dir / f"{reference}.json"
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _matching_task(
+    config: Config,
+    project: ProjectAdapter,
+    operation: ProjectOperation,
+    working_directory: Path,
+    tree_receipt: Mapping[str, Any],
+    environment_receipt: Mapping[str, str],
+) -> Task | None:
+    label = label_for(project.project_id, operation.name)
+    for task in sorted(pueue.tasks().values(), key=lambda item: item.task_id):
+        if task.label != label:
+            continue
+        launch_input = _launch_input(config, task)
+        if launch_input is None:
+            continue
+        if (
+            launch_input.get("working_directory") != str(working_directory)
+            or launch_input.get("tree_receipt") != dict(tree_receipt)
+            or launch_input.get("environment_receipt") != dict(environment_receipt)
+        ):
+            continue
+        if not task.terminal or task.succeeded:
+            return task
+    return None
+
+
 def enqueue(
     config: Config,
     *,
@@ -74,6 +154,8 @@ def enqueue(
     environment: Mapping[str, str],
     kind: str = "declared-operation",
     after: Sequence[int] = (),
+    tree_receipt: Mapping[str, Any] | None = None,
+    environment_receipt: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """Write the launch input, add the pueue task, return the job view."""
     reference = _reference(label)
@@ -94,6 +176,10 @@ def enqueue(
         "log_path": str(log_path),
         "event_spool_path": str(config.event_spool),
     }
+    if tree_receipt is not None:
+        launch["tree_receipt"] = dict(tree_receipt)
+    if environment_receipt is not None:
+        launch["environment_receipt"] = dict(environment_receipt)
     if result_kind != "exit":
         launch["result_path"] = str(config.jobs_dir / f"{reference}.result")
     input_path = config.inputs_dir / f"{reference}.json"
@@ -124,6 +210,31 @@ def start_operation(
     extra_argv: Sequence[str] = (),
 ) -> dict[str, Any]:
     """Launch a declared operation on the project root or a worktree of it."""
+    return _start_operation(
+        config,
+        project,
+        operation,
+        workspace=workspace,
+        extra_argv=extra_argv,
+        stack=(),
+    )
+
+
+def _start_operation(
+    config: Config,
+    project: ProjectAdapter,
+    operation: ProjectOperation,
+    *,
+    workspace: Path | None,
+    extra_argv: Sequence[str],
+    stack: tuple[str, ...],
+) -> dict[str, Any]:
+    """Start one operation after its declared pueue dependencies."""
+    if operation.name in stack:
+        raise JobError(
+            f"{project.project_id} operation dependencies contain a cycle at "
+            f"{operation.name}"
+        )
     working_directory = (workspace or project.root).resolve()
     if operation.checkout == "default" and working_directory != project.root:
         raise JobError(
@@ -135,7 +246,59 @@ def start_operation(
     for key in ("SINNIXD_PRINCIPAL", "SINNIXD_LANE_BEAD"):
         if value := os.environ.get(key):
             environment[key] = value
-    return enqueue(
+    tree_receipt = None
+    environment_receipt = None
+    if operation.cache == "tree+environment":
+        tree_receipt = _tree_receipt(working_directory)
+        if tree_receipt["dirty"]:
+            tree_receipt = None
+        else:
+            environment_receipt = _environment_receipt(
+                project, operation, environment, extra_argv
+            )
+            existing = _matching_task(
+                config,
+                project,
+                operation,
+                working_directory,
+                tree_receipt,
+                environment_receipt,
+            )
+            if existing is not None:
+                existing_input = _launch_input(config, existing) or {}
+                return {
+                    **job_view(existing),
+                    "reused": True,
+                    **{
+                        key: existing_input[key]
+                        for key in ("tree_receipt", "environment_receipt")
+                        if key in existing_input
+                    },
+                }
+    dependency_ids: list[int] = []
+    for dependency_name in operation.dependencies:
+        try:
+            dependency = project.operation(dependency_name)
+        except KeyError as error:
+            raise JobError(
+                f"{project.project_id}.{operation.name} depends on undeclared "
+                f"operation {dependency_name}"
+            ) from error
+        started = _start_operation(
+            config,
+            project,
+            dependency,
+            workspace=workspace,
+            extra_argv=(),
+            stack=(*stack, operation.name),
+        )
+        dependency_id = started.get("job_id")
+        if not isinstance(dependency_id, int):
+            raise JobError(
+                f"{project.project_id}.{dependency_name} did not return a task id"
+            )
+        dependency_ids.append(dependency_id)
+    started = enqueue(
         config,
         project=project,
         operation=operation.name,
@@ -146,7 +309,15 @@ def start_operation(
         timeout_seconds=operation.timeout_seconds,
         result_kind=_RESULT_KINDS[operation.result],
         environment=environment,
+        after=dependency_ids,
+        tree_receipt=tree_receipt,
+        environment_receipt=environment_receipt,
     )
+    if tree_receipt is not None:
+        started["tree_receipt"] = tree_receipt
+    if environment_receipt is not None:
+        started["environment_receipt"] = environment_receipt
+    return started
 
 
 def fire(

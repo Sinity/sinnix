@@ -23,12 +23,14 @@ def test_the_fixture_descriptor_loads_every_declared_field(project_root: Path) -
     assert project.workspace is not None
     assert project.workspace.default_base == "origin/master"
     assert project.workspace.agent_memory_max == "10G"
+    assert project.workspace.verification_operations == ("verify_quick",)
     nightly = project.operation("nightly")
     assert nightly.schedule == "*-*-* 03:17:00"
     assert nightly.checkout == "default"
     assert nightly.pool == "bulk"
     verify = project.operation("verify")
     assert (verify.result, verify.timeout_seconds) == ("json", 120)
+    assert verify.dependencies == ()
     assert [operation.name for operation in project.operations] == [
         "check",
         "nightly",
@@ -82,6 +84,10 @@ def test_retired_tables_are_ignored_but_retired_operation_fields_refuse(
             '[operations.bad]\ndescription = "x"\nexec = ["x"]\ncheckout = "lane"\n',
             "checkout is invalid",
         ),
+        (
+            '[operations.bad]\ndescription = "x"\nexec = ["x"]\ncache = "bad"\n',
+            "cache is invalid",
+        ),
     ],
 )
 def test_malformed_operations_are_typed_refusals(
@@ -103,6 +109,35 @@ def test_a_malformed_agent_ceiling_is_a_typed_refusal(tmp_path: Path) -> None:
         )
     )
     with pytest.raises(ProjectConfigError, match="agent_memory_max"):
+        load_project_adapter(root)
+
+
+def test_verification_operations_and_dependencies_are_validated(tmp_path: Path) -> None:
+    root = write_project(tmp_path / "p")
+    descriptor = root / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text()
+        .replace(
+            'verification_operations = ["verify_quick"]',
+            'verification_operations = ["verify_quick", "check"]',
+        )
+        .replace(
+            'exec = ["fixture-verify"]\npool = "pytest"',
+            'exec = ["fixture-verify"]\npool = "pytest"\ndependencies = ["missing"]',
+        )
+    )
+    with pytest.raises(ProjectConfigError, match="undeclared.*missing"):
+        load_project_adapter(root)
+
+    descriptor.write_text(
+        descriptor.read_text()
+        .replace('dependencies = ["missing"]', 'dependencies = ["check"]')
+        .replace(
+            'exec = ["true"]\npool = "normal"',
+            'exec = ["true"]\npool = "normal"\ndependencies = ["verify"]',
+        )
+    )
+    with pytest.raises(ProjectConfigError, match="cycle"):
         load_project_adapter(root)
 
 

@@ -105,7 +105,7 @@ testmon seed copied from the primary checkout) is the project's `wt.toml`
 hooks' job. The environment carries `BEADS_ACTOR=agent-<bead>` so an agent's
 task writes are its own. Agent jobs cap at four hours.
 
-The worker ends its lane with `lane publish` (the toolbelt) or `agentctl lane publish <worktree>`. Publication first queues the project's declared `verify_quick` operation in its pueue pool and waits for that task to finish successfully, then pushes and opens the PR titled by the bead (`fix:` for bugs, `feat:` for features, `chore:` otherwise, at most 72 characters), body from `.lane/body.md`, auto-merge armed. Branch protection, the required verify check and review decide when it lands. `lane sync` then closes the bead and removes the worktree. Nothing dispatches on its own: `refill` and `lane start` are explicit, and a declared `schedule` is the one autonomous driver a project can choose.
+The worker ends its lane with `lane publish` (the toolbelt) or `agentctl lane publish <worktree>`. Publication reads the lane checkout's project descriptor, validates its project identity, and runs the ordered `workspace.verification_operations` sequence in its declared pueue pools. Operation dependencies become pueue edges. Operations with `cache = "tree+environment"` carry exact Git head/tree and non-secret environment receipts, so an active identical task is reused and a successful matching task is consumed. Every declared operation must succeed before the branch is pushed. Publication waits until GitHub exposes the created PR, then arms `gh pr merge --auto --squash`; GitHub branch protection, required checks and review decide when it lands. `lane sync` then closes the bead and removes the worktree. Nothing dispatches on its own: `refill` and `lane start` are explicit, and a declared `schedule` is the one autonomous driver a project can choose.
 
 ## Descriptors
 
@@ -133,6 +133,7 @@ POLYLOGUE_ARCHIVE_ROOT = "/realm/state/polylogue"
 root = "/realm/worktrees"
 default_base = "origin/master"
 agent_memory_max = "10G"
+verification_operations = ["verify_quick"]
 
 [packets]
 branch_prefix = "feature/packet"
@@ -141,6 +142,13 @@ branch_prefix = "feature/packet"
 backend = "codex"
 model = "gpt-5.6-luna"
 effort = "medium"
+
+[operations.verify_quick]
+description = "Run the lane verification"
+exec = ["devtools", "verify", "--quick"]
+pool = "pytest"
+result = "pytest"
+cache = "tree+environment"
 
 [operations.verify_all]
 description = "Run the complete corpus"
@@ -155,14 +163,17 @@ schedule = "*-*-* 03:17:00"
 An operation declares `description`, `exec` (argv, no shell), `pool` (a
 pueue group), `result` (`exit`, `json`, `pytest`), `timeout_seconds` (1 to
 28,800; default 3,600), `checkout` (`any`, or `default` for operations that
-run only on the main checkout) and `schedule` (an `OnCalendar` expression).
-`cache` is accepted and ignored. Any other operation field takes the project
+run only on the main checkout), `schedule` (an `OnCalendar` expression),
+`cache` (`none` or `tree+environment`) and `dependencies` (declared operation
+names). Dependencies are queued before their operation and cannot contain
+cycles. Any other operation field takes the project
 out of service with the field named. The retired tables `[conflicts]`,
 `[owner_adapters]` and the extra `[workspace]` fields are ignored.
 `[environment]` declares `kind`, `command`, `inherit`, `unset`, `values` and
 `require`; a required variable missing at launch fails the launch with its
 name. `[workspace]` declares `root`, `default_base` and `agent_memory_max`
-(a systemd size). `[packets]` declares `template`, `atlas_dir`,
+(a systemd size) and the ordered, non-empty `verification_operations` list.
+Every listed operation must be declared. `[packets]` declares `template`, `atlas_dir`,
 `branch_prefix` and `[packets.defaults]` (`backend`, `model`, `effort`).
 
 Descriptor changes take effect on the next call; timers follow on the next

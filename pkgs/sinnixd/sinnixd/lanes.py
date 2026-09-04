@@ -12,6 +12,7 @@ import json
 import os
 import re
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -33,7 +34,6 @@ from .worktrunk import Worktree, WorktrunkError
 LANE_OPERATION = "lane"
 REBASE_OPERATION = "rebase"
 AGENT_GROUP = "agent"
-VERIFY_OPERATION = "verify_quick"
 # The scope's slice: the job plane, where pueued's own tasks live, so an
 # agent's memory counts against the plane's budget and not the desktop's.
 AGENT_SLICE = "sinnixd-pueue-agent.slice"
@@ -318,7 +318,13 @@ def _remote_head(worktree: Path, branch: str) -> str | None:
 def _open_pr(worktree: Path, branch: str) -> Mapping[str, Any] | None:
     try:
         value = gh_json(
-            ["pr", "view", branch, "--json", "number,url,state,autoMergeRequest"],
+            [
+                "pr",
+                "view",
+                branch,
+                "--json",
+                "number,url,state,autoMergeRequest,reviewDecision,statusCheckRollup,isDraft",
+            ],
             cwd=worktree,
         )
     except LaneError as error:
@@ -328,29 +334,66 @@ def _open_pr(worktree: Path, branch: str) -> Mapping[str, Any] | None:
     return value if isinstance(value, Mapping) else None
 
 
+def _wait_for_pr(worktree: Path, branch: str) -> Mapping[str, Any]:
+    """Wait for GitHub to expose the PR created by the preceding command."""
+    deadline = time.monotonic() + GH_TIMEOUT_SECONDS
+    while True:
+        pull = _open_pr(worktree, branch)
+        if pull is not None:
+            return pull
+        if time.monotonic() >= deadline:
+            raise LaneError("gh pr create returned but the PR is not visible")
+        time.sleep(0.25)
+
+
 def _verify_for_publish(
     config: Config, project: ProjectAdapter, worktree: Path
 ) -> dict[str, Any]:
-    try:
-        operation = project.operation(VERIFY_OPERATION)
-    except KeyError as error:
-        raise LaneError(
-            f"project {project.project_id} does not declare {VERIFY_OPERATION}"
-        ) from error
-    started = launch.start_operation(config, project, operation, workspace=worktree)
-    job_id = started["job_id"]
-    receipt = launch.wait(job_id, timeout_seconds=operation.timeout_seconds)
-    if not receipt.get("terminal") or receipt.get("phase") != "succeeded":
-        phase = receipt.get("phase", "unknown")
-        detail = (
-            f", exit {receipt['exit_code']}"
-            if receipt.get("exit_code") is not None
-            else ""
-        )
-        raise LaneError(
-            f"quick verification task {job_id} did not succeed: {phase}{detail}"
-        )
-    return receipt
+    if project.workspace is None:
+        raise LaneError(f"project {project.project_id} declares no [workspace]")
+    operations: list[dict[str, Any]] = []
+    for operation_name in project.workspace.verification_operations:
+        try:
+            operation = project.operation(operation_name)
+        except KeyError as error:
+            raise LaneError(
+                f"project {project.project_id} does not declare verification "
+                f"operation {operation_name}"
+            ) from error
+        started = launch.start_operation(config, project, operation, workspace=worktree)
+        job_id = started.get("job_id")
+        if not isinstance(job_id, int):
+            raise LaneError(
+                f"verification operation {operation_name} did not return a task id"
+            )
+        receipt = {
+            **started,
+            **launch.wait(job_id, timeout_seconds=operation.timeout_seconds),
+        }
+        if not receipt.get("terminal") or receipt.get("phase") != "succeeded":
+            phase = receipt.get("phase", "unknown")
+            detail = (
+                f", exit {receipt['exit_code']}"
+                if receipt.get("exit_code") is not None
+                else ""
+            )
+            if operation_name == "verify_quick":
+                message = f"quick verification task {job_id} did not succeed"
+            else:
+                message = (
+                    f"verification operation {operation_name} task {job_id} did not "
+                    "succeed"
+                )
+            raise LaneError(f"{message}: {phase}{detail}")
+        operations.append({"name": operation_name, **receipt})
+    summary: dict[str, Any] = {
+        "phase": "succeeded",
+        "operations": operations,
+        "job_ids": [item["job_id"] for item in operations],
+    }
+    if len(operations) == 1:
+        summary.update(operations[0])
+    return summary
 
 
 def lane_publish(
@@ -427,9 +470,7 @@ def lane_publish(
             cwd=worktree,
         )
         created = True
-        pull = _open_pr(worktree, branch)
-        if pull is None:
-            raise LaneError("gh pr create returned but the PR is not visible")
+        pull = _wait_for_pr(worktree, branch)
     number = pull.get("number")
     if not isinstance(number, int):
         raise LaneError("gh pr view published no PR number")
