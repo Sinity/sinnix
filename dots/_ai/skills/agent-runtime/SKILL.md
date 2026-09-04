@@ -7,8 +7,9 @@ description: Operate or recover agentctl jobs and lanes — declared operations 
 
 `agentctl` is an in-process CLI; nothing runs on its behalf. pueue owns the
 queue, every process and its terminal result; worktrunk owns worktrees;
-GitHub owns review, required checks and merge; Beads owns tasks; systemd owns
-only calendar wake-ups. Do not add a parallel ledger for any of them.
+GitHub owns review, the default branch's protection and merge; Beads owns
+tasks; systemd owns only calendar wake-ups. Do not add a parallel ledger for
+any of them.
 
 Verbs: `project`, `job`, `lane`, `refill`, `view`, `events`, `schedule`.
 `agentctl <verb> --help` is the surface. Reads print tables in local time;

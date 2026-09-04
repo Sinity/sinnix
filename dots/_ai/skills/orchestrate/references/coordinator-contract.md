@@ -47,9 +47,10 @@ A missing capability is a bead against the substrate. Declared operations are
 the extension point: `.agentctl/project.toml` in the repo, live on the next
 call.
 
-Publication policy is per-repository: polylogue lands via `lane publish`
-(PR + auto-merge behind the required verify check); **sinnix publishes from
-`master` directly** — verify at exact head, merge or fast-forward, push.
+Every repository lands the same way: `lane publish` verifies at the exact
+head, pushes, opens the PR and arms auto-merge; GitHub merges. What it waits
+for is per-repository: polylogue's `master` requires a status check, sinnix's
+carries no protection and merges at once. Nothing lands by hand.
 
 ## The operating loop
 
@@ -60,10 +61,11 @@ Publication policy is per-repository: polylogue lands via `lane publish`
 3. `agentctl view <p>`; decide; `refill` or `lane start` the next wave.
 
 **Stages on the view** and what follows mechanically: `lane queued/running`
-→ wait; `unpublished` (agent done, no PR) → `lane publish`; `pr open` →
-`gh pr merge --auto --squash` (the worker should have armed it);
-`auto-merge armed` / `checks running` → wait; `checks failing` or `changes
-requested` → fix in the lane, push; `conflicting` → `lane rebase`;
+→ wait; `unpublished` (agent done, no PR) → `lane publish`; `pr open` with
+auto-merge unarmed → publication refused, so read its reason, fix in the lane
+and `lane publish` again; `auto-merge armed` / `checks running` → wait;
+`checks failing` or `changes requested` → fix in the lane, push;
+`conflicting` → `lane rebase`;
 `lane failed/timed-out` → `job logs`, then `lane rebase`; `merged` →
 `lane sync`.
 

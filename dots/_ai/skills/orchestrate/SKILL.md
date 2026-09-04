@@ -65,9 +65,10 @@ targets — run it before a hunt wave.
   a fresh agent into the existing worktree; uncommitted work there is the new
   agent's.
 - Publication: the worker's `lane publish` (or `agentctl lane publish
-<worktree>`) opens the PR and arms auto-merge; branch protection, the
-  required check and review land it. `agentctl lane sync <project>` closes
-  merged beads and removes their worktrees.
+<worktree>`) verifies at the exact head, opens the PR and arms auto-merge;
+  GitHub merges under the default branch's protection, at once where there is
+  none. `agentctl lane sync <project>` closes merged beads and removes their
+  worktrees.
 - Observation: ONE persistent watch on `agentctl events tail --follow`.
   Completion events are authoritative; no per-job wait loops.
 - Heavy host operations run as declared operations so pueue's per-group
@@ -131,6 +132,7 @@ pueue executes and observes every job: it owns the queue, the process, the
 terminal result, and cancellation (`pueue pause -g <group>` freezes a group;
 the backpressure timer does this under host stall). worktrunk owns worktree
 creation and removal. Publication is `gh pr create` plus `gh pr merge --auto
---squash`; GitHub owns review, required checks, and merge. Systemd owns only
-calendar-timer wake-ups for declared `schedule` operations and the opt-in
-refill timer. `agentctl` is in-process: no daemon, no socket, no judgment.
+--squash`; GitHub owns review, the default branch's protection, and merge.
+Systemd owns only calendar-timer wake-ups for declared `schedule` operations
+and the opt-in refill timer. `agentctl` is in-process: no daemon, no socket,
+no judgment.

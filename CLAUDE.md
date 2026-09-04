@@ -155,12 +155,18 @@ launch. Do not maintain shell-parsed dispatch ledgers or subagent stop ledgers.
 
 ## Development workflow
 
-This repository publishes from `master` directly: verify locally, commit on
-master (or land a short-lived branch with a plain merge/fast-forward), push.
-Do not open GitHub PRs for sinnix work — hosted CI does not run automatically
-here and PR ceremony adds review latency with no gate behind it. Worktrees
-and branches remain fine as isolation for in-flight work; they end in a
-direct push, not a PR.
+Every change reaches `master` through a pull request opened by `agentctl lane
+publish`: it runs the descriptor's `workspace.verification_operations` at the
+exact head, pushes only if all of them succeed, opens the PR, and arms `gh pr
+merge --auto --squash`. GitHub performs the merge. Do not merge by hand and do
+not push to `master`.
+
+What that auto-merge waits for is whatever `master` requires, and `master`
+currently requires nothing: it carries no branch protection and no ruleset, and
+`.github/workflows/ci.yml` runs on `workflow_dispatch` alone, so no hosted
+status check observes a PR. Every precondition is therefore one `lane publish`
+applies before it arms the merge; nothing tests the merge commit, which is why
+`operations.check_master` watches committed `master` hourly.
 
 Short foreground work may use ordinary commands from the devshell. Durable or
 heavy operations use project operations:

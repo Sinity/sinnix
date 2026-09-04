@@ -36,10 +36,12 @@ repeated here.
    reader against the live archive read-only and report the counts.
 5. **Commit by path, push, publish.** When the work is complete and the
    quick gate is green in the rebased state, run `lane publish` (or
-   `agentctl lane publish <worktree>`): it pushes, opens the PR under the
-   bead's type-prefixed subject, and arms `gh pr merge --auto --squash`.
-   Branch protection and the required check decide when it lands; never
-   merge by hand.
+   `agentctl lane publish <worktree>`): it runs the descriptor's declared
+   verification at the exact head, pushes if that succeeds, opens the PR
+   under the bead's type-prefixed subject, and arms `gh pr merge --auto
+   --squash`. GitHub then merges under whatever the repository's default
+   branch requires, which in a repository with no branch protection is
+   immediately. Never merge by hand and never push to the default branch.
 6. **Report once, honestly.** Per-bead and per-acceptance-criterion
    disposition, the exact commands and the result line that matters, diffstat,
    residual risk. Refuting a finding needs evidence. The report is the
