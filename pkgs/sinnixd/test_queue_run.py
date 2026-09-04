@@ -62,6 +62,20 @@ def test_a_successful_command_spools_its_start_and_reports_its_status(
     assert started[0]["label"] == "fixture:check:job-a"
 
 
+def test_worker_exports_queue_identity_to_the_child(tmp_path: Path) -> None:
+    launch = write_launch(
+        tmp_path,
+        argv=[
+            "sh",
+            "-c",
+            'printf \'%s %s %s\' "$SINNIXD_JOB_ID" "$SINNIXD_PROJECT_ID" "$SINNIXD_OPERATION"',
+        ],
+    )
+
+    assert main([str(launch)]) == 0
+    assert (tmp_path / "log").read_text() == "job-a fixture check"
+
+
 def test_a_failing_command_reports_its_own_exit_status(tmp_path: Path) -> None:
     launch = write_launch(tmp_path, argv=["sh", "-c", "exit 3"])
 

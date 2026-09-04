@@ -177,6 +177,16 @@ def run(launch: Mapping[str, Any]) -> int:
     # A typed result is the command's stdout alone; stderr and everything else
     # belongs in the log, or trailing diagnostics would corrupt the document.
     capture_stdout = result_path is not None and result_kind in {"json", "pytest"}
+    # The queue is the admission boundary.  Pass its identity to the child so
+    # project-native runners can distinguish a worker from a lane-side request.
+    child_environment = dict(launch["environment"])
+    child_environment.update(
+        {
+            "SINNIXD_JOB_ID": str(launch["job_id"]),
+            "SINNIXD_PROJECT_ID": str(launch["project_id"]),
+            "SINNIXD_OPERATION": str(launch["operation"]),
+        }
+    )
     with open(log_path, "wb") as log:
         stdout: Any = log
         result_file = None
@@ -189,7 +199,7 @@ def run(launch: Mapping[str, Any]) -> int:
             process = subprocess.Popen(
                 list(launch["argv"]),
                 cwd=launch["working_directory"],
-                env=dict(launch["environment"]),
+                env=child_environment,
                 stdout=stdout,
                 stderr=log,
                 start_new_session=True,

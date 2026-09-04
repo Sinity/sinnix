@@ -158,6 +158,7 @@ def queue_agent(
     environment = project.environment.values()
     # Task-authority writes from an agent must not default to the operator.
     environment.setdefault("BEADS_ACTOR", f"agent-{bead_id}")
+    environment["SINNIXD_PRINCIPAL"] = "agent-control"
     environment["SINNIXD_PROJECT_ID"] = project.project_id
     environment["SINNIXD_LANE_BEAD"] = bead_id
     return launch.enqueue(

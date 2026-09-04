@@ -128,6 +128,9 @@ def start_operation(
     if not working_directory.is_dir():
         raise JobError(f"working directory does not exist: {working_directory}")
     environment = project.environment.values()
+    for key in ("SINNIXD_PRINCIPAL", "SINNIXD_LANE_BEAD"):
+        if value := os.environ.get(key):
+            environment[key] = value
     return enqueue(
         config,
         project=project,
