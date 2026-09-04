@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 from pathlib import Path
 from typing import Callable
 
@@ -37,9 +36,7 @@ def test_start_writes_the_launch_input_and_queues_the_wrapper_in_the_pool(
     assert written["argv"] == ["env", "fixture-verify"]
     assert written["timeout_seconds"] == 120
     assert written["pool"] == "pytest"
-    assert launch.scope_unit(fake_pueue.task(1)) == scope_unit_for(
-        input_path, "pytest"
-    )
+    assert launch.scope_unit(fake_pueue.task(1)) == scope_unit_for(input_path, "pytest")
     assert written["result_kind"] == "json"
     assert written["result_path"].endswith(".result")
     assert written["event_spool_path"] == str(config.event_spool)
