@@ -246,6 +246,8 @@ def run(launch: Mapping[str, Any]) -> int:
             "SINNIXD_QUEUE_WORKER": "1",
         }
     )
+    if pool := launch.get("pool"):
+        child_environment["SINNIXD_QUEUE_POOL"] = str(pool)
     command, scope_unit = _scoped_command(launch)
     with open(log_path, "wb") as log:
         stdout: Any = log

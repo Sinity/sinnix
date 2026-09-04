@@ -62,18 +62,29 @@ def test_a_successful_command_spools_its_start_and_reports_its_status(
     assert started[0]["label"] == "fixture:check:job-a"
 
 
-def test_worker_exports_queue_identity_to_the_child(tmp_path: Path) -> None:
+def test_worker_exports_queue_identity_to_the_child(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    runner = fake_bin / "systemd-run"
+    runner.write_text(
+        '#!/bin/sh\nwhile [ "$1" != "--" ]; do shift; done\nshift\nexec "$@"\n'
+    )
+    runner.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{fake_bin}{os.pathsep}{os.environ['PATH']}")
     launch = write_launch(
         tmp_path,
         argv=[
             "sh",
             "-c",
-            'printf \'%s %s %s\' "$SINNIXD_JOB_ID" "$SINNIXD_PROJECT_ID" "$SINNIXD_OPERATION"',
+            'printf \'%s %s %s %s\' "$SINNIXD_JOB_ID" "$SINNIXD_PROJECT_ID" "$SINNIXD_OPERATION" "$SINNIXD_QUEUE_POOL"',
         ],
+        pool="pytest",
     )
 
     assert main([str(launch)]) == 0
-    assert (tmp_path / "log").read_text() == "job-a fixture check"
+    assert (tmp_path / "log").read_text() == "job-a fixture check pytest"
 
 
 def test_a_declared_pool_runs_the_child_in_its_named_systemd_scope(

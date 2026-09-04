@@ -502,6 +502,10 @@ in
     test-vm = {
       description = "Build a QEMU VM from current configuration and launch it (nixos-rebuild build-vm)";
       script = ''
+        if [ "''${SINNIXD_PRINCIPAL:-}" = agent-control ]; then
+          echo "sinnix test-vm: refused in a managed lane; declare a pueue operation and run it with agentctl" >&2
+          exit 64
+        fi
         ${resolveFlakeDir}
         ${rebuildLock "test-vm"}
         ${localInputOverrideArgs}
