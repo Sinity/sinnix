@@ -90,6 +90,14 @@
           scripts = [ "sinnix-speaker-verify" ];
           pythonPackages = [ "numpy" ];
         };
+        reading-stack-suite = mkScriptSuite {
+          name = "sinnix-reading-stack";
+          suiteDir = ../../pkgs/sinnix-reading-stack/tests;
+          scripts = [
+            "sinnix-reading-stack"
+            "sinnix-nav-capture-daemon"
+          ];
+        };
       };
     };
 }

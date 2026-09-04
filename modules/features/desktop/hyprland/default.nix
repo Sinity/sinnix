@@ -302,8 +302,6 @@ in
                     hl.dispatch(hl.dsp.force_renderer_reload())
                   end, { timeout = 2000, type = "oneshot" })
                   hl.exec_cmd("uwsm app -- ${pkgs.kitty}/bin/kitty --class scratchpad-weechat --title WeeChat $HOME/.local/bin/weechat-scratchpad")
-                  hl.exec_cmd("uwsm app -- ${scriptPkgs.sinnix-nav-capture-daemon}/bin/sinnix-nav-capture-daemon")
-                  hl.exec_cmd("uwsm app -- ${pkgs.kitty}/bin/kitty --class reading-stack-widget --title reading-stack ${scriptPkgs.sinnix-reading-stack-widget}/bin/sinnix-reading-stack-widget")
                 end)
               '';
             };

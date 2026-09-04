@@ -16,6 +16,7 @@ while true; do
   echo "── reading stack ──────────────────────"
   count="$(sinnix-reading-stack count)"
   sinnix-reading-stack list --compact --limit 12
+  echo "  SUPER+O: choose [stack] to open and consume"
   echo "────────────────────────────────────────"
   if [ "$count" -gt 20 ]; then
     echo "  ($count total -- over soft cap, review)"
