@@ -51,12 +51,11 @@ five means the change should be split).
 - Stage by path, never `git add -A` on significant changes. Never
   `--no-verify` unbidden; a hook failure means fix the cause in a new
   commit. From a linked worktree, use `git -C /abs/path`.
-- Lane flow where the repository lands via PRs: `agentctl lane publish
-<worktree>` pushes the branch, opens the PR under the bead's type-prefixed
-  subject (body from `.lane/body.md`), and arms `gh pr merge --auto
---squash`; branch protection, the required verify check and GitHub review
-  decide when it lands. `agentctl lane sync <project>` closes the beads of
-  merged lanes and removes their worktrees — no parallel merge ledger.
+- Where the repository lands via PRs, integrate candidate commits into one
+  batch worktree, then run `agentctl lane publish <integration-worktree>`.
+  Branch protection, the required check and GitHub review decide when it
+  lands. Repositories that publish directly from their default branch are
+  reviewed and verified as one batch before the coordinator pushes them.
 - A green hosted check is not test evidence where CI skips the heavy suite
   (recorded polylogue gotcha) — verify locally with the focused selector
   and say which tier ran. `devtools verify` selects from the checkout's one

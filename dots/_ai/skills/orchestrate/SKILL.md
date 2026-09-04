@@ -11,15 +11,14 @@ what it is told and reports. Nothing dispatches on its own.
 
 ## The operating loop
 
-1. Merge everything already in progress (`agentctl lane sync <project>`
-   closes what merged). Excisions land as whole merges, not as a trickle of
-   partial branches.
+1. Inventory everything already in progress. Group compatible candidate
+   commits into the smallest number of coherent integration batches; do not
+   publish each lane independently.
 2. Run the corpus **once**, at the master boundary, through the declared
    operation: `agentctl job start polylogue verify_all`. Never a corpus run
    per lane.
 3. Read `agentctl view <project>`, decide, dispatch the next wave:
-   `agentctl refill <project> --limit N` or `agentctl lane start <project>
-<bead>` per bead.
+   `agentctl lane start <project> <bead>` for each ready ownership group.
 
 A declared `schedule` in a project descriptor is the only autonomous driver,
 and the opt-in refill timer the only other one.
@@ -30,17 +29,15 @@ and the opt-in refill timer the only other one.
 | ------------------------------------------ | --------------------------------------- | ---------------- | ---------- |
 | Specification, review, integration         | this session                            | (session model)  | default    |
 | Context-carrying analysis                  | fork                                    | inherited        | —          |
-| Implementation lane (well-specified beads) | `agentctl lane start … --backend codex` | gpt-5.6-luna     | medium     |
-| Escalated lane (luna floundered)           | `agentctl lane rebase … --model …`      | gpt-5.6-terra    | high       |
-| Design / debug / adversarial review        | Agent tool or backend claude            | claude-opus-5    | high       |
+| Implementation and investigation lane      | `agentctl lane start … --backend claude` | claude-opus-5    | high       |
+| Design / debug / adversarial review         | Agent tool or backend claude             | claude-opus-5    | high       |
 | Review alternate (Claude quota tight)      | backend codex                           | gpt-5.6-sol      | high       |
 | Menial coordination (≥3 live lanes)        | Agent tool                              | claude-haiku-4-5 | medium     |
 | Broad read-only sweeps                     | Agent tool                              | sonnet or luna   | low/medium |
 
 Every dispatch names backend, model, and effort explicitly; only forks inherit.
-Luna-first is quota-driven (a separate Codex pool) and review-driven
-(cross-family review has uncorrelated failure modes). When a lane is stuck,
-LOWER effort or switch model. Escalate luna → terra on the first flounder.
+Use another family when an independent failure mode is worth its cost, not as
+the default implementation route.
 
 Multi-model redundancy runs only on a predeclared trigger: irreversible
 action, destructive-data risk, no executable oracle, or concrete disagreement
@@ -58,16 +55,16 @@ targets — run it before a hunt wave.
 
 ## Dispatch mechanics
 
-- Wave: `agentctl refill <project> --limit N [--dry-run]`. One bead:
-  `agentctl lane start <project> <bead>`. Both compile the worker contract
-  into the prompt.
+- Start one ownership group with `agentctl lane start <project> <leader-bead>`.
+  Put closely related Beads in one dispatch group when they share files,
+  evidence, or a verification boundary. Use `refill --dry-run` for discovery,
+  not as an instruction to publish one PR per ready Bead.
 - Continue or unblock a lane: `agentctl lane rebase <project> <bead>` queues
   a fresh agent into the existing worktree; uncommitted work there is the new
   agent's.
-- Publication: the worker's `lane publish` (or `agentctl lane publish
-<worktree>`) opens the PR and arms auto-merge; branch protection, the
-  required check and review land it. `agentctl lane sync <project>` closes
-  merged beads and removes their worktrees.
+- Publication belongs to the coordinator after candidate commits have been
+  integrated. Product repositories get one PR per coherent batch. Repositories
+  that publish from their default branch get one verified direct integration.
 - Observation: ONE persistent watch on `agentctl events tail --follow`.
   Completion events are authoritative; no per-job wait loops.
 - Heavy host operations run as declared operations so pueue's per-group
@@ -81,15 +78,16 @@ targets — run it before a hunt wave.
 
 ## Lane contract
 
-- A lane = one worker + one worktree + one independently verifiable change,
-  bounded by ownership and expected runtime. Its bead count may be one or
-  many (a dispatch group). One branch per lane; one PR per lane.
+- A lane = one worker + one worktree + one ownership group. It may complete
+  several closely related Beads. Its branch produces candidate commits; it is
+  not a publication unit.
 - The dispatch prompt carries task content only (bead ids, files, scope,
   verification selector). Standing rules live in the worker contract.
   Communicate by pointer — bead ids, spec paths, commit SHAs.
-- Workers commit each completed chunk, run their exact focused selector, and
-  report with an anti-vacuity statement: what production dependency the work
-  exercises, and what was not done.
+- Workers commit the candidate, run the exact focused selector and quick gate,
+  and report what production dependency the work exercises and what was not
+  done. The coordinator integrates compatible candidates, resolves overlap,
+  reviews the combined diff, and verifies the batch once.
 
 ## Verification
 
@@ -119,11 +117,9 @@ diagnose the whole failure shape and batch the fixes.
 
 ## Continuous queue mode
 
-Claim the highest-value ready cluster via [[task-backend]] → dispatch lane →
-review → integrate → complete with verification evidence → repeat. Keep the
-agent frontier full up to pueue's configured `agent` group capacity and one
-merge-ready train. Heavy verification remains independently bounded by its
-own groups.
+Claim the highest-value ready ownership groups via [[task-backend]], keep the
+agent frontier full, and drain completed candidates into one integration
+batch. Heavy verification remains independently bounded by its own groups.
 
 ## Runtime architecture
 
