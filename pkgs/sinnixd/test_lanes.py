@@ -73,7 +73,12 @@ def fake_bd(monkeypatch: pytest.MonkeyPatch) -> FakeBd:
 @pytest.fixture
 def fake_commands(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     """Records gh/git/bd invocations; answers `gh` reads from `prs`."""
-    state: dict[str, Any] = {"calls": [], "prs": {}, "merged_heads": set()}
+    state: dict[str, Any] = {
+        "calls": [],
+        "prs": {},
+        "pr_views": {},
+        "merged_heads": set(),
+    }
 
     def run(argv: Any, *, cwd: Path, timeout: float = 60) -> str:
         argv = list(argv)
@@ -84,6 +89,9 @@ def fake_commands(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
             pull = state["prs"].get(argv[3])
             if pull is None:
                 raise LaneError("no pull requests found for branch")
+            views = state["pr_views"].get(argv[3])
+            if views:
+                pull = views.pop(0)
             return json.dumps(pull)
         if argv[:3] == ["gh", "pr", "create"]:
             head = argv[argv.index("--head") + 1]
@@ -366,6 +374,54 @@ def test_lane_publish_runs_the_declared_verification_sequence_and_dependencies(
     ]
 
 
+def test_lane_publish_consumes_a_matching_cached_verification(
+    fake_commands: dict[str, Any],
+    fake_pueue: FakePueue,
+    fake_bd: FakeBd,
+    config: Config,
+    project_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    worktree = _git_worktree(monkeypatch, project_root, "feature/packet/fx-1")
+    descriptor = worktree / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text().replace(
+            '[operations.verify_quick]\ndescription = "Fixture quick verification"',
+            '[operations.verify_quick]\ndescription = "Fixture quick verification"\n'
+            'cache = "tree+environment"',
+        )
+    )
+    monkeypatch.setattr(
+        launch,
+        "_git",
+        lambda path, *arguments: {
+            ("rev-parse", "HEAD"): "a" * 40,
+            ("rev-parse", "HEAD^{tree}"): "b" * 40,
+            ("status", "--porcelain=v1", "--untracked-files=all"): "",
+        }[arguments],
+    )
+    cached = launch.start_operation(
+        config,
+        load_project_adapter(worktree),
+        load_project_adapter(worktree).operation("verify_quick"),
+        workspace=worktree,
+    )
+    fake_pueue.succeed(cached["job_id"])
+
+    published = lanes.lane_publish(config, worktree)
+
+    assert [item["label"] for item in fake_pueue.added] == ["fixture:verify_quick"]
+    verification = published["verification"]["operations"][0]
+    assert verification["job_id"] == cached["job_id"]
+    assert verification["reused"] is True
+    assert verification["tree_receipt"] == {
+        "head": "a" * 40,
+        "tree": "b" * 40,
+        "dirty": False,
+    }
+    assert verification["environment_receipt"]["digest"].startswith("sha256:")
+
+
 def test_lane_publish_rejects_a_checkout_that_spoofs_project_identity(
     fake_commands: dict[str, Any],
     fake_pueue: FakePueue,
@@ -444,13 +500,90 @@ def test_lane_publish_pushes_opens_the_pr_under_the_bead_subject_and_arms_auto_m
     assert create[create.index("--base") + 1] == "master"
     assert create[create.index("--head") + 1] == "feature/packet/fx-1"
     assert create[create.index("--body") + 1].endswith(
-        '<!-- sinnixd:lane-publication '
+        "<!-- sinnixd:lane-publication "
         '{"bead":"fx-1","branch":"feature/packet/fx-1",'
         '"head":"abc123"} -->\n'
     )
     assert ["gh", "pr", "merge", "100", "--auto", "--squash"] in fake_commands["calls"]
     assert published["pr"] == 100 and published["created"] is True
     assert published["bead"] == "fx-1"
+
+
+def test_lane_publish_waits_for_checks_and_required_review_before_auto_merge(
+    fake_commands: dict[str, Any],
+    fake_pueue: FakePueue,
+    fake_bd: FakeBd,
+    config: Config,
+    project_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    worktree = _git_worktree(monkeypatch, project_root, "feature/packet/fx-1")
+    fake_pueue.finish_when_waited(1, lambda fake: fake.succeed(1))
+    fake_commands["pr_views"]["feature/packet/fx-1"] = [
+        {
+            "number": 100,
+            "url": "u",
+            "state": "OPEN",
+            "headRefName": "feature/packet/fx-1",
+            "autoMergeRequest": None,
+            "reviewDecision": "REVIEW_REQUIRED",
+            "statusCheckRollup": [{"__typename": "CheckRun", "status": "IN_PROGRESS"}],
+        },
+        {
+            "number": 100,
+            "url": "u",
+            "state": "OPEN",
+            "headRefName": "feature/packet/fx-1",
+            "autoMergeRequest": None,
+            "reviewDecision": "APPROVED",
+            "statusCheckRollup": [
+                {
+                    "__typename": "CheckRun",
+                    "status": "COMPLETED",
+                    "conclusion": "SUCCESS",
+                }
+            ],
+        },
+    ]
+
+    published = lanes.lane_publish(config, worktree)
+
+    assert published["auto_merge"] is True
+    assert fake_commands["pr_views"]["feature/packet/fx-1"] == []
+    assert ["gh", "pr", "merge", "100", "--auto", "--squash"] in fake_commands["calls"]
+
+
+def test_lane_publish_refuses_failing_hosted_checks_before_auto_merge(
+    fake_commands: dict[str, Any],
+    fake_pueue: FakePueue,
+    fake_bd: FakeBd,
+    config: Config,
+    project_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    worktree = _git_worktree(monkeypatch, project_root, "feature/packet/fx-1")
+    fake_pueue.finish_when_waited(1, lambda fake: fake.succeed(1))
+    failing_pr = {
+        "number": 100,
+        "url": "u",
+        "state": "OPEN",
+        "headRefName": "feature/packet/fx-1",
+        "autoMergeRequest": None,
+        "reviewDecision": "APPROVED",
+        "statusCheckRollup": [
+            {
+                "__typename": "CheckRun",
+                "status": "COMPLETED",
+                "conclusion": "FAILURE",
+            }
+        ],
+    }
+    fake_commands["pr_views"]["feature/packet/fx-1"] = [failing_pr, failing_pr]
+
+    with pytest.raises(LaneError, match="failing required checks"):
+        lanes.lane_publish(config, worktree)
+
+    assert not any(call[:3] == ["gh", "pr", "merge"] for call in fake_commands["calls"])
 
 
 def test_lane_publish_reuses_an_open_pr_and_reads_the_lane_body(
@@ -747,9 +880,7 @@ def test_lane_sync_does_not_close_a_bead_for_another_beads_merged_pr(
 ) -> None:
     """A reused branch can have another bead's exact merged head."""
     project = load_project_adapter(project_root)
-    fake_wt["trees"] = [
-        tree("feature/packet/fx-1", tmp_path / "a", state="integrated")
-    ]
+    fake_wt["trees"] = [tree("feature/packet/fx-1", tmp_path / "a", state="integrated")]
     fake_commands["prs"] = {
         "feature/packet/fx-1": {
             "number": 4670,
@@ -758,7 +889,7 @@ def test_lane_sync_does_not_close_a_bead_for_another_beads_merged_pr(
             "headRefOid": "abc123",
             "title": "fix: Second task",
             "body": (
-                '<!-- sinnixd:lane-publication '
+                "<!-- sinnixd:lane-publication "
                 '{"bead":"fx-2","branch":"feature/packet/fx-1",'
                 '"head":"abc123"} -->'
             ),

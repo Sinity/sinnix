@@ -39,6 +39,7 @@ AGENT_GROUP = "agent"
 AGENT_SLICE = "sinnixd-pueue-agent.slice"
 GH_TIMEOUT_SECONDS = 60
 PUSH_TIMEOUT_SECONDS = 2_400  # the push runs the repository's pre-push gate
+PR_POLL_INTERVAL_SECONDS = 0.25
 _PUBLICATION_MARKER = re.compile(
     r"<!-- sinnixd:lane-publication (?P<payload>\{.*?\}) -->"
 )
@@ -346,7 +347,69 @@ def _wait_for_pr(worktree: Path, branch: str) -> Mapping[str, Any]:
             return pull
         if time.monotonic() >= deadline:
             raise LaneError("gh pr create returned but the PR is not visible")
-        time.sleep(0.25)
+        time.sleep(PR_POLL_INTERVAL_SECONDS)
+
+
+def _check_rollup(pull: Mapping[str, Any]) -> str:
+    """Classify GitHub's check rollup before auto-merge is requested."""
+    rollup = pull.get("statusCheckRollup")
+    if not isinstance(rollup, list) or not rollup:
+        return "ready"
+    pending = False
+    for check in rollup:
+        if not isinstance(check, Mapping):
+            pending = True
+            continue
+        conclusion = str(check.get("conclusion") or "").upper()
+        state = str(check.get("state") or "").upper()
+        status = str(check.get("status") or "").upper()
+        if conclusion in {
+            "FAILURE",
+            "ERROR",
+            "CANCELLED",
+            "TIMED_OUT",
+            "ACTION_REQUIRED",
+        }:
+            return "failed"
+        if state in {"FAILURE", "ERROR"}:
+            return "failed"
+        if conclusion in {"SUCCESS", "NEUTRAL", "SKIPPED"} or state == "SUCCESS":
+            continue
+        if status == "COMPLETED" and conclusion:
+            return "failed"
+        pending = True
+    return "pending" if pending else "ready"
+
+
+def _review_state(pull: Mapping[str, Any]) -> str:
+    """Classify the review decision, treating an empty decision as no requirement."""
+    decision = pull.get("reviewDecision")
+    if decision in (None, "", "APPROVED"):
+        return "ready"
+    if decision == "CHANGES_REQUESTED":
+        return "failed"
+    if decision == "REVIEW_REQUIRED":
+        return "pending"
+    return "pending"
+
+
+def _wait_for_merge_ready(worktree: Path, branch: str) -> Mapping[str, Any]:
+    """Wait until GitHub checks and required review permit an auto-merge request."""
+    deadline = time.monotonic() + GH_TIMEOUT_SECONDS
+    while True:
+        pull = _open_pr(worktree, branch)
+        if pull is not None:
+            checks = _check_rollup(pull)
+            if checks == "failed":
+                raise LaneError("published PR has failing required checks")
+            review = _review_state(pull)
+            if review == "failed":
+                raise LaneError("published PR has requested changes")
+            if checks == "ready" and review == "ready":
+                return pull
+        if time.monotonic() >= deadline:
+            raise LaneError("published PR checks or required review did not settle")
+        time.sleep(PR_POLL_INTERVAL_SECONDS)
 
 
 def _verify_for_publish(
@@ -447,8 +510,10 @@ def lane_publish(
     base_branch = base.split("/", 1)[1] if base.startswith("origin/") else base
 
     remote_head = _remote_head(worktree, branch)
-    verification = _verify_for_publish(config, project, worktree)
     head = _git(worktree, "rev-parse", "HEAD")
+    verification = _verify_for_publish(config, project, worktree)
+    if _git(worktree, "rev-parse", "HEAD") != head:
+        raise LaneError("worktree head changed during publication verification")
     if bead_id is not None:
         marker = json.dumps(
             {"bead": bead_id, "branch": branch, "head": head},
@@ -491,6 +556,7 @@ def lane_publish(
     auto_merge = bool(pull.get("autoMergeRequest"))
     next_action = "wait for merge"
     if not auto_merge:
+        pull = _wait_for_merge_ready(worktree, branch)
         try:
             _run(["gh", "pr", "merge", str(number), "--auto", "--squash"], cwd=worktree)
         except LaneError as error:
@@ -594,11 +660,14 @@ def _publication_binding(body: Any) -> Mapping[str, str] | None:
             continue
         if not isinstance(payload, Mapping):
             continue
-        if all(isinstance(payload.get(key), str) and payload[key] for key in (
-            "bead",
-            "branch",
-            "head",
-        )):
+        if all(
+            isinstance(payload.get(key), str) and payload[key]
+            for key in (
+                "bead",
+                "branch",
+                "head",
+            )
+        ):
             return {
                 "bead": payload["bead"],
                 "branch": payload["branch"],
