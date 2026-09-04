@@ -15,11 +15,7 @@ from sinnixd.config import Config
 from sinnixd.launch import JobError
 from sinnixd.projects import load_project_adapter
 from sinnixd.pueue import PueueGroupError
-from sinnixd.queue_run import (
-    REFUSED_EXIT_CODE,
-    TIMEOUT_EXIT_CODE,
-    process_group_members,
-)
+from sinnixd.queue_run import REFUSED_EXIT_CODE, TIMEOUT_EXIT_CODE, scope_unit_for
 
 
 def test_start_writes_the_launch_input_and_queues_the_wrapper_in_the_pool(
@@ -41,8 +37,8 @@ def test_start_writes_the_launch_input_and_queues_the_wrapper_in_the_pool(
     assert written["argv"] == ["env", "fixture-verify"]
     assert written["timeout_seconds"] == 120
     assert written["pool"] == "pytest"
-    assert launch.scope_unit(fake_pueue.task(1)) == (
-        f"sinnixd-pueue-pytest-{input_path.stem}.scope"
+    assert launch.scope_unit(fake_pueue.task(1)) == scope_unit_for(
+        input_path, "pytest"
     )
     assert written["result_kind"] == "json"
     assert written["result_path"].endswith(".result")
@@ -264,42 +260,51 @@ def test_result_of_an_exit_operation_is_the_status_alone(
     assert outcome["exit_code"] == 0
 
 
-def test_cancel_stops_the_task_scope_and_kills_the_recorded_process_group(
+def test_cancel_kills_the_task_then_stops_the_scope_that_held_its_workload(
     fake_pueue: FakePueue,
     config: Config,
     project_root: Path,
     recording_systemctl: Callable[[], list[list[str]]],
 ) -> None:
-    """pueue's SIGKILL cannot be caught, so cancel reaps from outside.
+    """pueue's SIGKILL cannot be caught, so the workload is reaped from outside.
 
-    Anti-vacuity: the process group here really is running, and the assertion is
-    that it is gone afterwards, not that a signal was requested.
+    That the reap really ends the tree is proven against a live daemon in
+    test_pueue.py; this is the wiring, including the scope named before the
+    kill removes the command that names it.
     """
     project = load_project_adapter(project_root)
     started = launch.start_operation(config, project, project.operation("check"))
-    written = read_launch(config, fake_pueue.task(started["job_id"]))
-    group_path = Path(written["log_path"] + ".pgid")
-    group_path.parent.mkdir(parents=True, exist_ok=True)
-    survivor = subprocess.Popen(
-        ["sh", "-c", "sleep 60 & sleep 60"], start_new_session=True
-    )
-    group_path.write_text(str(survivor.pid))
+    unit = launch.scope_unit(fake_pueue.task(started["job_id"]))
 
     cancelled = launch.cancel(config, started["job_id"])
 
-    unit = launch.scope_unit(fake_pueue.task(started["job_id"]))
     assert fake_pueue.killed == [started["job_id"]]
     assert ["systemctl", "--user", "stop", unit] in recording_systemctl()
-    assert cancelled["reaped"]["process_group"] == {
-        "pgid": survivor.pid,
-        "reaped": True,
-    }
-    assert survivor.wait(timeout=5) < 0, "the group leader exited on its own"
-    assert process_group_members(survivor.pid) == []
+    assert cancelled["cancelled"] == "killed"
     assert cancelled["phase"] == "cancelled"
 
 
-def test_cancel_reaps_a_queued_task_whose_launch_input_agentctl_did_not_write(
+def test_cancelling_a_queued_task_drops_it_out_of_the_queue(
+    fake_pueue: FakePueue, config: Config, project_root: Path
+) -> None:
+    """A task that never started has no process, and pueue refuses to kill it.
+
+    Anti-vacuity: the refusal leaves the task queued, so a cancel that only
+    kills reports failure and the task runs a minute later regardless.
+    """
+    project = load_project_adapter(project_root)
+    started = launch.start_operation(config, project, project.operation("check"))
+    fake_pueue.queue(started["job_id"])
+
+    cancelled = launch.cancel(config, started["job_id"])
+
+    assert fake_pueue.removed == [started["job_id"]]
+    assert fake_pueue.task(started["job_id"]) is None
+    assert cancelled["cancelled"] == "dropped"
+    assert cancelled["phase"] == "cancelled" and cancelled["terminal"] is True
+
+
+def test_a_task_whose_launch_input_agentctl_did_not_write_names_its_own_scope(
     fake_pueue: FakePueue,
     config: Config,
     tmp_path: Path,
@@ -312,63 +317,111 @@ def test_cancel_reaps_a_queued_task_whose_launch_input_agentctl_did_not_write(
     """
     foreign = tmp_path / "checkout" / ".cache" / "verify" / "pytest-slot-42.json"
     foreign.parent.mkdir(parents=True)
-    log_path = foreign.parent / "pytest-slot-42.log"
-    foreign.write_text(json.dumps({"log_path": str(log_path)}))
-    survivor = subprocess.Popen(
-        ["sh", "-c", "sleep 60 & sleep 60"], start_new_session=True
-    )
-    Path(f"{log_path}.pgid").write_text(str(survivor.pid))
+    foreign.write_text(json.dumps({"log_path": str(foreign.parent / "slot.log")}))
     task_id = fake_pueue.add(
         group="pytest",
         label="polylogue:test:42",
         command=("/run/current-system/sw/bin/sinnixd-queue-run", str(foreign)),
-        working_directory=tmp_path,
+        working_directory=tmp_path / "checkout",
     )
 
     cancelled = launch.cancel(config, task_id)
 
-    assert [
-        "systemctl",
-        "--user",
-        "stop",
-        "sinnixd-pueue-pytest-pytest-slot-42.scope",
-    ] in recording_systemctl()
-    assert cancelled["reaped"]["process_group"]["reaped"] is True
-    assert survivor.wait(timeout=5) < 0, "the group leader exited on its own"
-    assert process_group_members(survivor.pid) == []
+    unit = scope_unit_for(foreign, "pytest")
+    assert ["systemctl", "--user", "stop", unit] in recording_systemctl()
+    assert cancelled["reaped"]["scope"]["unit"] == unit
 
 
-def test_a_stopped_scope_ends_the_reap_before_the_recorded_group(
+def test_a_command_that_only_mentions_the_wrapper_owns_no_scope_and_no_artifacts(
     fake_pueue: FakePueue,
     config: Config,
     project_root: Path,
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    recording_systemctl: Callable[[], list[list[str]]],
 ) -> None:
-    """The cgroup was the containment, so its record is the whole answer.
+    """Ownership is what a task runs, not what its command line contains.
 
-    Anti-vacuity: a `.pgid` file outlives the task that wrote it, so signalling
-    it after the scope is gone reaches whatever now holds that number.
+    Anti-vacuity: this command carries the wrapper's name and a real launch
+    input path, so reading the command as text hands an unrelated task another
+    task's scope to stop and another task's log to print.
     """
-    directory = tmp_path / "stopping-systemctl"
-    directory.mkdir()
-    (directory / "systemctl").write_text("#!/bin/sh\nexit 0\n")
-    (directory / "systemctl").chmod(0o755)
-    monkeypatch.setenv("PATH", f"{directory}{os.pathsep}{os.environ['PATH']}")
     project = load_project_adapter(project_root)
-    started = launch.start_operation(config, project, project.operation("check"))
-    written = read_launch(config, fake_pueue.task(started["job_id"]))
-    group_path = Path(written["log_path"] + ".pgid")
-    group_path.parent.mkdir(parents=True, exist_ok=True)
-    bystander = subprocess.Popen(["sleep", "30"], start_new_session=True)
-    group_path.write_text(str(bystander.pid))
+    victim = launch.start_operation(config, project, project.operation("check"))
+    borrowed = launch.launch_input_path(fake_pueue.task(victim["job_id"]))
+    task_id = fake_pueue.add(
+        group="pytest",
+        label="other:report:1",
+        command=("sh", "-c", f"echo sinnixd-queue-run {borrowed}"),
+        working_directory=tmp_path,
+    )
+    task = fake_pueue.task(task_id)
 
-    cancelled = launch.cancel(config, started["job_id"])
+    assert launch.launch_input_path(task) is None
+    assert launch.scope_unit(task) is None
+    cancelled = launch.cancel(config, task_id)
 
-    assert "process_group" not in cancelled["reaped"]
-    assert bystander.poll() is None, "the reap signalled a group it did not own"
-    bystander.kill()
-    bystander.wait(timeout=5)
+    assert cancelled["reaped"]["scope"] == {
+        "unit": None,
+        "stopped": False,
+        "survivors": [],
+    }
+    assert [call for call in recording_systemctl() if "stop" in call] == []
+
+
+def test_an_artifact_outside_the_task_own_directories_is_not_published(
+    fake_pueue: FakePueue, config: Config, tmp_path: Path
+) -> None:
+    """A launch input names its own artifact paths, and only its own.
+
+    Anti-vacuity: `job logs` prints what the input declares, so an input naming
+    a file in another tree publishes that file to whoever asks for the log.
+    """
+    private = tmp_path / "elsewhere" / "credentials"
+    private.parent.mkdir(parents=True)
+    private.write_text("secret material")
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    outside = checkout / "outside.json"
+    outside.write_text(json.dumps({"log_path": str(private)}))
+    reachable = checkout / "reachable.json"
+    reachable.write_text(json.dumps({"log_path": str(checkout / "own.log")}))
+    (checkout / "own.log").write_text("this task's own output\n")
+
+    tasks = {
+        name: fake_pueue.add(
+            group="pytest",
+            label=f"polylogue:test:{name}",
+            command=("sinnixd-queue-run", str(path)),
+            working_directory=checkout,
+        )
+        for name, path in (("outside", outside), ("reachable", reachable))
+    }
+    for task_id in tasks.values():
+        fake_pueue.set_log(task_id, "wrapper stderr")
+
+    assert launch.logs(config, tasks["outside"]) == "wrapper stderr"
+    assert "secret material" not in launch.logs(config, tasks["outside"])
+    # The same rule must publish the artifacts a task really does own.
+    assert "this task's own output" in launch.logs(config, tasks["reachable"])
+
+
+def test_an_artifact_that_is_not_a_regular_file_is_refused_without_blocking(
+    tmp_path: Path,
+) -> None:
+    """A read bounded by the caller, on a file that cannot block it.
+
+    Anti-vacuity: opening a fifo with no writer blocks until one appears, and
+    reading a whole file to slice it afterwards is bounded by nothing.
+    """
+    fifo = tmp_path / "log"
+    os.mkfifo(fifo)
+    regular = tmp_path / "regular"
+    regular.write_bytes(b"x" * 4096)
+
+    assert launch.read_bounded(fifo, 64) is None
+    assert launch.read_bounded(tmp_path, 64) is None
+    assert launch.read_bounded(tmp_path / "absent", 64) is None
+    assert launch.read_bounded(regular, 64) == b"x" * 64
 
 
 def test_retry_is_pueue_restart_and_only_for_terminal_tasks(

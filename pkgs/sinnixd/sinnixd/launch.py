@@ -13,10 +13,12 @@ import hashlib
 import json
 import os
 import re
+import shlex
+import stat
 import subprocess
 import time
 import uuid
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Mapping, Sequence
 
 from . import pueue
@@ -28,16 +30,16 @@ from .queue_run import (
     MAX_RESULT_BYTES,
     REFUSED_EXIT_CODE,
     TIMEOUT_EXIT_CODE,
-    reap_process_group,
     scope_pool,
     scope_unit_for,
     stop_scope,
 )
 
 QUEUE_RUN_EXECUTABLE = "sinnixd-queue-run"
-# Any queued task that runs the wrapper, whoever wrote its launch input: the
-# input path is the task's handle on its artifacts and its scope.
-_LAUNCH_REFERENCE = re.compile(r"sinnixd-queue-run (?P<path>/\S+\.json)")
+# A launch input carries argv and a resolved environment; the largest this
+# workstation has queued is 21 KB. The bound is what keeps a task from naming
+# an arbitrarily large file and having agentctl read it.
+MAX_LAUNCH_INPUT_BYTES = 1_048_576
 _RESULT_KINDS = {"exit": "exit", "json": "json", "pytest": "pytest"}
 
 
@@ -104,18 +106,22 @@ def _environment_receipt(
     return {"digest": "sha256:" + hashlib.sha256(encoded).hexdigest()}
 
 
-def _launch_input(task: Task) -> dict[str, Any] | None:
+def _launch_input(config: Config, task: Task) -> dict[str, Any] | None:
     path = launch_input_path(task)
-    if path is None:
+    if path is None or not _task_owned(config, task, path):
+        return None
+    raw = read_bounded(path, MAX_LAUNCH_INPUT_BYTES)
+    if raw is None:
         return None
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        value = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
         return None
     return value if isinstance(value, dict) else None
 
 
 def _matching_task(
+    config: Config,
     project: ProjectAdapter,
     operation: ProjectOperation,
     working_directory: Path,
@@ -126,7 +132,7 @@ def _matching_task(
     for task in sorted(pueue.tasks().values(), key=lambda item: item.task_id):
         if task.label != label:
             continue
-        launch_input = _launch_input(task)
+        launch_input = _launch_input(config, task)
         if launch_input is None:
             continue
         if (
@@ -259,6 +265,7 @@ def _start_operation(
                 project, operation, environment, extra_argv
             )
             existing = _matching_task(
+                config,
                 project,
                 operation,
                 working_directory,
@@ -266,7 +273,7 @@ def _start_operation(
                 environment_receipt,
             )
             if existing is not None:
-                existing_input = _launch_input(existing) or {}
+                existing_input = _launch_input(config, existing) or {}
                 return {
                     **job_view(existing),
                     "reused": True,
@@ -362,8 +369,70 @@ def phase_of(task: Task) -> str:
 
 
 def launch_input_path(task: Task) -> Path | None:
-    match = _LAUNCH_REFERENCE.search(task.command)
-    return Path(match.group("path")) if match else None
+    """The launch input a task's command names, or None for any other command.
+
+    pueue records one command per task; the wrapper's is its own name and one
+    absolute path, and nothing else. A command that merely contains that text
+    runs a different program, and claiming its artifacts or its scope would
+    reap a task that no one cancelled.
+    """
+    try:
+        words = shlex.split(task.command)
+    except ValueError:
+        return None
+    if len(words) != 2 or PurePosixPath(words[0]).name != QUEUE_RUN_EXECUTABLE:
+        return None
+    candidate = PurePosixPath(words[1])
+    if not candidate.is_absolute() or candidate.suffix != ".json":
+        return None
+    return Path(words[1])
+
+
+def _task_owned(config: Config, task: Task, path: Path) -> bool:
+    """Whether a task may read this path back as one of its own artifacts.
+
+    A task owns agentctl's state directory and the working directory pueue
+    recorded for it; a launch input naming anything else is publishing another
+    owner's file through `job logs`. Both sides are resolved, so neither a
+    parent reference nor a symlink planted inside a root reaches outside one.
+    """
+    roots = [config.state_dir]
+    if task.path.startswith("/"):
+        roots.append(Path(task.path))
+    try:
+        resolved = path.resolve()
+        return any(resolved.is_relative_to(root.resolve()) for root in roots)
+    except OSError:
+        return False
+
+
+def read_bounded(path: Path, limit: int) -> bytes | None:
+    """At most ``limit`` bytes of a regular file, or None for anything else.
+
+    A launch input names its own artifact paths, so the read must survive one
+    naming a device or a fifo: opening without blocking and proving the file is
+    regular before reading is what keeps `job logs` from hanging on it.
+    """
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+    except OSError:
+        return None
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            return None
+        chunks: list[bytes] = []
+        remaining = limit
+        while remaining > 0:
+            chunk = os.read(descriptor, remaining)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        return b"".join(chunks)
+    except OSError:
+        return None
+    finally:
+        os.close(descriptor)
 
 
 def launch_reference(task: Task) -> str | None:
@@ -377,9 +446,9 @@ def scope_unit(task: Task) -> str | None:
     Derived from the queue's own record so a cancel reaches the cgroup after the
     wrapper is gone and after the launch input its owner wrote has been deleted.
     """
-    reference = launch_reference(task)
+    path = launch_input_path(task)
     pool = scope_pool(task.group)
-    return scope_unit_for(reference, pool) if reference and pool else None
+    return scope_unit_for(path, pool) if path is not None and pool else None
 
 
 def job_view(task: Task) -> dict[str, Any]:
@@ -427,17 +496,19 @@ def get_job(task_id: int) -> dict[str, Any]:
 
 
 def _artifact(config: Config, task: Task, suffix: str) -> Path | None:
-    """Where a task's log or result lands.
+    """Where a task's log or result lands, when the task owns that path.
 
     The launch input declares its own paths; a task whose input agentctl wrote
     keeps them under the state directory, and one written by another repository
-    keeps them in that checkout.
+    keeps them in that checkout. A path outside both belongs to someone else
+    and is not this task's artifact to publish.
     """
-    declared = (_launch_input(task) or {}).get(
+    declared = (_launch_input(config, task) or {}).get(
         {".log": "log_path", ".result": "result_path"}[suffix]
     )
     if isinstance(declared, str) and declared:
-        return Path(declared)
+        path = Path(declared)
+        return path if _task_owned(config, task, path) else None
     reference = launch_reference(task)
     return config.jobs_dir / f"{reference}{suffix}" if reference else None
 
@@ -446,12 +517,8 @@ def logs(config: Config, task_id: int) -> str:
     """The command's bounded log; pueue's own capture holds the wrapper's stderr."""
     task = _task(task_id)
     path = _artifact(config, task, ".log")
-    text = ""
-    if path is not None:
-        try:
-            text = path.read_bytes()[:MAX_LOG_BYTES].decode("utf-8", "replace")
-        except OSError:
-            text = ""
+    raw = read_bounded(path, MAX_LOG_BYTES) if path is not None else None
+    text = raw.decode("utf-8", "replace") if raw else ""
     wrapper = pueue.log(task_id)
     if wrapper.strip():
         text = f"{text}\n[wrapper]\n{wrapper}" if text else wrapper
@@ -463,9 +530,9 @@ def result(config: Config, task_id: int) -> dict[str, Any]:
     task = _task(task_id)
     view = job_view(task)
     path = _artifact(config, task, ".result")
-    if path is None or not path.exists():
+    raw = read_bounded(path, MAX_RESULT_BYTES + 1) if path is not None else None
+    if raw is None:
         return {**view, "kind": "exit", "value": None}
-    raw = path.read_bytes()
     if len(raw) > MAX_RESULT_BYTES:
         raise JobError(
             f"result artifact for task {task_id} exceeds {MAX_RESULT_BYTES} bytes"
@@ -478,36 +545,51 @@ def result(config: Config, task_id: int) -> dict[str, Any]:
     return {**view, "kind": "artifact", "value": value}
 
 
-def _recorded_process_group(config: Config, task: Task) -> int | None:
-    """The group the running command leads, as its wrapper recorded it."""
-    log_path = _artifact(config, task, ".log")
-    if log_path is None:
-        return None
-    try:
-        return int(Path(f"{log_path}.pgid").read_text().strip())
-    except (OSError, ValueError):
-        return None
+def _stop(task_id: int) -> str:
+    """Make a task not run, whatever state pueue has it in.
+
+    `pueue kill` is defined for a task that has a process; it refuses a queued
+    one, which then runs later as though nothing had been cancelled. Dropping
+    such a task from the queue is what cancelling it means. Each round re-reads
+    the state, because a task can start between the read and the request.
+    """
+    for _ in range(2):
+        task = pueue.task(task_id)
+        if task is None:
+            return "forgotten"
+        if task.terminal:
+            return "terminal"
+        try:
+            if task.started_at is None:
+                pueue.remove([task_id])
+                return "dropped"
+            pueue.kill(task_id)
+            return "killed"
+        except PueueError:
+            continue
+    raise JobError(f"pueue would not stop task {task_id}")
 
 
 def cancel(config: Config, task_id: int) -> dict[str, Any]:
-    """Kill the task through pueue, then reap everything it started.
+    """Stop the task through pueue, then reap everything it started.
 
     pueue kills with SIGKILL, which the wrapper cannot catch, so the workload is
     reaped from outside: its scope's cgroup holds every descendant, including
-    those that left the process group. Both handles are read before the kill,
-    while the wrapper still holds them.
+    those that left the process group. The scope is named before the stop, while
+    pueue still records the command that names it.
     """
     task = _task(task_id)
     unit = scope_unit(task)
-    pgid = _recorded_process_group(config, task)
-    pueue.kill(task_id)
+    outcome = _stop(task_id)
     reaped: dict[str, Any] = {"scope": stop_scope(unit)}
-    # Stopping the scope killed its cgroup, which held every descendant. The
-    # recorded group is the fallback for a run that had no scope, and reaching
-    # for it after a successful stop would signal whatever inherited the number.
-    if not reaped["scope"]["stopped"] and pgid is not None:
-        reaped["process_group"] = {"pgid": pgid, "reaped": reap_process_group(pgid)}
-    return {**get_job(task_id), "reaped": reaped}
+    # A dropped task is one pueue no longer holds, so its own view is the last
+    # one there was; the phase says what agentctl did with it.
+    view = (
+        {**job_view(task), "phase": "cancelled", "terminal": True}
+        if outcome == "dropped"
+        else get_job(task_id)
+    )
+    return {**view, "cancelled": outcome, "reaped": reaped}
 
 
 def retry(task_id: int) -> dict[str, Any]:

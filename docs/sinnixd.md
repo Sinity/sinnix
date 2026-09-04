@@ -50,16 +50,19 @@ directory, the timeout, the result kind and the artifact paths, then runs
 `pueue add --escape -g <pool> -l <label> -- sinnixd-queue-run <input>`.
 
 `sinnixd-queue-run` is the command every task runs. It appends a `started`
-event to the spool, starts the workload in the task's transient systemd scope,
-runs the argv with the launch environment in its own session, enforces the
-declared timeout (exit 124), refuses a vanished working directory (exit 125),
-writes the combined log to `jobs/<ref>.log` and — for
-`json`/`pytest` results — stdout alone to `jobs/<ref>.result`, both bounded at
-64,000 bytes with an overflow marker. pueue's completion callback (declared by
-the CLI feature) appends the finish event. `job logs` and `job result` read the
-paths the launch input named at the launch input path in the task's own command
-line; there is no job ledger. The launch input stays so `pueue restart` re-runs the same
-command.
+event to the spool naming the group pueue ran it in, starts the workload in the
+task's transient systemd scope, runs the argv with the launch environment in
+its own session, enforces the declared timeout (exit 124), refuses a vanished
+working directory (exit 125), writes the combined log to `jobs/<ref>.log` and —
+for `json`/`pytest` results — stdout alone to `jobs/<ref>.result`, both bounded
+at 64,000 bytes with an overflow marker. It returns only once the scope holds
+nothing: a descendant that outlived the workload's leader is waited out and
+then killed, because pueue frees the group's worker the moment the wrapper
+returns. pueue's completion callback (declared by the CLI feature) appends the
+finish event. `job logs` and `job result` read the paths the launch input
+named, which must be regular files under the task's own working directory or
+the state directory, bounded by the same limits; there is no job ledger. The
+launch input stays so `pueue restart` re-runs the same command.
 
 `pueue add` publishes the adding client's environment into world-readable
 state, so every add goes through the adapter's scrubbed environment (`HOME`,
@@ -68,18 +71,24 @@ real one. Add tasks by hand with `sinnix-pueue-add`, which scrubs the same
 way.
 
 Groups admit work, and every task's workload enters a transient
-`sinnixd-pueue-<group>-<launch input stem>.scope` in the corresponding
-declarative `sinnixd-pueue-<group>.slice`: `agent:6 pytest:1 bulk:1 normal:5
-interactive:4`. Both halves of that name come from `pueue status`, so `job
-cancel` stops the cgroup — the one boundary a descendant cannot leave — after
-pueue has SIGKILLed the wrapper that would otherwise have to clean up. The
-group comes from `PUEUE_GROUP`, so a repository that queues
+`sinnixd-pueue-<group>-<stem>-<digest of the launch input path>.scope` in the
+corresponding declarative `sinnixd-pueue-<group>.slice`: `agent:6 pytest:1
+bulk:1 normal:5 interactive:4`. Every part of that name comes from `pueue
+status`, from a command that is the wrapper and one launch input and nothing
+else, so `job cancel` stops the cgroup — the one boundary a descendant cannot
+leave — after pueue has SIGKILLed the wrapper that would otherwise have to
+clean up. Stopping it is one write to `cgroup.kill`, which the kernel applies
+to the whole subtree, and `job cancel` on a task that never started drops it
+out of the queue instead, since pueue kills processes and a queued task has
+none. The group comes from `PUEUE_GROUP`, so a repository that queues
 `sinnixd-queue-run` with its own launch input is contained and reaped
-identically; launch input basenames must be unique among live tasks.
-`scope_properties` in a launch input are `systemd-run -p` settings on that
-scope, and a launch must not start a scope of its own: it would land outside
-the task's cgroup, where a cancel cannot reach it. The pytest and bulk slices have fixed memory, swap, CPU, and
-IO budgets; they do not choose capacity from instantaneous free RAM.
+identically. `scope_properties` in a launch input are `systemd-run -p`
+settings on that scope, restricted to the ones that lower what the task may
+consume (`MemoryMax`, `MemoryHigh`, `MemorySwapMax`, `MemoryZSwapMax`,
+`TasksMax`), and a launch must not start a scope of its own: it would land
+outside the task's cgroup, where a cancel cannot reach it. The pytest and bulk
+slices have fixed memory, swap, CPU, and IO budgets; they do not choose
+capacity from instantaneous free RAM.
 `sinnixd-backpressure.timer` pauses one group per minute while the host's
 `full` IO or memory stall stays above threshold and resumes in reverse order
 once clear; a paused task keeps its work.

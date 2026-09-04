@@ -2,17 +2,35 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 from typing import Any, Callable
 
 import pytest
+from sinnixd import queue_run
 from sinnixd.queue_run import (
     MAX_LOG_BYTES,
     REFUSED_EXIT_CODE,
     TIMEOUT_EXIT_CODE,
+    cgroup_processes,
     main,
+    scope_control_group,
+    scope_unit_for,
 )
+
+
+def user_scopes(monkeypatch: pytest.MonkeyPatch, pool: str) -> dict[str, str]:
+    """Run this test's workload in a real transient scope, or skip.
+
+    Returns the launch environment: `systemd-run` is started with the declared
+    environment and nothing else, so the user manager's socket has to be in it.
+    """
+    runtime = Path(f"/run/user/{os.getuid()}")
+    if not (runtime / "bus").exists():
+        pytest.skip("no user systemd bus is available")
+    monkeypatch.setenv("PUEUE_GROUP", pool)
+    return {"PATH": os.environ["PATH"], "XDG_RUNTIME_DIR": str(runtime)}
 
 
 def write_launch(tmp_path: Path, **overrides: Any) -> Path:
@@ -120,7 +138,7 @@ def test_a_declared_pool_runs_the_child_in_its_named_systemd_scope(
     scope_argv = recording_systemd_run()
     assert "--scope" in scope_argv
     assert "--collect" in scope_argv
-    assert "--unit=sinnixd-pueue-pytest-launch.scope" in scope_argv
+    assert f"--unit={scope_unit_for(launch, 'pytest')}" in scope_argv
     assert "--slice=sinnixd-pueue-pytest.slice" in scope_argv
     assert (tmp_path / "log").read_text() == "1 job-a"
 
@@ -141,7 +159,72 @@ def test_a_launch_input_without_a_pool_is_contained_by_its_pueue_group(
 
     assert main([str(launch)]) == 0
 
-    assert "--unit=sinnixd-pueue-pytest-launch.scope" in recording_systemd_run()
+    assert f"--unit={scope_unit_for(launch, 'pytest')}" in recording_systemd_run()
+
+
+def test_the_start_event_records_the_group_the_task_actually_ran_in(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    recording_systemd_run: Callable[[], list[str]],
+) -> None:
+    """The pool a reader sees must be the one bounding the run.
+
+    Anti-vacuity: pueued admits by its own group, so a launch input declaring
+    another names the containment nowhere near the event that reports it.
+    """
+    monkeypatch.setenv("PUEUE_GROUP", "bulk")
+    launch = write_launch(tmp_path, pool="pytest")
+
+    assert main([str(launch)]) == 0
+
+    assert [event["pool"] for event in events(tmp_path)] == ["bulk"]
+    assert "--slice=sinnixd-pueue-bulk.slice" in recording_systemd_run()
+
+
+def test_scopes_stay_distinct_when_their_launch_inputs_share_a_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two checkouts name their launch inputs alike; one cancel must not reach both.
+
+    Anti-vacuity: a name built from the basename alone, or truncated to fit a
+    unit name, collides exactly here — and a colliding scope is another task's
+    workload killed by a cancel that was never asked to touch it.
+    """
+    stem = "pytest-slot-4242"
+    long_stem = "x" * 400
+    units = {
+        scope_unit_for(f"/realm/worktrees/{name}/.cache/verify/{stem}.json", "pytest")
+        for name in ("checkout-a", "checkout-b")
+    } | {
+        scope_unit_for(f"/inputs/{long_stem}{suffix}.json", "pytest")
+        for suffix in ("-one", "-two")
+    }
+
+    assert len(units) == 4
+    assert all(unit.startswith("sinnixd-pueue-pytest-") for unit in units)
+    assert all(len(unit) < 256 for unit in units)
+
+
+def test_a_scope_is_stopped_by_killing_its_cgroup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The kill names a cgroup, never the pids read out of one.
+
+    Anti-vacuity: signalling pids one by one races a descendant forking while
+    the walk runs, and races the kernel handing a pid the walk already read to
+    an unrelated process.
+    """
+    control_group = tmp_path / "scope-cgroup"
+    control_group.mkdir()
+    (control_group / "cgroup.kill").write_text("")
+    (control_group / "cgroup.procs").write_text("")
+    monkeypatch.setattr(queue_run, "scope_control_group", lambda unit: control_group)
+    monkeypatch.setattr(queue_run.subprocess, "run", lambda *a, **k: None)
+
+    reaped = queue_run.stop_scope("sinnixd-pueue-fixture-job-0123456789ab.scope")
+
+    assert (control_group / "cgroup.kill").read_text() == "1"
+    assert reaped["stopped"] and reaped["survivors"] == []
 
 
 def test_scope_properties_bound_the_task_scope_itself(
@@ -163,11 +246,23 @@ def test_scope_properties_bound_the_task_scope_itself(
     assert scope_argv.index("MemoryMax=10G") < scope_argv.index("--")
 
 
-def test_a_scope_property_that_is_not_a_systemd_setting_is_refused(
-    tmp_path: Path,
+@pytest.mark.parametrize(
+    "setting",
+    [
+        "--property=Delegate=yes",
+        # A well-formed systemd setting that grants rather than bounds: the
+        # scope is the workload's own containment, not a second launcher.
+        "ExecStartPost=/bin/sh -c evil",
+        "User=root",
+        "Delegate=yes",
+        "MemoryMax=; rm -rf /",
+    ],
+)
+def test_a_scope_property_that_does_not_bound_the_task_is_refused(
+    tmp_path: Path, setting: str
 ) -> None:
-    """The launch input must not become arbitrary systemd-run argv."""
-    launch = write_launch(tmp_path, scope_properties=["--property=Delegate=yes"])
+    """A launch input may lower what its own task consumes, and nothing else."""
+    launch = write_launch(tmp_path, scope_properties=[setting])
 
     assert main([str(launch)]) == REFUSED_EXIT_CODE
 
@@ -307,37 +402,62 @@ def test_the_launch_input_survives_for_a_restart(tmp_path: Path) -> None:
     assert main([str(launch)]) == 0
 
 
-def test_the_wrapper_records_the_group_its_command_leads(tmp_path: Path) -> None:
-    """Cancel reaps that group; without the file the process tree survives.
+def test_the_wrapper_returns_only_once_its_scope_is_empty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A queued task is over when its cgroup is, not when its leader exits.
 
-    Anti-vacuity: `pueue kill` sends SIGKILL to its own group, which the
-    command left, so this file is the only handle on what it started.
+    Anti-vacuity: `systemd-run --scope` execs the workload, so the wait ends
+    with the leader while a descendant that left its session runs on. Returning
+    there reports the task terminal to pueue, which admits the next task into a
+    group whose worker is still occupied.
     """
-    import os
-    import signal
-    import threading
-    import time
-
-    marker = tmp_path / "survivor"
+    environment = user_scopes(monkeypatch, "fixture")
+    marker = tmp_path / "finished-after-the-leader"
     launch = write_launch(
         tmp_path,
-        argv=["sh", "-c", f"(sleep 5; touch {marker}) & sleep 5"],
+        argv=["sh", "-c", f"setsid sh -c 'sleep 2; touch {marker}' & exit 0"],
+        environment=environment,
         timeout_seconds=60,
     )
-    group_path = Path(str(tmp_path / "log") + ".pgid")
-    result: list[int] = []
-    worker = threading.Thread(target=lambda: result.append(main([str(launch)])))
-    worker.start()
-    deadline = time.monotonic() + 10
-    while not group_path.exists():
-        assert time.monotonic() < deadline, "the wrapper never recorded a group"
-        time.sleep(0.05)
 
-    pgid = int(group_path.read_text().strip())
-    assert pgid != os.getpgrp(), "the command must lead its own group"
-    os.killpg(pgid, signal.SIGKILL)
-    worker.join(timeout=20)
+    assert main([str(launch)]) == 0
 
-    time.sleep(4)
-    assert not marker.exists()
-    assert not group_path.exists(), "a finished job leaves no stale group file"
+    assert marker.exists(), "the wrapper returned while its scope still ran"
+    assert "left in the task scope" not in (tmp_path / "log").read_text()
+
+
+def test_a_descendant_that_will_not_exit_is_killed_with_the_scope(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Waiting out a leaked process would hold the group's worker indefinitely.
+
+    Anti-vacuity: the sleeper outlives the grace, so only the kill ends it, and
+    nothing is left in the scope when the wrapper returns.
+    """
+    environment = user_scopes(monkeypatch, "fixture")
+    monkeypatch.setattr(queue_run, "REAP_GRACE_SECONDS", 0.5)
+    started = tmp_path / "descendant-started"
+    launch = write_launch(
+        tmp_path,
+        argv=[
+            "sh",
+            "-c",
+            f"setsid sh -c 'touch {started}; sleep 300' & "
+            f"while [ ! -e {started} ]; do sleep 0.05; done; exit 0",
+        ],
+        environment=environment,
+        timeout_seconds=60,
+    )
+
+    assert main([str(launch)]) == 0
+
+    reported = [
+        line
+        for line in (tmp_path / "log").read_text().splitlines()
+        if line.startswith("killed what the command left in its scope")
+    ]
+    killed = [int(pid) for pid in re.findall(r"[0-9]+", "".join(reported))]
+    assert killed, "the leaked descendant was neither waited out nor killed"
+    assert not any(Path(f"/proc/{pid}").exists() for pid in killed)
+    assert cgroup_processes(scope_control_group(scope_unit_for(launch, "fixture"))) == []

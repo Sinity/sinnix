@@ -101,8 +101,12 @@ class FakePueue:
         return self._tasks.get(task_id)
 
     def kill(self, task_id: int) -> None:
-        self.killed.append(task_id)
         task = self._tasks.get(task_id)
+        # pueued kills a process; asked to kill a task that has none it fails
+        # the request and leaves the task queued, to run later.
+        if task is not None and task.started_at is None:
+            raise PueueError(f"The command failed for tasks: {task_id}")
+        self.killed.append(task_id)
         if task is not None and not task.terminal:
             self._tasks[task_id] = replace(
                 task, status="Done", result="Killed", exit_code=None
@@ -150,7 +154,7 @@ class FakePueue:
         self._set(task_id, status="Running")
 
     def queue(self, task_id: int) -> None:
-        self._set(task_id, status="Queued")
+        self._set(task_id, status="Queued", started_at=None)
 
     def succeed(self, task_id: int, *, exit_code: int = 0) -> None:
         self._set(
