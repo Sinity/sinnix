@@ -120,3 +120,41 @@ def test_backup_of_a_parked_walless_database_succeeds(tmp_path: Path) -> None:
     )
     assert result.returncode == 0, result.stderr
     assert output.exists() and output.stat().st_size > 0
+
+
+def test_immutable_snapshot_source_is_compressed_without_copy(tmp_path: Path) -> None:
+    source = tmp_path / "snapshot" / "telemetry.sqlite"
+    source.parent.mkdir()
+    with sqlite3.connect(source) as connection:
+        connection.execute("CREATE TABLE t (x INTEGER)")
+        connection.execute("INSERT INTO t VALUES (1)")
+    output = tmp_path / "snapshot.sqlite.zst"
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    cp = fake_bin / "cp"
+    cp.write_text("#!/bin/sh\nexit 99\n")
+    cp.chmod(0o755)
+    result = subprocess.run(
+        [str(SCRIPT), "--immutable-source", str(source), str(output)],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PATH": f"{fake_bin}:{os.environ['PATH']}"},
+    )
+    assert result.returncode == 0, result.stderr
+    assert output.exists()
+    assert not list(tmp_path.glob("*.tmp*"))
+
+
+def test_immutable_snapshot_source_rejects_wal_sidecar(tmp_path: Path) -> None:
+    source = tmp_path / "telemetry.sqlite"
+    seed_database(source)
+    with sqlite3.connect(source) as connection:
+        connection.execute("INSERT INTO samples(value) VALUES ('uncheckpointed')")
+    assert Path(f"{source}-wal").exists()
+    result = subprocess.run(
+        [str(SCRIPT), "--immutable-source", str(source), str(tmp_path / "out.zst")],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "must not have a WAL" in result.stderr
