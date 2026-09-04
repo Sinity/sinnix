@@ -99,9 +99,12 @@ def backup_database(
     target: sqlite3.Connection | None = None
     try:
         if immutable_source:
-            if Path(f"{source_path}-wal").exists():
+            wal_path = Path(f"{source_path}-wal")
+            if wal_path.exists() and wal_path.stat().st_size > 0:
                 raise RuntimeError("immutable SQLite source must not have a WAL")
-            source = sqlite3.connect(source_path, timeout=5.0)
+            source = sqlite3.connect(
+                f"file:{source_path}?mode=ro&immutable=1", uri=True, timeout=5.0
+            )
             source.execute("PRAGMA busy_timeout=5000")
             page_count = source.execute("PRAGMA page_count").fetchone()[0]
             if page_count <= FULL_INTEGRITY_PAGE_LIMIT:

@@ -237,7 +237,7 @@ mkServiceModule {
             # constant-time operation. A read-only subvolume snapshot freezes
             # the checkpointed input; the helper then compresses it directly.
             sqlite3 ${lib.escapeShellArg dbPath} 'PRAGMA wal_checkpoint(TRUNCATE);'
-            if [ -e ${lib.escapeShellArg "${dbPath}-wal"} ]; then
+            if [ -s ${lib.escapeShellArg "${dbPath}-wal"} ]; then
               echo "machine telemetry WAL remained after checkpoint" >&2
               exit 1
             fi
