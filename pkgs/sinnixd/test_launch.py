@@ -76,6 +76,72 @@ def test_extra_argv_is_appended_after_the_declared_exec(
     assert written["argv"] == ["env", "true", "--apply"]
 
 
+def test_cached_operation_reuses_an_active_and_completed_exact_receipt(
+    fake_pueue: FakePueue,
+    config: Config,
+    project_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    descriptor = project_root / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text().replace(
+            '[operations.verify]\ndescription = "Fixture typed verification"',
+            '[operations.verify]\ndescription = "Fixture typed verification"\ncache = "tree+environment"',
+        )
+    )
+    monkeypatch.setattr(
+        launch,
+        "_git",
+        lambda path, *arguments: {
+            ("rev-parse", "HEAD"): "a" * 40,
+            ("rev-parse", "HEAD^{tree}"): "b" * 40,
+            ("status", "--porcelain=v1", "--untracked-files=all"): "",
+        }[arguments],
+    )
+    project = load_project_adapter(project_root)
+
+    first = launch.start_operation(config, project, project.operation("verify"))
+    second = launch.start_operation(config, project, project.operation("verify"))
+    fake_pueue.succeed(first["job_id"])
+    third = launch.start_operation(config, project, project.operation("verify"))
+
+    assert len(fake_pueue.added) == 1
+    assert second["job_id"] == first["job_id"]
+    assert third["job_id"] == first["job_id"]
+    assert second["reused"] is True and third["reused"] is True
+    written = read_launch(config, fake_pueue.task(first["job_id"]))
+    assert written["tree_receipt"] == {
+        "head": "a" * 40,
+        "tree": "b" * 40,
+        "dirty": False,
+    }
+    assert written["environment_receipt"]["digest"].startswith("sha256:")
+
+
+def test_operation_dependencies_are_pueue_edges(
+    fake_pueue: FakePueue,
+    config: Config,
+    project_root: Path,
+) -> None:
+    descriptor = project_root / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text().replace(
+            'exec = ["fixture-verify"]\npool = "pytest"',
+            'exec = ["fixture-verify"]\npool = "pytest"\ndependencies = ["check"]',
+        )
+    )
+    project = load_project_adapter(project_root)
+
+    started = launch.start_operation(config, project, project.operation("verify"))
+
+    assert started["job_id"] == 2
+    assert [item["label"] for item in fake_pueue.added] == [
+        "fixture:check",
+        "fixture:verify",
+    ]
+    assert fake_pueue.added[1]["after"] == (1,)
+
+
 def test_a_default_checkout_operation_refuses_a_worktree(
     fake_pueue: FakePueue, config: Config, project_root: Path, tmp_path: Path
 ) -> None:
