@@ -341,6 +341,36 @@ def test_lane_publish_reuses_an_open_pr_and_reads_the_lane_body(
     assert published["pr"] == 7 and published["created"] is False
 
 
+def test_lane_publish_reports_reviewable_pr_when_auto_merge_is_unavailable(
+    fake_commands: dict[str, Any],
+    fake_pueue: FakePueue,
+    fake_bd: FakeBd,
+    config: Config,
+    project_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    worktree = _git_worktree(monkeypatch, project_root, "feature/packet/fx-1")
+    fake_pueue.finish_when_waited(1, lambda fake: fake.succeed(1))
+
+    original_run = fake_commands["calls"]
+    run = lanes._run
+
+    def fail_auto_merge(argv: Any, *, cwd: Path, timeout: float = 60) -> str:
+        if list(argv)[:3] == ["gh", "pr", "merge"]:
+            original_run.append(list(argv))
+            raise LaneError("protected branch rules are not configured")
+        return run(argv, cwd=cwd, timeout=timeout)
+
+    monkeypatch.setattr(lanes, "_run", fail_auto_merge)
+
+    published = lanes.lane_publish(config, worktree)
+
+    assert published["pr"] == 100
+    assert published["auto_merge"] is False
+    assert published["next_action"] == "gh pr merge 100 --squash"
+    assert ["gh", "pr", "merge", "100", "--auto", "--squash"] in original_run
+
+
 def test_lane_publish_refuses_a_dirty_worktree_but_ignores_lane_artifacts(
     fake_commands: dict[str, Any],
     fake_pueue: FakePueue,

@@ -322,7 +322,9 @@ def _lane(arguments: argparse.Namespace, config: Config, out: Output) -> int:
             published,
             f"PR #{published['pr']} {'opened' if published['created'] else 'already open'} "
             f"for {published['branch']}: {published['subject']}\n"
-            f"auto-merge armed: {published['url']}",
+            f"{'auto-merge armed' if published['auto_merge'] else 'auto-merge unavailable'}: "
+            f"{published['url']}\n"
+            f"next action: {published['next_action']}",
         )
         return EXIT_OK
     if verb == "rebase":
