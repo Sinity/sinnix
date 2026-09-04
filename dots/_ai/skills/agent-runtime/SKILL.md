@@ -62,7 +62,8 @@ A lane is a worktree with an agent in it and a PR that merges itself.
   type-prefixed subject (body from `.lane/body.md`), and arms
   `gh pr merge --auto --squash`. It refuses a dirty worktree.
 - `agentctl lane sync <project>` closes the beads of merged lanes and removes
-  their worktrees; the rest are listed with their state and PR.
+  their worktrees; a lane whose job is still queued or running is left alone,
+  and the rest are listed with their state and PR.
 - `agentctl refill <project> --limit N [--dry-run]` starts lanes for ready
   beads that have neither a worktree nor an open PR.
 

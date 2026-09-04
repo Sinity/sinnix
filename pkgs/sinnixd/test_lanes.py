@@ -17,11 +17,31 @@ from sinnixd.worktrunk import Worktree, WorktrunkError
 
 
 def tree(
-    branch: str, path: Path, *, state: str = "ahead", dirty: bool = False
+    branch: str,
+    path: Path,
+    *,
+    state: str = "ahead",
+    dirty: bool = False,
+    head: str = "abc123",
 ) -> Worktree:
     return Worktree(
-        branch=branch, path=path, head="abc123", main=False, dirty=dirty, state=state
+        branch=branch, path=path, head=head, main=False, dirty=dirty, state=state
     )
+
+
+def merged_pr(
+    number: int, branch: str, bead_id: str, *, head: str = "abc123"
+) -> dict[str, Any]:
+    """A merged PR whose publication marker binds the lane it came from."""
+    payload = json.dumps({"bead": bead_id, "branch": branch, "head": head})
+    return {
+        "number": number,
+        "state": "MERGED",
+        "headRefName": branch,
+        "headRefOid": head,
+        "title": "fix: First task",
+        "body": f"<!-- sinnixd:lane-publication {payload} -->",
+    }
 
 
 @pytest.fixture
@@ -916,6 +936,7 @@ def test_lane_publish_blocks_publication_when_quick_verification_fails(
 
 
 def test_lane_sync_closes_and_removes_merged_lanes_and_reports_the_rest(
+    fake_pueue: FakePueue,
     fake_commands: dict[str, Any],
     fake_wt: dict[str, Any],
     fake_bd: FakeBd,
@@ -938,6 +959,7 @@ def test_lane_sync_closes_and_removes_merged_lanes_and_reports_the_rest(
         ),
     ]
     fake_commands["prs"] = {
+        "feature/packet/fx-1": merged_pr(1, "feature/packet/fx-1", "fx-1"),
         "feature/packet/fx-2": {
             "number": 2,
             "state": "MERGED",
@@ -965,7 +987,7 @@ def test_lane_sync_closes_and_removes_merged_lanes_and_reports_the_rest(
         "--actor",
         "agentctl",
         "--reason",
-        "merged (branch integrated)",
+        "merged (PR #1)",
     ] in fake_commands["calls"]
     remaining = {row["branch"]: row for row in synced["remaining"]}
     assert remaining["feature/packet/fx-2"]["reason"].startswith("merged but")
@@ -973,6 +995,7 @@ def test_lane_sync_closes_and_removes_merged_lanes_and_reports_the_rest(
 
 
 def test_lane_sync_does_not_reuse_a_historical_merged_pr_for_a_new_branch_head(
+    fake_pueue: FakePueue,
     fake_commands: dict[str, Any],
     fake_wt: dict[str, Any],
     fake_bd: FakeBd,
@@ -1004,6 +1027,7 @@ def test_lane_sync_does_not_reuse_a_historical_merged_pr_for_a_new_branch_head(
 
 
 def test_lane_sync_does_not_close_a_bead_for_another_beads_merged_pr(
+    fake_pueue: FakePueue,
     fake_commands: dict[str, Any],
     fake_wt: dict[str, Any],
     fake_bd: FakeBd,
@@ -1040,6 +1064,7 @@ def test_lane_sync_does_not_close_a_bead_for_another_beads_merged_pr(
 
 
 def test_lane_sync_removes_a_clean_worktree_for_the_current_merged_pr_head(
+    fake_pueue: FakePueue,
     fake_commands: dict[str, Any],
     fake_wt: dict[str, Any],
     fake_bd: FakeBd,
@@ -1095,6 +1120,7 @@ def test_refill_starts_ready_beads_without_a_worktree_or_pr_up_to_the_limit(
 
 
 def test_lane_sync_reports_a_locked_worktree_and_continues(
+    fake_pueue: FakePueue,
     fake_commands: dict[str, Any],
     fake_wt: dict[str, Any],
     fake_bd: FakeBd,
@@ -1109,6 +1135,10 @@ def test_lane_sync_reports_a_locked_worktree_and_continues(
         tree("feature/packet/fx-2", tmp_path / "b", state="integrated"),
     ]
     fake_wt["locked"] = {"feature/packet/fx-1"}
+    fake_commands["prs"] = {
+        "feature/packet/fx-1": merged_pr(1, "feature/packet/fx-1", "fx-1"),
+        "feature/packet/fx-2": merged_pr(2, "feature/packet/fx-2", "fx-2"),
+    }
 
     synced = lanes.lane_sync(config, project)
 
@@ -1116,3 +1146,201 @@ def test_lane_sync_reports_a_locked_worktree_and_continues(
     assert synced["closed"] == ["fx-2"]
     locked = next(row for row in synced["remaining"] if row["branch"].endswith("fx-1"))
     assert "locked" in locked["reason"]
+
+
+def test_lane_sync_leaves_a_lane_alone_while_its_agent_job_runs(
+    fake_pueue: FakePueue,
+    fake_commands: dict[str, Any],
+    fake_wt: dict[str, Any],
+    fake_bd: FakeBd,
+    config: Config,
+    project_root: Path,
+    tmp_path: Path,
+) -> None:
+    """Complete merge evidence does not license cleanup under a running agent."""
+    project = load_project_adapter(project_root)
+    fake_wt["trees"] = [tree("feature/packet/fx-1", tmp_path / "a")]
+    fake_commands["prs"] = {
+        "feature/packet/fx-1": merged_pr(9, "feature/packet/fx-1", "fx-1")
+    }
+    task_id = fake_pueue.add(
+        group="agent",
+        label="fixture:lane:fx-1",
+        command=["agent"],
+        working_directory=tmp_path / "a",
+    )
+
+    synced = lanes.lane_sync(config, project)
+
+    assert synced["closed"] == []
+    assert synced["removed"] == []
+    assert fake_wt["removed"] == []
+    assert not [call for call in fake_commands["calls"] if call[:2] == ["bd", "close"]]
+    assert synced["remaining"][0]["reason"] == (
+        f"job {task_id} (fixture:lane:fx-1) is running"
+    )
+
+    fake_pueue.succeed(task_id)
+    finished = lanes.lane_sync(config, project)
+
+    assert finished["closed"] == ["fx-1"]
+    assert finished["removed"] == ["feature/packet/fx-1"]
+
+
+def test_lane_sync_leaves_an_active_empty_branch_alone(
+    fake_pueue: FakePueue,
+    fake_commands: dict[str, Any],
+    fake_wt: dict[str, Any],
+    fake_bd: FakeBd,
+    config: Config,
+    project_root: Path,
+    tmp_path: Path,
+) -> None:
+    """A branch an agent has not committed to yet reads as integrated: no content
+    of its own is missing from master."""
+    project = load_project_adapter(project_root)
+    fake_wt["trees"] = [tree("feature/packet/fx-1", tmp_path / "a", state="integrated")]
+    task_id = fake_pueue.add(
+        group="agent",
+        label="fixture:lane:fx-1",
+        command=["agent"],
+        working_directory=tmp_path / "a",
+    )
+
+    synced = lanes.lane_sync(config, project)
+
+    assert synced["closed"] == []
+    assert synced["removed"] == []
+    assert fake_wt["removed"] == []
+    assert not [call for call in fake_commands["calls"] if call[:2] == ["bd", "close"]]
+    assert synced["remaining"][0]["reason"] == (
+        f"job {task_id} (fixture:lane:fx-1) is running"
+    )
+
+
+def test_lane_sync_leaves_an_active_lane_whose_base_merged_under_an_old_pr(
+    fake_pueue: FakePueue,
+    fake_commands: dict[str, Any],
+    fake_wt: dict[str, Any],
+    fake_bd: FakeBd,
+    config: Config,
+    project_root: Path,
+    tmp_path: Path,
+) -> None:
+    """The lane's base commit is contained in an earlier round's merge commit, so
+    every merge test the branch itself can answer says landed."""
+    project = load_project_adapter(project_root)
+    fake_wt["trees"] = [
+        tree(
+            "feature/packet/fx-1",
+            tmp_path / "a",
+            state="integrated",
+            head="base-commit",
+        )
+    ]
+    fake_commands["prs"] = {
+        "feature/packet/fx-1": {
+            "number": 9,
+            "state": "MERGED",
+            "headRefName": "feature/packet/fx-1",
+            "headRefOid": "earlier-head",
+            "mergeCommit": {"oid": "merge-commit"},
+            "title": "fix: First task",
+        }
+    }
+    task_id = fake_pueue.add(
+        group="agent",
+        label="fixture:rebase:fx-1",
+        command=["agent"],
+        working_directory=tmp_path / "a",
+    )
+
+    synced = lanes.lane_sync(config, project)
+
+    assert synced["closed"] == []
+    assert synced["removed"] == []
+    assert fake_wt["removed"] == []
+    assert synced["remaining"][0]["reason"] == (
+        f"job {task_id} (fixture:rebase:fx-1) is running"
+    )
+
+    fake_pueue.succeed(task_id)
+    finished = lanes.lane_sync(config, project)
+
+    assert finished["removed"] == ["feature/packet/fx-1"]
+
+
+def test_lane_sync_keeps_an_integrated_branch_that_no_merged_pr_published(
+    fake_pueue: FakePueue,
+    fake_commands: dict[str, Any],
+    fake_wt: dict[str, Any],
+    fake_bd: FakeBd,
+    config: Config,
+    project_root: Path,
+    tmp_path: Path,
+) -> None:
+    """wt's integrated verdict alone is not a publication: no PR merged this bead."""
+    project = load_project_adapter(project_root)
+    fake_wt["trees"] = [tree("feature/packet/fx-1", tmp_path / "a", state="integrated")]
+
+    synced = lanes.lane_sync(config, project)
+
+    assert synced["closed"] == []
+    assert synced["removed"] == []
+    assert fake_wt["removed"] == []
+    assert not [call for call in fake_commands["calls"] if call[:2] == ["bd", "close"]]
+    assert synced["remaining"][0]["reason"] == (
+        "branch integrated but no merged PR publishes this bead"
+    )
+
+
+def test_lane_sync_closes_a_merged_lane_its_publication_marker_binds(
+    fake_pueue: FakePueue,
+    fake_commands: dict[str, Any],
+    fake_wt: dict[str, Any],
+    fake_bd: FakeBd,
+    config: Config,
+    project_root: Path,
+    tmp_path: Path,
+) -> None:
+    project = load_project_adapter(project_root)
+    fake_wt["trees"] = [tree("feature/packet/fx-1", tmp_path / "a", state="integrated")]
+    fake_commands["prs"] = {
+        "feature/packet/fx-1": merged_pr(9, "feature/packet/fx-1", "fx-1")
+    }
+    fake_pueue.succeed(
+        fake_pueue.add(
+            group="agent",
+            label="fixture:lane:fx-1",
+            command=["agent"],
+            working_directory=tmp_path / "a",
+        )
+    )
+
+    synced = lanes.lane_sync(config, project)
+
+    assert synced["closed"] == ["fx-1"]
+    assert synced["removed"] == ["feature/packet/fx-1"]
+    assert synced["remaining"] == []
+
+
+def test_lane_sync_refuses_when_the_queue_cannot_say_which_lanes_are_active(
+    fake_pueue: FakePueue,
+    fake_commands: dict[str, Any],
+    fake_wt: dict[str, Any],
+    fake_bd: FakeBd,
+    config: Config,
+    project_root: Path,
+    tmp_path: Path,
+) -> None:
+    project = load_project_adapter(project_root)
+    fake_wt["trees"] = [tree("feature/packet/fx-1", tmp_path / "a", state="integrated")]
+    fake_commands["prs"] = {
+        "feature/packet/fx-1": merged_pr(9, "feature/packet/fx-1", "fx-1")
+    }
+    fake_pueue.fail_tasks = True
+
+    with pytest.raises(LaneError, match="pueue"):
+        lanes.lane_sync(config, project)
+
+    assert fake_wt["removed"] == []
