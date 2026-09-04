@@ -32,12 +32,11 @@ MEMORY_FULL_FREEZE = 25.0
 # keep a group closed.
 RESUME_BELOW = 10.0
 
-# IO pressure drains test admission without delaying API-bound agents. Memory
-# pressure closes agent admission first because several harnesses have a
-# material aggregate resident set.
+# Conversations stay admissible under both signals. Their fixed six-slot cap
+# and cgroup limits bound them; pressure gates the heavy work they can launch.
 CLOSE_ORDER = {
-    "io": ("pytest", "normal", "bulk"),
-    "memory": ("agent", "pytest", "normal", "bulk"),
+    "io": ("pytest", "bulk"),
+    "memory": ("pytest", "normal", "bulk"),
 }
 MANAGED_GROUPS = ("agent", "pytest", "normal", "bulk")
 
@@ -64,22 +63,21 @@ def read_pressure(root: Path = Path("/proc/pressure")) -> dict[str, float]:
     return values
 
 
-def over_threshold(pressure: Mapping[str, float]) -> str | None:
-    """The signal that says freeze, or None."""
+def over_threshold(pressure: Mapping[str, float]) -> tuple[str, ...]:
+    """Every signal that currently requires reduced admission."""
+    active = []
     if pressure.get("io_full_avg60", 0.0) >= IO_FULL_FREEZE:
-        return "io"
+        active.append("io")
     if pressure.get("memory_full_avg60", 0.0) >= MEMORY_FULL_FREEZE:
-        return "memory"
-    return None
+        active.append("memory")
+    return tuple(active)
 
 
 def _signal_pressure(pressure: Mapping[str, float], signal: str) -> float:
     return pressure.get(f"{signal}_full_avg60", 0.0)
 
 
-def _desired_paused(
-    pressure: Mapping[str, float], paused: Sequence[str]
-) -> set[str]:
+def _desired_paused(pressure: Mapping[str, float], paused: Sequence[str]) -> set[str]:
     """Keep existing closures latched per signal until that signal clears."""
     desired: set[str] = set()
     for signal, groups in CLOSE_ORDER.items():
@@ -118,7 +116,8 @@ def tick(*, spool: Path | None, pressure_root: Path = Path("/proc/pressure")) ->
         return {"action": "unavailable", "error": str(error), "pressure": pressure}
 
     paused = [name for name in MANAGED_GROUPS if groups.get(name) == "Paused"]
-    signal = over_threshold(pressure)
+    signals = over_threshold(pressure)
+    signal = "+".join(signals) or None
 
     desired_paused = _desired_paused(pressure, paused)
     obsolete = [name for name in paused if name not in desired_paused]
@@ -132,8 +131,10 @@ def tick(*, spool: Path | None, pressure_root: Path = Path("/proc/pressure")) ->
         _append(spool, event)
         return event
 
-    if signal is not None:
-        close_order = CLOSE_ORDER[signal]
+    if signals:
+        close_order = tuple(
+            dict.fromkeys(group for active in signals for group in CLOSE_ORDER[active])
+        )
         running = [name for name in close_order if groups.get(name) == "Running"]
         if not running:
             return {

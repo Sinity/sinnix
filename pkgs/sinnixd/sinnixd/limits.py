@@ -7,7 +7,7 @@ MAX_AGENT_TIMEOUT_SECONDS = 14_400
 MAX_DECLARED_OPERATION_TIMEOUT_SECONDS = 28_800
 # Hard ceiling on one agent's scope. The job plane's MemoryHigh is 20G; one
 # lane may not take more than half of it.
-AGENT_MEMORY_MAX = "10G"
+AGENT_MEMORY_MAX = "4G"
 
 
 def maximum_timeout_seconds(kind: str) -> int:
