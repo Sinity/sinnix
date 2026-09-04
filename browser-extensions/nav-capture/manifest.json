@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Sinnix Navigation Capture",
   "version": "0.2.0",
-  "description": "Capture link provenance, defer links without opening tabs, and send selected page context to an agent.",
+  "description": "Capture link provenance and defer links without opening tabs.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAt4OevC02uOdykCxBSXTlPX0cjHwIREIEV4Vp+xv4k4a3p24BSB+FK9y/Jv8mYYlI6L3r/+Gxjkp9302vB2EIlQJ/G3/jvc0HnBE1Z1gNUq4Qav6NNie7lLN/aKNdl9UcLmnJgakRGV+yiO2wzzz7qKU85koU9O0+UDtkuOCE311ouUBK1cJOqdss1MwrE1bLROtx60RLTAtg/TrFqnxDZ/x+IZv9C01/GdJykYRTKXONju8NYsgYD2kxtuV8+rWyfQao0z9MznPucOFS/JofYK3hJM0tw1EL8LPj5eHHrmOm1M1krZd/iyb+RtOJJYfzyc1z2HqxU3ImuDv6EaYmyQIDAQAB",
   "permissions": ["activeTab", "contextMenus", "scripting", "tabs"],
   "host_permissions": ["http://127.0.0.1/*", "<all_urls>"],

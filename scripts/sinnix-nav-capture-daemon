@@ -1,9 +1,9 @@
 # @sinnix-package
-# description: Local HTTP receiver for browser provenance, reading-stack pushes, and selected-text agent actions
+# description: Local HTTP receiver for browser provenance and reading-stack pushes
 # runtimeInputs: python3 @sinnix-capture
 #!/usr/bin/env python3
 """sinnix-nav-capture-daemon: the local endpoint the nav-capture WebExtension
-POSTs to. Three routes:
+POSTs to. Two routes:
 
   POST /v1/link-event         -- {source_url, source_title, target_url,
                                    anchor_text, ts, trigger} -- every link
@@ -18,10 +18,6 @@ POSTs to. Three routes:
                                    target_title, anchor_text, note, ts}.
                                    Delegates to `sinnix-reading-stack push`,
                                    which owns bounded working state.
-
-  POST /v1/agent-action       -- {page_url, page_title, selection_text,
-                                   instruction, ts}. Written to the
-                                   "browser-agent-actions" capture lane.
 
 Binds 127.0.0.1:8766 only (never 0.0.0.0) -- this is a same-machine
 extension<->daemon channel, not a network service. Port chosen to sit next
@@ -108,8 +104,6 @@ class Handler(BaseHTTPRequestHandler):
                 sinnix_capture_write("browser-nav-edges", payload)
             elif self.path == "/v1/reading-stack/push":
                 reading_stack_push(payload)
-            elif self.path == "/v1/agent-action":
-                sinnix_capture_write("browser-agent-actions", payload)
             else:
                 self._respond(404)
                 return
