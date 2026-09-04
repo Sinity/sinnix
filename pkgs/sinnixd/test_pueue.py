@@ -390,7 +390,7 @@ def test_a_private_pueue_task_places_its_child_in_the_declared_pool_scope(
 
     assert finished.succeeded, pueue.log(task_id)
     cgroup = log_path.read_text()
-    assert f"/{scope_unit_for(launch_path.stem, 'pytest')}" in cgroup
+    assert f"/{scope_unit_for(launch_path, 'pytest')}" in cgroup
     assert "/sinnixd-pueue-pytest.slice/" in cgroup
 
 
@@ -484,10 +484,14 @@ def test_cancelling_a_task_reaps_every_descendant_it_started(
         script.write_text(f'#!/bin/sh\necho "$$" >> "$PIDS"\n{body}')
         script.chmod(0o755)
         scripts[name] = script
-    # The command must be a `sinnixd-queue-run` path: that is what identifies a
-    # queued task's launch input, and through it the scope holding its workload.
+    # The command must be a `sinnixd-queue-run` and one launch input, which is
+    # what identifies a queued task's artifacts and the scope holding its
+    # workload; anything else is another program that happens to be queued.
     wrapper = tmp_path / "sinnixd-queue-run"
-    wrapper.write_text(f'#!/bin/sh\nexec {sys.executable} -m sinnixd.queue_run "$@"\n')
+    wrapper.write_text(
+        f"#!/bin/sh\nexport PYTHONPATH={Path(__file__).parent}\n"
+        f'exec {sys.executable} -m sinnixd.queue_run "$@"\n'
+    )
     wrapper.chmod(0o755)
     launch_path = tmp_path / "reaped-job.json"
     launch_path.write_text(
@@ -524,12 +528,7 @@ def test_cancelling_a_task_reaps_every_descendant_it_started(
     task_id = pueue.add(
         group="pytest",
         label="fixture:verify:reaped",
-        command=(
-            "env",
-            f"PYTHONPATH={Path(__file__).parent}",
-            str(wrapper),
-            str(launch_path),
-        ),
+        command=(str(wrapper), str(launch_path)),
         working_directory=tmp_path,
     )
     unrelated = pueue.add(
@@ -545,7 +544,7 @@ def test_cancelling_a_task_reaps_every_descendant_it_started(
         )
         time.sleep(0.1)
     descendants = [int(pid) for pid in started]
-    unit = scope_unit_for(launch_path.stem, "pytest")
+    unit = scope_unit_for(launch_path, "pytest")
     for pid in descendants:
         assert unit in Path(f"/proc/{pid}/cgroup").read_text(), (
             "a descendant outside the task's scope is one a cancel cannot reach"

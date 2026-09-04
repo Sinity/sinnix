@@ -11,16 +11,22 @@ string for its shell; a single unspaced path cannot be re-split whatever the
 shell does with it.
 
 That path also names the task's containment. The workload runs in a transient
-scope called ``sinnixd-pueue-<pueue group>-<launch input stem>.scope``, both
-halves of which a reader can recover from ``pueue status`` alone, so a canceller
-reaps the whole cgroup without this wrapper's help and without the launch input
-still existing. Launch input basenames must therefore be unique among live
-tasks.
+scope called ``sinnixd-pueue-<pueue group>-<stem>-<digest of the path>.scope``,
+every part of which a reader recovers from ``pueue status`` alone, so a
+canceller reaps the whole cgroup without this wrapper's help and without the
+launch input still existing.
+
+The wrapper returns only once that scope holds nothing. ``systemd-run --scope``
+execs the workload, so waiting on it ends when the leader exits while the scope
+stays active for any descendant that outlived it; a wrapper returning there
+reports the task terminal to pueue, which admits the next task into a group
+whose worker is still occupied.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -28,7 +34,7 @@ import signal
 import subprocess
 import sys
 import time
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Mapping, Sequence
 
 # The bounded artifacts a queued command may leave behind. A command that
@@ -49,15 +55,23 @@ RESULT_KINDS = frozenset({"exit", "json", "pytest", "last-message"})
 POOL_NAME = re.compile(r"[a-z][a-z0-9-]{0,63}\Z")
 POOL_SLICE_PREFIX = "sinnixd-pueue"
 
-# A transient scope setting agentctl passes through to `systemd-run -p`. Only
-# `MemoryMax=` is written today, by a lane launch; the pattern keeps a launch
-# input from turning into arbitrary systemd-run argv.
-SCOPE_PROPERTY = re.compile(r"[A-Za-z][A-Za-z0-9]*=\S+\Z")
+# The transient scope settings agentctl passes through to `systemd-run -p`.
+# Each one only lowers what the workload may consume, so a launch input can
+# bound its own task and nothing else: no capability, no namespace, no
+# credential, no execution setting is reachable from here.
+SCOPE_PROPERTIES = frozenset(
+    {"MemoryMax", "MemoryHigh", "MemorySwapMax", "MemoryZSwapMax", "TasksMax"}
+)
+SCOPE_PROPERTY_VALUE = re.compile(r"(infinity|[0-9]+[KMGTPE]?)\Z")
 
-# How long a reap waits for a cgroup or a process group to drain before it
-# reports what is left. Stopping a scope is a cgroup kill and returns in
-# milliseconds; this bounds the pathological case, not the normal one.
+# How long a reap waits for a cgroup to drain before it reports what is left.
+# Killing a cgroup is one write and returns in milliseconds; this bounds the
+# pathological case, not the normal one.
 REAP_GRACE_SECONDS = 5.0
+
+# The bytes of a scope unit name kept for the launch input's own stem. Unit
+# names are bounded, and the prefix, the pool and the digest come first.
+SCOPE_STEM_BYTES = 100
 
 _REQUIRED_FIELDS = (
     "job_id",
@@ -116,15 +130,25 @@ def _read_input(path: Path) -> dict[str, Any]:
     properties = value.get("scope_properties")
     if properties is not None and (
         not isinstance(properties, list)
-        or not all(
-            isinstance(item, str) and SCOPE_PROPERTY.fullmatch(item)
-            for item in properties
-        )
+        or not all(supported_scope_property(item) for item in properties)
     ):
         raise QueueInputError(
-            "launch input scope_properties must be systemd NAME=VALUE settings"
+            "launch input scope_properties must be "
+            f"{'/'.join(sorted(SCOPE_PROPERTIES))} settings"
         )
     return value
+
+
+def supported_scope_property(value: object) -> bool:
+    """Whether a launch input may set this on its own scope."""
+    if not isinstance(value, str):
+        return False
+    name, separator, size = value.partition("=")
+    return bool(
+        separator
+        and name in SCOPE_PROPERTIES
+        and SCOPE_PROPERTY_VALUE.fullmatch(size) is not None
+    )
 
 
 def scope_pool(group: str | None) -> str | None:
@@ -134,20 +158,25 @@ def scope_pool(group: str | None) -> str | None:
     return re.sub(r"[^a-z0-9-]+", "-", group.strip().lower()).strip("-") or None
 
 
-def scope_unit_for(reference: object, pool: str) -> str:
-    """Name the transient scope carrying the task whose launch input is ``reference``.
+def scope_unit_for(launch_input: object, pool: str) -> str:
+    """Name the transient scope carrying the task launched from ``launch_input``.
 
-    ``reference`` is the launch input path's basename without its suffix, so a
-    canceller reading only ``pueue status`` names the same unit the wrapper
-    created.
+    ``launch_input`` is the path the task's command names, as a string or a
+    path, so a canceller reading only ``pueue status`` names the same unit the
+    wrapper created. The digest is of that whole path: a unit name is shorter
+    than a path and drops the characters systemd reserves, and two tasks whose
+    inputs differ only where the name is lossy must not share one scope.
     """
-    safe = re.sub(r"[^A-Za-z0-9_.-]", "-", str(reference)).strip("-") or "job"
-    return f"{POOL_SLICE_PREFIX}-{pool}-{safe[:160]}.scope"
+    text = str(PurePosixPath(str(launch_input)))
+    digest = hashlib.sha256(text.encode()).hexdigest()[:12]
+    stem = re.sub(r"[^A-Za-z0-9_.-]", "-", PurePosixPath(text).stem).strip("-.")
+    stem = stem[:SCOPE_STEM_BYTES] or "job"
+    return f"{POOL_SLICE_PREFIX}-{pool}-{stem}-{digest}.scope"
 
 
 def _scoped_command(
-    launch: Mapping[str, Any], reference: str
-) -> tuple[list[str], str | None]:
+    launch: Mapping[str, Any], launch_input: str
+) -> tuple[list[str], str | None, str | None]:
     """Contain the workload in the scope named for its launch input and group.
 
     The pueue group comes from ``PUEUE_GROUP``, which pueued exports into every
@@ -157,8 +186,8 @@ def _scoped_command(
     """
     pool = scope_pool(os.environ.get("PUEUE_GROUP")) or scope_pool(launch.get("pool"))
     if pool is None:
-        return list(launch["argv"]), None
-    unit = scope_unit_for(reference, pool)
+        return list(launch["argv"]), None, None
+    unit = scope_unit_for(launch_input, pool)
     properties = [
         argument
         for value in launch.get("scope_properties") or ()
@@ -178,6 +207,7 @@ def _scoped_command(
             *launch["argv"],
         ],
         unit,
+        pool,
     )
 
 
@@ -248,8 +278,23 @@ def scope_control_group(unit: str) -> Path | None:
     return Path(f"/sys/fs/cgroup{path}") if path.startswith("/") else None
 
 
+def _live(pid: int) -> bool:
+    """Whether a pid is a process rather than an unreaped exit status.
+
+    A zombie stays in its cgroup until its parent reaps it, so counting one as
+    a survivor would report a finished scope as still occupied.
+    """
+    try:
+        # comm can contain spaces and parentheses; the field after the last
+        # ')' is the process state.
+        state = Path(f"/proc/{pid}/stat").read_text().rpartition(")")[2].split()
+    except OSError:
+        return False
+    return bool(state) and state[0] != "Z"
+
+
 def cgroup_processes(control_group: Path | None) -> list[int]:
-    """Every process in a cgroup and its descendants.
+    """Every live process in a cgroup and its descendants.
 
     A process may leave its session and its process group; it cannot leave the
     cgroup it was placed in, so this is the complete membership of a scope.
@@ -262,87 +307,90 @@ def cgroup_processes(control_group: Path | None) -> list[int]:
             found.update(int(line) for line in procs.read_text().split())
         except (OSError, ValueError):
             continue
-    return sorted(found)
+    return sorted(pid for pid in found if _live(pid))
+
+
+def kill_control_group(control_group: Path | None) -> bool:
+    """Kill a cgroup and its descendants in one write.
+
+    The kernel signals the whole subtree under its own lock, so nothing escapes
+    by forking while the kill walks, and no pid read a moment earlier can have
+    been reused by an unrelated process in between.
+    """
+    if control_group is None:
+        return False
+    try:
+        (control_group / "cgroup.kill").write_text("1")
+    except OSError:
+        return False
+    return True
 
 
 def stop_scope(unit: str | None) -> dict[str, Any]:
-    """Stop a transient scope and report what, if anything, outlived it."""
+    """Kill a transient scope and report what, if anything, outlived it.
+
+    A scope is stopped when its task is over — pueue has SIGKILLed the wrapper,
+    or the declared timeout expired — so there is nothing left to flush and the
+    kill is immediate. Stopping the unit afterwards releases a scope that did
+    not collect itself once empty.
+    """
     if unit is None:
         return {"unit": None, "stopped": False, "survivors": []}
     control_group = scope_control_group(unit)
+    kill_control_group(control_group)
+    # systemd kills the control group too, and releases a unit whose cgroup the
+    # kernel emptied under it; a unit already collected refuses, harmlessly.
     try:
-        completed = subprocess.run(
+        subprocess.run(
             ["systemctl", "--user", "stop", unit],
             capture_output=True,
             check=False,
             timeout=30,
         )
-        stopped = completed.returncode == 0
     except (OSError, subprocess.TimeoutExpired):
-        stopped = False
+        pass
+    survivors = _drain(control_group)
+    return {"unit": unit, "stopped": not survivors, "survivors": survivors}
+
+
+def _drain(control_group: Path | None) -> list[int]:
+    """Kill a cgroup until it is empty; the pids still there when time ran out."""
     deadline = time.monotonic() + REAP_GRACE_SECONDS
     survivors = cgroup_processes(control_group)
-    while survivors and time.monotonic() < deadline:
-        for pid in survivors:
-            try:
-                os.kill(pid, signal.SIGKILL)
-            except OSError:
-                continue
-        time.sleep(0.1)
+    while survivors:
+        kill_control_group(control_group)
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(0.05)
         survivors = cgroup_processes(control_group)
-    return {"unit": unit, "stopped": stopped, "survivors": survivors}
+    return survivors
 
 
-def process_group_members(pgid: int) -> list[int]:
-    """Every live process in a process group.
+def settle_scope(unit: str | None) -> dict[str, list[int]]:
+    """Wait for a scope to empty after its leader exited, then kill the rest.
 
-    Zombies are excluded: one holds its group id until its parent reaps it, so
-    signalling the group would otherwise never look finished.
+    ``systemd-run --scope`` execs the workload, so the wrapper's wait ends with
+    the leader while every descendant that left it keeps the scope active. The
+    task is over by definition here, and its group's worker is not free until
+    the cgroup is: what has not exited on its own is killed. Reports what
+    outlived the command, and what outlived the kill as well.
     """
-    members: list[int] = []
-    for entry in Path("/proc").iterdir():
-        if not entry.name.isdigit():
-            continue
-        try:
-            # comm can contain spaces and parentheses; the fields after the
-            # last ')' are state onwards, of which the third is the group.
-            fields = (entry / "stat").read_text().rpartition(")")[2].split()
-        except OSError:
-            continue
-        if len(fields) < 3 or fields[0] == "Z":
-            continue
-        try:
-            if int(fields[2]) == pgid:
-                members.append(int(entry.name))
-        except ValueError:
-            continue
-    return sorted(members)
+    settled: dict[str, list[int]] = {"outlived": [], "survivors": []}
+    if unit is None:
+        return settled
+    control_group = scope_control_group(unit)
+    if control_group is None:
+        return settled
+    deadline = time.monotonic() + REAP_GRACE_SECONDS
+    while cgroup_processes(control_group) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    outlived = cgroup_processes(control_group)
+    if not outlived:
+        return settled
+    return {"outlived": outlived, "survivors": stop_scope(unit)["survivors"]}
 
 
-def reap_process_group(pgid: int) -> bool:
-    """Signal a process group until it is gone; True when nothing is left.
-
-    The fallback for a run with no scope. It reaches only processes that stayed
-    in the group, which is why containment is the cgroup and not this.
-    """
-    for number in (signal.SIGTERM, signal.SIGKILL):
-        if not process_group_members(pgid):
-            return True
-        try:
-            os.killpg(pgid, number)
-        except ProcessLookupError:
-            continue
-        except PermissionError:
-            return False
-        deadline = time.monotonic() + REAP_GRACE_SECONDS / 2
-        while time.monotonic() < deadline:
-            time.sleep(0.05)
-            if not process_group_members(pgid):
-                return True
-    return not process_group_members(pgid)
-
-
-def run(launch: Mapping[str, Any], *, reference: str) -> int:
+def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
     """Run one queued command and leave its bounded artifacts behind."""
     log_path = Path(launch["log_path"])
     spool_path = (
@@ -358,7 +406,7 @@ def run(launch: Mapping[str, Any], *, reference: str) -> int:
         )
         return REFUSED_EXIT_CODE
 
-    command, scope_unit = _scoped_command(launch, reference)
+    command, scope_unit, pool = _scoped_command(launch, launch_input)
     append_event(
         spool_path,
         {
@@ -370,7 +418,10 @@ def run(launch: Mapping[str, Any], *, reference: str) -> int:
             "job_kind": launch.get("kind", "declared-operation"),
             "project": launch["project_id"],
             "operation": launch["operation"],
-            "pool": launch.get("pool"),
+            # The group pueue actually ran the task in, which is the group the
+            # scope and its slice were named for; a launch input may declare
+            # another or none at all.
+            "pool": pool,
             "scope_unit": scope_unit,
             "phase": "started",
             "working_directory": launch["working_directory"],
@@ -414,14 +465,6 @@ def run(launch: Mapping[str, Any], *, reference: str) -> int:
             log.write(f"could not start the command: {error}\n".encode())
             return REFUSED_EXIT_CODE
 
-        # `pueue kill` sends SIGKILL, so no handler here can ever run and the
-        # command's own session would outlive a cancel. Record the group the
-        # command leads; `agentctl job cancel` reaps it after pueue kills.
-        group_path = Path(f"{log_path}.pgid")
-        try:
-            group_path.write_text(str(os.getpgid(process.pid)))
-        except OSError:
-            pass
         try:
             returncode = process.wait(timeout=launch["timeout_seconds"])
         except subprocess.TimeoutExpired:
@@ -429,8 +472,17 @@ def run(launch: Mapping[str, Any], *, reference: str) -> int:
             _terminate(process)
             log.write(f"timed out after {launch['timeout_seconds']} seconds\n".encode())
             returncode = TIMEOUT_EXIT_CODE
+        else:
+            settled = settle_scope(scope_unit)
+            if settled["outlived"]:
+                left = ", ".join(str(pid) for pid in settled["outlived"])
+                log.write(
+                    f"killed what the command left in its scope: {left}\n".encode()
+                )
+            if settled["survivors"]:
+                alive = ", ".join(str(pid) for pid in settled["survivors"])
+                log.write(f"still running after the kill: {alive}\n".encode())
         finally:
-            group_path.unlink(missing_ok=True)
             if result_file is not None:
                 result_file.close()
 
@@ -442,16 +494,18 @@ def run(launch: Mapping[str, Any], *, reference: str) -> int:
 
 def main(arguments: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="sinnixd-queue-run")
-    parser.add_argument("launch_input", type=Path)
+    parser.add_argument("launch_input")
     parsed = parser.parse_args(arguments)
     try:
-        launch = _read_input(parsed.launch_input)
+        launch = _read_input(Path(parsed.launch_input))
     except QueueInputError as error:
         print(str(error), file=sys.stderr)
         return REFUSED_EXIT_CODE
     # The input stays for `pueue restart`: a retry re-executes this same
     # command line. It is mode 0600 and lives with the task that names it.
-    return run(launch, reference=parsed.launch_input.stem)
+    # The path travels on as written: a canceller reads that same string out
+    # of the task's command to name the scope this run is about to create.
+    return run(launch, launch_input=parsed.launch_input)
 
 
 if __name__ == "__main__":  # pragma: no cover - console entry point
