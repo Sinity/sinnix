@@ -8,14 +8,16 @@ push the branch, open the PR, arm auto-merge, and close what merged.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import re
 import subprocess
 import time
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Iterator, Mapping, Sequence
 
 from . import launch, pueue, worktrunk
 from .config import Config
@@ -39,6 +41,13 @@ AGENT_OPERATIONS = frozenset({LANE_OPERATION, REBASE_OPERATION})
 # an agent's memory counts against the plane's budget and not the desktop's.
 AGENT_GROUP = "agent"
 GH_TIMEOUT_SECONDS = 60
+# One branch's PRs are the rounds of a single lane, not the repository's history.
+BRANCH_PR_LIMIT = 30
+LANE_LOCK_DIRECTORY = "lane-locks"
+# A sweep waits for a start's worktree hooks, but never forever: a lane it
+# cannot take is reported, not removed.
+LANE_LOCK_WAIT_SECONDS = 120.0
+LANE_LOCK_POLL_SECONDS = 0.1
 PUSH_TIMEOUT_SECONDS = 2_400  # the push runs the repository's pre-push gate
 PR_POLL_INTERVAL_SECONDS = 0.25
 CODEX_REVIEW_TIMEOUT_SECONDS = 15 * 60
@@ -60,6 +69,10 @@ _CODEX_REVIEWED_COMMIT = re.compile(
 
 class LaneError(RuntimeError):
     """A lane step agentctl refuses; the external tools' own refusals carry through."""
+
+
+class LaneBusy(LaneError):
+    """Another start, rebase or sync holds the lane."""
 
 
 def _auto_merge_unavailable(error: LaneError) -> bool:
@@ -107,6 +120,51 @@ def worktree_path(project: ProjectAdapter, branch: str) -> Path:
     if project.workspace is None:
         raise LaneError(f"project {project.project_id} declares no [workspace]")
     return project.workspace.root / f"{project.root.name}-{_sanitize(branch)}"
+
+
+def lane_lock_path(config: Config, project: ProjectAdapter, branch: str) -> Path:
+    directory = config.state_dir / LANE_LOCK_DIRECTORY / project.project_id
+    return directory / f"{_sanitize(branch)}.lock"
+
+
+def _acquire(handle: Any, branch: str, wait_seconds: float | None) -> None:
+    """Take the lock on ``handle``, or refuse after ``wait_seconds``."""
+    if wait_seconds is None:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        return
+    deadline = time.monotonic() + wait_seconds
+    while True:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return
+        except OSError:
+            if time.monotonic() >= deadline:
+                raise LaneBusy(f"another lane operation holds {branch}") from None
+            time.sleep(LANE_LOCK_POLL_SECONDS)
+
+
+@contextmanager
+def _lane_lock(
+    config: Config,
+    project: ProjectAdapter,
+    branch: str,
+    *,
+    wait_seconds: float | None = None,
+) -> Iterator[None]:
+    """Hold one lane against a concurrent start, rebase or sync.
+
+    Ownership of a lane is not readable in a single step: a start creates the
+    worktree before its agent is queued, so in between there is nothing in the
+    queue to find. The queue answers for a lane only while this is held.
+    """
+    path = lane_lock_path(config, project, branch)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a") as handle:
+        _acquire(handle, branch, wait_seconds)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def _write_prompt(worktree: Path, name: str, prompt: str) -> Path:
@@ -227,32 +285,36 @@ def lane_start(
         model=model,
         effort=effort,
     )
-    existing = worktrunk.worktrunk_find(project.root, snapshot.branch)
-    if existing is not None and existing.path is not None:
-        raise LaneError(
-            f"{snapshot.branch} already has a worktree at {existing.path}; "
-            f"use `agentctl lane rebase {project.project_id} {bead_id}` to continue it"
+    # The worktree exists before its agent is queued; a sweep that read the
+    # queue in that window would find the lane unowned.
+    with _lane_lock(config, project, snapshot.branch):
+        existing = worktrunk.worktrunk_find(project.root, snapshot.branch)
+        if existing is not None and existing.path is not None:
+            raise LaneError(
+                f"{snapshot.branch} already has a worktree at {existing.path}; "
+                f"use `agentctl lane rebase {project.project_id} {bead_id}` "
+                "to continue it"
+            )
+        created = worktrunk.worktrunk_create(
+            project.root,
+            snapshot.branch,
+            path=worktree_path(project, snapshot.branch),
+            base=project.workspace.default_base if project.workspace else None,
         )
-    created = worktrunk.worktrunk_create(
-        project.root,
-        snapshot.branch,
-        path=worktree_path(project, snapshot.branch),
-        base=project.workspace.default_base if project.workspace else None,
-    )
-    if created.path is None:
-        raise WorktrunkError(f"wt created {snapshot.branch} without a path")
-    job = queue_agent(
-        config,
-        project,
-        operation=LANE_OPERATION,
-        bead_id=snapshot.leader_id,
-        worktree=created.path,
-        prompt=snapshot.prompt,
-        prompt_name="prompt.md",
-        backend=snapshot.dimensions.backend,
-        model=snapshot.dimensions.model,
-        effort=snapshot.dimensions.effort,
-    )
+        if created.path is None:
+            raise WorktrunkError(f"wt created {snapshot.branch} without a path")
+        job = queue_agent(
+            config,
+            project,
+            operation=LANE_OPERATION,
+            bead_id=snapshot.leader_id,
+            worktree=created.path,
+            prompt=snapshot.prompt,
+            prompt_name="prompt.md",
+            backend=snapshot.dimensions.backend,
+            model=snapshot.dimensions.model,
+            effort=snapshot.dimensions.effort,
+        )
     return {
         "bead": snapshot.leader_id,
         "beads": list(snapshot.bead_ids),
@@ -816,53 +878,71 @@ def lane_rebase(
     """Queue an agent with the rebase prompt into the bead's existing worktree."""
     packets = PacketConfig.load(project.root)
     branch = packets.branch_for(bead_id)
-    tree = worktrunk.worktrunk_find(project.root, branch)
-    if tree is None or tree.path is None:
-        raise LaneError(f"{branch} has no worktree; start the lane instead")
-    bead = SubprocessBdReader(project.root).show(bead_id)
-    base = project.workspace.default_base if project.workspace else "origin/master"
-    prompt = rebase_prompt(
-        config=packets, bead=bead, branch=branch, base=base, worktree=tree.path
-    )
-    job = queue_agent(
-        config,
-        project,
-        operation=REBASE_OPERATION,
-        bead_id=bead_id,
-        worktree=tree.path,
-        prompt=prompt,
-        prompt_name="rebase-prompt.md",
-        backend=backend or packets.default_backend,
-        model=model or packets.default_model,
-        effort=effort or packets.default_effort,
-    )
+    with _lane_lock(config, project, branch):
+        tree = worktrunk.worktrunk_find(project.root, branch)
+        if tree is None or tree.path is None:
+            raise LaneError(f"{branch} has no worktree; start the lane instead")
+        bead = SubprocessBdReader(project.root).show(bead_id)
+        base = project.workspace.default_base if project.workspace else "origin/master"
+        prompt = rebase_prompt(
+            config=packets, bead=bead, branch=branch, base=base, worktree=tree.path
+        )
+        job = queue_agent(
+            config,
+            project,
+            operation=REBASE_OPERATION,
+            bead_id=bead_id,
+            worktree=tree.path,
+            prompt=prompt,
+            prompt_name="rebase-prompt.md",
+            backend=backend or packets.default_backend,
+            model=model or packets.default_model,
+            effort=effort or packets.default_effort,
+        )
     return {"bead": bead_id, "branch": branch, "worktree": str(tree.path), "job": job}
 
 
-def pull_requests(
-    root: Path, *, state: str = "all", limit: int = 300
-) -> dict[str, dict[str, Any]]:
-    """Open and recent PRs of the repository at ``root``, keyed by head branch."""
-    value = gh_json(
-        [
-            "pr",
-            "list",
-            "--state",
-            state,
-            "--limit",
-            str(limit),
+def _pr_rows(
+    root: Path, *, state: str, limit: int, head: str | None = None
+) -> list[Mapping[str, Any]]:
+    arguments = ["pr", "list", "--state", state, "--limit", str(limit)]
+    if head is not None:
+        arguments.extend(("--head", head))
+    arguments.extend(
+        (
             "--json",
             "number,url,title,headRefName,state,isDraft,mergeable,reviewDecision,"
             "headRefOid,mergeCommit,body,autoMergeRequest,statusCheckRollup,"
             "reviews,comments,reactionGroups,updatedAt",
-        ],
-        cwd=root,
+        )
     )
-    rows = value if isinstance(value, list) else []
+    value = gh_json(arguments, cwd=root)
+    if not isinstance(value, list):
+        return []
+    return [row for row in value if isinstance(row, Mapping)]
+
+
+def pull_requests(
+    root: Path,
+    *,
+    state: str = "all",
+    limit: int = 300,
+    heads: Sequence[str] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """PRs of the repository at ``root``, keyed by head branch.
+
+    ``heads`` asks GitHub for those branches by name. A lane's PR must be found
+    by the identity of its branch: a bounded listing of the newest PRs reports
+    every older lane as never published.
+    """
+    rows: list[Mapping[str, Any]] = []
+    if heads is None:
+        rows = _pr_rows(root, state=state, limit=limit)
+    else:
+        for head in dict.fromkeys(heads):
+            rows.extend(_pr_rows(root, state=state, limit=BRANCH_PR_LIMIT, head=head))
     by_head: dict[str, dict[str, Any]] = {}
     for row in rows:
-        if not isinstance(row, Mapping):
-            continue
         head = str(row.get("headRefName") or "")
         # The newest PR for a branch is the one that describes it.
         if head and (head not in by_head or row.get("state") == "OPEN"):
@@ -951,12 +1031,14 @@ def _merged_pr_matches_tree(
 
 def lane_rows(project: ProjectAdapter, *, full: bool = False) -> list[LaneRow]:
     packets = PacketConfig.load(project.root)
-    trees = worktrunk.worktrunk_list(project.root, full=full)
-    prs = pull_requests(project.root)
+    trees = [
+        tree
+        for tree in worktrunk.worktrunk_list(project.root, full=full)
+        if not tree.main and tree.branch is not None
+    ]
+    prs = pull_requests(project.root, heads=[str(tree.branch) for tree in trees])
     rows: list[LaneRow] = []
     for tree in trees:
-        if tree.main or tree.branch is None:
-            continue
         rows.append(
             LaneRow(
                 worktree=tree,
@@ -980,6 +1062,22 @@ def _remaining_row(row: LaneRow, *, reason: str | None = None) -> dict[str, Any]
         "pr_state": row.pr.get("state") if row.pr else None,
         **({"reason": reason} if reason else {}),
     }
+
+
+def _project_tasks(project: ProjectAdapter) -> list[Task]:
+    """The project's queue entries.
+
+    Removing a worktree an agent is working in destroys uncommitted work, so a
+    sweep that cannot see the queue does nothing at all.
+    """
+    try:
+        return [
+            task
+            for task in pueue.tasks().values()
+            if task.label.startswith(f"{project.project_id}:")
+        ]
+    except PueueError as error:
+        raise LaneError(f"pueue cannot say which lanes are active: {error}") from error
 
 
 def _active_job(row: LaneRow, tasks: Sequence[Task]) -> Task | None:
@@ -1010,82 +1108,90 @@ def lane_sync(
     removed: list[str] = []
     remaining: list[dict[str, Any]] = []
     reader = SubprocessBdReader(project.root)
-    try:
-        tasks = [
-            task
-            for task in pueue.tasks().values()
-            if task.label.startswith(f"{project.project_id}:")
-        ]
-    except PueueError as error:
-        # Removing a worktree an agent is working in destroys uncommitted work,
-        # so a sweep that cannot see the queue does nothing at all.
-        raise LaneError(f"pueue cannot say which lanes are active: {error}") from error
+    # Refuse an unreadable queue before the first GitHub call, not at the first
+    # lane; the per-lane answer below is the one removal acts on.
+    _project_tasks(project)
     for row in lane_rows(project):
         tree = row.worktree
         assert tree.branch is not None
-        active = _active_job(row, tasks)
-        if active is not None:
-            remaining.append(
-                _remaining_row(
-                    row,
-                    reason=f"job {active.task_id} ({active.label}) is "
-                    f"{active.status.lower()}",
-                )
-            )
-            continue
-        bead = None
-        if row.bead is not None:
+        with ExitStack() as lane:
             try:
-                bead = reader.show(row.bead)
-            except PacketError:
-                pass
-        # A merged PR bound to this bead, branch and head is the whole of the
-        # completion evidence: wt's integrated verdict also holds for a branch
-        # that has nothing on it yet.
-        pr_matches, pr_reason = _merged_pr_matches_tree(row, bead)
-        if not pr_matches:
-            if pr_reason is None and tree.integrated:
-                pr_reason = "branch integrated but no merged PR publishes this bead"
-            remaining.append(_remaining_row(row, reason=pr_reason))
-            continue
-        assert row.pr is not None
-        if tree.dirty:
-            remaining.append(
-                _remaining_row(
-                    row, reason="merged but the worktree has uncommitted changes"
-                )
-            )
-            continue
-        # One lane that cannot be removed (a locked worktree an agent still
-        # holds, a wt refusal) is reported; the sweep continues past it.
-        try:
-            worktrunk.worktrunk_remove(project.root, tree.branch)
-        except (WorktrunkError, LaneError) as error:
-            remaining.append(_remaining_row(row, reason=str(error)))
-            continue
-        removed.append(tree.branch)
-        if row.bead is not None:
-            if bead is not None and bead.get("status") not in {"closed"}:
-                # The merge is the fact; whoever the bead was assigned to no
-                # longer owns it. A bd refusal is reported, not fatal.
-                try:
-                    _run(
-                        [
-                            "bd",
-                            "close",
-                            row.bead,
-                            "--force",
-                            "--actor",
-                            actor,
-                            "--reason",
-                            f"merged (PR #{row.pr['number']})",
-                        ],
-                        cwd=project.root,
+                lane.enter_context(
+                    _lane_lock(
+                        config,
+                        project,
+                        tree.branch,
+                        wait_seconds=LANE_LOCK_WAIT_SECONDS,
                     )
-                except LaneError as error:
-                    remaining.append(_remaining_row(row, reason=str(error)))
-                else:
-                    closed.append(row.bead)
+                )
+            except LaneBusy as error:
+                remaining.append(_remaining_row(row, reason=str(error)))
+                continue
+            # A lane can be started or rebased while the sweep works, so
+            # ownership is read again here, under the lane's own lock.
+            active = _active_job(row, _project_tasks(project))
+            if active is not None:
+                remaining.append(
+                    _remaining_row(
+                        row,
+                        reason=f"job {active.task_id} ({active.label}) is "
+                        f"{active.status.lower()}",
+                    )
+                )
+                continue
+            bead = None
+            if row.bead is not None:
+                try:
+                    bead = reader.show(row.bead)
+                except PacketError:
+                    pass
+            # A merged PR bound to this bead, branch and head is the whole of the
+            # completion evidence: wt's integrated verdict also holds for a branch
+            # that has nothing on it yet.
+            pr_matches, pr_reason = _merged_pr_matches_tree(row, bead)
+            if not pr_matches:
+                if pr_reason is None and tree.integrated:
+                    pr_reason = "branch integrated but no merged PR publishes this bead"
+                remaining.append(_remaining_row(row, reason=pr_reason))
+                continue
+            assert row.pr is not None
+            if tree.dirty:
+                remaining.append(
+                    _remaining_row(
+                        row, reason="merged but the worktree has uncommitted changes"
+                    )
+                )
+                continue
+            # One lane that cannot be removed (a locked worktree an agent still
+            # holds, a wt refusal) is reported; the sweep continues past it.
+            try:
+                worktrunk.worktrunk_remove(project.root, tree.branch)
+            except (WorktrunkError, LaneError) as error:
+                remaining.append(_remaining_row(row, reason=str(error)))
+                continue
+            removed.append(tree.branch)
+            if row.bead is not None:
+                if bead is not None and bead.get("status") not in {"closed"}:
+                    # The merge is the fact; whoever the bead was assigned to no
+                    # longer owns it. A bd refusal is reported, not fatal.
+                    try:
+                        _run(
+                            [
+                                "bd",
+                                "close",
+                                row.bead,
+                                "--force",
+                                "--actor",
+                                actor,
+                                "--reason",
+                                f"merged (PR #{row.pr['number']})",
+                            ],
+                            cwd=project.root,
+                        )
+                    except LaneError as error:
+                        remaining.append(_remaining_row(row, reason=str(error)))
+                    else:
+                        closed.append(row.bead)
     return {"closed": closed, "removed": removed, "remaining": remaining}
 
 
