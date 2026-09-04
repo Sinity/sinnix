@@ -83,7 +83,8 @@
           set -euo pipefail
           ${resolveFlakeDir}
           if [ "''${SINNIXD_PRINCIPAL:-}" = agent-control ] \
-            && [ "''${SINNIXD_OPERATION:-}" != check ]; then
+            && [ "''${SINNIXD_OPERATION:-}" != check ] \
+            && [ "''${SINNIXD_OPERATION:-}" != verify_quick ]; then
             exec agentctl job start sinnix check --workspace "$_flake_dir" --wait -- "$@"
           fi
           exec 9>/tmp/sinnix-switch.lock

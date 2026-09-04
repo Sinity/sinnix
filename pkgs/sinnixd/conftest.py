@@ -284,6 +284,13 @@ exec = ["true"]
 pool = "normal"
 result = "exit"
 
+[operations.verify_quick]
+description = "Fixture quick verification"
+exec = ["fixture-verify-quick"]
+pool = "pytest"
+result = "exit"
+timeout_seconds = 120
+
 [operations.verify]
 description = "Fixture typed verification"
 exec = ["fixture-verify"]

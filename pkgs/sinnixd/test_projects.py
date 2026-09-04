@@ -33,6 +33,7 @@ def test_the_fixture_descriptor_loads_every_declared_field(project_root: Path) -
         "check",
         "nightly",
         "verify",
+        "verify_quick",
     ]
 
 

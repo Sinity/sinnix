@@ -105,14 +105,7 @@ testmon seed copied from the primary checkout) is the project's `wt.toml`
 hooks' job. The environment carries `BEADS_ACTOR=agent-<bead>` so an agent's
 task writes are its own. Agent jobs cap at four hours.
 
-The worker ends its lane with `lane publish` (the toolbelt) or
-`agentctl lane publish <worktree>`: push, PR titled by the bead (`fix:` for
-bugs, `feat:` for features, `chore:` otherwise, at most 72 characters), body
-from `.lane/body.md`, auto-merge armed. Branch protection, the required verify
-check and review decide when it lands. `lane sync` then closes the bead and
-removes the worktree. Nothing dispatches on its own: `refill` and `lane start`
-are explicit, and a declared `schedule` is the one autonomous driver a project
-can choose.
+The worker ends its lane with `lane publish` (the toolbelt) or `agentctl lane publish <worktree>`. Publication first queues the project's declared `verify_quick` operation in its pueue pool and waits for that task to finish successfully, then pushes and opens the PR titled by the bead (`fix:` for bugs, `feat:` for features, `chore:` otherwise, at most 72 characters), body from `.lane/body.md`, auto-merge armed. Branch protection, the required verify check and review decide when it lands. `lane sync` then closes the bead and removes the worktree. Nothing dispatches on its own: `refill` and `lane start` are explicit, and a declared `schedule` is the one autonomous driver a project can choose.
 
 ## Descriptors
 

@@ -32,6 +32,7 @@ from .worktrunk import Worktree, WorktrunkError
 LANE_OPERATION = "lane"
 REBASE_OPERATION = "rebase"
 AGENT_GROUP = "agent"
+VERIFY_OPERATION = "verify_quick"
 # The scope's slice: the job plane, where pueued's own tasks live, so an
 # agent's memory counts against the plane's budget and not the desktop's.
 AGENT_SLICE = "sinnixd-pueue-agent.slice"
@@ -269,6 +270,31 @@ def _open_pr(worktree: Path, branch: str) -> Mapping[str, Any] | None:
     return value if isinstance(value, Mapping) else None
 
 
+def _verify_for_publish(
+    config: Config, project: ProjectAdapter, worktree: Path
+) -> dict[str, Any]:
+    try:
+        operation = project.operation(VERIFY_OPERATION)
+    except KeyError as error:
+        raise LaneError(
+            f"project {project.project_id} does not declare {VERIFY_OPERATION}"
+        ) from error
+    started = launch.start_operation(config, project, operation, workspace=worktree)
+    job_id = started["job_id"]
+    receipt = launch.wait(job_id, timeout_seconds=operation.timeout_seconds)
+    if not receipt.get("terminal") or receipt.get("phase") != "succeeded":
+        phase = receipt.get("phase", "unknown")
+        detail = (
+            f", exit {receipt['exit_code']}"
+            if receipt.get("exit_code") is not None
+            else ""
+        )
+        raise LaneError(
+            f"quick verification task {job_id} did not succeed: {phase}{detail}"
+        )
+    return receipt
+
+
 def lane_publish(
     config: Config,
     worktree: Path,
@@ -318,6 +344,8 @@ def lane_publish(
     base = project.workspace.default_base if project.workspace else "origin/master"
     base_branch = base.split("/", 1)[1] if base.startswith("origin/") else base
 
+    verification = _verify_for_publish(config, project, worktree)
+
     _git(
         worktree,
         "push",
@@ -362,6 +390,7 @@ def lane_publish(
         "url": pull.get("url"),
         "created": created,
         "auto_merge": True,
+        "verification": verification,
     }
 
 
