@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -263,6 +264,23 @@ def _project_root_of(worktree: Path) -> Path:
     return common.parent.resolve()
 
 
+def _remote_head(worktree: Path, branch: str) -> str | None:
+    """Return the observed remote head to use as a single-ref push lease."""
+    ref = f"refs/heads/{branch}"
+    output = _git(worktree, "ls-remote", "origin", ref)
+    if not output:
+        return None
+    rows = output.splitlines()
+    if len(rows) != 1:
+        raise LaneError(f"git ls-remote returned an unexpected result for {ref}")
+    fields = rows[0].split()
+    if len(fields) != 2 or fields[1] != ref or not re.fullmatch(
+        r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})", fields[0]
+    ):
+        raise LaneError(f"git ls-remote returned an unexpected result for {ref}")
+    return fields[0]
+
+
 def _open_pr(worktree: Path, branch: str) -> Mapping[str, Any] | None:
     try:
         value = gh_json(
@@ -350,16 +368,14 @@ def lane_publish(
     base = project.workspace.default_base if project.workspace else "origin/master"
     base_branch = base.split("/", 1)[1] if base.startswith("origin/") else base
 
+    remote_head = _remote_head(worktree, branch)
     verification = _verify_for_publish(config, project, worktree)
 
-    _git(
-        worktree,
-        "push",
-        "--set-upstream",
-        "origin",
-        branch,
-        timeout=PUSH_TIMEOUT_SECONDS,
-    )
+    push_arguments = ["push"]
+    if remote_head is not None:
+        push_arguments.append(f"--force-with-lease=refs/heads/{branch}:{remote_head}")
+    push_arguments.extend(("--set-upstream", "origin", branch))
+    _git(worktree, *push_arguments, timeout=PUSH_TIMEOUT_SECONDS)
     pull = _open_pr(worktree, branch)
     created = False
     if pull is None or pull.get("state") == "MERGED":
