@@ -14,9 +14,11 @@ repeated here.
    Run the static gate with `lane verify`; it submits the declared
    `verify_quick` operation to pueue and waits for that task. Do not invoke
    `devtools verify --quick` directly inside a lane. Do not start or wait for
-   affected or complete verification. GitHub starts affected verification
-   after publication, and the coordinator starts one complete run after the
-   merge batch. The harness refuses both tiers inside a lane. Fix, test,
+   affected or complete verification when the repository has an automatic PR
+   verification workflow: GitHub starts affected verification after
+   publication, and the coordinator starts one complete run after the merge
+   batch. Without such a workflow, run the repository's declared semantic
+   check through `agentctl job start` before publication. Fix, test,
    iterate until green. Do not spawn
    review subagents — hosted PR review and the test oracle are the check.
    `devtools verify` selects from the checkout's one testmon datafile

@@ -98,7 +98,7 @@ systemd-run --user --scope --slice=sinnixd-pueue-agent.slice \
 ```
 
 The queue runner selects the pool slice for every new task, while the agent
-scope keeps the descriptor's `workspace.agent_memory_max` (default 10G) as
+scope keeps the descriptor's `workspace.agent_memory_max` (default 4G) as
 the hard ceiling for one lane. The adapter (`agentRunner`) turns the prompt
 into one backend invocation. Provisioning the worktree (dependencies, the
 testmon seed copied from the primary checkout) is the project's `wt.toml`
