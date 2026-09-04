@@ -334,7 +334,7 @@ in
           && !(managedWork ? ManagedOOMMemoryPressure)
           && userSlices.app.MemoryLow == "6G"
           && userSlices.session.MemoryLow == "5G"
-          && poolSlices.sinnixd-pueue-agent.MemoryMax == "10G"
+          && !(poolSlices.sinnixd-pueue-agent ? MemoryMax)
           && !(poolSlices.sinnixd-pueue-agent ? ManagedOOMPreference)
           && poolSlices.sinnixd-pueue-pytest.MemoryHigh == "6G"
           && poolSlices.sinnixd-pueue-pytest.MemoryMax == "8G"

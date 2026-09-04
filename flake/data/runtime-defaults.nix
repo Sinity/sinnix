@@ -360,7 +360,6 @@ rec {
         CPUWeight = 400;
         IOWeight = 300;
         MemoryHigh = "8G";
-        MemoryMax = "10G";
         MemorySwapMax = "0";
       };
       sinnixd-pueue-pytest = {

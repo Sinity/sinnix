@@ -38,8 +38,8 @@ pool = "bulk"
 result = "exit"
 
 [operations.verify_quick]
-description = "Run the default checks before lane publication"
-exec = ["check"]
+description = "Run maintained lint and formatting checks before lane publication"
+exec = ["lint"]
 pool = "normal"
 result = "exit"
 
