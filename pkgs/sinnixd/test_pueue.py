@@ -205,12 +205,12 @@ def test_log_reads_the_whole_output_not_a_tail(stub_pueue: Path) -> None:
     assert _calls(stub_pueue)[0] == ["log", "0", "--json", "--full"]
 
 
-def test_freeze_and_resume_name_the_group(stub_pueue: Path) -> None:
+def test_pause_drains_running_tasks_and_resume_names_the_group(stub_pueue: Path) -> None:
     pueue.pause("agent")
     pueue.resume("agent")
 
     assert _calls(stub_pueue) == [
-        ["pause", "--group", "agent"],
+        ["pause", "--wait", "--group", "agent"],
         ["start", "--group", "agent"],
     ]
 

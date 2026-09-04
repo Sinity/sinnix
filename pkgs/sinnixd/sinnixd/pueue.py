@@ -274,8 +274,8 @@ def remove(task_ids: Sequence[int]) -> None:
 
 
 def pause(group: str) -> None:
-    """Freeze a group: SIGSTOP to its running tasks, rather than thrashing."""
-    _run(["pause", "--group", group])
+    """Close a group's queue while allowing its running tasks to finish."""
+    _run(["pause", "--wait", "--group", group])
 
 
 def resume(group: str) -> None:

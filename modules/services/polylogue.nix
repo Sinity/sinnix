@@ -55,7 +55,7 @@ mkServiceModule {
         default = "127.0.0.1";
         description = ''
           Host for the daemon's HTTP API and browser-capture receiver.
-          Mapped to ``programs.polylogued.settings.daemon.host``.
+          Mapped to the daemon API and browser-capture listen hosts.
         '';
       };
 
@@ -205,12 +205,18 @@ mkServiceModule {
             archive.root = cfg.dataDir;
 
             daemon = {
-              host = cfg.daemon.host;
-              port = cfg.daemon.apiPort;
               debounce-s = 30;
             };
 
-            browser-capture.port = cfg.daemon.browserCapturePort;
+            daemon-api = {
+              host = cfg.daemon.host;
+              port = cfg.daemon.apiPort;
+            };
+
+            browser-capture = {
+              host = cfg.daemon.host;
+              port = cfg.daemon.browserCapturePort;
+            };
 
             embedding = {
               enabled = cfg.embedding.enable;
