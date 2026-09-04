@@ -711,8 +711,16 @@ def lane_publish(
     if remote_head is not None:
         push_arguments.append(f"--force-with-lease=refs/heads/{branch}:{remote_head}")
     push_arguments.extend(("--set-upstream", "origin", branch))
-    _git(worktree, *push_arguments, timeout=PUSH_TIMEOUT_SECONDS)
     pull = _open_pr(worktree, branch)
+    # A merge armed for an earlier head would land this push unreviewed, so it
+    # is disarmed before the push and rearmed only by this head's verdict.
+    if pull is not None and pull.get("state") == "OPEN":
+        armed_number = pull.get("number")
+        if pull.get("autoMergeRequest") and isinstance(armed_number, int):
+            _run(
+                ["gh", "pr", "merge", str(armed_number), "--disable-auto"], cwd=worktree
+            )
+    _git(worktree, *push_arguments, timeout=PUSH_TIMEOUT_SECONDS)
     created = False
     if pull is None or pull.get("state") == "MERGED":
         _run(
@@ -736,46 +744,28 @@ def lane_publish(
     number = pull.get("number")
     if not isinstance(number, int):
         raise LaneError("gh pr view published no PR number")
-    auto_merge = bool(pull.get("autoMergeRequest"))
+    auto_merge = False
     next_action = "wait for merge"
-    review: dict[str, Any] | None = None
-    if not auto_merge:
-        pull, review = _wait_for_merge_ready(worktree, branch, head)
-        if review["status"] == "findings":
-            round_number = int(review.get("round") or 1)
-            if round_number >= MAX_CODEX_REVIEW_ROUNDS:
-                next_action = (
-                    "resolve Codex findings before another publication "
-                    f"(review round {round_number}/{MAX_CODEX_REVIEW_ROUNDS} exhausted)"
-                )
-            else:
-                next_action = (
-                    f"fix Codex findings in the lane and push "
-                    f"(review round {round_number}/{MAX_CODEX_REVIEW_ROUNDS})"
-                )
-        elif review["status"] == "timeout":
+    pull, review = _wait_for_merge_ready(worktree, branch, head)
+    if review["status"] == "findings":
+        round_number = int(review.get("round") or 1)
+        if round_number >= MAX_CODEX_REVIEW_ROUNDS:
             next_action = (
-                f"wait for hosted Codex review for {head[:12]}, then rerun lane publish"
+                "resolve Codex findings before another publication "
+                f"(review round {round_number}/{MAX_CODEX_REVIEW_ROUNDS} exhausted)"
             )
-        elif review["status"] != "clean":
-            next_action = f"wait for hosted Codex review for {head[:12]}"
-        if review["status"] != "clean":
-            return {
-                "branch": branch,
-                "bead": bead_id,
-                "subject": subject,
-                "pr": number,
-                "url": pull.get("url"),
-                "created": created,
-                "auto_merge": False,
-                "next_action": next_action,
-                "review": {
-                    **review,
-                    "head": head,
-                    "max_rounds": MAX_CODEX_REVIEW_ROUNDS,
-                },
-                "verification": verification,
-            }
+        else:
+            next_action = (
+                f"fix Codex findings in the lane and push "
+                f"(review round {round_number}/{MAX_CODEX_REVIEW_ROUNDS})"
+            )
+    elif review["status"] == "timeout":
+        next_action = (
+            f"wait for hosted Codex review for {head[:12]}, then rerun lane publish"
+        )
+    elif review["status"] != "clean":
+        next_action = f"wait for hosted Codex review for {head[:12]}"
+    if review["status"] == "clean":
         try:
             _run(["gh", "pr", "merge", str(number), "--auto", "--squash"], cwd=worktree)
         except LaneError as error:
@@ -793,11 +783,7 @@ def lane_publish(
         "created": created,
         "auto_merge": auto_merge,
         "next_action": next_action,
-        "review": (
-            {**review, "head": head, "max_rounds": MAX_CODEX_REVIEW_ROUNDS}
-            if review is not None
-            else {"status": "already_armed", "head": head}
-        ),
+        "review": {**review, "head": head, "max_rounds": MAX_CODEX_REVIEW_ROUNDS},
         "verification": verification,
     }
 
