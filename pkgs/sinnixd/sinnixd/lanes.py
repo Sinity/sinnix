@@ -48,7 +48,10 @@ class LaneError(RuntimeError):
 def _auto_merge_unavailable(error: LaneError) -> bool:
     """Recognize GitHub's refusal when repository rules cannot support auto-merge."""
     message = str(error).lower()
-    return "protected branch rules are not configured" in message
+    return (
+        "protected branch rules are not configured" in message
+        or "protected branch rules not configured" in message
+    )
 
 
 def _run(argv: Sequence[str], *, cwd: Path, timeout: float = GH_TIMEOUT_SECONDS) -> str:

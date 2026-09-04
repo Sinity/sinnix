@@ -461,6 +461,12 @@ def test_lane_publish_reports_reviewable_pr_when_auto_merge_is_unavailable(
     assert ["gh", "pr", "merge", "100", "--auto", "--squash"] in original_run
 
 
+def test_lane_publish_recognizes_github_unconfigured_branch_rules_error() -> None:
+    assert lanes._auto_merge_unavailable(
+        LaneError("GraphQL: Pull request Protected branch rules not configured")
+    )
+
+
 def test_lane_publish_uses_the_observed_remote_head_as_a_force_push_lease(
     fake_commands: dict[str, Any],
     fake_pueue: FakePueue,
