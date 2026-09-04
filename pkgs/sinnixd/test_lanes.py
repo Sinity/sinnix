@@ -247,21 +247,32 @@ def _git_worktree(
     *,
     dirty: str = "",
     events: list[str] | None = None,
+    git_calls: list[tuple[str, ...]] | None = None,
+    remote_head: str = "",
+    push_error: str | None = None,
 ) -> Path:
     worktree = project_root.parent / "worktrees" / "lane"
     worktree.mkdir(parents=True)
     (worktree / ".git").write_text("gitdir: elsewhere\n")
 
     def git(path: Path, *arguments: str, timeout: float = 60) -> str:
+        if git_calls is not None:
+            git_calls.append(arguments)
         if arguments[0] == "status":
             return dirty
         if arguments[0] == "symbolic-ref":
             return branch
         if arguments[0] == "rev-parse":
             return str(project_root / ".git")
+        if arguments[0] == "ls-remote":
+            return (
+                f"{remote_head}\trefs/heads/{branch}\n" if remote_head else ""
+            )
         if arguments[0] == "push":
             if events is not None:
                 events.append("push")
+            if push_error is not None:
+                raise LaneError(push_error)
             return ""
         raise AssertionError(arguments)
 
@@ -369,6 +380,70 @@ def test_lane_publish_reports_reviewable_pr_when_auto_merge_is_unavailable(
     assert published["auto_merge"] is False
     assert published["next_action"] == "gh pr merge 100 --squash"
     assert ["gh", "pr", "merge", "100", "--auto", "--squash"] in original_run
+
+
+def test_lane_publish_uses_the_observed_remote_head_as_a_force_push_lease(
+    fake_commands: dict[str, Any],
+    fake_pueue: FakePueue,
+    fake_bd: FakeBd,
+    config: Config,
+    project_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    remote_head = "1" * 40
+    git_calls: list[tuple[str, ...]] = []
+    worktree = _git_worktree(
+        monkeypatch,
+        project_root,
+        "feature/packet/fx-2",
+        remote_head=remote_head,
+        git_calls=git_calls,
+    )
+    fake_commands["prs"]["feature/packet/fx-2"] = {
+        "number": 7,
+        "url": "u",
+        "state": "OPEN",
+        "headRefName": "feature/packet/fx-2",
+        "autoMergeRequest": {"enabledAt": "x"},
+    }
+    fake_pueue.finish_when_waited(1, lambda fake: fake.succeed(1))
+
+    lanes.lane_publish(config, worktree)
+
+    push = next(call for call in git_calls if call[0] == "push")
+    assert "--force-with-lease=refs/heads/feature/packet/fx-2:" + remote_head in push
+
+
+def test_lane_publish_refuses_when_the_remote_head_lease_is_rejected(
+    fake_commands: dict[str, Any],
+    fake_pueue: FakePueue,
+    fake_bd: FakeBd,
+    config: Config,
+    project_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    remote_head = "2" * 40
+    worktree = _git_worktree(
+        monkeypatch,
+        project_root,
+        "feature/packet/fx-2",
+        remote_head=remote_head,
+        push_error="remote ref has changed",
+    )
+    fake_commands["prs"]["feature/packet/fx-2"] = {
+        "number": 7,
+        "url": "u",
+        "state": "OPEN",
+        "headRefName": "feature/packet/fx-2",
+        "autoMergeRequest": {"enabledAt": "x"},
+    }
+    fake_pueue.finish_when_waited(1, lambda fake: fake.succeed(1))
+
+    with pytest.raises(LaneError, match="remote ref has changed"):
+        lanes.lane_publish(config, worktree)
+
+    assert not any(call[:3] == ["gh", "pr", "create"] for call in fake_commands["calls"])
+    assert not any(call[:3] == ["gh", "pr", "merge"] for call in fake_commands["calls"])
 
 
 def test_lane_publish_refuses_a_dirty_worktree_but_ignores_lane_artifacts(
