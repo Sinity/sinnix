@@ -135,8 +135,7 @@ in
                 let
                   preStart = toString hm.systemd.user.services.sinnix-clodex.Service.ExecStartPre;
                 in
-                lib.hasInfix "sinnix-clodex-aliases" preStart
-                && !(lib.hasInfix "\n" preStart);
+                lib.hasInfix "sinnix-clodex-aliases" preStart && !(lib.hasInfix "\n" preStart);
               message = "Clodex alias reconciliation must run as a one-line store script.";
             }
             {

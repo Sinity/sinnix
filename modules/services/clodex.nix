@@ -69,35 +69,35 @@ mkServiceModule {
               ''}"
             ];
             ExecCondition = "${pkgs.writeShellScript "sinnix-clodex-patch-check" ''
-                set +e
-                (
-                set -euo pipefail
-                manifest="/home/${user}/.clodex/patch-state.json"
-                if [ ! -r "$manifest" ]; then
-                  echo "clodex: Claude Code is not patched; run clodex patch, then systemctl --user start sinnix-clodex" >&2
-                  exit 78
-                fi
-                binary="$(${pkgs.jq}/bin/jq -er '.binaryPath' "$manifest")"
-                expected="$(${pkgs.jq}/bin/jq -er '.claudeVersion' "$manifest")"
-                if [ ! -x "$binary" ]; then
-                  echo "clodex: patched Claude Code binary is missing: $binary; run clodex patch, then systemctl --user start sinnix-clodex" >&2
-                  exit 78
-                fi
-                actual="$($binary --version 2>/dev/null | ${pkgs.gnugrep}/bin/grep -Eo '[0-9]+(\.[0-9]+)+' | ${pkgs.coreutils}/bin/head -n1 || true)"
-                size="$(${pkgs.coreutils}/bin/stat -c '%s' "$binary")"
-                patched_size="$(${pkgs.jq}/bin/jq -er '.patchedSize' "$manifest")"
-                if [ -z "$actual" ] || [ "$actual" != "$expected" ] || [ "$size" != "$patched_size" ]; then
-                  echo "clodex: Claude Code patch is stale (expected $expected/$patched_size, found ''${actual:-unknown}/$size); run clodex patch, then systemctl --user start sinnix-clodex" >&2
-                  exit 78
-                fi
-                )
-                status=$?
-                case "$status" in
-                  0) exit 0 ;;
-                  78) exit 1 ;;
-                  *) exit 255 ;;
-                esac
-              ''}";
+              set +e
+              (
+              set -euo pipefail
+              manifest="/home/${user}/.clodex/patch-state.json"
+              if [ ! -r "$manifest" ]; then
+                echo "clodex: Claude Code is not patched; run clodex patch, then systemctl --user start sinnix-clodex" >&2
+                exit 78
+              fi
+              binary="$(${pkgs.jq}/bin/jq -er '.binaryPath' "$manifest")"
+              expected="$(${pkgs.jq}/bin/jq -er '.claudeVersion' "$manifest")"
+              if [ ! -x "$binary" ]; then
+                echo "clodex: patched Claude Code binary is missing: $binary; run clodex patch, then systemctl --user start sinnix-clodex" >&2
+                exit 78
+              fi
+              actual="$($binary --version 2>/dev/null | ${pkgs.gnugrep}/bin/grep -Eo '[0-9]+(\.[0-9]+)+' | ${pkgs.coreutils}/bin/head -n1 || true)"
+              size="$(${pkgs.coreutils}/bin/stat -c '%s' "$binary")"
+              patched_size="$(${pkgs.jq}/bin/jq -er '.patchedSize' "$manifest")"
+              if [ -z "$actual" ] || [ "$actual" != "$expected" ] || [ "$size" != "$patched_size" ]; then
+                echo "clodex: Claude Code patch is stale (expected $expected/$patched_size, found ''${actual:-unknown}/$size); run clodex patch, then systemctl --user start sinnix-clodex" >&2
+                exit 78
+              fi
+              )
+              status=$?
+              case "$status" in
+                0) exit 0 ;;
+                78) exit 1 ;;
+                *) exit 255 ;;
+              esac
+            ''}";
             ExecStart = "/home/${user}/.local/bin/sinnix-clodex-server";
             Environment = [
               "CLODEX_CREDENTIAL_HELPER=${scriptPkgs.sinnix-clodex-credential-helper}/bin/sinnix-clodex-credential-helper"
