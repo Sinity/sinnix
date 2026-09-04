@@ -120,8 +120,10 @@ diagnose the whole failure shape and batch the fixes.
 ## Continuous queue mode
 
 Claim the highest-value ready cluster via [[task-backend]] → dispatch lane →
-review → integrate → complete with verification evidence → repeat. At most 6
-concurrent implementation lanes and one merge-ready train.
+review → integrate → complete with verification evidence → repeat. Keep the
+agent frontier full up to pueue's configured `agent` group capacity and one
+merge-ready train. Heavy verification remains independently bounded by its
+own groups.
 
 ## Runtime architecture
 
