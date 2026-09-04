@@ -1,8 +1,8 @@
-"""Freeze the queue under host pressure instead of killing what is running.
+"""Close queue admission under host pressure instead of killing what is running.
 
 One pass: read the host's pressure, pause or resume one pueue group, record
 the transition, exit. A timer runs it. Nothing here loops or sleeps, and
-nothing is cancelled — a frozen group's tasks keep their work and resume.
+nothing is cancelled — a paused group's tasks keep their work and resume.
 """
 
 from __future__ import annotations
@@ -27,8 +27,9 @@ IO_FULL_FREEZE = 25.0
 # victim, which is the whole difference between freezing and thrashing.
 MEMORY_FULL_FREEZE = 25.0
 
-# Resuming at the freeze threshold would thaw straight back into the pressure
-# that caused the freeze. Both signals must fall well clear first.
+# A signal that caused a closure remains latched while it is at or above this
+# level. Each signal is evaluated independently, so unrelated pressure cannot
+# keep a group closed.
 RESUME_BELOW = 10.0
 
 # IO pressure drains test admission without delaying API-bound agents. Memory
@@ -72,11 +73,19 @@ def over_threshold(pressure: Mapping[str, float]) -> str | None:
     return None
 
 
-def clear(pressure: Mapping[str, float]) -> bool:
-    return (
-        pressure.get("io_full_avg60", 0.0) < RESUME_BELOW
-        and pressure.get("memory_full_avg60", 0.0) < RESUME_BELOW
-    )
+def _signal_pressure(pressure: Mapping[str, float], signal: str) -> float:
+    return pressure.get(f"{signal}_full_avg60", 0.0)
+
+
+def _desired_paused(
+    pressure: Mapping[str, float], paused: Sequence[str]
+) -> set[str]:
+    """Keep existing closures latched per signal until that signal clears."""
+    desired: set[str] = set()
+    for signal, groups in CLOSE_ORDER.items():
+        if _signal_pressure(pressure, signal) >= RESUME_BELOW:
+            desired.update(group for group in paused if group in groups)
+    return desired
 
 
 def _append(spool: Path | None, event: Mapping[str, object]) -> None:
@@ -101,7 +110,7 @@ def _append(spool: Path | None, event: Mapping[str, object]) -> None:
 
 
 def tick(*, spool: Path | None, pressure_root: Path = Path("/proc/pressure")) -> dict:
-    """Freeze one more group, thaw one, or do nothing. Never cancels."""
+    """Close or reopen one admission group. Never stops running tasks."""
     pressure = read_pressure(pressure_root)
     try:
         groups = pueue.groups_status()
@@ -111,19 +120,20 @@ def tick(*, spool: Path | None, pressure_root: Path = Path("/proc/pressure")) ->
     paused = [name for name in MANAGED_GROUPS if groups.get(name) == "Paused"]
     signal = over_threshold(pressure)
 
+    desired_paused = _desired_paused(pressure, paused)
+    obsolete = [name for name in paused if name not in desired_paused]
+    if obsolete:
+        target = obsolete[0]
+        try:
+            pueue.resume(target)
+        except PueueError as error:
+            return {"action": "failed", "group": target, "error": str(error)}
+        event = {"action": "opened", "group": target, "signal": signal, **pressure}
+        _append(spool, event)
+        return event
+
     if signal is not None:
         close_order = CLOSE_ORDER[signal]
-        obsolete = [name for name in paused if name not in close_order]
-        if obsolete:
-            target = obsolete[0]
-            try:
-                pueue.resume(target)
-            except PueueError as error:
-                return {"action": "failed", "group": target, "error": str(error)}
-            event = {"action": "thawed", "group": target, "signal": signal, **pressure}
-            _append(spool, event)
-            return event
-
         running = [name for name in close_order if groups.get(name) == "Running"]
         if not running:
             return {
@@ -137,17 +147,7 @@ def tick(*, spool: Path | None, pressure_root: Path = Path("/proc/pressure")) ->
             pueue.pause(target)
         except PueueError as error:
             return {"action": "failed", "group": target, "error": str(error)}
-        event = {"action": "froze", "group": target, "signal": signal, **pressure}
-        _append(spool, event)
-        return event
-
-    if signal is None and clear(pressure) and paused:
-        target = paused[-1]
-        try:
-            pueue.resume(target)
-        except PueueError as error:
-            return {"action": "failed", "group": target, "error": str(error)}
-        event = {"action": "thawed", "group": target, **pressure}
+        event = {"action": "closed", "group": target, "signal": signal, **pressure}
         _append(spool, event)
         return event
 
