@@ -444,7 +444,7 @@ def test_lane_publish_pushes_opens_the_pr_under_the_bead_subject_and_arms_auto_m
     assert create[create.index("--base") + 1] == "master"
     assert create[create.index("--head") + 1] == "feature/packet/fx-1"
     assert create[create.index("--body") + 1].endswith(
-        '<!-- sinnixd:lane-publication '
+        "<!-- sinnixd:lane-publication "
         '{"bead":"fx-1","branch":"feature/packet/fx-1",'
         '"head":"abc123"} -->\n'
     )
@@ -747,9 +747,7 @@ def test_lane_sync_does_not_close_a_bead_for_another_beads_merged_pr(
 ) -> None:
     """A reused branch can have another bead's exact merged head."""
     project = load_project_adapter(project_root)
-    fake_wt["trees"] = [
-        tree("feature/packet/fx-1", tmp_path / "a", state="integrated")
-    ]
+    fake_wt["trees"] = [tree("feature/packet/fx-1", tmp_path / "a", state="integrated")]
     fake_commands["prs"] = {
         "feature/packet/fx-1": {
             "number": 4670,
@@ -758,7 +756,7 @@ def test_lane_sync_does_not_close_a_bead_for_another_beads_merged_pr(
             "headRefOid": "abc123",
             "title": "fix: Second task",
             "body": (
-                '<!-- sinnixd:lane-publication '
+                "<!-- sinnixd:lane-publication "
                 '{"bead":"fx-2","branch":"feature/packet/fx-1",'
                 '"head":"abc123"} -->'
             ),
