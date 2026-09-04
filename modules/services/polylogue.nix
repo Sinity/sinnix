@@ -135,7 +135,10 @@ mkServiceModule {
       # Free-threaded build so daemon thread-parse fan-outs run parallel
       # instead of serializing on GIL writer-commit contention; rollback is
       # repinning `.default`.
-      polyloguePkg = inputs.polylogue.packages.${pkgs.stdenv.hostPlatform.system}.polylogue;
+      polyloguePkg = import ../../flake/polylogue-package.nix {
+        inherit inputs pkgs;
+        package = inputs.polylogue.packages.${pkgs.stdenv.hostPlatform.system}.polylogue;
+      };
       # One source of truth for the daemon's memory ceiling, derived from a
       # single budget knob and used both for upstream's own service.memory*
       # options and for the runtime surface declaration, so the inventory
