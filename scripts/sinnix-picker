@@ -265,7 +265,17 @@ def gather() -> list[Entry]:
     entries.extend(load_chrome_bookmarks())
     entries.extend(load_raindrop())
     entries.extend(load_history())
-    return entries
+    # Sources overlap heavily. Keep the first row because source priority is
+    # intentional: the live queue should win over bookmarks and history.
+    unique: list[Entry] = []
+    seen_urls: set[str] = set()
+    for entry in entries:
+        if entry.category in ("hist", "mark", "stack"):
+            if entry.payload in seen_urls:
+                continue
+            seen_urls.add(entry.payload)
+        unique.append(entry)
+    return unique
 
 
 def dispatch(category: str, payload: str) -> None:

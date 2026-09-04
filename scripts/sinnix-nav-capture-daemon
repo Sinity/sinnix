@@ -3,7 +3,7 @@
 # runtimeInputs: python3 @sinnix-capture @sinnix-reading-stack
 #!/usr/bin/env python3
 """sinnix-nav-capture-daemon: the local endpoint the nav-capture WebExtension
-POSTs to. Two routes:
+POSTs to. Three routes:
 
   POST /v1/link-event         -- {source_url, source_title, target_url,
                                    anchor_text, ts, trigger} -- every link
@@ -18,6 +18,10 @@ POSTs to. Two routes:
                                    target_title, anchor_text, note, ts}.
                                    Delegates to `sinnix-reading-stack push`,
                                    which owns bounded working state.
+
+  POST /v1/agent-action -- {page_url, page_title, selection_text,
+                            instruction, ts}. Writes the explicit selection
+                            and instruction to the browser-agent-actions lane.
 
 Binds the configured loopback port only (never 0.0.0.0) -- this is a same-machine
 extension<->daemon channel, not a network service. Port chosen to sit next
@@ -74,6 +78,10 @@ def reading_stack_push(payload: dict) -> None:
     subprocess.run(command, check=True, capture_output=True)
 
 
+def agent_action(payload: dict) -> None:
+    sinnix_capture_write("browser-agent-actions", payload)
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args) -> None:  # quiet by default
         pass
@@ -104,6 +112,8 @@ class Handler(BaseHTTPRequestHandler):
                 sinnix_capture_write("browser-nav-edges", payload)
             elif self.path == "/v1/reading-stack/push":
                 reading_stack_push(payload)
+            elif self.path == "/v1/agent-action":
+                agent_action(payload)
             else:
                 self._respond(404)
                 return
