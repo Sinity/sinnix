@@ -26,7 +26,10 @@ in
         dotsRoot = inputs.self + "/dots";
       };
       claudeHooks = ../../dots/claude/managed-settings.json;
-      polylogueHook = inputs.polylogue.packages.${system}.default;
+      polylogueHook = import ../polylogue-package.nix {
+        inherit inputs pkgs;
+        package = inputs.polylogue.packages.${system}.default;
+      };
       testLib = import ../test-lib.nix { inherit inputs lib; };
       inherit (testLib)
         evalTestSpec
