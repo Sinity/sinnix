@@ -39,8 +39,19 @@ AGENT_GROUP = "agent"
 AGENT_SLICE = "sinnixd-pueue-agent.slice"
 GH_TIMEOUT_SECONDS = 60
 PUSH_TIMEOUT_SECONDS = 2_400  # the push runs the repository's pre-push gate
+PR_POLL_INTERVAL_SECONDS = 0.25
+CODEX_REVIEW_TIMEOUT_SECONDS = 15 * 60
+MAX_CODEX_REVIEW_ROUNDS = 2
+CODEX_BOT_LOGINS = {
+    "chatgpt-codex-connector",
+    "chatgpt-codex-connector[bot]",
+}
 _PUBLICATION_MARKER = re.compile(
     r"<!-- sinnixd:lane-publication (?P<payload>\{.*?\}) -->"
+)
+_CODEX_REVIEWED_COMMIT = re.compile(
+    r"(?:\*\*\s*)?Reviewed commit:\s*`(?P<commit>[0-9a-fA-F]+)`",
+    re.IGNORECASE,
 )
 
 
@@ -326,7 +337,7 @@ def _open_pr(worktree: Path, branch: str) -> Mapping[str, Any] | None:
                 "view",
                 branch,
                 "--json",
-                "number,url,state,autoMergeRequest,reviewDecision,statusCheckRollup,isDraft",
+                "number,url,state,autoMergeRequest,reviewDecision,statusCheckRollup,isDraft,headRefOid,reviews,comments,reactionGroups",
             ],
             cwd=worktree,
         )
@@ -346,7 +357,200 @@ def _wait_for_pr(worktree: Path, branch: str) -> Mapping[str, Any]:
             return pull
         if time.monotonic() >= deadline:
             raise LaneError("gh pr create returned but the PR is not visible")
-        time.sleep(0.25)
+        time.sleep(PR_POLL_INTERVAL_SECONDS)
+
+
+def _check_rollup(pull: Mapping[str, Any]) -> str:
+    """Classify GitHub's check rollup before auto-merge is requested."""
+    rollup = pull.get("statusCheckRollup")
+    if not isinstance(rollup, list) or not rollup:
+        return "ready"
+    pending = False
+    for check in rollup:
+        if not isinstance(check, Mapping):
+            pending = True
+            continue
+        conclusion = str(check.get("conclusion") or "").upper()
+        state = str(check.get("state") or "").upper()
+        status = str(check.get("status") or "").upper()
+        if conclusion in {
+            "FAILURE",
+            "ERROR",
+            "CANCELLED",
+            "TIMED_OUT",
+            "ACTION_REQUIRED",
+        } or state in {"FAILURE", "ERROR"}:
+            return "failed"
+        if conclusion in {"SUCCESS", "NEUTRAL", "SKIPPED"} or state == "SUCCESS":
+            continue
+        if status == "COMPLETED" and conclusion:
+            return "failed"
+        pending = True
+    return "pending" if pending else "ready"
+
+
+def _is_codex_author(value: Any) -> bool:
+    return isinstance(value, Mapping) and value.get("login") in CODEX_BOT_LOGINS
+
+
+def _commit_matches(reference: Any, head: str) -> bool:
+    return (
+        isinstance(reference, str)
+        and bool(reference)
+        and bool(head)
+        and head.lower().startswith(reference.lower())
+    )
+
+
+def _reviewed_commit(body: Any) -> str | None:
+    if not isinstance(body, str):
+        return None
+    match = _CODEX_REVIEWED_COMMIT.search(body)
+    return match.group("commit") if match else None
+
+
+def _codex_reviews(pull: Mapping[str, Any], head: str) -> list[Mapping[str, Any]]:
+    reviews = pull.get("reviews")
+    if not isinstance(reviews, list):
+        return []
+    exact: list[Mapping[str, Any]] = []
+    for review in reviews:
+        if not isinstance(review, Mapping) or not _is_codex_author(
+            review.get("author")
+        ):
+            continue
+        commit = review.get("commit")
+        commit_oid = commit.get("oid") if isinstance(commit, Mapping) else None
+        commit_oid = commit_oid or review.get("commitOid")
+        if _commit_matches(commit_oid, head):
+            exact.append(review)
+    return exact
+
+
+def _codex_comments(pull: Mapping[str, Any], head: str) -> list[Mapping[str, Any]]:
+    comments = pull.get("comments")
+    if not isinstance(comments, list):
+        return []
+    exact: list[Mapping[str, Any]] = []
+    for comment in comments:
+        if not isinstance(comment, Mapping) or not _is_codex_author(
+            comment.get("author")
+        ):
+            continue
+        if _commit_matches(_reviewed_commit(comment.get("body")), head):
+            exact.append(comment)
+    return exact
+
+
+def _has_codex_thumbsup(pull: Mapping[str, Any]) -> bool:
+    reactions = pull.get("reactionGroups")
+    if not isinstance(reactions, list):
+        return False
+    for reaction in reactions:
+        if not isinstance(reaction, Mapping):
+            continue
+        users = reaction.get("users")
+        if (
+            reaction.get("content") == "THUMBS_UP"
+            and isinstance(users, Mapping)
+            and int(users.get("totalCount") or 0) > 0
+        ):
+            return True
+    return False
+
+
+def _codex_review_gate(pull: Mapping[str, Any], head: str) -> dict[str, Any]:
+    """Classify only hosted Codex evidence bound to the current PR head."""
+    reviews = _codex_reviews(pull, head)
+    comments = _codex_comments(pull, head)
+    exact_review = reviews[-1] if reviews else None
+    exact_comments = [str(comment.get("body") or "") for comment in comments]
+    clean_comment = any(
+        "didn't find any major issues" in body.lower() for body in exact_comments
+    )
+    state = str(exact_review.get("state") or "").upper() if exact_review else ""
+    if state in {"CHANGES_REQUESTED", "COMMENTED"}:
+        clean = clean_comment or (
+            exact_review is not None and _has_codex_thumbsup(pull)
+        )
+        if not clean:
+            return {
+                "status": "findings",
+                "round": len(reviews),
+                "evidence": "exact-head Codex review has findings",
+            }
+    if (
+        state == "APPROVED"
+        or clean_comment
+        or (exact_review is not None and _has_codex_thumbsup(pull))
+    ):
+        return {
+            "status": "clean",
+            "round": len(reviews),
+            "evidence": "exact-head Codex review is clean",
+        }
+    if state in {"PENDING", "REVIEW_REQUESTED"}:
+        return {
+            "status": "pending",
+            "round": len(reviews),
+            "evidence": "hosted Codex review is still running",
+        }
+    return {
+        "status": "pending",
+        "round": len(reviews),
+        "evidence": "no exact-head hosted Codex review",
+    }
+
+
+def _wait_for_merge_ready(
+    worktree: Path, branch: str, head: str
+) -> tuple[Mapping[str, Any], dict[str, Any]]:
+    """Wait until checks and an exact-head Codex verdict permit auto-merge."""
+    deadline = time.monotonic() + CODEX_REVIEW_TIMEOUT_SECONDS
+    requested = False
+    pull: Mapping[str, Any] | None = None
+    while True:
+        pull = _open_pr(worktree, branch)
+        if pull is not None:
+            checks = _check_rollup(pull)
+            if checks == "failed":
+                raise LaneError("published PR has failing required checks")
+            if pull.get("headRefOid") != head:
+                review = {
+                    "status": "pending",
+                    "round": 0,
+                    "evidence": "PR head does not match the published head",
+                }
+            else:
+                review = _codex_review_gate(pull, head)
+            if checks == "ready" and review["status"] == "clean":
+                return pull, review
+            if review["status"] == "findings":
+                return pull, review
+            if (
+                not requested
+                and review["status"] == "pending"
+                and pull.get("headRefOid") == head
+            ):
+                _run(
+                    [
+                        "gh",
+                        "pr",
+                        "comment",
+                        str(pull["number"]),
+                        "--body",
+                        "@codex review",
+                    ],
+                    cwd=worktree,
+                )
+                requested = True
+        if time.monotonic() >= deadline:
+            return pull or {}, {
+                "status": "timeout",
+                "round": 0,
+                "evidence": "hosted Codex review did not settle before the poll deadline",
+            }
+        time.sleep(PR_POLL_INTERVAL_SECONDS)
 
 
 def _verify_for_publish(
@@ -447,8 +651,10 @@ def lane_publish(
     base_branch = base.split("/", 1)[1] if base.startswith("origin/") else base
 
     remote_head = _remote_head(worktree, branch)
-    verification = _verify_for_publish(config, project, worktree)
     head = _git(worktree, "rev-parse", "HEAD")
+    verification = _verify_for_publish(config, project, worktree)
+    if _git(worktree, "rev-parse", "HEAD") != head:
+        raise LaneError("worktree head changed during publication verification")
     if bead_id is not None:
         marker = json.dumps(
             {"bead": bead_id, "branch": branch, "head": head},
@@ -490,7 +696,44 @@ def lane_publish(
         raise LaneError("gh pr view published no PR number")
     auto_merge = bool(pull.get("autoMergeRequest"))
     next_action = "wait for merge"
+    review: dict[str, Any] | None = None
     if not auto_merge:
+        pull, review = _wait_for_merge_ready(worktree, branch, head)
+        if review["status"] == "findings":
+            round_number = int(review.get("round") or 1)
+            if round_number >= MAX_CODEX_REVIEW_ROUNDS:
+                next_action = (
+                    "resolve Codex findings before another publication "
+                    f"(review round {round_number}/{MAX_CODEX_REVIEW_ROUNDS} exhausted)"
+                )
+            else:
+                next_action = (
+                    f"fix Codex findings in the lane and push "
+                    f"(review round {round_number}/{MAX_CODEX_REVIEW_ROUNDS})"
+                )
+        elif review["status"] == "timeout":
+            next_action = (
+                f"wait for hosted Codex review for {head[:12]}, then rerun lane publish"
+            )
+        elif review["status"] != "clean":
+            next_action = f"wait for hosted Codex review for {head[:12]}"
+        if review["status"] != "clean":
+            return {
+                "branch": branch,
+                "bead": bead_id,
+                "subject": subject,
+                "pr": number,
+                "url": pull.get("url"),
+                "created": created,
+                "auto_merge": False,
+                "next_action": next_action,
+                "review": {
+                    **review,
+                    "head": head,
+                    "max_rounds": MAX_CODEX_REVIEW_ROUNDS,
+                },
+                "verification": verification,
+            }
         try:
             _run(["gh", "pr", "merge", str(number), "--auto", "--squash"], cwd=worktree)
         except LaneError as error:
@@ -508,6 +751,11 @@ def lane_publish(
         "created": created,
         "auto_merge": auto_merge,
         "next_action": next_action,
+        "review": (
+            {**review, "head": head, "max_rounds": MAX_CODEX_REVIEW_ROUNDS}
+            if review is not None
+            else {"status": "already_armed", "head": head}
+        ),
         "verification": verification,
     }
 
@@ -561,7 +809,8 @@ def pull_requests(
             str(limit),
             "--json",
             "number,url,title,headRefName,state,isDraft,mergeable,reviewDecision,"
-            "headRefOid,mergeCommit,body,autoMergeRequest,statusCheckRollup,updatedAt",
+            "headRefOid,mergeCommit,body,autoMergeRequest,statusCheckRollup,"
+            "reviews,comments,reactionGroups,updatedAt",
         ],
         cwd=root,
     )
