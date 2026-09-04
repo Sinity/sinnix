@@ -23,7 +23,7 @@ command, and one operator screen.
 | `job start <p> <op> [--workspace <path>] [--wait] [-- args…]` | `pueue add` in the operation's pool, label `<p>:<op>`, running `sinnixd-queue-run <launch.json>`; extra arguments are appended to the declared `exec`                                                  |
 | `job fire <p> <op>`                                           | what a schedule timer runs: `job start` on the main checkout, skipped while the same label is queued or running                                                                                        |
 | `job list [--project p] [--active]`                           | `pueue status --json` reduced to job rows                                                                                                                                                              |
-| `job get \| logs \| result \| cancel \| retry \| wait <id>`   | one task by pueue id; `logs` reads the bounded log, `result` the typed artifact, `cancel` kills the task and its process group, `retry` is `pueue restart --in-place`                                  |
+| `job get \| logs \| result \| cancel \| retry \| wait <id>`   | one task by pueue id; `logs` reads the bounded log, `result` the typed artifact, `cancel` kills the task and reaps its scope's whole cgroup, `retry` is `pueue restart --in-place`                     |
 | `lane start <p> <bead> [--backend --model --effort]`          | compile the prompt, `wt switch --create feature/packet/<bead>`, queue the agent in group `agent` (label `<p>:lane:<bead>`)                                                                             |
 | `lane publish [<worktree>] [--bead --title --body-file]`      | push, create or reuse the PR, wait for checks and an exact-head hosted Codex verdict, then run `gh pr merge --auto --squash`; pending reviews and findings remain actionable; refuses a dirty worktree |
 | `lane rebase <p> <bead>`                                      | queue an agent with the rebase prompt into the bead's existing worktree (label `<p>:rebase:<bead>`)                                                                                                    |
@@ -50,15 +50,15 @@ directory, the timeout, the result kind and the artifact paths, then runs
 `pueue add --escape -g <pool> -l <label> -- sinnixd-queue-run <input>`.
 
 `sinnixd-queue-run` is the command every task runs. It appends a `started`
-event to the spool, starts new launches in the pool's transient systemd scope,
+event to the spool, starts the workload in the task's transient systemd scope,
 runs the argv with the launch environment in its own session, enforces the
 declared timeout (exit 124), refuses a vanished working directory (exit 125),
 writes the combined log to `jobs/<ref>.log` and — for
 `json`/`pytest` results — stdout alone to `jobs/<ref>.result`, both bounded at
 64,000 bytes with an overflow marker. pueue's completion callback (declared by
-the CLI feature) appends the finish event. `job logs` and `job result` find
-the artifacts by the launch reference in the task's own command line; there
-is no job ledger. The launch input stays so `pueue restart` re-runs the same
+the CLI feature) appends the finish event. `job logs` and `job result` read the
+paths the launch input named at the launch input path in the task's own command
+line; there is no job ledger. The launch input stays so `pueue restart` re-runs the same
 command.
 
 `pueue add` publishes the adding client's environment into world-readable
@@ -67,10 +67,18 @@ state, so every add goes through the adapter's scrubbed environment (`HOME`,
 real one. Add tasks by hand with `sinnix-pueue-add`, which scrubs the same
 way.
 
-Groups admit work, and every new task's wrapper enters a transient
-`sinnixd-pueue-<pool>-<job>.scope` in the corresponding declarative
-`sinnixd-pueue-<pool>.slice`: `agent:6 pytest:1 bulk:1 normal:5
-interactive:4`. The pytest and bulk slices have fixed memory, swap, CPU, and
+Groups admit work, and every task's workload enters a transient
+`sinnixd-pueue-<group>-<launch input stem>.scope` in the corresponding
+declarative `sinnixd-pueue-<group>.slice`: `agent:6 pytest:1 bulk:1 normal:5
+interactive:4`. Both halves of that name come from `pueue status`, so `job
+cancel` stops the cgroup — the one boundary a descendant cannot leave — after
+pueue has SIGKILLed the wrapper that would otherwise have to clean up. The
+group comes from `PUEUE_GROUP`, so a repository that queues
+`sinnixd-queue-run` with its own launch input is contained and reaped
+identically; launch input basenames must be unique among live tasks.
+`scope_properties` in a launch input are `systemd-run -p` settings on that
+scope, and a launch must not start a scope of its own: it would land outside
+the task's cgroup, where a cancel cannot reach it. The pytest and bulk slices have fixed memory, swap, CPU, and
 IO budgets; they do not choose capacity from instantaneous free RAM.
 `sinnixd-backpressure.timer` pauses one group per minute while the host's
 `full` IO or memory stall stays above threshold and resumes in reverse order
@@ -90,16 +98,15 @@ contract appended verbatim. It creates
 `.lane/prompt.md` (0600), and queues in group `agent`:
 
 ```text
-<environment.command> sinnixd-queue-run <agent-launch.json>
-systemd-run --user --scope --slice=sinnixd-pueue-agent.slice \
-  --unit=sinnixd-pueue-agent-<job>.scope -- run_agent_prompt.sh --agent B --workdir W \
+sinnixd-queue-run <agent-launch.json>
+<environment.command> run_agent_prompt.sh --agent B --workdir W \
   --prompt-file W/.lane/prompt.md --last-file W/.lane/prompt.result.md \
   --model M --reasoning-effort E
 ```
 
-The queue runner selects the pool slice for every new task, while the agent
-scope keeps the descriptor's `workspace.agent_memory_max` (default 4G) as
-the hard ceiling for one lane. The adapter (`agentRunner`) turns the prompt
+The lane's launch input carries `MemoryMax=<workspace.agent_memory_max>`
+(default 4G) as a property of that task's own scope, so the hard ceiling and
+the cancellation boundary are the same unit. The adapter (`agentRunner`) turns the prompt
 into one backend invocation. Provisioning the worktree (dependencies, the
 testmon seed copied from the primary checkout) is the project's `wt.toml`
 hooks' job. The environment carries `BEADS_ACTOR=agent-<bead>` so an agent's

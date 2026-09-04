@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 from pathlib import Path
+from typing import Callable
 
 import pytest
 from conftest import FakePueue, read_launch
@@ -12,7 +15,11 @@ from sinnixd.config import Config
 from sinnixd.launch import JobError
 from sinnixd.projects import load_project_adapter
 from sinnixd.pueue import PueueGroupError
-from sinnixd.queue_run import REFUSED_EXIT_CODE, TIMEOUT_EXIT_CODE
+from sinnixd.queue_run import (
+    REFUSED_EXIT_CODE,
+    TIMEOUT_EXIT_CODE,
+    process_group_members,
+)
 
 
 def test_start_writes_the_launch_input_and_queues_the_wrapper_in_the_pool(
@@ -34,7 +41,9 @@ def test_start_writes_the_launch_input_and_queues_the_wrapper_in_the_pool(
     assert written["argv"] == ["env", "fixture-verify"]
     assert written["timeout_seconds"] == 120
     assert written["pool"] == "pytest"
-    assert written["scope_unit"].startswith("sinnixd-pueue-pytest-")
+    assert launch.scope_unit(fake_pueue.task(1)) == (
+        f"sinnixd-pueue-pytest-{input_path.stem}.scope"
+    )
     assert written["result_kind"] == "json"
     assert written["result_path"].endswith(".result")
     assert written["event_spool_path"] == str(config.event_spool)
@@ -255,29 +264,111 @@ def test_result_of_an_exit_operation_is_the_status_alone(
     assert outcome["exit_code"] == 0
 
 
-def test_cancel_kills_the_task_and_signals_the_recorded_process_group(
+def test_cancel_stops_the_task_scope_and_kills_the_recorded_process_group(
     fake_pueue: FakePueue,
     config: Config,
     project_root: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    recording_systemctl: Callable[[], list[list[str]]],
 ) -> None:
-    """pueue's SIGKILL cannot be caught; the wrapper's recorded group is what gets reaped."""
+    """pueue's SIGKILL cannot be caught, so cancel reaps from outside.
+
+    Anti-vacuity: the process group here really is running, and the assertion is
+    that it is gone afterwards, not that a signal was requested.
+    """
     project = load_project_adapter(project_root)
     started = launch.start_operation(config, project, project.operation("check"))
     written = read_launch(config, fake_pueue.task(started["job_id"]))
     group_path = Path(written["log_path"] + ".pgid")
     group_path.parent.mkdir(parents=True, exist_ok=True)
-    group_path.write_text("424242")
-    signalled: list[tuple[int, int]] = []
-    monkeypatch.setattr(
-        launch.os, "killpg", lambda pgid, sig: signalled.append((pgid, sig))
+    survivor = subprocess.Popen(
+        ["sh", "-c", "sleep 60 & sleep 60"], start_new_session=True
     )
+    group_path.write_text(str(survivor.pid))
 
     cancelled = launch.cancel(config, started["job_id"])
 
+    unit = launch.scope_unit(fake_pueue.task(started["job_id"]))
     assert fake_pueue.killed == [started["job_id"]]
-    assert signalled == [(424242, launch.signal.SIGTERM)]
+    assert ["systemctl", "--user", "stop", unit] in recording_systemctl()
+    assert cancelled["reaped"]["process_group"] == {
+        "pgid": survivor.pid,
+        "reaped": True,
+    }
+    assert survivor.wait(timeout=5) < 0, "the group leader exited on its own"
+    assert process_group_members(survivor.pid) == []
     assert cancelled["phase"] == "cancelled"
+
+
+def test_cancel_reaps_a_queued_task_whose_launch_input_agentctl_did_not_write(
+    fake_pueue: FakePueue,
+    config: Config,
+    tmp_path: Path,
+    recording_systemctl: Callable[[], list[list[str]]],
+) -> None:
+    """A repository may queue the wrapper with its own launch input.
+
+    Anti-vacuity: such an input sits in that checkout, not under the state
+    directory, and a reap that looks only there reaches nothing at all.
+    """
+    foreign = tmp_path / "checkout" / ".cache" / "verify" / "pytest-slot-42.json"
+    foreign.parent.mkdir(parents=True)
+    log_path = foreign.parent / "pytest-slot-42.log"
+    foreign.write_text(json.dumps({"log_path": str(log_path)}))
+    survivor = subprocess.Popen(
+        ["sh", "-c", "sleep 60 & sleep 60"], start_new_session=True
+    )
+    Path(f"{log_path}.pgid").write_text(str(survivor.pid))
+    task_id = fake_pueue.add(
+        group="pytest",
+        label="polylogue:test:42",
+        command=("/run/current-system/sw/bin/sinnixd-queue-run", str(foreign)),
+        working_directory=tmp_path,
+    )
+
+    cancelled = launch.cancel(config, task_id)
+
+    assert [
+        "systemctl",
+        "--user",
+        "stop",
+        "sinnixd-pueue-pytest-pytest-slot-42.scope",
+    ] in recording_systemctl()
+    assert cancelled["reaped"]["process_group"]["reaped"] is True
+    assert survivor.wait(timeout=5) < 0, "the group leader exited on its own"
+    assert process_group_members(survivor.pid) == []
+
+
+def test_a_stopped_scope_ends_the_reap_before_the_recorded_group(
+    fake_pueue: FakePueue,
+    config: Config,
+    project_root: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The cgroup was the containment, so its record is the whole answer.
+
+    Anti-vacuity: a `.pgid` file outlives the task that wrote it, so signalling
+    it after the scope is gone reaches whatever now holds that number.
+    """
+    directory = tmp_path / "stopping-systemctl"
+    directory.mkdir()
+    (directory / "systemctl").write_text("#!/bin/sh\nexit 0\n")
+    (directory / "systemctl").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{directory}{os.pathsep}{os.environ['PATH']}")
+    project = load_project_adapter(project_root)
+    started = launch.start_operation(config, project, project.operation("check"))
+    written = read_launch(config, fake_pueue.task(started["job_id"]))
+    group_path = Path(written["log_path"] + ".pgid")
+    group_path.parent.mkdir(parents=True, exist_ok=True)
+    bystander = subprocess.Popen(["sleep", "30"], start_new_session=True)
+    group_path.write_text(str(bystander.pid))
+
+    cancelled = launch.cancel(config, started["job_id"])
+
+    assert "process_group" not in cancelled["reaped"]
+    assert bystander.poll() is None, "the reap signalled a group it did not own"
+    bystander.kill()
+    bystander.wait(timeout=5)
 
 
 def test_retry_is_pueue_restart_and_only_for_terminal_tasks(

@@ -19,7 +19,8 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from sinnixd import pueue
+from sinnixd import launch, pueue
+from sinnixd.config import Config
 from sinnixd.queue_run import scope_unit_for
 
 # Recorded from `pueue status --json` on pueue 4.0.4 after one failing task.
@@ -389,7 +390,7 @@ def test_a_private_pueue_task_places_its_child_in_the_declared_pool_scope(
 
     assert finished.succeeded, pueue.log(task_id)
     cgroup = log_path.read_text()
-    assert f"/{scope_unit_for(job_id, 'pytest')}" in cgroup
+    assert f"/{scope_unit_for(launch_path.stem, 'pytest')}" in cgroup
     assert "/sinnixd-pueue-pytest.slice/" in cgroup
 
 
@@ -452,4 +453,112 @@ def test_kill_is_not_catchable_so_a_wrapper_cannot_clean_up(
 
     assert not caught.exists(), (
         "pueue delivered a catchable signal; the wrapper could clean up itself"
+    )
+
+
+def test_cancelling_a_task_reaps_every_descendant_it_started(
+    live_pueue: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Cancel by task id ends the whole tree, and only it.
+
+    Anti-vacuity: the grandchild leaves both the session and the process group,
+    so a reap that signals the recorded group alone leaves it running. Only the
+    cgroup still holds it.
+    """
+    if not Path(f"/run/user/{os.getuid()}/bus").exists():
+        pytest.skip("no user systemd bus is available")
+    monkeypatch.setenv(
+        "DBUS_SESSION_BUS_ADDRESS", f"unix:path=/run/user/{os.getuid()}/bus"
+    )
+    subprocess.run(["pueue", "group", "add", "pytest"], check=True)
+    subprocess.run(["pueue", "parallel", "-g", "pytest", "1"], check=True)
+
+    pids = tmp_path / "pids"
+    scripts = {}
+    for name, body in {
+        "leader": '"$CHILD" &\nexec sleep 300\n',
+        "child": 'setsid "$GRANDCHILD" &\nexec sleep 300\n',
+        "grandchild": "exec sleep 300\n",
+    }.items():
+        script = tmp_path / f"{name}.sh"
+        script.write_text(f'#!/bin/sh\necho "$$" >> "$PIDS"\n{body}')
+        script.chmod(0o755)
+        scripts[name] = script
+    # The command must be a `sinnixd-queue-run` path: that is what identifies a
+    # queued task's launch input, and through it the scope holding its workload.
+    wrapper = tmp_path / "sinnixd-queue-run"
+    wrapper.write_text(f'#!/bin/sh\nexec {sys.executable} -m sinnixd.queue_run "$@"\n')
+    wrapper.chmod(0o755)
+    launch_path = tmp_path / "reaped-job.json"
+    launch_path.write_text(
+        json.dumps(
+            {
+                "job_id": "reaped-job",
+                "project_id": "fixture",
+                "operation": "verify",
+                "argv": [str(scripts["leader"])],
+                "environment": {
+                    "HOME": os.environ["HOME"],
+                    "PATH": os.environ["PATH"],
+                    "XDG_RUNTIME_DIR": f"/run/user/{os.getuid()}",
+                    "PYTHONPATH": str(Path(__file__).parent),
+                    "PIDS": str(pids),
+                    "CHILD": str(scripts["child"]),
+                    "GRANDCHILD": str(scripts["grandchild"]),
+                },
+                "working_directory": str(tmp_path),
+                "timeout_seconds": 300,
+                "result_kind": "exit",
+                "label": "fixture:verify:reaped",
+                "log_path": str(tmp_path / "reaped-job.log"),
+            }
+        )
+    )
+    config = Config(
+        project_roots=(),
+        agent_runner=tmp_path / "absent",
+        event_spool=tmp_path / "events.jsonl",
+        state_dir=tmp_path / "state",
+        agentctl_executable="/fixture/agentctl",
+    )
+    task_id = pueue.add(
+        group="pytest",
+        label="fixture:verify:reaped",
+        command=(
+            "env",
+            f"PYTHONPATH={Path(__file__).parent}",
+            str(wrapper),
+            str(launch_path),
+        ),
+        working_directory=tmp_path,
+    )
+    unrelated = pueue.add(
+        group="default",
+        label="fixture:unrelated:job",
+        command=("sh", "-c", "sleep 4; exit 0"),
+        working_directory=tmp_path,
+    )
+    deadline = time.monotonic() + 60
+    while len(started := pids.read_text().split() if pids.exists() else []) < 3:
+        assert time.monotonic() < deadline, (
+            f"the workload never started: {(tmp_path / 'reaped-job.log').read_text()}"
+        )
+        time.sleep(0.1)
+    descendants = [int(pid) for pid in started]
+    unit = scope_unit_for(launch_path.stem, "pytest")
+    for pid in descendants:
+        assert unit in Path(f"/proc/{pid}/cgroup").read_text(), (
+            "a descendant outside the task's scope is one a cancel cannot reach"
+        )
+
+    cancelled = launch.cancel(config, task_id)
+
+    assert cancelled["reaped"]["scope"]["unit"] == unit
+    assert cancelled["reaped"]["scope"]["survivors"] == []
+    assert pueue.wait(task_id, timeout_seconds=60).result == "Killed"
+    for pid in descendants:
+        with pytest.raises(ProcessLookupError):
+            os.kill(pid, 0)
+    assert pueue.wait(unrelated, timeout_seconds=60).succeeded, (
+        "cancelling one task must not disturb another"
     )

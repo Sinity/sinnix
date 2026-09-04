@@ -33,10 +33,9 @@ from .worktrunk import Worktree, WorktrunkError
 
 LANE_OPERATION = "lane"
 REBASE_OPERATION = "rebase"
+# The agent pool. Its slice is the job plane, where pueued's own tasks live, so
+# an agent's memory counts against the plane's budget and not the desktop's.
 AGENT_GROUP = "agent"
-# The scope's slice: the job plane, where pueued's own tasks live, so an
-# agent's memory counts against the plane's budget and not the desktop's.
-AGENT_SLICE = "sinnixd-pueue-agent.slice"
 GH_TIMEOUT_SECONDS = 60
 PUSH_TIMEOUT_SECONDS = 2_400  # the push runs the repository's pre-push gate
 PR_POLL_INTERVAL_SECONDS = 0.25
@@ -130,8 +129,12 @@ def _agent_argv(
     backend: str,
     model: str,
     effort: str,
-    memory_max: str,
 ) -> tuple[str, ...]:
+    """The agent's command. Its containment is the queued task's own scope.
+
+    A scope started here would move the agent into a second cgroup outside the
+    task's, where cancelling the task cannot reach it.
+    """
     if not config.agent_runner.is_file() or not os.access(config.agent_runner, os.X_OK):
         raise LaneError(f"agent runner is unavailable: {config.agent_runner}")
     runner = (
@@ -149,18 +152,7 @@ def _agent_argv(
         "--reasoning-effort",
         effort,
     )
-    scope = (
-        "systemd-run",
-        "--user",
-        "--scope",
-        "--quiet",
-        f"--slice={AGENT_SLICE}",
-        "-p",
-        f"MemoryMax={memory_max}",
-        "--",
-        *runner,
-    )
-    return project.environment.command_for(scope)
+    return project.environment.command_for(runner)
 
 
 def queue_agent(
@@ -203,13 +195,13 @@ def queue_agent(
             backend=backend,
             model=model,
             effort=effort,
-            memory_max=project.workspace.agent_memory_max,
         ),
         working_directory=worktree,
         timeout_seconds=timeout_seconds,
         result_kind="last-message",
         environment=environment,
         kind="attested-agent",
+        scope_properties=(f"MemoryMax={project.workspace.agent_memory_max}",),
     )
 
 

@@ -153,10 +153,13 @@ def test_lane_start_creates_the_worktree_and_queues_a_bounded_agent_scope(
     assert added["label"] == "fixture:lane:fx-1"
     written = read_launch(config, fake_pueue.task(started["job"]["job_id"]))
     argv = written["argv"]
-    assert argv[:3] == ["env", "systemd-run", "--user"]
-    assert "--scope" in argv
-    assert f"--slice={lanes.AGENT_SLICE}" in argv
-    assert "MemoryMax=10G" in argv
+    assert argv[:2] == ["env", str(config.agent_runner)]
+    assert "systemd-run" not in argv, (
+        "a scope started by the agent's own command lives outside the task's, "
+        "where cancelling the task cannot reach it"
+    )
+    assert written["scope_properties"] == ["MemoryMax=10G"]
+    assert written["pool"] == lanes.AGENT_GROUP
     runner_index = argv.index(str(config.agent_runner))
     runner_args = argv[runner_index + 1 :]
     assert runner_args[runner_args.index("--agent") + 1] == "codex"
@@ -454,7 +457,6 @@ def test_lane_publish_pushes_opens_the_pr_under_the_bead_subject_and_arms_auto_m
     assert events == ["push"]
     launch_input = read_launch(config, fake_pueue.task(1))
     assert launch_input["pool"] == "pytest"
-    assert launch_input["scope_unit"].startswith("sinnixd-pueue-pytest-")
     assert published["verification"]["job_id"] == 1
     assert published["verification"]["phase"] == "succeeded"
     create = next(
