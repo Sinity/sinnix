@@ -94,6 +94,7 @@ def fake_commands(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
                 "headRefName": head,
                 "autoMergeRequest": None,
                 "title": argv[argv.index("--title") + 1],
+                "body": argv[argv.index("--body") + 1],
             }
             return ""
         if argv[:3] == ["gh", "pr", "merge"]:
@@ -268,6 +269,8 @@ def _git_worktree(
         if arguments[0] == "symbolic-ref":
             return branch
         if arguments[0] == "rev-parse":
+            if arguments[1:] == ("HEAD",):
+                return "abc123"
             return str(project_root / ".git")
         if arguments[0] == "ls-remote":
             return f"{remote_head}\trefs/heads/{branch}\n" if remote_head else ""
@@ -440,6 +443,11 @@ def test_lane_publish_pushes_opens_the_pr_under_the_bead_subject_and_arms_auto_m
     assert create[create.index("--title") + 1] == "fix: First task"
     assert create[create.index("--base") + 1] == "master"
     assert create[create.index("--head") + 1] == "feature/packet/fx-1"
+    assert create[create.index("--body") + 1].endswith(
+        '<!-- sinnixd:lane-publication '
+        '{"bead":"fx-1","branch":"feature/packet/fx-1",'
+        '"head":"abc123"} -->\n'
+    )
     assert ["gh", "pr", "merge", "100", "--auto", "--squash"] in fake_commands["calls"]
     assert published["pr"] == 100 and published["created"] is True
     assert published["bead"] == "fx-1"
@@ -669,6 +677,7 @@ def test_lane_sync_closes_and_removes_merged_lanes_and_reports_the_rest(
             "state": "MERGED",
             "headRefName": "feature/packet/fx-2",
             "headRefOid": "abc123",
+            "title": "feat: Second task",
         },
         "feature/packet/fx-3": {
             "number": 3,
@@ -728,6 +737,44 @@ def test_lane_sync_does_not_reuse_a_historical_merged_pr_for_a_new_branch_head(
     assert remaining[0]["reason"] == "merged PR does not match the current branch head"
 
 
+def test_lane_sync_does_not_close_a_bead_for_another_beads_merged_pr(
+    fake_commands: dict[str, Any],
+    fake_wt: dict[str, Any],
+    fake_bd: FakeBd,
+    config: Config,
+    project_root: Path,
+    tmp_path: Path,
+) -> None:
+    """A reused branch can have another bead's exact merged head."""
+    project = load_project_adapter(project_root)
+    fake_wt["trees"] = [
+        tree("feature/packet/fx-1", tmp_path / "a", state="integrated")
+    ]
+    fake_commands["prs"] = {
+        "feature/packet/fx-1": {
+            "number": 4670,
+            "state": "MERGED",
+            "headRefName": "feature/packet/fx-1",
+            "headRefOid": "abc123",
+            "title": "fix: Second task",
+            "body": (
+                '<!-- sinnixd:lane-publication '
+                '{"bead":"fx-2","branch":"feature/packet/fx-1",'
+                '"head":"abc123"} -->'
+            ),
+        }
+    }
+
+    synced = lanes.lane_sync(config, project)
+
+    assert synced["closed"] == []
+    assert synced["removed"] == []
+    assert fake_wt["removed"] == []
+    assert synced["remaining"][0]["reason"] == (
+        "merged PR does not bind the current bead"
+    )
+
+
 def test_lane_sync_removes_a_clean_worktree_for_the_current_merged_pr_head(
     fake_commands: dict[str, Any],
     fake_wt: dict[str, Any],
@@ -744,6 +791,7 @@ def test_lane_sync_removes_a_clean_worktree_for_the_current_merged_pr_head(
             "state": "MERGED",
             "headRefName": "feature/packet/fx-1",
             "headRefOid": "abc123",
+            "title": "fix: First task",
         }
     }
 
