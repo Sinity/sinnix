@@ -21,7 +21,12 @@ from mcp.types import PaginatedRequestParams
 from sinnix_agent_gateway.app import Runtime, create_server
 from sinnix_agent_gateway.artifacts import ArtifactError
 from sinnix_agent_gateway.capabilities import PolicyError
-from sinnix_agent_gateway.cli import build_manifest, parser, verify_approval
+from sinnix_agent_gateway.cli import (
+    build_manifest,
+    parser,
+    semantic_canary,
+    verify_approval,
+)
 from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
 from sinnix_agent_gateway.projects import ProjectError
 from sinnix_agent_gateway.registry import REGISTRY
@@ -1701,9 +1706,20 @@ def test_approval_check_requires_the_current_paired_contract(tmp_path: Path) -> 
         )
 
 
+def test_semantic_canary_exercises_catalog_and_project_list_envelopes(
+    tmp_path: Path,
+) -> None:
+    result = anyio.run(semantic_canary, config(tmp_path), "observer")
+
+    assert result["principal"] == "observer"
+    assert result["catalog_actions"] >= 4
+    assert result["projects"] == 1
+
+
 def test_cli_exposes_catalog_hash_without_retired_profiles() -> None:
     assert parser().parse_args(["catalog-hash"]).command == "catalog-hash"
     assert parser().parse_args(["approval-check"]).command == "approval-check"
+    assert parser().parse_args(["canary"]).command == "canary"
     with pytest.raises(SystemExit):
         parser().parse_args(["--profile", "observer", "info"])
 

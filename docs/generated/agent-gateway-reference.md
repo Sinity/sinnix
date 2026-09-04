@@ -1,99 +1,98 @@
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v2-g3.0-pueue-jobs -->
-<!-- gateway-catalog-sha256: 885e3a2cee22a5488d8cc0dd289312bb9105a7f9679c8a247afeda5dbb919548 -->
-
+<!-- gateway-catalog-sha256: 73967b9d691118482283e66b72ecb11faa84c0a62f2b15c4f0838787f9d5242f -->
 # Sinnix Agent Gateway V2 reference
 
 This reference is generated from `sinnix_agent_gateway.registry.REGISTRY`. The catalog hash changes when an action, resource, schema, route, principal, bound, or example changes.
 
-Revision: `v2-g3.0-pueue-jobs`. Catalog SHA-256: `885e3a2cee22a5488d8cc0dd289312bb9105a7f9679c8a247afeda5dbb919548`.
+Revision: `v2-g3.0-pueue-jobs`. Catalog SHA-256: `73967b9d691118482283e66b72ecb11faa84c0a62f2b15c4f0838787f9d5242f`.
 
 ## Ten CLI verbs
 
 Each verb calls the matching MCP tool through the same runtime and principal. Requests accept `--input`, `--input-file`, or `--stdin`; common request controls can be supplied as flags. Mutating requests require the idempotency key declared by their selected action.
 
-| Verb      | CLI subcommand                 | MCP tool  |
-| --------- | ------------------------------ | --------- |
-| `status`  | `sinnix-agent-gateway status`  | `status`  |
+| Verb | CLI subcommand | MCP tool |
+| --- | --- | --- |
+| `status` | `sinnix-agent-gateway status` | `status` |
 | `catalog` | `sinnix-agent-gateway catalog` | `catalog` |
-| `query`   | `sinnix-agent-gateway query`   | `query`   |
-| `get`     | `sinnix-agent-gateway get`     | `get`     |
+| `query` | `sinnix-agent-gateway query` | `query` |
+| `get` | `sinnix-agent-gateway get` | `get` |
 | `context` | `sinnix-agent-gateway context` | `context` |
-| `events`  | `sinnix-agent-gateway events`  | `events`  |
-| `wait`    | `sinnix-agent-gateway wait`    | `wait`    |
-| `change`  | `sinnix-agent-gateway change`  | `change`  |
+| `events` | `sinnix-agent-gateway events` | `events` |
+| `wait` | `sinnix-agent-gateway wait` | `wait` |
+| `change` | `sinnix-agent-gateway change` | `change` |
 | `operate` | `sinnix-agent-gateway operate` | `operate` |
-| `run`     | `sinnix-agent-gateway run`     | `run`     |
+| `run` | `sinnix-agent-gateway run` | `run` |
 
 ## Resources
 
-| Resource            | Owner              | Canonical reference                                      | Query   |
-| ------------------- | ------------------ | -------------------------------------------------------- | ------- |
-| `project`           | `projects`         | `sinnix://projects/{project_id}`                         | `true`  |
-| `checkout`          | `projects`         | `sinnix://projects/{project_id}/checkouts/{checkout_id}` | `true`  |
-| `bead`              | `beads`            | `sinnix://projects/{project_id}/beads/{bead_id}`         | `true`  |
-| `task_authority`    | `beads`            | `sinnix://projects/{project_id}/task-authority`          | `false` |
-| `job`               | `jobs`             | `sinnix://jobs/{job_id}`                                 | `true`  |
-| `artifact`          | `artifacts`        | `sinnix://artifacts/{artifact_id}`                       | `true`  |
-| `receipt`           | `audit`            | `sinnix://receipts/{receipt_id}`                         | `true`  |
-| `result`            | `results`          | `sinnix://results/{result_id}`                           | `true`  |
-| `machine_unit`      | `machine`          | `sinnix://machine/units/{manager}/{unit}`                | `true`  |
-| `browser_page`      | `browser`          | `sinnix://browser/pages/{page_id}`                       | `true`  |
-| `browser_workspace` | `browser`          | `sinnix://browser/agent-workspace`                       | `false` |
-| `process`           | `machine`          | `sinnix://processes/{pid}/{start_ticks}`                 | `true`  |
-| `terminal`          | `terminals`        | `sinnix://terminals/{terminal_id}`                       | `true`  |
-| `desktop`           | `desktop`          | `sinnix://desktop/current`                               | `true`  |
-| `host_file`         | `files`            | `sinnix://files/{file_token}`                            | `true`  |
-| `mcp_tool`          | `mcp-broker`       | `sinnix://mcp/{server}/tools/{tool}`                     | `true`  |
-| `capture_lane`      | `captures`         | `sinnix://captures/{lane}`                               | `true`  |
-| `capability`        | `capability-index` | `sinnix://capabilities/{name}`                           | `true`  |
-| `session`           | `sessions`         | `sinnix://sessions/{provider}/{session_id}`              | `true`  |
-| `context_snapshot`  | `context`          | `sinnix://contexts/{snapshot_id}`                        | `true`  |
+| Resource | Owner | Canonical reference | Query |
+| --- | --- | --- | --- |
+| `project` | `projects` | `sinnix://projects/{project_id}` | `true` |
+| `checkout` | `projects` | `sinnix://projects/{project_id}/checkouts/{checkout_id}` | `true` |
+| `bead` | `beads` | `sinnix://projects/{project_id}/beads/{bead_id}` | `true` |
+| `task_authority` | `beads` | `sinnix://projects/{project_id}/task-authority` | `false` |
+| `job` | `jobs` | `sinnix://jobs/{job_id}` | `true` |
+| `artifact` | `artifacts` | `sinnix://artifacts/{artifact_id}` | `true` |
+| `receipt` | `audit` | `sinnix://receipts/{receipt_id}` | `true` |
+| `result` | `results` | `sinnix://results/{result_id}` | `true` |
+| `machine_unit` | `machine` | `sinnix://machine/units/{manager}/{unit}` | `true` |
+| `browser_page` | `browser` | `sinnix://browser/pages/{page_id}` | `true` |
+| `browser_workspace` | `browser` | `sinnix://browser/agent-workspace` | `false` |
+| `process` | `machine` | `sinnix://processes/{pid}/{start_ticks}` | `true` |
+| `terminal` | `terminals` | `sinnix://terminals/{terminal_id}` | `true` |
+| `desktop` | `desktop` | `sinnix://desktop/current` | `true` |
+| `host_file` | `files` | `sinnix://files/{file_token}` | `true` |
+| `mcp_tool` | `mcp-broker` | `sinnix://mcp/{server}/tools/{tool}` | `true` |
+| `capture_lane` | `captures` | `sinnix://captures/{lane}` | `true` |
+| `capability` | `capability-index` | `sinnix://capabilities/{name}` | `true` |
+| `session` | `sessions` | `sinnix://sessions/{provider}/{session_id}` | `true` |
+| `context_snapshot` | `context` | `sinnix://contexts/{snapshot_id}` | `true` |
 
 ## Actions
 
-| Action               | Verb      | Owner              | Route                     | Schema                                                                                             |
-| -------------------- | --------- | ------------------ | ------------------------- | -------------------------------------------------------------------------------------------------- |
-| `gateway.status`     | `status`  | `gateway`          | `observe.gateway_status`  | [`sinnix://gateway/v2/actions/gateway.status`](sinnix://gateway/v2/actions/gateway.status)         |
-| `gateway.catalog`    | `catalog` | `registry`         | `registry.search`         | [`sinnix://gateway/v2/actions/gateway.catalog`](sinnix://gateway/v2/actions/gateway.catalog)       |
-| `resources.get`      | `get`     | `resolver`         | `resources.get`           | [`sinnix://gateway/v2/actions/resources.get`](sinnix://gateway/v2/actions/resources.get)           |
-| `projects.query`     | `query`   | `projects`         | `projects.search`         | [`sinnix://gateway/v2/actions/projects.query`](sinnix://gateway/v2/actions/projects.query)         |
-| `beads.query`        | `query`   | `beads`            | `beads.query`             | [`sinnix://gateway/v2/actions/beads.query`](sinnix://gateway/v2/actions/beads.query)               |
-| `projects.context`   | `context` | `project-context`  | `project_context.context` | [`sinnix://gateway/v2/actions/projects.context`](sinnix://gateway/v2/actions/projects.context)     |
-| `audit.events`       | `events`  | `audit`            | `audit.tail`              | [`sinnix://gateway/v2/actions/audit.events`](sinnix://gateway/v2/actions/audit.events)             |
-| `jobs.wait`          | `wait`    | `systemd-jobs`     | `job.wait`                | [`sinnix://gateway/v2/actions/jobs.wait`](sinnix://gateway/v2/actions/jobs.wait)                   |
-| `projects.change`    | `change`  | `projects`         | `projects.change`         | [`sinnix://gateway/v2/actions/projects.change`](sinnix://gateway/v2/actions/projects.change)       |
-| `files.change`       | `change`  | `files`            | `files.change`            | [`sinnix://gateway/v2/actions/files.change`](sinnix://gateway/v2/actions/files.change)             |
-| `beads.change`       | `change`  | `beads`            | `beads.write`             | [`sinnix://gateway/v2/actions/beads.change`](sinnix://gateway/v2/actions/beads.change)             |
-| `beads.changeset`    | `change`  | `beads`            | `beads.changeset`         | [`sinnix://gateway/v2/actions/beads.changeset`](sinnix://gateway/v2/actions/beads.changeset)       |
-| `beads.operate`      | `operate` | `beads`            | `beads.maintenance`       | [`sinnix://gateway/v2/actions/beads.operate`](sinnix://gateway/v2/actions/beads.operate)           |
-| `mcp.change`         | `change`  | `mcp-broker`       | `mcp.call.write`          | [`sinnix://gateway/v2/actions/mcp.change`](sinnix://gateway/v2/actions/mcp.change)                 |
-| `machine.operate`    | `operate` | `ops-reducer`      | `ops.actions.execute`     | [`sinnix://gateway/v2/actions/machine.operate`](sinnix://gateway/v2/actions/machine.operate)       |
-| `operations.run`     | `run`     | `systemd-jobs`     | `job.start`               | [`sinnix://gateway/v2/actions/operations.run`](sinnix://gateway/v2/actions/operations.run)         |
-| `agent.for_bead`     | `run`     | `systemd-jobs`     | `job.agent.start`         | [`sinnix://gateway/v2/actions/agent.for_bead`](sinnix://gateway/v2/actions/agent.for_bead)         |
-| `jobs.cancel`        | `operate` | `systemd-jobs`     | `job.cancel`              | [`sinnix://gateway/v2/actions/jobs.cancel`](sinnix://gateway/v2/actions/jobs.cancel)               |
-| `desktop.operate`    | `operate` | `desktop`          | `desktop.action`          | [`sinnix://gateway/v2/actions/desktop.operate`](sinnix://gateway/v2/actions/desktop.operate)       |
-| `terminals.operate`  | `operate` | `terminals`        | `terminals.action`        | [`sinnix://gateway/v2/actions/terminals.operate`](sinnix://gateway/v2/actions/terminals.operate)   |
-| `browser.operate`    | `operate` | `browser`          | `browser.action`          | [`sinnix://gateway/v2/actions/browser.operate`](sinnix://gateway/v2/actions/browser.operate)       |
-| `shell.run`          | `run`     | `systemd-jobs`     | `job.shell.start`         | [`sinnix://gateway/v2/actions/shell.run`](sinnix://gateway/v2/actions/shell.run)                   |
-| `projects.list`      | `query`   | `projects`         | `projects.list`           | [`sinnix://gateway/v2/actions/projects.list`](sinnix://gateway/v2/actions/projects.list)           |
-| `projects.tree`      | `query`   | `projects`         | `projects.tree`           | [`sinnix://gateway/v2/actions/projects.tree`](sinnix://gateway/v2/actions/projects.tree)           |
-| `projects.read`      | `query`   | `projects`         | `projects.read`           | [`sinnix://gateway/v2/actions/projects.read`](sinnix://gateway/v2/actions/projects.read)           |
-| `projects.diff`      | `query`   | `projects`         | `projects.diff`           | [`sinnix://gateway/v2/actions/projects.diff`](sinnix://gateway/v2/actions/projects.diff)           |
-| `machine.query`      | `query`   | `machine`          | `observe.machine_query`   | [`sinnix://gateway/v2/actions/machine.query`](sinnix://gateway/v2/actions/machine.query)           |
-| `capabilities.query` | `query`   | `capability-index` | `capability_index.query`  | [`sinnix://gateway/v2/actions/capabilities.query`](sinnix://gateway/v2/actions/capabilities.query) |
-| `mcp.query`          | `query`   | `mcp-broker`       | `mcp.call.read`           | [`sinnix://gateway/v2/actions/mcp.query`](sinnix://gateway/v2/actions/mcp.query)                   |
-| `desktop.query`      | `query`   | `desktop`          | `desktop.read`            | [`sinnix://gateway/v2/actions/desktop.query`](sinnix://gateway/v2/actions/desktop.query)           |
-| `terminals.query`    | `query`   | `terminals`        | `terminals.read`          | [`sinnix://gateway/v2/actions/terminals.query`](sinnix://gateway/v2/actions/terminals.query)       |
-| `browser.query`      | `query`   | `browser`          | `browser.read`            | [`sinnix://gateway/v2/actions/browser.query`](sinnix://gateway/v2/actions/browser.query)           |
-| `files.query`        | `query`   | `files`            | `files.read`              | [`sinnix://gateway/v2/actions/files.query`](sinnix://gateway/v2/actions/files.query)               |
-| `sessions.query`     | `query`   | `sessions`         | `sessions.query`          | [`sinnix://gateway/v2/actions/sessions.query`](sinnix://gateway/v2/actions/sessions.query)         |
-| `memory.query`       | `query`   | `memory`           | `memory.query`            | [`sinnix://gateway/v2/actions/memory.query`](sinnix://gateway/v2/actions/memory.query)             |
-| `timeline.query`     | `query`   | `timeline`         | `timeline.query`          | [`sinnix://gateway/v2/actions/timeline.query`](sinnix://gateway/v2/actions/timeline.query)         |
-| `artifacts.query`    | `query`   | `artifacts`        | `artifacts.query`         | [`sinnix://gateway/v2/actions/artifacts.query`](sinnix://gateway/v2/actions/artifacts.query)       |
-| `audit.verify`       | `query`   | `audit`            | `audit.verify`            | [`sinnix://gateway/v2/actions/audit.verify`](sinnix://gateway/v2/actions/audit.verify)             |
-| `captures.query`     | `query`   | `captures`         | `captures.query`          | [`sinnix://gateway/v2/actions/captures.query`](sinnix://gateway/v2/actions/captures.query)         |
-| `jobs.query`         | `query`   | `systemd-jobs`     | `job.list`                | [`sinnix://gateway/v2/actions/jobs.query`](sinnix://gateway/v2/actions/jobs.query)                 |
+| Action | Verb | Owner | Route | Schema |
+| --- | --- | --- | --- | --- |
+| `gateway.status` | `status` | `gateway` | `observe.gateway_status` | [`sinnix://gateway/v2/actions/gateway.status`](sinnix://gateway/v2/actions/gateway.status) |
+| `gateway.catalog` | `catalog` | `registry` | `registry.search` | [`sinnix://gateway/v2/actions/gateway.catalog`](sinnix://gateway/v2/actions/gateway.catalog) |
+| `resources.get` | `get` | `resolver` | `resources.get` | [`sinnix://gateway/v2/actions/resources.get`](sinnix://gateway/v2/actions/resources.get) |
+| `projects.query` | `query` | `projects` | `projects.search` | [`sinnix://gateway/v2/actions/projects.query`](sinnix://gateway/v2/actions/projects.query) |
+| `beads.query` | `query` | `beads` | `beads.query` | [`sinnix://gateway/v2/actions/beads.query`](sinnix://gateway/v2/actions/beads.query) |
+| `projects.context` | `context` | `project-context` | `project_context.context` | [`sinnix://gateway/v2/actions/projects.context`](sinnix://gateway/v2/actions/projects.context) |
+| `audit.events` | `events` | `audit` | `audit.tail` | [`sinnix://gateway/v2/actions/audit.events`](sinnix://gateway/v2/actions/audit.events) |
+| `jobs.wait` | `wait` | `systemd-jobs` | `job.wait` | [`sinnix://gateway/v2/actions/jobs.wait`](sinnix://gateway/v2/actions/jobs.wait) |
+| `projects.change` | `change` | `projects` | `projects.change` | [`sinnix://gateway/v2/actions/projects.change`](sinnix://gateway/v2/actions/projects.change) |
+| `files.change` | `change` | `files` | `files.change` | [`sinnix://gateway/v2/actions/files.change`](sinnix://gateway/v2/actions/files.change) |
+| `beads.change` | `change` | `beads` | `beads.write` | [`sinnix://gateway/v2/actions/beads.change`](sinnix://gateway/v2/actions/beads.change) |
+| `beads.changeset` | `change` | `beads` | `beads.changeset` | [`sinnix://gateway/v2/actions/beads.changeset`](sinnix://gateway/v2/actions/beads.changeset) |
+| `beads.operate` | `operate` | `beads` | `beads.maintenance` | [`sinnix://gateway/v2/actions/beads.operate`](sinnix://gateway/v2/actions/beads.operate) |
+| `mcp.change` | `change` | `mcp-broker` | `mcp.call.write` | [`sinnix://gateway/v2/actions/mcp.change`](sinnix://gateway/v2/actions/mcp.change) |
+| `machine.operate` | `operate` | `ops-reducer` | `ops.actions.execute` | [`sinnix://gateway/v2/actions/machine.operate`](sinnix://gateway/v2/actions/machine.operate) |
+| `operations.run` | `run` | `systemd-jobs` | `job.start` | [`sinnix://gateway/v2/actions/operations.run`](sinnix://gateway/v2/actions/operations.run) |
+| `agent.for_bead` | `run` | `systemd-jobs` | `job.agent.start` | [`sinnix://gateway/v2/actions/agent.for_bead`](sinnix://gateway/v2/actions/agent.for_bead) |
+| `jobs.cancel` | `operate` | `systemd-jobs` | `job.cancel` | [`sinnix://gateway/v2/actions/jobs.cancel`](sinnix://gateway/v2/actions/jobs.cancel) |
+| `desktop.operate` | `operate` | `desktop` | `desktop.action` | [`sinnix://gateway/v2/actions/desktop.operate`](sinnix://gateway/v2/actions/desktop.operate) |
+| `terminals.operate` | `operate` | `terminals` | `terminals.action` | [`sinnix://gateway/v2/actions/terminals.operate`](sinnix://gateway/v2/actions/terminals.operate) |
+| `browser.operate` | `operate` | `browser` | `browser.action` | [`sinnix://gateway/v2/actions/browser.operate`](sinnix://gateway/v2/actions/browser.operate) |
+| `shell.run` | `run` | `systemd-jobs` | `job.shell.start` | [`sinnix://gateway/v2/actions/shell.run`](sinnix://gateway/v2/actions/shell.run) |
+| `projects.list` | `query` | `projects` | `projects.list` | [`sinnix://gateway/v2/actions/projects.list`](sinnix://gateway/v2/actions/projects.list) |
+| `projects.tree` | `query` | `projects` | `projects.tree` | [`sinnix://gateway/v2/actions/projects.tree`](sinnix://gateway/v2/actions/projects.tree) |
+| `projects.read` | `query` | `projects` | `projects.read` | [`sinnix://gateway/v2/actions/projects.read`](sinnix://gateway/v2/actions/projects.read) |
+| `projects.diff` | `query` | `projects` | `projects.diff` | [`sinnix://gateway/v2/actions/projects.diff`](sinnix://gateway/v2/actions/projects.diff) |
+| `machine.query` | `query` | `machine` | `observe.machine_query` | [`sinnix://gateway/v2/actions/machine.query`](sinnix://gateway/v2/actions/machine.query) |
+| `capabilities.query` | `query` | `capability-index` | `capability_index.query` | [`sinnix://gateway/v2/actions/capabilities.query`](sinnix://gateway/v2/actions/capabilities.query) |
+| `mcp.query` | `query` | `mcp-broker` | `mcp.call.read` | [`sinnix://gateway/v2/actions/mcp.query`](sinnix://gateway/v2/actions/mcp.query) |
+| `desktop.query` | `query` | `desktop` | `desktop.read` | [`sinnix://gateway/v2/actions/desktop.query`](sinnix://gateway/v2/actions/desktop.query) |
+| `terminals.query` | `query` | `terminals` | `terminals.read` | [`sinnix://gateway/v2/actions/terminals.query`](sinnix://gateway/v2/actions/terminals.query) |
+| `browser.query` | `query` | `browser` | `browser.read` | [`sinnix://gateway/v2/actions/browser.query`](sinnix://gateway/v2/actions/browser.query) |
+| `files.query` | `query` | `files` | `files.read` | [`sinnix://gateway/v2/actions/files.query`](sinnix://gateway/v2/actions/files.query) |
+| `sessions.query` | `query` | `sessions` | `sessions.query` | [`sinnix://gateway/v2/actions/sessions.query`](sinnix://gateway/v2/actions/sessions.query) |
+| `memory.query` | `query` | `memory` | `memory.query` | [`sinnix://gateway/v2/actions/memory.query`](sinnix://gateway/v2/actions/memory.query) |
+| `timeline.query` | `query` | `timeline` | `timeline.query` | [`sinnix://gateway/v2/actions/timeline.query`](sinnix://gateway/v2/actions/timeline.query) |
+| `artifacts.query` | `query` | `artifacts` | `artifacts.query` | [`sinnix://gateway/v2/actions/artifacts.query`](sinnix://gateway/v2/actions/artifacts.query) |
+| `audit.verify` | `query` | `audit` | `audit.verify` | [`sinnix://gateway/v2/actions/audit.verify`](sinnix://gateway/v2/actions/audit.verify) |
+| `captures.query` | `query` | `captures` | `captures.query` | [`sinnix://gateway/v2/actions/captures.query`](sinnix://gateway/v2/actions/captures.query) |
+| `jobs.query` | `query` | `systemd-jobs` | `job.list` | [`sinnix://gateway/v2/actions/jobs.query`](sinnix://gateway/v2/actions/jobs.query) |
 
 ### `gateway.status`
 
@@ -159,7 +158,10 @@ Input schema:
       "type": "string"
     },
     "availability": {
-      "enum": ["available", "unavailable"]
+      "enum": [
+        "available",
+        "unavailable"
+      ]
     },
     "deadline_at": {
       "type": "number"
@@ -169,7 +171,12 @@ Input schema:
       "type": "string"
     },
     "effect": {
-      "enum": ["read", "change", "operate", "run"]
+      "enum": [
+        "read",
+        "change",
+        "operate",
+        "run"
+      ]
     },
     "idempotency_key": {
       "maxLength": 256,
@@ -286,7 +293,11 @@ Input schema:
     },
     "projection": {
       "default": "summary",
-      "enum": ["summary", "log", "result"]
+      "enum": [
+        "summary",
+        "log",
+        "result"
+      ]
     },
     "reason": {
       "maxLength": 2000,
@@ -304,7 +315,9 @@ Input schema:
       "type": "string"
     }
   },
-  "required": ["ref"],
+  "required": [
+    "ref"
+  ],
   "type": "object"
 }
 ```
@@ -370,7 +383,10 @@ Input schema:
       "type": "string"
     }
   },
-  "required": ["ref", "query"],
+  "required": [
+    "ref",
+    "query"
+  ],
   "type": "object"
 }
 ```
@@ -422,11 +438,13 @@ Input schema:
           "type": "string"
         },
         "expression": {
+          "description": "Native Beads expression. It accepts the owner query grammar, for example status=open AND priority<=1.",
           "maxLength": 4000,
           "minLength": 1,
           "type": "string"
         },
         "filters": {
+          "description": "Filter AST: field=value or field={op,value}; op is one of =, !=, >, >=, <, <=. Combine non-empty nodes with and, or, or not.",
           "maxProperties": 32,
           "type": "object"
         },
@@ -442,7 +460,11 @@ Input schema:
               "type": "integer"
             },
             "direction": {
-              "enum": ["down", "up", "both"]
+              "enum": [
+                "down",
+                "up",
+                "both"
+              ]
             },
             "edge_type": {
               "type": "string"
@@ -494,6 +516,7 @@ Input schema:
           "type": "object"
         },
         "native_filters": {
+          "description": "Native list filters for non-query views. Supported scalar keys include title_contains, status, priority, priority_min, priority_max, assignee, parent, type, updated_after, and updated_before; label, label_any, and exclude_label accept string lists.",
           "maxProperties": 40,
           "type": "object"
         },
@@ -559,7 +582,10 @@ Input schema:
       "type": "string"
     }
   },
-  "required": ["action_name", "parameters"],
+  "required": [
+    "action_name",
+    "parameters"
+  ],
   "type": "object"
 }
 ```
@@ -577,9 +603,13 @@ Examples:
       },
       "status": "open"
     },
-    "includes": ["dependencies"],
+    "includes": [
+      "dependencies"
+    ],
     "limit": 50,
-    "project_ids": ["polylogue"],
+    "project_ids": [
+      "polylogue"
+    ],
     "view": "query"
   }
 }
@@ -637,7 +667,9 @@ Input schema:
       "type": "string"
     }
   },
-  "required": ["ref"],
+  "required": [
+    "ref"
+  ],
   "type": "object"
 }
 ```
@@ -788,7 +820,9 @@ Input schema:
       "type": "integer"
     }
   },
-  "required": ["ref"],
+  "required": [
+    "ref"
+  ],
   "type": "object"
 }
 ```
@@ -828,7 +862,10 @@ Input schema:
       "type": "string"
     },
     "operation": {
-      "enum": ["apply_patch", "write"]
+      "enum": [
+        "apply_patch",
+        "write"
+      ]
     },
     "parameters": {
       "maxProperties": 32,
@@ -865,7 +902,12 @@ Input schema:
       "type": "string"
     }
   },
-  "required": ["ref", "operation", "parameters", "idempotency_key"],
+  "required": [
+    "ref",
+    "operation",
+    "parameters",
+    "idempotency_key"
+  ],
   "type": "object"
 }
 ```
@@ -913,7 +955,14 @@ Input schema:
       "type": "string"
     },
     "operation": {
-      "enum": ["append", "copy", "mkdir", "move", "remove", "replace"]
+      "enum": [
+        "append",
+        "copy",
+        "mkdir",
+        "move",
+        "remove",
+        "replace"
+      ]
     },
     "parameters": {
       "maxProperties": 32,
@@ -946,7 +995,12 @@ Input schema:
       "type": "string"
     }
   },
-  "required": ["ref", "operation", "parameters", "idempotency_key"],
+  "required": [
+    "ref",
+    "operation",
+    "parameters",
+    "idempotency_key"
+  ],
   "type": "object"
 }
 ```
@@ -1050,7 +1104,10 @@ Input schema:
           "type": "string"
         },
         "mode": {
-          "enum": ["preview", "apply"]
+          "enum": [
+            "preview",
+            "apply"
+          ]
         },
         "other_id": {
           "maxLength": 128,
@@ -1106,14 +1163,19 @@ Input schema:
               "additionalProperties": false,
               "properties": {
                 "mode": {
-                  "enum": ["append", "replace"]
+                  "enum": [
+                    "append",
+                    "replace"
+                  ]
                 },
                 "text": {
                   "maxLength": 32000,
                   "type": "string"
                 }
               },
-              "required": ["text"],
+              "required": [
+                "text"
+              ],
               "type": "object"
             },
             "set": {
@@ -1121,7 +1183,11 @@ Input schema:
             },
             "unset": {
               "items": {
-                "enum": ["due", "defer", "parent"]
+                "enum": [
+                  "due",
+                  "defer",
+                  "parent"
+                ]
               },
               "type": "array"
             }
@@ -1165,7 +1231,11 @@ Input schema:
           "type": "string"
         },
         "verdict": {
-          "enum": ["accepted", "rejected", "partial"]
+          "enum": [
+            "accepted",
+            "rejected",
+            "partial"
+          ]
         }
       },
       "type": "object"
@@ -1175,7 +1245,10 @@ Input schema:
       "properties": {
         "expected_assignee": {
           "maxLength": 256,
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "expected_etag": {
           "pattern": "^[0-9a-f]{64}$",
@@ -1209,7 +1282,12 @@ Input schema:
       "type": "string"
     }
   },
-  "required": ["ref", "operation", "parameters", "idempotency_key"],
+  "required": [
+    "ref",
+    "operation",
+    "parameters",
+    "idempotency_key"
+  ],
   "type": "object"
 }
 ```
@@ -1254,7 +1332,10 @@ Input schema:
       "type": "string"
     },
     "operation": {
-      "enum": ["apply", "preview"]
+      "enum": [
+        "apply",
+        "preview"
+      ]
     },
     "parameters": {
       "additionalProperties": false,
@@ -1297,7 +1378,10 @@ Input schema:
                 "properties": {
                   "expected_assignee": {
                     "maxLength": 256,
-                    "type": ["string", "null"]
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   },
                   "expected_etag": {
                     "pattern": "^[0-9a-f]{64}$",
@@ -1321,7 +1405,11 @@ Input schema:
                 "type": "string"
               }
             },
-            "required": ["ref", "operation", "parameters"],
+            "required": [
+              "ref",
+              "operation",
+              "parameters"
+            ],
             "type": "object"
           },
           "maxItems": 128,
@@ -1329,14 +1417,19 @@ Input schema:
           "type": "array"
         },
         "on_error": {
-          "enum": ["stop", "continue"]
+          "enum": [
+            "stop",
+            "continue"
+          ]
         },
         "preview_digest": {
           "pattern": "^[0-9a-f]{64}$",
           "type": "string"
         }
       },
-      "required": ["actions"],
+      "required": [
+        "actions"
+      ],
       "type": "object"
     },
     "preconditions": {
@@ -1359,7 +1452,12 @@ Input schema:
       "type": "string"
     }
   },
-  "required": ["ref", "operation", "parameters", "idempotency_key"],
+  "required": [
+    "ref",
+    "operation",
+    "parameters",
+    "idempotency_key"
+  ],
   "type": "object"
 }
 ```
@@ -1457,7 +1555,12 @@ Input schema:
       "type": "string"
     }
   },
-  "required": ["ref", "operation", "parameters", "idempotency_key"],
+  "required": [
+    "ref",
+    "operation",
+    "parameters",
+    "idempotency_key"
+  ],
   "type": "object"
 }
 ```
@@ -1499,7 +1602,9 @@ Input schema:
       "type": "string"
     },
     "operation": {
-      "enum": ["call"]
+      "enum": [
+        "call"
+      ]
     },
     "parameters": {
       "maxProperties": 32,
@@ -1522,7 +1627,12 @@ Input schema:
       "type": "string"
     }
   },
-  "required": ["ref", "operation", "parameters", "idempotency_key"],
+  "required": [
+    "ref",
+    "operation",
+    "parameters",
+    "idempotency_key"
+  ],
   "type": "object"
 }
 ```
@@ -1588,7 +1698,9 @@ Input schema:
           "type": "integer"
         }
       },
-      "required": ["expected_revision"],
+      "required": [
+        "expected_revision"
+      ],
       "type": "object"
     },
     "reason": {
@@ -1691,7 +1803,11 @@ Input schema:
       "type": "string"
     }
   },
-  "required": ["project_id", "operation", "idempotency_key"],
+  "required": [
+    "project_id",
+    "operation",
+    "idempotency_key"
+  ],
   "type": "object"
 }
 ```
@@ -1725,7 +1841,13 @@ Input schema:
       "type": "string"
     },
     "backend": {
-      "enum": ["claude", "codex", "gemini", "grok", "antigravity"]
+      "enum": [
+        "claude",
+        "codex",
+        "gemini",
+        "grok",
+        "antigravity"
+      ]
     },
     "deadline_at": {
       "type": "number"
@@ -1762,7 +1884,10 @@ Input schema:
       "type": "string"
     }
   },
-  "required": ["ref", "idempotency_key"],
+  "required": [
+    "ref",
+    "idempotency_key"
+  ],
   "type": "object"
 }
 ```
@@ -1813,7 +1938,9 @@ Input schema:
           "type": "string"
         }
       },
-      "required": ["expected_phase"],
+      "required": [
+        "expected_phase"
+      ],
       "type": "object"
     },
     "reason": {
@@ -1833,7 +1960,11 @@ Input schema:
       "type": "string"
     }
   },
-  "required": ["ref", "idempotency_key", "preconditions"],
+  "required": [
+    "ref",
+    "idempotency_key",
+    "preconditions"
+  ],
   "type": "object"
 }
 ```
@@ -1906,7 +2037,12 @@ Input schema:
       "type": "string"
     }
   },
-  "required": ["ref", "operation", "parameters", "idempotency_key"],
+  "required": [
+    "ref",
+    "operation",
+    "parameters",
+    "idempotency_key"
+  ],
   "type": "object"
 }
 ```
@@ -1950,7 +2086,12 @@ Input schema:
       "type": "string"
     },
     "operation": {
-      "enum": ["focus", "key", "run", "send"]
+      "enum": [
+        "focus",
+        "key",
+        "run",
+        "send"
+      ]
     },
     "parameters": {
       "maxProperties": 32,
@@ -1973,7 +2114,12 @@ Input schema:
       "type": "string"
     }
   },
-  "required": ["ref", "operation", "parameters", "idempotency_key"],
+  "required": [
+    "ref",
+    "operation",
+    "parameters",
+    "idempotency_key"
+  ],
   "type": "object"
 }
 ```
@@ -2052,7 +2198,12 @@ Input schema:
       "type": "string"
     }
   },
-  "required": ["ref", "operation", "parameters", "idempotency_key"],
+  "required": [
+    "ref",
+    "operation",
+    "parameters",
+    "idempotency_key"
+  ],
   "type": "object"
 }
 ```
@@ -2138,7 +2289,12 @@ Input schema:
       "type": "integer"
     }
   },
-  "required": ["project_id", "checkout_id", "argv", "idempotency_key"],
+  "required": [
+    "project_id",
+    "checkout_id",
+    "argv",
+    "idempotency_key"
+  ],
   "type": "object"
 }
 ```
@@ -2147,7 +2303,11 @@ Examples:
 
 ```json
 {
-  "argv": ["git", "status", "--short"],
+  "argv": [
+    "git",
+    "status",
+    "--short"
+  ],
   "checkout_id": "default",
   "cwd": ".",
   "idempotency_key": "shell-status-example",

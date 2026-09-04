@@ -70,6 +70,48 @@ def verify_approval(config: GatewayConfig, principal_name: str) -> dict[str, obj
     }
 
 
+async def semantic_canary(
+    config: GatewayConfig, principal_name: str
+) -> dict[str, object]:
+    """Exercise public MCP envelopes required for a cold operator session."""
+    from .cli_support import invoke_mcp
+
+    catalog = await invoke_mcp(config, principal_name, "catalog", {})
+    catalog_data = catalog.get("data")
+    if (
+        catalog.get("result", {}).get("outcome") != "ok"
+        or catalog.get("result", {}).get("action") != "gateway.catalog"
+        or not isinstance(catalog_data, dict)
+    ):
+        raise ValueError("semantic canary catalog did not return its typed envelope")
+    actions = {
+        row.get("name")
+        for row in catalog_data.get("actions", [])
+        if isinstance(row, dict)
+    }
+    required = {"resources.get", "projects.list", "jobs.query", "beads.query"}
+    missing = sorted(required - actions)
+    if missing:
+        raise ValueError(f"semantic canary catalog omits actions: {', '.join(missing)}")
+    projects = await invoke_mcp(
+        config,
+        principal_name,
+        "query",
+        {"action_name": "projects.list"},
+    )
+    if (
+        projects.get("result", {}).get("outcome") != "ok"
+        or projects.get("result", {}).get("action") != "projects.list"
+        or not isinstance(projects.get("data", {}).get("projects"), list)
+    ):
+        raise ValueError("semantic canary projects.list did not return its typed envelope")
+    return {
+        "principal": principal_name,
+        "catalog_actions": len(actions),
+        "projects": len(projects["data"]["projects"]),
+    }
+
+
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(prog="sinnix-agent-gateway")
     result.add_argument(
@@ -86,6 +128,7 @@ def parser() -> argparse.ArgumentParser:
     subcommands.add_parser("manifest")
     subcommands.add_parser("catalog-hash")
     subcommands.add_parser("approval-check")
+    subcommands.add_parser("canary")
     subcommands.add_parser("info")
 
     def add_input_flags(command: argparse.ArgumentParser) -> None:
@@ -167,6 +210,11 @@ def main() -> None:
     elif command == "approval-check":
         try:
             print(json.dumps(verify_approval(config, arguments.principal), indent=2))
+        except ValueError as error:
+            raise SystemExit(str(error)) from error
+    elif command == "canary":
+        try:
+            print(json.dumps(anyio.run(semantic_canary, config, principal_name)))
         except ValueError as error:
             raise SystemExit(str(error)) from error
     elif command == "info":

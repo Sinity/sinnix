@@ -267,7 +267,9 @@ class ProjectService:
                     current = {}
                 continue
             key, separator, value = line.partition(" ")
-            if not separator:
+            # `bare`, `detached`, `locked`, and `prunable` are valid marker
+            # records. Git emits some of them without a trailing value.
+            if not separator and key not in {"bare", "detached", "locked", "prunable"}:
                 raise ProjectError("git worktree returned malformed porcelain")
             if key in current:
                 raise ProjectError("git worktree returned duplicate porcelain field")

@@ -728,11 +728,11 @@ class BeadsService:
         coverage: dict[str, Any] = {}
         revisions: dict[str, str] = {}
         parsed: dict[str, Any] = {}
+        owner_cap = self._limit(limit)
         for project_id in sorted(project_ids):
             try:
                 project, status = self._attest(project_id, False)
                 revisions[project_id] = status["revision"]
-                owner_cap = _MAX_PAGE
                 if expression:
                     parsed[project_id] = self._run(
                         project, ["query", expression, "--parse-only"], False
@@ -743,7 +743,6 @@ class BeadsService:
                         "unsupported_capability",
                     )
                 if view == "ready":
-                    owner_cap = self._limit(limit)
                     command = [
                         "ready",
                         "--limit",
@@ -768,9 +767,9 @@ class BeadsService:
                         "list",
                         "--flat",
                         "--limit",
-                        str(_MAX_PAGE),
+                        str(owner_cap),
                         "--max-rows",
-                        str(_MAX_PAGE),
+                        str(owner_cap),
                     ]
                     command += {
                         "open": ["--status", "open"],
@@ -787,7 +786,7 @@ class BeadsService:
                             "--status",
                             "in_progress",
                             "--limit",
-                            str(_MAX_PAGE),
+                            str(owner_cap),
                         ]
                         if "stale_days" in (native_filters or {}):
                             command += ["--days", str(native_filters["stale_days"])]
@@ -800,13 +799,13 @@ class BeadsService:
                 elif view == "query":
                     if not expression:
                         raise BeadsError("query view requires filters or expression")
-                    command = ["query", expression, "--limit", str(_MAX_PAGE)]
+                    command = ["query", expression, "--limit", str(owner_cap)]
                 else:
                     raise BeadsError(
                         f"unsupported_capability: unknown Beads view {view!r}"
                     )
                 if expression and view != "query":
-                    command = ["query", expression, "--limit", str(_MAX_PAGE)]
+                    command = ["query", expression, "--limit", str(owner_cap)]
                 elif view != "stale_claims":
                     command += native_args
                 if order:

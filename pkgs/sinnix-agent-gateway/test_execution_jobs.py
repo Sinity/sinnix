@@ -425,6 +425,41 @@ def test_v2_jobs_query_bounds_owner_job_list_and_preserves_job_refs(
     assert jobs.calls[0].arguments == {"limit": 1}
 
 
+def test_public_query_dispatches_job_list_parameters_without_double_nesting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Red if the public query verb wraps jobs.query parameters a second time."""
+    runtime, jobs = runtime_with_jobs(tmp_path, "observer")
+    jobs.responses = {
+        "job.list": {
+            "jobs": [],
+            "limit": 10,
+            "total": 0,
+            "truncated": False,
+            "next_cursor": None,
+            "snapshot": {
+                "ordering": "created_at_desc_job_id_desc",
+                "ceiling": ["2026-09-04T00:00:00+00:00", ""],
+            },
+        }
+    }
+    monkeypatch.setattr(
+        Runtime, "create", classmethod(lambda _cls, _config, _principal: runtime)
+    )
+    server = create_server(runtime.config, "observer")
+
+    response = anyio.run(
+        invoke,
+        server,
+        "query",
+        {"action_name": "jobs.query", "parameters": {"limit": 10}},
+    )
+
+    assert response["result"]["outcome"] == "ok"
+    assert response["result"]["action"] == "jobs.query"
+    assert jobs.calls[0].arguments == {"limit": 10}
+
+
 def test_v2_jobs_query_emits_a_declared_typed_failure_for_an_invalid_bound(
     tmp_path: Path,
 ) -> None:

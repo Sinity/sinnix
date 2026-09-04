@@ -235,6 +235,10 @@ mkServiceModule {
             set -euo pipefail
             exec ${gatewayBin} --config ${configFile} --principal ${lib.escapeShellArg endpoint.principal} approval-check
           '';
+          semanticCanary = pkgs.writeShellScript "sinnix-agent-gateway-${name}-semantic-canary" ''
+            set -euo pipefail
+            exec ${gatewayBin} --config ${configFile} --principal ${lib.escapeShellArg endpoint.principal} canary
+          '';
           stateScaffold = pkgs.writeShellScript "sinnix-agent-gateway-${name}-state-scaffold" ''
             set -euo pipefail
             exec ${pkgs.coreutils}/bin/install -d -m 0700 ${lib.escapeShellArg endpoint.stateDir}
@@ -360,6 +364,7 @@ mkServiceModule {
               ExecStartPre = [
                 endpointArtifacts.${name}.stateScaffold
                 endpointArtifacts.${name}.approvalGate
+                endpointArtifacts.${name}.semanticCanary
               ];
               ExecStart = ''
                 ${tunnelClient}/bin/tunnel-client run \
