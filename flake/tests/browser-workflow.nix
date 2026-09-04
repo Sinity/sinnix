@@ -71,9 +71,13 @@ in
           ];
       };
       evaluated = evalTestSpec system spec;
+      # Force the evaluated module outputs in the check derivation. Keeping
+      # this read in the derivation prevents a lazy check from passing when
+      # the browser module stops contributing its policy or inventory.
       workflow = builtins.unsafeDiscardStringContext (builtins.toJSON {
         policy = evaluated.config.environment.etc."opt/chrome/policies/managed/extra.json".text;
         inventory = evaluated.config.sinnix.runtime.inventory;
+        services = builtins.attrNames evaluated.config.home-manager.users.${evaluated.config.sinnix.user.name}.systemd.user.services;
       });
     in
     {
