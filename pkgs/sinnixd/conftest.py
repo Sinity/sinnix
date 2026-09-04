@@ -7,6 +7,7 @@ shelling out to a real pueued.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
@@ -207,6 +208,46 @@ def fake_pueue(monkeypatch: pytest.MonkeyPatch) -> FakePueue:
         monkeypatch.setattr(pueue_module, name, getattr(fake, name))
     monkeypatch.setattr(pueue_module, "groups", lambda: dict(fake.groups))
     return fake
+
+
+@pytest.fixture(autouse=True)
+def _no_inherited_queue_group(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The suite must not inherit the group of a pueue task that runs it.
+
+    `PUEUE_GROUP` is what the wrapper containerises by, so a suite run from
+    inside a queued task would otherwise scope every fixture launch for real.
+    """
+    monkeypatch.delenv("PUEUE_GROUP", raising=False)
+
+
+@pytest.fixture
+def recording_systemctl(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Callable[[], list[list[str]]]:
+    """A systemctl on PATH recording its argv; returns a reader for the calls.
+
+    The reap's real argv is the contract, so this replaces the executable rather
+    than the function that runs it.
+    """
+    directory = tmp_path / "systemctl-bin"
+    directory.mkdir(exist_ok=True)
+    ledger = directory / "calls"
+    script = directory / "systemctl"
+    # systemd refuses to stop a unit that was never created; a fake that
+    # reported success would hide a reap that reached nothing.
+    script.write_text(
+        f'#!/bin/sh\nprintf "systemctl %s\\n" "$*" >> {ledger}\n'
+        'case "$*" in *stop*) exit 1 ;; esac\n'
+    )
+    script.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{directory}{os.pathsep}{os.environ['PATH']}")
+
+    def calls() -> list[list[str]]:
+        if not ledger.exists():
+            return []
+        return [line.split() for line in ledger.read_text().splitlines()]
+
+    return calls
 
 
 @dataclass

@@ -273,7 +273,12 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         return EXIT_OK
     if verb == "cancel":
         job = launch.cancel(config, arguments.job_id)
-        out.emit(job, out.job_line(job))
+        survivors = job["reaped"]["scope"]["survivors"]
+        out.emit(
+            job,
+            out.job_line(job)
+            + (f"; {len(survivors)} processes survived the reap" if survivors else ""),
+        )
         return EXIT_OK
     if verb == "retry":
         job = launch.retry(arguments.job_id)

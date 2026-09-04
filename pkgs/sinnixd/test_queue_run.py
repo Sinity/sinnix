@@ -4,7 +4,7 @@ import json
 import os
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import pytest
 from sinnixd.queue_run import (
@@ -76,12 +76,13 @@ def test_worker_exports_queue_identity_to_the_child(tmp_path: Path) -> None:
     assert (tmp_path / "log").read_text() == "job-a fixture check"
 
 
-def test_a_declared_pool_runs_the_child_in_its_named_systemd_scope(
+@pytest.fixture
+def recording_systemd_run(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Breaks if a queued workload executes beside the queue runner again."""
+) -> Callable[[], list[str]]:
+    """A systemd-run on PATH that records its argv and then runs the command."""
     fake_bin = tmp_path / "bin"
-    fake_bin.mkdir()
+    fake_bin.mkdir(exist_ok=True)
     recorder = tmp_path / "systemd-run-argv"
     runner = fake_bin / "systemd-run"
     runner.write_text(
@@ -93,6 +94,17 @@ def test_a_declared_pool_runs_the_child_in_its_named_systemd_scope(
     )
     runner.chmod(0o755)
     monkeypatch.setenv("PATH", f"{fake_bin}{os.pathsep}{os.environ['PATH']}")
+    return lambda: recorder.read_text().splitlines() if recorder.exists() else []
+
+
+def test_a_declared_pool_runs_the_child_in_its_named_systemd_scope(
+    tmp_path: Path, recording_systemd_run: Callable[[], list[str]]
+) -> None:
+    """Breaks if a queued workload executes beside the queue runner again.
+
+    The scope is named for the launch input, not for a field inside it, because
+    that name is what a canceller can rebuild from `pueue status` alone.
+    """
     launch = write_launch(
         tmp_path,
         pool="pytest",
@@ -105,12 +117,59 @@ def test_a_declared_pool_runs_the_child_in_its_named_systemd_scope(
 
     assert main([str(launch)]) == 0
 
-    scope_argv = recorder.read_text().splitlines()
+    scope_argv = recording_systemd_run()
     assert "--scope" in scope_argv
     assert "--collect" in scope_argv
-    assert "--unit=sinnixd-pueue-pytest-job-a.scope" in scope_argv
+    assert "--unit=sinnixd-pueue-pytest-launch.scope" in scope_argv
     assert "--slice=sinnixd-pueue-pytest.slice" in scope_argv
     assert (tmp_path / "log").read_text() == "1 job-a"
+
+
+def test_a_launch_input_without_a_pool_is_contained_by_its_pueue_group(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    recording_systemd_run: Callable[[], list[str]],
+) -> None:
+    """A repository queueing the wrapper itself still gets a cgroup.
+
+    Anti-vacuity: a workload with no scope inherits pueued.service's own
+    cgroup, where a cancel has nothing to stop.
+    """
+    monkeypatch.setenv("PUEUE_GROUP", "pytest")
+    launch = write_launch(tmp_path)
+    assert "pool" not in json.loads(launch.read_text())
+
+    assert main([str(launch)]) == 0
+
+    assert "--unit=sinnixd-pueue-pytest-launch.scope" in recording_systemd_run()
+
+
+def test_scope_properties_bound_the_task_scope_itself(
+    tmp_path: Path, recording_systemd_run: Callable[[], list[str]]
+) -> None:
+    """A lane's memory ceiling belongs to the scope cancel can stop.
+
+    Anti-vacuity: set on a scope of the workload's own making, the ceiling would
+    hold, but the cancel that stops this unit would not reach it.
+    """
+    launch = write_launch(
+        tmp_path, pool="agent", scope_properties=["MemoryMax=10G"], argv=["true"]
+    )
+
+    assert main([str(launch)]) == 0
+
+    scope_argv = recording_systemd_run()
+    assert scope_argv[scope_argv.index("MemoryMax=10G") - 1] == "-p"
+    assert scope_argv.index("MemoryMax=10G") < scope_argv.index("--")
+
+
+def test_a_scope_property_that_is_not_a_systemd_setting_is_refused(
+    tmp_path: Path,
+) -> None:
+    """The launch input must not become arbitrary systemd-run argv."""
+    launch = write_launch(tmp_path, scope_properties=["--property=Delegate=yes"])
+
+    assert main([str(launch)]) == REFUSED_EXIT_CODE
 
 
 def test_a_failing_command_reports_its_own_exit_status(tmp_path: Path) -> None:
