@@ -32,7 +32,7 @@ def test_duplicate_labels_select_the_chosen_row(monkeypatch):
         picker.subprocess,
         "run",
         lambda *_args, **_kwargs: subprocess.CompletedProcess(
-            ["fuzzel"], 0, "[stack] Same title\t1\n", ""
+            ["fuzzel"], 0, "[stack] Same title -- https://two.example\t1\n", ""
         ),
     )
     monkeypatch.setattr(
