@@ -18,7 +18,7 @@ repeated here.
    verification workflow: GitHub starts affected verification after
    publication, and the coordinator starts one complete run after the merge
    batch. Without such a workflow, run the repository's declared semantic
-   check through `agentctl job start` before publication. Fix, test,
+   check through `agentctl job start ... --wait` before publication. Fix, test,
    iterate until green. Do not spawn
    review subagents — hosted PR review and the test oracle are the check.
    `devtools verify` selects from the checkout's one testmon datafile
