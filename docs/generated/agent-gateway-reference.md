@@ -1,12 +1,12 @@
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v2-g3.0-pueue-jobs -->
-<!-- gateway-catalog-sha256: 885e3a2cee22a5488d8cc0dd289312bb9105a7f9679c8a247afeda5dbb919548 -->
+<!-- gateway-catalog-sha256: 73967b9d691118482283e66b72ecb11faa84c0a62f2b15c4f0838787f9d5242f -->
 
 # Sinnix Agent Gateway V2 reference
 
 This reference is generated from `sinnix_agent_gateway.registry.REGISTRY`. The catalog hash changes when an action, resource, schema, route, principal, bound, or example changes.
 
-Revision: `v2-g3.0-pueue-jobs`. Catalog SHA-256: `885e3a2cee22a5488d8cc0dd289312bb9105a7f9679c8a247afeda5dbb919548`.
+Revision: `v2-g3.0-pueue-jobs`. Catalog SHA-256: `73967b9d691118482283e66b72ecb11faa84c0a62f2b15c4f0838787f9d5242f`.
 
 ## Ten CLI verbs
 
@@ -422,11 +422,13 @@ Input schema:
           "type": "string"
         },
         "expression": {
+          "description": "Native Beads expression. It accepts the owner query grammar, for example status=open AND priority<=1.",
           "maxLength": 4000,
           "minLength": 1,
           "type": "string"
         },
         "filters": {
+          "description": "Filter AST: field=value or field={op,value}; op is one of =, !=, >, >=, <, <=. Combine non-empty nodes with and, or, or not.",
           "maxProperties": 32,
           "type": "object"
         },
@@ -494,6 +496,7 @@ Input schema:
           "type": "object"
         },
         "native_filters": {
+          "description": "Native list filters for non-query views. Supported scalar keys include title_contains, status, priority, priority_min, priority_max, assignee, parent, type, updated_after, and updated_before; label, label_any, and exclude_label accept string lists.",
           "maxProperties": 40,
           "type": "object"
         },

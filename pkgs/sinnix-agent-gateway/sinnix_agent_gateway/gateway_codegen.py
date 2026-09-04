@@ -164,6 +164,8 @@ Every request accepts one bounded JSON source: `--input '{{"ref":"..."}}'`, `--i
 
 The CLI invokes the matching MCP verb through the same server runtime and principal. It does not create an alternate owner route. Invalid JSON, non-object JSON, unknown fields, schema violations, and inputs larger than 262144 bytes are rejected before owner dispatch.
 
+`sinnix-agent-gateway canary` verifies the catalog and project-list envelopes used by a cold session. Endpoint startup runs it after contract approval.
+
 ## Workflow prompts
 
 - Project orientation: call `{context}` with a canonical `sinnix://projects/<project>` ref and `intent=project`, then follow the returned checkout and task-authority refs.

@@ -145,7 +145,7 @@ The private operator runtime key is the agenix secret `openai-tunnel-runtime-key
 
 ## Generated V2 reference
 
-This section is generated from the canonical gateway registry. Revision `v2-g3.0-pueue-jobs`, catalog SHA-256 `885e3a2cee22a5488d8cc0dd289312bb9105a7f9679c8a247afeda5dbb919548`.
+This section is generated from the canonical gateway registry. Revision `v2-g3.0-pueue-jobs`, catalog SHA-256 `73967b9d691118482283e66b72ecb11faa84c0a62f2b15c4f0838787f9d5242f`.
 
 The full schemas and executable examples are in [the generated gateway reference](generated/agent-gateway-reference.md). The matching agent skill is [agent-gateway](../dots/_ai/skills/agent-gateway/SKILL.md).
 
