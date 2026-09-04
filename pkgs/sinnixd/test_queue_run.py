@@ -87,9 +87,9 @@ def test_a_declared_pool_runs_the_child_in_its_named_systemd_scope(
     runner.write_text(
         "#!/bin/sh\n"
         f"printf '%s\\n' \"$@\" > {recorder}\n"
-        "while [ \"$1\" != \"--\" ]; do shift; done\n"
+        'while [ "$1" != "--" ]; do shift; done\n'
         "shift\n"
-        "exec \"$@\"\n"
+        'exec "$@"\n'
     )
     runner.chmod(0o755)
     monkeypatch.setenv("PATH", f"{fake_bin}{os.pathsep}{os.environ['PATH']}")

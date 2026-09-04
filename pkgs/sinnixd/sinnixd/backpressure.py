@@ -76,9 +76,7 @@ def _signal_pressure(pressure: Mapping[str, float], signal: str) -> float:
     return pressure.get(f"{signal}_full_avg60", 0.0)
 
 
-def _desired_paused(
-    pressure: Mapping[str, float], paused: Sequence[str]
-) -> set[str]:
+def _desired_paused(pressure: Mapping[str, float], paused: Sequence[str]) -> set[str]:
     """Keep existing closures latched per signal until that signal clears."""
     desired: set[str] = set()
     for signal, groups in CLOSE_ORDER.items():
