@@ -1,4 +1,8 @@
-{ mkFeatureModule, ... }@args:
+{
+  mkFeatureModule,
+  pkgs,
+  ...
+}@args:
 mkFeatureModule {
   path = [
     "dev"
@@ -7,16 +11,20 @@ mkFeatureModule {
   description = "Git and delta tooling";
   configFn =
     {
-      config,
       lib,
+      pkgs,
       user,
       ...
     }:
     let
-      secretsEnabled = config.sinnix.secrets.enable;
-      githubTokenPath =
-        if secretsEnabled then config.sinnix.secrets.paths."github-token" else "/dev/null";
-      githubHelper = ''!f(){ if [ -r ${githubTokenPath} ]; then token="$(tr -d '\r\n' < ${githubTokenPath})"; printf 'username=x-access-token\npassword=%s\n' "$token"; fi; }; f'';
+      # GitHub credentials come from gh's persistent login. A secret under
+      # /run cannot serve this: /run is tmpfs, so every boot and every
+      # activation has a window with no token file, and a helper that answers
+      # nothing in that window leaves git falling through to an interactive
+      # terminal prompt that blocks an unattended push until it is killed.
+      # `quit=1` ends the exchange so an unusable login fails immediately
+      # instead, and it is scoped to GitHub: other hosts keep the prompt.
+      githubHelper = ''!f(){ ${lib.getExe pkgs.gh} auth git-credential "$@" || { [ "$1" = get ] && echo quit=1; }; }; f'';
     in
     {
       home-manager.users.${user} = _: {
