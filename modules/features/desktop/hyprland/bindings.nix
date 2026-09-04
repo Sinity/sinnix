@@ -59,7 +59,9 @@ let
       call "window.fullscreen" ''{ mode = "fullscreen", action = "toggle" }''
     ))
     (run "SUPER + D" "Open the app launcher" "noctalia msg panel-toggle launcher")
-    (run "SUPER + O" "Open the unified reading picker" "uwsm app -- ${scriptPkgs.sinnix-picker}/bin/sinnix-picker")
+    (run "SUPER + O" "Open the unified reading picker"
+      "uwsm app -- ${scriptPkgs.sinnix-picker}/bin/sinnix-picker"
+    )
     (run "SUPER + Escape" "Lock the session" "noctalia msg session lock")
     (run "SUPER + Slash" "Show this keybind cheatsheet"
       "noctalia msg panel-toggle kenn/keybind-cheatsheet:cheatsheet"

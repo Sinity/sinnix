@@ -44,16 +44,19 @@ mkFeatureModule {
       navigationPort = helpers.data.ports.browserNavigation;
       scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
       navCaptureExtensionId = "jccgkpdlopfflfchemmfedfokldkeeck";
-      navCaptureCrx = pkgs.runCommand "sinnix-nav-capture.crx" {
-        nativeBuildInputs = [ pkgs.go-crx3 ];
-      } ''
-        mkdir extension
-        cp -R ${../../../browser-extensions/nav-capture}/. extension/
-        chmod -R u+w extension
-        substituteInPlace extension/background.js --replace-fail \
-          '127.0.0.1:8767' '127.0.0.1:${toString navigationPort}'
-        crx3 pack extension --outfile "$out"
-      '';
+      navCaptureCrx =
+        pkgs.runCommand "sinnix-nav-capture.crx"
+          {
+            nativeBuildInputs = [ pkgs.go-crx3 ];
+          }
+          ''
+            mkdir extension
+            cp -R ${../../../browser-extensions/nav-capture}/. extension/
+            chmod -R u+w extension
+            substituteInPlace extension/background.js --replace-fail \
+              '127.0.0.1:8767' '127.0.0.1:${toString navigationPort}'
+            crx3 pack extension --outfile "$out"
+          '';
       navCaptureUpdate = pkgs.writeText "sinnix-nav-capture-updates.xml" ''
         <?xml version="1.0" encoding="UTF-8"?>
         <gupdate xmlns="http://www.google.com/update2/response" protocol="2.0">

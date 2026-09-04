@@ -28,7 +28,10 @@ in
           config:
           let
             hm = hmFor config;
-            policy = builtins.fromJSON (builtins.unsafeDiscardStringContext config.environment.etc."opt/chrome/policies/managed/extra.json".text);
+            policy = builtins.fromJSON (
+              builtins.unsafeDiscardStringContext
+                config.environment.etc."opt/chrome/policies/managed/extra.json".text
+            );
             inventory = config.sinnix.runtime.inventory;
             bindings = builtins.toJSON hm.wayland.windowManager.hyprland.settings.bind;
             extensionId = "jccgkpdlopfflfchemmfedfokldkeeck";
@@ -38,7 +41,9 @@ in
               assertion =
                 policy.ExtensionSettings.${extensionId}.installation_mode == "force_installed"
                 && policy.ExtensionSettings.${extensionId}.override_update_url
-                && lib.hasPrefix "${extensionId};file:///nix/store/" (builtins.head policy.ExtensionInstallForcelist);
+                && lib.hasPrefix "${extensionId};file:///nix/store/" (
+                  builtins.head policy.ExtensionInstallForcelist
+                );
               message = "The navigation extension must be installed by Chrome's managed extension policy.";
             }
             {
@@ -56,9 +61,7 @@ in
               message = "The browser provenance receiver must execute the declared daemon package.";
             }
             {
-              assertion =
-                lib.hasInfix "SUPER + O" bindings
-                && lib.hasInfix "sinnix-picker" bindings;
+              assertion = lib.hasInfix "SUPER + O" bindings && lib.hasInfix "sinnix-picker" bindings;
               message = "SUPER+O must reach the unified picker that consumes reading-stack entries.";
             }
             {
@@ -67,8 +70,7 @@ in
             }
             {
               assertion = lib.any (
-                entry:
-                lib.hasInfix "SINNIX_NAV_CAPTURE_PORT=${toString navigationPort}" (toString entry)
+                entry: lib.hasInfix "SINNIX_NAV_CAPTURE_PORT=${toString navigationPort}" (toString entry)
               ) hm.systemd.user.services.sinnix-nav-capture.Service.Environment;
               message = "The provenance receiver must bind the port declared in the ports registry.";
             }
@@ -86,11 +88,15 @@ in
       # Force the evaluated module outputs in the check derivation. Keeping
       # this read in the derivation prevents a lazy check from passing when
       # the browser module stops contributing its policy or inventory.
-      workflow = builtins.unsafeDiscardStringContext (builtins.toJSON {
-        policy = evaluated.config.environment.etc."opt/chrome/policies/managed/extra.json".text;
-        inventory = evaluated.config.sinnix.runtime.inventory;
-        services = builtins.attrNames evaluated.config.home-manager.users.${evaluated.config.sinnix.user.name}.systemd.user.services;
-      });
+      workflow = builtins.unsafeDiscardStringContext (
+        builtins.toJSON {
+          policy = evaluated.config.environment.etc."opt/chrome/policies/managed/extra.json".text;
+          inventory = evaluated.config.sinnix.runtime.inventory;
+          services =
+            builtins.attrNames
+              evaluated.config.home-manager.users.${evaluated.config.sinnix.user.name}.systemd.user.services;
+        }
+      );
     in
     {
       checks.browser-workflow = pkgs.runCommand "sinnix-browser-workflow" { inherit workflow; } ''
