@@ -32,12 +32,11 @@ MEMORY_FULL_FREEZE = 25.0
 # keep a group closed.
 RESUME_BELOW = 10.0
 
-# IO pressure drains test admission without delaying API-bound agents. Memory
-# pressure closes agent admission first because several harnesses have a
-# material aggregate resident set.
+# Conversations stay admissible under both signals. Their fixed six-slot cap
+# and cgroup limits bound them; pressure gates the heavy work they can launch.
 CLOSE_ORDER = {
-    "io": ("pytest", "normal", "bulk"),
-    "memory": ("agent", "pytest", "normal", "bulk"),
+    "io": ("pytest", "bulk"),
+    "memory": ("pytest", "normal", "bulk"),
 }
 MANAGED_GROUPS = ("agent", "pytest", "normal", "bulk")
 

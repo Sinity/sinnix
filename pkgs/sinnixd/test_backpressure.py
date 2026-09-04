@@ -13,7 +13,7 @@ def _tick(monkeypatch, pressure, groups):
     return result, calls
 
 
-def test_memory_closure_reopens_agent_when_only_io_is_in_hysteresis(monkeypatch) -> None:
+def test_agent_admission_reopens_under_pressure(monkeypatch) -> None:
     result, calls = _tick(
         monkeypatch,
         {"io_full_avg60": 15.22, "memory_full_avg60": 1.92},
@@ -39,7 +39,7 @@ def test_memory_closure_stays_until_memory_below_hysteresis(monkeypatch) -> None
     result, calls = _tick(
         monkeypatch,
         {"io_full_avg60": 1.0, "memory_full_avg60": 15.0},
-        {"agent": "Paused", "pytest": "Running", "normal": "Running", "bulk": "Running"},
+        {"agent": "Running", "pytest": "Paused", "normal": "Running", "bulk": "Running"},
     )
 
     assert calls == []
@@ -65,4 +65,26 @@ def test_pressure_closes_admission_without_stopping_tasks(monkeypatch) -> None:
     )
 
     assert calls == [("pause", "pytest")]
+    assert result["action"] == "closed"
+
+
+def test_io_pressure_keeps_normal_admissible_after_pytest_is_paused(monkeypatch) -> None:
+    result, calls = _tick(
+        monkeypatch,
+        {"io_full_avg60": 30.0, "memory_full_avg60": 1.0},
+        {"agent": "Running", "pytest": "Paused", "normal": "Running", "bulk": "Running"},
+    )
+
+    assert calls == [("pause", "bulk")]
+    assert result["action"] == "closed"
+
+
+def test_memory_pressure_keeps_agent_admissible(monkeypatch) -> None:
+    result, calls = _tick(
+        monkeypatch,
+        {"io_full_avg60": 1.0, "memory_full_avg60": 30.0},
+        {"agent": "Running", "pytest": "Paused", "normal": "Running", "bulk": "Running"},
+    )
+
+    assert calls == [("pause", "normal")]
     assert result["action"] == "closed"
