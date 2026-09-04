@@ -1227,6 +1227,33 @@ def test_lane_sync_leaves_an_active_empty_branch_alone(
     )
 
 
+def test_lane_sync_leaves_a_worktree_owned_by_an_unlabelled_task_alone(
+    fake_pueue: FakePueue,
+    fake_commands: dict[str, Any],
+    fake_wt: dict[str, Any],
+    fake_bd: FakeBd,
+    config: Config,
+    project_root: Path,
+    tmp_path: Path,
+) -> None:
+    project = load_project_adapter(project_root)
+    lane_path = tmp_path / "a"
+    fake_wt["trees"] = [tree("feature/packet/fx-1", lane_path, state="integrated")]
+    task_id = fake_pueue.add(
+        group="agent",
+        label="",
+        command=["agent"],
+        working_directory=lane_path,
+    )
+
+    synced = lanes.lane_sync(config, project)
+
+    assert synced["closed"] == []
+    assert synced["removed"] == []
+    assert fake_wt["removed"] == []
+    assert synced["remaining"][0]["reason"] == f"job {task_id} () is running"
+
+
 def test_lane_sync_leaves_an_active_lane_whose_base_merged_under_an_old_pr(
     fake_pueue: FakePueue,
     fake_commands: dict[str, Any],
