@@ -254,6 +254,11 @@ def _git_worktree(
     worktree = project_root.parent / "worktrees" / "lane"
     worktree.mkdir(parents=True)
     (worktree / ".git").write_text("gitdir: elsewhere\n")
+    (worktree / "marker").write_text("")
+    (worktree / ".agentctl").mkdir()
+    (worktree / ".agentctl" / "project.toml").write_text(
+        (project_root / ".agentctl" / "project.toml").read_text()
+    )
 
     def git(path: Path, *arguments: str, timeout: float = 60) -> str:
         if git_calls is not None:
@@ -278,6 +283,80 @@ def _git_worktree(
 
     monkeypatch.setattr(lanes, "_git", git)
     return worktree
+
+
+def test_lane_publish_uses_a_new_operation_from_the_lane_descriptor(
+    fake_commands: dict[str, Any],
+    fake_pueue: FakePueue,
+    fake_bd: FakeBd,
+    config: Config,
+    project_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    worktree = _git_worktree(monkeypatch, project_root, "feature/packet/fx-1")
+    descriptor = worktree / ".agentctl" / "project.toml"
+    descriptor_text = descriptor.read_text().replace(
+        '[operations.verify_quick]\ndescription = "Fixture quick verification"\n'
+        'exec = ["fixture-verify-quick"]\npool = "pytest"\nresult = "exit"\n'
+        'timeout_seconds = 120\n',
+        "",
+    )
+    descriptor.write_text(
+        descriptor_text
+        + '\n[operations.verify_quick]\n'
+        + 'description = "Lane-only quick verification"\n'
+        + 'exec = ["lane-verify-quick"]\n'
+        + 'pool = "pytest"\n'
+        + 'result = "exit"\n'
+        + 'timeout_seconds = 120\n'
+    )
+    fake_pueue.finish_when_waited(1, lambda fake: fake.succeed(1))
+
+    published = lanes.lane_publish(config, worktree)
+
+    assert published["verification"]["phase"] == "succeeded"
+    assert fake_pueue.added[0]["label"] == "fixture:verify_quick"
+    launch_input = read_launch(config, fake_pueue.task(1))
+    assert launch_input["argv"][-1] == "lane-verify-quick"
+
+
+def test_lane_publish_rejects_a_checkout_that_spoofs_project_identity(
+    fake_commands: dict[str, Any],
+    fake_pueue: FakePueue,
+    fake_bd: FakeBd,
+    config: Config,
+    project_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    worktree = _git_worktree(monkeypatch, project_root, "feature/packet/fx-1")
+    descriptor = worktree / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text().replace('id = "fixture"', 'id = "other"')
+    )
+
+    with pytest.raises(LaneError, match="does not match registered project fixture"):
+        lanes.lane_publish(config, worktree)
+
+    assert fake_pueue.added == []
+
+
+def test_lane_publish_rejects_a_worktree_outside_registered_repositories(
+    fake_commands: dict[str, Any],
+    fake_pueue: FakePueue,
+    fake_bd: FakeBd,
+    config: Config,
+    project_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    worktree = _git_worktree(monkeypatch, project_root, "feature/packet/fx-1")
+    monkeypatch.setattr(
+        lanes, "_project_root_of", lambda path: project_root.parent / "other"
+    )
+
+    with pytest.raises(LaneError, match="is not a configured project"):
+        lanes.lane_publish(config, worktree)
+
+    assert fake_pueue.added == []
 
 
 def test_lane_publish_pushes_opens_the_pr_under_the_bead_subject_and_arms_auto_merge(
