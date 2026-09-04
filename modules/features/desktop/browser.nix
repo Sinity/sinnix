@@ -237,13 +237,19 @@ mkFeatureModule {
             name = "browser-nav-edges";
             path = "${activityRoot}/browser-nav-edges";
             eventDriven = true;
-            requiredPayloadFields = [ "source_url" "target_url" ];
+            requiredPayloadFields = [
+              "source_url"
+              "target_url"
+            ];
           }
           {
             name = "reading-stack";
             path = "${activityRoot}/reading-stack";
             eventDriven = true;
-            requiredPayloadFields = [ "event" "url" ];
+            requiredPayloadFields = [
+              "event"
+              "url"
+            ];
           }
         ];
       };

@@ -54,7 +54,13 @@ in
         test -n '${toString hm.systemd.user.services.sinnix-nav-capture.Service.ExecStart}'
         test '${toString (lib.elem ".local/state/sinnix" evaluated.config.sinnix.persistence.home.directories)}' = 1
         test '${toString (navSurface.captures != [ ])}' = 1
-        test '${toString (lib.any (entry: lib.hasInfix "8767" (toString entry)) hm.systemd.user.services.sinnix-nav-capture.Service.Environment)}' = 1
+        test '${
+          toString (
+            lib.any (
+              entry: lib.hasInfix "8767" (toString entry)
+            ) hm.systemd.user.services.sinnix-nav-capture.Service.Environment
+          )
+        }' = 1
         touch "$out"
       '';
     };
