@@ -1050,18 +1050,14 @@ def _remaining_row(row: LaneRow, *, reason: str | None = None) -> dict[str, Any]
     }
 
 
-def _project_tasks(project: ProjectAdapter) -> list[Task]:
-    """The project's queue entries.
+def _queue_tasks(project: ProjectAdapter) -> list[Task]:
+    """All queue entries that may own one of the project's worktrees.
 
     Removing a worktree an agent is working in destroys uncommitted work, so a
     sweep that cannot see the queue does nothing at all.
     """
     try:
-        return [
-            task
-            for task in pueue.tasks().values()
-            if task.label.startswith(f"{project.project_id}:")
-        ]
+        return list(pueue.tasks().values())
     except PueueError as error:
         raise LaneError(f"pueue cannot say which lanes are active: {error}") from error
 
@@ -1096,7 +1092,7 @@ def lane_sync(
     reader = SubprocessBdReader(project.root)
     # Refuse an unreadable queue before the first GitHub call, not at the first
     # lane; the per-lane answer below is the one removal acts on.
-    _project_tasks(project)
+    _queue_tasks(project)
     for row in lane_rows(project):
         tree = row.worktree
         assert tree.branch is not None
@@ -1115,7 +1111,7 @@ def lane_sync(
                 continue
             # A lane can be started or rebased while the sweep works, so
             # ownership is read again here, under the lane's own lock.
-            active = _active_job(row, _project_tasks(project))
+            active = _active_job(row, _queue_tasks(project))
             if active is not None:
                 remaining.append(
                     _remaining_row(
