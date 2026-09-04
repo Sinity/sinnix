@@ -10,8 +10,10 @@ repeated here.
    descriptions and acceptance criteria as they stood at dispatch time, the
    worktree and branch, and the files in scope. Where the packet names atlas
    sheets, read them for orientation rather than re-deriving the area.
-2. **Verify your own work.** Focused runs are `devtools test <selection>`;
-   the static gate is `devtools verify --quick`. The affected and complete
+2. **Verify your own work.** Focused runs are `devtools test <selection>`.
+   Run the static gate with `lane verify`; it submits the declared
+   `verify_quick` operation to pueue and waits for that task. Do not invoke
+   `devtools verify --quick` directly inside a lane. The affected and complete
    test tiers run once, as declared jobs, after you finish; the harness
    refuses them inside a lane. Fix, test, iterate until green. Do not spawn
    review subagents — hosted PR review and the test oracle are the check.

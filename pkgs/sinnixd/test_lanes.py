@@ -219,7 +219,12 @@ def test_lane_rebase_refuses_without_a_worktree(
 
 
 def _git_worktree(
-    monkeypatch: pytest.MonkeyPatch, project_root: Path, branch: str, *, dirty: str = ""
+    monkeypatch: pytest.MonkeyPatch,
+    project_root: Path,
+    branch: str,
+    *,
+    dirty: str = "",
+    events: list[str] | None = None,
 ) -> Path:
     worktree = project_root.parent / "worktrees" / "lane"
     worktree.mkdir(parents=True)
@@ -233,6 +238,8 @@ def _git_worktree(
         if arguments[0] == "rev-parse":
             return str(project_root / ".git")
         if arguments[0] == "push":
+            if events is not None:
+                events.append("push")
             return ""
         raise AssertionError(arguments)
 
@@ -242,15 +249,36 @@ def _git_worktree(
 
 def test_lane_publish_pushes_opens_the_pr_under_the_bead_subject_and_arms_auto_merge(
     fake_commands: dict[str, Any],
+    fake_pueue: FakePueue,
     fake_bd: FakeBd,
     config: Config,
     project_root: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    worktree = _git_worktree(monkeypatch, project_root, "feature/packet/fx-1")
+    events: list[str] = []
+    worktree = _git_worktree(
+        monkeypatch, project_root, "feature/packet/fx-1", events=events
+    )
+
+    def finish_verification(fake: FakePueue) -> None:
+        assert events == []
+        fake.succeed(1)
+
+    fake_pueue.finish_when_waited(1, finish_verification)
 
     published = lanes.lane_publish(config, worktree)
 
+    assert fake_pueue.added[0]["label"] == "fixture:verify_quick"
+    assert fake_pueue.added[0]["command"][0] == "sinnixd-queue-run"
+    assert fake_pueue.added[0]["group"] == "pytest"
+    assert fake_pueue.added[0]["working_directory"] == worktree
+    assert fake_pueue.waited == [1]
+    assert events == ["push"]
+    launch_input = read_launch(config, fake_pueue.task(1))
+    assert launch_input["pool"] == "pytest"
+    assert launch_input["scope_unit"].startswith("sinnixd-pueue-pytest-")
+    assert published["verification"]["job_id"] == 1
+    assert published["verification"]["phase"] == "succeeded"
     create = next(
         call for call in fake_commands["calls"] if call[:3] == ["gh", "pr", "create"]
     )
@@ -264,6 +292,7 @@ def test_lane_publish_pushes_opens_the_pr_under_the_bead_subject_and_arms_auto_m
 
 def test_lane_publish_reuses_an_open_pr_and_reads_the_lane_body(
     fake_commands: dict[str, Any],
+    fake_pueue: FakePueue,
     fake_bd: FakeBd,
     config: Config,
     project_root: Path,
@@ -279,6 +308,7 @@ def test_lane_publish_reuses_an_open_pr_and_reads_the_lane_body(
         "headRefName": "feature/packet/fx-2",
         "autoMergeRequest": {"enabledAt": "x"},
     }
+    fake_pueue.finish_when_waited(1, lambda fake: fake.succeed(1))
 
     published = lanes.lane_publish(config, worktree)
 
@@ -291,6 +321,7 @@ def test_lane_publish_reuses_an_open_pr_and_reads_the_lane_body(
 
 def test_lane_publish_refuses_a_dirty_worktree_but_ignores_lane_artifacts(
     fake_commands: dict[str, Any],
+    fake_pueue: FakePueue,
     fake_bd: FakeBd,
     config: Config,
     project_root: Path,
@@ -310,6 +341,7 @@ def test_lane_publish_refuses_a_dirty_worktree_but_ignores_lane_artifacts(
 
 def test_lane_publish_needs_a_bead_or_a_title_for_a_foreign_branch(
     fake_commands: dict[str, Any],
+    fake_pueue: FakePueue,
     fake_bd: FakeBd,
     config: Config,
     project_root: Path,
@@ -319,12 +351,37 @@ def test_lane_publish_needs_a_bead_or_a_title_for_a_foreign_branch(
     with pytest.raises(LaneError, match="--bead or --title"):
         lanes.lane_publish(config, worktree)
 
+    fake_pueue.finish_when_waited(1, lambda fake: fake.succeed(1))
     published = lanes.lane_publish(config, worktree, title="chore: hand-written")
     create = next(
         call for call in fake_commands["calls"] if call[:3] == ["gh", "pr", "create"]
     )
     assert create[create.index("--title") + 1] == "chore: hand-written"
     assert published["bead"] is None
+
+
+def test_lane_publish_blocks_publication_when_quick_verification_fails(
+    fake_commands: dict[str, Any],
+    fake_pueue: FakePueue,
+    fake_bd: FakeBd,
+    config: Config,
+    project_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed pueue receipt must leave push and GitHub publication untouched."""
+    events: list[str] = []
+    worktree = _git_worktree(
+        monkeypatch, project_root, "feature/packet/fx-1", events=events
+    )
+    fake_pueue.finish_when_waited(1, lambda fake: fake.fail(1, exit_code=1))
+
+    with pytest.raises(LaneError, match="quick verification task 1 did not succeed"):
+        lanes.lane_publish(config, worktree)
+
+    assert fake_pueue.added[0]["label"] == "fixture:verify_quick"
+    assert fake_pueue.waited == [1]
+    assert events == []
+    assert fake_commands["calls"] == []
 
 
 def test_lane_sync_closes_and_removes_merged_lanes_and_reports_the_rest(

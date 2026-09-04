@@ -37,6 +37,12 @@ exec = ["check"]
 pool = "bulk"
 result = "exit"
 
+[operations.verify_quick]
+description = "Run the default checks before lane publication"
+exec = ["check"]
+pool = "bulk"
+result = "exit"
+
 [operations.check_heavy]
 description = "Run the heavy Sinnix check tier"
 exec = ["check-heavy"]
