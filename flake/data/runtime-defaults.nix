@@ -356,6 +356,58 @@ rec {
         CPUWeight = 100;
         IOWeight = 100;
       };
+      # Each pueue task is a transient scope in one of these slices. The
+      # reservations are fixed against the workstation's 32 GiB physical
+      # memory: app 6 GiB, session 5 GiB, desktop shell 512 MiB, and the
+      # remaining job plane is admitted by pool rather than free-RAM probes.
+      # Zero swap is deliberate for test/build pools: a hostile child must be
+      # killed at its own MemoryMax instead of making the desktop page.
+      sinnixd-pueue-agent = {
+        IOAccounting = true;
+        CPUWeight = 400;
+        IOWeight = 300;
+        MemoryHigh = "8G";
+        MemoryMax = "10G";
+        MemorySwapMax = "0";
+      };
+      sinnixd-pueue-pytest = {
+        IOAccounting = true;
+        CPUWeight = 20;
+        IOWeight = 20;
+        MemoryHigh = "6G";
+        MemoryMax = "8G";
+        MemorySwapMax = "0";
+        ManagedOOMMemoryPressure = "kill";
+        ManagedOOMMemoryPressureLimit = "50%";
+        ManagedOOMMemoryPressureDurationSec = "30s";
+      };
+      sinnixd-pueue-bulk = {
+        IOAccounting = true;
+        CPUWeight = 20;
+        IOWeight = 10;
+        MemoryHigh = "10G";
+        MemoryMax = "14G";
+        MemorySwapMax = "0";
+        ManagedOOMMemoryPressure = "kill";
+        ManagedOOMMemoryPressureLimit = "50%";
+        ManagedOOMMemoryPressureDurationSec = "30s";
+      };
+      sinnixd-pueue-normal = {
+        IOAccounting = true;
+        CPUWeight = 50;
+        IOWeight = 50;
+        MemoryHigh = "4G";
+        MemoryMax = "6G";
+        MemorySwapMax = "0";
+      };
+      sinnixd-pueue-interactive = {
+        IOAccounting = true;
+        CPUWeight = 100;
+        IOWeight = 100;
+        MemoryHigh = "2G";
+        MemoryMax = "4G";
+        MemorySwapMax = "0";
+      };
       gpu-runtime = {
         IOAccounting = true;
         CPUWeight = 20;

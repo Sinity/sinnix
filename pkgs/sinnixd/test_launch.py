@@ -33,6 +33,8 @@ def test_start_writes_the_launch_input_and_queues_the_wrapper_in_the_pool(
     written = json.loads(input_path.read_text())
     assert written["argv"] == ["env", "fixture-verify"]
     assert written["timeout_seconds"] == 120
+    assert written["pool"] == "pytest"
+    assert written["scope_unit"].startswith("sinnixd-pueue-pytest-")
     assert written["result_kind"] == "json"
     assert written["result_path"].endswith(".result")
     assert written["event_spool_path"] == str(config.event_spool)

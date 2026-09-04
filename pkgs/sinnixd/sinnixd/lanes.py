@@ -34,7 +34,7 @@ REBASE_OPERATION = "rebase"
 AGENT_GROUP = "agent"
 # The scope's slice: the job plane, where pueued's own tasks live, so an
 # agent's memory counts against the plane's budget and not the desktop's.
-AGENT_SLICE = "sinnixd-work.slice"
+AGENT_SLICE = "sinnixd-pueue-agent.slice"
 GH_TIMEOUT_SECONDS = 60
 PUSH_TIMEOUT_SECONDS = 2_400  # the push runs the repository's pre-push gate
 

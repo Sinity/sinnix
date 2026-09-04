@@ -13,6 +13,7 @@ import json
 import os
 import re
 import signal
+import subprocess
 import time
 import uuid
 from pathlib import Path
@@ -26,6 +27,7 @@ from .queue_run import (
     MAX_LOG_BYTES,
     MAX_RESULT_BYTES,
     REFUSED_EXIT_CODE,
+    scope_unit_for,
     TIMEOUT_EXIT_CODE,
 )
 
@@ -80,6 +82,8 @@ def enqueue(
         "job_id": reference,
         "project_id": project.project_id,
         "operation": operation,
+        "pool": group,
+        "scope_unit": scope_unit_for(reference, group),
         "kind": kind,
         "label": label,
         "argv": list(argv),
@@ -283,6 +287,24 @@ def cancel(config: Config, task_id: int) -> dict[str, Any]:
     """
     task = _task(task_id)
     pueue.kill(task_id)
+    reference = launch_reference(task)
+    if reference is not None:
+        input_path = config.inputs_dir / f"{reference}.json"
+        try:
+            launch_input = json.loads(input_path.read_text(encoding="utf-8"))
+            scope_unit = launch_input.get("scope_unit")
+        except (OSError, json.JSONDecodeError):
+            scope_unit = None
+        if isinstance(scope_unit, str):
+            try:
+                subprocess.run(
+                    ["systemctl", "--user", "stop", scope_unit],
+                    capture_output=True,
+                    check=False,
+                    timeout=10,
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                pass
     group_path = _artifact(config, task, ".log.pgid")
     if group_path is not None:
         try:

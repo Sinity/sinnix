@@ -84,7 +84,7 @@
           ${resolveFlakeDir}
           if [ "''${SINNIXD_PRINCIPAL:-}" = agent-control ] \
             && [ "''${SINNIXD_OPERATION:-}" != check ]; then
-            exec agentctl job start sinnix check --workspace "$_flake_dir" --wait
+            exec agentctl job start sinnix check --workspace "$_flake_dir" --wait -- "$@"
           fi
           exec 9>/tmp/sinnix-switch.lock
           if ! ${pkgs.util-linux}/bin/flock --nonblock 9; then
