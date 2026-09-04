@@ -149,6 +149,48 @@ def test_explicit_backend_model_effort_override_the_policy(project_root: Path) -
     ) == ("claude", "claude-opus-5", "medium")
 
 
+def test_codex_model_alias_resolves_before_dispatch(project_root: Path) -> None:
+    config = PacketConfig.load(project_root)
+
+    snapshot = compile_launch_snapshot(
+        "fx-solo",
+        project_id="fixture",
+        reader=reader(),
+        config=config,
+        model="luna",
+    )
+
+    assert snapshot.dimensions.backend == "codex"
+    assert snapshot.dimensions.model == "gpt-5.6-luna"
+
+
+def test_unknown_model_alias_is_rejected_with_valid_choices(project_root: Path) -> None:
+    config = PacketConfig.load(project_root)
+
+    with pytest.raises(PacketError, match=r"unknown model alias 'moon'.*luna"):
+        compile_launch_snapshot(
+            "fx-solo",
+            project_id="fixture",
+            reader=reader(),
+            config=config,
+            model="moon",
+        )
+
+
+def test_model_backend_mismatch_is_rejected_before_dispatch(project_root: Path) -> None:
+    config = PacketConfig.load(project_root)
+
+    with pytest.raises(PacketError, match="incompatible"):
+        compile_launch_snapshot(
+            "fx-solo",
+            project_id="fixture",
+            reader=reader(),
+            config=config,
+            backend="claude",
+            model="luna",
+        )
+
+
 def test_a_prompt_over_budget_is_refused(project_root: Path) -> None:
     config = PacketConfig.load(project_root)
     big = reader()

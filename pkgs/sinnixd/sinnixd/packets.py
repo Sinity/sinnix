@@ -32,6 +32,18 @@ DEFAULT_POLICY_MAP: dict[str, tuple[str, str]] = {
     "provider-neutral-capability-v1": ("codex", "gpt-5.6-luna"),
     "provider-pinned-v1": ("codex", "gpt-5.6-luna"),
 }
+MODEL_ALIASES: dict[str, tuple[str, str]] = {
+    "sol": ("codex", "gpt-5.6-sol"),
+    "terra": ("codex", "gpt-5.6-terra"),
+    "luna": ("codex", "gpt-5.6-luna"),
+}
+BACKEND_MODEL_PREFIXES = {
+    "codex": "gpt-",
+    "claude": "claude-",
+    "gemini": "gemini-",
+    "antigravity": "gemini-",
+    "grok": "grok-",
+}
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9._/-]+")
 _SUBJECT_PREFIXES = {"bug": "fix", "feature": "feat"}
 
@@ -216,6 +228,45 @@ class PacketConfig:
     def branch_for(self, bead_id: str) -> str:
         return f"{self.branch_prefix}/{_safe_name(bead_id)}"
 
+    def resolve_model(self, backend: str, model: str) -> str:
+        """Resolve a configured shorthand and reject known provider mismatches."""
+        aliases = dict(MODEL_ALIASES)
+        for configured_backend, configured_model in self.policy_map.values():
+            if configured_backend == "codex" and configured_model.startswith("gpt-"):
+                alias = configured_model.removeprefix("gpt-5.6-")
+                aliases.setdefault(alias, (configured_backend, configured_model))
+        valid = ", ".join(sorted(aliases))
+        if model in aliases:
+            alias_backend, resolved = aliases[model]
+            if backend != alias_backend:
+                raise PacketError(
+                    f"model alias {model!r} is incompatible with backend {backend!r}; "
+                    f"it requires backend {alias_backend!r}; "
+                    f"valid aliases: {valid}"
+                )
+            return resolved
+        if (
+            model in {value[1] for value in self.policy_map.values()}
+            or model == self.default_model
+        ):
+            resolved = model
+        elif not any(model.startswith(prefix) for prefix in BACKEND_MODEL_PREFIXES.values()):
+            raise PacketError(f"unknown model alias {model!r}; valid aliases: {valid}")
+        else:
+            resolved = model
+        expected_prefix = BACKEND_MODEL_PREFIXES.get(backend)
+        if expected_prefix is None:
+            valid_backends = ", ".join(sorted(BACKEND_MODEL_PREFIXES))
+            raise PacketError(
+                f"unsupported backend {backend!r}; valid backends: {valid_backends}"
+            )
+        known_model = any(
+            resolved.startswith(prefix) for prefix in BACKEND_MODEL_PREFIXES.values()
+        )
+        if known_model and not resolved.startswith(expected_prefix):
+            raise PacketError(f"model {resolved!r} is incompatible with backend {backend!r}")
+        return resolved
+
 
 @dataclass(frozen=True)
 class PacketDimensions:
@@ -314,10 +365,12 @@ def _policy_dimensions(
                 result.update(item for item in value if isinstance(item, str) and item)
         return tuple(sorted(result))
 
+    effective_backend = backend or policy_backend
+    effective_model = config.resolve_model(effective_backend, model or policy_model)
     return PacketDimensions(
         template_version=config.template_version,
-        backend=backend or policy_backend,
-        model=model or policy_model,
+        backend=effective_backend,
+        model=effective_model,
         effort=effort or declared_effort,
         model_policy=policy_name,
         verification_commands=values("verification_commands"),
