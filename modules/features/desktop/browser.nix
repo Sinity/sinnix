@@ -40,6 +40,8 @@ mkFeatureModule {
     }:
     let
       repoRoot = config.sinnix.paths.projectRoot;
+      activityRoot = config.sinnix.paths.activityRoot;
+      navigationPort = helpers.data.ports.browserNavigation;
       scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
     in
     {
@@ -64,6 +66,8 @@ mkFeatureModule {
           navCaptureExtension = pkgs.runCommand "sinnix-nav-capture-extension" { } ''
             mkdir -p "$out"
             cp -R ${../../../browser-extensions/nav-capture}/. "$out/"
+            substituteInPlace "$out/background.js" --replace-fail \
+              '127.0.0.1:8767' '127.0.0.1:${toString navigationPort}'
           '';
           chromeArgs = lib.concatStringsSep " " [
             "--disable-features=WaylandWpColorManagerV1"
@@ -186,6 +190,7 @@ mkFeatureModule {
               };
               Service = {
                 ExecStart = "${scriptPkgs.sinnix-nav-capture-daemon}/bin/sinnix-nav-capture-daemon";
+                Environment = [ "SINNIX_NAV_CAPTURE_PORT=${toString navigationPort}" ];
                 Restart = "on-failure";
               };
               Install.WantedBy = [ "graphical-session.target" ];
@@ -218,5 +223,29 @@ mkFeatureModule {
             mimeType = chromeDesktopMimeTypes;
           };
         };
+      sinnix.persistence.home.directories = [ ".local/state/sinnix" ];
+      sinnix.runtime.surfaces.sinnix-nav-capture = {
+        unit = "sinnix-nav-capture.service";
+        manager = "user";
+        resourceClass = "capture-runtime";
+        observe = {
+          enable = true;
+          restartable = true;
+        };
+        captures = [
+          {
+            name = "browser-nav-edges";
+            path = "${activityRoot}/browser-nav-edges";
+            eventDriven = true;
+            requiredPayloadFields = [ "source_url" "target_url" ];
+          }
+          {
+            name = "reading-stack";
+            path = "${activityRoot}/reading-stack";
+            eventDriven = true;
+            requiredPayloadFields = [ "event" "url" ];
+          }
+        ];
+      };
     };
 } args

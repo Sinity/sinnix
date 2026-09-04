@@ -1,4 +1,4 @@
-const ENDPOINT = "http://127.0.0.1:8766";
+const ENDPOINT = "http://127.0.0.1:8767";
 
 async function post(path, body) {
   const response = await fetch(`${ENDPOINT}${path}`, {

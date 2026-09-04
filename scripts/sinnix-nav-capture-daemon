@@ -1,6 +1,6 @@
 # @sinnix-package
 # description: Local HTTP receiver for browser provenance, reading-stack pushes, and selected-text agent actions
-# runtimeInputs: python3 @sinnix-capture
+# runtimeInputs: python3 @sinnix-capture @sinnix-reading-stack
 #!/usr/bin/env python3
 """sinnix-nav-capture-daemon: the local endpoint the nav-capture WebExtension
 POSTs to. Three routes:
@@ -23,7 +23,7 @@ POSTs to. Three routes:
                                    instruction, ts}. Written to the
                                    "browser-agent-actions" capture lane.
 
-Binds 127.0.0.1:8766 only (never 0.0.0.0) -- this is a same-machine
+Binds the configured loopback port only (never 0.0.0.0) -- this is a same-machine
 extension<->daemon channel, not a network service. Port chosen to sit next
 to polylogue's browser-extension receiver (127.0.0.1:8765) without
 colliding.
@@ -43,7 +43,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 CAPTURE_ROOT = os.environ.get("SINNIX_CAPTURE_ROOT", "/realm/data/activity")
 BIND_HOST = "127.0.0.1"
-BIND_PORT = 8766
+BIND_PORT = int(os.environ.get("SINNIX_NAV_CAPTURE_PORT", "8767"))
 
 
 def sinnix_capture_write(lane: str, payload: dict) -> None:

@@ -87,5 +87,10 @@
 
   # ── Other ────────────────────────────────────────────────────────────────
   chromeDevtools = 9222; # live Chrome remote-debugging port
+  polylogue = {
+    browserCapture = 8765;
+    api = 8766;
+  };
+  browserNavigation = 8767; # nav-capture extension -> sinnix receiver
   phoneStream = 8940; # persistent phone->prime telemetry push (tailscale0 only)
 }

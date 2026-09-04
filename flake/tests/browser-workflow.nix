@@ -46,9 +46,15 @@ in
           ];
       };
       evaluated = evalTestSpec system spec;
+      hm = hmFor evaluated.config;
+      navSurface = evaluated.config.sinnix.runtime.surfaces.sinnix-nav-capture;
     in
     {
       checks.browser-workflow = pkgs.runCommand "sinnix-browser-workflow" { } ''
+        test -n '${toString hm.systemd.user.services.sinnix-nav-capture.Service.ExecStart}'
+        test '${toString (lib.elem ".local/state/sinnix" evaluated.config.sinnix.persistence.home.directories)}' = 1
+        test '${toString (navSurface.captures != [ ])}' = 1
+        test '${toString (lib.any (entry: lib.hasInfix "8767" (toString entry)) hm.systemd.user.services.sinnix-nav-capture.Service.Environment)}' = 1
         touch "$out"
       '';
     };
