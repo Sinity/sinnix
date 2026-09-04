@@ -61,7 +61,6 @@ chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.removeAll(() => {
     chrome.contextMenus.create({ id: "defer-link", title: "Defer link", contexts: ["link"] });
     chrome.contextMenus.create({ id: "defer-link-with-note", title: "Defer link with note", contexts: ["link"] });
-    chrome.contextMenus.create({ id: "agent-action", title: "Ask agent about selection", contexts: ["selection"] });
   });
 });
 
@@ -76,16 +75,5 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     }
     post("/v1/reading-stack/push", payload).catch(() => {});
     return;
-  }
-  if (info.menuItemId === "agent-action") {
-    const instruction = await promptInPage(tab.id, "Instruction for agent");
-    if (instruction === null) return;
-    post("/v1/agent-action", {
-      page_url: info.pageUrl || tab.url || null,
-      page_title: tab.title || null,
-      selection_text: info.selectionText || "",
-      instruction,
-      ts: Date.now() / 1000,
-    }).catch(() => {});
   }
 });

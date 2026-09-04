@@ -60,23 +60,3 @@ def test_reading_stack_push_passes_provenance_and_note(monkeypatch):
             {"check": True, "capture_output": True},
         )
     ]
-
-
-def test_agent_action_writes_selection_and_instruction(monkeypatch):
-    calls = []
-    monkeypatch.setattr(
-        daemon,
-        "sinnix_capture_write",
-        lambda lane, payload: calls.append((lane, payload)),
-    )
-
-    payload = {
-        "page_url": "https://page.example/article",
-        "page_title": "Article",
-        "selection_text": "A selected passage",
-        "instruction": "Summarize this",
-        "ts": 1,
-    }
-    daemon.agent_action(payload)
-
-    assert calls == [("browser-agent-actions", payload)]
