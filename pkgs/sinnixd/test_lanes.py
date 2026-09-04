@@ -265,9 +265,7 @@ def _git_worktree(
         if arguments[0] == "rev-parse":
             return str(project_root / ".git")
         if arguments[0] == "ls-remote":
-            return (
-                f"{remote_head}\trefs/heads/{branch}\n" if remote_head else ""
-            )
+            return f"{remote_head}\trefs/heads/{branch}\n" if remote_head else ""
         if arguments[0] == "push":
             if events is not None:
                 events.append("push")
@@ -442,7 +440,9 @@ def test_lane_publish_refuses_when_the_remote_head_lease_is_rejected(
     with pytest.raises(LaneError, match="remote ref has changed"):
         lanes.lane_publish(config, worktree)
 
-    assert not any(call[:3] == ["gh", "pr", "create"] for call in fake_commands["calls"])
+    assert not any(
+        call[:3] == ["gh", "pr", "create"] for call in fake_commands["calls"]
+    )
     assert not any(call[:3] == ["gh", "pr", "merge"] for call in fake_commands["calls"])
 
 

@@ -1716,6 +1716,24 @@ def test_semantic_canary_exercises_catalog_and_project_list_envelopes(
     assert result["projects"] == 1
 
 
+def test_semantic_canary_reads_an_artifactized_project_list(tmp_path: Path) -> None:
+    cfg = dataclasses.replace(config(tmp_path), max_result_bytes=1_024)
+    cfg.projects.update(
+        {
+            f"project-{index}": ProjectConfig(
+                project_id=f"project-{index}",
+                path=tmp_path,
+                observer_read=True,
+            )
+            for index in range(40)
+        }
+    )
+
+    result = anyio.run(semantic_canary, cfg, "observer")
+
+    assert result["projects"] == 41
+
+
 def test_cli_exposes_catalog_hash_without_retired_profiles() -> None:
     assert parser().parse_args(["catalog-hash"]).command == "catalog-hash"
     assert parser().parse_args(["approval-check"]).command == "approval-check"

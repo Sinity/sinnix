@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 from pathlib import Path
@@ -15,6 +16,7 @@ from .cli_support import (
     build_request,
     catalog_display,
     invoke,
+    invoke_mcp,
 )
 from .config import GatewayConfig
 from .registry import REGISTRY
@@ -74,10 +76,8 @@ async def semantic_canary(
     config: GatewayConfig, principal_name: str
 ) -> dict[str, object]:
     """Exercise public MCP envelopes required for a cold operator session."""
-    from .cli_support import invoke_mcp
-
     catalog = await invoke_mcp(config, principal_name, "catalog", {})
-    catalog_data = catalog.get("data")
+    catalog_data = await _canary_data(config, principal_name, catalog)
     if (
         catalog.get("result", {}).get("outcome") != "ok"
         or catalog.get("result", {}).get("action") != "gateway.catalog"
@@ -99,10 +99,11 @@ async def semantic_canary(
         "query",
         {"action_name": "projects.list"},
     )
+    projects_data = await _canary_data(config, principal_name, projects)
     if (
         projects.get("result", {}).get("outcome") != "ok"
         or projects.get("result", {}).get("action") != "projects.list"
-        or not isinstance(projects.get("data", {}).get("projects"), list)
+        or not isinstance(projects_data.get("projects"), list)
     ):
         raise ValueError(
             "semantic canary projects.list did not return its typed envelope"
@@ -110,8 +111,60 @@ async def semantic_canary(
     return {
         "principal": principal_name,
         "catalog_actions": len(actions),
-        "projects": len(projects["data"]["projects"]),
+        "projects": len(projects_data["projects"]),
     }
+
+
+async def _canary_data(
+    config: GatewayConfig, principal_name: str, envelope: dict[str, Any]
+) -> dict[str, Any]:
+    data = envelope.get("data")
+    if not isinstance(data, dict):
+        return {}
+    artifact = data.get("artifact")
+    if data.get("truncated") is not True or not isinstance(artifact, dict):
+        return data
+    ref = artifact.get("ref")
+    if not isinstance(ref, str) or not ref.startswith("sinnix://artifacts/"):
+        raise ValueError("semantic canary result has no readable artifact")
+    artifact_id = ref.rsplit("/", 1)[-1]
+    chunks: list[bytes] = []
+    offset = 0
+    chunk_bytes = max(1, min(256, config.max_result_bytes // 16))
+    while True:
+        response = await invoke_mcp(
+            config,
+            principal_name,
+            "query",
+            {
+                "action_name": "artifacts.query",
+                "parameters": {
+                    "operation": "read",
+                    "artifact_id": artifact_id,
+                    "offset": offset,
+                    "max_bytes": chunk_bytes,
+                },
+            },
+        )
+        chunk = response.get("data")
+        if response.get("result", {}).get("outcome") != "ok" or not isinstance(
+            chunk, dict
+        ):
+            raise ValueError("semantic canary could not read result artifact")
+        encoded = chunk.get("base64")
+        if not isinstance(encoded, str):
+            raise ValueError("semantic canary artifact returned no bytes")
+        chunks.append(base64.b64decode(encoded, validate=True))
+        next_offset = chunk.get("next_offset")
+        if next_offset is None:
+            break
+        if not isinstance(next_offset, int) or next_offset <= offset:
+            raise ValueError("semantic canary artifact cursor did not advance")
+        offset = next_offset
+    materialized = json.loads(b"".join(chunks))
+    if not isinstance(materialized, dict):
+        raise ValueError("semantic canary artifact is not an object")
+    return materialized
 
 
 def parser() -> argparse.ArgumentParser:
