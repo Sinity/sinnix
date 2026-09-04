@@ -460,4 +460,6 @@ def test_a_descendant_that_will_not_exit_is_killed_with_the_scope(
     killed = [int(pid) for pid in re.findall(r"[0-9]+", "".join(reported))]
     assert killed, "the leaked descendant was neither waited out nor killed"
     assert not any(Path(f"/proc/{pid}").exists() for pid in killed)
-    assert cgroup_processes(scope_control_group(scope_unit_for(launch, "fixture"))) == []
+    assert (
+        cgroup_processes(scope_control_group(scope_unit_for(launch, "fixture"))) == []
+    )

@@ -35,7 +35,7 @@ Look for the verb before writing any procedure: `agentctl <verb> --help`.
 | start lanes for ready beads                | `agentctl refill <p> --limit N [--dry-run]`                         |
 | start one lane                             | `agentctl lane start <p> <bead> [--backend B --model M --effort E]` |
 | re-queue an agent into an existing lane    | `agentctl lane rebase <p> <bead> [--model M --effort E]`            |
-| publish an integrated product batch        | `agentctl lane publish <integration-worktree>`                     |
+| publish an integrated product batch        | `agentctl lane publish <integration-worktree>`                      |
 | close merged beads, remove their worktrees | `agentctl lane sync <p>`                                            |
 | run a declared operation                   | `agentctl job start <p> <operation> [--workspace <path>] [--wait]`  |
 | read a job                                 | `agentctl job get\|logs\|result <id>`                               |
