@@ -104,7 +104,9 @@ async def semantic_canary(
         or projects.get("result", {}).get("action") != "projects.list"
         or not isinstance(projects.get("data", {}).get("projects"), list)
     ):
-        raise ValueError("semantic canary projects.list did not return its typed envelope")
+        raise ValueError(
+            "semantic canary projects.list did not return its typed envelope"
+        )
     return {
         "principal": principal_name,
         "catalog_actions": len(actions),

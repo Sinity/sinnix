@@ -142,54 +142,56 @@ The private operator runtime key is the agenix secret `openai-tunnel-runtime-key
 5. Create or refresh the ChatGPT connector from that endpoint's tunnel, approve its exact tool snapshot, and invoke `status`, `catalog`, and a bounded project read.
 6. Record observed connector tool names and manifest hash for each enabled endpoint. This observation is required before claiming connector parity. Repeat the proof independently when the operator endpoint is provisioned and enabled.
 <!-- BEGIN GENERATED GATEWAY V2 REFERENCE -->
+
 ## Generated V2 reference
 
 This section is generated from the canonical gateway registry. Revision `v2-g3.0-pueue-jobs`, catalog SHA-256 `73967b9d691118482283e66b72ecb11faa84c0a62f2b15c4f0838787f9d5242f`.
 
 The full schemas and executable examples are in [the generated gateway reference](generated/agent-gateway-reference.md). The matching agent skill is [agent-gateway](../dots/_ai/skills/agent-gateway/SKILL.md).
 
-| Action | Verb | Owner | Route | Schema |
-| --- | --- | --- | --- | --- |
-| `gateway.status` | `status` | `gateway` | `observe.gateway_status` | [`sinnix://gateway/v2/actions/gateway.status`](sinnix://gateway/v2/actions/gateway.status) |
-| `gateway.catalog` | `catalog` | `registry` | `registry.search` | [`sinnix://gateway/v2/actions/gateway.catalog`](sinnix://gateway/v2/actions/gateway.catalog) |
-| `resources.get` | `get` | `resolver` | `resources.get` | [`sinnix://gateway/v2/actions/resources.get`](sinnix://gateway/v2/actions/resources.get) |
-| `projects.query` | `query` | `projects` | `projects.search` | [`sinnix://gateway/v2/actions/projects.query`](sinnix://gateway/v2/actions/projects.query) |
-| `beads.query` | `query` | `beads` | `beads.query` | [`sinnix://gateway/v2/actions/beads.query`](sinnix://gateway/v2/actions/beads.query) |
-| `projects.context` | `context` | `project-context` | `project_context.context` | [`sinnix://gateway/v2/actions/projects.context`](sinnix://gateway/v2/actions/projects.context) |
-| `audit.events` | `events` | `audit` | `audit.tail` | [`sinnix://gateway/v2/actions/audit.events`](sinnix://gateway/v2/actions/audit.events) |
-| `jobs.wait` | `wait` | `systemd-jobs` | `job.wait` | [`sinnix://gateway/v2/actions/jobs.wait`](sinnix://gateway/v2/actions/jobs.wait) |
-| `projects.change` | `change` | `projects` | `projects.change` | [`sinnix://gateway/v2/actions/projects.change`](sinnix://gateway/v2/actions/projects.change) |
-| `files.change` | `change` | `files` | `files.change` | [`sinnix://gateway/v2/actions/files.change`](sinnix://gateway/v2/actions/files.change) |
-| `beads.change` | `change` | `beads` | `beads.write` | [`sinnix://gateway/v2/actions/beads.change`](sinnix://gateway/v2/actions/beads.change) |
-| `beads.changeset` | `change` | `beads` | `beads.changeset` | [`sinnix://gateway/v2/actions/beads.changeset`](sinnix://gateway/v2/actions/beads.changeset) |
-| `beads.operate` | `operate` | `beads` | `beads.maintenance` | [`sinnix://gateway/v2/actions/beads.operate`](sinnix://gateway/v2/actions/beads.operate) |
-| `mcp.change` | `change` | `mcp-broker` | `mcp.call.write` | [`sinnix://gateway/v2/actions/mcp.change`](sinnix://gateway/v2/actions/mcp.change) |
-| `machine.operate` | `operate` | `ops-reducer` | `ops.actions.execute` | [`sinnix://gateway/v2/actions/machine.operate`](sinnix://gateway/v2/actions/machine.operate) |
-| `operations.run` | `run` | `systemd-jobs` | `job.start` | [`sinnix://gateway/v2/actions/operations.run`](sinnix://gateway/v2/actions/operations.run) |
-| `agent.for_bead` | `run` | `systemd-jobs` | `job.agent.start` | [`sinnix://gateway/v2/actions/agent.for_bead`](sinnix://gateway/v2/actions/agent.for_bead) |
-| `jobs.cancel` | `operate` | `systemd-jobs` | `job.cancel` | [`sinnix://gateway/v2/actions/jobs.cancel`](sinnix://gateway/v2/actions/jobs.cancel) |
-| `desktop.operate` | `operate` | `desktop` | `desktop.action` | [`sinnix://gateway/v2/actions/desktop.operate`](sinnix://gateway/v2/actions/desktop.operate) |
-| `terminals.operate` | `operate` | `terminals` | `terminals.action` | [`sinnix://gateway/v2/actions/terminals.operate`](sinnix://gateway/v2/actions/terminals.operate) |
-| `browser.operate` | `operate` | `browser` | `browser.action` | [`sinnix://gateway/v2/actions/browser.operate`](sinnix://gateway/v2/actions/browser.operate) |
-| `shell.run` | `run` | `systemd-jobs` | `job.shell.start` | [`sinnix://gateway/v2/actions/shell.run`](sinnix://gateway/v2/actions/shell.run) |
-| `projects.list` | `query` | `projects` | `projects.list` | [`sinnix://gateway/v2/actions/projects.list`](sinnix://gateway/v2/actions/projects.list) |
-| `projects.tree` | `query` | `projects` | `projects.tree` | [`sinnix://gateway/v2/actions/projects.tree`](sinnix://gateway/v2/actions/projects.tree) |
-| `projects.read` | `query` | `projects` | `projects.read` | [`sinnix://gateway/v2/actions/projects.read`](sinnix://gateway/v2/actions/projects.read) |
-| `projects.diff` | `query` | `projects` | `projects.diff` | [`sinnix://gateway/v2/actions/projects.diff`](sinnix://gateway/v2/actions/projects.diff) |
-| `machine.query` | `query` | `machine` | `observe.machine_query` | [`sinnix://gateway/v2/actions/machine.query`](sinnix://gateway/v2/actions/machine.query) |
-| `capabilities.query` | `query` | `capability-index` | `capability_index.query` | [`sinnix://gateway/v2/actions/capabilities.query`](sinnix://gateway/v2/actions/capabilities.query) |
-| `mcp.query` | `query` | `mcp-broker` | `mcp.call.read` | [`sinnix://gateway/v2/actions/mcp.query`](sinnix://gateway/v2/actions/mcp.query) |
-| `desktop.query` | `query` | `desktop` | `desktop.read` | [`sinnix://gateway/v2/actions/desktop.query`](sinnix://gateway/v2/actions/desktop.query) |
-| `terminals.query` | `query` | `terminals` | `terminals.read` | [`sinnix://gateway/v2/actions/terminals.query`](sinnix://gateway/v2/actions/terminals.query) |
-| `browser.query` | `query` | `browser` | `browser.read` | [`sinnix://gateway/v2/actions/browser.query`](sinnix://gateway/v2/actions/browser.query) |
-| `files.query` | `query` | `files` | `files.read` | [`sinnix://gateway/v2/actions/files.query`](sinnix://gateway/v2/actions/files.query) |
-| `sessions.query` | `query` | `sessions` | `sessions.query` | [`sinnix://gateway/v2/actions/sessions.query`](sinnix://gateway/v2/actions/sessions.query) |
-| `memory.query` | `query` | `memory` | `memory.query` | [`sinnix://gateway/v2/actions/memory.query`](sinnix://gateway/v2/actions/memory.query) |
-| `timeline.query` | `query` | `timeline` | `timeline.query` | [`sinnix://gateway/v2/actions/timeline.query`](sinnix://gateway/v2/actions/timeline.query) |
-| `artifacts.query` | `query` | `artifacts` | `artifacts.query` | [`sinnix://gateway/v2/actions/artifacts.query`](sinnix://gateway/v2/actions/artifacts.query) |
-| `audit.verify` | `query` | `audit` | `audit.verify` | [`sinnix://gateway/v2/actions/audit.verify`](sinnix://gateway/v2/actions/audit.verify) |
-| `captures.query` | `query` | `captures` | `captures.query` | [`sinnix://gateway/v2/actions/captures.query`](sinnix://gateway/v2/actions/captures.query) |
-| `jobs.query` | `query` | `systemd-jobs` | `job.list` | [`sinnix://gateway/v2/actions/jobs.query`](sinnix://gateway/v2/actions/jobs.query) |
+| Action               | Verb      | Owner              | Route                     | Schema                                                                                             |
+| -------------------- | --------- | ------------------ | ------------------------- | -------------------------------------------------------------------------------------------------- |
+| `gateway.status`     | `status`  | `gateway`          | `observe.gateway_status`  | [`sinnix://gateway/v2/actions/gateway.status`](sinnix://gateway/v2/actions/gateway.status)         |
+| `gateway.catalog`    | `catalog` | `registry`         | `registry.search`         | [`sinnix://gateway/v2/actions/gateway.catalog`](sinnix://gateway/v2/actions/gateway.catalog)       |
+| `resources.get`      | `get`     | `resolver`         | `resources.get`           | [`sinnix://gateway/v2/actions/resources.get`](sinnix://gateway/v2/actions/resources.get)           |
+| `projects.query`     | `query`   | `projects`         | `projects.search`         | [`sinnix://gateway/v2/actions/projects.query`](sinnix://gateway/v2/actions/projects.query)         |
+| `beads.query`        | `query`   | `beads`            | `beads.query`             | [`sinnix://gateway/v2/actions/beads.query`](sinnix://gateway/v2/actions/beads.query)               |
+| `projects.context`   | `context` | `project-context`  | `project_context.context` | [`sinnix://gateway/v2/actions/projects.context`](sinnix://gateway/v2/actions/projects.context)     |
+| `audit.events`       | `events`  | `audit`            | `audit.tail`              | [`sinnix://gateway/v2/actions/audit.events`](sinnix://gateway/v2/actions/audit.events)             |
+| `jobs.wait`          | `wait`    | `systemd-jobs`     | `job.wait`                | [`sinnix://gateway/v2/actions/jobs.wait`](sinnix://gateway/v2/actions/jobs.wait)                   |
+| `projects.change`    | `change`  | `projects`         | `projects.change`         | [`sinnix://gateway/v2/actions/projects.change`](sinnix://gateway/v2/actions/projects.change)       |
+| `files.change`       | `change`  | `files`            | `files.change`            | [`sinnix://gateway/v2/actions/files.change`](sinnix://gateway/v2/actions/files.change)             |
+| `beads.change`       | `change`  | `beads`            | `beads.write`             | [`sinnix://gateway/v2/actions/beads.change`](sinnix://gateway/v2/actions/beads.change)             |
+| `beads.changeset`    | `change`  | `beads`            | `beads.changeset`         | [`sinnix://gateway/v2/actions/beads.changeset`](sinnix://gateway/v2/actions/beads.changeset)       |
+| `beads.operate`      | `operate` | `beads`            | `beads.maintenance`       | [`sinnix://gateway/v2/actions/beads.operate`](sinnix://gateway/v2/actions/beads.operate)           |
+| `mcp.change`         | `change`  | `mcp-broker`       | `mcp.call.write`          | [`sinnix://gateway/v2/actions/mcp.change`](sinnix://gateway/v2/actions/mcp.change)                 |
+| `machine.operate`    | `operate` | `ops-reducer`      | `ops.actions.execute`     | [`sinnix://gateway/v2/actions/machine.operate`](sinnix://gateway/v2/actions/machine.operate)       |
+| `operations.run`     | `run`     | `systemd-jobs`     | `job.start`               | [`sinnix://gateway/v2/actions/operations.run`](sinnix://gateway/v2/actions/operations.run)         |
+| `agent.for_bead`     | `run`     | `systemd-jobs`     | `job.agent.start`         | [`sinnix://gateway/v2/actions/agent.for_bead`](sinnix://gateway/v2/actions/agent.for_bead)         |
+| `jobs.cancel`        | `operate` | `systemd-jobs`     | `job.cancel`              | [`sinnix://gateway/v2/actions/jobs.cancel`](sinnix://gateway/v2/actions/jobs.cancel)               |
+| `desktop.operate`    | `operate` | `desktop`          | `desktop.action`          | [`sinnix://gateway/v2/actions/desktop.operate`](sinnix://gateway/v2/actions/desktop.operate)       |
+| `terminals.operate`  | `operate` | `terminals`        | `terminals.action`        | [`sinnix://gateway/v2/actions/terminals.operate`](sinnix://gateway/v2/actions/terminals.operate)   |
+| `browser.operate`    | `operate` | `browser`          | `browser.action`          | [`sinnix://gateway/v2/actions/browser.operate`](sinnix://gateway/v2/actions/browser.operate)       |
+| `shell.run`          | `run`     | `systemd-jobs`     | `job.shell.start`         | [`sinnix://gateway/v2/actions/shell.run`](sinnix://gateway/v2/actions/shell.run)                   |
+| `projects.list`      | `query`   | `projects`         | `projects.list`           | [`sinnix://gateway/v2/actions/projects.list`](sinnix://gateway/v2/actions/projects.list)           |
+| `projects.tree`      | `query`   | `projects`         | `projects.tree`           | [`sinnix://gateway/v2/actions/projects.tree`](sinnix://gateway/v2/actions/projects.tree)           |
+| `projects.read`      | `query`   | `projects`         | `projects.read`           | [`sinnix://gateway/v2/actions/projects.read`](sinnix://gateway/v2/actions/projects.read)           |
+| `projects.diff`      | `query`   | `projects`         | `projects.diff`           | [`sinnix://gateway/v2/actions/projects.diff`](sinnix://gateway/v2/actions/projects.diff)           |
+| `machine.query`      | `query`   | `machine`          | `observe.machine_query`   | [`sinnix://gateway/v2/actions/machine.query`](sinnix://gateway/v2/actions/machine.query)           |
+| `capabilities.query` | `query`   | `capability-index` | `capability_index.query`  | [`sinnix://gateway/v2/actions/capabilities.query`](sinnix://gateway/v2/actions/capabilities.query) |
+| `mcp.query`          | `query`   | `mcp-broker`       | `mcp.call.read`           | [`sinnix://gateway/v2/actions/mcp.query`](sinnix://gateway/v2/actions/mcp.query)                   |
+| `desktop.query`      | `query`   | `desktop`          | `desktop.read`            | [`sinnix://gateway/v2/actions/desktop.query`](sinnix://gateway/v2/actions/desktop.query)           |
+| `terminals.query`    | `query`   | `terminals`        | `terminals.read`          | [`sinnix://gateway/v2/actions/terminals.query`](sinnix://gateway/v2/actions/terminals.query)       |
+| `browser.query`      | `query`   | `browser`          | `browser.read`            | [`sinnix://gateway/v2/actions/browser.query`](sinnix://gateway/v2/actions/browser.query)           |
+| `files.query`        | `query`   | `files`            | `files.read`              | [`sinnix://gateway/v2/actions/files.query`](sinnix://gateway/v2/actions/files.query)               |
+| `sessions.query`     | `query`   | `sessions`         | `sessions.query`          | [`sinnix://gateway/v2/actions/sessions.query`](sinnix://gateway/v2/actions/sessions.query)         |
+| `memory.query`       | `query`   | `memory`           | `memory.query`            | [`sinnix://gateway/v2/actions/memory.query`](sinnix://gateway/v2/actions/memory.query)             |
+| `timeline.query`     | `query`   | `timeline`         | `timeline.query`          | [`sinnix://gateway/v2/actions/timeline.query`](sinnix://gateway/v2/actions/timeline.query)         |
+| `artifacts.query`    | `query`   | `artifacts`        | `artifacts.query`         | [`sinnix://gateway/v2/actions/artifacts.query`](sinnix://gateway/v2/actions/artifacts.query)       |
+| `audit.verify`       | `query`   | `audit`            | `audit.verify`            | [`sinnix://gateway/v2/actions/audit.verify`](sinnix://gateway/v2/actions/audit.verify)             |
+| `captures.query`     | `query`   | `captures`         | `captures.query`          | [`sinnix://gateway/v2/actions/captures.query`](sinnix://gateway/v2/actions/captures.query)         |
+| `jobs.query`         | `query`   | `systemd-jobs`     | `job.list`                | [`sinnix://gateway/v2/actions/jobs.query`](sinnix://gateway/v2/actions/jobs.query)                 |
 
 Direct-owner fallback semantics: `bd 1.1.0-dev` uses the canonical standalone Dolt workspace resolved through the canonical worktree and `.beads/redirect`; Dolt remains authoritative, JSONL is an optional export, and snapshot publication is explicit through `beads.operate` with `snapshot.publish`.
+
 <!-- END GENERATED GATEWAY V2 REFERENCE -->
