@@ -40,7 +40,7 @@ result = "exit"
 [operations.verify_quick]
 description = "Run the default checks before lane publication"
 exec = ["check"]
-pool = "bulk"
+pool = "normal"
 result = "exit"
 
 [operations.check_heavy]

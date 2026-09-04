@@ -131,3 +131,19 @@ def test_memory_pressure_keeps_agent_admissible(monkeypatch) -> None:
 
     assert calls == [("pause", "normal")]
     assert result["action"] == "closed"
+
+
+def test_memory_closure_continues_after_io_targets_are_closed(monkeypatch) -> None:
+    result, calls = _tick(
+        monkeypatch,
+        {"io_full_avg60": 30.0, "memory_full_avg60": 30.0},
+        {
+            "agent": "Running",
+            "pytest": "Paused",
+            "normal": "Running",
+            "bulk": "Paused",
+        },
+    )
+
+    assert calls == [("pause", "normal")]
+    assert result["signal"] == "io+memory"
