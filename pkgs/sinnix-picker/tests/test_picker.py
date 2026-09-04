@@ -56,18 +56,24 @@ def test_duplicate_labels_select_the_chosen_row(monkeypatch):
 
 
 def test_gather_deduplicates_urls_across_sources(monkeypatch):
-    monkeypatch.setattr(picker, "load_reading_stack", lambda: [
-        picker.Entry("stack", "Queued", "https://same.example")
-    ])
+    monkeypatch.setattr(
+        picker,
+        "load_reading_stack",
+        lambda: [picker.Entry("stack", "Queued", "https://same.example")],
+    )
     monkeypatch.setattr(picker, "load_recent_dirs", lambda: [])
     monkeypatch.setattr(picker, "load_clipboard", lambda: [])
-    monkeypatch.setattr(picker, "load_chrome_bookmarks", lambda: [
-        picker.Entry("mark", "Bookmark", "https://same.example")
-    ])
+    monkeypatch.setattr(
+        picker,
+        "load_chrome_bookmarks",
+        lambda: [picker.Entry("mark", "Bookmark", "https://same.example")],
+    )
     monkeypatch.setattr(picker, "load_raindrop", lambda: [])
-    monkeypatch.setattr(picker, "load_history", lambda: [
-        picker.Entry("hist", "History", "https://other.example")
-    ])
+    monkeypatch.setattr(
+        picker,
+        "load_history",
+        lambda: [picker.Entry("hist", "History", "https://other.example")],
+    )
 
     assert picker.gather() == [
         picker.Entry("stack", "Queued", "https://same.example"),
