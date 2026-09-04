@@ -44,6 +44,12 @@ class LaneError(RuntimeError):
     """A lane step agentctl refuses; the external tools' own refusals carry through."""
 
 
+def _auto_merge_unavailable(error: LaneError) -> bool:
+    """Recognize GitHub's refusal when repository rules cannot support auto-merge."""
+    message = str(error).lower()
+    return "protected branch rules are not configured" in message
+
+
 def _run(argv: Sequence[str], *, cwd: Path, timeout: float = GH_TIMEOUT_SECONDS) -> str:
     try:
         completed = subprocess.run(
@@ -303,7 +309,7 @@ def lane_publish(
     title: str | None = None,
     body_file: Path | None = None,
 ) -> dict[str, Any]:
-    """Push the branch, open the PR under the bead's subject, arm auto-merge."""
+    """Push the branch, open the PR, and report how it can reach merge."""
     worktree = worktree.resolve()
     if not (worktree / ".git").exists():
         raise LaneError(f"{worktree} is not a Git worktree")
@@ -380,8 +386,17 @@ def lane_publish(
     number = pull.get("number")
     if not isinstance(number, int):
         raise LaneError("gh pr view published no PR number")
-    if not pull.get("autoMergeRequest"):
-        _run(["gh", "pr", "merge", str(number), "--auto", "--squash"], cwd=worktree)
+    auto_merge = bool(pull.get("autoMergeRequest"))
+    next_action = "wait for merge"
+    if not auto_merge:
+        try:
+            _run(["gh", "pr", "merge", str(number), "--auto", "--squash"], cwd=worktree)
+        except LaneError as error:
+            if not _auto_merge_unavailable(error):
+                raise
+            next_action = f"gh pr merge {number} --squash"
+        else:
+            auto_merge = True
     return {
         "branch": branch,
         "bead": bead_id,
@@ -389,7 +404,8 @@ def lane_publish(
         "pr": number,
         "url": pull.get("url"),
         "created": created,
-        "auto_merge": True,
+        "auto_merge": auto_merge,
+        "next_action": next_action,
         "verification": verification,
     }
 
