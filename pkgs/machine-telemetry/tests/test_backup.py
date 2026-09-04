@@ -158,3 +158,17 @@ def test_immutable_snapshot_source_rejects_wal_sidecar(tmp_path: Path) -> None:
     )
     assert result.returncode != 0
     assert "must not have a WAL" in result.stderr
+
+
+def test_immutable_snapshot_source_accepts_empty_wal_sidecar(tmp_path: Path) -> None:
+    source = tmp_path / "telemetry.sqlite"
+    seed_database(source)
+    Path(f"{source}-wal").write_bytes(b"")
+
+    result = subprocess.run(
+        [str(SCRIPT), "--immutable-source", str(source), str(tmp_path / "out.zst")],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
