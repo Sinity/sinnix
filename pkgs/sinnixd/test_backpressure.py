@@ -49,6 +49,27 @@ def test_io_closure_stays_until_io_below_hysteresis(monkeypatch) -> None:
     assert result["action"] == "hold"
 
 
+def test_io_closure_reopens_when_current_pressure_recovers(monkeypatch) -> None:
+    result, calls = _tick(
+        monkeypatch,
+        {
+            "io_full_avg10": 2.0,
+            "io_full_avg60": 30.0,
+            "memory_full_avg10": 1.0,
+            "memory_full_avg60": 1.0,
+        },
+        {
+            "agent": "Running",
+            "pytest": "Paused",
+            "normal": "Running",
+            "bulk": "Paused",
+        },
+    )
+
+    assert calls == [("resume", "pytest")]
+    assert result["action"] == "opened"
+
+
 def test_memory_closure_stays_until_memory_below_hysteresis(monkeypatch) -> None:
     result, calls = _tick(
         monkeypatch,
