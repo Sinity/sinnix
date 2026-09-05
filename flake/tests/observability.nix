@@ -9,11 +9,14 @@
 { inputs, ... }:
 {
   perSystem =
-    { system, ... }:
+    {
+      system,
+      sinnixScriptRegistry,
+      ...
+    }:
     let
       pkgs = inputs.nixpkgs.legacyPackages.${system};
-      scriptRegistry = import ../scripts.nix { inherit inputs pkgs; };
-      sinnixObserve = scriptRegistry.packageSet.sinnix-observe;
+      sinnixObserve = sinnixScriptRegistry.packageSet.sinnix-observe;
 
       sinnixObserveRuntime =
         pkgs.runCommand "sinnix-observe-runtime-check"
