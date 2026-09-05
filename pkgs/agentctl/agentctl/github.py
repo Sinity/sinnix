@@ -12,7 +12,9 @@ import subprocess
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-GH_TIMEOUT_SECONDS = 60
+from . import gitcmd
+from .limits import CALL_TIMEOUT_SECONDS
+
 _PR_FIELDS = (
     "number,url,title,state,isDraft,mergeable,headRefName,headRefOid,baseRefName,"
     "mergeCommit,autoMergeRequest,statusCheckRollup,reviewDecision,updatedAt"
@@ -32,7 +34,9 @@ class GithubError(RuntimeError):
     """gh refused a request or published output this module cannot read."""
 
 
-def _run(argv: Sequence[str], *, cwd: Path, timeout: float = GH_TIMEOUT_SECONDS) -> str:
+def _run(
+    argv: Sequence[str], *, cwd: Path, timeout: float = CALL_TIMEOUT_SECONDS
+) -> str:
     try:
         completed = subprocess.run(
             list(argv), cwd=cwd, capture_output=True, text=True, timeout=timeout
@@ -242,20 +246,21 @@ def push_branch(
     root: Path, branch: str, *, sha: str, lease: str | None, timeout: float = 2_400
 ) -> None:
     """Push ``sha`` to ``origin/<branch>``, leasing on the head last observed there."""
-    arguments = ["git", "-C", str(root), "push"]
-    if lease is None:
-        arguments.append(f"--force-with-lease=refs/heads/{branch}:")
-    else:
-        arguments.append(f"--force-with-lease=refs/heads/{branch}:{lease}")
-    arguments.extend(("origin", f"{sha}:refs/heads/{branch}"))
-    _run(arguments, cwd=root, timeout=timeout)
+    gitcmd.git(
+        root,
+        "push",
+        f"--force-with-lease=refs/heads/{branch}:{lease or ''}",
+        "origin",
+        f"{sha}:refs/heads/{branch}",
+        timeout=timeout,
+        error=GithubError,
+    )
 
 
 def remote_head(root: Path, branch: str) -> str | None:
     """The remote branch's head, or None when the branch does not exist there."""
-    output = _run(
-        ["git", "-C", str(root), "ls-remote", "origin", f"refs/heads/{branch}"],
-        cwd=root,
+    output = gitcmd.git(
+        root, "ls-remote", "origin", f"refs/heads/{branch}", error=GithubError
     )
     rows = output.split()
     if not rows:

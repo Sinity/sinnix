@@ -14,3 +14,6 @@ agentctl-run = "agentctl.run:main"
 
 [tool.setuptools.packages.find]
 include = ["agentctl*"]
+
+[tool.setuptools.package-data]
+"agentctl.prompts" = ["*.md"]

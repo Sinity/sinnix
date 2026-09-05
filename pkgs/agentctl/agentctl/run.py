@@ -41,6 +41,8 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Mapping, Sequence
 
 from . import pueue
+from .launch_input import QueueInputError, read_input
+from .limits import SYSTEMCTL_TIMEOUT_SECONDS
 from .pueue import PueueError
 
 # The bounded artifacts a queued command may leave behind. A command that
@@ -70,8 +72,6 @@ class Outcome(str, Enum):
     SLOT_OCCUPIED = "slot_occupied"
 
 
-RESULT_KINDS = frozenset({"exit", "json", "pytest", "last-message"})
-POOL_NAME = re.compile(r"[a-z][a-z0-9-]{0,63}\Z")
 POOL_SLICE_PREFIX = "agentctl"
 # The pools with a declared slice policy. Any other pueue group (a project's
 # landing group, a fixture) runs under the normal slice.
@@ -80,104 +80,9 @@ DEFAULT_SLICE_POOL = "normal"
 RUN_EXECUTABLE = "agentctl-run"
 DESCRIPTION_PREFIX = "agentctl"
 
-# The unit settings agentctl passes through to `systemd-run -p`. Each one only
-# bounds what the workload may consume, so a launch input can limit its own
-# task and nothing else: no capability, no namespace, no credential, no
-# execution setting is reachable from here.
-UNIT_PROPERTIES = frozenset(
-    {
-        "MemoryMax",
-        "MemoryHigh",
-        "MemorySwapMax",
-        "MemoryZSwapMax",
-        "TasksMax",
-        "CPUWeight",
-        "IOWeight",
-    }
-)
-UNIT_PROPERTY_VALUE = re.compile(r"(infinity|[0-9]+[KMGTPE]?)\Z")
-
 # The bytes of a unit name kept for the launch input's own stem. Unit names
 # are bounded, and the prefix, the pool and the digest come first.
 UNIT_STEM_BYTES = 100
-SYSTEMCTL_TIMEOUT_SECONDS = 30
-
-_REQUIRED_FIELDS = (
-    "job_id",
-    "project_id",
-    "operation",
-    "argv",
-    "environment",
-    "working_directory",
-    "timeout_seconds",
-    "result_kind",
-    "log_path",
-)
-
-
-class QueueInputError(ValueError):
-    """The private launch input is absent, malformed, or not this contract."""
-
-
-def _read_input(path: Path) -> dict[str, Any]:
-    try:
-        raw = path.read_text(encoding="utf-8")
-    except OSError as error:
-        raise QueueInputError(f"launch input is unreadable: {error}") from error
-    try:
-        value = json.loads(raw)
-    except json.JSONDecodeError as error:
-        raise QueueInputError("launch input is not JSON") from error
-    if not isinstance(value, dict):
-        raise QueueInputError("launch input is not an object")
-    missing = [field for field in _REQUIRED_FIELDS if field not in value]
-    if missing:
-        raise QueueInputError(f"launch input omits {', '.join(sorted(missing))}")
-    argv = value["argv"]
-    if (
-        not isinstance(argv, list)
-        or not argv
-        or not all(isinstance(item, str) for item in argv)
-    ):
-        raise QueueInputError("launch input argv must be a non-empty list of strings")
-    environment = value["environment"]
-    if not isinstance(environment, dict) or not all(
-        isinstance(key, str) and isinstance(item, str)
-        for key, item in environment.items()
-    ):
-        raise QueueInputError("launch input environment must be a string map")
-    if value["result_kind"] not in RESULT_KINDS:
-        raise QueueInputError(f"unknown result kind: {value['result_kind']!r}")
-    timeout = value["timeout_seconds"]
-    if not isinstance(timeout, int) or isinstance(timeout, bool) or timeout <= 0:
-        raise QueueInputError("launch input timeout_seconds must be a positive integer")
-    pool = value.get("pool")
-    if pool is not None and (
-        not isinstance(pool, str) or POOL_NAME.fullmatch(pool) is None
-    ):
-        raise QueueInputError("launch input pool must be a lowercase pueue group name")
-    properties = value.get("scope_properties")
-    if properties is not None and (
-        not isinstance(properties, list)
-        or not all(supported_unit_property(item) for item in properties)
-    ):
-        raise QueueInputError(
-            "launch input scope_properties must be "
-            f"{'/'.join(sorted(UNIT_PROPERTIES))} settings"
-        )
-    return value
-
-
-def supported_unit_property(value: object) -> bool:
-    """Whether a launch input may set this on its own unit."""
-    if not isinstance(value, str):
-        return False
-    name, separator, size = value.partition("=")
-    return bool(
-        separator
-        and name in UNIT_PROPERTIES
-        and UNIT_PROPERTY_VALUE.fullmatch(size) is not None
-    )
 
 
 def unit_pool(group: str | None) -> str | None:
@@ -595,7 +500,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
     parser.add_argument("launch_input")
     parsed = parser.parse_args(arguments)
     try:
-        launch = _read_input(Path(parsed.launch_input))
+        launch = read_input(Path(parsed.launch_input))
     except QueueInputError as error:
         print(str(error), file=sys.stderr)
         return REFUSED_EXIT_CODE

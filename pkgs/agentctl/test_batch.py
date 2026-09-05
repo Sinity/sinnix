@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from agentctl import batch, github, launch, worktrunk
+from agentctl import batch, gitcmd, github, launch, manifest, start, worktrunk
 from agentctl.batch import BatchError, BatchRefusal
 from agentctl.config import Config
 from agentctl.projects import ProjectAdapter, load_project_adapter
@@ -87,7 +87,13 @@ class FakeGit:
     off_base: set[str] = field(default_factory=set)
     ancestry: list[tuple[str, str]] = field(default_factory=list)
 
-    def __call__(self, path: Path, *arguments: str, timeout: float = 60) -> str:
+    def __call__(
+        self,
+        path: Path,
+        *arguments: str,
+        timeout: float = 60,
+        error: type[Exception] = BatchError,
+    ) -> str:
         verb = arguments[0]
         if verb == "fetch":
             return ""
@@ -102,13 +108,13 @@ class FakeGit:
                 )
             return BASE
         if verb == "merge" and arguments[1] == "--abort":
-            raise BatchError("git merge: no merge to abort")
+            raise error("git merge: no merge to abort")
         if verb == "merge":
             branch = arguments[-1]
             self.merges.append(branch)
             if branch in self.conflict_on:
                 self.conflict_on.discard(branch)
-                raise BatchError("git merge: CONFLICT (content)")
+                raise error("git merge: CONFLICT (content)")
             return ""
         if verb == "reset":
             self.resets.append(arguments[-1])
@@ -127,7 +133,7 @@ class FakeGit:
         if verb == "push":
             if self.push_rejects:
                 self.push_rejects -= 1
-                raise BatchError(f"git push: {self.push_rejection}")
+                raise error(f"git push: {self.push_rejection}")
             self.pushes.append(arguments)
             return ""
         raise AssertionError(arguments)
@@ -246,7 +252,7 @@ def harness(
     git = FakeGit()
     wt = FakeWorktrunk()
     fake_pueue.groups["fixture-land"] = 1
-    monkeypatch.setattr(batch, "_git", git)
+    monkeypatch.setattr(gitcmd, "git", git)
     monkeypatch.setattr(worktrunk, "worktrunk_find", wt.find)
     monkeypatch.setattr(worktrunk, "worktrunk_create", wt.create)
     monkeypatch.setattr(worktrunk, "worktrunk_remove", wt.remove)
@@ -341,11 +347,11 @@ def test_start_claims_creates_worktrees_and_queues_workers_then_the_landing(
         "land",
         run["run_id"],
     ]
-    manifest = json.loads(
-        batch.manifest_path(harness.config, run["run_id"]).read_text()
+    stored = json.loads(
+        manifest.manifest_path(harness.config, run["run_id"]).read_text()
     )
-    assert manifest["workers"][0]["task_id"] == lead["task_id"]
-    assert manifest["workers"][0]["claimed_beads"] == ["fx-lead", "fx-member"]
+    assert stored["workers"][0]["task_id"] == lead["task_id"]
+    assert stored["workers"][0]["claimed_beads"] == ["fx-lead", "fx-member"]
     assert launch.get_job(lead["task_id"], harness.config)["binding"] == {
         "beads": ["fx-lead", "fx-member"],
         "run_id": run["run_id"],
@@ -368,7 +374,7 @@ def test_start_is_idempotent_for_the_same_members(harness: Harness) -> None:
 def test_start_completes_a_run_left_half_prepared(harness: Harness) -> None:
     """Breaks if recovery launches a second task graph for the same manifest."""
     run = harness.start("fx-solo")
-    manifest_path = batch.manifest_path(harness.config, run["run_id"])
+    manifest_path = manifest.manifest_path(harness.config, run["run_id"])
     document = json.loads(manifest_path.read_text())
     document["prepared"] = False
     document["landing"]["task_id"] = None
@@ -397,9 +403,9 @@ def test_a_failed_start_releases_its_claims_and_removes_its_manifest(
         harness.start("fx-lead")
     assert {item[0] for item in harness.beads.released} == {"fx-lead", "fx-member"}
     assert harness.beads.beads["fx-lead"]["status"] == "open"
-    assert batch.list_runs(harness.config) == []
+    assert manifest.list_runs(harness.config) == []
     assert harness.wt.trees == {} and len(harness.wt.removed) == 1
-    assert [path.name for path in batch.runs_dir(harness.config).iterdir()] == [
+    assert [path.name for path in manifest.runs_dir(harness.config).iterdir()] == [
         "fixture.lock"
     ]
 
@@ -411,7 +417,7 @@ def test_two_starts_on_the_same_member_are_refused_by_the_claim(
     with pytest.raises(BatchRefusal, match="already in another run") as refused:
         harness.start("fx-solo", "fx-other")
     assert refused.value.to_dict()["refusals"][0]["code"] == "in_run"
-    assert batch.list_runs(harness.config)[0].run_id == first["run_id"]
+    assert manifest.list_runs(harness.config)[0].run_id == first["run_id"]
 
     # A claim taken outside agentctl between validation and preparation.
     harness.beads.beads["fx-other"]["assignee"] = "someone-else"
@@ -428,7 +434,7 @@ def test_two_starts_on_the_same_member_are_refused_by_the_claim(
     harness.beads.claim = race  # type: ignore[method-assign]
     with pytest.raises(BatchError, match="already claimed by racer"):
         harness.start("fx-other")
-    assert len(batch.list_runs(harness.config)) == 1
+    assert len(manifest.list_runs(harness.config)) == 1
     assert not any(
         str(record.get("assignee") or "").startswith("agentctl-batch-")
         for bead_id, record in harness.beads.beads.items()
@@ -454,7 +460,7 @@ def test_a_claim_failing_mid_worker_releases_the_beads_already_claimed(
     assert harness.beads.beads["fx-lead"]["assignee"] is None
     assert harness.beads.beads["fx-lead"]["status"] == "open"
     assert harness.beads.beads["fx-member"]["assignee"] == "racer"
-    assert batch.list_runs(harness.config) == []
+    assert manifest.list_runs(harness.config) == []
 
 
 def test_start_takes_the_project_lock_around_worktree_creation(
@@ -479,12 +485,12 @@ def test_start_takes_the_project_lock_around_worktree_creation(
         seen.append(set(held))
         return create(root, branch, **kwargs)
 
-    monkeypatch.setattr(batch.fcntl, "flock", flock)
+    monkeypatch.setattr(manifest.fcntl, "flock", flock)
     monkeypatch.setattr(worktrunk, "worktrunk_create", observed_create)
 
     harness.start("fx-solo")
 
-    lock = str(batch.project_lock_path(harness.config, "fixture"))
+    lock = str(manifest.project_lock_path(harness.config, "fixture"))
     assert lock.endswith("/runs/fixture.lock")
     assert seen and all(lock in locks for locks in seen)
     assert lock not in held
@@ -554,7 +560,9 @@ def test_result_validates_and_binds_to_the_worktree_head(harness: Harness) -> No
     filed = harness.file_result(run, "fx-solo")
     assert filed["result"]["candidate_sha"] == SHA
     assert (
-        batch.load(harness.config, run["run_id"]).workers[0]["result"]["beads"][0]["id"]
+        manifest.load(harness.config, run["run_id"]).workers[0]["result"]["beads"][0][
+            "id"
+        ]
         == "fx-solo"
     )
 
@@ -563,7 +571,7 @@ def test_resume_requeues_the_worker_and_a_landing_behind_it(
     harness: Harness, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     run = harness.start("fx-lead", "fx-solo")
-    monkeypatch.setattr(batch, "SubprocessBeads", lambda root: harness.beads)
+    monkeypatch.setattr(start, "SubprocessBeads", lambda root: harness.beads)
     lead_task = run["workers"][0]["task_id"]
     with pytest.raises(BatchRefusal, match="worker_active"):
         batch.resume(harness.config, harness.project, run["run_id"], "fx-lead")
@@ -614,7 +622,7 @@ def prepared_run(
     for worker in run["workers"]:
         harness.pueue.succeed(worker["task_id"])
         harness.file_result(run, worker["id"], unsatisfied=unsatisfied)
-    return batch.load(harness.config, run["run_id"]).to_dict()
+    return manifest.load(harness.config, run["run_id"]).to_dict()
 
 
 def test_land_refuses_until_every_worker_succeeded_with_a_result(
@@ -630,7 +638,7 @@ def test_land_refuses_until_every_worker_succeeded_with_a_result(
     harness.pueue.succeed(run["workers"][1]["task_id"])
     with pytest.raises(BatchRefusal, match="worker_result_missing"):
         harness.land(run["run_id"])
-    assert batch.load(harness.config, run["run_id"]).landing["failure"] is None
+    assert manifest.load(harness.config, run["run_id"]).landing["failure"] is None
     assert harness.git.merges == []
 
 
@@ -765,7 +773,7 @@ def test_a_rejected_review_records_the_failure_and_closes_nothing(
     with pytest.raises(BatchRefusal, match="review_rejected"):
         harness.land(run["run_id"])
 
-    stored = batch.load(harness.config, run["run_id"])
+    stored = manifest.load(harness.config, run["run_id"])
     assert stored.acceptance is None
     assert stored.landing["failure"]["code"] == "review_rejected"
     assert stored.landing["verify_run"]["phase"] == "succeeded"
@@ -798,7 +806,7 @@ def test_target_moved_once_refreshes_and_twice_stops(harness: Harness) -> None:
     harness.git.remote_bases = [MOVED, MOVED, MOVED_AGAIN, MOVED_AGAIN]
     with pytest.raises(BatchRefusal, match="target_moved_twice"):
         harness.land(second["run_id"])
-    stored = batch.load(harness.config, second["run_id"])
+    stored = manifest.load(harness.config, second["run_id"])
     assert stored.landing["failure"]["code"] == "target_moved_twice"
     assert stored.landing["refreshes"] == 1 and stored.acceptance is None
     assert harness.beads.beads["fx-other"]["status"] == "in_progress"
@@ -837,7 +845,7 @@ def test_a_push_rejected_for_any_other_reason_is_a_publish_refusal(
     with pytest.raises(BatchRefusal, match="publish_rejected") as refused:
         harness.land(run["run_id"])
     assert "protected branch hook declined" in refused.value.detail
-    stored = batch.load(harness.config, run["run_id"])
+    stored = manifest.load(harness.config, run["run_id"])
     assert stored.landing["refreshes"] == 0
     assert stored.landing["failure"]["code"] == "publish_rejected"
     assert stored.acceptance is None and harness.beads.closed == []
@@ -980,29 +988,29 @@ def test_status_and_list_join_the_manifest_with_pueue(harness: Harness) -> None:
         == f"fixture:worker:{run['run_id']}:fx-lead"
     )
     assert document["landing"]["task"]["phase"] == "running"
-    assert [item.run_id for item in batch.list_runs(harness.config, "fixture")] == [
+    assert [item.run_id for item in manifest.list_runs(harness.config, "fixture")] == [
         run["run_id"]
     ]
-    assert batch.list_runs(harness.config, "other") == []
+    assert manifest.list_runs(harness.config, "other") == []
 
 
 def test_manifest_is_written_once_and_updated_under_the_lock(harness: Harness) -> None:
-    run = batch.Run.from_dict(
+    run = manifest.Run.from_dict(
         {
             **harness.start("fx-solo"),
         }
     )
     with pytest.raises(BatchRefusal, match="already has a manifest"):
-        batch.create(harness.config, run)
+        manifest.create(harness.config, run)
 
     def bump(document: dict[str, Any]) -> None:
         document["landing"]["refreshes"] = 3
 
-    updated = batch.update(harness.config, run.run_id, bump)
+    updated = manifest.update(harness.config, run.run_id, bump)
     assert updated.landing["refreshes"] == 3
-    assert batch.load(harness.config, run.run_id).landing["refreshes"] == 3
+    assert manifest.load(harness.config, run.run_id).landing["refreshes"] == 3
     with pytest.raises(BatchRefusal, match="unknown_run"):
-        batch.load(harness.config, "nope")
+        manifest.load(harness.config, "nope")
 
 
 def test_a_result_must_name_a_commit_that_descends_from_the_run_base(
@@ -1031,7 +1039,7 @@ def test_resume_replaces_a_queued_landing_so_it_waits_on_the_current_workers(
     harness: Harness, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     run = harness.start("fx-lead", "fx-solo")
-    monkeypatch.setattr(batch, "SubprocessBeads", lambda root: harness.beads)
+    monkeypatch.setattr(start, "SubprocessBeads", lambda root: harness.beads)
     harness.pueue.fail(run["workers"][0]["task_id"], exit_code=1)
     harness.pueue.fail(run["workers"][1]["task_id"], exit_code=1)
     queued = harness.pueue.task(run["landing"]["task_id"])

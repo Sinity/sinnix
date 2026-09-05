@@ -1,28 +1,105 @@
-"""The operator's one screen: queue, runs and their workers, ready work.
+"""What the operator reads: a run's stage, the one screen, and the CLI's output.
 
 Assembled from `pueue status --json`, the run manifests and `bd ready
---json`; rendered as text in local time.
-Every "next" here is a description of the mechanical state, not a decision:
-nothing in this module dispatches.
+--json`; rendered as text in local time. Every "next" here is a description
+of the mechanical state, not a decision: nothing in this module dispatches.
 """
 
 from __future__ import annotations
 
+import json
+import sys
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Mapping, Sequence
 
-from . import batch, pueue
-from .batch import Run, run_stage, worker_stage
+from . import github, launch, pueue
 from .config import Config
+from .github import GithubError
 from .launch import job_view
+from .limits import SHORT_ID
+from .manifest import Run, list_runs, load, short_run_id
 from .packets import PacketError, SubprocessBdReader
 from .projects import ProjectAdapter
 from .pueue import PueueError, Task
 
 MAX_READY_SHOWN = 8
 MAX_FAILED_SHOWN = 6
+
+
+# ---------------------------------------------------------------- stage
+
+
+def worker_stage(worker: Mapping[str, Any], task: Task | None) -> str:
+    """What the worker is doing, from pueue first and the manifest second."""
+    if task is not None and not task.terminal:
+        return task.status.lower()
+    if worker.get("result"):
+        return "done"
+    if task is not None and task.terminal:
+        return launch.phase_of(task)
+    return "awaiting result" if worker.get("worktree") else "unprepared"
+
+
+def run_stage(
+    run: Run, landing: Task | None, worker_tasks: Sequence[Task | None]
+) -> str:
+    """The run as one word: an active worker or landing task is never landed."""
+    if any(task is not None and not task.terminal for task in worker_tasks):
+        return "working"
+    if landing is not None and not landing.terminal:
+        return "stashed" if landing.status == "Stashed" else "landing"
+    if run.acceptance is not None:
+        return "landed"
+    failure = run.landing.get("failure")
+    if failure:
+        return f"failed: {failure.get('code')}"
+    if not run.prepared:
+        return "unprepared"
+    if landing is not None and landing.terminal and not landing.succeeded:
+        return f"landing {launch.phase_of(landing)}"
+    return (
+        "awaiting workers"
+        if not all(w.get("result") for w in run.workers)
+        else "ready to land"
+    )
+
+
+def status(
+    config: Config, run_id: str, *, project: ProjectAdapter | None = None
+) -> dict[str, Any]:
+    """The manifest with each task's pueue view and the landing PR's state."""
+    run = load(config, run_id)
+    tasks = pueue.tasks()
+    document = run.to_dict()
+    for worker in document["workers"]:
+        task_id = worker.get("task_id")
+        task = tasks.get(task_id) if isinstance(task_id, int) else None
+        worker["task"] = job_view(task) if task else None
+        worker["stage"] = worker_stage(worker, task)
+    landing_id = document["landing"].get("task_id")
+    landing_task = tasks.get(landing_id) if isinstance(landing_id, int) else None
+    document["landing"]["task"] = job_view(landing_task) if landing_task else None
+    document["stage"] = run_stage(
+        run,
+        landing_task,
+        [
+            tasks.get(w["task_id"]) if isinstance(w.get("task_id"), int) else None
+            for w in run.workers
+        ],
+    )
+    number = run.landing.get("pr_number")
+    if project is not None and isinstance(number, int):
+        try:
+            pull = github.pull_request(project.root, number)
+        except GithubError as error:
+            pull = {"error": str(error)}
+        document["landing"]["pr"] = pull
+    return document
+
+
+# ---------------------------------------------------------------- screen
 
 
 @dataclass(frozen=True)
@@ -190,7 +267,7 @@ def collect(
     except PueueError as error:
         tasks, groups = (), {}
         errors.append(f"pueue: {error}")
-    runs = tuple(batch.list_runs(config, project.project_id))
+    runs = tuple(list_runs(config, project.project_id))
     reader = SubprocessBdReader(project.root)
     try:
         ready = tuple(reader.ready())
@@ -339,4 +416,109 @@ def render(snapshot: Snapshot) -> str:
     return "\n".join(lines)
 
 
-__all__ = ["Snapshot", "collect", "render", "table", "age", "local_clock", "run_dict"]
+# ---------------------------------------------------------------- CLI output
+
+
+class Output:
+    """One place that decides what stdout and stderr carry."""
+
+    def __init__(self, *, as_json: bool, full: bool) -> None:
+        self.as_json = as_json
+        self.full = full
+        self.now = datetime.now(UTC)
+
+    def read(self, document: Any, text: str | None = None) -> None:
+        """A read: the table a person reads, or the document with ``--json``."""
+        if self.as_json or text is None:
+            print(json.dumps(document, indent=2, sort_keys=True))
+        else:
+            print(text)
+
+    def write(self, document: Any, summary: str) -> None:
+        """A write: the document on stdout, one summary line on stderr."""
+        print(json.dumps(document, indent=2, sort_keys=True))
+        print(summary, file=sys.stderr)
+
+    def run(self, run_id: str) -> str:
+        return run_id if self.full else short_run_id(run_id)
+
+    def sha(self, value: Any) -> str:
+        text = str(value or "")
+        if not text:
+            return "-"
+        return text if self.full else text[:SHORT_ID]
+
+    def when(self, stamp: str | None, ended: str | None = None) -> str:
+        """Local clock and age, e.g. ``14:02 3m``."""
+        until = parse_stamp(ended) or self.now
+        return f"{local_clock(stamp)} {age(stamp, until)}"
+
+    def job_line(self, job: Mapping[str, Any]) -> str:
+        started = job.get("started_at") or job.get("enqueued_at")
+        ended = job.get("ended_at")
+        when = (
+            f"finished {local_clock(ended)} after {age(started, parse_stamp(ended) or self.now)}"
+            if ended
+            else f"since {local_clock(started)} ({age(started, self.now)})"
+        )
+        exit_text = (
+            f" exit {job['exit_code']}" if job.get("exit_code") not in (None, 0) else ""
+        )
+        return f"job {job['job_id']} {job['label']} {job['phase']}{exit_text} {when}"
+
+    def jobs_table(self, rows: Sequence[Mapping[str, Any]]) -> str:
+        if not rows:
+            return "(no jobs)"
+        return table(
+            ("id", "label", "phase", "started", "age", "exit", "cwd"),
+            [
+                (
+                    row["job_id"],
+                    row["label"],
+                    row["phase"],
+                    local_clock(row.get("started_at") or row.get("enqueued_at")),
+                    age(
+                        row.get("started_at") or row.get("enqueued_at"),
+                        parse_stamp(row.get("ended_at")) or self.now,
+                    ),
+                    "" if row.get("exit_code") is None else row["exit_code"],
+                    row.get("path", ""),
+                )
+                for row in rows
+            ],
+        )
+
+    def run_lines(self, document: Mapping[str, Any]) -> str:
+        workers = ", ".join(
+            f"{worker['id']}[{worker.get('stage') or ('task ' + str(worker.get('task_id')) if worker.get('task_id') is not None else 'external')}]"
+            for worker in document["workers"]
+        )
+        landing = document["landing"]
+        return (
+            f"run {self.run(document['run_id'])} {document['project']} {document['harness']} "
+            f"base {self.sha(document['base_commit'])} stage {document.get('stage', '-')} "
+            f"started {self.when(document.get('created_at'))}\n"
+            f"workers: {workers}\n"
+            f"landing: task {landing.get('task_id')} candidate {self.sha(landing.get('candidate_sha'))}"
+            f"{' PR #' + str(landing['pr_number']) if landing.get('pr_number') else ''}"
+            f"{' failure ' + landing['failure']['code'] if landing.get('failure') else ''}"
+        )
+
+    def runs_table(self, rows: Sequence[Mapping[str, Any]]) -> str:
+        if not rows:
+            return "(no runs)"
+        return table(
+            ("run", "harness", "stage", "started", "age", "workers", "candidate"),
+            [
+                (
+                    self.run(row["run_id"]),
+                    row["harness"],
+                    row["stage"],
+                    local_clock(row.get("created_at")),
+                    age(row.get("created_at"), self.now),
+                    " ".join(f"{w['id']}:{w['stage']}" for w in row["workers"]),
+                    self.sha(row["landing"].get("candidate_sha")),
+                )
+                for row in rows
+            ],
+        )

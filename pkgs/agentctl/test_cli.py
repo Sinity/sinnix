@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Callable
 
 import pytest
-from agentctl import batch, cli
+from agentctl import cli, github, manifest
 from agentctl.config import Config
 from conftest import FakePueue, read_launch
 
@@ -230,10 +230,8 @@ def test_default_state_dir_moves_the_previous_directory_once(
 
 
 def _manifest(config: Config, run_id: str) -> None:
-    from agentctl import batch
-
-    batch.runs_dir(config).mkdir(parents=True, exist_ok=True)
-    batch.manifest_path(config, run_id).write_text(
+    manifest.runs_dir(config).mkdir(parents=True, exist_ok=True)
+    manifest.manifest_path(config, run_id).write_text(
         json.dumps(
             {
                 "run_id": run_id,
@@ -299,13 +297,13 @@ def test_batch_list_reads_each_run_pr_through_the_project(
 ) -> None:
     run_id = "fixture-20260903-080000-0123abcd"
     _manifest(cli_config, run_id)
-    path = batch.manifest_path(cli_config, run_id)
+    path = manifest.manifest_path(cli_config, run_id)
     document = json.loads(path.read_text())
     document["landing"]["pr_number"] = 41
     path.write_text(json.dumps(document))
     asked: list[tuple[str, int]] = []
     monkeypatch.setattr(
-        cli.batch.github,
+        github,
         "pull_request",
         lambda root, number: (
             asked.append((str(root), number)) or {"number": number, "state": "MERGED"}
