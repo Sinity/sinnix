@@ -1,9 +1,15 @@
 # Preference ranking
 
-One engine, one store convention, thin frontends. Anything the operator can
-compare two of — backlog items, wallpapers, keybindings, generated options,
-activities — is ranked by the same Plackett-Luce fit over the same append-only
+One engine, thin frontends. Anything the operator can compare two of — backlog
+items, wallpapers, keybindings, generated options, activities — is ranked by the
+same Plackett-Luce fit, selected by the same selector, over an append-only
 comparison log.
+
+Two store formats exist. `sinnix-rank` writes choice-set records and caches no
+fit; `sinnix-elicit` writes pairwise records, an `items.json` roster and the one
+cached fit. Unifying them is a migration over live domains and is tracked as
+`sinnix-z8iq.14`; until it happens, the format a domain uses is the format of
+the tool that created it.
 
 ## The engine
 
