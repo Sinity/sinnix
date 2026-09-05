@@ -26,6 +26,11 @@ from .pueue import PueueError, Task
 
 MAX_READY_SHOWN = 8
 MAX_FAILED_SHOWN = 6
+# A failure older than this has been seen; the screen shows recent ones.
+ATTENTION_SECONDS = 6 * 3_600
+# Bead types the ready list leaves out: neither is a unit of work.
+UNREADY_TYPES = frozenset({"epic", "decision"})
+DEFAULT_JOB_ROWS = 40
 
 
 # ---------------------------------------------------------------- stage
@@ -137,6 +142,12 @@ class Snapshot:
         }
 
 
+def recent(stamp: str | None, now: datetime) -> bool:
+    """Whether ``stamp`` lies within the attention window before ``now``."""
+    moment = parse_stamp(stamp)
+    return moment is not None and (now - moment).total_seconds() <= ATTENTION_SECONDS
+
+
 def parse_stamp(stamp: str | None) -> datetime | None:
     if not stamp:
         return None
@@ -194,6 +205,13 @@ def run_dict(run: Run, tasks: Sequence[Task], now: datetime) -> dict[str, Any]:
             }
         )
     landing = run.landing
+    # When the run last changed: the landing task's end, else the latest
+    # worker task's end, else the run's start.
+    ended = [
+        task.ended_at
+        for task in (landing_task, *worker_tasks)
+        if task is not None and task.ended_at
+    ]
     return {
         "run": run.run_id,
         "harness": run.harness,
@@ -209,6 +227,7 @@ def run_dict(run: Run, tasks: Sequence[Task], now: datetime) -> dict[str, Any]:
             "failure": landing.get("failure"),
         },
         "accepted": run.acceptance is not None,
+        "changed_at": max(ended) if ended else run.created_at,
     }
 
 
@@ -272,7 +291,11 @@ def collect(
     runs = tuple(list_runs(config, project.project_id))
     reader = SubprocessBdReader(project.root)
     try:
-        ready = tuple(reader.ready())
+        ready = tuple(
+            bead
+            for bead in reader.ready()
+            if str(bead.get("issue_type") or "") not in UNREADY_TYPES
+        )
     except PromptError as error:
         ready = ()
         errors.append(f"bd: {error}")
@@ -326,18 +349,24 @@ def render(snapshot: Snapshot) -> str:
     failed = [
         task
         for task in snapshot.tasks
-        if task.terminal and not task.succeeded and task.result != "Killed"
+        if task.terminal
+        and not task.succeeded
+        and task.result != "Killed"
+        and recent(task.ended_at, now)
     ]
     failed.sort(key=lambda task: task.ended_at or "", reverse=True)
     runs = [run_dict(run, snapshot.tasks, now) for run in snapshot.runs]
     attention = [
         row
         for row in runs
-        if row["stage"].startswith(("failed", "landing "))
-        or any(
-            worker["stage"]
-            in {"failed", "timeout", "refused", "cancelled", "launch-failed"}
-            for worker in row["workers"]
+        if recent(row["changed_at"], now)
+        and (
+            row["stage"].startswith(("failed", "landing "))
+            or any(
+                worker["stage"]
+                in {"failed", "timeout", "refused", "cancelled", "launch-failed"}
+                for worker in row["workers"]
+            )
         )
     ]
     if failed or attention:
@@ -461,6 +490,16 @@ class Output:
         until = parse_stamp(ended) or self.now
         return f"{local_clock(stamp)} {age(stamp, until)}"
 
+    def clock(self, stamp: str | None) -> str:
+        """Local clock, with the date when the moment is not today."""
+        moment = parse_stamp(stamp)
+        if moment is None:
+            return "?"
+        local = moment.astimezone()
+        if local.date() == self.now.astimezone().date():
+            return local.strftime("%H:%M")
+        return local.strftime("%m-%d %H:%M")
+
     def job_line(self, job: Mapping[str, Any]) -> str:
         started = job.get("started_at") or job.get("enqueued_at")
         ended = job.get("ended_at")
@@ -484,7 +523,7 @@ class Output:
                     row["job_id"],
                     row["label"],
                     row["phase"],
-                    local_clock(row.get("started_at") or row.get("enqueued_at")),
+                    self.clock(row.get("started_at") or row.get("enqueued_at")),
                     age(
                         row.get("started_at") or row.get("enqueued_at"),
                         parse_stamp(row.get("ended_at")) or self.now,
@@ -502,15 +541,35 @@ class Output:
             for worker in document["workers"]
         )
         landing = document["landing"]
-        return (
+        lines = [
             f"run {self.run(document['run_id'])} {document['project']} {document['harness']} "
             f"base {self.sha(document['base_commit'])} stage {document.get('stage', '-')} "
-            f"started {self.when(document.get('created_at'))}\n"
-            f"workers: {workers}\n"
+            f"started {self.when(document.get('created_at'))}",
+            f"workers: {workers}",
+        ]
+        for worker in document["workers"]:
+            prompt = worker.get("prompt_path") or (
+                f"{worker['worktree']}/.agentctl/prompt.md"
+                if worker.get("worktree")
+                else "-"
+            )
+            lines.append(f"  {worker['id']}: prompt {prompt}")
+            if document["harness"] == "external" and not worker.get("result"):
+                result = worker.get("result_path") or (
+                    f"{worker['worktree']}/.agentctl/prompt.result.json"
+                    if worker.get("worktree")
+                    else "<result.json>"
+                )
+                lines.append(
+                    f"    next: agentctl batch result {document['run_id']} "
+                    f"{worker['id']} {result}"
+                )
+        lines.append(
             f"landing: task {landing.get('task_id')} candidate {self.sha(landing.get('candidate_sha'))}"
             f"{' PR #' + str(landing['pr_number']) if landing.get('pr_number') else ''}"
             f"{' failure ' + landing['failure']['code'] if landing.get('failure') else ''}"
         )
+        return "\n".join(lines)
 
     def runs_table(self, rows: Sequence[Mapping[str, Any]]) -> str:
         if not rows:
