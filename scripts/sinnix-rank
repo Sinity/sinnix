@@ -22,15 +22,25 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import random
 import subprocess
 import sys
 from pathlib import Path
 
 from rank_core import Item, Selector, Store, draw, fit, top_k_stability
 from rank_core.draw import POLICIES
+from rank_core.store import VALID_KINDS
 
-CAPTURE_ROOT = Path("/realm/data/activity/ranking")
+CAPTURE_ROOT = Path(
+    os.environ.get("SINNIX_RANK_ROOT", "/realm/data/activity/ranking")
+)
 BACKLOG_ACTIVITY_NAME = "backlog session"
+
+#: Below this top-k stability the fitted order is a working hypothesis, not an
+#: answer. `status` refuses to call anything settled under it, and every
+#: consumer reads `evidence.settled` rather than re-deriving a threshold.
+DEFAULT_STOP_AT = 0.9
 
 
 def domain_dir(domain: str) -> Path:
@@ -62,14 +72,78 @@ def load_items_input(raw: str) -> list[Item]:
     return items
 
 
+def check_identity(
+    incoming: list[Item],
+    existing: dict[str, Item],
+    *,
+    allow_duplicate_labels: bool,
+    revise: bool,
+) -> tuple[list[Item], list[str]]:
+    """Split *incoming* into items to append and identity conflicts to refuse.
+
+    An id is a promise: comparisons already recorded against it are evidence
+    about the option that id named. So a re-`add` under an id that already
+    carries a different label is a changed option set, not an update, and it
+    is refused unless the caller says explicitly which of the two it means --
+    `--revise` to relabel the same option, or a fresh id for a new one.
+    Duplicate labels are refused for the mirror-image reason: two options the
+    operator cannot tell apart in a prompt produce comparisons that cannot be
+    attributed afterwards.
+    """
+    conflicts: list[str] = []
+    to_add: list[Item] = []
+    labels: dict[str, str] = {} if allow_duplicate_labels else {
+        item.label: item_id for item_id, item in existing.items()
+    }
+    for item in incoming:
+        prior = existing.get(item.id)
+        if prior is not None and prior.label != item.label and not revise:
+            conflicts.append(
+                f"{item.id}: already registered as {prior.label!r}, now given as "
+                f"{item.label!r} -- use a new id for a new option, or --revise "
+                f"to relabel the same one"
+            )
+            continue
+        if prior is not None and prior.label == item.label:
+            continue
+        owner = labels.get(item.label)
+        if owner is not None and owner != item.id:
+            conflicts.append(
+                f"{item.id}: label {item.label!r} is already item {owner} -- "
+                f"disambiguate the label, or pass --allow-duplicate-labels"
+            )
+            continue
+        if not allow_duplicate_labels:
+            labels[item.label] = item.id
+        to_add.append(item)
+    return to_add, conflicts
+
+
 def cmd_add(args: argparse.Namespace) -> int:
     raw = sys.stdin.read() if args.items == "-" else Path(args.items).read_text()
     items = load_items_input(raw)
     store = Store(domain_dir(args.domain))
     existing = store.load_items()
-    new_items = [i for i in items if i.id not in existing]
-    n = store.add_items(new_items)
-    print(f"added {n} new item(s) to domain {args.domain!r} ({len(items) - n} already registered)")
+    to_add, conflicts = check_identity(
+        items,
+        existing,
+        allow_duplicate_labels=args.allow_duplicate_labels,
+        revise=args.revise,
+    )
+    if conflicts:
+        for message in conflicts:
+            print(f"identity conflict: {message}", file=sys.stderr)
+        print(
+            f"refused {len(conflicts)} item(s); nothing was written to domain "
+            f"{args.domain!r}",
+            file=sys.stderr,
+        )
+        return 2
+    n = store.add_items(to_add)
+    print(
+        f"added {n} new item(s) to domain {args.domain!r} "
+        f"({len(items) - n} already registered)"
+    )
     return 0
 
 
@@ -80,18 +154,72 @@ def _fit_domain(store: Store):
     return items, comparisons, result
 
 
+def evidence_report(items, comparisons, result, stability, stop_at: float) -> dict:
+    """What the comparisons do and do not support.
+
+    A Plackett-Luce fit always returns a total order; whether that order means
+    anything is a separate question with three ways to answer no, and a
+    consumer that reads only `ranked()` cannot tell them apart. Items in
+    different connected components have never been compared even transitively,
+    so their thetas are anchored only to the virtual tie and are not mutually
+    comparable at all. Few comparisons leave the top-k unstable under the
+    fit's own standard errors. Items with no comparisons at all are placed by
+    the anchor, not by evidence.
+    """
+    judged = [c for c in comparisons if c.kind in ("pair", "choice-set")]
+    components = sorted({record.component for record in result.records.values()})
+    unjudged = sorted(
+        record.id for record in result.records.values() if record.matches <= 0
+    )
+    connected = len(components) <= 1
+    reasons: list[str] = []
+    if not judged:
+        reasons.append("no operator comparisons recorded yet")
+    if not connected:
+        reasons.append(
+            f"{len(components)} disconnected comparison components: items in "
+            f"different components have never been compared, even transitively, "
+            f"so their order is not evidence"
+        )
+    if unjudged:
+        reasons.append(
+            f"{len(unjudged)} item(s) carry no comparison: "
+            + ", ".join(unjudged[:5])
+            + ("..." if len(unjudged) > 5 else "")
+        )
+    if stability.p_stable < stop_at:
+        reasons.append(
+            f"top-{stability.k} stability {stability.p_stable:.0%} is below the "
+            f"{stop_at:.0%} threshold"
+        )
+    return {
+        "items": len(items),
+        "comparisons": len(comparisons),
+        "operator_comparisons": len(judged),
+        "components": len(components),
+        "connected": connected,
+        "unjudged_items": unjudged,
+        "stop_at": stop_at,
+        "settled": not reasons,
+        "reasons": reasons,
+    }
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     store = Store(domain_dir(args.domain))
     items, comparisons, result = _fit_domain(store)
     if not items:
         print(f"domain {args.domain!r} has no items yet -- `sinnix-rank add {args.domain} --items ...`")
         return 1
-    stability = top_k_stability(result, k=args.k)
+    stability = top_k_stability(result, k=args.k, seed=args.seed)
     ranked = result.ranked()
+    evidence = evidence_report(items, comparisons, result, stability, args.stop_at)
     if args.json:
         print(
             json.dumps(
                 {
+                    "domain": args.domain,
+                    "domain_dir": str(domain_dir(args.domain)),
                     "items": [
                         {
                             "id": r.id,
@@ -105,21 +233,135 @@ def cmd_status(args: argparse.Namespace) -> int:
                     ],
                     "stability": {"top_k": stability.top_k, "p_stable": stability.p_stable, "k": stability.k},
                     "comparisons": len(comparisons),
+                    "evidence": evidence,
                 },
                 indent=2,
             )
         )
         return 0
-    components = {r.component for r in ranked}
     for i, r in enumerate(ranked, start=1):
         label = items[r.id].label if r.id in items else r.id
         print(f"{i:>3}. {label}  theta={r.theta:+.3f} se={r.se:.3f} matches={r.matches:.0f} comp={r.component}")
-    if len(components) > 1:
-        print(f"\n{len(components)} disconnected comparison components -- ranking across them is not yet meaningful")
     print(
         f"\ntop-{stability.k} stability: {stability.p_stable:.0%} "
         f"({', '.join(items[i].label if i in items else i for i in stability.top_k)})"
     )
+    if evidence["settled"]:
+        print(f"settled: the top-{stability.k} order is supported by the comparisons")
+    else:
+        print("NOT settled -- this order is a working hypothesis:")
+        for reason in evidence["reasons"]:
+            print(f"  - {reason}")
+    print(f"domain dir: {domain_dir(args.domain)}")
+    return 0
+
+
+def _seen_sets(comparisons) -> set[frozenset[str]]:
+    return {frozenset(c.set) for c in comparisons}
+
+
+def _selector(items, comparisons, result, grid: int, seed: int | None) -> Selector:
+    selector = Selector(
+        item_ids=list(items.keys()),
+        grid_n=grid,
+        rng=random.Random(seed),
+    )
+    selector.seed_counts(comparisons)
+    selector.update_fit(result)
+    return selector
+
+
+def cmd_next(args: argparse.Namespace) -> int:
+    """The next set to put in front of the operator, without owning a TTY.
+
+    `compare` is the operator's own loop; an agent mediating a comparison pass
+    holds the conversation instead, so it needs the selection and the
+    recording as two separate non-interactive calls. Sets already judged are
+    skipped where the selector offers an unjudged alternative, so a resumed
+    pass spends its questions on new information rather than re-asking.
+    """
+    store = Store(domain_dir(args.domain))
+    items, comparisons, result = _fit_domain(store)
+    if len(items) < args.grid:
+        print(
+            f"domain {args.domain!r} has {len(items)} item(s), fewer than the "
+            f"requested set size {args.grid}",
+            file=sys.stderr,
+        )
+        return 1
+    selector = _selector(items, comparisons, result, args.grid, args.seed)
+    seen = _seen_sets(comparisons)
+    chosen, strategy = selector.pick_set()
+    for _ in range(32):
+        if frozenset(chosen) not in seen:
+            break
+        chosen, strategy = selector.pick_set()
+    payload = {
+        "domain": args.domain,
+        "strategy": strategy,
+        "already_judged": frozenset(chosen) in seen,
+        "set": [
+            {"id": item_id, "label": items[item_id].label} for item_id in chosen
+        ],
+    }
+    if args.json:
+        print(json.dumps(payload, indent=2))
+        return 0
+    print(f"({strategy})")
+    for i, item_id in enumerate(chosen, start=1):
+        print(f"  {i}. {items[item_id].label}  [{item_id}]")
+    return 0
+
+
+def cmd_record(args: argparse.Namespace) -> int:
+    """One operator judgment, from a caller that already asked the question."""
+    store = Store(domain_dir(args.domain))
+    items = store.load_items()
+    set_ids = [part.strip() for part in args.set.split(",") if part.strip()]
+    unknown = [item_id for item_id in set_ids if item_id not in items]
+    if unknown:
+        print(f"unknown item id(s): {', '.join(unknown)}", file=sys.stderr)
+        return 2
+    if len(set_ids) < 2:
+        print("a comparison needs at least two items", file=sys.stderr)
+        return 2
+    if len(set(set_ids)) != len(set_ids):
+        print("an item cannot be compared against itself", file=sys.stderr)
+        return 2
+    kind = args.kind
+    if kind == "pair" and len(set_ids) > 2:
+        kind = "choice-set"
+    if kind in ("pair", "choice-set"):
+        if args.winner is None:
+            print(f"a {kind} comparison needs --winner", file=sys.stderr)
+            return 2
+        if args.winner not in set_ids:
+            print(
+                f"winner {args.winner!r} is not in the compared set",
+                file=sys.stderr,
+            )
+            return 2
+    comparison_id = store.record_comparison(
+        set_ids,
+        winner=args.winner if kind in ("pair", "choice-set") else None,
+        kind=kind,
+        context=args.context,
+    )
+    print(comparison_id)
+    return 0
+
+
+def cmd_retract(args: argparse.Namespace) -> int:
+    store = Store(domain_dir(args.domain))
+    known = {c.id for c in store.load_comparisons()}
+    if args.comparison not in known:
+        print(
+            f"no live comparison {args.comparison!r} in domain {args.domain!r}",
+            file=sys.stderr,
+        )
+        return 2
+    store.undo(args.comparison)
+    print(f"tombstoned {args.comparison}")
     return 0
 
 
@@ -242,7 +484,42 @@ def build_parser() -> argparse.ArgumentParser:
     add = sub.add_parser("add", help="register items into a domain")
     add.add_argument("domain")
     add.add_argument("--items", required=True, help="path to a JSON array or JSONL of {id,label,...}, or '-' for stdin")
+    add.add_argument(
+        "--allow-duplicate-labels",
+        action="store_true",
+        help="register options that share a label (they become indistinguishable in prompts)",
+    )
+    add.add_argument(
+        "--revise",
+        action="store_true",
+        help="relabel existing ids instead of refusing them; comparisons already recorded against the id are kept",
+    )
     add.set_defaults(func=cmd_add)
+
+    nxt = sub.add_parser("next", help="print the next comparison set without prompting")
+    nxt.add_argument("domain")
+    nxt.add_argument("--grid", type=int, default=2, help="items per choice set (2 = pairwise)")
+    nxt.add_argument("--seed", type=int, default=None)
+    nxt.add_argument("--json", action="store_true")
+    nxt.set_defaults(func=cmd_next)
+
+    record = sub.add_parser("record", help="record one operator judgment non-interactively")
+    record.add_argument("domain")
+    record.add_argument("--set", required=True, help="comma-separated item ids that were compared")
+    record.add_argument("--winner", default=None, help="the id the operator chose")
+    record.add_argument(
+        "--kind",
+        default="pair",
+        choices=sorted(VALID_KINDS),
+        help="pair/choice-set need a winner; skip and incomparable do not",
+    )
+    record.add_argument("--context", default=None)
+    record.set_defaults(func=cmd_record)
+
+    retract = sub.add_parser("retract", help="tombstone one recorded comparison")
+    retract.add_argument("domain")
+    retract.add_argument("--comparison", required=True)
+    retract.set_defaults(func=cmd_retract)
 
     compare = sub.add_parser("compare", help="interactive pairwise/choice-set prompting session")
     compare.add_argument("domain")
@@ -250,13 +527,15 @@ def build_parser() -> argparse.ArgumentParser:
     compare.add_argument("--rounds", type=int, default=20)
     compare.add_argument("--report-every", type=int, default=5)
     compare.add_argument("--k", type=int, default=1, help="top-k for the stopping statistic")
-    compare.add_argument("--stop-at", type=float, default=0.9)
+    compare.add_argument("--stop-at", type=float, default=DEFAULT_STOP_AT)
     compare.add_argument("--context", default=None)
     compare.set_defaults(func=cmd_compare)
 
     status = sub.add_parser("status", help="show the fitted ranking + stopping statement")
     status.add_argument("domain")
     status.add_argument("--k", type=int, default=1)
+    status.add_argument("--stop-at", type=float, default=DEFAULT_STOP_AT)
+    status.add_argument("--seed", type=int, default=None)
     status.add_argument("--json", action="store_true")
     status.set_defaults(func=cmd_status)
 
