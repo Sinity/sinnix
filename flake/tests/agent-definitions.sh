@@ -68,7 +68,6 @@ for tool in Write Edit; do
       exit 1
     }
 done
-grep -q '^isolation: worktree$' "$agents_dir/lane.md"
 
 for name in triage judge; do
   test -f "$schemas_dir/$name.schema.json"

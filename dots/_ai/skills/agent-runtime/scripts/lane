@@ -5,10 +5,9 @@ set -euo pipefail
 usage() {
   cat >&2 <<'EOF'
 Usage:
-  lane task                       print the dispatch prompt
+  lane task                       print the dispatch packet
   lane verify                     run the descriptor's focused verification as a job and wait
-  lane done [--incomplete] <report-file>
-                                  push the branch and emit the report as the final message
+  lane done <result.json>         validate the result document and print it as the final message
 EOF
 }
 
@@ -39,7 +38,7 @@ project_id() {
 lane_task() {
   local prompt
   prompt=${AGENTCTL_JOB_PROMPT_FILE:-$(repo_root)/.lane/prompt.md}
-  [[ -r $prompt ]] || die "dispatch prompt is unavailable: $prompt"
+  [[ -r $prompt ]] || die "dispatch packet is unavailable: $prompt"
   cat -- "$prompt"
 }
 
@@ -77,46 +76,93 @@ git_offenders() {
   git status --porcelain=v1 --untracked-files=all | grep -v ' \.lane/' || true
 }
 
-current_branch() {
-  git symbolic-ref --quiet --short HEAD || die "cannot push a detached HEAD"
-}
+validate_result() {
+  # The worker schema `agentctl batch start` writes next to the packet, checked
+  # with a closed-object validator covering the schema's own vocabulary.
+  local result=$1 schema
+  schema=$(repo_root)/.lane/worker.schema.json
+  [[ -r $schema ]] || die "worker schema is unavailable: $schema"
+  command -v python3 >/dev/null 2>&1 || die "python3 is required to validate the result"
+  python3 - "$schema" "$result" <<'EOF'
+import json
+import re
+import sys
 
-push_current_branch() {
-  local branch remote
-  branch=$(current_branch)
-  if git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' >/dev/null 2>&1; then
-    git push >&2
-    return
-  fi
-  remote=$(git config "branch.$branch.remote" 2>/dev/null || true)
-  [[ -n $remote ]] || remote=origin
-  git push --set-upstream "$remote" "$branch" >&2
+schema_path, result_path = sys.argv[1:]
+with open(schema_path) as handle:
+    schema = json.load(handle)
+try:
+    with open(result_path) as handle:
+        value = json.load(handle)
+except json.JSONDecodeError as error:
+    sys.exit(f"lane: result is not JSON: {error}")
+
+errors: list[str] = []
+
+
+def check(node, value, path):
+    kind = node.get("type")
+    if kind == "object":
+        if not isinstance(value, dict):
+            errors.append(f"{path}: expected object")
+            return
+        properties = node.get("properties", {})
+        for name in node.get("required", []):
+            if name not in value:
+                errors.append(f"{path}.{name}: required")
+        if node.get("additionalProperties") is False:
+            for name in value:
+                if name not in properties:
+                    errors.append(f"{path}.{name}: unknown property")
+        for name, child in properties.items():
+            if name in value:
+                check(child, value[name], f"{path}.{name}")
+    elif kind == "array":
+        if not isinstance(value, list):
+            errors.append(f"{path}: expected array")
+            return
+        if len(value) < node.get("minItems", 0):
+            errors.append(f"{path}: at least {node['minItems']} item(s) required")
+        for index, item in enumerate(value):
+            check(node["items"], item, f"{path}[{index}]")
+    elif kind == "string":
+        if not isinstance(value, str):
+            errors.append(f"{path}: expected string")
+            return
+        if len(value) < node.get("minLength", 0):
+            errors.append(f"{path}: must not be empty")
+        if "pattern" in node and not re.search(node["pattern"], value):
+            errors.append(f"{path}: does not match {node['pattern']}")
+        if "enum" in node and value not in node["enum"]:
+            errors.append(f"{path}: must be one of {', '.join(node['enum'])}")
+
+
+check(schema, value, "$")
+if errors:
+    sys.exit("lane: result does not validate:\n" + "\n".join(errors[:12]))
+EOF
 }
 
 lane_done() {
-  local incomplete=0 report dirty
-  if [[ ${1:-} == --incomplete ]]; then
-    incomplete=1
-    shift
-  fi
+  local result dirty head sha
   [[ $# -eq 1 ]] || {
     usage
     exit 2
   }
-  report=$1
-  [[ -f $report && -r $report ]] || die "report is not a readable file: $report"
+  result=$1
+  [[ -f $result && -r $result ]] || die "result is not a readable file: $result"
   dirty=$(git_offenders)
-  if [[ $incomplete -eq 0 && -n $dirty ]]; then
-    printf 'lane: refusing complete handoff because the Git tree is dirty-uncommitted. Offenders:\n%s\n' "$dirty" >&2
+  if [[ -n $dirty ]]; then
+    printf 'lane: refusing to finish with uncommitted changes. Offenders:\n%s\n' "$dirty" >&2
     exit 1
   fi
-  push_current_branch
-  if [[ $incomplete -eq 1 ]]; then
-    printf 'INCOMPLETE HANDOFF\nOnly committed WIP was pushed; uncommitted work remains in this workspace.\n\n'
-  fi
-  # The backend adapter stores stdout as the last message: the report must be
-  # the final stdout of this command.
-  cat -- "$report"
+  validate_result "$result"
+  head=$(git rev-parse HEAD)
+  sha=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["candidate_sha"])' "$result")
+  [[ $sha == "$head" ]] || die "candidate_sha $sha is not HEAD $head"
+  # The backend adapter stores stdout as the final message: the result
+  # document must be the last stdout of this command.
+  cat -- "$result"
 }
 
 main() {

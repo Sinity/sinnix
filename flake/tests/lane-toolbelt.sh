@@ -2,12 +2,12 @@
 set -euo pipefail
 
 lane=$1
+schema=$2
 root=$(mktemp -d)
 origin=$root/origin.git
 repo=$root/repo
 bin=$root/bin
-state=$root/state
-mkdir -p "$bin" "$state" "$origin" "$repo"
+mkdir -p "$bin" "$origin" "$repo"
 export HOME=$root/home
 mkdir -p "$HOME"
 export GIT_CONFIG_COUNT=1
@@ -22,41 +22,76 @@ git -C "$repo" remote add origin "$origin"
 printf 'initial\n' >"$repo/work.txt"
 git -C "$repo" add work.txt
 git -C "$repo" commit -qm initial
-git -C "$repo" branch -M feature/lane-toolbelt
-git -C "$repo" push -q --set-upstream origin feature/lane-toolbelt
+git -C "$repo" branch -M batch/fixture/w1
+git -C "$repo" push -q --set-upstream origin batch/fixture/w1
 
-report=$root/report.md
-printf '# fixture report\ncomplete\n' >"$report"
+mkdir -p "$repo/.lane"
+cp "$schema" "$repo/.lane/worker.schema.json"
 
-printf 'dirty\n' >"$repo/dirty.txt"
-set +e
-dirty_output=$(cd "$repo" && "$lane" done "$report" 2>&1)
-dirty_status=$?
-set -e
-test "$dirty_status" -eq 1
-grep -Fq 'dirty-uncommitted' <<<"$dirty_output"
-grep -Fq 'dirty.txt' <<<"$dirty_output"
+write_result() {
+  local sha=$1
+  cat >"$root/result.json" <<EOF
+{
+  "candidate_sha": "$sha",
+  "beads": [
+    {
+      "id": "fixture-1",
+      "criteria": [
+        { "text": "the fixture passes", "status": "satisfied", "evidence": "work.txt:2" }
+      ]
+    }
+  ],
+  "unresolved": [],
+  "verification": [{ "command": "true", "receipt": "exit 0" }]
+}
+EOF
+}
 
-rm "$repo/dirty.txt"
 printf 'committed WIP\n' >>"$repo/work.txt"
 git -C "$repo" add work.txt
 git -C "$repo" commit -qm 'fixture WIP'
+head=$(git -C "$repo" rev-parse HEAD)
+write_result "$head"
 
+# A dirty tree is refused; `.lane/` is not counted.
+printf 'dirty\n' >"$repo/dirty.txt"
+set +e
+dirty_output=$(cd "$repo" && "$lane" done "$root/result.json" 2>&1)
+dirty_status=$?
+set -e
+test "$dirty_status" -eq 1
+grep -Fq 'uncommitted' <<<"$dirty_output"
+grep -Fq 'dirty.txt' <<<"$dirty_output"
+rm "$repo/dirty.txt"
+
+# A result that does not validate is refused.
+printf '{"candidate_sha": "%s", "beads": []}\n' "$head" >"$root/invalid.json"
+set +e
+invalid_output=$(cd "$repo" && "$lane" done "$root/invalid.json" 2>&1)
+invalid_status=$?
+set -e
+test "$invalid_status" -eq 1
+grep -Fq 'does not validate' <<<"$invalid_output"
+grep -Fq 'unresolved' <<<"$invalid_output"
+
+# A result naming another commit is refused.
+write_result "$(printf '0%.0s' $(seq 1 40))"
+set +e
+mismatch_output=$(cd "$repo" && "$lane" done "$root/result.json" 2>&1)
+mismatch_status=$?
+set -e
+test "$mismatch_status" -eq 1
+grep -Fq 'is not HEAD' <<<"$mismatch_output"
+
+# A valid result at HEAD is printed verbatim and nothing is pushed.
+write_result "$head"
 captured=$root/captured.result
-(cd "$repo" && "$lane" done "$report") >"$captured"
-test "$(cat "$captured")" = "$(cat "$report")"
-remote_head=$(git --git-dir="$origin" rev-parse refs/heads/feature/lane-toolbelt)
-local_head=$(git -C "$repo" rev-parse HEAD)
-test "$remote_head" = "$local_head"
+(cd "$repo" && "$lane" done "$root/result.json") >"$captured"
+test "$(cat "$captured")" = "$(cat "$root/result.json")"
+remote_head=$(git --git-dir="$origin" rev-parse refs/heads/batch/fixture/w1)
+test "$remote_head" != "$head"
 
-printf 'partial uncommitted\n' >>"$repo/work.txt"
-incomplete=$root/incomplete.result
-(cd "$repo" && "$lane" done --incomplete "$report") >"$incomplete"
-grep -Fq 'INCOMPLETE HANDOFF' "$incomplete"
-grep -Fq '# fixture report' "$incomplete"
-test -n "$(git -C "$repo" status --porcelain)"
-
-mkdir -p "$repo/.agentctl" "$repo/.lane"
+mkdir -p "$repo/.agentctl"
 cat >"$repo/.agentctl/project.toml" <<'EOF'
 schema = 1
 
