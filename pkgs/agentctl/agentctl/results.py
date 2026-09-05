@@ -121,7 +121,7 @@ def validate(schema: Mapping[str, Any], value: Any, *, path: str = "$") -> list[
     if isinstance(value, str):
         if "minLength" in schema and len(value) < schema["minLength"]:
             errors.append(f"{path}: shorter than {schema['minLength']}")
-        if "pattern" in schema and re.search(schema["pattern"], value) is None:
+        if "pattern" in schema and re.fullmatch(schema["pattern"], value) is None:
             errors.append(f"{path}: does not match {schema['pattern']}")
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         if "minimum" in schema and value < schema["minimum"]:
