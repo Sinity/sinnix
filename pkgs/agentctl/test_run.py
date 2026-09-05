@@ -343,6 +343,87 @@ def test_a_property_that_does_not_bound_the_task_is_refused(
     assert main([str(launch)]) == REFUSED_EXIT_CODE
 
 
+def test_a_declared_scratch_is_created_exported_measured_and_removed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The footprint is the job's own record; the result artifact stays the
+    command's document, so nothing a parser reads is invented here."""
+    monkeypatch.setenv("AGENTCTL_TMPFS_SCRATCH_ROOT", str(tmp_path / "tmpfs"))
+    scratch = tmp_path / "tmpfs" / "job-a"
+    launch = write_launch(
+        tmp_path,
+        argv=[
+            "sh",
+            "-c",
+            'mkdir -p "$AGENTCTL_SCRATCH/inner" '
+            '&& dd if=/dev/zero of="$AGENTCTL_SCRATCH/inner/blob" bs=1024 count=4 '
+            "2>/dev/null "
+            '&& printf \'{"scratch": "%s"}\' "$AGENTCTL_SCRATCH"',
+        ],
+        result_kind="json",
+        result_path=str(tmp_path / "job-a.result"),
+        scratch={"kind": "tmpfs", "path": str(scratch)},
+    )
+
+    assert main([str(launch)]) == 0
+
+    footprint = outcome_of(tmp_path)["scratch"]
+    assert footprint["kind"] == "tmpfs" and footprint["path"] == str(scratch)
+    assert footprint["files"] == 1 and footprint["bytes"] == 4096
+    assert footprint["truncated"] is False
+    assert events(tmp_path)[-1]["scratch"] == footprint
+    assert not scratch.exists() and (tmp_path / "tmpfs").is_dir()
+    # The result artifact carries the command's stdout and nothing agentctl added.
+    document = json.loads((tmp_path / "job-a.result").read_text())
+    assert document == {"scratch": str(scratch)}
+
+
+def test_a_job_declaring_no_scratch_records_none(tmp_path: Path) -> None:
+    launch = write_launch(tmp_path, argv=["sh", "-c", "exit 0"])
+
+    assert main([str(launch)]) == 0
+    assert "scratch" not in outcome_of(tmp_path)
+
+
+def test_a_refused_launch_leaves_no_scratch_behind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A command that never started still owned a directory; it goes with the run."""
+    monkeypatch.setenv("AGENTCTL_TMPFS_SCRATCH_ROOT", str(tmp_path / "tmpfs"))
+    scratch = tmp_path / "tmpfs" / "job-a"
+    launch = write_launch(
+        tmp_path,
+        argv=["agentctl-no-such-command"],
+        scratch={"kind": "tmpfs", "path": str(scratch)},
+    )
+
+    assert main([str(launch)]) == REFUSED_EXIT_CODE
+    assert not scratch.exists()
+
+
+def test_a_scratch_path_outside_its_tier_root_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The wrapper removes this directory afterwards; it must own it first."""
+    monkeypatch.setenv("AGENTCTL_TMPFS_SCRATCH_ROOT", str(tmp_path / "tmpfs"))
+    elsewhere = tmp_path / "elsewhere"
+    launch = write_launch(
+        tmp_path,
+        argv=["sh", "-c", "exit 0"],
+        scratch={"kind": "tmpfs", "path": str(elsewhere)},
+    )
+
+    assert main([str(launch)]) == REFUSED_EXIT_CODE
+    assert not elsewhere.exists()
+
+    unknown = write_launch(
+        tmp_path,
+        name="unknown.json",
+        scratch={"kind": "disk", "path": str(tmp_path / "tmpfs" / "job-a")},
+    )
+    assert main([str(unknown)]) == REFUSED_EXIT_CODE
+
+
 def test_a_failing_command_reports_its_own_exit_status(tmp_path: Path) -> None:
     launch = write_launch(tmp_path, argv=["sh", "-c", "exit 3"])
 

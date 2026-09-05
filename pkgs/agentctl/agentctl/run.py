@@ -85,6 +85,10 @@ DESCRIPTION_PREFIX = "agentctl"
 # are bounded, and the prefix, the pool and the digest come first.
 UNIT_STEM_BYTES = 100
 
+# Files counted before the measurement stops and says so. A scratch tree
+# larger than this is reported as a lower bound, never walked without end.
+MAX_SCRATCH_ENTRIES = 100_000
+
 
 def unit_pool(group: str | None) -> str | None:
     """A pueue group as a unit name component."""
@@ -131,6 +135,36 @@ def cancel_marker_for(log_path: object) -> Path:
 def outcome_path_for(log_path: object) -> Path:
     """``<jobs_dir>/<ref>.outcome``: the wrapper's own record of how the run ended."""
     return _sibling(log_path, ".outcome")
+
+
+def remove_scratch(path: Path | None) -> None:
+    """Drop a job's scratch directory; the job it belonged to is over."""
+    if path is not None:
+        shutil.rmtree(path, ignore_errors=True)
+
+
+def scratch_footprint(path: Path) -> dict[str, Any]:
+    """What the job left in its scratch: bytes and files, bounded by entry count.
+
+    Sizes come from `lstat`, so a symlink counts as itself and never as the
+    tree it points at.
+    """
+    total = 0
+    files = 0
+    truncated = False
+    for directory, _directories, names in os.walk(path, followlinks=False):
+        for name in names:
+            if files >= MAX_SCRATCH_ENTRIES:
+                truncated = True
+                break
+            try:
+                total += os.lstat(os.path.join(directory, name)).st_size
+            except OSError:
+                continue
+            files += 1
+        if truncated:
+            break
+    return {"bytes": total, "files": files, "truncated": truncated}
 
 
 def launch_input_of(command: str) -> str | None:
@@ -385,6 +419,15 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
             f"working directory is gone: {launch['working_directory']}\n"
         )
         return REFUSED_EXIT_CODE
+    scratch = launch.get("scratch")
+    scratch_dir = Path(scratch["path"]) if scratch else None
+    if scratch_dir is not None:
+        try:
+            scratch_dir.parent.mkdir(parents=True, exist_ok=True)
+            scratch_dir.mkdir(mode=0o700, exist_ok=True)
+        except OSError as error:
+            log_path.write_text(f"could not create the scratch directory: {error}\n")
+            return REFUSED_EXIT_CODE
 
     # The pueue group comes from `PUEUE_GROUP`, which pueued exports into every
     # task it spawns, so a launch input written by another repository is
@@ -421,6 +464,8 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
     )
     if pool:
         environment["AGENTCTL_POOL"] = pool
+    if scratch_dir is not None:
+        environment["AGENTCTL_SCRATCH"] = str(scratch_dir)
     # Polylogue's devtools read the SINNIXD_* names; removed with them.
     for name, value in list(environment.items()):
         if name.startswith("AGENTCTL_") and name != "AGENTCTL_POOL":
@@ -438,6 +483,7 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
     with open(log_path, "ab") as log, open(stdout_path, "ab") as stdout:
         if executable is None:
             log.write(f"could not start the command: {argv[0]} not found\n".encode())
+            remove_scratch(scratch_dir)
             return REFUSED_EXIT_CODE
         argv[0] = executable
         try:
@@ -476,18 +522,28 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
                         )
         except OSError as error:
             log.write(f"could not start the command: {error}\n".encode())
+            remove_scratch(scratch_dir)
             return REFUSED_EXIT_CODE
         if outcome is Outcome.TIMEOUT:
             log.write(f"timed out after {launch['timeout_seconds']} seconds\n".encode())
     marker.unlink(missing_ok=True)
 
-    record = {
+    record: dict[str, Any] = {
         "outcome": outcome.value,
         "exit_code": status,
         "unit": unit,
         "pool": pool,
         "systemd_result": properties.get("Result"),
     }
+    if scratch_dir is not None:
+        # Measured now, while the unit has exited and nothing else writes
+        # there; the record outlives the directory, which goes with the job.
+        record["scratch"] = {
+            "kind": str(scratch["kind"]),
+            "path": str(scratch_dir),
+            **scratch_footprint(scratch_dir),
+        }
+        remove_scratch(scratch_dir)
     outcome_path_for(log_path).write_text(json.dumps(record, sort_keys=True))
     append_event(spool_path, {**event, "phase": "finished", **record})
     _bound(log_path, MAX_LOG_BYTES)
