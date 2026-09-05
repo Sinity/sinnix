@@ -1,7 +1,9 @@
 # Provably fails when: the drain stops deleting snapshots it has proven into
 # an archive (verified by removing the `btrfs subvolume delete` from
-# mkSnapshotDrainScript), stops bind-mounting the snapshot it archives, or
-# stops writing the freshness marker its capture lane watches.
+# mkSnapshotDrainScript), stops bind-mounting the snapshot it archives, stops
+# writing the freshness marker its capture lane watches, or changes realm
+# archive membership -- tmp/ and worktrees/ must be absent from the archive
+# while inbox/ and a tmp/ nested inside a dataset stay present.
 #
 # Borg backup drain-hook runtime checks — exercises the realm/persist
 # btrbk-snapshot-drain shell logic (extracted from the systemd unit scripts)
@@ -183,6 +185,15 @@ in
               from = "/run/borgbackup-snapshot-inputs/realm";
               to = "$TMPDIR/bind/realm";
             }
+            {
+              # mkBorgExcludeArgs qualifies every non-`**` pattern with the
+              # source root minus its leading separator, which is what borg
+              # matches against. Rewrite that spelling too, or the exclude
+              # patterns name a path the test tree does not have and every
+              # path-based exclusion silently matches nothing.
+              from = "run/borgbackup-snapshot-inputs/realm";
+              to = "$TMPDIR/bind/realm";
+            }
           ];
       persistBorgDrainScript =
         rewriteBackupHook backupRuntimeEval.config.systemd.services.borgbackup-job-persist.script
@@ -229,6 +240,10 @@ in
             }
             {
               from = "/run/borgbackup-snapshot-inputs/persist";
+              to = "$TMPDIR/bind/persist";
+            }
+            {
+              from = "run/borgbackup-snapshot-inputs/persist";
               to = "$TMPDIR/bind/persist";
             }
           ];
@@ -340,6 +355,10 @@ in
         }
         {
           from = "/tmp/sentinel-polylogue-root";
+          to = "$TMPDIR/live-polylogue";
+        }
+        {
+          from = "tmp/sentinel-polylogue-root";
           to = "$TMPDIR/live-polylogue";
         }
       ];
@@ -472,18 +491,46 @@ in
               ;;
             create)
               archive=""
-              for arg in "$@"; do
-                case "$arg" in
-                  ::*) archive="''${arg#::}" ;;
+              source_path="''${@: -1}"
+              excludes=()
+              while [ "$#" -gt 0 ]; do
+                case "$1" in
+                  ::*) archive="''${1#::}"; shift ;;
+                  --exclude) excludes+=("$2"); shift 2 ;;
+                  --exclude-if-present) shift 2 ;;
+                  *) shift ;;
                 esac
               done
-              source_path="''${@: -1}"
               repo="''${BORG_REPO:?BORG_REPO must be set}"
               repo_path="''${repo#file://}"
               test -n "$archive"
               test -d "$source_path"
               mkdir -p "$repo_path/archives/$archive"
-              cp -a "$source_path/." "$repo_path/archives/$archive/"
+              # borg matches exclude patterns against the full source path it
+              # walks, with the leading separator stripped, and stops
+              # recursing into a directory that matches -- so an entry is
+              # archived only when neither it nor any ancestor matches. In
+              # fnmatch style `*` crosses path separators, which is exactly
+              # what bash `[[ ... == pattern ]]` does with an unquoted
+              # pattern.
+              source_root="''${source_path%/}"
+              source_root="''${source_root%/.}"
+              source_root="''${source_root%/}"
+              while IFS= read -r -d "" entry; do
+                relative="''${entry#$source_root/}"
+                walked="''${source_root#/}/$relative"
+                excluded=0
+                for pattern in ''${excludes[@]+"''${excludes[@]}"}; do
+                  pattern="''${pattern#/}"
+                  if [[ "$walked" == $pattern || "$walked" == $pattern/* ]]; then
+                    excluded=1
+                    break
+                  fi
+                done
+                [ "$excluded" -eq 1 ] && continue
+                mkdir -p "$repo_path/archives/$archive/$(dirname "$relative")"
+                cp -a "$entry" "$repo_path/archives/$archive/$relative"
+              done < <(find "$source_root" -mindepth 1 -type f -print0)
               ;;
             extract)
               archive_ref="$1"
@@ -563,8 +610,16 @@ in
           mkdir -p \
             "$TMPDIR/realm-snapshots/realm.2026-04-02T010000" \
             "$TMPDIR/realm-snapshots/realm.2026-04-02T011500/project/sinex/.beads/dolt/.dolt" \
+            "$TMPDIR/realm-snapshots/realm.2026-04-02T011500/tmp/work" \
+            "$TMPDIR/realm-snapshots/realm.2026-04-02T011500/worktrees/agent-checkout" \
+            "$TMPDIR/realm-snapshots/realm.2026-04-02T011500/inbox/download" \
+            "$TMPDIR/realm-snapshots/realm.2026-04-02T011500/data/project/tmp" \
             "$TMPDIR/persist-snapshots/persist.2026-04-02T010000" \
             "$TMPDIR/persist-snapshots/persist.2026-04-02T011500"
+          printf 'scratch\n' > "$TMPDIR/realm-snapshots/realm.2026-04-02T011500/tmp/work/analysis-output"
+          printf 'checkout\n' > "$TMPDIR/realm-snapshots/realm.2026-04-02T011500/worktrees/agent-checkout/file"
+          printf 'downloaded\n' > "$TMPDIR/realm-snapshots/realm.2026-04-02T011500/inbox/download/landed.bin"
+          printf 'nested\n' > "$TMPDIR/realm-snapshots/realm.2026-04-02T011500/data/project/tmp/kept"
           printf '{"id":"synthetic-bead"}\n' > "$TMPDIR/realm-snapshots/realm.2026-04-02T011500/project/sinex/.beads/issues.jsonl"
           printf 'synthetic Dolt state\n' > "$TMPDIR/realm-snapshots/realm.2026-04-02T011500/project/sinex/.beads/dolt/.dolt/HEAD"
 
@@ -624,6 +679,34 @@ in
           grep -q "$TMPDIR/bind/persist" "$TMPDIR/logs/umount.log"
           grep -q "create .*::realm-realm.2026-04-02T011500" "$TMPDIR/logs/borg.log"
           grep -q "create .*::persist-persist.2026-04-02T011500" "$TMPDIR/logs/borg.log"
+          # Realm archive membership. inbox/ is the control: a realm
+          # exclusion broad enough to reach it fails here, and so does one
+          # broad enough to take a tmp/ nested inside a real dataset.
+          mkdir -p "$TMPDIR/restore-realm"
+          (
+            cd "$TMPDIR/restore-realm"
+            borg extract "file://$TMPDIR/repos/borg-realm-v2::realm-realm.2026-04-02T011500"
+          )
+          assert_archived() {
+            if ! test -f "$TMPDIR/restore-realm/$1"; then
+              echo "realm archive is missing $1" >&2
+              exit 1
+            fi
+          }
+          # `! cmd` is exempt from set -e, so a negative claim has to exit by
+          # hand or it can never fail the build.
+          refute_archived() {
+            if test -e "$TMPDIR/restore-realm/$1"; then
+              echo "realm archive still contains $1" >&2
+              exit 1
+            fi
+          }
+          assert_archived inbox/download/landed.bin
+          assert_archived data/project/tmp/kept
+          assert_archived project/sinex/.beads/issues.jsonl
+          refute_archived tmp
+          refute_archived worktrees
+
           grep -q "subvolume delete $TMPDIR/realm-snapshots/realm.2026-04-02T010000" "$TMPDIR/logs/btrfs.log"
           grep -q "subvolume delete $TMPDIR/persist-snapshots/persist.2026-04-02T010000" "$TMPDIR/logs/btrfs.log"
           archive_name="$(borg list --short file://$TMPDIR/repos/borg-sinex-blobs-v1)"
@@ -635,7 +718,10 @@ in
           )
           cmp "$TMPDIR/live-cas/objects/ab/cdef" "$TMPDIR/restore/objects/ab/cdef"
           grep -q "create .* $TMPDIR/live-cas" "$TMPDIR/logs/borg.log"
-          ! grep -q "/realm/sinex/state/blob-repository" "$TMPDIR/logs/borg.log"
+          if grep -q "/realm/sinex/state/blob-repository" "$TMPDIR/logs/borg.log"; then
+            echo "sinex blob job used a hardcoded CAS path" >&2
+            exit 1
+          fi
           polylogue_archive="$(borg list --short file://$TMPDIR/repos/borg-polylogue-state-v1)"
           case "$polylogue_archive" in polylogue-state-*) ;; *) exit 1 ;; esac
           mkdir -p "$TMPDIR/restore-polylogue"
@@ -644,6 +730,10 @@ in
             borg extract "file://$TMPDIR/repos/borg-polylogue-state-v1::$polylogue_archive"
           )
           cmp "$TMPDIR/live-polylogue/blob/objects/cd/ef01" "$TMPDIR/restore-polylogue/blob/objects/cd/ef01"
+          if test -e "$TMPDIR/restore-polylogue/source.db"; then
+            echo "polylogue state archive contains the live source.db" >&2
+            exit 1
+          fi
           test -f "$TMPDIR/state/borg-drain/polylogue-state.last-success"
 
           beads_drill_log="$(find "$TMPDIR/realm-data" -name borg_beads_drill.jsonl -print -quit)"
@@ -662,7 +752,10 @@ in
           set -e
 
           test "$missing_status" -eq 0
-          ! grep -q "borg create failed" "$TMPDIR/missing-realm.log"
+          if grep -q "borg create failed" "$TMPDIR/missing-realm.log"; then
+            echo "empty snapshot queue reported a failed borg create" >&2
+            exit 1
+          fi
         '';
       };
 
