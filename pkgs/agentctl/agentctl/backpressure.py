@@ -40,6 +40,11 @@ CLOSE_ORDER = {
 }
 MANAGED_GROUPS = ("agent", "pytest", "normal", "bulk")
 
+# Every pause this module records names itself, and `tick` reopens only a
+# group whose most recent pause event is its own: an operator's
+# `pueue pause -g X` leaves no event and stays paused until the operator says.
+OWNER = "agentctl"
+
 
 def read_pressure(root: Path = Path("/proc/pressure")) -> dict[str, float]:
     """The host's `full` stall averages. Absent PSI reads as no pressure."""
@@ -102,6 +107,7 @@ def _append(spool: Path | None, event: Mapping[str, object]) -> None:
             "schema_version": 1,
             "emitted_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "kind": "backpressure",
+            "owner": OWNER,
             **dict(event),
         },
         sort_keys=True,
@@ -113,6 +119,32 @@ def _append(spool: Path | None, event: Mapping[str, object]) -> None:
             handle.write(line + "\n")
     except OSError:
         return
+
+
+def paused_by_us(spool: Path | None) -> set[str]:
+    """Groups whose latest pause event in the spool is this module's own."""
+    if spool is None:
+        return set()
+    try:
+        lines = spool.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return set()
+    latest: dict[str, bool] = {}
+    for line in lines:
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict) or event.get("kind") != "backpressure":
+            continue
+        group = event.get("group")
+        if not isinstance(group, str):
+            continue
+        if event.get("action") == "closed":
+            latest[group] = event.get("owner") == OWNER
+        elif event.get("action") == "opened":
+            latest.pop(group, None)
+    return {group for group, ours in latest.items() if ours}
 
 
 def tick(*, spool: Path | None, pressure_root: Path = Path("/proc/pressure")) -> dict:
@@ -128,7 +160,8 @@ def tick(*, spool: Path | None, pressure_root: Path = Path("/proc/pressure")) ->
     signal = "+".join(signals) or None
 
     desired_paused = _desired_paused(pressure, paused)
-    obsolete = [name for name in paused if name not in desired_paused]
+    ours = paused_by_us(spool)
+    obsolete = [name for name in paused if name not in desired_paused and name in ours]
     if obsolete:
         target = obsolete[0]
         try:
