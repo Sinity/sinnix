@@ -263,3 +263,32 @@ def test_a_pause_someone_else_recorded_after_ours_is_theirs(
 
     assert calls == []
     assert result["action"] == "hold"
+
+
+def test_a_group_seen_running_after_our_pause_is_released_and_an_operator_repause_holds(
+    monkeypatch, tmp_path
+) -> None:
+    """`pueue start -g X` by the operator after our pause, then their own
+    `pueue pause -g X`: the second pause is theirs and stays."""
+    spool = _spool(tmp_path, _ours("pytest"))
+    result, calls = _tick(
+        monkeypatch,
+        {"io_full_avg60": 1.0, "memory_full_avg60": 1.0},
+        {"agent": "Running", "pytest": "Running", "normal": "Running", "bulk": "Running"},
+        spool=spool,
+    )
+    assert calls == [] and result["action"] == "hold"
+    events = [json.loads(line) for line in spool.read_text().splitlines()]
+    assert [(e["action"], e["group"]) for e in events] == [
+        ("closed", "pytest"),
+        ("released", "pytest"),
+    ]
+    assert backpressure.paused_by_us(spool) == set()
+
+    result, calls = _tick(
+        monkeypatch,
+        {"io_full_avg60": 1.0, "memory_full_avg60": 1.0},
+        {"agent": "Running", "pytest": "Paused", "normal": "Running", "bulk": "Running"},
+        spool=spool,
+    )
+    assert calls == [] and result["action"] == "hold"
