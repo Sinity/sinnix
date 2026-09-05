@@ -267,8 +267,9 @@ def test_integrity_walk_stops_when_it_outlasts_its_budget(
 ) -> None:
     """The walk is bounded, and exhausting the bound publishes nothing.
 
-    Mutation: dropping the deadline arm of the watchdog lets the walk run to
-    completion and publish, so the run succeeds and this fails.
+    This also pins the mechanism: dropping either the watchdog's deadline arm
+    or its connection.interrupt() call lets the walk run to completion and
+    publish, because a progress handler cannot end a scan in flight.
     """
     source = slow_walk_database
     output = tmp_path / "out.zst"
