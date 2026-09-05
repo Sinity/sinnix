@@ -10,7 +10,7 @@ requires-python = ">=3.12"
 
 [project.scripts]
 agentctl = "agentctl.cli:main"
-agentctl-run = "agentctl.queue_run:main"
+agentctl-run = "agentctl.run:main"
 
 [tool.setuptools.packages.find]
 include = ["agentctl*"]

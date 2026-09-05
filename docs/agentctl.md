@@ -23,7 +23,8 @@ command, and one operator screen.
 | `job start <p> <op> [--workspace <path>] [--wait] [-- args…]` | `pueue add` in the operation's pool, label `<p>:<op>`, running `agentctl-run <launch.json>`; extra arguments are appended to the declared `exec`                                                                                                   |
 | `job fire <p> <op>`                                           | what a schedule timer runs: `job start` on the main checkout, skipped while the same label is queued or running                                                                                                                                    |
 | `job list [--project p] [--active]`                           | `pueue status --json` reduced to job rows                                                                                                                                                                                                          |
-| `job get \| logs \| result \| cancel \| retry \| wait <id>`   | one task by pueue id; `logs` reads the bounded log, `result` the typed artifact, `cancel` kills the task and reaps its scope's whole cgroup, `retry` is `pueue restart --in-place`                                                                 |
+| `job get \| logs \| result \| cancel \| retry \| wait <id>`   | one task by pueue id; `logs` reads the bounded log, `result` the typed artifact, `cancel` stops the task's unit and kills the task, `retry` is `pueue restart --in-place`                                                                 |
+| `job clean <id> \| --all-terminal`                            | delete a terminal task's launch input, log, result, outcome and cancel marker, then `pueue remove`; never by age |
 | `lane start <p> <bead> [--backend --model --effort]`          | compile the prompt, `wt switch --create feature/packet/<bead>`, queue the agent in group `agent` (label `<p>:lane:<bead>`)                                                                                                                         |
 | `lane publish [<worktree>] [--bead --title --body-file]`      | disarm any merge armed for an earlier head, push, create or reuse the PR, wait for checks and an exact-head hosted Codex verdict, then run `gh pr merge --auto --squash`; pending reviews and findings remain actionable; refuses a dirty worktree |
 | `lane rebase <p> <bead>`                                      | queue an agent with the rebase prompt into the bead's existing worktree (label `<p>:rebase:<bead>`)                                                                                                                                                |
@@ -50,49 +51,67 @@ directory, the timeout, the result kind and the artifact paths, then runs
 `pueue add --escape -g <pool> -l <label> -- agentctl-run <input>`.
 
 `agentctl-run` is the command every task runs. It appends a `started`
-event to the spool naming the group pueue ran it in, starts the workload in the
-task's transient systemd scope, runs the argv with the launch environment in
-its own session, enforces the declared timeout (exit 124), refuses a vanished
-working directory (exit 125), writes the combined log to `jobs/<ref>.log` and —
-for `json`/`pytest` results — stdout alone to `jobs/<ref>.result`, both bounded
-at 64,000 bytes with an overflow marker. It returns only once the scope holds
-nothing: a descendant that outlived the workload's leader is waited out and
-then killed, because pueue frees the group's worker the moment the wrapper
-returns. pueue's completion callback (declared by the CLI feature) appends the
-finish event. `job logs` and `job result` read the paths the launch input
-named, which must be regular files under the task's own working directory or
-the state directory, bounded by the same limits; there is no job ledger. The
-launch input stays so `pueue restart` re-runs the same command.
+event to the spool naming the group pueue ran it in, then runs the argv as a
+transient service `agentctl-<group>-<stem>-<digest of the launch input
+path>.service` in the declarative `agentctl-<group>.slice`:
+`systemd-run --user --wait -p Type=exec -p ExitType=cgroup
+-p KillMode=control-group -p IOAccounting=yes -p RuntimeMaxSec=<timeout>`,
+with the launch environment as `--setenv` and the pueue task id as the unit
+description. The wait returns once the unit's cgroup is empty, so a
+descendant that outlives the command's leader still holds the task and its
+pool slot. stdout and stderr go to `jobs/<ref>.log` — for `json`/`pytest`
+results stdout alone goes to `jobs/<ref>.result` — both bounded at 64,000
+bytes with an overflow marker. A vanished working directory or an
+unresolvable command is refused before anything starts (exit 125).
+
+The run ends in one of `success`, `failed` (the command's exit status),
+`timeout` (exit 124, `RuntimeMaxSec` expired), `cancelled` (exit 130, the
+cancel marker `jobs/<ref>.cancel` existed when the wait returned),
+`vanished` (exit 126, the unit could not be observed after a failing wait)
+or `slot_occupied` (exit 75). The outcome is written to `jobs/<ref>.outcome`,
+carried on the `finished` event and shown by `job result`. pueue's
+completion callback (declared by the CLI feature) appends its own finish
+event. `job logs` and `job result` read the paths the launch input named,
+which must be regular files under the task's own working directory or the
+state directory; there is no job ledger. The launch input stays so `pueue
+restart` re-runs the same command.
+
+Before starting in a pool whose parallelism is 1 (`pytest`, `bulk`), the
+wrapper lists the active units of that pool's slice. A unit whose pueue task
+is terminal is an orphan of a killed wrapper and is stopped (`settled_orphan`
+in the log); a unit whose task is still running, or that no queued task
+owns, ends the run as `slot_occupied` without starting the command.
 
 `pueue add` publishes the adding client's environment into world-readable
 state, so every add goes through the adapter's scrubbed environment (`HOME`,
 `PATH`, `XDG_RUNTIME_DIR`, `XDG_DATA_HOME`); the launch input carries the
-real one. Add tasks by hand with `sinnix-pueue-add`, which scrubs the same
-way.
+real one.
 
-Groups admit work, and every task's workload enters a transient
-`agentctl-<group>-<stem>-<digest of the launch input path>.scope` in the
-corresponding declarative `agentctl-<group>.slice`: `agent:6 pytest:1
-bulk:1 normal:5 interactive:4`. Every part of that name comes from `pueue
-status`, from a command that is the wrapper and one launch input and nothing
-else, so `job cancel` stops the cgroup — the one boundary a descendant cannot
-leave — after pueue has SIGKILLed the wrapper that would otherwise have to
-clean up. Stopping it is one write to `cgroup.kill`, which the kernel applies
-to the whole subtree, and `job cancel` on a task that never started drops it
-out of the queue instead, since pueue kills processes and a queued task has
-none. The group comes from `PUEUE_GROUP`, so a repository that queues
-`agentctl-run` with its own launch input is contained and reaped
-identically. `scope_properties` in a launch input are `systemd-run -p`
-settings on that scope, restricted to the ones that lower what the task may
-consume (`MemoryMax`, `MemoryHigh`, `MemorySwapMax`, `MemoryZSwapMax`,
-`TasksMax`), and a launch must not start a scope of its own: it would land
-outside the task's cgroup, where a cancel cannot reach it. The pytest and bulk
-slices have fixed memory, swap, CPU, and IO budgets; they do not choose
-capacity from instantaneous free RAM.
+Groups admit work: `agent:6 pytest:1 bulk:1 normal:5 interactive:4`. Every
+part of a unit name comes from `pueue status`, from a command that is the
+wrapper and one launch input and nothing else. `job cancel` drops a queued
+task out of the queue (`removed`); for a running task it writes the cancel
+marker, runs `systemctl --user stop <unit>`, then `pueue kill`, and reports
+`stopped`, or `failed` with a non-zero exit while the unit is still active.
+`systemctl stop` ends the wrapper's wait with a success status, which is why
+the marker is written first. The group comes from `PUEUE_GROUP`, so a
+repository that queues `agentctl-run` with its own launch input is contained
+and cancelled identically. `scope_properties` in a launch input are
+`systemd-run -p` settings on that unit, restricted to the ones that bound
+what the task may consume (`MemoryMax`, `MemoryHigh`, `MemorySwapMax`,
+`MemoryZSwapMax`, `TasksMax`, `CPUWeight`, `IOWeight`), and a launch must
+not start a unit of its own: it would land outside the task's cgroup, where
+a cancel cannot reach it. `agentctl.slice` and `agentctl-agent.slice` are
+never systemd-oomd or swap victims; the pytest and bulk slices have fixed
+memory, swap, CPU and IO budgets, `MemorySwapMax=0`, and are killed by
+systemd-oomd at their own memory pressure; they do not choose capacity from
+instantaneous free RAM.
 `agentctl-backpressure.timer` runs `agentctl backpressure tick`, which pauses one
-group per minute while the host's
-`full` IO or memory stall stays above threshold and resumes in reverse order
-once clear; a paused task keeps its work.
+group per minute while the host's `full` IO or memory stall stays above
+threshold and resumes in reverse order once clear; a paused task keeps its
+work. Every pause event carries `"owner": "agentctl"` and the group, and a
+group is resumed only when its most recent pause event in the spool is
+agentctl's own: an operator's `pueue pause -g <group>` stays paused.
 
 ## Lanes
 
@@ -220,9 +239,12 @@ it is the only timer that starts lanes.
 | `pueue.CALL_TIMEOUT_SECONDS` (60)                            | arbitrary bound (a minute distinguishes a wedged daemon from a slow one) | max time for one `pueue` round trip                              |
 | `worktrunk.LIST_SCHEMA_VERSION` (2)                          | external tool's contract                                                 | the `wt list` JSON schema this module parses                     |
 | `worktrunk.CALL_TIMEOUT_SECONDS` (60)                        | arbitrary bound (covers one cold forge round trip)                       | max time for one `wt` round trip                                 |
-| `queue_run.MAX_LOG_BYTES` / `MAX_RESULT_BYTES` (64,000)      | arbitrary bound                                                          | caps on the captured log and typed result                        |
-| `queue_run.TIMEOUT_EXIT_CODE` (124)                          | external tool's contract (`timeout(1)`)                                  | the wrapper enforced the declared timeout                        |
-| `queue_run.REFUSED_EXIT_CODE` (125)                          | arbitrary bound                                                          | a pre-run refusal (vanished working directory, unreadable input) |
+| `run.MAX_LOG_BYTES` / `MAX_RESULT_BYTES` (64,000)            | arbitrary bound                                                          | caps on the captured log and typed result                        |
+| `run.TIMEOUT_EXIT_CODE` (124)                                | external tool's contract (`timeout(1)`)                                  | the unit's `RuntimeMaxSec` expired                               |
+| `run.REFUSED_EXIT_CODE` (125)                                | arbitrary bound                                                          | a pre-run refusal (vanished working directory, unreadable input) |
+| `run.CANCELLED_EXIT_CODE` (130)                              | shell convention (128 + SIGINT)                                          | the cancel marker existed when the wait returned                 |
+| `run.VANISHED_EXIT_CODE` (126)                               | arbitrary bound                                                          | the unit could not be observed after a failing wait              |
+| `run.SLOT_OCCUPIED_EXIT_CODE` (75)                           | external convention (`EX_TEMPFAIL`)                                      | a single-slot pool was held by another unit                      |
 | `lanes.PUSH_TIMEOUT_SECONDS` (2,400)                         | arbitrary bound (the push runs the repository's pre-push gate)           | timeout for `git push` during publication                        |
 | `lanes.GH_TIMEOUT_SECONDS` (60)                              | arbitrary bound                                                          | timeout for one `gh`/`git` call                                  |
 | `packets.MAX_PROMPT_BYTES` (200,000)                         | arbitrary bound                                                          | cap on a compiled prompt                                         |

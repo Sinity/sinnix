@@ -255,7 +255,7 @@ def recording_systemctl(
     # reported success would hide a reap that reached nothing.
     script.write_text(
         f'#!/bin/sh\nprintf "systemctl %s\\n" "$*" >> {ledger}\n'
-        'case "$*" in *stop*) exit 1 ;; esac\n'
+        'case "$*" in *stop*) exit 1 ;; *is-active*) exit 3 ;; esac\n'
     )
     script.chmod(0o755)
     monkeypatch.setenv("PATH", f"{directory}{os.pathsep}{os.environ['PATH']}")

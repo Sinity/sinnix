@@ -13,7 +13,16 @@ from agentctl.config import Config
 from agentctl.launch import JobError
 from agentctl.projects import load_project_adapter
 from agentctl.pueue import PueueGroupError
-from agentctl.queue_run import REFUSED_EXIT_CODE, TIMEOUT_EXIT_CODE, scope_unit_for
+from agentctl.run import (
+    CANCELLED_EXIT_CODE,
+    REFUSED_EXIT_CODE,
+    SLOT_OCCUPIED_EXIT_CODE,
+    TIMEOUT_EXIT_CODE,
+    VANISHED_EXIT_CODE,
+    cancel_marker_for,
+    outcome_path_for,
+    scope_unit_for,
+)
 from conftest import FakePueue, read_launch
 
 
@@ -202,7 +211,7 @@ def test_phases_come_from_pueue_results_and_the_wrapper_exit_codes(
     project = load_project_adapter(project_root)
     ids = [
         launch.start_operation(config, project, project.operation("check"))["job_id"]
-        for _ in range(6)
+        for _ in range(9)
     ]
     fake_pueue.succeed(ids[0])
     fake_pueue.fail(ids[1], exit_code=3)
@@ -210,6 +219,9 @@ def test_phases_come_from_pueue_results_and_the_wrapper_exit_codes(
     fake_pueue.fail(ids[3], exit_code=REFUSED_EXIT_CODE)
     fake_pueue.kill_directly(ids[4])
     fake_pueue.queue(ids[5])
+    fake_pueue.fail(ids[6], exit_code=CANCELLED_EXIT_CODE)
+    fake_pueue.fail(ids[7], exit_code=VANISHED_EXIT_CODE)
+    fake_pueue.fail(ids[8], exit_code=SLOT_OCCUPIED_EXIT_CODE)
 
     phases = [launch.get_job(task_id)["phase"] for task_id in ids]
 
@@ -220,6 +232,9 @@ def test_phases_come_from_pueue_results_and_the_wrapper_exit_codes(
         "refused",
         "cancelled",
         "queued",
+        "cancelled",
+        "vanished",
+        "slot-occupied",
     ]
 
 
@@ -233,6 +248,7 @@ def test_logs_and_result_are_read_by_the_reference_in_the_task_command(
     Path(written["log_path"]).parent.mkdir(parents=True, exist_ok=True)
     Path(written["log_path"]).write_text("ran\n")
     Path(written["result_path"]).write_text('{"passed": 3}')
+    outcome_path_for(written["log_path"]).write_text('{"outcome": "success"}')
     fake_pueue.set_log(started["job_id"], "wrapper stderr")
     fake_pueue.succeed(started["job_id"])
 
@@ -242,6 +258,7 @@ def test_logs_and_result_are_read_by_the_reference_in_the_task_command(
     assert outcome["kind"] == "artifact"
     assert outcome["value"] == {"passed": 3}
     assert outcome["phase"] == "succeeded"
+    assert outcome["outcome"] == {"outcome": "success"}
 
 
 def test_result_of_an_exit_operation_is_the_status_alone(
@@ -257,28 +274,125 @@ def test_result_of_an_exit_operation_is_the_status_alone(
     assert outcome["exit_code"] == 0
 
 
-def test_cancel_kills_the_task_then_stops_the_scope_that_held_its_workload(
+def test_cancel_marks_then_stops_the_unit_then_kills_the_task(
     fake_pueue: FakePueue,
     config: Config,
     project_root: Path,
     recording_systemctl: Callable[[], list[list[str]]],
 ) -> None:
-    """pueue's SIGKILL cannot be caught, so the workload is reaped from outside.
-
-    That the reap really ends the tree is proven against a live daemon in
-    test_pueue.py; this is the wiring, including the scope named before the
-    kill removes the command that names it.
-    """
+    """`systemctl stop` ends the wrapper's wait with a success status, so the
+    marker written before it is the only record that this was a cancel."""
     project = load_project_adapter(project_root)
     started = launch.start_operation(config, project, project.operation("check"))
-    unit = launch.scope_unit(fake_pueue.task(started["job_id"]))
+    task = fake_pueue.task(started["job_id"])
+    unit = launch.scope_unit(task)
+    marker = cancel_marker_for(read_launch(config, task)["log_path"])
 
     cancelled = launch.cancel(config, started["job_id"])
 
+    assert marker.exists()
     assert fake_pueue.killed == [started["job_id"]]
-    assert ["systemctl", "--user", "stop", unit] in recording_systemctl()
-    assert cancelled["cancelled"] == "killed"
+    calls = recording_systemctl()
+    assert ["systemctl", "--user", "stop", unit] in calls
+    assert ["systemctl", "--user", "is-active", "--quiet", unit] in calls
+    assert cancelled["state"] == "stopped"
+    assert cancelled["unit"] == unit
     assert cancelled["phase"] == "cancelled"
+
+
+def test_cancel_fails_when_the_unit_is_still_active_afterwards(
+    fake_pueue: FakePueue,
+    config: Config,
+    project_root: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    directory = tmp_path / "live-systemctl"
+    directory.mkdir()
+    (directory / "systemctl").write_text("#!/bin/sh\nexit 0\n")
+    (directory / "systemctl").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{directory}{os.pathsep}{os.environ['PATH']}")
+    project = load_project_adapter(project_root)
+    started = launch.start_operation(config, project, project.operation("check"))
+
+    cancelled = launch.cancel(config, started["job_id"])
+
+    assert cancelled["state"] == "failed"
+
+
+def test_clean_deletes_a_terminal_task_and_everything_it_left(
+    fake_pueue: FakePueue, config: Config, project_root: Path
+) -> None:
+    project = load_project_adapter(project_root)
+    started = launch.start_operation(config, project, project.operation("verify"))
+    task = fake_pueue.task(started["job_id"])
+    written = read_launch(config, task)
+    log = Path(written["log_path"])
+    log.parent.mkdir(parents=True, exist_ok=True)
+    artifacts = [
+        log,
+        Path(written["result_path"]),
+        cancel_marker_for(log),
+        outcome_path_for(log),
+        launch.launch_input_path(task),
+    ]
+    for path in artifacts:
+        path.write_text("x")
+
+    with pytest.raises(JobError, match="still running"):
+        launch.clean(config, started["job_id"])
+    fake_pueue.succeed(started["job_id"])
+    cleaned = launch.clean(config, started["job_id"])
+
+    assert cleaned["cleaned"] is True
+    assert not any(path.exists() for path in artifacts)
+    assert fake_pueue.removed == [started["job_id"]]
+
+
+def test_clean_all_terminal_leaves_running_and_foreign_tasks_alone(
+    fake_pueue: FakePueue, config: Config, project_root: Path
+) -> None:
+    project = load_project_adapter(project_root)
+    done = launch.start_operation(config, project, project.operation("check"))
+    running = launch.start_operation(config, project, project.operation("check"))
+    foreign = fake_pueue.add(
+        group="normal",
+        label="other:x",
+        command=("true",),
+        working_directory=project_root,
+    )
+    fake_pueue.succeed(done["job_id"])
+    fake_pueue.succeed(foreign)
+
+    cleaned = launch.clean_terminal(config)
+
+    assert [row["job_id"] for row in cleaned] == [done["job_id"]]
+    assert fake_pueue.task(running["job_id"]) is not None
+    assert fake_pueue.task(foreign) is not None
+
+
+def test_a_binding_is_stored_in_the_launch_input_and_read_back_on_get(
+    fake_pueue: FakePueue, config: Config, project_root: Path
+) -> None:
+    project = load_project_adapter(project_root)
+    started = launch.enqueue(
+        config,
+        project=project,
+        operation="check",
+        label="fixture:check",
+        group="normal",
+        argv=["true"],
+        working_directory=project_root,
+        timeout_seconds=10,
+        result_kind="exit",
+        environment={"PATH": os.environ["PATH"]},
+        binding={"beads": ["fx-1", "fx-2"], "run_id": "run-7"},
+    )
+
+    written = read_launch(config, fake_pueue.task(started["job_id"]))
+    assert written["binding"] == {"beads": ["fx-1", "fx-2"], "run_id": "run-7"}
+    assert launch.get_job(started["job_id"], config)["binding"] == written["binding"]
+    assert "binding" not in launch.get_job(started["job_id"])
 
 
 def test_cancelling_a_queued_task_drops_it_out_of_the_queue(
@@ -297,7 +411,7 @@ def test_cancelling_a_queued_task_drops_it_out_of_the_queue(
 
     assert fake_pueue.removed == [started["job_id"]]
     assert fake_pueue.task(started["job_id"]) is None
-    assert cancelled["cancelled"] == "dropped"
+    assert cancelled["state"] == "removed"
     assert cancelled["phase"] == "cancelled" and cancelled["terminal"] is True
 
 
@@ -326,7 +440,8 @@ def test_a_task_whose_launch_input_agentctl_did_not_write_names_its_own_scope(
 
     unit = scope_unit_for(foreign, "pytest")
     assert ["systemctl", "--user", "stop", unit] in recording_systemctl()
-    assert cancelled["reaped"]["scope"]["unit"] == unit
+    assert cancelled["unit"] == unit
+    assert cancel_marker_for(foreign.parent / "slot.log").exists()
 
 
 def test_a_command_that_only_mentions_the_wrapper_owns_no_scope_and_no_artifacts(
@@ -357,11 +472,7 @@ def test_a_command_that_only_mentions_the_wrapper_owns_no_scope_and_no_artifacts
     assert launch.scope_unit(task) is None
     cancelled = launch.cancel(config, task_id)
 
-    assert cancelled["reaped"]["scope"] == {
-        "unit": None,
-        "stopped": False,
-        "survivors": [],
-    }
+    assert cancelled["unit"] is None
     assert [call for call in recording_systemctl() if "stop" in call] == []
 
 

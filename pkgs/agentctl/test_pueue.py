@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 from agentctl import launch, pueue
 from agentctl.config import Config
-from agentctl.queue_run import scope_unit_for
+from agentctl.run import scope_unit_for
 
 # Recorded from `pueue status --json` on pueue 4.0.4 after one failing task.
 LIVE_STATUS = {
@@ -409,7 +409,7 @@ def test_a_private_pueue_task_places_its_child_in_the_declared_pool_scope(
             f"PYTHONPATH={Path(__file__).parent}",
             sys.executable,
             "-m",
-            "agentctl.queue_run",
+            "agentctl.run",
             str(launch_path),
         ),
         working_directory=tmp_path,
@@ -453,7 +453,7 @@ def test_kill_reaches_the_whole_process_tree(live_pueue: str, tmp_path: Path) ->
 def test_kill_is_not_catchable_so_a_wrapper_cannot_clean_up(
     live_pueue: str, tmp_path: Path
 ) -> None:
-    """`pueue kill` is not catchable, which is why the wrapper records a pgid.
+    """`pueue kill` is not catchable, which is why the canceller stops the unit.
 
     Anti-vacuity: if pueue ever delivered a catchable signal, a wrapper could
     clean up its own detached session and agentctl's reaping would be dead
@@ -519,7 +519,7 @@ def test_cancelling_a_task_reaps_every_descendant_it_started(
     wrapper = tmp_path / "agentctl-run"
     wrapper.write_text(
         f"#!/bin/sh\nexport PYTHONPATH={Path(__file__).parent}\n"
-        f'exec {sys.executable} -m agentctl.queue_run "$@"\n'
+        f'exec {sys.executable} -m agentctl.run "$@"\n'
     )
     wrapper.chmod(0o755)
     launch_path = tmp_path / "reaped-job.json"
@@ -581,9 +581,9 @@ def test_cancelling_a_task_reaps_every_descendant_it_started(
 
     cancelled = launch.cancel(config, task_id)
 
-    assert cancelled["reaped"]["scope"]["unit"] == unit
-    assert cancelled["reaped"]["scope"]["survivors"] == []
-    assert pueue.wait(task_id, timeout_seconds=60).result == "Killed"
+    assert cancelled["unit"] == unit
+    assert cancelled["state"] == "stopped"
+    assert pueue.wait(task_id, timeout_seconds=60).result in {"Killed", "Failed"}
     for pid in descendants:
         with pytest.raises(ProcessLookupError):
             os.kill(pid, 0)
