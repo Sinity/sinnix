@@ -70,6 +70,7 @@ mkFeatureModule {
                 description = "clipse ${mime} clipboard watcher";
                 execStart = "${lib.getExe' pkgs.wl-clipboard "wl-paste"} --type ${mime} --watch ${lib.getExe pkgs.clipse} --wl-store";
                 target = graphicalTarget;
+                restart = "always";
               };
           in
           {
