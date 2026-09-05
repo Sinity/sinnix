@@ -41,19 +41,20 @@ def _cmd_write(args: argparse.Namespace) -> int:
 
 
 def _cmd_selection(args: argparse.Namespace) -> int:
-    if args.debounce_ms is not None and args.debounce_state is None:
-        print("--debounce-ms requires --debounce-state", file=sys.stderr)
+    try:
+        return capture_selection(
+            capture_root=args.capture_root,
+            lane=args.lane,
+            list_command=args.list_command,
+            paste_command=args.paste_command,
+            window_command=args.window_command,
+            dedup_state=args.dedup_state,
+            debounce_ms=args.debounce_ms,
+            debounce_state=args.debounce_state,
+        )
+    except ValueError as exc:
+        print(f"sinnix-capture: {exc}", file=sys.stderr)
         return 2
-    return capture_selection(
-        capture_root=args.capture_root,
-        lane=args.lane,
-        list_command=args.list_command,
-        paste_command=args.paste_command,
-        window_command=args.window_command,
-        dedup_state=args.dedup_state,
-        debounce_ms=args.debounce_ms,
-        debounce_state=args.debounce_state,
-    )
 
 
 def _cmd_query(args: argparse.Namespace) -> int:

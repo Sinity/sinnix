@@ -172,6 +172,9 @@ def capture_selection(
     debounce_ms: int | None = None,
     debounce_state: Path | None = None,
 ) -> int:
+    if debounce_ms is not None and debounce_state is None:
+        raise ValueError("a debounce window needs a trigger file to arbitrate on")
+
     _drain_watch_payload()
 
     # Types the source printed count even if it then exited nonzero: a
