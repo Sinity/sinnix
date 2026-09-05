@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -820,3 +820,22 @@ def test_a_result_naming_the_base_commit_is_refused(harness: Harness) -> None:
     harness.git.heads[worker["worktree"]] = BASE
     with pytest.raises(BatchRefusal, match="empty_candidate"):
         harness.file_result(run, "fx-solo", sha=BASE)
+
+
+def test_resume_replaces_a_queued_landing_so_it_waits_on_the_current_workers(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = harness.start("fx-lead", "fx-solo")
+    monkeypatch.setattr(batch, "SubprocessBeads", lambda root: harness.beads)
+    harness.pueue.fail(run["workers"][0]["task_id"], exit_code=1)
+    harness.pueue.fail(run["workers"][1]["task_id"], exit_code=1)
+    queued = harness.pueue.task(run["landing"]["task_id"])
+    harness.pueue._tasks[queued.task_id] = replace(queued, status="Queued")
+    first = batch.resume(harness.config, harness.project, run["run_id"], "fx-lead")
+    queued = harness.pueue.task(first["landing"]["task_id"])
+    harness.pueue._tasks[queued.task_id] = replace(queued, status="Queued")
+    second = batch.resume(harness.config, harness.project, run["run_id"], "fx-solo")
+    landing = harness.pueue.task(second["landing"]["task_id"])
+    assert sorted(landing.dependencies) == sorted(
+        worker["task_id"] for worker in second["workers"]
+    )
