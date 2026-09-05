@@ -335,7 +335,7 @@ let
     # Shared pairwise/choice-set preference ranking engine (importable, not
     # a CLI): Plackett-Luce fit, stopping statistic, selection, draw
     # policies. scripts/sinnix-rank is its text frontend.
-    sinnix-rank-core = pkgs.callPackage ../pkgs/sinnix-rank-core/pkg.nix { };
+    sinnix-rank-core = pkgs.callPackage ../pkgs/sinnix-rank-core/pkg.nix { inherit sinnix-lib; };
 
     # Steering CLI: source lives in the steering workspace (a non-flake
     # git+file input), packaging lives here — the same split as lynchpin's

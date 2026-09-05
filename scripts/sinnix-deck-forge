@@ -2,6 +2,7 @@
 # @sinnix-package
 # description: Mint drill decks for the phone from the operator's own lake — shell recall, Fermi estimation, and the typing-error analysis
 # runtimeInputs: coreutils sqlite
+# pythonPackages: @sinnix-lib
 
 """Drills generated from the operator's own data.
 
@@ -39,6 +40,8 @@ import sys
 from pathlib import Path
 from typing import Any, Iterable
 
+from sinnix_lib.ledger import utc_ts
+
 SCHEMA = "sinnix.phone.deck/1"
 
 STATE_DIR = Path(os.environ.get("SINNIX_PHONE_STATE_DIR", "/realm/state/sinnix-phone"))
@@ -51,10 +54,6 @@ DERIVED = Path(os.environ.get("SINNIX_DERIVED_ROOT", "/realm/data/derived"))
 ATUIN_DB = Path(os.environ.get("ATUIN_DB", Path.home() / ".local/share/atuin/history.db"))
 KEYLOG = ACTIVITY / "keylog" / "logs"
 KEYBIND_MANIFEST = DERIVED / "keybinds" / "manifest.json"
-
-
-def now_iso() -> str:
-    return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def write_deck(deck: dict, *, dry_run: bool = False) -> Path | None:
@@ -96,7 +95,7 @@ def deck(
         "seconds": seconds,
         "blurb": blurb,
         "scored_on_device": True,
-        "generated_at": now_iso(),
+        "generated_at": utc_ts(),
         "config": config or {},
         "trials": trials,
         "assets": [],
@@ -445,7 +444,7 @@ def analyse_typing(days: int, max_lines: int) -> dict | None:
     rows.sort(key=lambda r: -r["rate"])
     return {
         "schema": "sinnix.typing.profile/1",
-        "generated_at": now_iso(),
+        "generated_at": utc_ts(),
         "days": len(files),
         "presses": presses,
         "backspaces": backspaces,

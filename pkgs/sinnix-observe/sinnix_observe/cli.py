@@ -9,6 +9,8 @@ import sys
 from collections import Counter
 from typing import Any
 
+from sinnix_lib.ledger import utc_ts
+
 from . import SCHEMA
 from .joins import build_gateway_rows, build_workload_rows
 from .render import render_human
@@ -26,7 +28,6 @@ from .sources.systemd import (
     collect_systemd_units,
 )
 from .sources.xtask import collect_sinex_xtask
-from .util import utc_now
 
 DEFAULT_BEGIN = os.environ.get("SINNIX_OBSERVE_BEGIN", "10 min ago")
 DEFAULT_DURATION = os.environ.get("SINNIX_OBSERVE_DURATION", "10 min")
@@ -36,7 +37,7 @@ DEFAULT_LIMIT = int(os.environ.get("SINNIX_OBSERVE_LIMIT", "10"))
 def _report_header(args: argparse.Namespace) -> dict[str, Any]:
     return {
         "schema": SCHEMA,
-        "generated_at": utc_now(),
+        "generated_at": utc_ts(),
         "window": {"since": args.since, "duration": args.duration},
     }
 

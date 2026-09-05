@@ -1,4 +1,12 @@
-from sinnix_quota.normalize import compare, normalize_cost, normalize_usage, redact_json
+import re
+
+from sinnix_quota import normalize
+from sinnix_quota.normalize import (
+    compare,
+    normalize_cost,
+    normalize_usage,
+    redact_json,
+)
 
 
 def codex_fixture(remaining: float = 72.0) -> dict:
@@ -96,3 +104,27 @@ def test_codexbar_linux_json_array_derives_remaining_and_plan() -> None:
     assert rows[0]["plan"] == "pro"
     assert rows[0]["window"]["remaining_fraction"] == 0.36
     assert rows[0]["account_hash"].startswith("sha256:")
+
+
+def test_fetched_at_falls_back_to_the_shared_utc_helper() -> None:
+    """A provider payload with no ``generatedAt`` still gets one stamp.
+
+    The field otherwise carries whatever grammar the provider published, so
+    the locally-minted fallback is the only part this package controls; it
+    matches the estate's ``%Y-%m-%dT%H:%M:%SZ``.
+    """
+    raw = codex_fixture()
+    raw.pop("generatedAt")
+    rows = normalize_usage(raw, "codexbar")
+
+    assert rows
+    for row in rows:
+        assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", row["fetched_at"])
+
+
+def test_fetched_at_fallback_routes_through_the_shared_helper(monkeypatch) -> None:
+    monkeypatch.setattr(normalize, "utc_ts", lambda: "SENTINEL-UTC-TS")
+    raw = codex_fixture()
+    raw.pop("generatedAt")
+
+    assert normalize_usage(raw, "codexbar")[0]["fetched_at"] == "SENTINEL-UTC-TS"

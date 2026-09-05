@@ -2,7 +2,7 @@
 # @sinnix-package
 # description: Rank current Hyprland keybindings for practice — stable identities, bounded usage priors, operator comparisons, and an ordered drill manifest
 # runtimeInputs: coreutils
-# pythonPackages: @sinnix-rank-core
+# pythonPackages: @sinnix-lib @sinnix-rank-core
 # docs: docs/ranking.md
 
 """Which keybindings are worth learning next.
@@ -46,6 +46,7 @@ import sys
 from pathlib import Path
 
 from rank_core import Item, Store, fit
+from sinnix_lib.ledger import utc_ts
 
 MANIFEST_SCHEMA = "sinnix.keybind.manifest/1"
 USAGE_SCHEMA = "sinnix.keybind.usage/1"
@@ -82,10 +83,6 @@ BIND_HEADER = re.compile(r'^hl\.bind\("(?P<chord>(?:[^"\\]|\\.)*)", \((?P<action
 FLAG_LINE = re.compile(r'^\s*\["(?P<key>[^"]+)"\]\s*=\s*(?P<value>.*?),?$')
 EXEC_CMD = re.compile(r'^hl\.dsp\.exec_cmd\("(?P<command>(?:[^"\\]|\\.)*)"\)$')
 STORE_PATH = re.compile(r"/nix/store/[a-z0-9]{32}-")
-
-
-def now_iso() -> str:
-    return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def unquote_lua(text: str) -> str:
@@ -371,7 +368,7 @@ def build_manifest(
     rows.sort(key=lambda row: (-row["priority"], row["id"]))
     return {
         "schema": MANIFEST_SCHEMA,
-        "generated_at": now_iso(),
+        "generated_at": utc_ts(),
         "inventory_source": inventory_source,
         "domain": domain,
         "domain_dir": str(domain_dir(domain)),
@@ -455,7 +452,7 @@ def cmd_usage(args: argparse.Namespace) -> int:
 
     payload = {
         "schema": USAGE_SCHEMA,
-        "generated_at": now_iso(),
+        "generated_at": utc_ts(),
         "source": source,
         "window_days": args.window_days,
         "records": records,

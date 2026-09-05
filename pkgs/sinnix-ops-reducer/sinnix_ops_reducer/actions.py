@@ -11,12 +11,11 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable
 
-from sinnix_lib.ledger import append_jsonl, iter_jsonl
+from sinnix_lib.ledger import append_jsonl, iter_jsonl, utc_ts
 from sinnix_lib.systemd import show_units
 
 from . import pressure as pressure_model
 from .agent_jobs import AgentCtlClient, AgentCtlError
-from .reducer import now_iso
 
 # Schema of the one-time marker record written to the receipts ledger the
 # first time it is created. Its presence (not its content) is what makes
@@ -306,7 +305,7 @@ class ActionService:
                 "schema": RECEIPTS_MIGRATION_SCHEMA,
                 "migrated_from": str(self.receipts_path),
                 "count": len(folded),
-                "migrated_at": now_iso(),
+                "migrated_at": utc_ts(),
             },
         )
         for record in folded.values():
@@ -608,7 +607,7 @@ class ActionService:
                 "expected_revision": request["expected_revision"],
                 "status": "rejected",
                 "error": str(error),
-                "created_at": now_iso(),
+                "created_at": utc_ts(),
             }
             self.receipts[request["idempotency_key"]] = rejected
             append_jsonl(self.receipts_ledger_path, rejected)
@@ -636,7 +635,7 @@ class ActionService:
                 else self._target_state(resolved)
             ),
             "adapter": adapter_receipt,
-            "created_at": now_iso(),
+            "created_at": utc_ts(),
         }
         self.receipts[request["idempotency_key"]] = receipt
         append_jsonl(self.receipts_ledger_path, receipt)

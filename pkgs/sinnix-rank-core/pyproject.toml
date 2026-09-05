@@ -7,6 +7,7 @@ name = "sinnix-rank-core"
 version = "0.1.0"
 description = "Shared pairwise/choice-set preference ranking engine: Plackett-Luce fit, stopping statistic, selection, draw policies"
 requires-python = ">=3.11"
+dependencies = ["sinnix-lib"]
 
 [tool.setuptools.packages.find]
 include = ["rank_core*"]

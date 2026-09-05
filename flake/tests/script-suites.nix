@@ -11,6 +11,10 @@
     { system, ... }:
     let
       pkgs = inputs.nixpkgs.legacyPackages.${system};
+      sinnix-lib = pkgs.callPackage ../../pkgs/sinnix-lib/pkg.nix { };
+      sinnix-rank-core = pkgs.callPackage ../../pkgs/sinnix-rank-core/pkg.nix {
+        inherit sinnix-lib;
+      };
       # The suites resolve their subject as parents[3]/scripts/<name>, so the
       # fixture must reproduce that layout rather than pass a path.
       mkScriptSuite =
@@ -83,6 +87,22 @@
           packageFiles = [ "collector.py" ];
           nativeBuildInputs = [ pkgs.zstd ];
         };
+        # Provably fails when: either runner stamps a grammar other than the
+        # estate's %Y-%m-%dT%H:%M:%SZ -- the offset-suffix spelling both
+        # carried before, for instance. Verified by restoring
+        # machine-experiment-run's local
+        # `dt.datetime.now(dt.UTC).replace(microsecond=0).isoformat()`, which
+        # fails the manifest assertion on `2026-09-05T23:39:12+00:00`.
+        experiment-manifest-suite = mkScriptSuite {
+          name = "machine-experiment-run";
+          suiteDir = ../../pkgs/machine-experiment-run/tests;
+          scripts = [
+            "machine-experiment-run"
+            "syslog-index"
+          ];
+          extraPythonPackages = [ sinnix-lib ];
+          nativeBuildInputs = [ pkgs.systemd ];
+        };
         # Provably fails when: the drift reporter stops distinguishing the
         # booted configuration revision from the current one, or stops
         # reporting a drift class its manifest describes.
@@ -100,7 +120,7 @@
           name = "sinnix-census";
           suiteDir = ../../pkgs/sinnix-census/tests;
           scripts = [ "sinnix-census" ];
-          extraPythonPackages = [ (pkgs.callPackage ../../pkgs/sinnix-lib/pkg.nix { }) ];
+          extraPythonPackages = [ sinnix-lib ];
         };
         # Provably fails when: either direction of the /realm taxonomy
         # assertion is dropped, or a retired level-1 name is readmitted to the
@@ -143,9 +163,7 @@
             "sinnix-rank"
             "sinnix-deck-forge"
           ];
-          extraPythonPackages = [
-            (pkgs.callPackage ../../pkgs/sinnix-rank-core/pkg.nix { })
-          ];
+          extraPythonPackages = [ sinnix-rank-core ];
           extraFiles = [
             {
               source = ../../modules/features/desktop/hyprland/bindings.nix;
@@ -171,9 +189,7 @@
             "sinnix-elicit"
             "sinnix-elicit-migrate"
           ];
-          extraPythonPackages = [
-            (pkgs.callPackage ../../pkgs/sinnix-rank-core/pkg.nix { })
-          ];
+          extraPythonPackages = [ sinnix-rank-core ];
         };
       };
     };
