@@ -959,9 +959,12 @@ def resume(
         # The old landing task depended on the failed worker task and is done
         # for good; the new one waits on every worker's current task.
         old = tasks.get(landing_id) if isinstance(landing_id, int) else None
-        if old is not None and old.terminal:
+        # A landing that has not started yet still names the worker task it
+        # was queued behind; only a running landing is left alone.
+        replace = old is None or old.status != "Running"
+        if old is not None and replace:
             pueue.remove([landing_id])
-        if old is None or old.terminal:
+        if replace:
             after = [
                 item["task_id"]
                 for item in run.workers
