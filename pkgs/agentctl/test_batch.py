@@ -83,6 +83,9 @@ class FakeGit:
     push_rejects: int = 0
     push_rejection: str = "! [rejected] master -> master (stale info)"
     resets: list[str] = field(default_factory=list)
+    # Commits that do not descend from the base commit.
+    off_base: set[str] = field(default_factory=set)
+    ancestry: list[tuple[str, str]] = field(default_factory=list)
 
     def __call__(self, path: Path, *arguments: str, timeout: float = 60) -> str:
         verb = arguments[0]
@@ -115,6 +118,11 @@ class FakeGit:
         if verb == "status":
             return ""
         if verb == "merge-base":
+            if arguments[1] == "--is-ancestor":
+                ancestor, descendant = arguments[2], arguments[3]
+                self.ancestry.append((ancestor, descendant))
+                if descendant in self.off_base:
+                    raise BatchError("merge-base: not an ancestor")
             return ""
         if verb == "push":
             if self.push_rejects:
@@ -997,12 +1005,26 @@ def test_manifest_is_written_once_and_updated_under_the_lock(harness: Harness) -
         batch.load(harness.config, "nope")
 
 
-def test_a_result_naming_the_base_commit_is_refused(harness: Harness) -> None:
+def test_a_result_must_name_a_commit_that_descends_from_the_run_base(
+    harness: Harness,
+) -> None:
+    """Breaks if a worker may file work landing cannot merge onto the base: the
+    base itself (nothing committed) or a commit from an unrelated history."""
     run = harness.start("fx-solo")
     worker = run["workers"][0]
+
+    filed = harness.file_result(run, "fx-solo")
+    assert filed["result"]["candidate_sha"] == SHA
+    assert (BASE, SHA) in harness.git.ancestry
+
     harness.git.heads[worker["worktree"]] = BASE
     with pytest.raises(BatchRefusal, match="empty_candidate"):
         harness.file_result(run, "fx-solo", sha=BASE)
+
+    harness.git.heads[worker["worktree"]] = MOVED
+    harness.git.off_base.add(MOVED)
+    with pytest.raises(BatchRefusal, match="candidate_off_base"):
+        harness.file_result(run, "fx-solo", sha=MOVED)
 
 
 def test_resume_replaces_a_queued_landing_so_it_waits_on_the_current_workers(
