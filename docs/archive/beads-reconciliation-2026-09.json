@@ -4,7 +4,7 @@
     "title": "Rename the thin AgentCTL runtime and retire the sinnixd namespace",
     "disposition": "fold:rename",
     "canonical_owner": "rename",
-    "evidence": "Plan Delivery 0 renames pkgs/sinnixd to pkgs/agentctl and retires the sinnixd namespace; pkgs/sinnixd/sinnixd/ still exists on master.",
+    "evidence": "pkgs/agentctl is the runtime package; pkgs/sinnixd and the sinnixd namespace no longer exist.",
     "replacement": null
   },
   {
@@ -233,7 +233,7 @@
     "title": "Compiled packet prompts overflow the 200KB cap for large dispatch groups",
     "disposition": "fold:B",
     "canonical_owner": "B",
-    "evidence": "Delivery B's packet.py renders a bounded prompt with body digests, replacing the MAX_PROMPT_BYTES refusal at packets.py:19,402.",
+    "evidence": "Delivery B's packet.py renders a bounded prompt with body digests, replacing the MAX_PROMPT_BYTES refusal at packets.py:19,402; its dispatch-group leader sinnix-1iu6 is closed.",
     "replacement": null
   },
   {
@@ -289,7 +289,7 @@
     "title": "verb surface consistency: names vs UUIDs, --project acceptance, plain-vs-JSON output",
     "disposition": "fold:C",
     "canonical_owner": "C",
-    "evidence": "Delivery C's one output layer makes agent-launch output JSON by default (its open fourth item) and --project cwd-default everywhere.",
+    "evidence": "Delivery C's one output layer makes agent-launch output JSON by default (its open fourth item) and --project cwd-default everywhere; its dispatch-group leader sinnix-v3e2 is closed.",
     "replacement": null
   },
   {
@@ -403,7 +403,7 @@
     "title": "Expose captured job usage in aggregate outcome views",
     "disposition": "close:stale-surface",
     "canonical_owner": "A",
-    "evidence": "fleet.py read_evidence and _usage are deleted; per-worker usage lives in the run manifest result, with no aggregate view in the plan.",
+    "evidence": "fleet.py read_evidence and _usage are deleted; per-worker usage lives in the run manifest result, with no aggregate view in the plan; its dispatch-group leader sinnix-30m8 is closed.",
     "replacement": null
   },
   {
@@ -411,7 +411,7 @@
     "title": "Reset nix-build.slice memory.peak at lease-acquire time; add job-class identity to lease audit log",
     "disposition": "close:stale-surface",
     "canonical_owner": "A",
-    "evidence": "GenericJobs._memory_peak and build leases (jobs.py) are deleted; IOAccounting on run units (6xob in A) is the surviving accounting.",
+    "evidence": "GenericJobs._memory_peak and build leases (jobs.py) are deleted; IOAccounting on run units (6xob in A) is the surviving accounting; its dispatch-group leader sinnix-30m8 is closed.",
     "replacement": null
   },
   {
@@ -427,7 +427,7 @@
     "title": "admission verdicts do not explain themselves; add an explain surface naming the failing inequality",
     "disposition": "close:stale-surface",
     "canonical_owner": "A",
-    "evidence": "Admission verdicts no longer exist; a queued pueue task waits only on its group slot, so there is no inequality to explain.",
+    "evidence": "Admission verdicts no longer exist; a queued pueue task waits only on its group slot, so there is no inequality to explain; its dispatch-group leader sinnix-sj66 is closed.",
     "replacement": null
   },
   {
@@ -531,7 +531,7 @@
     "title": "Live-prove packet launch with current runtime capabilities",
     "disposition": "close:stale-surface",
     "canonical_owner": "B",
-    "evidence": "CampaignRunner.run (campaign.py) is deleted; the live proof is Delivery B's disposable-repo canary.",
+    "evidence": "CampaignRunner.run (campaign.py) is deleted; the live proof is Delivery B's disposable-repo canary; its dispatch-group leader sinnix-1iu6 is closed.",
     "replacement": null
   },
   {
@@ -892,54 +892,6 @@
     "disposition": "dereference-leader",
     "canonical_owner": "polylogue-27gl2",
     "evidence": "leader closed 2026-09-03",
-    "replacement": null
-  },
-  {
-    "id": "sinnix-ouh2",
-    "title": "Live-prove packet launch with current runtime capabilities",
-    "disposition": "dereference-leader",
-    "canonical_owner": "sinnix-1iu6",
-    "evidence": "leader closed 2026-08-31",
-    "replacement": null
-  },
-  {
-    "id": "sinnix-yblg",
-    "title": "Expose captured job usage in aggregate outcome views",
-    "disposition": "dereference-leader",
-    "canonical_owner": "sinnix-30m8",
-    "evidence": "leader closed 2026-09-01",
-    "replacement": null
-  },
-  {
-    "id": "sinnix-4hy5",
-    "title": "verb surface consistency: names vs UUIDs, --project acceptance, plain-vs-JSON output",
-    "disposition": "dereference-leader",
-    "canonical_owner": "sinnix-v3e2",
-    "evidence": "leader closed 2026-08-31",
-    "replacement": null
-  },
-  {
-    "id": "sinnix-ck7i",
-    "title": "admission verdicts do not explain themselves; add an explain surface naming the failing inequality",
-    "disposition": "dereference-leader",
-    "canonical_owner": "sinnix-sj66",
-    "evidence": "leader closed 2026-09-01",
-    "replacement": null
-  },
-  {
-    "id": "sinnix-f4h1",
-    "title": "Compiled packet prompts overflow the 200KB cap for large dispatch groups",
-    "disposition": "dereference-leader",
-    "canonical_owner": "sinnix-1iu6",
-    "evidence": "leader closed 2026-08-31",
-    "replacement": null
-  },
-  {
-    "id": "sinnix-1ei",
-    "title": "Reset nix-build.slice memory.peak at lease-acquire time; add job-class identity to lease audit log",
-    "disposition": "dereference-leader",
-    "canonical_owner": "sinnix-30m8",
-    "evidence": "leader closed 2026-09-01",
     "replacement": null
   }
 ]
