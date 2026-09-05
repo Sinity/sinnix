@@ -16,6 +16,11 @@ slice, every part of which a reader recovers from ``pueue status`` alone. The
 service exits with its cgroup (``ExitType=cgroup``), so ``systemd-run --wait``
 returns only once nothing the workload started is left, and a canceller stops
 the unit without this wrapper's help.
+
+The unit's Description is ``agentctl:<daemon>:<pool>:<pueue task id>``: the
+pueue daemon the task belongs to and the exact pool, so the single-slot guard
+considers only units of its own queue. Every other unit in the slice belongs to
+another daemon (a test's private pueued) and is left alone.
 """
 
 from __future__ import annotations
@@ -68,13 +73,18 @@ class Outcome(str, Enum):
 RESULT_KINDS = frozenset({"exit", "json", "pytest", "last-message"})
 POOL_NAME = re.compile(r"[a-z][a-z0-9-]{0,63}\Z")
 POOL_SLICE_PREFIX = "agentctl"
+# The pools with a declared slice policy. Any other pueue group (a project's
+# landing group, a fixture) runs under the normal slice.
+POLICY_POOLS = frozenset({"agent", "pytest", "bulk", "normal", "interactive"})
+DEFAULT_SLICE_POOL = "normal"
 RUN_EXECUTABLE = "agentctl-run"
+DESCRIPTION_PREFIX = "agentctl"
 
 # The unit settings agentctl passes through to `systemd-run -p`. Each one only
 # bounds what the workload may consume, so a launch input can limit its own
 # task and nothing else: no capability, no namespace, no credential, no
 # execution setting is reachable from here.
-SCOPE_PROPERTIES = frozenset(
+UNIT_PROPERTIES = frozenset(
     {
         "MemoryMax",
         "MemoryHigh",
@@ -85,11 +95,11 @@ SCOPE_PROPERTIES = frozenset(
         "IOWeight",
     }
 )
-SCOPE_PROPERTY_VALUE = re.compile(r"(infinity|[0-9]+[KMGTPE]?)\Z")
+UNIT_PROPERTY_VALUE = re.compile(r"(infinity|[0-9]+[KMGTPE]?)\Z")
 
 # The bytes of a unit name kept for the launch input's own stem. Unit names
 # are bounded, and the prefix, the pool and the digest come first.
-SCOPE_STEM_BYTES = 100
+UNIT_STEM_BYTES = 100
 SYSTEMCTL_TIMEOUT_SECONDS = 30
 
 _REQUIRED_FIELDS = (
@@ -149,35 +159,45 @@ def _read_input(path: Path) -> dict[str, Any]:
     properties = value.get("scope_properties")
     if properties is not None and (
         not isinstance(properties, list)
-        or not all(supported_scope_property(item) for item in properties)
+        or not all(supported_unit_property(item) for item in properties)
     ):
         raise QueueInputError(
             "launch input scope_properties must be "
-            f"{'/'.join(sorted(SCOPE_PROPERTIES))} settings"
+            f"{'/'.join(sorted(UNIT_PROPERTIES))} settings"
         )
     return value
 
 
-def supported_scope_property(value: object) -> bool:
+def supported_unit_property(value: object) -> bool:
     """Whether a launch input may set this on its own unit."""
     if not isinstance(value, str):
         return False
     name, separator, size = value.partition("=")
     return bool(
         separator
-        and name in SCOPE_PROPERTIES
-        and SCOPE_PROPERTY_VALUE.fullmatch(size) is not None
+        and name in UNIT_PROPERTIES
+        and UNIT_PROPERTY_VALUE.fullmatch(size) is not None
     )
 
 
-def scope_pool(group: str | None) -> str | None:
-    """A pueue group as a slice name component."""
+def unit_pool(group: str | None) -> str | None:
+    """A pueue group as a unit name component."""
     if not isinstance(group, str):
         return None
     return re.sub(r"[^a-z0-9-]+", "-", group.strip().lower()).strip("-") or None
 
 
-def scope_unit_for(launch_input: object, pool: str) -> str:
+def pool_slice(pool: str) -> str:
+    """The slice carrying a pool's units; pools without a policy share `normal`."""
+    name = pool if pool in POLICY_POOLS else DEFAULT_SLICE_POOL
+    return f"{POOL_SLICE_PREFIX}-{name}.slice"
+
+
+def unit_description(daemon: str, pool: str, task: str) -> str:
+    return f"{DESCRIPTION_PREFIX}:{daemon}:{pool}:{task}"
+
+
+def unit_for(launch_input: object, pool: str) -> str:
     """Name the transient service carrying the task launched from ``launch_input``.
 
     The digest is of the whole path: a unit name is shorter than a path and
@@ -187,7 +207,7 @@ def scope_unit_for(launch_input: object, pool: str) -> str:
     text = str(PurePosixPath(str(launch_input)))
     digest = hashlib.sha256(text.encode()).hexdigest()[:12]
     stem = re.sub(r"[^A-Za-z0-9_.-]", "-", PurePosixPath(text).stem).strip("-.")
-    stem = stem[:SCOPE_STEM_BYTES] or "job"
+    stem = stem[:UNIT_STEM_BYTES] or "job"
     return f"{POOL_SLICE_PREFIX}-{pool}-{stem}-{digest}.service"
 
 
@@ -291,8 +311,13 @@ def unit_properties(unit: str) -> dict[str, str]:
     return properties if properties.get("LoadState") == "loaded" else {}
 
 
-def active_units(pool: str) -> list[str]:
-    """Every unit still holding the pool slice, whichever run created it."""
+def active_units(daemon: str, pool: str) -> list[str]:
+    """Every unit of this daemon's pool still running, whichever run created it.
+
+    The name glob is a prefilter; the Description decides, so a pool whose
+    name extends another's (``pytest-x``) and another daemon's units never
+    count.
+    """
     listed = _systemctl(
         "list-units",
         "--plain",
@@ -300,39 +325,47 @@ def active_units(pool: str) -> list[str]:
         "--state=active,activating,deactivating",
         f"{POOL_SLICE_PREFIX}-{pool}-*",
     )
-    return [line.split()[0] for line in (listed or "").splitlines() if line.strip()]
+    prefix = unit_description(daemon, pool, "")
+    units = []
+    for line in (listed or "").splitlines():
+        columns = line.split(None, 4)
+        if len(columns) == 5 and columns[4].strip().startswith(prefix):
+            units.append(columns[0])
+    return units
 
 
-def _occupancy(pool: str, unit: str, launch_input: str, log: Any) -> tuple[str, str]:
-    """Whether a single-slot pool is free, and the pueue task id of this run.
+def _occupancy(
+    pool: str, unit: str, daemon: str, log: Any
+) -> tuple[str, pueue.Task | None]:
+    """Whether a single-slot pool is free, and the pueue task of this run.
 
-    Returns ``("slot_occupied", ...)`` when a unit in the slice belongs to a
-    task pueue still has running, or to no task this queue knows; a unit whose
-    task is terminal is an orphan of a killed wrapper and is stopped here.
+    Returns ``("slot_occupied", ...)`` when a unit of this daemon's pool
+    belongs to a task pueue still has running, or to no task this queue
+    knows; a unit whose task is terminal is an orphan of a killed wrapper and
+    is stopped here.
     """
     try:
         parallel = pueue.groups().get(pool)
-        tasks = pueue.tasks() if parallel == 1 else {}
+        tasks = pueue.tasks()
     except PueueError:
-        return "", ""
+        return "", None
     owners = {}
     for task in tasks.values():
         path = launch_input_of(task.command)
         if path is not None:
-            owners[scope_unit_for(path, pool)] = task
+            owners[unit_for(path, pool)] = task
     own = owners.get(unit)
-    description = str(own.task_id) if own is not None else launch_input
     if parallel != 1:
-        return "", description
-    for other in active_units(pool):
+        return "", own
+    for other in active_units(daemon, pool):
         owner = owners.get(other)
         if other != unit and (owner is None or not owner.terminal):
             log.write(f"pool {pool} is occupied by {other}\n".encode())
-            return "slot_occupied", description
+            return "slot_occupied", own
         _systemctl("stop", other)
         _systemctl("reset-failed", other)
         log.write(f"settled_orphan {other}\n".encode())
-    return "", description
+    return "", own
 
 
 def _service_command(
@@ -363,7 +396,7 @@ def _service_command(
         "--wait",
         "--quiet",
         f"--unit={unit}",
-        f"--slice={POOL_SLICE_PREFIX}-{pool}.slice",
+        f"--slice={pool_slice(pool)}",
         f"--description={description}",
         *(f"--setenv={key}={value}" for key, value in environment.items()),
         *(argument for value in properties for argument in ("-p", value)),
@@ -450,21 +483,21 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
     # The pueue group comes from `PUEUE_GROUP`, which pueued exports into every
     # task it spawns, so a launch input written by another repository is
     # contained exactly like one agentctl wrote.
-    pool = scope_pool(os.environ.get("PUEUE_GROUP")) or scope_pool(launch.get("pool"))
-    unit = scope_unit_for(launch_input, pool) if pool else None
+    pool = unit_pool(os.environ.get("PUEUE_GROUP")) or unit_pool(launch.get("pool"))
+    unit = unit_for(launch_input, pool) if pool else None
+    daemon = pueue.daemon_tag()
     marker = cancel_marker_for(log_path)
     marker.unlink(missing_ok=True)
     event = {
-        # pueue's completion callback spools `queue-task` finish events;
-        # the start carries the same kind so one lane's timeline pairs.
         "kind": "queue-task",
         "job_id": launch["job_id"],
+        "task_id": None,
         "label": launch.get("label", ""),
         "job_kind": launch.get("kind", "declared-operation"),
         "project": launch["project_id"],
         "operation": launch["operation"],
         "pool": pool,
-        "scope_unit": unit,
+        "unit": unit,
         "working_directory": launch["working_directory"],
     }
     append_event(spool_path, {**event, "phase": "started"})
@@ -482,8 +515,7 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
     )
     if pool:
         environment["AGENTCTL_POOL"] = pool
-    # Consumers still reading the pre-rename names; deleted once Polylogue's
-    # devtools read AGENTCTL_* (PR Sinity/polylogue#4681).
+    # Polylogue's devtools read the SINNIXD_* names; removed with them.
     for name, value in list(environment.items()):
         if name.startswith("AGENTCTL_") and name != "AGENTCTL_POOL":
             environment.setdefault("SINNIXD_" + name[len("AGENTCTL_") :], value)
@@ -506,7 +538,9 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
             if unit is None or pool is None:
                 outcome, status = _run_bare(argv, launch, environment, stdout, log)
             else:
-                refusal, description = _occupancy(pool, unit, launch_input, log)
+                refusal, own = _occupancy(pool, unit, daemon, log)
+                if own is not None:
+                    event["task_id"] = own.task_id
                 if refusal:
                     outcome, status = Outcome.SLOT_OCCUPIED, SLOT_OCCUPIED_EXIT_CODE
                 else:
@@ -514,7 +548,11 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
                         launch,
                         unit=unit,
                         pool=pool,
-                        description=description,
+                        description=unit_description(
+                            daemon,
+                            pool,
+                            str(own.task_id) if own is not None else launch_input,
+                        ),
                         argv=argv,
                         environment=environment,
                         stdout=stdout_path,

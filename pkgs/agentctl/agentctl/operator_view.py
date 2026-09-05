@@ -257,7 +257,7 @@ def render(snapshot: Snapshot) -> str:
         if row["stage"].startswith(("failed", "landing "))
         or any(
             worker["stage"]
-            in {"failed", "timed-out", "refused", "cancelled", "launch-failed"}
+            in {"failed", "timeout", "refused", "cancelled", "launch-failed"}
             for worker in row["workers"]
         )
     ]
