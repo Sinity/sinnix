@@ -2,6 +2,7 @@
 # @sinnix-package
 # description: Evidence-joined usage census across sinnix-owned artifact classes
 # runtimeInputs: python3 systemd gnugrep
+# pythonPackages: @sinnix-lib
 
 """Join declaration inventories against usage evidence.
 
@@ -49,10 +50,11 @@ import json
 import os
 import re
 import sqlite3
-import subprocess
 import sys
 import time
 from pathlib import Path
+
+from sinnix_lib.process import run
 
 HOME = Path.home()
 REPO = Path(os.environ.get("SINNIX_REPO", "/realm/project/sinnix"))
@@ -60,14 +62,6 @@ CAPTURES = Path("/realm/data/machine")
 SECRET_DIR = Path("/realm/data/secrets/sinnix/secret")
 INVENTORY = Path("/etc/sinnix/runtime-inventory.json")
 CAPABILITY_INDEX = Path("/etc/sinnix/capability-index.json")
-
-
-def run(argv: list[str], timeout: int = 30) -> str | None:
-    try:
-        proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, check=False)
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    return proc.stdout if proc.returncode == 0 else None
 
 
 # ---------- evidence sources ----------
@@ -97,7 +91,7 @@ def polylogue_evidence(name: str, window_days: int) -> dict | None:
     # `search` was renamed to the query-first `find QUERY` dispatch; root
     # flags (--json/--limit) precede the subcommand, and results come back
     # as {"items": [...]} rather than a bare list or {"results": [...]}.
-    out = run(["polylogue", "--json", "--limit", "5", "find", name], timeout=60)
+    out = run(["polylogue", "--json", "--limit", "5", "find", name], timeout=60).text
     if out is None:
         return None
     try:
@@ -117,7 +111,7 @@ def journal_count(unit: str, days: int, manager_user: bool, pattern: str | None 
     argv = ["journalctl", f"--since=-{days}d", "-u", unit, "-o", "cat"]
     if manager_user:
         argv.insert(1, "--user")
-    out = run(argv, timeout=60)
+    out = run(argv, timeout=60).text
     if out is None:
         return None
     if pattern:
@@ -148,10 +142,10 @@ def lane_freshness(path_str: str | None, since_epoch: int) -> dict | None:
 
 def static_refs(name: str) -> list[str]:
     refs: list[str] = []
-    out = run(["grep", "-rl", "--include=*.nix", name, str(REPO / "modules"), str(REPO / "flake")], timeout=60)
+    out = run(["grep", "-rl", "--include=*.nix", name, str(REPO / "modules"), str(REPO / "flake")], timeout=60).text
     if out:
         refs += [p.removeprefix(str(REPO) + "/") for p in out.splitlines()]
-    etc = run(["grep", "-rl", name, "/etc/systemd/system"], timeout=30)
+    etc = run(["grep", "-rl", name, "/etc/systemd/system"], timeout=30).text
     if etc:
         refs += ["/etc/systemd/system"]
     return refs
@@ -218,7 +212,7 @@ def declared_skills(index: dict[str, list[dict]] | None) -> dict[str, dict]:
 
 def declared_models() -> dict[str, dict]:
     out = run(["curl", "-sm", "20", "-H", "Authorization: Bearer sk-local",
-               "http://127.0.0.1:4000/v1/models"], timeout=25)
+               "http://127.0.0.1:4000/v1/models"], timeout=25).text
     models: dict[str, dict] = {}
     if out:
         try:
@@ -380,7 +374,7 @@ def main() -> int:
                          "verdict": verdict(ev, [], False)})
 
     if "models" in wanted:
-        ollama_log = run(["journalctl", f"--since=-{args.window_days}d", "-u", "ollama", "-o", "cat"], timeout=90) or ""
+        ollama_log = run(["journalctl", f"--since=-{args.window_days}d", "-u", "ollama", "-o", "cat"], timeout=90).text or ""
         for name, meta in declared_models().items():
             hits = ollama_log.count(name)
             ev = {"atuin": None, "polylogue": None,

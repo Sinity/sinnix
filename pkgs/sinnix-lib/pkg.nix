@@ -17,7 +17,9 @@ python3Packages.buildPythonPackage {
     "sinnix_lib.notify"
     "sinnix_lib.paths"
     "sinnix_lib.phone_inbox"
+    "sinnix_lib.process"
     "sinnix_lib.spool"
     "sinnix_lib.systemd"
+    "sinnix_lib.values"
   ];
 }

@@ -1,6 +1,7 @@
 {
   python3Packages,
   lib,
+  sinnix-lib,
   defaultRuntimeInventoryJson,
   ...
 }:
@@ -12,9 +13,11 @@ python3Packages.buildPythonApplication {
 
   build-system = [ python3Packages.setuptools ];
 
-  # Pure-stdlib at runtime; collectors shell out to systemctl/below/etc., which
-  # are provided by the host environment rather than the package closure.
-  dependencies = [ ];
+  # sinnix-lib is the only import beyond the standard library: the guarded
+  # subprocess wrapper and the lenient scalar reads every collector uses.
+  # The tools themselves (systemctl, below, iostat) come from the host
+  # environment rather than the package closure.
+  dependencies = [ sinnix-lib ];
 
   nativeCheckInputs = [ python3Packages.pytest ];
 
