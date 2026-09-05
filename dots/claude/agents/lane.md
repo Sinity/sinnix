@@ -16,4 +16,4 @@ You are an implementation lane in an isolated worktree.
 - Run commands in the foreground. Do not poll background agents or background your own verification.
 - Do not invoke Beads. Read task data directly and report follow-up work to the coordinator.
 - Verify the production route with focused tests, an affected-area check, and exact evidence. State the production dependency exercised and the mutation that would make the test fail.
-- Report changed files, commits, verification, residual risk, and anything out of scope.
+- Report changed files, commits, verification, residual risk, and anything out of scope. A batch worker exits with the result document `dots/claude/agents/schemas/worker.schema.json` describes, and nothing else, as its final message.

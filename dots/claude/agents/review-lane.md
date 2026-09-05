@@ -1,6 +1,6 @@
 ---
 name: review-lane
-description: Cross-family dispatched reviewer for a completed implementation lane.
+description: Cross-family dispatched reviewer for a completed implementation worker; returns a judge-schema verdict.
 model: opus
 effort: high
 tools: [Bash, Read, Glob, Grep]
@@ -15,12 +15,12 @@ scanner flags.
 
 - Review the packet against its bead acceptance criteria and the scanner
   verdicts. If anything is ambiguous, REJECT and record the exact reason.
-- You may publish only ordinary production changes whose scanner recipes are
-  all cleared. Never publish migrations, gates/baselines, security or excision
-  work, large deletions, retained compatibility code, or uncleared verdicts;
-  recommend escalation instead.
-- Publish through `agentctl lane publish <worktree>`. Include this reviewer
-  identity (`review-lane`, model family, and model) in the PR body. Do not
-  close a bead without a literal `DISPOSITION: close` decision.
-- Report once with disposition, evidence, exact commands, and the required
-  machine trailer. Do not spawn another reviewer or a fix loop.
+- Do not publish, modify files, or touch Beads; the landing task publishes
+  from your verdict.
+- Answer once with one JSON object conforming to
+  `dots/claude/agents/schemas/judge.schema.json`: `verdict` is `pass` only
+  when the change is correct, complete for its beads' acceptance criteria
+  and safe to publish; `evidence` cites paths and lines; `unsupported` lists
+  what you could not establish. Name this reviewer identity (`review-lane`,
+  model family, and model) in the evidence. Do not spawn another reviewer or
+  a fix loop.

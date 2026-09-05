@@ -43,28 +43,31 @@ five means the change should be split).
 
 ## Landing
 
-- **One PR per coherent batch** — lanes integrate into a batch branch; no
-  per-lane PRs. Product repos: feature branch → squash-merge; the PR title
-  is the permanent master subject (≤72 chars, imperative). Body sections:
-  Summary, Problem (evidence), Solution (modules + non-obvious decisions),
-  Verification (exact commands + the output line that matters).
+- **One candidate per batch.** `agentctl batch land <run>` is the route:
+  it merges the worker branches into a fresh integration worktree, runs the
+  descriptor's candidate verification once, runs one reviewer bound to the
+  candidate commit, publishes, and records acceptance. Run it by hand after
+  fixing a named failure. Product repos (`publish = "pr"`): one PR whose
+  title is the permanent master subject (≤72 chars, imperative), merged with
+  `gh pr merge --squash --match-head-commit <candidate>` after the required
+  checks and the reviewer verdict. Sinnix (`publish = "master"`): the
+  candidate commit is fast-forwarded onto master once master still equals
+  the run's base. Hosted Codex review is advisory: read its findings, never
+  wait on it. Body sections for a hand-written PR: Summary, Problem
+  (evidence), Solution (modules + non-obvious decisions), Verification
+  (exact commands + the output line that matters).
 - Stage by path, never `git add -A` on significant changes. Never
   `--no-verify` unbidden; a hook failure means fix the cause in a new
   commit. From a linked worktree, use `git -C /abs/path`.
-- Where the repository lands via PRs, integrate candidate commits into one
-  batch worktree, then run `agentctl lane publish <integration-worktree>`.
-  Branch protection, the required check and GitHub review decide when it
-  lands. Repositories that publish directly from their default branch are
-  reviewed and verified as one batch before the coordinator pushes them.
 - A green hosted check is not test evidence where CI skips the heavy suite
   (recorded polylogue gotcha) — verify locally with the focused selector
   and say which tier ran. `devtools verify` selects from the checkout's one
   testmon datafile and writes back; `--all` runs everything; a corrupt or
   foreign datafile stops with `graph_unusable` (delete it and rerun). A
   selected green proves the selected scope only.
-- Merge everything in progress, then run the corpus once at the master
-  boundary (`agentctl job start polylogue verify_all`). Never a corpus run per
-  lane; excisions land as whole merges.
+- Land everything in progress, then run the corpus once at the master
+  boundary through the descriptor's `corpus` operation. Never a corpus run
+  per worker; excisions land as whole merges.
 - Before claiming "unified / complete / converged": grep the diff and check
   both paths. State partial work honestly; split remainder to a successor
   bead ([[task-backend]] close discipline).
@@ -79,8 +82,10 @@ markers — grep for them before continuing.
 
 ## After landing
 
-Complete the beads with PR + merge SHA, remove the integrated worktree
-(`agentctl lane sync <project>` or `wt remove`), clean transient artifacts
-you created, and carry any
-deferred scope into named successors — landing is not done while the
-tracker lies about what happened.
+`batch land` closes the beads whose criteria its worker results satisfy,
+comments the residual on the rest, and removes the worker worktrees; read
+the acceptance record in `batch status <run>`. Close beads you landed by
+hand with the PR and merge SHA, remove your worktree (`wt remove`), clean
+transient artifacts you created, and carry any deferred scope into named
+successors — landing is not done while the tracker lies about what
+happened.

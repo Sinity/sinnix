@@ -65,6 +65,10 @@ id = "fixture"
 display_name = "Fixture"
 root_markers = [".agentctl"]
 
+[workspace]
+root = "/tmp"
+verify = { focused = "verify_quick" }
+
 [operations.verify_quick]
 description = "Fixture quick verification"
 exec = ["fixture-check"]
@@ -77,9 +81,6 @@ case "$1 $2" in
   job\ start)
     printf '{"job_id": 7, "phase": "succeeded", "terminal": true}\n'
     ;;
-  lane\ publish)
-    printf '{"pr": 41, "auto_merge": true}\n'
-    ;;
   *)
     exit 2
     ;;
@@ -90,10 +91,6 @@ export AGENTCTL_CALLS=$root/agentctl.calls
 verify_output=$(cd "$repo" && PATH="$bin:$PATH" AGENTCTL_TIMEOUT_SECONDS=60 "$lane" verify)
 grep -Fq 'succeeded' <<<"$verify_output"
 grep -Fq "job start fixture verify_quick --workspace $repo --wait --timeout-seconds 60" "$AGENTCTL_CALLS"
-
-publish_output=$(cd "$repo" && PATH="$bin:$PATH" "$lane" publish)
-grep -Fq '"pr": 41' <<<"$publish_output"
-grep -Fq "lane publish $repo" "$AGENTCTL_CALLS"
 
 printf 'launch snapshot\n' >"$repo/.lane/prompt.md"
 task_output=$(cd "$repo" && "$lane" task)

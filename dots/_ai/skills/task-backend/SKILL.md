@@ -26,8 +26,11 @@ live state.
 
 ## Claiming and working
 
-- Claim before working. Stale leases with dead heartbeats are the recorded
-  smell of abandoned claims — release what you will not finish.
+- Claim before working. `agentctl batch start` claims every member of a
+  batch with `bd update --claim` and `batch land` closes the satisfied ones;
+  workers never touch Beads. Claim by hand only for work you do yourself.
+  Stale leases with dead heartbeats are the recorded smell of abandoned
+  claims — release what you will not finish.
 - Record as you go with `bd` notes. Notes carry dated facts and disproved
   hypotheses — the next session must inherit them, not re-derive them.
 - Relate discovered structure with `bd dep` — convert prose dependencies into
@@ -46,9 +49,12 @@ live state.
   than emitting one operation at a time. Multi-id closes map `--reason`
   flags positionally; a close refused by an open blocker means close the
   blocker first (or `--force` deliberately, stating why).
-- Co-execution batches are marked with `dispatch_group=<leader-id>` metadata
-  — mechanics in [[orchestrate]]'s worker-contract reference; never merge
-  beads to co-execute them.
+- `dispatch_group=<leader-id>` metadata puts beads that share files,
+  evidence, or a verification boundary into one worker: `batch start
+<leader>` executes the leader and its open members together, and each
+  bead keeps its own verifiable close. A closed leader is skipped. Never
+  merge beads to co-execute them; remove the metadata when a leader closes
+  (`bd update <id> --unset-metadata dispatch_group`).
 
 ## Filing new work
 

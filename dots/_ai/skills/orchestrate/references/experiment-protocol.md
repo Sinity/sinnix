@@ -27,5 +27,5 @@ Discipline:
   say so in its closing row.
 
 Standing measured results live where they're consumed: model/tier evidence
-in `model-landscape-*.md`, lens yields in the grok skill's
+in `model-landscape.md`, lens yields in the grok skill's
 `defect-lenses.md`, process smells in `worker-contract.md`.

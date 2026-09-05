@@ -1,4 +1,6 @@
-# Model landscape and supervision economics — 2026-08 snapshot
+# Model landscape and supervision economics
+
+Snapshot 2026-08.
 
 Distilled from `/realm/data/derived/reports/zvi-ai-meta-2026-08-23.html` (Zvi /
 Don't Worry About the Vase digest, posts 2026-06-19 → 2026-08-20). External
