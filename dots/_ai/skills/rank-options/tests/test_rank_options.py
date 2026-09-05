@@ -427,24 +427,29 @@ def text_contains(root: Path, needle: str) -> list[str]:
     return hits
 
 
-def test_private_option_text_stays_in_local_ranking_state(rank: Rank, tmp_path: Path):
-    canary = f"canary-{uuid.uuid4().hex}"
+def seed_private_options(rank: Rank, canary: str) -> None:
     options = [(f"opt-private-{i}", f"{canary} option {i}") for i in range(1, 5)]
     assert rank.add("private", options).returncode == 0
     rank.record("private", options[0][0], options[1][0], options[0][0])
     rank.record("private", options[1][0], options[2][0], options[1][0])
     rank.record("private", options[2][0], options[3][0], options[2][0])
 
+
+def test_private_option_text_stays_out_of_the_tree(rank: Rank, tmp_path: Path):
+    canary = f"canary-{uuid.uuid4().hex}"
+    seed_private_options(rank, canary)
+
     report_path = tmp_path / "report.json"
     report_path.write_text(json.dumps(rank.status("private"), indent=2))
 
-    # The canary really is in the local state, so the absence checks below are
-    # about where it went, not about whether it was ever used.
+    # The canary really is in the local state and in the report, so the
+    # absence check below is about where it went, not about whether it was
+    # ever used.
     assert canary in (rank.root / "private" / "items.jsonl").read_text()
     assert canary in report_path.read_text()
 
-    # The scan finds a canary that a tracked file does carry, so finding none
-    # in the repository is a fact about the repository.
+    # The scan finds a canary a file does carry, so finding none in the
+    # repository is a fact about the repository.
     planted = tmp_path / "planted" / "options.jsonl"
     planted.parent.mkdir()
     planted.write_text(f'{{"id": "opt-leak", "label": "{canary} option 1"}}\n')
@@ -452,9 +457,15 @@ def test_private_option_text_stays_in_local_ranking_state(rank: Rank, tmp_path: 
 
     assert text_contains(REPO_ROOT, canary) == []
 
+
+def test_private_option_text_stays_out_of_the_diff(rank: Rank):
     git = shutil.which("git")
     if git is None or not (REPO_ROOT / ".git").exists():
         pytest.skip("no git checkout to diff")
+
+    canary = f"canary-{uuid.uuid4().hex}"
+    seed_private_options(rank, canary)
+
     for argv in (
         [git, "-C", str(REPO_ROOT), "status", "--porcelain"],
         [git, "-C", str(REPO_ROOT), "diff"],
