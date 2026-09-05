@@ -192,6 +192,28 @@ def test_group_add_creates_only_a_missing_group(stub_pueue: Path) -> None:
     assert calls[-1] == ["group", "add", "--parallel", "1", "fixture-land"]
 
 
+def _interpreter_own_variables() -> set[str]:
+    """The names this interpreter sets whatever it is given.
+
+    The fake client below is a script run by `sys.executable`, and both CPython
+    (`LC_CTYPE`) and a Nix python wrapper (`PYTHONNOUSERSITE`) put names into
+    their own environment; finding one in the client's environment is not
+    evidence that the adapter passed the caller's on.
+    """
+    probe = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import json, os; print(json.dumps(sorted(os.environ)))",
+        ],
+        env={},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return set(json.loads(probe.stdout))
+
+
 def test_the_client_environment_carries_no_inherited_secret(
     stub_pueue: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -218,9 +240,15 @@ def test_the_client_environment_carries_no_inherited_secret(
 
     published = set(json.loads((tmp_path / "env").read_text()))
     assert "SECRET_API_KEY" not in published
-    # Nothing the daemon inherited survives except the allowlist; the child
-    # interpreter is free to set its own variables (LC_CTYPE) on top.
-    inherited = set(os.environ) - set(pueue._CLIENT_ENVIRONMENT_KEYS)
+    # Nothing the daemon inherited survives except the allowlist; what the
+    # child interpreter sets for itself is measured, not guessed, so a
+    # wrapper that exports its own variables is not read as a leak.
+    inherited = (
+        set(os.environ)
+        - set(pueue._CLIENT_ENVIRONMENT_KEYS)
+        - _interpreter_own_variables()
+    )
+    assert inherited
     assert not published & inherited
 
 
