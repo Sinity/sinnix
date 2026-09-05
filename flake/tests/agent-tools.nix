@@ -326,28 +326,30 @@ in
         assert lib.assertMsg (lib.all (token: !(lib.hasInfix token avoidPattern))
           forbiddenAvoidTokens
         ) "the earlyoom fallback must not exempt agents, browsers, runtimes, or generic shells";
-        assert lib.assertMsg (
-          managedWork.CPUWeight < userSlices.app.CPUWeight
-          && managedWork.IOWeight < userSlices.app.IOWeight
-          && managedWork.MemoryHigh == "20G"
-          && !(managedWork ? MemoryMax)
-          && !(managedWork ? ManagedOOMSwap)
-          && !(managedWork ? ManagedOOMMemoryPressure)
-          && userSlices.app.MemoryLow == "6G"
-          && userSlices.session.MemoryLow == "5G"
-          && !(poolSlices.agentctl-agent ? MemoryMax)
-          && !(poolSlices.agentctl-agent ? ManagedOOMPreference)
-          && poolSlices.agentctl-pytest.MemoryHigh == "6G"
-          && poolSlices.agentctl-pytest.MemoryMax == "8G"
-          && poolSlices.agentctl-pytest.MemorySwapMax == "0"
-          && poolSlices.agentctl-pytest.CPUWeight == 20
-          && poolSlices.agentctl-pytest.IOWeight == 20
-          && poolSlices.agentctl-bulk.MemoryHigh == "10G"
-          && poolSlices.agentctl-bulk.MemoryMax == "14G"
-          && poolSlices.agentctl-bulk.MemorySwapMax == "0"
-          && poolSlices.agentctl-bulk.CPUWeight == 20
-          && poolSlices.agentctl-bulk.IOWeight == 10
-        ) "agentctl coordinator work must yield to protected interactive slices; pool slices own fixed caps";
+        assert lib.assertMsg
+          (
+            managedWork.CPUWeight < userSlices.app.CPUWeight
+            && managedWork.IOWeight < userSlices.app.IOWeight
+            && managedWork.MemoryHigh == "20G"
+            && !(managedWork ? MemoryMax)
+            && !(managedWork ? ManagedOOMSwap)
+            && !(managedWork ? ManagedOOMMemoryPressure)
+            && userSlices.app.MemoryLow == "6G"
+            && userSlices.session.MemoryLow == "5G"
+            && !(poolSlices.agentctl-agent ? MemoryMax)
+            && !(poolSlices.agentctl-agent ? ManagedOOMPreference)
+            && poolSlices.agentctl-pytest.MemoryHigh == "6G"
+            && poolSlices.agentctl-pytest.MemoryMax == "8G"
+            && poolSlices.agentctl-pytest.MemorySwapMax == "0"
+            && poolSlices.agentctl-pytest.CPUWeight == 20
+            && poolSlices.agentctl-pytest.IOWeight == 20
+            && poolSlices.agentctl-bulk.MemoryHigh == "10G"
+            && poolSlices.agentctl-bulk.MemoryMax == "14G"
+            && poolSlices.agentctl-bulk.MemorySwapMax == "0"
+            && poolSlices.agentctl-bulk.CPUWeight == 20
+            && poolSlices.agentctl-bulk.IOWeight == 10
+          )
+          "agentctl coordinator work must yield to protected interactive slices; pool slices own fixed caps";
         pkgs.runCommand "sinnix-agent-resource-policy-check" { } ''
           touch "$out"
         '';
