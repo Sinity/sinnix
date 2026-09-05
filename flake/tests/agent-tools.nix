@@ -615,14 +615,18 @@ in
             assert local['model_provider'] == 'local'
             assert local['model_providers']['local']['base_url'].startswith('http://127.0.0.1:')
             assert keys(local_path) == full
-            for path_name, expected_role in [
-                ('full.config.toml', 'write'),
-                ('evidence.config.toml', 'write'),
-                ('browser.config.toml', 'write'),
-                ('lean.config.toml', 'read'),
+            # polylogue-mcp has no role flag: write is an environment opt-in.
+            for path_name, write_enabled in [
+                ('full.config.toml', True),
+                ('evidence.config.toml', True),
+                ('browser.config.toml', True),
+                ('lean.config.toml', False),
             ]:
                 data = tomllib.loads(pathlib.Path.home().joinpath('.codex', path_name).read_text())
-                assert data['mcp_servers']['polylogue']['args'] == ['--role', expected_role]
+                polylogue = data['mcp_servers']['polylogue']
+                assert 'args' not in polylogue, (path_name, polylogue)
+                env = polylogue.get('env', {})
+                assert (env.get('POLYLOGUE_MCP_WRITE_ENABLED') == '1') == write_enabled, (path_name, env)
             PYCODE
 
             # Same registry-derived contract as the claude configs above:
