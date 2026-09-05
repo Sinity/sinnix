@@ -1,16 +1,13 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timezone
 from typing import Any
+
+from sinnix_lib.ledger import utc_ts
 
 from . import SCHEMA
 
 SECRET_WORDS = ("token", "secret", "cookie", "password", "apikey", "api_key")
-
-
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def account_hash(value: Any) -> str | None:
@@ -102,7 +99,7 @@ def normalize_usage(
         fetched_at
         or (raw.get("generatedAt") if isinstance(raw, dict) else None)
         or (raw.get("generated_at") if isinstance(raw, dict) else None)
-        or _now()
+        or utc_ts()
     )
     rows: list[dict[str, Any]] = []
     for entry in _entries(raw):
@@ -173,7 +170,7 @@ def normalize_cost(
     fetched = (
         fetched_at
         or (raw.get("generatedAt") if isinstance(raw, dict) else None)
-        or _now()
+        or utc_ts()
     )
     rows = []
     for entry in _entries(raw):

@@ -21,7 +21,7 @@ import sys
 from pathlib import Path
 from typing import Any, Callable
 
-from .reducer import now_iso
+from sinnix_lib.ledger import utc_ts
 
 SCHEMA = "sinnix-orient-v1"
 
@@ -277,7 +277,7 @@ def compose(
     if not isinstance(inventory, dict):
         inventory = read_static(static_inventory_path)
 
-    result: dict[str, Any] = {"schema": SCHEMA, "generated_at": now_iso()}
+    result: dict[str, Any] = {"schema": SCHEMA, "generated_at": utc_ts()}
     if not isinstance(snapshot, dict) or state == {}:
         result["system"] = {
             "status": "unavailable",
