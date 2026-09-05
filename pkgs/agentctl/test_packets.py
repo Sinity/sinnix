@@ -329,8 +329,8 @@ def test_subject_is_type_prefixed_and_bounded() -> None:
         "fix: Archive reads refuse drift"
     )
     assert (
-        bead_subject(bead("a", "Add lane sync", issue_type="feature"))
-        == "feat: Add lane sync"
+        bead_subject(bead("a", "Add worktree sync", issue_type="feature"))
+        == "feat: Add worktree sync"
     )
     assert (
         bead_subject(bead("a", "Migrate  the\nthing", issue_type="task"))

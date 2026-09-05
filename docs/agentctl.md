@@ -8,37 +8,47 @@ external tools own the state it reads and writes:
 | pueue     | the queue, its groups (pools), every process, its terminal result  | `pueue status --json`, `pueue log` |
 | worktrunk | worktree creation, provisioning (`.config/wt.toml` hooks), removal | `wt list --format=json` (schema 2) |
 | GitHub    | PRs, review, required checks, merge                                | `gh pr list/view/create/merge`     |
-| Beads     | tasks                                                              | `bd ready/show/close --json`       |
+| Beads     | tasks, claims                                                      | `bd ready/show/claim/close --json` |
 | systemd   | only the calendar wake-up a declared `schedule` needs              | transient user timers              |
 
 What agentctl owns outright: the project descriptors, the prompt compiled
 from a bead, the launch-input and result-artifact contract of a queued
-command, and one operator screen.
+command, the run manifest of a batch, and one operator screen.
 
 ## Verbs
 
-| Verb                                                          | Does                                                                                                                                                                                                                                               |
-| ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `project list \| get <p> \| operations <p>`                   | the configured descriptors (`/etc/sinnix/agentctl.json` lists the roots)                                                                                                                                                                           |
-| `job start <p> <op> [--workspace <path>] [--wait] [-- args…]` | `pueue add` in the operation's pool, label `<p>:<op>`, running `agentctl-run <launch.json>`; extra arguments are appended to the declared `exec`                                                                                                   |
-| `job fire <p> <op>`                                           | what a schedule timer runs: `job start` on the main checkout, skipped while the same label is queued or running                                                                                                                                    |
-| `job list [--project p] [--active]`                           | `pueue status --json` reduced to job rows                                                                                                                                                                                                          |
-| `job get \| logs \| result \| cancel \| retry \| wait <id>`   | one task by pueue id; `logs` reads the bounded log, `result` the typed artifact, `cancel` stops the task's unit and kills the task, `retry` is `pueue restart --in-place`                                                                          |
-| `job clean <id> \| --all-terminal`                            | delete a terminal task's launch input, log, result, outcome and cancel marker, then `pueue remove`; never by age                                                                                                                                   |
-| `lane start <p> <bead> [--backend --model --effort]`          | compile the prompt, `wt switch --create feature/packet/<bead>`, queue the agent in group `agent` (label `<p>:lane:<bead>`)                                                                                                                         |
-| `lane publish [<worktree>] [--bead --title --body-file]`      | disarm any merge armed for an earlier head, push, create or reuse the PR, wait for checks and an exact-head hosted Codex verdict, then run `gh pr merge --auto --squash`; pending reviews and findings remain actionable; refuses a dirty worktree |
-| `lane rebase <p> <bead>`                                      | queue an agent with the rebase prompt into the bead's existing worktree (label `<p>:rebase:<bead>`)                                                                                                                                                |
-| `lane sync <p>`                                               | worktrees whose bound PR merged: `bd close`, `wt remove`; the rest are reported                                                                                                                                                                    |
-| `refill <p> --limit N [--dry-run]`                            | `bd ready` minus beads that already have a worktree or an open PR, minus epics → `lane start`                                                                                                                                                      |
-| `view [<p>]`                                                  | queue groups (running/queued/paused), what needs attention, active jobs with start and elapsed, every lane with bead, stage, since/elapsed, agent job, PR and what follows, ready beads                                                            |
-| `events tail [--lines N] [--follow] [--project p]`            | the event spool (`/realm/state/agentctl/events.jsonl`)                                                                                                                                                                                             |
-| `schedule apply`                                              | make the transient timer set equal the declared schedules                                                                                                                                                                                          |
+| Verb                                                                                                      | Does                                                                                                                                                                                |
+| --------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `project list \| get [p] \| operations [p]`                                                               | the configured descriptors (`/etc/sinnix/agentctl.json` lists the roots)                                                                                                            |
+| `job start [p] <op> [--workspace <path>] [--wait] [-- args…]`                                             | `pueue add` in the operation's pool, label `<p>:<op>`, running `agentctl-run <launch.json>`; extra arguments are appended to the declared `exec`                                    |
+| `job fire [p] <op>`                                                                                       | what a schedule timer runs: `job start` on the main checkout, skipped while the same label is queued or running                                                                     |
+| `job list [--project p] [--active]`                                                                       | `pueue status --json` reduced to job rows                                                                                                                                           |
+| `job get \| logs \| result \| cancel \| retry \| wait <id>`                                               | one task by pueue id; `logs` reads the bounded log, `result` the typed artifact, `cancel` drops a queued task or stops a running task's unit, `retry` is `pueue restart --in-place` |
+| `job clean <id> \| --all-terminal \| --daemon-era`                                                        | delete a terminal task's launch input, log, result, outcome and cancel marker, then `pueue remove`; `--daemon-era` deletes the state subtrees no verb reads; never by age           |
+| `batch start [p] <bead>… [--worker a,b]… [--workers queued\|external] [--backend B --model M --effort E]` | validate the members, write the run manifest, claim the beads, create one worktree per worker, queue the workers (or write their packets) and the landing task behind them          |
+| `batch land <run>`                                                                                        | the landing task's body: integrate, verify, review, publish, record acceptance, close satisfied beads, remove worktrees; re-runnable                                                |
+| `batch status <run>` / `batch list [p]`                                                                   | the manifest joined with pueue task state and the landing PR                                                                                                                        |
+| `batch result <run> <worker> <result.json>`                                                               | file a schema-validated result for a worker another harness ran; releases the stashed landing task once every worker has one                                                        |
+| `batch resume <run> --worker <w>`                                                                         | queue a fresh agent into the worker's existing worktree with the original packet                                                                                                    |
+| `view [p]`                                                                                                | queue groups, what needs attention, active jobs, open runs with each worker's stage, ready beads                                                                                    |
+| `events tail [--lines N] [--follow] [--project p]`                                                        | the event spool (`/realm/state/agentctl/events.jsonl`)                                                                                                                              |
+| `schedule apply`                                                                                          | make the transient timer set equal the declared schedules                                                                                                                           |
+| `backpressure tick`                                                                                       | pause or resume one pool against host stall                                                                                                                                         |
 
-Reads print tables in local time; `agentctl --json <verb>` prints the
-document. A project argument defaults to the checkout enclosing the working
-directory where the table says so. Exit status: 0 done, 1 refused or failed,
-2 usage, 3 the waited job (`job wait`, `job start --wait`) did not succeed.
-The CLI decides nothing: it dispatches what it is told and reports; a lane's
+The project is `--project`, a leading positional naming a configured project
+or a checkout path, or the checkout enclosing the working directory. A run
+is its full id or its 8-character suffix.
+
+Reads print tables in local time with an age column; `--json` before or
+after the verb prints the document. Writes print the document as JSON on
+stdout and one summary line on stderr. Tables shorten run ids and commits
+to 8 characters; `--full` prints them whole.
+
+Exit status: 0 done; 1 refused (validation, policy, a missing object) or the
+action failed; 2 usage; 3 a tool agentctl drives failed; 4 the waited job
+(`job wait`, `job start --wait`) did not succeed.
+
+The CLI decides nothing: it dispatches what it is told and reports; a run's
 "next" on the view describes its state.
 
 ## Jobs
@@ -64,17 +74,25 @@ results stdout alone goes to `jobs/<ref>.result` — both bounded at 64,000
 bytes with an overflow marker. A vanished working directory or an
 unresolvable command is refused before anything starts (exit 125).
 
-The run ends in one of `success`, `failed` (the command's exit status),
-`timeout` (exit 124, `RuntimeMaxSec` expired), `cancelled` (exit 130, the
-cancel marker `jobs/<ref>.cancel` existed when the wait returned),
-`vanished` (exit 126, the unit could not be observed after a failing wait)
-or `slot_occupied` (exit 75). The outcome is written to `jobs/<ref>.outcome`,
-carried on the `finished` event and shown by `job result`. pueue's
-completion callback (declared by the CLI feature) appends its own finish
-event. `job logs` and `job result` read the paths the launch input named,
-which must be regular files under the task's own working directory or the
-state directory; there is no job ledger. The launch input stays so `pueue
-restart` re-runs the same command.
+### Executor outcomes
+
+The run ends in one outcome, written to `jobs/<ref>.outcome`, carried on the
+`finished` event and shown by `job result`:
+
+| Outcome         | Exit | Meaning                                                    |
+| --------------- | ---- | ---------------------------------------------------------- |
+| `success`       | 0    | the command exited 0                                       |
+| `failed`        | n    | the command's own exit status                              |
+| `timeout`       | 124  | `RuntimeMaxSec` expired                                    |
+| `cancelled`     | 130  | the cancel marker `jobs/<ref>.cancel` existed at wait exit |
+| `vanished`      | 126  | the unit could not be observed after a failing wait        |
+| `slot_occupied` | 75   | a single-slot pool was held by another unit                |
+
+pueue's completion callback (declared by the CLI feature) appends its own
+finish event. `job logs` and `job result` read the paths the launch input
+named, which must be regular files under the task's own working directory
+or the state directory; there is no job ledger. The launch input stays so
+`pueue restart` re-runs the same command.
 
 Before starting in a pool whose parallelism is 1 (`pytest`, `bulk`), the
 wrapper lists the active units of that pool's slice. A unit whose pueue task
@@ -87,61 +105,147 @@ state, so every add goes through the adapter's scrubbed environment (`HOME`,
 `PATH`, `XDG_RUNTIME_DIR`, `XDG_DATA_HOME`); the launch input carries the
 real one.
 
-Groups admit work: `agent:6 pytest:1 bulk:1 normal:5 interactive:4`. Every
-part of a unit name comes from `pueue status`, from a command that is the
-wrapper and one launch input and nothing else. `job cancel` drops a queued
-task out of the queue (`removed`); for a running task it writes the cancel
-marker, runs `systemctl --user stop <unit>`, then `pueue kill`, and reports
-`stopped`, or `failed` with a non-zero exit while the unit is still active.
-`systemctl stop` ends the wrapper's wait with a success status, which is why
-the marker is written first. The group comes from `PUEUE_GROUP`, so a
-repository that queues `agentctl-run` with its own launch input is contained
-and cancelled identically. `scope_properties` in a launch input are
-`systemd-run -p` settings on that unit, restricted to the ones that bound
-what the task may consume (`MemoryMax`, `MemoryHigh`, `MemorySwapMax`,
-`MemoryZSwapMax`, `TasksMax`, `CPUWeight`, `IOWeight`), and a launch must
-not start a unit of its own: it would land outside the task's cgroup, where
-a cancel cannot reach it. `agentctl.slice` and `agentctl-agent.slice` are
-never systemd-oomd or swap victims; the pytest and bulk slices have fixed
-memory, swap, CPU and IO budgets, `MemorySwapMax=0`, and are killed by
-systemd-oomd at their own memory pressure; they do not choose capacity from
-instantaneous free RAM.
-`agentctl-backpressure.timer` runs `agentctl backpressure tick`, which pauses one
-group per minute while the host's `full` IO or memory stall stays above
-threshold and resumes in reverse order once clear; a paused task keeps its
-work. Every pause event carries `"owner": "agentctl"` and the group, and a
-group is resumed only when its most recent pause event in the spool is
-agentctl's own: an operator's `pueue pause -g <group>` stays paused.
+Groups admit work: `agent:6 pytest:1 bulk:1 normal:5 interactive:4`, plus
+one `<project>-land` group of parallelism 1 per project that has run a
+batch. Every part of a unit name comes from `pueue status`, from a command
+that is the wrapper and one launch input and nothing else.
 
-## Lanes
+`job cancel` drops a queued task out of the queue (`removed`); for a running
+task it writes the cancel marker, runs `systemctl --user stop <unit>`, then
+`pueue kill`, and reports `stopped`, or `failed` with exit status 1 while
+the unit is still active. `systemctl stop` ends the wrapper's wait with a
+success status, which is why the marker is written first. The group comes
+from `PUEUE_GROUP`, so a repository that queues `agentctl-run` with its own
+launch input is contained and cancelled identically. `scope_properties` in
+a launch input are `systemd-run -p` settings on that unit, restricted to
+the ones that bound what the task may consume (`MemoryMax`, `MemoryHigh`,
+`MemorySwapMax`, `MemoryZSwapMax`, `TasksMax`, `CPUWeight`, `IOWeight`),
+and a launch must not start a unit of its own: it would land outside the
+task's cgroup, where a cancel cannot reach it. `agentctl.slice` and
+`agentctl-agent.slice` are never systemd-oomd or swap victims; the pytest
+and bulk slices have fixed memory, swap, CPU and IO budgets,
+`MemorySwapMax=0`, and are killed by systemd-oomd at their own memory
+pressure; they do not choose capacity from instantaneous free RAM.
 
-A lane is a worktree with an agent in it and a PR that merges itself.
+`agentctl-backpressure.timer` runs `agentctl backpressure tick`, which
+pauses one group per minute while the host's `full` IO or memory stall
+stays above threshold and resumes in reverse order once clear; a paused
+task keeps its work. Every pause event carries `"owner": "agentctl"` and
+the group, and a group is resumed only when its most recent pause event in
+the spool is agentctl's own: an operator's `pueue pause -g <group>` stays
+paused.
 
-`lane start` compiles the prompt (`packets.py`): the bead and its open
-dispatch-group members from `bd`, backend/model/effort from the bead's
-`model_policy` metadata or the descriptor's `[packets.defaults]` (an explicit
-flag wins), the atlas sheets matching the affected paths, and the worker
-contract appended verbatim. It creates
-`<workspace.root>/<repo>-feature-packet-<bead>` through `wt switch --create`
-(the project's own hooks provision it), writes the prompt to
-`.lane/prompt.md` (0600), and queues in group `agent`:
+## Batches
+
+A batch is several workers on one base commit, landed as one candidate.
+Its inputs and outcomes live in one run manifest,
+`$XDG_STATE_HOME/agentctl/runs/<run-id>.json`, written once by
+`batch start` and appended with worker results, landing state and the
+acceptance record. pueue holds the live task state, Beads the claims,
+worktrunk the worktrees, GitHub the PR; the manifest is not a database.
+
+### The manifest
+
+```
+run_id            <project>-<UTC stamp>-<8 hex>
+project, base_commit, created_at, harness (queued|external)
+runtime_revision  the agentctl store path that started the run
+verify_profile    the descriptor's [workspace].verify.candidate
+review_profile    "review"
+workers: [{id, beads: [...], branch, worktree, task_id|null, result|null,
+           result_path, claimed}]
+landing: {task_id|null, integration_worktree, candidate_sha|null,
+          pr_number|null, verify_run, review_verdict, failure|null,
+          refreshes, refreshed_base}
+acceptance: {candidate_sha, verify_run, review_verdict, published,
+             members: {<bead>: {state: closed|open, evidence}},
+             recorded_at, residual: [...]} | null
+prepared          every claim, worktree and task exists
+```
+
+### Start
+
+`batch start` resolves each seed bead's open dispatch group into one worker
+(`--worker a,b` names one explicitly; the first bead leads) and validates
+every member: it exists, is open or in progress, has no open external
+blocker, is not claimed or in another run, and no two workers share a write
+scope; a closed leader is skipped. It then writes the manifest, claims each
+member with `bd update --claim` as actor `agentctl-batch-<run>`, creates
+`<workspace.root>/<repo>-batch-<run>-<worker>` on branch
+`batch/<run>/<worker>` from `base_commit` through `wt switch --create`,
+writes the worker packet to `.lane/prompt.md` (0600), queues each
+worker in group `agent` (label `<p>:worker:<run>:<w>`,
+`MemoryMax=<workspace.agent_memory_max>` on its unit), and queues the
+landing task in `<p>-land` with `--after` every worker (label
+`<p>:land:<run>`). A worker runs
 
 ```text
 agentctl-run <agent-launch.json>
 <environment.command> run_agent_prompt.sh --agent B --workdir W \
-  --prompt-file W/.lane/prompt.md --last-file W/.lane/prompt.result.md \
-  --model M --reasoning-effort E
+  --prompt-file W/.lane/prompt.md --last-file W/.lane/prompt.result.json \
+  --model M --reasoning-effort E --output-schema worker.schema.json
 ```
 
-The lane's launch input carries `MemoryMax=<workspace.agent_memory_max>`
-(default 4G) as a property of that task's own scope, so the hard ceiling and
-the cancellation boundary are the same unit. The adapter (`agentRunner`) turns the prompt
-into one backend invocation. Provisioning the worktree (dependencies, the
-testmon seed copied from the primary checkout) is the project's `wt.toml`
-hooks' job. The environment carries `BEADS_ACTOR=agent-<bead>` so an agent's
-task writes are its own. Agent jobs cap at four hours.
+followed, in the same task, by `agentctl batch result <run> <w>
+W/.lane/prompt.result.json`, which validates the last file against
+`dots/claude/agents/schemas/worker.schema.json` and binds it to the
+worktree head; a zero exit with no valid result is a failed worker, so the
+landing task's dependency does not release. Backend, model and effort come from the flags,
+the bead's `model_policy` metadata, or the descriptor's `[packets.defaults]`.
+The environment carries `BEADS_ACTOR=agent-<bead>`; agent jobs cap at four
+hours.
 
-A worker ends its lane with `lane done report.md`; the branch is a preserved candidate, not a publication unit. The coordinator combines compatible candidates and verifies the combined diff once. For a product repository, `agentctl lane publish <integration-worktree>` reads the project descriptor, validates project identity, and runs the ordered `workspace.verification_operations` sequence in its declared pueue pools. Operations with `cache = "tree+environment"` carry exact Git head/tree and non-secret environment receipts. Every declared operation must succeed at the same head before the branch is pushed. The PR body binds the Beads, branch, and source head. Publication disarms a merge armed for an earlier head, waits for GitHub to expose the PR, then waits up to 15 minutes for checks and a hosted Codex verdict bound to that head. Empty `reviewDecision` is not a verdict. Findings and review timeouts leave the PR unarmed. Sinnix itself is reviewed and verified as one direct-master integration batch and does not use `lane publish`. `lane sync` closes a Bead only from a merged PR bound to its lane. Nothing dispatches on its own: `refill` and `lane start` are explicit, and a declared `schedule` is the one autonomous driver a project can choose.
+With `--workers external` the same manifest, claims, worktrees and packets
+are made and only the landing task is queued, stashed. Another harness runs
+the workers in those worktrees and files each result with `batch result`;
+the last result enqueues the landing task. `batch start` on an existing
+manifest completes whatever step is missing and never starts a second
+graph.
+
+### Landing
+
+`batch land <run>` is the landing task's body and can be run by hand; every
+step is recorded in `landing` before the next starts, and a repeat run
+resumes from the manifest.
+
+1. Refuse unless every worker task succeeded with a valid result, and
+   refuse a run that already has an acceptance record.
+2. Create a fresh integration worktree from `base_commit` and merge the
+   worker branches in manifest order with `git merge --no-ff`. A conflict
+   queues one integration agent (label `<p>:integrate:<run>`) with the
+   conflicts and the remaining branches; the merged head is
+   `candidate_sha`.
+3. Verify: one job of the descriptor's `verify.candidate` operation in the
+   integration worktree, or, when it is `hosted:<check>`, the PR is pushed
+   and that required check is awaited. The receipt is `verify_run`.
+4. Review: one reviewer job (label `<p>:review:<run>`) on
+   `git diff base..candidate` with the `review` agent definition and
+   `judge.schema.json`; the verdict is bound to `candidate_sha` and must be
+   `pass`. Hosted Codex review comments are recorded as advisory and never
+   gate.
+5. Publish, after re-reading the remote default branch equals the run's
+   base. `publish = "master"`: push `candidate_sha` to the default branch
+   with `--force-with-lease=<branch>:<base>`. `publish = "pr"`: create or
+   reuse the PR by stored number, wait for the required checks on exactly
+   `candidate_sha`, then `gh pr merge --squash --match-head-commit <sha>`.
+   If the target moved, one refresh rebases the run on the new base and
+   repeats from step 2; a second movement stops with `target_moved_twice`.
+6. Accept: write the acceptance record, `bd close` each bead whose criteria
+   are all satisfied or superseded in its worker's result, `bd comment` the
+   rest with the residual, then `wt remove` the worker worktrees. A cleanup
+   failure leaves the beads closed and a named residual; a close failure
+   leaves worktrees.
+
+A refusal or substrate error after step 1 is written to `landing.failure`
+with its code; `batch status` shows `failed: <code>` and `view` names what
+follows.
+
+### Result
+
+A worker exits with the JSON document `worker.schema.json` describes:
+`candidate_sha` (the worktree HEAD when filed), `beads` with each acceptance
+criterion marked `satisfied`, `unsatisfied` or `superseded` with evidence,
+`unresolved` findings, and `verification` receipts.
 
 ## Descriptors
 
@@ -169,7 +273,8 @@ POLYLOGUE_ARCHIVE_ROOT = "/realm/state/polylogue"
 root = "/realm/worktrees"
 default_base = "origin/master"
 agent_memory_max = "10G"
-verification_operations = ["verify_quick"]
+verify = { focused = "verify_quick", candidate = "hosted:verify", corpus = "verify_all" }
+publish = "pr"
 
 [packets]
 branch_prefix = "feature/packet"
@@ -200,17 +305,20 @@ An operation declares `description`, `exec` (argv, no shell), `pool` (a
 pueue group), `result` (`exit`, `json`, `pytest`), `timeout_seconds` (1 to
 28,800; default 3,600), `checkout` (`any`, or `default` for operations that
 run only on the main checkout), `schedule` (an `OnCalendar` expression),
-`cache` (`none` or `tree+environment`) and `dependencies` (declared operation
-names). Dependencies are queued before their operation and cannot contain
-cycles. Any other operation field takes the project
-out of service with the field named. The retired tables `[conflicts]`,
-`[owner_adapters]` and the extra `[workspace]` fields are ignored.
-`[environment]` declares `kind`, `command`, `inherit`, `unset`, `values` and
-`require`; a required variable missing at launch fails the launch with its
-name. `[workspace]` declares `root`, `default_base` and `agent_memory_max`
-(a systemd size) and the ordered, non-empty `verification_operations` list.
-Every listed operation must be declared. `[packets]` declares `template`, `atlas_dir`,
-`branch_prefix` and `[packets.defaults]` (`backend`, `model`, `effort`).
+`cache` (`none` or `tree+environment`) and `dependencies` (declared
+operation names). Dependencies are queued before their operation and cannot
+contain cycles. Any other operation field takes the project out of service
+with the field named. `[environment]` declares `kind`, `command`,
+`inherit`, `unset`, `values` and `require`; a required variable missing at
+launch fails the launch with its name. `[workspace]` declares `root`,
+`default_base`, `agent_memory_max` (a systemd size), `verify` (the
+`focused`, `candidate` and `corpus` operations; `candidate` may be
+`hosted:<check>` for a required PR check) and `publish` (`pr` or `master`).
+Every named operation must be declared; other `[workspace]` fields and the
+`[conflicts]` and `[owner_adapters]` tables are ignored. `[packets]`
+declares `template` (default: the `worker_contract` path in
+`agentctl.json`), `atlas_dir`, `branch_prefix` and `[packets.defaults]`
+(`backend`, `model`, `effort`).
 
 Descriptor changes take effect on the next call; timers follow on the next
 `schedule apply` (every fifteen minutes and at login).
@@ -222,11 +330,9 @@ Each declared `schedule` is one transient user timer,
 `agentctl job fire <project> <operation>`. `schedule apply` lists the live
 timers, stops the ones no descriptor declares, and starts the missing ones;
 a changed expression is a new unit. Daily or rarer timers are `Persistent`
-(a missed firing catches up); sub-hourly ones are not.
-
-The opt-in refill timer (`sinnix.services.agentctl.refill = { enable = true;
-project; limit; onCalendar; }`) runs `agentctl refill <project> --limit N`;
-it is the only timer that starts lanes.
+(a missed firing catches up); sub-hourly ones are not. A project that wants
+unattended batches declares a scheduled operation whose `exec` runs
+`agentctl batch start` with its own selection rule.
 
 ## Limits
 
@@ -235,7 +341,7 @@ it is the only timer that starts lanes.
 | `limits.DEFAULT_TIMEOUT_SECONDS` (3,600)                     | arbitrary bound                                                          | the job timeout when an operation declares none                  |
 | `limits.MAX_AGENT_TIMEOUT_SECONDS` (14,400)                  | measurement (a 1h ceiling forced serial re-launch rounds on real lanes)  | the agent job timeout                                            |
 | `limits.MAX_DECLARED_OPERATION_TIMEOUT_SECONDS` (28,800)     | arbitrary bound                                                          | the ceiling on a declared `timeout_seconds`                      |
-| `limits.AGENT_MEMORY_MAX` (10G)                              | half of the job plane's MemoryHigh                                       | the hard ceiling of one agent's scope                            |
+| `limits.AGENT_MEMORY_MAX` (10G)                              | half of the job plane's MemoryHigh                                       | the hard ceiling of one agent's unit                             |
 | `pueue.CALL_TIMEOUT_SECONDS` (60)                            | arbitrary bound (a minute distinguishes a wedged daemon from a slow one) | max time for one `pueue` round trip                              |
 | `worktrunk.LIST_SCHEMA_VERSION` (2)                          | external tool's contract                                                 | the `wt list` JSON schema this module parses                     |
 | `worktrunk.CALL_TIMEOUT_SECONDS` (60)                        | arbitrary bound (covers one cold forge round trip)                       | max time for one `wt` round trip                                 |
@@ -245,8 +351,11 @@ it is the only timer that starts lanes.
 | `run.CANCELLED_EXIT_CODE` (130)                              | shell convention (128 + SIGINT)                                          | the cancel marker existed when the wait returned                 |
 | `run.VANISHED_EXIT_CODE` (126)                               | arbitrary bound                                                          | the unit could not be observed after a failing wait              |
 | `run.SLOT_OCCUPIED_EXIT_CODE` (75)                           | external convention (`EX_TEMPFAIL`)                                      | a single-slot pool was held by another unit                      |
-| `lanes.PUSH_TIMEOUT_SECONDS` (2,400)                         | arbitrary bound (the push runs the repository's pre-push gate)           | timeout for `git push` during publication                        |
-| `lanes.GH_TIMEOUT_SECONDS` (60)                              | arbitrary bound                                                          | timeout for one `gh`/`git` call                                  |
+| `batch.PUSH_TIMEOUT_SECONDS` (2,400)                         | arbitrary bound (the push runs the repository's pre-push gate)           | timeout for `git push` and `git fetch` during landing            |
+| `batch.GIT_TIMEOUT_SECONDS` (60)                             | arbitrary bound                                                          | timeout for one local `git` call                                 |
+| `batch.HOSTED_CHECK_TIMEOUT_SECONDS` (7,200)                 | arbitrary bound                                                          | how long landing waits for a required PR check                   |
+| `batch.MAX_REFRESHES` (1)                                    | arbitrary bound                                                          | base movements a landing absorbs before `target_moved_twice`     |
+| `batch.SHORT_RUN_ID` (8)                                     | arbitrary bound                                                          | hex characters in a run id's suffix                              |
 | `packets.MAX_PROMPT_BYTES` (200,000)                         | arbitrary bound                                                          | cap on a compiled prompt                                         |
 | `packets.MAX_SUBJECT_LENGTH` (72)                            | repository commit convention                                             | cap on a PR subject                                              |
 | `backpressure.IO_FULL_FREEZE` (25%)                          | measurement (io full avg10 reached 76% under eight normal-pool jobs)     | the IO stall that freezes a group                                |
@@ -258,14 +367,15 @@ it is the only timer that starts lanes.
 ## Host wiring
 
 `modules/services/agentctl.nix` renders `/etc/sinnix/agentctl.json`
-(`project_roots`, `agent_runner`, `event_spool`, `agentctl`), installs
-`agentctl`, `wt`, `pueue` and `gh` as system packages, persists
-`~/.local/state/agentctl`, and declares the timers: `agentctl-backpressure`
-(every minute), `agentctl-schedule` (every fifteen minutes, and two minutes
-after login), and `agentctl-refill` when the opt-in refill is enabled. pueued itself, its groups, its completion callback and the
-`agentctl-work.slice` coordinator placement, the pueue pool groups, and their
-pool slices are declared by the CLI feature and runtime registry
-(`modules/features/cli/core.nix`, `flake/data/runtime-defaults.nix`).
+(`project_roots`, `agent_runner`, `worker_contract`, `event_spool`,
+`agentctl`), installs `agentctl`, `wt`, `pueue` and `gh` as system
+packages, persists `~/.local/state/agentctl`, and declares the timers:
+`agentctl-backpressure` (every minute) and `agentctl-schedule` (every
+fifteen minutes, and two minutes after login). pueued itself, its groups,
+its completion callback and the `agentctl-work.slice` coordinator
+placement, the pueue pool groups, and their pool slices are declared by the
+CLI feature and runtime registry (`modules/features/cli/core.nix`,
+`flake/data/runtime-defaults.nix`).
 
 `nix build .#agentctl` runs the package suite, which drives a private pueued
-end to end for the adapter and fakes it for the launch and lane routes.
+end to end for the adapter and fakes it for the launch and batch routes.

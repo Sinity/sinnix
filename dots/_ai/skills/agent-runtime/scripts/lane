@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
-# Worker-side toolbelt for an agent queued by `agentctl lane start`.
+# Worker-side toolbelt for a batch worker queued by `agentctl batch start`.
 set -euo pipefail
 
 usage() {
   cat >&2 <<'EOF'
 Usage:
   lane task                       print the dispatch prompt
-  lane verify                     run the project's quick verification as a job and wait
-  lane publish                    push, open the PR under the bead's subject, arm auto-merge
+  lane verify                     run the descriptor's focused verification as a job and wait
   lane done [--incomplete] <report-file>
                                   push the branch and emit the report as the final message
 EOF
@@ -44,45 +43,34 @@ lane_task() {
   cat -- "$prompt"
 }
 
-operation_has_exec() {
-  local file=$1 operation=$2
-  awk -v target="[operations.$operation]" '
-    $0 == target { in_operation = 1; next }
-    /^\[/ { in_operation = 0 }
-    in_operation && $0 ~ /^[[:space:]]*exec[[:space:]]*=/ { found = 1; exit }
-    END { exit(found ? 0 : 1) }
-  ' "$file"
-}
-
-select_verification_operation() {
-  local file=$1 operation
-  for operation in verify_quick verify_focused focused check; do
-    if operation_has_exec "$file" "$operation"; then
-      printf '%s\n' "$operation"
-      return 0
-    fi
-  done
-  return 1
+focused_operation() {
+  # `[workspace].verify.focused` in the descriptor: an inline table on the
+  # `verify` key or a `[workspace.verify]` table.
+  awk '
+    /^\[/ { in_workspace = ($0 ~ /^\[workspace(\.verify)?\]/) }
+    in_workspace && match($0, /focused[[:space:]]*=[[:space:]]*"[^"]+"/) {
+      value = substr($0, RSTART, RLENGTH)
+      sub(/^[^"]*"/, "", value)
+      sub(/"$/, "", value)
+      print value
+      exit
+    }
+  ' "$1"
 }
 
 lane_verify() {
-  local file operation output
-  file=$(project_file)
-  if ! operation=$(select_verification_operation "$file"); then
-    printf 'lane verify: no quick verification operation declared in %s\n' "$file"
+  local operation output
+  command -v agentctl >/dev/null 2>&1 || die "agentctl is unavailable for managed verification"
+  operation=$(focused_operation "$(project_file)")
+  if [[ -z $operation ]]; then
+    printf 'lane verify: no focused verification declared in %s\n' "$(project_file)"
     return 0
   fi
-  command -v agentctl >/dev/null 2>&1 || die "agentctl is unavailable for managed verification"
   if ! output=$(agentctl job start "$(project_id)" "$operation" --workspace "$(repo_root)" --wait --timeout-seconds "${AGENTCTL_TIMEOUT_SECONDS:-3600}"); then
     printf '%s\n' "$output" >&2
     die "managed verification did not succeed"
   fi
   printf '%s\n' "$output"
-}
-
-lane_publish() {
-  command -v agentctl >/dev/null 2>&1 || die "agentctl is unavailable for publication"
-  agentctl lane publish "$(repo_root)"
 }
 
 git_offenders() {
@@ -140,10 +128,6 @@ main() {
     verify)
       [[ $# -eq 1 ]] || { usage; exit 2; }
       lane_verify
-      ;;
-    publish)
-      [[ $# -eq 1 ]] || { usage; exit 2; }
-      lane_publish
       ;;
     done)
       shift

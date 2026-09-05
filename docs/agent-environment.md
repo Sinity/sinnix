@@ -169,22 +169,22 @@ Servers: agent-control, context7, github, polylogue, sinex.
 
 ## Agent definitions
 
-| Name                   | Description                                                                                         | Model    | Effort   |
-| ---------------------- | --------------------------------------------------------------------------------------------------- | -------- | -------- | --- |
-| `boilerplate-scribe`   |                                                                                                     |          | `haiku`  | ``  |
-| `judge`                | Headless structured judge with an explicit refutation attempt and honest unsupported path.          | `sonnet` | `high`   |
-| `lane`                 | Worktree-isolated implementation worker. Dispatch prompts carry only task scope and file ownership. | `sonnet` | `high`   |
-| `review`               | Read-only adversarial reviewer that cites exact evidence and tests the strongest counterclaim.      | `opus`   | `high`   |
-| `review-lane`          | Cross-family dispatched reviewer for a completed implementation lane.                               | `opus`   | `high`   |
-| `test-coverage-sprint` |                                                                                                     |          | `sonnet` | ``  |
-| `triage`               | Read-only evidence worker returning a closed structured verdict.                                    | `haiku`  | `medium` |
+| Name                   | Description                                                                                             | Model    | Effort   |
+| ---------------------- | ------------------------------------------------------------------------------------------------------- | -------- | -------- | --- |
+| `boilerplate-scribe`   |                                                                                                         |          | `haiku`  | ``  |
+| `judge`                | Headless structured judge with an explicit refutation attempt and honest unsupported path.              | `sonnet` | `high`   |
+| `lane`                 | Worktree-isolated implementation worker. Dispatch prompts carry only task scope and file ownership.     | `sonnet` | `high`   |
+| `review`               | Read-only adversarial reviewer that cites exact evidence and tests the strongest counterclaim.          | `opus`   | `high`   |
+| `review-lane`          | Cross-family dispatched reviewer for a completed implementation worker; returns a judge-schema verdict. | `opus`   | `high`   |
+| `test-coverage-sprint` |                                                                                                         |          | `sonnet` | ``  |
+| `triage`               | Read-only evidence worker returning a closed structured verdict.                                        | `haiku`  | `medium` |
 
 ## Shared skills
 
 | Skill                    | When to use                                                                                                                                                                                                                                                                         |
 | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `agent-gateway`          | Use when invoking, inspecting, or documenting Sinnix Agent Gateway V2 resources and actions through its ten-verb CLI or MCP contract.                                                                                                                                               |
-| `agent-runtime`          | Operate or recover agentctl jobs and lanes — declared operations as pueue tasks, worktree lanes with an agent and a PR, logs, results, cancellation, cleanup and redispatch.                                                                                                        |
+| `agent-runtime`          | Operate or recover agentctl jobs and batches — declared operations as pueue tasks, worker worktrees, the landing task, logs, results, cancellation, cleanup and resumption.                                                                                                         |
 | `analyze`                | Interactive codebase analysis with user steering (survey → narrate → synthesize)                                                                                                                                                                                                    |
 | `android-device-control` | Control, configure, debloat, or capture from an unrooted Android phone through adb, Termux, tailnet access, and resilient UI automation, including Xiaomi power-management traps.                                                                                                   |
 | `bead-authoring`         | Write or mature Beads tasks, specifications, acceptance criteria, dependency edges, and campaign slices so implementation can proceed without re-deriving intent.                                                                                                                   |
@@ -202,7 +202,7 @@ Servers: agent-control, context7, github, polylogue, sinex.
 | `investigate`            | Investigate bugs, regressions, incidents, performance problems, missing artifacts, and contested claims through reproduction, measurement, evidence preservation, and direct verification.                                                                                          |
 | `lynchpin`               | Query or develop Lynchpin evidence sources, materialization, DuckDB substrate generations, graphs, analyses, Chisel reports, Polylogue boundaries, and MCP evidence products.                                                                                                       |
 | `meta`                   | Meta-level introspection - analyze session, improve setup, persist learnings                                                                                                                                                                                                        |
-| `orchestrate`            | Orchestrate parallel agent implementation, research, or continuous queue work through explicit ownership, model selection, agentctl lanes and jobs, structural review, and one integrated batch.                                                                                    |
+| `orchestrate`            | Orchestrate parallel agent implementation, research, or continuous queue work through explicit ownership, model selection, agentctl batches and jobs, structural review, and one landed candidate per batch.                                                                        |
 | `polylogue`              | Query or develop Polylogue session archives, ingestion, storage tiers, lineage, CLI, MCP, daemon convergence, devtools verification, or historical work reconstruction.                                                                                                             |
 | `prompting`              | Write, review, or diagnose nontrivial prompts for subagents, external models, workflow stages, headless judgment, MCP or skill instructions, reusable templates, and agent definitions.                                                                                             |
 | `recap`                  | Refresh stale session context or prepare a concise handoff after compaction or interruption when current work, decisions, evidence, blockers, and the next action are unclear.                                                                                                      |

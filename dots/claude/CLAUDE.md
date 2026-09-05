@@ -135,7 +135,7 @@ multi-agent work. `agentctl --help` is the verb surface.
   running. `agentctl job fire` (timers) skips while the same operation is
   active.
 - Every agent dispatch names backend, model, and effort explicitly
-  (`agentctl lane start <project> <bead> --backend B --model M --effort E`).
+  (`agentctl batch start <project> <bead> --backend B --model M --effort E`).
 - Commit before risky integration or recovery; Git is the checkpoint.
 - Authority map: Git/worktrunk = commits/worktrees; pueue = live processes
   and terminal results; systemd = only calendar-timer wake-ups; GitHub =
@@ -152,28 +152,31 @@ multi-agent work. `agentctl --help` is the verb surface.
   evidence and act at ~2x with a decision, never silent waiting. Completion
   events (`agentctl events tail --follow`) are authoritative; do not poll.
 
-## Lane coordination (stateless takeover)
+## Batch coordination (stateless takeover)
 
-A lane is a worktree with an agent in it and a PR that merges itself. The
-protocol and live state live OUTSIDE your context — read them, never
-reconstruct:
+A batch is several workers on one base commit, each in its own worktree,
+landed as one candidate by a task queued behind them. The protocol and live
+state live OUTSIDE your context — read them, never reconstruct:
 
 - **Protocol**: `/realm/project/sinnix/dots/_ai/skills/orchestrate/references/coordinator-contract.md`
   — start with its capability table, which names the `agentctl` verb for each
   need. Worker rules in its sibling `worker-contract.md`.
 - **Live state**: `agentctl view <project>` is the one screen (`--json` for
   the payload); `agentctl events tail` is the event history.
-- **Who drives**: the operator or the coordinating agent. Nothing advances on
-  its own: `agentctl refill <project> --limit N` starts lanes for ready beads,
-  `agentctl lane start <project> <bead>` starts one, `agentctl lane rebase`
-  re-queues an agent into a conflicted lane, `agentctl lane sync` closes what
-  merged and removes its worktree.
-- **Merge gate**: branch protection + the required verify check +
-  `gh pr merge --auto --squash`, armed by `agentctl lane publish <worktree>`.
-- **Operating loop**: merge everything in progress, then ONE corpus run
-  (`agentctl job start <project> verify_all`); never per-lane corpus runs.
+- **Who drives**: the operator or the coordinating agent starts batches;
+  a started batch lands itself. `agentctl batch start <project> <bead>…`
+  starts one, `agentctl batch resume <run> --worker <w>` re-queues an agent
+  into a worker's worktree, `agentctl batch land <run>` re-runs a landing
+  by hand, `agentctl batch result` files a Claude-subagent worker's result.
+- **Landing gate**: the candidate verification, one reviewer verdict bound
+  to the candidate commit, and the required checks where the repository
+  publishes through PRs; the landing task publishes and records acceptance.
+- **Operating loop**: inventory `agentctl view`, start one coherent set of
+  two to four workers, wait for the landing event, read `batch status`; the
+  corpus runs ONCE at the master boundary through the descriptor's `corpus`
+  operation, never per worker.
 - A fresh session resumes from those verbs plus the project's memory index;
-  nothing a lane depends on may live only in a chat context.
+  nothing a batch depends on may live only in a chat context.
 
 ## Ambient control (browser, desktop, terminal)
 
@@ -212,9 +215,9 @@ memory, or the owning CLAUDE.md) instead of re-deriving next session.
 - Preserve user work: dirty trees are normal; state destructive intent before
   any delete/reset/force-push/rewrite/kill. Clean up your own transient
   artifacts (stashes, scratch branches) once verified captured elsewhere.
-- Publish through `agentctl lane publish <worktree>` where the repository
-  lands via PRs; never bypass hosted checks or protected-branch policy. Load
-  `review-land` for adversarial review + publication procedure.
+- Publish through `agentctl batch land <run>`; never bypass hosted checks or
+  protected-branch policy. Load `review-land` for adversarial review +
+  publication procedure.
 
 ## Verification
 

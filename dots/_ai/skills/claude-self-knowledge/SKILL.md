@@ -89,9 +89,11 @@ worktree`, `skills`, `memory`, `maxTurns`, hooks. Bake standing contracts
 - **Never poll background agents** — completion notifications are automatic;
   Monitor only with an until-condition; ScheduleWakeup only for genuine
   wall-clock deadlines (CI grace windows, external state).
-- pueue records job state (`agentctl job get|logs|result`) and the event
-  spool records every start and finish. Polylogue retains session history;
-  neither role is recreated from hook-derived transcript ledgers.
+- pueue records job state (`agentctl job get|logs|result`), the run
+  manifests under `~/.local/state/agentctl/runs/` record every batch's
+  inputs, worker results and acceptance, and the event spool records every
+  start and finish. Polylogue retains session history; none of these roles
+  is recreated from hook-derived transcript ledgers.
 - For coordination, Beads owns work and dependencies; Polylogue blackboard
   assertions are durable asynchronous notes, not a delivered group chat.
 - Wrappers: bare `claude` uses the lean profile; `claude-full` adds the full
