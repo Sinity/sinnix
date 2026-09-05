@@ -35,15 +35,17 @@ mkAiService {
   description = "Speech-to-text hub (Parakeet TDT via sherpa-onnx)";
   docs = "docs/speech.md";
   unit = "sinnix-stt.service";
-  endpoint = "127.0.0.1:${toString helpers.data.ports.stt.public}";
   requiresCuda = false;
   activation = {
     mode = "socket-proxy";
+    publicEndpoint = "127.0.0.1:${toString helpers.data.ports.stt.public}";
     backendEndpoint = "127.0.0.1:${toString helpers.data.ports.stt.backend}";
     # Longer than the GPU services' 30s: there is no scarce resource being
     # held, and re-loading a 650 MB encoder for every voice note in a
     # conversation is worse than keeping it warm through the gaps.
     idleTimeout = "300s";
+    # Cold start loads that 650 MB encoder in ~2s.
+    readinessTimeout = 60;
     dependsOn = [ "stt-proxy" ];
   };
   configFn =
