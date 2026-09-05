@@ -95,6 +95,20 @@ named, which must be regular files under the task's own working directory
 or the state directory; there is no job ledger. The launch input stays so
 `pueue restart` re-runs the same command.
 
+### Scratch
+
+An operation declaring `scratch = "tmpfs"` or `scratch = "nvme"` gets one
+job-owned directory, `/dev/shm/agentctl/<ref>` or
+`/realm/tmp/work/agentctl/<ref>`. `job start` resolves the path into the
+launch input; the wrapper creates it 0700, exports it as `AGENTCTL_SCRATCH`,
+and at unit exit measures it (bytes, file count, both bounded at 100,000
+entries; `truncated` says the count stopped there) and records the footprint
+under `scratch` in `jobs/<ref>.outcome` and on the `finished` event, then
+removes the directory. `job get` renders it. The typed result artifact stays
+the command's own stdout. A launch input naming a scratch path outside its
+tier's root is refused (exit 125): the wrapper removes what it created and
+nothing else. `scratch = "none"`, the default, allocates nothing.
+
 Before starting in a pool whose parallelism is 1 (`pytest`, `bulk`), the
 wrapper lists the active units of that pool's slice. A unit whose pueue task
 is terminal is an orphan of a killed wrapper and is stopped (`settled_orphan`
@@ -445,9 +459,9 @@ An operation declares `description`, `exec` (argv, no shell), `pool` (a
 pueue group), `result` (`exit`, `json`, `pytest`), `timeout_seconds` (1 to
 28,800; default 3,600), `checkout` (`any`, or `default` for operations that
 run only on the main checkout), `schedule` (an `OnCalendar` expression),
-`cache` (`none` or `tree+environment`) and `dependencies` (declared
-operation names). Dependencies are queued before their operation and cannot
-contain cycles. Any other operation field takes the project out of service
+`cache` (`none` or `tree+environment`), `scratch` (`none`, `tmpfs` or
+`nvme`) and `dependencies` (declared operation names). Dependencies are
+queued before their operation and cannot contain cycles. Any other operation field takes the project out of service
 with the field named. `[environment]` declares `kind`, `command`,
 `inherit`, `unset`, `values` and `require`; a required variable missing at
 launch fails the launch with its name. `[workspace]` declares `root`,
@@ -490,6 +504,7 @@ unattended batches declares a scheduled operation whose `exec` runs
 | `worktrunk.LIST_SCHEMA_VERSION` (2)                          | external tool's contract                                                  | the `wt list` JSON schema this module parses                         |
 | `worktrunk.GIT_SETTLE_SECONDS` (30)                          | arbitrary bound                                                           | how long a mutation waits for Git to release the repository index    |
 | `run.MAX_LOG_BYTES` / `MAX_RESULT_BYTES` (64,000)            | arbitrary bound                                                           | caps on the captured log and typed result                            |
+| `run.MAX_SCRATCH_ENTRIES` (100,000)                          | arbitrary bound                                                           | files counted before a scratch footprint reports a lower bound       |
 | `run.TIMEOUT_EXIT_CODE` (124)                                | external tool's contract (`timeout(1)`)                                   | the unit's `RuntimeMaxSec` expired                                   |
 | `run.REFUSED_EXIT_CODE` (125)                                | arbitrary bound                                                           | a pre-run refusal (vanished working directory, unreadable input)     |
 | `run.CANCELLED_EXIT_CODE` (130)                              | shell convention (128 + SIGINT)                                           | the cancel marker existed when the wait returned                     |

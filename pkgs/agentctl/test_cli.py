@@ -109,6 +109,38 @@ def test_job_start_with_wait_reports_a_failure_in_the_exit_status(
     assert "failed exit 3" in captured.err
 
 
+def test_job_get_renders_the_scratch_footprint(
+    fake_pueue: FakePueue, cli_config: Config, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert cli.main(["job", "start", "fixture", "check"]) == 0
+    capsys.readouterr()
+    reference = Path(fake_pueue.added[0]["command"][1]).stem
+    outcome = cli_config.jobs_dir / f"{reference}.outcome"
+    outcome.parent.mkdir(parents=True, exist_ok=True)
+    outcome.write_text(
+        json.dumps(
+            {
+                "outcome": "success",
+                "exit_code": 0,
+                "scratch": {
+                    "kind": "tmpfs",
+                    "path": "/dev/shm/agentctl/ref",
+                    "bytes": 4096,
+                    "files": 2,
+                    "truncated": False,
+                },
+            }
+        )
+    )
+    fake_pueue.succeed(1)
+
+    assert cli.main(["job", "get", "1"]) == 0
+
+    assert "scratch tmpfs 4096 bytes in 2 file(s)" in capsys.readouterr().out
+    assert cli.main(["job", "get", "1", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["scratch"]["files"] == 2
+
+
 def test_write_verbs_print_json_and_one_summary_line_on_stderr(
     fake_pueue: FakePueue,
     cli_config: Config,

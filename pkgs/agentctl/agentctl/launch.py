@@ -24,7 +24,7 @@ from typing import Any, Callable, Mapping, Sequence
 
 from . import gitcmd, pueue
 from .config import Config
-from .launch_input import write_input
+from .launch_input import scratch_path, write_input
 from .limits import CALL_TIMEOUT_SECONDS, SHORT_ID, SYSTEMCTL_TIMEOUT_SECONDS
 from .projects import ProjectAdapter, ProjectOperation
 from .pueue import PueueError, Task
@@ -152,6 +152,7 @@ def enqueue(
     result_kind: str,
     environment: Mapping[str, str],
     kind: str = "declared-operation",
+    scratch: str = "none",
     after: Sequence[int] = (),
     stashed: bool = False,
     unit_properties: Sequence[str] = (),
@@ -162,7 +163,8 @@ def enqueue(
     """Write the launch input, add the pueue task, return the job view.
 
     ``binding`` is what the caller ties the task to (``beads``, ``run_id``);
-    it is stored as written and read back on ``job get``.
+    it is stored as written and read back on ``job get``. ``scratch`` names
+    the tier of the job-owned directory the wrapper creates and removes.
     """
     reference = _reference(label)
     log_path = config.jobs_dir / f"{reference}.log"
@@ -195,6 +197,9 @@ def enqueue(
         launch["environment_receipt"] = dict(environment_receipt)
     if binding:
         launch["binding"] = dict(binding)
+    scratch_dir = scratch_path(scratch, reference)
+    if scratch_dir is not None:
+        launch["scratch"] = {"kind": scratch, "path": str(scratch_dir)}
     if result_kind != "exit":
         launch["result_path"] = str(config.jobs_dir / f"{reference}.result")
     input_path = config.inputs_dir / f"{reference}.json"
@@ -327,6 +332,7 @@ def _start_operation(
         timeout_seconds=operation.timeout_seconds,
         result_kind=operation.result,
         environment=environment,
+        scratch=operation.scratch,
         after=dependency_ids,
         tree_receipt=tree_receipt,
         environment_receipt=environment_receipt,
@@ -511,8 +517,13 @@ def _task(task_id: int) -> Task:
 def get_job(task_id: int, config: Config | None = None) -> dict[str, Any]:
     task = _task(task_id)
     view = job_view(task)
-    binding = (_launch_input(config, task) or {}).get("binding") if config else None
-    return {**view, "binding": binding} if binding else view
+    if config is None:
+        return view
+    binding = (_launch_input(config, task) or {}).get("binding")
+    if binding:
+        view = {**view, "binding": binding}
+    footprint = (_outcome(config, task).get("outcome") or {}).get("scratch")
+    return {**view, "scratch": footprint} if isinstance(footprint, dict) else view
 
 
 def _artifact(config: Config, task: Task, suffix: str) -> Path | None:
