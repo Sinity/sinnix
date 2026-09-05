@@ -1,0 +1,945 @@
+[
+  {
+    "id": "sinnix-45p6",
+    "title": "Rename the thin AgentCTL runtime and retire the sinnixd namespace",
+    "disposition": "fold:rename",
+    "canonical_owner": "rename",
+    "evidence": "Plan Delivery 0 renames pkgs/sinnixd to pkgs/agentctl and retires the sinnixd namespace; pkgs/sinnixd/sinnixd/ still exists on master.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-vj4c",
+    "title": "Retire the sinnixd namespace after the daemon removal",
+    "disposition": "fold:rename",
+    "canonical_owner": "sinnix-45p6",
+    "evidence": "Same rename as sinnix-45p6 (Delivery 0); 45p6 is the canonical survivor, vj4c closes with it.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-xsk3",
+    "title": "Route lane tests and builds through declared pueue operations",
+    "disposition": "fold:A",
+    "canonical_owner": "A",
+    "evidence": "Delivery A routes every task through a transient service in agentctl-<pool>.slice (run.py); residual commit de151e66 in its worktree lands first as bootstrap cohort.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-o28r",
+    "title": "A job is complete when its scope is inactive, and a cancel that leaves survivors must fail",
+    "disposition": "fold:A",
+    "canonical_owner": "A",
+    "evidence": "Delivery A deletes settle_scope (queue_run.py:369) and the process-group fallback; completion becomes cgroup-empty plus result artifact under ExitType=cgroup.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-wgjc",
+    "title": "Reap nested operation process groups when a pueue task is cancelled",
+    "disposition": "fold:A",
+    "canonical_owner": "A",
+    "evidence": "Delivery A makes launch.cancel (launch.py:573) use pueue remove for queued tasks and systemctl --user stop then pueue kill for running ones, KillMode=control-group.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-sa2v.1",
+    "title": "Protect agent conversations from systemd-oomd victim selection",
+    "disposition": "fold:A",
+    "canonical_owner": "A",
+    "evidence": "Delivery A removes pressure monitoring from agentctl.slice and keeps ManagedOOMMemoryPressure=kill only on the pytest and bulk slices (flake/data/runtime-defaults.nix:232-248).",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-kcph",
+    "title": "AgentCTL development-service admission excludes cold startup build cost",
+    "disposition": "fold:A",
+    "canonical_owner": "A",
+    "evidence": "Delivery A replaces ServiceLease admission (deleted jobs.py) with a with-dev-services verify profile run inside the verification unit; replacement spec attached here for the 6057/kcph/r0jw group (6057 is the group leader outside the cluster).",
+    "replacement": {
+      "title": "Verify profile with development services (with-dev-services)",
+      "problem": "Sinex candidate verification needs its declared development services started, ready-probed and stopped inside the same verification unit; the lease/admission machinery 6057, kcph and r0jw were written against (jobs.py ServiceLease, GenericJobs.start_declared) is deleted.",
+      "outcome": "The [verification] descriptor section accepts requires = [\"dev_services\"] on a profile; agentctl-run starts the declared services in the verification unit, waits on the ready probe with a bounded deadline, runs the profile, and stops the services with the unit so no lease or orphan survives cancellation.",
+      "acceptance": "Sinex candidate = \"check_default\" with requires = [\"dev_services\"] runs green through agentctl job start; cancelling the job leaves no service process in systemd-cgls; two worktrees run concurrently with distinct service state roots; a descriptor without requires runs unchanged."
+    }
+  },
+  {
+    "id": "sinnix-r0jw",
+    "title": "Prevent overlapping development-service leases for one checkout state root",
+    "disposition": "fold:A",
+    "canonical_owner": "sinnix-kcph",
+    "evidence": "ServiceLease and jobs.py are deleted; the surviving intent (distinct worktrees run concurrently, one service per state root) is in the replacement spec on sinnix-kcph.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-nwia",
+    "title": "Retire scripts/sinnix-pueue-add",
+    "disposition": "fold:A",
+    "canonical_owner": "A",
+    "evidence": "Delivery A deletes scripts/sinnix-pueue-add, which still exists on master; ad-hoc queueing goes through declared operations.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-6xob",
+    "title": "sinnixd: IOAccounting on job units so verification IO is attributable",
+    "disposition": "fold:A",
+    "canonical_owner": "A",
+    "evidence": "Delivery A adds -p IOAccounting=yes to the systemd-run command in run.py; queue_run.py has no IOAccounting today.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-8ery",
+    "title": "The .lane exclusion lives in untracked local state",
+    "disposition": "fold:A",
+    "canonical_owner": "A",
+    "evidence": "Delivery A moves the .lane/ exclusion from .git/info/exclude into each project's wt.toml or .gitignore so launch._tree_receipt (launch.py:84) reports clean.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-qplk",
+    "title": "migration 3: GitHub self-hosted runner runs devtools verify as a required check with a pytest concurrency group",
+    "disposition": "fold:A",
+    "canonical_owner": "A",
+    "evidence": "Delivery A makes lint and verify the required Polylogue contexts once one green current-master corpus exists (its precondition note); landing refuses until then.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-9alx",
+    "title": "Per-project scanner recipes and verification commands in the project descriptor",
+    "disposition": "fold:A",
+    "canonical_owner": "A",
+    "evidence": "Delivery A replaces workspace.verification_operations (projects.py:122,282) with a validated [verification] profile section, which is this bead's descriptor half; harvest is deleted.",
+    "replacement": null
+  },
+  {
+    "id": "polylogue-vgytk",
+    "title": "Keep full corpus out of per-lane publication verification",
+    "disposition": "fold:A",
+    "canonical_owner": "A",
+    "evidence": "Delivery A lands its pending worktree (PR #4677) first as bootstrap cohort, then the descriptor verify profiles carry the one-corpus-after-wave rule.",
+    "replacement": null
+  },
+  {
+    "id": "polylogue-omjok",
+    "title": "Keep GitHub verification independent of the local queue runner",
+    "disposition": "fold:A",
+    "canonical_owner": "A",
+    "evidence": "Delivery A's pytest_slot.py rewrite removes the direct pueue add/wait client (pytest_slot.py:178-328) so hosted verify.yml never needs the queue runner on PATH.",
+    "replacement": null
+  },
+  {
+    "id": "polylogue-alia0",
+    "title": "Do not select the Python corpus for AgentCTL descriptor-only changes",
+    "disposition": "fold:A",
+    "canonical_owner": "A",
+    "evidence": "Delivery A moves affected verification to the hosted verify check and removes local verify_affected from publication, so descriptor-only diffs no longer select the corpus locally.",
+    "replacement": null
+  },
+  {
+    "id": "polylogue-qhlj6",
+    "title": "Run affected verification in GitHub, not before lane publication",
+    "disposition": "fold:A",
+    "canonical_owner": "A",
+    "evidence": "Delivery A sets Polylogue verify = {focused = pytest_focused, candidate = hosted:verify, corpus = verify_all}, removing local affected runs from publication.",
+    "replacement": null
+  },
+  {
+    "id": "polylogue-acsmu",
+    "title": "devtools verify leaks its per-run scratch directory on abnormal exit",
+    "disposition": "fold:A",
+    "canonical_owner": "A",
+    "evidence": "Delivery A's Polylogue devtools/verify.py change covers scratch removal on any exit path; the .cache/verify/tmp-* leak is a verify-runner defect in that file.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-122i",
+    "title": "Bind lane takeover to the current commit, not a reused branch name",
+    "disposition": "fold:B",
+    "canonical_owner": "B",
+    "evidence": "Delivery B binds PRs by stored number and --match-head-commit in github.py and resumes a worker worktree with batch resume; branch-name matching is deleted with lanes.py.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-5y90.1",
+    "title": "Never close or remove active or unpublished integrated lanes",
+    "disposition": "fold:B",
+    "canonical_owner": "B",
+    "evidence": "Delivery B deletes lane sync (lanes.py) and closes Beads only from the acceptance record in batch.land; its three pending commits land first only if they do not conflict with B.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-5y90.1.1",
+    "title": "Serialize lane sync with starts and resolve old merged PRs",
+    "disposition": "fold:B",
+    "canonical_owner": "sinnix-5y90.1",
+    "evidence": "Delivery B removes the 300-PR sweep (lanes.py:827 limit=300) and serializes landing per project through a one-slot pueue group with --after.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-jcub",
+    "title": "Lane view must not call an active lane merged",
+    "disposition": "fold:B",
+    "canonical_owner": "B",
+    "evidence": "Delivery B rewrites operator_view.lane_stage (operator_view.py:171) to render run and worker rows from manifests; an active worker never renders merged (test_operator_view.py).",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-09ih",
+    "title": "Publish lanes from declared exact-head verification sequences",
+    "disposition": "fold:B",
+    "canonical_owner": "B",
+    "evidence": "Delivery B's batch.land runs the declared candidate verify profile instead of the hardcoded verify_quick at lanes.py:629 and arms merge only after checks and the bound verdict.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-useb",
+    "title": "Wait for exact-head hosted Codex verdict before auto-merge",
+    "disposition": "fold:B",
+    "canonical_owner": "B",
+    "evidence": "Decision taken: hosted Codex review is advisory; the gate code _codex_review_gate (lanes.py:503) is deleted and the reviewer job with judge.schema.json is the only review authority.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-vi58",
+    "title": "Bind the clean Codex thumbs-up to a head",
+    "disposition": "fold:B",
+    "canonical_owner": "sinnix-useb",
+    "evidence": "_has_codex_thumbsup (lanes.py:452) is deleted with the gate in Delivery B; the stale-thumbs-up case survives as a test_github.py case.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-xteo.4",
+    "title": "Migration 4: merge queue + auto-merge replace publication_sweep (after green master)",
+    "disposition": "fold:B",
+    "canonical_owner": "B",
+    "evidence": "Delivery B's batch.land publishes through gh pr merge --squash --match-head-commit after required checks; canonical survivor of the xteo.4/3yo2 pair.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-3yo2",
+    "title": "migration 4: GitHub merge queue + auto-merge replace the publication sweep (only after master is green)",
+    "disposition": "close:superseded-by",
+    "canonical_owner": "sinnix-xteo.4",
+    "evidence": "Duplicate of sinnix-xteo.4 (its own description says 'Existing bead sinnix-3yo2'); the plan names xteo.4 canonical.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-9xx9",
+    "title": "Decision: merging is the agent's job, not the operator's",
+    "disposition": "fold:B",
+    "canonical_owner": "B",
+    "evidence": "Decision honoured in Delivery B: the landing task lands the change itself (integrate, verify, review, publish, close); the decision Bead closes when batch.land ships.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-f4h1",
+    "title": "Compiled packet prompts overflow the 200KB cap for large dispatch groups",
+    "disposition": "fold:B",
+    "canonical_owner": "B",
+    "evidence": "Delivery B's packet.py renders a bounded prompt with body digests, replacing the MAX_PROMPT_BYTES refusal at packets.py:19,402.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-xteo.19",
+    "title": "Gateway agent-control bead-binding reads contract.bead_binding, which the pueue job model does not persist",
+    "disposition": "fold:B",
+    "canonical_owner": "B",
+    "evidence": "Delivery B persists the bead binding in the launch input beads field; gateway residual (reading it instead of contract.bead_binding) is in the replacement spec on sinnix-xteo.22.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-zn38",
+    "title": "Configure GitHub credentials for unattended Git pushes",
+    "disposition": "close:delivered",
+    "canonical_owner": "sinnix-zn38",
+    "evidence": "Closed 2026-09-05 on master e1a672d5 (credential helper calls gh, no prompt fallback, disposable HTTPS push verified).",
+    "replacement": null
+  },
+  {
+    "id": "polylogue-ikvpd",
+    "title": "Bind AgentCTL jobs to bounded immutable packet context",
+    "disposition": "fold:B",
+    "canonical_owner": "B",
+    "evidence": "Delivery B's packet.py bounded snapshot with member bodies, digests and base commit is the packet projection this bead asks for.",
+    "replacement": null
+  },
+  {
+    "id": "polylogue-co83o",
+    "title": "Worktree-lane dispatches have no captured prompt anywhere in the archive, so lane work is invisible to delegation analytics",
+    "disposition": "fold:B",
+    "canonical_owner": "B",
+    "evidence": "The run manifest at ~/.local/state/agentctl/runs/<run-id>.json (Delivery B) is the captured dispatch record per wave, worker, prompt and outcome.",
+    "replacement": null
+  },
+  {
+    "id": "polylogue-e6ja",
+    "title": "Close the zero-tests-pre-merge hole: bounded per-PR test lane or local-verify attestation (operator decision)",
+    "disposition": "fold:B",
+    "canonical_owner": "B",
+    "evidence": "Answered by the candidate verify profile (hosted:verify required before merge) in Delivery A and enforced by batch.land in Delivery B; no PR merges with zero tests.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-xteo.18",
+    "title": "agentctl job inputs and logs are orphaned by pueue clean",
+    "disposition": "fold:C",
+    "canonical_owner": "C",
+    "evidence": "Delivery C adds job clean and removes task artifacts under ~/.local/state/agentctl with the task on cancel or remove, never by age.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-4hy5",
+    "title": "verb surface consistency: names vs UUIDs, --project acceptance, plain-vs-JSON output",
+    "disposition": "fold:C",
+    "canonical_owner": "C",
+    "evidence": "Delivery C's one output layer makes agent-launch output JSON by default (its open fourth item) and --project cwd-default everywhere.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-xzx7",
+    "title": "agentctl: one output layer — human tables by default, --json on reads, 8-char ids with --full, local time with age, cwd-default --project, distinct exit codes",
+    "disposition": "fold:C",
+    "canonical_owner": "sinnix-4hy5",
+    "evidence": "Same output-layer change as sinnix-4hy5 (cli.py); 4hy5 is the canonical survivor.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-vbez",
+    "title": "agentctl: de-project — stage names and receipt vocabulary come from the descriptor; refill becomes a project-owned opt-in operation",
+    "disposition": "fold:C",
+    "canonical_owner": "C",
+    "evidence": "Delivery C takes stage vocabulary from the descriptor; the refill half is superseded (refill deleted, cli.py:139; unattended selection is a project-declared scheduled operation).",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-z8iq.6",
+    "title": "Beads truth reconciliation after pueue/worktrunk cut: close stale architecture, merge duplicates, restore one executable backlog",
+    "disposition": "fold:C",
+    "canonical_owner": "C",
+    "evidence": "This ledger (docs/archive/beads-reconciliation-2026-09.json) is its acceptance artifact; closes when Delivery C lands the ledger and bd doctor is clean.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-xteo.15",
+    "title": "Stale .git/index.lock left in the polylogue main checkout (02:29, 05:03 on 2026-09-03)",
+    "disposition": "fold:C",
+    "canonical_owner": "C",
+    "evidence": "Delivery C serializes wt mutations under the per-project mutex from B; worktrunk.py:46-50 already avoids index.lock on reads.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-hx15",
+    "title": "migration 1: worktrunk owns worktree lifecycle and provisioning; delete workspaces.py",
+    "disposition": "close:delivered",
+    "canonical_owner": "C",
+    "evidence": "worktrunk owns worktree lifecycle (worktrunk.py) and workspaces.py is deleted on master; closes in Delivery C with that evidence.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-3asc",
+    "title": "migration 2: pueue is the queue under the job verbs; admission deleted; cgroup wrapper per command",
+    "disposition": "close:delivered",
+    "canonical_owner": "C",
+    "evidence": "pueue is the queue under the job verbs (pueue.py, launch.py) and admission is deleted on master; closes in Delivery C.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-em8l",
+    "title": "A daemon restart re-observes units and never fails or cancels live jobs",
+    "disposition": "close:stale-surface",
+    "canonical_owner": "A",
+    "evidence": "No daemon exists to restart; unit survival across a pueued restart is a test_run.py case in Delivery A.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-xteo.22",
+    "title": "Expose the complete post-Pueue agentctl lifecycle as typed gateway actions",
+    "disposition": "fold:D",
+    "canonical_owner": "D",
+    "evidence": "Delivery D exposes jobs.* and batches.start|status|land|resume as typed gateway actions over the manifest; lane and refill actions in its text are superseded, replacement spec attached.",
+    "replacement": {
+      "title": "Gateway batch and job actions over the run manifest",
+      "problem": "The gateway's agent-control actions read contract.bead_binding and lane verbs that the batch design deletes, so a cold ChatGPT client cannot supervise a run end to end without shell.run.",
+      "outcome": "Typed gateway actions jobs.list|get|logs|wait|cancel|retry|clean and batches.start|status|land|resume operate on the same pueue task identity and run manifest as agentctl; bead membership comes from the launch input beads field and the manifest, never contract.bead_binding.",
+      "acceptance": "A cold connector session lists, starts, inspects and lands a disposable batch from the catalog alone; regression tests pin the jobs.wait, resources.get and beads.get argument-shape misrouting; fixtures and one live canary agree with agentctl batch status --json and pueue status."
+    }
+  },
+  {
+    "id": "sinnix-xteo.23",
+    "title": "Scheduled ChatGPT supervision: periodic, stateless check-ins over durable agentctl work",
+    "disposition": "fold:D",
+    "canonical_owner": "D",
+    "evidence": "Delivery D: scheduled ChatGPT supervision reads batch list --json and nothing else.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-oy37",
+    "title": "AgentCTL runtime consolidation: one host-side job substrate",
+    "disposition": "close:superseded-by",
+    "canonical_owner": "sinnix-xteo",
+    "evidence": "The consolidation this epic prescribes (jobs, workspaces, leases, fleet) is delivered as the pueue/worktrunk cut tracked by sinnix-xteo; its residuals are xteo.22 (D) and the replacement specs.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-oy37.18",
+    "title": "ChatGPT operator projection: compact live project, frontier and lane state from authoritative tools",
+    "disposition": "close:superseded-by",
+    "canonical_owner": "sinnix-xteo.22",
+    "evidence": "operator_view.py is the surviving nucleus; the gateway projection residual is the replacement spec on sinnix-xteo.22 and batch rows come from manifests in B.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-cnac",
+    "title": "Record job-scratch footprints before owner-proof reclamation",
+    "disposition": "close:stale-surface",
+    "canonical_owner": "A",
+    "evidence": "JobManager._allocate_scratch and ProjectOperation.scratch policy in jobs.py are deleted; footprint recording survives as the attached replacement against run.py.",
+    "replacement": {
+      "title": "Record scratch footprint in the run record before cleanup",
+      "problem": "A job's scratch directory is removed at cleanup with no measurement, so the operator cannot tell a small temporary workspace from one that consumed its declared tier.",
+      "outcome": "agentctl-run measures the job-owned scratch directory (bytes, file count) at unit exit and writes bounded summary fields into the task result artifact under ~/.local/state/agentctl/jobs before cleanup; scratch = \"none\"|\"tmpfs\"|\"nvme\" declarations parse unchanged.",
+      "acceptance": "A test_run.py case with a fixture that writes to scratch shows the footprint in the result artifact and an empty scratch tree afterwards; job get renders the footprint; a descriptor without a scratch field is unaffected."
+    }
+  },
+  {
+    "id": "sinnix-yblg",
+    "title": "Expose captured job usage in aggregate outcome views",
+    "disposition": "close:stale-surface",
+    "canonical_owner": "A",
+    "evidence": "fleet.py read_evidence and _usage are deleted; per-worker usage lives in the run manifest result, with no aggregate view in the plan.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-1ei",
+    "title": "Reset nix-build.slice memory.peak at lease-acquire time; add job-class identity to lease audit log",
+    "disposition": "close:stale-surface",
+    "canonical_owner": "A",
+    "evidence": "GenericJobs._memory_peak and build leases (jobs.py) are deleted; IOAccounting on run units (6xob in A) is the surviving accounting.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-8fnv",
+    "title": "sinnixd scheduling: dependency-aware queue, agent-job admission, pressure-gated WIP",
+    "disposition": "close:stale-surface",
+    "canonical_owner": "A",
+    "evidence": "Admission, pool budgets and PSI gating (jobs.py) are deleted; pueue groups and slice limits are the only scheduling (Decisions taken).",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-ck7i",
+    "title": "admission verdicts do not explain themselves; add an explain surface naming the failing inequality",
+    "disposition": "close:stale-surface",
+    "canonical_owner": "A",
+    "evidence": "Admission verdicts no longer exist; a queued pueue task waits only on its group slot, so there is no inequality to explain.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-oxq3",
+    "title": "AdmissionConflictError can report an empty overlap set",
+    "disposition": "close:stale-surface",
+    "canonical_owner": "A",
+    "evidence": "AdmissionConflictError and _active_key_conflicts (jobs.py) are deleted.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-opvl",
+    "title": "Declared-operation jobs admitted but no systemd unit ever launched",
+    "disposition": "close:stale-surface",
+    "canonical_owner": "A",
+    "evidence": "GenericJobs._admit_locked (jobs.py) is deleted; a queued task launches when its pueue group has a slot.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-v5wq",
+    "title": "Outcome-debt circuit breaker on dispatch admission",
+    "disposition": "close:stale-surface",
+    "canonical_owner": "B",
+    "evidence": "Dispatch admission (jobs.py, fleet.py) is deleted; unaccepted work is visible as manifests without an acceptance record in batch status.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-qvy2",
+    "title": "sinnixd: terminal records in phase 'capacity' read as active ghosts and cannot be cancelled",
+    "disposition": "close:stale-surface",
+    "canonical_owner": "A",
+    "evidence": "The phase 'capacity' record classifier lived in the deleted daemon; pueue task state is the only phase source.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-4k3i",
+    "title": "Export provider-neutral Sinnixd work events",
+    "disposition": "close:stale-surface",
+    "canonical_owner": "B",
+    "evidence": "reactor.py is deleted; the run manifest and events spool are the provider-neutral record, consumed by Polylogue as an origin if ever needed.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-gw2.15",
+    "title": "Export privacy-safe AgentCTL job observations for evidence consumers",
+    "disposition": "close:stale-surface",
+    "canonical_owner": "B",
+    "evidence": "jobs.py observation records and docs/sinnixd.md:236 retention are deleted; the manifest acceptance record is the consumer-facing projection.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-pogo",
+    "title": "Decide ownership of execution observations, project receipts, and evidence history",
+    "disposition": "close:stale-surface",
+    "canonical_owner": "B",
+    "evidence": "Its inventory targets jobs.py and docs/sinnixd.md:236-286, both deleted; the manifest and project receipts are the only two stores left.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-8lj3",
+    "title": "Decision: one cross-project run-history substrate (subsume xtask history + verify_runs persistence)",
+    "disposition": "close:stale-surface",
+    "canonical_owner": "B",
+    "evidence": "No Sinnixd run-history substrate exists; the run manifest (not a database) plus project receipts is the decision taken.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-krli",
+    "title": "Typed packet schema owned by sinnixd, validated at create/claim",
+    "disposition": "close:stale-surface",
+    "canonical_owner": "B",
+    "evidence": "Packet schema validation is Delivery B's packet.resolve_members and the worker result schema; the _metadata/_policy_dimensions surface in packets.py is rewritten.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-x7cr",
+    "title": "Refuse an editing agent dispatch that carries no registered workspace ID",
+    "disposition": "close:stale-surface",
+    "canonical_owner": "B",
+    "evidence": "contracts.py and workspaces.py are deleted; batch.start creates and locks a worktree per worker before enqueue.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-f94v",
+    "title": "Capability negotiation: status exposes capability set, dispatch declares requirements",
+    "disposition": "close:stale-surface",
+    "canonical_owner": "B",
+    "evidence": "service.py CAPABILITIES and campaign.py are deleted; the manifest records runtime_revision instead.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-bkjn",
+    "title": "Live-prove idempotent packet finalization",
+    "disposition": "close:stale-surface",
+    "canonical_owner": "B",
+    "evidence": "packet.py finalize saga is deleted; batch.land idempotence is a test_batch.py case.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-ouh2",
+    "title": "Live-prove packet launch with current runtime capabilities",
+    "disposition": "close:stale-surface",
+    "canonical_owner": "B",
+    "evidence": "CampaignRunner.run (campaign.py) is deleted; the live proof is Delivery B's disposable-repo canary.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-sjk9",
+    "title": "Concurrent packet workspaces come up with broken Python envs (missing dev deps)",
+    "disposition": "close:stale-surface",
+    "canonical_owner": "B",
+    "evidence": "GitWorkspaces._run_provision_exec (workspaces.py) is deleted; wt switch --create provisions worker worktrees.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-1qu2",
+    "title": "Packet workspaces lack browser-extension node_modules; extension test suites cannot run",
+    "disposition": "close:stale-surface",
+    "canonical_owner": "B",
+    "evidence": "GitWorkspaces._provision (workspaces.py) is deleted; no descriptor-declared Node provisioning exists in the target shape.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-oy37.3",
+    "title": "Delete duplicate host job controllers after AgentCTL parity",
+    "disposition": "close:stale-surface",
+    "canonical_owner": "sinnix-xteo",
+    "evidence": "Its deletion targets (gateway job controllers, skill controllers, sinnix-scope) went with the 2026-09-03 cut; nothing in the current package remains to delete.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-oy37.3.4",
+    "title": "Delete runtime, ops, telemetry, and service-placement inference superseded by AgentCTL",
+    "disposition": "close:stale-surface",
+    "canonical_owner": "sinnix-xteo",
+    "evidence": "Targets Sinnixd structured jobs, leases and workspace state, all deleted.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-oy37.8",
+    "title": "Integrate AgentCTL with the hub and complete the deletion census",
+    "disposition": "close:stale-surface",
+    "canonical_owner": "sinnix-xteo",
+    "evidence": "Targets hub rendering of workspaces, leases and learned observations, all deleted with jobs.py.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-oy37.10",
+    "title": "Live-prove long-running declared operation timeout",
+    "disposition": "close:stale-surface",
+    "canonical_owner": "A",
+    "evidence": "ProjectOperation/JobSpec timeout plumbing through the daemon is deleted; long verify_all runs are pueue tasks with no daemon deadline.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-oy37.13",
+    "title": "Bound AgentCTL task-list projections with continuation",
+    "disposition": "close:stale-surface",
+    "canonical_owner": "D",
+    "evidence": "tasks.py and service.py are deleted; paging belongs to the gateway beads adapter, not the runtime.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-oy37.15",
+    "title": "Model and effort visibility in AgentCTL job list, with a per-backend quota rollup",
+    "disposition": "close:stale-surface",
+    "canonical_owner": "A",
+    "evidence": "fleet.py is deleted; model and effort are in the launch input and manifest worker rows.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-xteo",
+    "title": "Worklist 2026-09-03: sinnixd redesign onto pueue + worktrunk",
+    "disposition": "keep",
+    "canonical_owner": "sinnix-xteo",
+    "evidence": "Parent worklist whose children are folded across 0, A, B, C and D; it closes when the last child does, so no disposition applies to it now.",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-7lnf",
+    "title": "Normalize campaign, job usage, and fleet events for reducer, bar, and cockpit",
+    "disposition": "keep",
+    "canonical_owner": "sinnix-7lnf",
+    "evidence": "Not named in the plan; its consumers pkgs/sinnix-ops-reducer and pkgs/sinnix-cockpit still exist and read the events spool, so whether it survives the manifest design is undecided.",
+    "replacement": null
+  },
+  {
+    "id": "polylogue-t4iy5",
+    "title": "Worklist 2026-09-03: finish the orchestration overhaul (polylogue side)",
+    "disposition": "keep",
+    "canonical_owner": "polylogue-t4iy5",
+    "evidence": "Polylogue worklist parent with open children (t4iy5.7, .10, .11) outside this plan; no disposition applies.",
+    "replacement": null
+  },
+  {
+    "id": "polylogue-kblcs",
+    "title": "Resolve child session links from parent-side dispatch evidence",
+    "disposition": "dereference-leader",
+    "canonical_owner": "polylogue-vid0",
+    "evidence": "leader closed 2026-09-04",
+    "replacement": null
+  },
+  {
+    "id": "polylogue-bx26w",
+    "title": "Conservation verification: actual sources to fresh archive, every term typed",
+    "disposition": "dereference-leader",
+    "canonical_owner": "polylogue-bz51x",
+    "evidence": "leader closed 2026-09-01",
+    "replacement": null
+  },
+  {
+    "id": "polylogue-4vs8n",
+    "title": "antigravity origin is 116 metadata phantoms that vanish untyped at reacquisition",
+    "disposition": "dereference-leader",
+    "canonical_owner": "polylogue-gmb3o",
+    "evidence": "leader closed 2026-09-04",
+    "replacement": null
+  },
+  {
+    "id": "polylogue-6rmd8",
+    "title": "Residue accounting for derived tiers: subtract the explained until only genuine unknowns remain",
+    "disposition": "dereference-leader",
+    "canonical_owner": "polylogue-itwu9",
+    "evidence": "leader closed 2026-09-02",
+    "replacement": null
+  },
+  {
+    "id": "polylogue-b2elq",
+    "title": "4,945 subagent sessions are zero-message husks with no parent edge",
+    "disposition": "dereference-leader",
+    "canonical_owner": "polylogue-htjxx",
+    "evidence": "leader closed 2026-09-02",
+    "replacement": null
+  },
+  {
+    "id": "polylogue-tvx7e",
+    "title": "Standing blob conservation check: no blob without an owning row, no ref without provable bytes",
+    "disposition": "dereference-leader",
+    "canonical_owner": "polylogue-itwu9",
+    "evidence": "leader closed 2026-09-02",
+    "replacement": null
+  },
+  {
+    "id": "polylogue-xe4hx",
+    "title": "Browser-extension backfill start refuses under concurrent host load",
+    "disposition": "dereference-leader",
+    "canonical_owner": "polylogue-kdsvs",
+    "evidence": "leader closed 2026-09-02",
+    "replacement": null
+  },
+  {
+    "id": "polylogue-53ngk",
+    "title": "Census Beads durable evidence and prepare authorized copy-forward removal",
+    "disposition": "dereference-leader",
+    "canonical_owner": "polylogue-a74ru",
+    "evidence": "leader closed 2026-09-03",
+    "replacement": null
+  },
+  {
+    "id": "polylogue-vusyh",
+    "title": "Decision: executable reference model + generated cross-surface differential",
+    "disposition": "dereference-leader",
+    "canonical_owner": "polylogue-ntwtk",
+    "evidence": "leader closed 2026-09-03",
+    "replacement": null
+  },
+  {
+    "id": "polylogue-3ahdg",
+    "title": "MCP maintenance scope filter is echoed but never enforced",
+    "disposition": "dereference-leader",
+    "canonical_owner": "polylogue-oqyew",
+    "evidence": "leader closed 2026-09-03",
+    "replacement": null
+  },
+  {
+    "id": "polylogue-t46v2",
+    "title": "Canonicalize and delete duplicate orchestration metadata",
+    "disposition": "dereference-leader",
+    "canonical_owner": "polylogue-a74ru",
+    "evidence": "leader closed 2026-09-03",
+    "replacement": null
+  },
+  {
+    "id": "polylogue-jbcln",
+    "title": "Replace mutable SQLite byte snapshots with declared logical-source semantics",
+    "disposition": "dereference-leader",
+    "canonical_owner": "polylogue-aex0",
+    "evidence": "leader closed 2026-09-02",
+    "replacement": null
+  },
+  {
+    "id": "polylogue-wzgpf",
+    "title": "Make export-element content identity authoritative and demote source_index to a hint",
+    "disposition": "dereference-leader",
+    "canonical_owner": "polylogue-htjxx",
+    "evidence": "leader closed 2026-09-02",
+    "replacement": null
+  },
+  {
+    "id": "polylogue-rh0sr",
+    "title": "Require a structural reason for every unknown tool-result outcome",
+    "disposition": "dereference-leader",
+    "canonical_owner": "polylogue-g0s6k.5",
+    "evidence": "leader closed 2026-09-02",
+    "replacement": null
+  },
+  {
+    "id": "polylogue-ylh7v",
+    "title": "Converge aggregate insights by canonical generation-local partition",
+    "disposition": "dereference-leader",
+    "canonical_owner": "polylogue-embeddings-retention",
+    "evidence": "leader closed 2026-09-02",
+    "replacement": null
+  },
+  {
+    "id": "polylogue-a7xr.24",
+    "title": "Complete spec-owned archive row plumbing and eliminate mechanical shape restatement",
+    "disposition": "dereference-leader",
+    "canonical_owner": "polylogue-hs3y",
+    "evidence": "leader closed 2026-09-03",
+    "replacement": null
+  },
+  {
+    "id": "polylogue-n2blt",
+    "title": "Zero-message Drive stubs bypass the thread materializer: one writer, one eligibility decision",
+    "disposition": "dereference-leader",
+    "canonical_owner": "polylogue-gmb3o",
+    "evidence": "leader closed 2026-09-04",
+    "replacement": null
+  },
+  {
+    "id": "polylogue-6bebe",
+    "title": "Classify extracted analysis corpora as artifacts, never provider sessions",
+    "disposition": "dereference-leader",
+    "canonical_owner": "polylogue-gmb3o",
+    "evidence": "leader closed 2026-09-04",
+    "replacement": null
+  },
+  {
+    "id": "polylogue-tu1f",
+    "title": "aistudio-drive: 100% unseen_shape schema drift since 2026-07-01 -- gemini schema catalog is stale",
+    "disposition": "dereference-leader",
+    "canonical_owner": "polylogue-gmb3o",
+    "evidence": "leader closed 2026-09-04",
+    "replacement": null
+  },
+  {
+    "id": "polylogue-gmw2",
+    "title": "Replace global spool preemption with fair, resumable intake",
+    "disposition": "dereference-leader",
+    "canonical_owner": "polylogue-fe8fv",
+    "evidence": "leader closed 2026-09-03",
+    "replacement": null
+  },
+  {
+    "id": "polylogue-5yig",
+    "title": "Define prefix-sharing order by content position, never wall-clock timestamps",
+    "disposition": "dereference-leader",
+    "canonical_owner": "polylogue-htjxx",
+    "evidence": "leader closed 2026-09-02",
+    "replacement": null
+  },
+  {
+    "id": "polylogue-cuxz.5",
+    "title": "Classify every tool call/result pairing gap and fix current reproducible loss",
+    "disposition": "dereference-leader",
+    "canonical_owner": "polylogue-g0s6k.5",
+    "evidence": "leader closed 2026-09-02",
+    "replacement": null
+  },
+  {
+    "id": "polylogue-1xc.14.1",
+    "title": "Unify deterministic workload artifacts without creating a case authority",
+    "disposition": "dereference-leader",
+    "canonical_owner": "polylogue-1xc.14",
+    "evidence": "leader closed 2026-09-03",
+    "replacement": null
+  },
+  {
+    "id": "polylogue-83u.6",
+    "title": "Complete the attachment acquisition before/after census",
+    "disposition": "dereference-leader",
+    "canonical_owner": "polylogue-itwu9",
+    "evidence": "leader closed 2026-09-02",
+    "replacement": null
+  },
+  {
+    "id": "polylogue-lr47v",
+    "title": "Full daemon session reads ignore HTTP client disconnects",
+    "disposition": "dereference-leader",
+    "canonical_owner": "polylogue-9lbwu",
+    "evidence": "leader closed 2026-08-30",
+    "replacement": null
+  },
+  {
+    "id": "polylogue-ztm1t",
+    "title": "Post-filtered queries underfetch and return false underfull/empty pages",
+    "disposition": "dereference-leader",
+    "canonical_owner": "polylogue-9lbwu",
+    "evidence": "leader closed 2026-08-30",
+    "replacement": null
+  },
+  {
+    "id": "polylogue-8374p",
+    "title": "Scoped facets consume spec.limit and mark page-derived buckets complete",
+    "disposition": "dereference-leader",
+    "canonical_owner": "polylogue-fohvq",
+    "evidence": "leader closed 2026-08-26",
+    "replacement": null
+  },
+  {
+    "id": "polylogue-dvhe7",
+    "title": "Pathology report hides the matched-session denominator",
+    "disposition": "dereference-leader",
+    "canonical_owner": "polylogue-fohvq",
+    "evidence": "leader closed 2026-08-26",
+    "replacement": null
+  },
+  {
+    "id": "polylogue-f7bf9",
+    "title": "Embedding catch-up receipts stuck outside running are never recovered",
+    "disposition": "dereference-leader",
+    "canonical_owner": "polylogue-xcpey",
+    "evidence": "leader closed 2026-08-28",
+    "replacement": null
+  },
+  {
+    "id": "polylogue-liwst",
+    "title": "Foreground convergence embeds without cap or spend accounting",
+    "disposition": "dereference-leader",
+    "canonical_owner": "polylogue-xcpey",
+    "evidence": "leader closed 2026-08-28",
+    "replacement": null
+  },
+  {
+    "id": "polylogue-osiia",
+    "title": "Convergence-debt retry selection can starve older due work forever",
+    "disposition": "dereference-leader",
+    "canonical_owner": "polylogue-xcpey",
+    "evidence": "leader closed 2026-08-28",
+    "replacement": null
+  },
+  {
+    "id": "polylogue-pd63j",
+    "title": "Missing cache rates reported as complete catalog pricing",
+    "disposition": "dereference-leader",
+    "canonical_owner": "polylogue-wdv1x",
+    "evidence": "leader closed 2026-08-26",
+    "replacement": null
+  },
+  {
+    "id": "polylogue-t2ugv",
+    "title": "Exact provider cost early-return erases canonical token accounting",
+    "disposition": "dereference-leader",
+    "canonical_owner": "polylogue-wdv1x",
+    "evidence": "leader closed 2026-08-26",
+    "replacement": null
+  },
+  {
+    "id": "polylogue-zdtqj",
+    "title": "manage_transaction=True/False caller knob hides a correctness-relevant invariant in a docstring",
+    "disposition": "dereference-leader",
+    "canonical_owner": "polylogue-27gl2",
+    "evidence": "leader closed 2026-09-03",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-ouh2",
+    "title": "Live-prove packet launch with current runtime capabilities",
+    "disposition": "dereference-leader",
+    "canonical_owner": "sinnix-1iu6",
+    "evidence": "leader closed 2026-08-31",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-yblg",
+    "title": "Expose captured job usage in aggregate outcome views",
+    "disposition": "dereference-leader",
+    "canonical_owner": "sinnix-30m8",
+    "evidence": "leader closed 2026-09-01",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-4hy5",
+    "title": "verb surface consistency: names vs UUIDs, --project acceptance, plain-vs-JSON output",
+    "disposition": "dereference-leader",
+    "canonical_owner": "sinnix-v3e2",
+    "evidence": "leader closed 2026-08-31",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-ck7i",
+    "title": "admission verdicts do not explain themselves; add an explain surface naming the failing inequality",
+    "disposition": "dereference-leader",
+    "canonical_owner": "sinnix-sj66",
+    "evidence": "leader closed 2026-09-01",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-f4h1",
+    "title": "Compiled packet prompts overflow the 200KB cap for large dispatch groups",
+    "disposition": "dereference-leader",
+    "canonical_owner": "sinnix-1iu6",
+    "evidence": "leader closed 2026-08-31",
+    "replacement": null
+  },
+  {
+    "id": "sinnix-1ei",
+    "title": "Reset nix-build.slice memory.peak at lease-acquire time; add job-class identity to lease audit log",
+    "disposition": "dereference-leader",
+    "canonical_owner": "sinnix-30m8",
+    "evidence": "leader closed 2026-09-01",
+    "replacement": null
+  }
+]
