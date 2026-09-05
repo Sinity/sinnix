@@ -812,3 +812,11 @@ def test_manifest_is_written_once_and_updated_under_the_lock(harness: Harness) -
     assert batch.load(harness.config, run.run_id).landing["refreshes"] == 3
     with pytest.raises(BatchRefusal, match="unknown_run"):
         batch.load(harness.config, "nope")
+
+
+def test_a_result_naming_the_base_commit_is_refused(harness: Harness) -> None:
+    run = harness.start("fx-solo")
+    worker = run["workers"][0]
+    harness.git.heads[worker["worktree"]] = BASE
+    with pytest.raises(BatchRefusal, match="empty_candidate"):
+        harness.file_result(run, "fx-solo", sha=BASE)
