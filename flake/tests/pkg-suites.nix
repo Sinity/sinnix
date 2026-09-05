@@ -116,6 +116,15 @@
         # confirming red.
         sinnix-lib-suite = sinnixScriptRegistry.packageSet.sinnix-lib;
 
+        # The selection capture both Wayland lanes run. Provably fails when:
+        # the MIME preference order is permuted (an adjacent swap fails
+        # test_preference_order_holds_for_every_adjacent_pair), or the blob
+        # shard prefix length changes (fails
+        # test_binary_selection_lands_in_a_two_character_shard and the
+        # store-once case). Its tests otherwise run only as a side effect of
+        # the clipboard runtime check building the package.
+        sinnix-capture-suite = sinnixScriptRegistry.packageSet.sinnix-capture;
+
         # Provably fails when: the launch input stops carrying the descriptor's
         # argv, pool, label or artifact paths, or the pueue adapter misreads
         # the daemon's JSON. The suite drives a private pueued end to end.
