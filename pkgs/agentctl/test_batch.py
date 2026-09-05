@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import fcntl
 import json
+import os
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -79,6 +81,7 @@ class FakeGit:
     conflict_on: set[str] = field(default_factory=set)
     remote_bases: list[str] = field(default_factory=lambda: [BASE])
     push_rejects: int = 0
+    push_rejection: str = "! [rejected] master -> master (stale info)"
     resets: list[str] = field(default_factory=list)
 
     def __call__(self, path: Path, *arguments: str, timeout: float = 60) -> str:
@@ -116,7 +119,7 @@ class FakeGit:
         if verb == "push":
             if self.push_rejects:
                 self.push_rejects -= 1
-                raise BatchError("git push: ! [rejected] master -> master (stale info)")
+                raise BatchError(f"git push: {self.push_rejection}")
             self.pushes.append(arguments)
             return ""
         raise AssertionError(arguments)
@@ -334,6 +337,12 @@ def test_start_claims_creates_worktrees_and_queues_workers_then_the_landing(
         batch.manifest_path(harness.config, run["run_id"]).read_text()
     )
     assert manifest["workers"][0]["task_id"] == lead["task_id"]
+    assert manifest["workers"][0]["claimed_beads"] == ["fx-lead", "fx-member"]
+    assert launch.get_job(lead["task_id"], harness.config)["binding"] == {
+        "beads": ["fx-lead", "fx-member"],
+        "run_id": run["run_id"],
+        "worker": "fx-lead",
+    }
 
 
 def test_start_is_idempotent_for_the_same_members(harness: Harness) -> None:
@@ -382,6 +391,9 @@ def test_a_failed_start_releases_its_claims_and_removes_its_manifest(
     assert harness.beads.beads["fx-lead"]["status"] == "open"
     assert batch.list_runs(harness.config) == []
     assert harness.wt.trees == {} and len(harness.wt.removed) == 1
+    assert [path.name for path in batch.runs_dir(harness.config).iterdir()] == [
+        "fixture.lock"
+    ]
 
 
 def test_two_starts_on_the_same_member_are_refused_by_the_claim(
@@ -409,6 +421,65 @@ def test_two_starts_on_the_same_member_are_refused_by_the_claim(
     with pytest.raises(BatchError, match="already claimed by racer"):
         harness.start("fx-other")
     assert len(batch.list_runs(harness.config)) == 1
+    assert not any(
+        str(record.get("assignee") or "").startswith("agentctl-batch-")
+        for bead_id, record in harness.beads.beads.items()
+        if bead_id != "fx-solo"
+    )
+
+
+def test_a_claim_failing_mid_worker_releases_the_beads_already_claimed(
+    harness: Harness,
+) -> None:
+    original = harness.beads.claim
+
+    def second_claim_races(bead_id: str, *, actor: str) -> None:
+        if bead_id == "fx-member":
+            harness.beads.beads[bead_id]["assignee"] = "racer"
+        original(bead_id, actor=actor)
+
+    harness.beads.claim = second_claim_races  # type: ignore[method-assign]
+    with pytest.raises(BatchError, match="already claimed by racer"):
+        harness.start("fx-lead")
+
+    assert [item[0] for item in harness.beads.released] == ["fx-lead"]
+    assert harness.beads.beads["fx-lead"]["assignee"] is None
+    assert harness.beads.beads["fx-lead"]["status"] == "open"
+    assert harness.beads.beads["fx-member"]["assignee"] == "racer"
+    assert batch.list_runs(harness.config) == []
+
+
+def test_start_takes_the_project_lock_around_worktree_creation(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two starts cannot race `wt`: creation happens under runs/<project>.lock."""
+    held: set[str] = set()
+    seen: list[set[str]] = []
+    real_flock = fcntl.flock
+
+    def flock(handle: Any, operation: int) -> None:
+        path = os.readlink(f"/proc/self/fd/{handle.fileno()}")
+        if operation == fcntl.LOCK_EX:
+            held.add(path)
+        else:
+            held.discard(path)
+        real_flock(handle, operation)
+
+    create = harness.wt.create
+
+    def observed_create(root: Path, branch: str, **kwargs: Any) -> Worktree:
+        seen.append(set(held))
+        return create(root, branch, **kwargs)
+
+    monkeypatch.setattr(batch.fcntl, "flock", flock)
+    monkeypatch.setattr(worktrunk, "worktrunk_create", observed_create)
+
+    harness.start("fx-solo")
+
+    lock = str(batch.project_lock_path(harness.config, "fixture"))
+    assert lock.endswith("/runs/fixture.lock")
+    assert seen and all(lock in locks for locks in seen)
+    assert lock not in held
 
 
 def test_a_closed_leader_is_excluded_and_a_blocked_member_refused(
@@ -510,6 +581,9 @@ def test_resume_requeues_the_worker_and_a_landing_behind_it(
     )
     argv = read_launch(harness.config, harness.pueue.task(worker["task_id"]))["argv"]
     assert argv[argv.index("--reasoning-effort") + 1] == "high"
+    assert read_launch(harness.config, harness.pueue.task(worker["task_id"]))[
+        "binding"
+    ] == {"beads": ["fx-lead", "fx-member"], "run_id": run["run_id"], "worker": "fx-lead"}
     assert harness.pueue.removed == [run["landing"]["task_id"]]
     landing = harness.pueue.task(resumed["landing"]["task_id"])
     assert landing is not None and landing.dependencies == (
@@ -572,6 +646,11 @@ def test_land_integrates_verifies_reviews_publishes_and_closes_satisfied_members
     assert read_launch(harness.config, review_task)["argv"][-1].endswith(
         "judge.schema.json"
     )
+    assert read_launch(harness.config, review_task)["binding"] == {
+        "beads": ["fx-lead", "fx-member", "fx-solo"],
+        "run_id": run_id,
+        "worker": None,
+    }
     assert harness.git.pushes == [
         (
             "push",
@@ -598,12 +677,35 @@ def test_land_integrates_verifies_reviews_publishes_and_closes_satisfied_members
         harness.beads.comments[0][0] == "fx-member"
         and "without satisfying" in harness.beads.comments[0][1]
     )
-    assert sorted(harness.wt.removed) == sorted(
-        [f"batch/{run_id}/fx-lead", f"batch/{run_id}/fx-solo", integration]
-    )
-    assert acceptance["residual"] == []
+    assert sorted(harness.wt.removed) == sorted([f"batch/{run_id}/fx-solo", integration])
+    assert acceptance["residual"] == [
+        f"batch/{run_id}/fx-lead: worktree kept; fx-member still open"
+    ]
+    assert acceptance["advisory"] == []
     with pytest.raises(BatchRefusal, match="already_accepted"):
         harness.land(run_id)
+
+
+def test_a_failed_close_keeps_that_worker_worktree_and_removes_the_rest(
+    harness: Harness,
+) -> None:
+    run = prepared_run(harness, "fx-lead", "fx-solo")
+    run_id = run["run_id"]
+    harness.beads.refuse_close = {"fx-solo"}
+
+    landed = harness.land(run_id)
+
+    members = landed["acceptance"]["members"]
+    assert members["fx-solo"]["state"] == "open"
+    assert "close failed" in members["fx-solo"]["evidence"]
+    assert members["fx-lead"]["state"] == "closed"
+    assert sorted(harness.wt.removed) == sorted(
+        [f"batch/{run_id}/fx-lead", f"batch/{run_id}/integration"]
+    )
+    assert f"batch/{run_id}/fx-solo" in harness.wt.trees
+    assert landed["acceptance"]["residual"] == [
+        f"batch/{run_id}/fx-solo: worktree kept; fx-solo still open"
+    ]
 
 
 def test_cleanup_failure_is_a_residual_and_never_undoes_a_close(
@@ -688,15 +790,73 @@ def test_target_moved_once_refreshes_and_twice_stops(harness: Harness) -> None:
     assert harness.beads.beads["fx-other"]["status"] == "in_progress"
 
 
-def test_a_push_lease_rejection_counts_as_target_movement(harness: Harness) -> None:
+@pytest.mark.parametrize(
+    "rejection",
+    [
+        "! [rejected] master -> master (stale info)",
+        "! [rejected] master -> master (fetch first)",
+    ],
+)
+def test_a_push_lease_rejection_counts_as_target_movement(
+    harness: Harness, rejection: str
+) -> None:
     run = prepared_run(harness, "fx-solo")
     harness.git.remote_bases = [BASE, MOVED, MOVED]
     harness.git.push_rejects = 1
+    harness.git.push_rejection = rejection
     landed = harness.land(run["run_id"])
     assert (
         landed["landing"]["refreshes"] == 1
         and landed["acceptance"]["published"]["base_commit"] == MOVED
     )
+
+
+def test_a_push_rejected_for_any_other_reason_is_a_publish_refusal(
+    harness: Harness,
+) -> None:
+    """A protected branch or a hook rejects the same push again; no refresh."""
+    run = prepared_run(harness, "fx-solo")
+    harness.git.push_rejects = 1
+    harness.git.push_rejection = (
+        "! [remote rejected] master -> master (protected branch hook declined)"
+    )
+    with pytest.raises(BatchRefusal, match="publish_rejected") as refused:
+        harness.land(run["run_id"])
+    assert "protected branch hook declined" in refused.value.detail
+    stored = batch.load(harness.config, run["run_id"])
+    assert stored.landing["refreshes"] == 0
+    assert stored.landing["failure"]["code"] == "publish_rejected"
+    assert stored.acceptance is None and harness.beads.closed == []
+
+
+def test_a_registered_integration_branch_without_a_directory_is_recreated(
+    harness: Harness, tmp_path: Path
+) -> None:
+    run = prepared_run(harness, "fx-solo")
+    integration = f"batch/{run['run_id']}/integration"
+    harness.wt.trees[integration] = Worktree(
+        branch=integration,
+        path=tmp_path / "gone",
+        head=BASE,
+        main=False,
+        dirty=False,
+        state="ahead",
+    )
+
+    landed = harness.land(run["run_id"])
+
+    assert landed["acceptance"]["candidate_sha"] == SHA
+    assert harness.wt.removed[0] == integration
+    assert harness.git.resets == []
+
+    second = prepared_run(harness, "fx-other")
+    stale = f"batch/{second['run_id']}/integration"
+    harness.wt.trees[stale] = Worktree(
+        branch=stale, path=None, head=BASE, main=False, dirty=False, state="ahead"
+    )
+    harness.wt.refuse_remove = {stale}
+    with pytest.raises(BatchRefusal, match="integration_worktree_missing"):
+        harness.land(second["run_id"])
 
 
 def test_pr_policy_pushes_the_branch_waits_for_required_checks_and_merges_the_head(
@@ -750,6 +910,20 @@ def test_pr_policy_pushes_the_branch_waits_for_required_checks_and_merges_the_he
         "merge_pr",
         lambda root, number, sha: calls.append(("merge", number, sha)),
     )
+    advisory = [
+        {
+            "kind": "review",
+            "author": "reviewer",
+            "state": "CHANGES_REQUESTED",
+            "head_sha": SHA,
+            "url": "https://github.com/o/r/pull/41#pullrequestreview-1",
+        }
+    ]
+    monkeypatch.setattr(
+        github,
+        "pull_request_advisory",
+        lambda root, number: calls.append(("advisory", number)) or advisory,
+    )
     run = prepared_run(harness, "fx-solo")
 
     landed = harness.land(run["run_id"])
@@ -766,13 +940,16 @@ def test_pr_policy_pushes_the_branch_waits_for_required_checks_and_merges_the_he
         "candidate_sha": SHA,
         "phase": "succeeded",
     }
-    assert calls[-1] == ("merge", 41, SHA)
+    assert calls[-2:] == [("merge", 41, SHA), ("advisory", 41)]
     assert landed["acceptance"]["published"] == {
         "policy": "pr",
         "pr": 41,
         "candidate_sha": SHA,
         "base_commit": BASE,
     }
+    # Advisory only: a CHANGES_REQUESTED review is recorded, never a gate.
+    assert landed["acceptance"]["advisory"] == advisory
+    assert landed["acceptance"]["members"]["fx-solo"]["state"] == "closed"
     assert harness.git.pushes == []
 
 
