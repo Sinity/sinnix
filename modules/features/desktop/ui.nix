@@ -152,27 +152,33 @@ mkFeatureModule {
           pkgs.xdg-desktop-portal-hyprland
           pkgs.xdg-desktop-portal-gtk
         ];
+        # Rendered to /etc/xdg/xdg-desktop-portal/(hyprland-)portals.conf.
+        # xdg-desktop-portal reads it only when XDG_DESKTOP_PORTAL_DIR is
+        # unset: that variable is a test hook that replaces the entire
+        # config and backend search with one directory, so setting it
+        # silently reverts every interface below to the built-in fallbacks.
         config = {
           common = {
             default = [
               "gtk"
               "hyprland"
             ];
+            "org.freedesktop.impl.portal.FileChooser" = [ "gtk" ];
           };
           hyprland = {
             default = [
               "gtk"
               "hyprland"
             ];
+            # File selection is GTK's: it is the only installed backend that
+            # implements FileChooser, and it reads the same gtk-3.0/bookmarks
+            # sidebar as the file manager.
+            "org.freedesktop.impl.portal.FileChooser" = [ "gtk" ];
             "org.freedesktop.impl.portal.ScreenCast" = [ "hyprland" ];
             "org.freedesktop.impl.portal.Screenshot" = [ "hyprland" ];
             "org.freedesktop.impl.portal.Secret" = [ "gnome-keyring" ];
           };
         };
-      };
-
-      systemd.user.services."xdg-desktop-portal".environment = {
-        XDG_DESKTOP_PORTAL_DIR = "/run/current-system/sw/share/xdg-desktop-portal/portals";
       };
 
       fonts = {
