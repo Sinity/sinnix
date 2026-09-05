@@ -34,16 +34,6 @@ mkFeatureModule {
           wtype
         ];
 
-        # Clipboard. The Home Manager module renders `clipse -listen`, which
-        # forks and exits, as a oneshot: systemd then tracks nothing and a
-        # dead monitor is never restarted. Run the foreground monitor.
-        systemd.user.services.clipse.Service = {
-          Type = lib.mkForce "simple";
-          ExecStart = lib.mkForce "${lib.getExe pkgs.clipse} -listen-shell";
-          RemainAfterExit = lib.mkForce false;
-          Restart = "on-failure";
-          RestartSec = 2;
-        };
         services.clipse = {
           enable = true;
           systemdTarget = graphicalTarget;
@@ -69,22 +59,37 @@ mkFeatureModule {
         };
 
         # Background Services
-        systemd.user.services = {
-          wl-clip-persist = lib.sinnix.systemd.mkGraphicalUserService {
-            description = "Wayland clipboard persistence";
-            execStart = "${pkgs.wl-clip-persist}/bin/wl-clip-persist --clipboard both";
+        systemd.user.services =
+          let
+            # `clipse -listen` forks one `wl-paste --watch` per MIME type and
+            # exits, so the Home Manager oneshot tracks nothing and a dead
+            # watcher is never restarted. Run each watcher in the foreground.
+            clipseWatcher =
+              mime:
+              lib.sinnix.systemd.mkGraphicalUserService {
+                description = "clipse ${mime} clipboard watcher";
+                execStart = "${lib.getExe' pkgs.wl-clipboard "wl-paste"} --type ${mime} --watch ${lib.getExe pkgs.clipse} --wl-store";
+                target = graphicalTarget;
+              };
+          in
+          {
+            clipse = lib.mkForce (clipseWatcher "text");
+            clipse-image = clipseWatcher "image/png";
+            wl-clip-persist = lib.sinnix.systemd.mkGraphicalUserService {
+              description = "Wayland clipboard persistence";
+              execStart = "${pkgs.wl-clip-persist}/bin/wl-clip-persist --clipboard both";
+            };
+            nm-applet = lib.sinnix.systemd.mkGraphicalUserService {
+              description = "NetworkManager applet";
+              execStart = "${pkgs.networkmanagerapplet}/bin/nm-applet";
+            };
+            # Polkit authentication agent is provided by Noctalia's polkit-agent
+            # plugin; running a second agent (polkit-gnome) would conflict.
+            blueman-applet = lib.sinnix.systemd.mkGraphicalUserService {
+              description = "Blueman applet";
+              execStart = "${pkgs.blueman}/bin/blueman-applet";
+            };
           };
-          nm-applet = lib.sinnix.systemd.mkGraphicalUserService {
-            description = "NetworkManager applet";
-            execStart = "${pkgs.networkmanagerapplet}/bin/nm-applet";
-          };
-          # Polkit authentication agent is provided by Noctalia's polkit-agent
-          # plugin; running a second agent (polkit-gnome) would conflict.
-          blueman-applet = lib.sinnix.systemd.mkGraphicalUserService {
-            description = "Blueman applet";
-            execStart = "${pkgs.blueman}/bin/blueman-applet";
-          };
-        };
 
         home.sessionVariables = {
           XDG_SESSION_TYPE = "wayland";
