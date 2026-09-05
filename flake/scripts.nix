@@ -318,7 +318,7 @@ let
     chatgpt-app = pkgs.callPackage ../pkgs/chatgpt-app { };
 
     sinnix-observe = pkgs.callPackage ../pkgs/sinnix-observe/pkg.nix {
-      inherit defaultRuntimeInventoryJson;
+      inherit defaultRuntimeInventoryJson sinnix-lib;
     };
 
     sinnix-ops-reducer = pkgs.callPackage ../pkgs/sinnix-ops-reducer/pkg.nix {

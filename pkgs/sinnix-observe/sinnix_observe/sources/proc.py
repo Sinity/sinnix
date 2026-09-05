@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ..util import int_or_none, read_text
+from sinnix_lib.values import int_or_none, read_text
 
 
 def parse_proc_io(path: Path) -> dict[str, int]:

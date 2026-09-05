@@ -100,6 +100,22 @@
         # exercises its bounded subprocess contract at its package boundary.
         sinnix-mcp-suite = sinnixScriptRegistry.packageSet.sinnix-mcp;
 
+        # The shared library every other Python package here depends on, so
+        # its suite only ever ran as a side effect of building a consumer.
+        # Named here it fails on its own contract, not on a consumer's.
+        #
+        # Provably fails when: sd_notify stops translating a leading "@" into
+        # the abstract namespace. Verified by deleting the
+        # `address.startswith("@")` branch in systemd.py -- caught by
+        # test_sd_notify_reaches_an_abstract_namespace_socket ("TimeoutError:
+        # timed out"; 1 failed, 30 passed); reverted after confirming red.
+        # Also fails when the subprocess wrapper stops swallowing
+        # TimeoutExpired: verified by dropping that except clause in
+        # process.py -- caught by test_run_returns_a_result_when_the_command_hangs
+        # (subprocess.TimeoutExpired; 1 failed, 30 passed); reverted after
+        # confirming red.
+        sinnix-lib-suite = scriptRegistry.packageSet.sinnix-lib;
+
         # Provably fails when: the launch input stops carrying the descriptor's
         # argv, pool, label or artifact paths, or the pueue adapter misreads
         # the daemon's JSON. The suite drives a private pueued end to end.

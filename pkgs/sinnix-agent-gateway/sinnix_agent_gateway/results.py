@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from .artifacts import ArtifactService
+from .atomic import atomic_publish
 from .capabilities import Capability, Principal
 from .config import GatewayConfig
 from .schemas import V2ToolEnvelope
@@ -229,19 +230,16 @@ class ResultService:
         self.snapshots_root.chmod(0o700)
         self.cursor_key_path = self.root / "cursor-key"
         if not self.cursor_key_path.exists():
-            temporary = self.root / f".cursor-key.{uuid.uuid4().hex}.tmp"
-            try:
-                with temporary.open("xb") as output:
-                    output.write(secrets.token_bytes(32))
-                    output.flush()
-                    os.fsync(output.fileno())
-                temporary.chmod(0o600)
-                try:
-                    os.link(temporary, self.cursor_key_path)
-                except FileExistsError:
-                    pass
-            finally:
-                temporary.unlink(missing_ok=True)
+            # Durability: file and directory, and never replaced. Every
+            # outstanding cursor was signed with this key; losing it or
+            # rolling it under a concurrent starter invalidates cursors
+            # clients still hold.
+            atomic_publish(
+                self.cursor_key_path,
+                secrets.token_bytes(32),
+                fsync=True,
+                exclusive=True,
+            )
         self.cursor_key = self.cursor_key_path.read_bytes()
         if len(self.cursor_key) < 32:
             raise ResultError("cursor key is malformed", "unavailable")
@@ -554,17 +552,10 @@ class ResultService:
             raise ResultError(
                 "V2 result envelope exceeded response bound", "response_bound"
             )
-        destination = self._path(result_id)
-        temporary = self.root / f".{result_id}.{uuid.uuid4().hex}.tmp"
-        try:
-            with temporary.open("xb") as output:
-                output.write(encoded)
-                output.flush()
-                os.fsync(output.fileno())
-            temporary.chmod(0o600)
-            os.replace(temporary, destination)
-        finally:
-            temporary.unlink(missing_ok=True)
+        # Durability: file and directory. The result id is returned to the
+        # client as the gateway's own record of what it did, so the name has
+        # to resolve after a crash, not just the bytes behind it.
+        atomic_publish(self._path(result_id), encoded, fsync=True)
         return envelope
 
     def record_snapshot(

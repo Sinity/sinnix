@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..util import float_or_none, int_or_none, read_text, run_cmd
+from sinnix_lib.process import run
+from sinnix_lib.values import float_or_none, int_or_none, read_text
 
 
 def parse_psi(path: str) -> dict[str, Any]:
@@ -34,25 +35,23 @@ def collect_pressure(offline: bool) -> dict[str, Any]:
         "memory": parse_psi("/proc/pressure/memory"),
         "io": parse_psi("/proc/pressure/io"),
     }
-    free = run_cmd(["free", "-h"])
-    pressure["free_h"] = free.stdout if free else ""
+    pressure["free_h"] = run(["free", "-h"], timeout=5).stdout
     return pressure
 
 
 def collect_blocked_tasks(offline: bool) -> list[dict[str, Any]]:
     if offline:
         return []
-    proc = run_cmd(
+    result = run(
         [
             "ps",
             "-eo",
             "stat,pid,ppid,etimes,pcpu,pmem,rss,wchan:32,comm,args",
-        ]
+        ],
+        timeout=5,
     )
     rows: list[dict[str, Any]] = []
-    if not proc:
-        return rows
-    for line in proc.stdout.splitlines()[1:]:
+    for line in result.stdout.splitlines()[1:]:
         parts = line.split(None, 9)
         if len(parts) < 10 or not parts[0].startswith("D"):
             continue

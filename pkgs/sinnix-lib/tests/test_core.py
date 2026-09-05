@@ -1,13 +1,14 @@
-"""Core helper contracts: atomic JSON, ledger, lock, systemd parser."""
+"""Core helper contracts: atomic JSON, ledger, lock, systemd parser and notify."""
 
 import json
+import socket
 import threading
 
 import pytest
 from sinnix_lib.atomic_json import modify_json, read_json, write_json_atomic
 from sinnix_lib.ledger import append_jsonl, iter_jsonl, receipt, write_jsonl_atomic
 from sinnix_lib.lock import LockBusy, flock
-from sinnix_lib.systemd import _parse_blocks
+from sinnix_lib.systemd import _parse_blocks, sd_notify, watchdog_period
 
 
 def test_atomic_roundtrip(tmp_path):
@@ -117,3 +118,46 @@ def test_write_jsonl_atomic_leaves_previous_file_on_failure(tmp_path):
         write_jsonl_atomic(p, rows())
     assert list(iter_jsonl(p)) == [{"a": 1}]
     assert [x.name for x in tmp_path.iterdir()] == ["index.jsonl"]
+
+
+def test_sd_notify_reaches_an_abstract_namespace_socket(monkeypatch):
+    """A leading "@" is the abstract namespace, not a relative file name.
+
+    Mutation: remove the ``address.startswith("@")`` branch and the datagram
+    goes to a file called "@..." in the process's cwd, the connect fails,
+    OSError is swallowed, and recvfrom below times out -- systemd would never
+    see READY=1 and the unit would be killed at its start timeout.
+    """
+    name = "\0sinnix-lib-test-notify"
+    with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as listener:
+        listener.bind(name)
+        listener.settimeout(5)
+        monkeypatch.setenv("NOTIFY_SOCKET", "@" + name[1:])
+        sd_notify("READY=1")
+        assert listener.recv(64) == b"READY=1"
+
+
+def test_sd_notify_reaches_a_filesystem_socket(monkeypatch, tmp_path):
+    path = tmp_path / "notify.sock"
+    with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as listener:
+        listener.bind(str(path))
+        listener.settimeout(5)
+        monkeypatch.setenv("NOTIFY_SOCKET", str(path))
+        sd_notify("STATUS=serving")
+        assert listener.recv(64) == b"STATUS=serving"
+
+
+def test_sd_notify_is_silent_without_a_socket(monkeypatch, tmp_path):
+    monkeypatch.delenv("NOTIFY_SOCKET", raising=False)
+    sd_notify("READY=1")
+    monkeypatch.setenv("NOTIFY_SOCKET", str(tmp_path / "nobody-listening.sock"))
+    sd_notify("READY=1")
+
+
+def test_watchdog_period_is_half_of_watchdog_usec(monkeypatch):
+    monkeypatch.setenv("WATCHDOG_USEC", "30000000")
+    assert watchdog_period() == 15.0
+    monkeypatch.setenv("WATCHDOG_USEC", "not-a-number")
+    assert watchdog_period() == 0.0
+    monkeypatch.delenv("WATCHDOG_USEC")
+    assert watchdog_period() == 0.0

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import mimetypes
-import os
 import uuid
 from pathlib import Path
 from typing import Any
@@ -15,6 +14,7 @@ from sinnix_mcp.execution import (
 )
 
 from .artifacts import ArtifactService
+from .atomic import atomic_publish
 from .capabilities import Capability, Principal
 from .config import GatewayConfig
 
@@ -78,17 +78,14 @@ class BrowserService:
 
     def _save_targets(self, targets: dict[str, dict[str, Any]]) -> None:
         self.config.state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-        temporary = self._targets_path.with_name(
-            f".{self._targets_path.name}.{uuid.uuid4().hex}.tmp"
+        # Durability: atomic only. The registry names pages in a live Chrome
+        # session, which a host crash destroys anyway; a lost registry makes
+        # the gateway disown pages it created, which fails closed.
+        atomic_publish(
+            self._targets_path,
+            json.dumps(targets, sort_keys=True, separators=(",", ":")).encode(),
+            fsync=False,
         )
-        try:
-            temporary.write_text(
-                json.dumps(targets, sort_keys=True, separators=(",", ":"))
-            )
-            temporary.chmod(0o600)
-            os.replace(temporary, self._targets_path)
-        finally:
-            temporary.unlink(missing_ok=True)
 
     def owned_page_ids(self) -> set[str]:
         """Page ids the gateway created; the only mutable or capturable targets."""

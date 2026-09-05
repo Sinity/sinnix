@@ -1,35 +1,18 @@
-"""Generic helpers shared across collectors."""
+"""Observe-shaped helpers. The generic ones live in sinnix_lib."""
 
 from __future__ import annotations
 
 import datetime as dt
 import json
 import re
-import shutil
-import subprocess
 from pathlib import Path
 from typing import Any
+
+from sinnix_lib.values import float_or_none
 
 
 def utc_now() -> str:
     return dt.datetime.now(dt.UTC).replace(microsecond=0).isoformat()
-
-
-def run_cmd(
-    args: list[str], timeout: float = 5.0
-) -> subprocess.CompletedProcess[str] | None:
-    if shutil.which(args[0]) is None:
-        return None
-    try:
-        return subprocess.run(
-            args,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return None
 
 
 def split_props(text: str) -> dict[str, str]:
@@ -42,33 +25,12 @@ def split_props(text: str) -> dict[str, str]:
     return props
 
 
-def read_text(path: str | Path) -> str | None:
-    try:
-        return Path(path).read_text(encoding="utf-8").strip()
-    except OSError:
-        return None
-
-
 def read_proc_cmdline(path: Path) -> str:
     try:
         raw = path.read_bytes()
     except OSError:
         return ""
     return raw.replace(b"\0", b" ").decode("utf-8", "replace").strip()
-
-
-def int_or_none(value: Any) -> int | None:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def float_or_none(value: Any) -> float | None:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
 
 
 def float_or_zero(value: Any) -> float:
