@@ -18,14 +18,18 @@ set -euo pipefail
 LEDGER_PARQUET="${SINNIX_URL_LEDGER_PARQUET:-/realm/data/activity/url-ledger/url_ledger.parquet}"
 ARCHIVE_ROOT="${SINNIX_VIDEO_ARCHIVE_ROOT:-/realm/data/activity/video-resolve}"
 DL_ARCHIVE="$ARCHIVE_ROOT/.yt-dlp-archive"
+# Every URL handed to yt-dlp, whether it resolved or not, so unavailable
+# videos are not retried every week; yt-dlp's archive only knows successes.
+# Delete this file to retry failures.
+TRIED="$ARCHIVE_ROOT/.tried-urls"
+# The ledger holds tens of thousands of watch URLs; a run pulls a bounded
+# slice, most-visited first, and the rest waits for later runs.
+LIMIT="${SINNIX_VIDEO_RESOLVE_LIMIT:-20}"
 
-VIDEO_DOMAINS=(
-  youtube.com youtu.be
-  vimeo.com
-  twitch.tv
-  streamable.com
-  dailymotion.com
-)
+# Video pages only, matched on the exact host and path shape: the ledger
+# also carries channel/home/search pages and local archive-replay URLs whose
+# paths mention these domains.
+VIDEO_URL_PATTERN='^https?://((www\.|m\.)?youtube\.com/(watch\?|shorts/)|youtu\.be/[A-Za-z0-9_-]+|(www\.)?vimeo\.com/[0-9]+|(www\.)?twitch\.tv/videos/[0-9]+|streamable\.com/[A-Za-z0-9]+|(www\.)?dailymotion\.com/video/)'
 
 if [[ ! -f "$LEDGER_PARQUET" ]]; then
   echo "sinnix-video-resolve: no ledger parquet at $LEDGER_PARQUET (run 'sinnix-url-ledger build' first)" >&2
@@ -33,35 +37,35 @@ if [[ ! -f "$LEDGER_PARQUET" ]]; then
 fi
 
 mkdir -p "$ARCHIVE_ROOT"
-
-# Build a duckdb LIKE-clause filter for the domain list.
-where_clause=""
-for d in "${VIDEO_DOMAINS[@]}"; do
-  where_clause+="url LIKE '%://%${d}%' OR url LIKE '%://${d}%' OR "
-done
-where_clause="${where_clause% OR }"
+touch "$TRIED"
 
 mapfile -t urls < <(
-  duckdb -csv -noheader "$LEDGER_PARQUET" -c \
-    "SELECT DISTINCT url FROM read_parquet('$LEDGER_PARQUET') WHERE $where_clause;" \
-    2>/dev/null
+  duckdb -csv -noheader -c "
+    SELECT normalized_url
+    FROM read_parquet('$LEDGER_PARQUET')
+    WHERE regexp_matches(normalized_url, '$VIDEO_URL_PATTERN')
+      AND normalized_url NOT IN (SELECT column0 FROM read_csv('$TRIED', header=false, columns={'column0': 'VARCHAR'}))
+    ORDER BY visit_count DESC, normalized_url
+    LIMIT $LIMIT;"
 )
 
-echo "sinnix-video-resolve: ${#urls[@]} candidate video URLs from the ledger" >&2
+echo "sinnix-video-resolve: ${#urls[@]} candidate video URLs from the ledger (limit $LIMIT, $(wc -l < "$TRIED") already tried)" >&2
 
 resolved=0
 failed=0
 for url in "${urls[@]}"; do
   [[ -n "$url" ]] || continue
+  printf '%s\n' "$url" >> "$TRIED"
   if yt-dlp \
     --download-archive "$DL_ARCHIVE" \
     --no-playlist \
+    --extractor-args 'youtube:player_client=android' \
     --paths "$ARCHIVE_ROOT" \
     --output "%(extractor)s/%(id)s.%(ext)s" \
     --write-info-json \
     --ignore-errors \
     --quiet \
-    -- "$url" 2>/dev/null; then
+    -- "$url"; then
     resolved=$((resolved + 1))
   else
     failed=$((failed + 1))
