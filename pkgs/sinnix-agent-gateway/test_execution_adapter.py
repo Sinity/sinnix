@@ -68,6 +68,7 @@ def adapter(tmp_path: Path, root: Path) -> LocalJobs:
         event_spool=tmp_path / "events.jsonl",
         state_dir=tmp_path / "state",
         agentctl_executable="/bin/true",
+        worker_contract=tmp_path / "worker-contract.md",
     )
     return LocalJobs(config)
 

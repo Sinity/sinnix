@@ -1,37 +1,29 @@
 from __future__ import annotations
 
-import base64
 import concurrent.futures
 import dataclasses
 import json
 import os
-import socketserver
 import subprocess
 import sys
-import threading
 from pathlib import Path
-from types import SimpleNamespace
 
 import anyio
 import pytest
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
-from mcp.server.mcpserver.context import Context
-from mcp.types import PaginatedRequestParams
+from sinnix_agent_gateway import actions as action_set
 from sinnix_agent_gateway.app import Runtime, create_server
 from sinnix_agent_gateway.artifacts import ArtifactError
 from sinnix_agent_gateway.capabilities import PolicyError
 from sinnix_agent_gateway.cli import (
     build_manifest,
-    parser,
     semantic_canary,
     verify_approval,
 )
 from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
 from sinnix_agent_gateway.projects import ProjectError
-from sinnix_agent_gateway.registry import REGISTRY
-from sinnix_agent_gateway.results import ProtocolError
-from sinnix_agent_gateway.server import _bounded_resource_json, _query_owner
+from sinnix_agent_gateway.server import _bounded_resource_json
 from sinnix_mcp.execution import ExecutionResult
 
 
@@ -48,1166 +40,7 @@ def config(tmp_path: Path, *, observer_read: bool = True) -> GatewayConfig:
             )
         },
         approved_manifest_hash="approved-fixture-hash",
-        approved_action_catalog_hash="catalog-hash",
     )
-
-
-def test_official_sdk_principals_expose_only_protocol_verbs(tmp_path: Path) -> None:
-    cfg = config(tmp_path)
-    observer = anyio.run(build_manifest, cfg, "observer")
-    agent_control = anyio.run(build_manifest, cfg, "agent-control")
-    operator = anyio.run(build_manifest, cfg, "operator")
-    names = {row["name"] for row in operator["tools"]}
-    verbs = {
-        "status",
-        "catalog",
-        "query",
-        "get",
-        "context",
-        "events",
-        "wait",
-        "change",
-        "operate",
-        "run",
-    }
-    typed = {name for name in names if "." in name}
-
-    assert names == verbs | typed and typed
-    assert {row["name"] for row in observer["tools"]} >= verbs
-    assert {row["name"] for row in agent_control["tools"]} >= verbs
-    assert {
-        row["name"]
-        for row in operator["tools"]
-        if row["name"] in verbs and row["annotations"]
-        == {
-            "readOnlyHint": True,
-            "destructiveHint": False,
-            "idempotentHint": True,
-            "openWorldHint": False,
-        }
-    } == {"status", "catalog", "query", "get", "context", "events", "wait"}
-    assert next(row for row in operator["tools"] if row["name"] == "change")[
-        "annotations"
-    ] == {
-        "readOnlyHint": False,
-        "destructiveHint": True,
-        "idempotentHint": True,
-        "openWorldHint": False,
-    }
-    assert next(row for row in operator["tools"] if row["name"] == "operate")[
-        "annotations"
-    ] == {
-        "readOnlyHint": False,
-        "destructiveHint": True,
-        "idempotentHint": True,
-        "openWorldHint": False,
-    }
-    assert next(row for row in operator["tools"] if row["name"] == "run")[
-        "annotations"
-    ] == {
-        "readOnlyHint": False,
-        "destructiveHint": False,
-        "idempotentHint": True,
-        "openWorldHint": True,
-    }
-    assert {
-        row["name"]: row["annotations"] for row in observer["tools"] if row["name"] in verbs
-    } == {row["name"]: row["annotations"] for row in operator["tools"] if row["name"] in verbs}
-    assert all(
-        "inputSchema" in row and "outputSchema" in row for row in operator["tools"]
-    )
-    # Typed actions are principal-filtered, so manifests differ per principal.
-    assert observer["sha256"] != operator["sha256"]
-    assert operator["measurement"] == {
-        "schema": "sinnix.gateway-schema-measurement.v1",
-        "canonical_bytes": operator["measurement"]["canonical_bytes"],
-        "tool_count": 10,
-        "token_lane": operator["measurement"]["token_lane"],
-    }
-    assert operator["measurement"]["token_lane"] == {
-        "status": "estimated",
-        "method": "canonical_bytes_divided_by_4",
-        "estimated_tokens": (operator["measurement"]["canonical_bytes"] + 3) // 4,
-        "reason": "No tokenizer is a declared gateway runtime dependency.",
-    }
-
-
-def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> None:
-    cfg = config(tmp_path)
-    subprocess.run(["git", "init", "--quiet", cfg.projects["fixture"].path], check=True)
-    config_path = tmp_path / "gateway.json"
-    config_path.write_text(
-        json.dumps(
-            {
-                "stateDir": str(cfg.state_dir),
-                "projects": {
-                    "fixture": {
-                        "path": str(cfg.projects["fixture"].path),
-                        "observerRead": True,
-                    }
-                },
-            }
-        )
-    )
-
-    async def probe() -> None:
-        executable = os.environ.get("SINNIX_GATEWAY_TEST_EXECUTABLE")
-        command = executable or sys.executable
-        args = [] if executable else ["-m", "sinnix_agent_gateway.cli"]
-        args.extend(
-            [
-                "--config",
-                str(config_path),
-                "--principal",
-                "observer",
-                "serve",
-            ]
-        )
-        parameters = StdioServerParameters(
-            command=command,
-            args=args,
-        )
-        async with stdio_client(parameters) as (read_stream, write_stream):
-            async with ClientSession(read_stream, write_stream) as session:
-                initialized = await session.initialize()
-                tools = await session.list_tools()
-                templates = await session.list_resource_templates()
-                assert templates.next_cursor
-                continued_templates = await session.list_resource_templates(
-                    params=PaginatedRequestParams(cursor=templates.next_cursor)
-                )
-                assert {
-                    template.uri_template for template in templates.resource_templates
-                }.isdisjoint(
-                    {
-                        template.uri_template
-                        for template in continued_templates.resource_templates
-                    }
-                )
-                all_templates = list(templates.resource_templates) + list(
-                    continued_templates.resource_templates
-                )
-                template_cursor = continued_templates.next_cursor
-                while template_cursor:
-                    page = await session.list_resource_templates(
-                        params=PaginatedRequestParams(cursor=template_cursor)
-                    )
-                    all_templates.extend(page.resource_templates)
-                    template_cursor = page.next_cursor
-                names = {tool.name for tool in tools.tools}
-                assert initialized.server_info.name == "sinnix-agent-gateway"
-                assert names >= {
-                    "status",
-                    "catalog",
-                    "query",
-                    "get",
-                    "context",
-                    "events",
-                    "wait",
-                    "change",
-                    "operate",
-                    "run",
-                }
-                denied_change = await session.call_tool(
-                    "change",
-                    {
-                        "action_name": "projects.change",
-                        "ref": "sinnix://projects/fixture/checkouts/default",
-                        "operation": "write",
-                        "idempotency_key": "observer-denied-change",
-                    },
-                )
-                denied_operate = await session.call_tool(
-                    "operate",
-                    {
-                        "action_name": "machine.operate",
-                        "ref": "sinnix://machine/units/user/example.service",
-                        "idempotency_key": "observer-denied-operate",
-                    },
-                )
-                denied_run = await session.call_tool(
-                    "run",
-                    {
-                        "action_name": "shell.run",
-                        "idempotency_key": "observer-denied-run",
-                    },
-                )
-                for denied in (denied_change, denied_operate, denied_run):
-                    assert denied.is_error is True
-                    assert (
-                        json.loads(denied.content[0].text)["error"]["code"]
-                        == "policy_denied"
-                    )
-                assert {
-                    "sinnix://gateway/v2/actions/{action_name}",
-                    "sinnix://gateway/v2/resources/{resource_kind}",
-                    "sinnix://receipts/{receipt_id}",
-                    "sinnix://results/{result_id}",
-                } <= {template.uri_template for template in all_templates}
-                action_resource = await session.read_resource(
-                    "sinnix://gateway/v2/actions/gateway.catalog"
-                )
-                action_contract = json.loads(action_resource.contents[0].text)
-                resource_resource = await session.read_resource(
-                    "sinnix://gateway/v2/resources/bead"
-                )
-                resource_contract = json.loads(resource_resource.contents[0].text)
-                documentation = await session.read_resource(
-                    "sinnix://gateway/v2/documentation"
-                )
-                documentation_rows = json.loads(documentation.contents[0].text)
-                assert action_contract["action"]["schema_ref"] == (
-                    "sinnix://gateway/v2/actions/gateway.catalog"
-                )
-                assert resource_contract["resource"] == {
-                    "availability": "declared",
-                    "contract_ref": "sinnix://gateway/v2/resources/bead",
-                    "kind": "bead",
-                    "owner": "beads",
-                    "principals": ["agent-control", "observer", "operator"],
-                    "readable_projections": ["summary", "history", "graph"],
-                    "ref_template": "sinnix://projects/{project_id}/beads/{bead_id}",
-                    "supports_query": True,
-                }
-                assert {
-                    "audit.events",
-                    "gateway.catalog",
-                    "gateway.status",
-                    "jobs.wait",
-                    "projects.context",
-                    "projects.query",
-                    "beads.query",
-                    "resources.get",
-                    "machine.query",
-                    "captures.query",
-                    "artifacts.query",
-                    "files.query",
-                    "sessions.query",
-                    "mcp.query",
-                } <= {row["name"] for row in documentation_rows["actions"]}
-                assert all(
-                    "observer" in row["principals"]
-                    for row in documentation_rows["resources"]
-                )
-                result = await session.call_tool("status", {})
-                status_envelope = json.loads(result.content[0].text)
-                status = status_envelope["data"]
-                assert status_envelope["schema"] == "sinnix.gateway-result.v3"
-                assert result.is_error is False
-                assert result.structured_content == status_envelope
-                status_tool = next(
-                    tool for tool in tools.tools if tool.name == "status"
-                )
-                assert (
-                    status_tool.output_schema
-                    != REGISTRY.action("gateway.status").output_schema
-                )
-                assert (
-                    action_contract["action"]["output_schema"]
-                    == REGISTRY.action("gateway.status").output_schema
-                )
-                assert status_envelope["result"]["action"] == "gateway.status"
-                assert status_envelope["result"]["outcome"] == "ok"
-                assert status_envelope["receipt"]["ref"].startswith(
-                    "sinnix://receipts/"
-                )
-                assert status["principal"] == "observer"
-                assert status["route_preflight"]["routes"]
-                assert status["manifests"]["live_server"]["sha256"]
-                assert status["manifests"]["comparisons"] == {
-                    "live_to_nix_approved": "unobserved",
-                    "live_to_chatgpt_observed": "unobserved",
-                    "nix_approved_to_chatgpt_observed": "unobserved",
-                }
-                result_resource = await session.read_resource(
-                    status_envelope["result"]["ref"]
-                )
-                receipt_resource = await session.read_resource(
-                    status_envelope["receipt"]["ref"]
-                )
-                assert json.loads(result_resource.contents[0].text) == status_envelope
-                assert json.loads(receipt_resource.contents[0].text)["outcome"] == "ok"
-                catalog_result = await session.call_tool("catalog", {"text": "gateway"})
-                catalog_envelope = json.loads(catalog_result.content[0].text)
-                catalog = catalog_envelope["data"]
-                assert catalog_envelope["result"]["action"] == "gateway.catalog"
-                assert {
-                    "gateway.status",
-                    "gateway.catalog",
-                } <= {action["name"] for action in catalog["actions"]}
-
-                query_tool = next(tool for tool in tools.tools if tool.name == "query")
-                assert "action_name" in query_tool.input_schema["required"]
-                assert (
-                    "default"
-                    not in query_tool.input_schema["properties"]["action_name"]
-                )
-                assert "projects.list" in (query_tool.description or "")
-                project_catalog_result = await session.call_tool(
-                    "catalog", {"project": "fixture"}
-                )
-                project_catalog = json.loads(project_catalog_result.content[0].text)[
-                    "data"
-                ]
-                assert project_catalog["project"] == {
-                    "project_id": "fixture",
-                    "available": True,
-                    "default_ref": "master",
-                    "observer_read": True,
-                    "writable": False,
-                    "ref": "sinnix://projects/fixture",
-                }
-                assert {
-                    resource["kind"] for resource in project_catalog["resources"]
-                } == {
-                    "project",
-                    "checkout",
-                    "bead",
-                    "task_authority",
-                }
-                assert all(
-                    resource["availability"] == "available"
-                    for resource in project_catalog["resources"]
-                )
-                unavailable_catalog_result = await session.call_tool(
-                    "catalog", {"availability": "unavailable"}
-                )
-                unavailable_catalog = json.loads(
-                    unavailable_catalog_result.content[0].text
-                )["data"]
-                assert unavailable_catalog["actions"] == []
-                assert unavailable_catalog["resources"] == []
-                get_result = await session.call_tool(
-                    "get", {"ref": "sinnix://projects/fixture"}
-                )
-                project_envelope = json.loads(get_result.content[0].text)
-                project_resource = project_envelope["data"]
-                assert project_envelope["result"]["action"] == "resources.get"
-                assert project_resource["kind"] == "project"
-                assert project_resource["project"]["project_id"] == "fixture"
-                checkout = project_resource["checkouts"][0]
-                assert checkout["ref"] == "sinnix://projects/fixture/checkouts/default"
-                assert checkout["checkout_id"] == "default"
-                assert (
-                    project_resource["task_authority"]["availability"] == "unavailable"
-                )
-                checkout_result = await session.call_tool(
-                    "get", {"ref": checkout["ref"]}
-                )
-                checkout_resource = json.loads(checkout_result.content[0].text)["data"]
-                assert checkout_resource["kind"] == "checkout"
-                assert (
-                    checkout_resource["checkout"]["checkout"]["checkout_id"]
-                    == "default"
-                )
-                query_result = await session.call_tool(
-                    "query",
-                    {
-                        "action_name": "projects.query",
-                        "ref": checkout["ref"],
-                        "query": "fixture",
-                    },
-                )
-                query_envelope = json.loads(query_result.content[0].text)
-                assert query_envelope["result"]["action"] == "projects.query"
-                assert query_envelope["data"]["ref"] == checkout["ref"]
-                assert (
-                    query_envelope["data"]["project_ref"] == "sinnix://projects/fixture"
-                )
-                assert query_envelope["meta"]["resource_refs"] == [
-                    "sinnix://projects/fixture",
-                    checkout["ref"],
-                ]
-                project_list_result = await session.call_tool(
-                    "query", {"action_name": "projects.list"}
-                )
-                project_list_envelope = json.loads(project_list_result.content[0].text)
-                assert project_list_envelope["result"]["action"] == "projects.list"
-                assert [
-                    project["project_id"]
-                    for project in project_list_envelope["data"]["projects"]
-                ] == ["fixture"]
-                context_result = await session.call_tool(
-                    "context", {"ref": "sinnix://projects/fixture"}
-                )
-                context_envelope = json.loads(context_result.content[0].text)
-                context = context_envelope["data"]
-                assert context_envelope["result"]["action"] == "projects.context"
-                assert context["ref"] == "sinnix://projects/fixture"
-                assert context["authority"]["canonical_checkout_ref"] == checkout["ref"]
-                assert len(context["authority"]["code_revision"]) == 64
-                assert (
-                    context["authority"]["task_authority"]["availability"]
-                    == "unavailable"
-                )
-                assert all(
-                    component["status"] != "available"
-                    or isinstance(component.get("source_revision"), str)
-                    for component in context["components"]
-                )
-                assert all(
-                    component["status"] in {"available", "unavailable"}
-                    for component in context["components"]
-                )
-                events_result = await session.call_tool("events", {"limit": 100})
-                events_envelope = json.loads(events_result.content[0].text)
-                assert events_envelope["result"]["action"] == "audit.events"
-                assert events_envelope["data"]["events"]
-                assert all(
-                    isinstance(event.get("event_id"), str)
-                    and isinstance(event.get("source_revision"), str)
-                    for event in events_envelope["data"]["events"]
-                )
-                invalid_catalog_result = await session.call_tool(
-                    "catalog", {"verb": "unrecognized"}
-                )
-                invalid_catalog = json.loads(invalid_catalog_result.content[0].text)
-                assert invalid_catalog_result.is_error is True
-                assert invalid_catalog_result.structured_content == invalid_catalog
-                assert invalid_catalog["result"]["outcome"] == "error"
-                assert invalid_catalog["error"]["code"] == "invalid_request"
-                assert invalid_catalog["receipt"]["ref"].startswith(
-                    "sinnix://receipts/"
-                )
-                mcp_catalog_result = await session.call_tool(
-                    "query",
-                    {
-                        "action_name": "mcp.query",
-                        "parameters": {"operation": "catalog"},
-                    },
-                )
-                assert json.loads(mcp_catalog_result.content[0].text)["data"] == {
-                    "servers": []
-                }
-
-    anyio.run(probe)
-
-
-def test_production_wait_route_observes_mcp_request_cancellation(
-    tmp_path: Path,
-) -> None:
-    server = create_server(config(tmp_path), "observer")
-    cancelled = anyio.Event()
-    cancelled.set()
-    context = Context(mcp_server=server)
-    context._request_context = SimpleNamespace(
-        session=SimpleNamespace(
-            _request_outbound=SimpleNamespace(cancel_requested=cancelled)
-        )
-    )
-
-    async def invoke() -> dict[str, object]:
-        result = await server.call_tool(
-            "wait",
-            {
-                "ref": "sinnix://projects/fixture/beads/fixture-1",
-                "target": "bead_status",
-                "timeout_seconds": 30,
-                "expected": {"status": "open"},
-            },
-            context=context,
-        )
-        assert result.structured_content is not None
-        return result.structured_content
-
-    response = anyio.run(invoke)
-    assert response["data"]["outcome"] == "cancelled", response
-
-
-def test_production_wait_route_runs_without_mcp_request_context(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    server = create_server(config(tmp_path), "observer")
-    runtime = server._sinnix_revision_publisher.runtime
-    monkeypatch.setattr(
-        runtime,
-        "_job",
-        lambda operation, arguments: {
-            "job_id": arguments["job_id"],
-            "state": {"phase": "succeeded", "terminal": True},
-        },
-    )
-
-    async def invoke() -> dict[str, object]:
-        result = await server.call_tool(
-            "wait",
-            {"ref": "sinnix://jobs/fixture-job", "timeout_seconds": 1},
-        )
-        assert result.structured_content is not None
-        return result.structured_content
-
-    response = anyio.run(invoke)
-    assert response["result"]["outcome"] == "ok", response
-    assert response["data"]["job_id"] == "fixture-job", response
-    assert response["data"]["state"] == {"phase": "succeeded", "terminal": True}, (
-        response
-    )
-
-
-def test_production_job_wait_route_cancels_owner_wait(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    server = create_server(config(tmp_path), "observer")
-    runtime = server._sinnix_revision_publisher.runtime
-    owner_started = threading.Event()
-
-    def delayed_owner(
-        operation: str, _arguments: dict[str, object]
-    ) -> dict[str, object]:
-        assert operation == "job.wait"
-        owner_started.set()
-        threading.Event().wait(0.5)
-        return {"job_id": "fixture-job", "state": {"phase": "running"}}
-
-    monkeypatch.setattr(runtime, "_job", delayed_owner)
-    cancelled = anyio.Event()
-    context = Context(mcp_server=server)
-    context._request_context = SimpleNamespace(
-        session=SimpleNamespace(
-            _request_outbound=SimpleNamespace(cancel_requested=cancelled)
-        )
-    )
-
-    async def invoke() -> dict[str, object]:
-        result_box: dict[str, object] = {}
-
-        async def call() -> None:
-            result_box["response"] = await server.call_tool(
-                "wait",
-                {
-                    "ref": "sinnix://jobs/fixture-job",
-                    "timeout_seconds": 30,
-                },
-                context=context,
-            )
-
-        async with anyio.create_task_group() as task_group:
-            task_group.start_soon(call)
-            await anyio.to_thread.run_sync(owner_started.wait)
-            cancelled.set()
-        response = result_box["response"]
-        assert response.structured_content is not None
-        return response.structured_content
-
-    response = anyio.run(invoke)
-    assert response["data"]["outcome"] == "cancelled", response
-
-
-def test_public_v2_mutation_verbs_preserve_owner_routes(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    cfg = config(tmp_path)
-    runtime = Runtime.create(cfg, "operator")
-    calls: dict[str, object] = {}
-
-    def beads_change(
-        project_id: str, operation: str, arguments: dict[str, object], **_kwargs: object
-    ) -> dict[str, object]:
-        calls["beads"] = (project_id, operation, arguments)
-        return {
-            "project_id": project_id,
-            "operation": operation,
-            "mode": "apply",
-            "atomicity": "owner_native",
-        }
-
-    async def mcp_call(
-        server: str, tool: str, arguments: dict[str, object], *, write: bool
-    ) -> dict[str, object]:
-        calls["mcp"] = (server, tool, arguments, write)
-        return {
-            "server": server,
-            "tool": tool,
-            "mode": "write",
-            "response": {"ok": True},
-        }
-
-    def desktop_owner(
-        operation: str, arguments: dict[str, object]
-    ) -> dict[str, object]:
-        calls["desktop"] = (operation, arguments)
-        return {"operation": operation, "result": {"ok": True}}
-
-    def terminal_owner(
-        operation: str, arguments: dict[str, object]
-    ) -> dict[str, object]:
-        calls["terminal"] = (operation, arguments)
-        return {"operation": operation, "result": {"ok": True}}
-
-    def browser_owner(
-        operation: str, arguments: dict[str, object]
-    ) -> dict[str, object]:
-        calls.setdefault("browser", []).append((operation, arguments))
-        if operation == "agent_window":
-            return {
-                "operation": operation,
-                "target": {"id": "agent-target", "parked": True},
-            }
-        return {
-            "operation": operation,
-            "page_id": arguments["page_id"],
-            "result": {"ok": True},
-        }
-
-    monkeypatch.setattr(runtime.beads, "change", beads_change)
-    monkeypatch.setattr(runtime.mcp_broker, "call", mcp_call)
-    monkeypatch.setattr(runtime.desktop, "action", desktop_owner)
-    monkeypatch.setattr(runtime.terminals, "action", terminal_owner)
-    monkeypatch.setattr(runtime.browser, "action", browser_owner)
-    monkeypatch.setattr(
-        Runtime, "create", classmethod(lambda _cls, _cfg, _principal: runtime)
-    )
-    server = create_server(cfg, "operator")
-    target = tmp_path / "public-route.txt"
-    file_token = base64.urlsafe_b64encode(str(target).encode()).decode().rstrip("=")
-
-    async def invoke(name: str, arguments: dict[str, object]) -> dict[str, object]:
-        response = await server.call_tool(name, arguments)
-        assert response.structured_content is not None
-        return response.structured_content
-
-    file_result = anyio.run(
-        invoke,
-        "change",
-        {
-            "action_name": "files.change",
-            "ref": f"sinnix://files/{file_token}",
-            "operation": "replace",
-            "parameters": {"content": "public route\n"},
-            "idempotency_key": "public-file-change",
-        },
-    )
-    beads_result = anyio.run(
-        invoke,
-        "change",
-        {
-            "action_name": "beads.change",
-            "ref": "sinnix://projects/fixture",
-            "operation": "comment",
-            "parameters": {"id": "fixture-1", "text": "public route"},
-            "idempotency_key": "public-beads-change",
-        },
-    )
-    mcp_result = anyio.run(
-        invoke,
-        "change",
-        {
-            "action_name": "mcp.change",
-            "ref": "sinnix://mcp/fixture/tools/mutate",
-            "operation": "call",
-            "parameters": {"value": "public route"},
-            "idempotency_key": "public-mcp-change",
-        },
-    )
-    desktop_result = anyio.run(
-        invoke,
-        "operate",
-        {
-            "action_name": "desktop.operate",
-            "ref": "sinnix://desktop/current",
-            "operation": "focus_window",
-            "parameters": {"window": "address:0xfixture"},
-            "idempotency_key": "public-desktop-operate",
-        },
-    )
-    terminal_result = anyio.run(
-        invoke,
-        "operate",
-        {
-            "action_name": "terminals.operate",
-            "ref": "sinnix://terminals/7",
-            "operation": "send",
-            "parameters": {"text": "printf fixture", "enter": True},
-            "idempotency_key": "public-terminal-operate",
-        },
-    )
-    window_result = anyio.run(
-        invoke,
-        "operate",
-        {
-            "action_name": "browser.operate",
-            "ref": "sinnix://browser/agent-workspace",
-            "operation": "agent_window",
-            "parameters": {"url": "https://example.test"},
-            "idempotency_key": "public-browser-window",
-        },
-    )
-    browser_result = anyio.run(
-        invoke,
-        "operate",
-        {
-            "action_name": "browser.operate",
-            "ref": "sinnix://browser/pages/agent-target",
-            "operation": "navigate",
-            "parameters": {"url": "https://example.test/next"},
-            "idempotency_key": "public-browser-operate",
-        },
-    )
-    unsupported = anyio.run(
-        invoke,
-        "change",
-        {
-            "action_name": "mcp.change",
-            "ref": "sinnix://mcp/fixture/tools/mutate",
-            "operation": "unsupported",
-            "parameters": {},
-            "idempotency_key": "public-mcp-unsupported",
-        },
-    )
-    undeclared = anyio.run(
-        invoke,
-        "change",
-        {
-            "action_name": "undeclared.change",
-            "ref": "sinnix://projects/fixture",
-            "operation": "replace",
-            "parameters": {},
-            "idempotency_key": "public-undeclared-change",
-        },
-    )
-    wrong_verb_with_preconditions = anyio.run(
-        invoke,
-        "operate",
-        {
-            "action_name": "beads.change",
-            "ref": "sinnix://projects/fixture",
-            "operation": "comment",
-            "parameters": {"id": "fixture-1", "text": "must not dispatch"},
-            "preconditions": {"expected_status": "open"},
-            "idempotency_key": "public-wrong-verb-precondition",
-        },
-    )
-
-    assert target.read_text() == "public route\n"
-    assert calls["beads"] == (
-        "fixture",
-        "comment",
-        {"id": "fixture-1", "text": "public route"},
-    )
-    assert calls["mcp"] == ("fixture", "mutate", {"value": "public route"}, True)
-    assert calls["desktop"] == ("focus_window", {"window": "address:0xfixture"})
-    assert calls["terminal"] == (
-        "send",
-        {"match": "id:7", "text": "printf fixture", "enter": True},
-    )
-    assert calls["browser"] == [
-        ("agent_window", {"url": "https://example.test"}),
-        ("navigate", {"page_id": "agent-target", "url": "https://example.test/next"}),
-    ]
-    assert [
-        result["result"]["action"]
-        for result in (
-            file_result,
-            beads_result,
-            mcp_result,
-            desktop_result,
-            terminal_result,
-            window_result,
-            browser_result,
-        )
-    ] == [
-        "files.change",
-        "beads.change",
-        "mcp.change",
-        "desktop.operate",
-        "terminals.operate",
-        "browser.operate",
-        "browser.operate",
-    ]
-    assert window_result["data"]["target_ref"] == "sinnix://browser/pages/agent-target"
-    assert browser_result["data"]["ref"] == "sinnix://browser/pages/agent-target"
-    assert unsupported["error"]["code"] == "unsupported_capability"
-    assert undeclared["error"]["code"] == "unsupported_capability"
-    assert wrong_verb_with_preconditions["error"]["code"] == "unsupported_capability"
-
-
-def test_mcp_dispatches_v2_change_and_operate_through_real_owners(
-    tmp_path: Path,
-) -> None:
-    cfg = config(tmp_path)
-    project = cfg.projects["fixture"].path
-    subprocess.run(["git", "init", "--quiet", project], check=True)
-    subprocess.run(
-        ["git", "config", "user.name", "Gateway Test"], cwd=project, check=True
-    )
-    subprocess.run(
-        ["git", "config", "user.email", "gateway-test@example.invalid"],
-        cwd=project,
-        check=True,
-    )
-    target = project / "tracked.txt"
-    target.write_text("before\n")
-    subprocess.run(["git", "add", "tracked.txt"], cwd=project, check=True)
-    subprocess.run(["git", "commit", "-qm", "fixture"], cwd=project, check=True)
-
-    expected_owner_request = {
-        "action": "restart",
-        "target": {"unit": "fixture.service"},
-        "expected_revision": 17,
-        "idempotency_key": "integration-machine-operate",
-        "operator_reason": "integration fixture",
-        "parameters": {},
-    }
-    owner_requests: list[dict[str, object]] = []
-    owner_failures: list[str] = []
-
-    class Handler(socketserver.StreamRequestHandler):
-        def handle(self) -> None:
-            try:
-                request = self.rfile.readline().decode()
-                if request.startswith("GET /v1/revision HTTP/"):
-                    while self.rfile.readline().rstrip(b"\r\n"):
-                        pass
-                    payload = json.dumps(
-                        {
-                            "schema": "sinnix-ops-v1",
-                            "sequence": 17,
-                            "observed_at": "2026-08-25T00:00:00Z",
-                            "degradation": None,
-                            "sources": {"fixture": {"status": "healthy"}},
-                            "state": {},
-                        },
-                        separators=(",", ":"),
-                    ).encode()
-                    self.wfile.write(
-                        b"HTTP/1.1 200 OK\r\n"
-                        + f"Content-Length: {len(payload)}\r\nContent-Type: application/json\r\n\r\n".encode()
-                        + payload
-                    )
-                    return
-                if not request.startswith("POST /v1/actions HTTP/"):
-                    raise AssertionError("unexpected owner request line")
-                headers: dict[str, str] = {}
-                while True:
-                    line = self.rfile.readline().decode().rstrip("\r\n")
-                    if not line:
-                        break
-                    name, value = line.split(":", 1)
-                    headers[name.lower()] = value.strip()
-                body = json.loads(self.rfile.read(int(headers["content-length"])))
-                owner_requests.append(body)
-                if body != expected_owner_request:
-                    owner_failures.append(f"unexpected owner request: {body!r}")
-                payload = json.dumps(
-                    {
-                        "schema": "sinnix-ops-action-v1",
-                        "receipt_id": "integration-owner-receipt",
-                        "idempotency_key": "integration-machine-operate",
-                        "action": "restart",
-                        "target": {"unit": "fixture.service"},
-                        "operator_reason": "integration fixture",
-                        "expected_revision": 17,
-                        "status": "accepted",
-                    },
-                    separators=(",", ":"),
-                ).encode()
-                self.wfile.write(
-                    b"HTTP/1.1 201 Created\r\n"
-                    + f"Content-Length: {len(payload)}\r\nContent-Type: application/json\r\n\r\n".encode()
-                    + payload
-                )
-            except Exception as exc:
-                owner_failures.append(f"owner fixture failure: {exc!r}")
-
-        def log_message(self, *_args: object) -> None:
-            return
-
-    socket_path = tmp_path / "ops.sock"
-    owner_server = socketserver.UnixStreamServer(str(socket_path), Handler)
-    owner_thread = threading.Thread(target=owner_server.serve_forever)
-    owner_thread.start()
-    try:
-        runtime = Runtime.create(cfg, "operator")
-        checkout = runtime.projects.checkout("fixture", "default")["checkout"]
-        preconditions = {
-            "head": checkout["head"],
-            "dirty_sha256": checkout["dirty_sha256"],
-        }
-        gateway = create_server(
-            dataclasses.replace(cfg, ops_socket_path=socket_path), "operator"
-        )
-
-        change = anyio.run(
-            gateway.call_tool,
-            "change",
-            {
-                "action_name": "projects.change",
-                "ref": "sinnix://projects/fixture",
-                "operation": "write",
-                "parameters": {"path": "tracked.txt", "content": "after\n"},
-                "preconditions": preconditions,
-                "idempotency_key": "integration-project-change",
-            },
-        )
-        action_snapshot = anyio.run(
-            gateway.call_tool,
-            "query",
-            {
-                "action_name": "machine.query",
-                "parameters": {"operation": "actions"},
-            },
-        )
-        operate = anyio.run(
-            gateway.call_tool,
-            "operate",
-            {
-                "action_name": "machine.operate",
-                "ref": "sinnix://machine/units/user/fixture.service",
-                "operation": "restart",
-                "parameters": {},
-                "reason": "integration fixture",
-                "preconditions": {"expected_revision": 17},
-                "idempotency_key": "integration-machine-operate",
-            },
-        )
-    finally:
-        owner_server.shutdown()
-        owner_server.server_close()
-        owner_thread.join(timeout=5)
-
-    assert change.structured_content["result"]["outcome"] == "ok"
-    assert change.structured_content["data"]["checkout_ref"] == (
-        "sinnix://projects/fixture/checkouts/default"
-    )
-    assert target.read_text() == "after\n"
-    assert action_snapshot.structured_content["data"] == {
-        "available": True,
-        "operation": "actions",
-        "owner": "ops-reducer",
-        "schema": "sinnix-ops-v1",
-        "observed_at": "2026-08-25T00:00:00Z",
-        "revision": 17,
-        "degradation": None,
-        "sources": {"fixture": {"status": "healthy"}},
-    }
-    assert operate.structured_content["result"]["outcome"] == "ok"
-    assert owner_failures == []
-    assert owner_requests == [expected_owner_request]
-    assert operate.structured_content["result"]["principal"] == "operator"
-    assert operate.structured_content["data"]["owner_receipt"] == {
-        "schema": "sinnix-ops-action-v1",
-        "receipt_id": "integration-owner-receipt",
-        "idempotency_key": "integration-machine-operate",
-        "action": "restart",
-        "target": {"unit": "fixture.service"},
-        "operator_reason": "integration fixture",
-        "expected_revision": 17,
-        "status": "accepted",
-    }
-
-
-def test_query_adapter_consumes_capture_selector_before_owner_invocation(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    runtime = Runtime.create(config(tmp_path), "observer")
-    captured: dict[str, object] = {}
-
-    def query(*, lanes: list[str], since: float, limit: int) -> dict[str, object]:
-        captured.update(lanes=lanes, since=since, limit=limit)
-        return {"records": []}
-
-    monkeypatch.setattr(runtime.captures, "query", query)
-    result = anyio.run(
-        _query_owner,
-        runtime,
-        "captures.query",
-        None,
-        None,
-        200,
-        {"operation": "query", "lanes": ["shell"], "since": 1.5, "limit": 4},
-    )
-
-    assert result == {"records": []}
-    assert captured == {"lanes": ["shell"], "since": 1.5, "limit": 4}
-
-
-def test_mcp_query_derives_server_and_tool_from_a_canonical_ref(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    runtime = Runtime.create(config(tmp_path), "observer")
-    captured: dict[str, object] = {}
-
-    async def call(
-        server: str, tool: str, arguments: dict[str, object], *, write: bool
-    ) -> dict[str, object]:
-        captured.update(server=server, tool=tool, arguments=arguments, write=write)
-        return {"response": {"ok": True}}
-
-    monkeypatch.setattr(runtime.mcp_broker, "call", call)
-    result = anyio.run(
-        _query_owner,
-        runtime,
-        "mcp.query",
-        "sinnix://mcp/fixture/tools/lookup",
-        None,
-        200,
-        {"operation": "call", "arguments": {"query": "fixture"}},
-    )
-
-    assert result == {
-        "ref": "sinnix://mcp/fixture/tools/lookup",
-        "response": {"ok": True},
-    }
-    assert captured == {
-        "server": "fixture",
-        "tool": "lookup",
-        "arguments": {"query": "fixture"},
-        "write": False,
-    }
-
-
-def test_target_query_adapters_round_trip_canonical_refs(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    runtime = Runtime.create(config(tmp_path), "observer")
-    calls: dict[str, object] = {}
-    monkeypatch.setattr(
-        runtime.desktop,
-        "read",
-        lambda operation: calls.update(desktop=operation) or {"ok": True},
-    )
-    monkeypatch.setattr(
-        runtime.terminals,
-        "read",
-        lambda operation, arguments=None: (
-            calls.update(terminal=(operation, arguments)) or {"ok": True}
-        ),
-    )
-    monkeypatch.setattr(
-        runtime.browser,
-        "read",
-        lambda operation, page_id=None, selector=None: (
-            calls.update(browser=(operation, page_id, selector)) or {"ok": True}
-        ),
-    )
-    monkeypatch.setattr(
-        runtime.files,
-        "read",
-        lambda operation, path, **kwargs: (
-            calls.update(files=(operation, path, kwargs)) or {"ok": True}
-        ),
-    )
-
-    file_token = base64.urlsafe_b64encode(b"/realm/fixture.txt").decode().rstrip("=")
-    desktop = anyio.run(
-        _query_owner,
-        runtime,
-        "desktop.query",
-        "sinnix://desktop/current",
-        None,
-        200,
-        {"operation": "status"},
-    )
-    terminal = anyio.run(
-        _query_owner,
-        runtime,
-        "terminals.query",
-        "sinnix://terminals/7",
-        None,
-        200,
-        {"operation": "capture", "arguments": {"extent": "screen"}},
-    )
-    browser = anyio.run(
-        _query_owner,
-        runtime,
-        "browser.query",
-        "sinnix://browser/pages/agent-target",
-        None,
-        200,
-        {"operation": "info"},
-    )
-    host_file = anyio.run(
-        _query_owner,
-        runtime,
-        "files.query",
-        f"sinnix://files/{file_token}",
-        None,
-        200,
-        {"operation": "stat"},
-    )
-
-    assert desktop["ref"] == "sinnix://desktop/current"
-    assert terminal["ref"] == "sinnix://terminals/7"
-    assert browser["ref"] == "sinnix://browser/pages/agent-target"
-    assert host_file["ref"] == f"sinnix://files/{file_token}"
-    assert calls == {
-        "desktop": "status",
-        "terminal": ("capture", {"match": "id:7", "extent": "screen"}),
-        "browser": ("info", "agent-target", None),
-        "files": (
-            "stat",
-            "/realm/fixture.txt",
-            {"offset": 0, "max_bytes": 64_000, "max_entries": 200},
-        ),
-    }
-    with pytest.raises(ProtocolError, match="canonical terminal ref"):
-        anyio.run(
-            _query_owner,
-            runtime,
-            "terminals.query",
-            None,
-            None,
-            200,
-            {"operation": "capture", "arguments": {"match": "id:7"}},
-        )
-
-
-def test_missing_observer_mcp_environment_is_a_typed_unavailable_failure(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    runtime = Runtime.create(config(tmp_path), "observer")
-    runtime.config.mcp_broker_servers["fixture"] = {
-        "description": "Fixture server",
-        "transport": "stdio",
-        "tier": "evidence",
-        "brokered": True,
-        "command": "fixture-mcp",
-        "args": [],
-        "env": {},
-    }
-    monkeypatch.delenv("DBUS_SESSION_BUS_ADDRESS", raising=False)
-    monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
-
-    with pytest.raises(ProtocolError) as error:
-        anyio.run(
-            _query_owner,
-            runtime,
-            "mcp.query",
-            "sinnix://mcp/fixture/tools/lookup",
-            None,
-            200,
-            {"operation": "call", "arguments": {}},
-        )
-
-    assert error.value.code == "unavailable"
-
-
-def test_browser_owner_failure_keeps_exact_diagnostic_ref_in_v2_envelope(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    runtime = Runtime.create(config(tmp_path), "observer")
-    monkeypatch.setattr(
-        runtime.browser.execution,
-        "run",
-        lambda command, profile: ExecutionResult(
-            tuple(command),
-            None,
-            b"",
-            b"chrome missing",
-            failure_class="command_unavailable:FileNotFoundError",
-        ),
-    )
-
-    response = runtime.execute_v2(
-        REGISTRY.action("browser.query"),
-        lambda: runtime.browser.read("status"),
-        {"action_name": "browser.query", "parameters": {"operation": "status"}},
-    )
-
-    diagnostic_refs = response["error"]["diagnostic_refs"]
-    assert len(diagnostic_refs) == 1
-    artifact_id = diagnostic_refs[0].rsplit("/", 1)[-1]
-    assert runtime.artifacts.read(artifact_id)["kind"] == "owner-diagnostic"
 
 
 def test_gateway_resource_bounds_fall_back_to_an_attested_artifact(
@@ -1418,7 +251,7 @@ def test_v2_events_are_principal_scoped_and_receipted(tmp_path: Path) -> None:
     operator.audit.append("operator_event", "ok")
 
     response = observer.execute_v2(
-        REGISTRY.action("audit.events"),
+        action_set.BY_NAME["events.tail"],
         lambda: observer.v2_events(100),
         {"limit": 100},
     )
@@ -1452,15 +285,9 @@ def test_gateway_status_reports_distinct_manifest_provenance(tmp_path: Path) -> 
             "principal": "observer",
             "sha256": "catalog-hash",
         },
-        "nix_approved": {
-            "principal": "observer",
-            "sha256": "catalog-hash",
-        },
         "chatgpt_observed": None,
         "comparisons": {
-            "live_to_nix_approved": "match",
             "live_to_chatgpt_observed": "unobserved",
-            "nix_approved_to_chatgpt_observed": "unobserved",
         },
     }
     assert status["manifests"]["comparisons"] == {
@@ -1515,27 +342,6 @@ def test_gateway_status_reports_distinct_manifest_provenance(tmp_path: Path) -> 
         "live_to_chatgpt_observed": "mismatch",
         "nix_approved_to_chatgpt_observed": "mismatch",
     }
-
-
-def test_gateway_status_reports_catalog_approval_drift(tmp_path: Path) -> None:
-    cfg = dataclasses.replace(
-        config(tmp_path), approved_action_catalog_hash="approved-catalog-hash"
-    )
-    runtime = Runtime.create(cfg, "observer")
-
-    status = runtime.observe.gateway_status(
-        "observer",
-        "capability-hash",
-        "approved-fixture-hash",
-        "live-catalog-hash",
-        "v2-test",
-    )
-
-    assert status["catalog"]["nix_approved"] == {
-        "principal": "observer",
-        "sha256": "approved-catalog-hash",
-    }
-    assert status["catalog"]["comparisons"]["live_to_nix_approved"] == "mismatch"
 
 
 def test_gateway_status_reports_broker_route_evidence(
@@ -1611,7 +417,6 @@ def test_gateway_status_keeps_unapproved_principal_unobserved(tmp_path: Path) ->
     )
 
     assert status["manifests"]["nix_approved"] is None
-    assert status["catalog"]["nix_approved"] is None
     assert status["catalog"]["chatgpt_observed"] is None
     assert set(status["catalog"]["comparisons"].values()) == {"unobserved"}
     assert status["manifests"]["comparisons"] == {
@@ -1691,22 +496,20 @@ def test_approval_check_requires_the_current_paired_contract(tmp_path: Path) -> 
     approved = dataclasses.replace(
         cfg,
         approved_manifest_hash=anyio.run(build_manifest, cfg, "observer")["sha256"],
-        approved_action_catalog_hash=REGISTRY.action_catalog_hash("observer"),
     )
 
     assert verify_approval(approved, "observer") == {
         "principal": "observer",
         "tool_manifest_hash": approved.approved_manifest_hash,
-        "action_catalog_hash": approved.approved_action_catalog_hash,
+        "action_catalog_hash": action_set.catalog_hash("observer"),
     }
 
-    with pytest.raises(ValueError, match="action catalog drift"):
+    with pytest.raises(ValueError, match="tool manifest drift"):
         verify_approval(
-            dataclasses.replace(
-                approved, approved_action_catalog_hash="unapproved-catalog"
-            ),
-            "observer",
+            dataclasses.replace(approved, approved_manifest_hash="stale"), "observer"
         )
+    with pytest.raises(ValueError, match="principal"):
+        verify_approval(approved, "operator")
 
 
 def test_semantic_canary_exercises_catalog_and_project_list_envelopes(
@@ -1719,32 +522,6 @@ def test_semantic_canary_exercises_catalog_and_project_list_envelopes(
     assert result["projects"] == 1
 
 
-def test_semantic_canary_reads_an_artifactized_project_list(tmp_path: Path) -> None:
-    cfg = dataclasses.replace(config(tmp_path), max_result_bytes=1_024)
-    cfg.projects.update(
-        {
-            f"project-{index}": ProjectConfig(
-                project_id=f"project-{index}",
-                path=tmp_path,
-                observer_read=True,
-            )
-            for index in range(40)
-        }
-    )
-
-    result = anyio.run(semantic_canary, cfg, "observer")
-
-    assert result["projects"] == 41
-
-
-def test_cli_exposes_catalog_hash_without_retired_profiles() -> None:
-    assert parser().parse_args(["catalog-hash"]).command == "catalog-hash"
-    assert parser().parse_args(["approval-check"]).command == "approval-check"
-    assert parser().parse_args(["canary"]).command == "canary"
-    with pytest.raises(SystemExit):
-        parser().parse_args(["--profile", "observer", "info"])
-
-
 def test_config_load_uses_one_project_contract(tmp_path: Path) -> None:
     project = tmp_path / "project"
     project.mkdir()
@@ -1753,7 +530,6 @@ def test_config_load_uses_one_project_contract(tmp_path: Path) -> None:
         json.dumps(
             {
                 "stateDir": str(tmp_path / "state"),
-                "approvedActionCatalogHash": "fixture-catalog-hash",
                 "projects": {
                     "fixture": {
                         "path": str(project),
@@ -1771,7 +547,6 @@ def test_config_load_uses_one_project_contract(tmp_path: Path) -> None:
         )
     )
     loaded = GatewayConfig.load(path)
-    assert loaded.approved_action_catalog_hash == "fixture-catalog-hash"
     assert loaded.projects["fixture"].path == project
     assert loaded.projects["fixture"].observer_read is True
     assert loaded.projects["fixture"].devtools_entrypoint == "nix develop"
@@ -1984,3 +759,90 @@ def test_machine_query_reduces_page_to_response_bound(
 
     assert len(result["rows"]) == 1
     assert result["next_cursor"] == 1
+
+
+def test_manifests_are_typed_actions_filtered_by_principal(tmp_path: Path) -> None:
+    cfg = config(tmp_path)
+    observer = anyio.run(build_manifest, cfg, "observer")
+    operator = anyio.run(build_manifest, cfg, "operator")
+    operator_names = {row["name"] for row in operator["tools"]}
+    observer_names = {row["name"] for row in observer["tools"]}
+    assert operator_names == {a.name for a in action_set.visible("operator")}
+    assert observer_names == {a.name for a in action_set.visible("observer")}
+    assert observer_names < operator_names
+    assert "files.change" not in observer_names and "files.change" in operator_names
+    for row in operator["tools"]:
+        action = action_set.BY_NAME[row["name"]]
+        assert row["inputSchema"] == action.input_schema()
+        assert row["inputSchema"].get("additionalProperties") is False
+        assert "parameters" not in row["inputSchema"]["properties"]
+        assert "outputSchema" not in row
+        expected_read = action.family.value in {
+            "status",
+            "catalog",
+            "query",
+            "get",
+            "context",
+            "events",
+            "wait",
+        }
+        assert row["annotations"]["readOnlyHint"] is expected_read
+    assert observer["sha256"] != operator["sha256"]
+    assert operator["measurement"]["tool_count"] == len(operator_names)
+
+
+def test_stdio_transport_negotiates_typed_tools(tmp_path: Path) -> None:
+    cfg = config(tmp_path)
+    subprocess.run(["git", "init", "--quiet", cfg.projects["fixture"].path], check=True)
+    config_path = tmp_path / "gateway.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "stateDir": str(cfg.state_dir),
+                "projects": {
+                    "fixture": {
+                        "path": str(cfg.projects["fixture"].path),
+                        "observerRead": True,
+                    }
+                },
+            }
+        )
+    )
+
+    async def probe() -> None:
+        executable = os.environ.get("SINNIX_GATEWAY_TEST_EXECUTABLE")
+        command = executable or sys.executable
+        args = [] if executable else ["-m", "sinnix_agent_gateway.cli"]
+        args.extend(["--config", str(config_path), "--principal", "observer", "serve"])
+        async with stdio_client(StdioServerParameters(command=command, args=args)) as (
+            read_stream,
+            write_stream,
+        ):
+            async with ClientSession(read_stream, write_stream) as session:
+                initialized = await session.initialize()
+                assert initialized.server_info.name == "sinnix-agent-gateway"
+                tools = {tool.name: tool for tool in (await session.list_tools()).tools}
+                assert "gateway.status" in tools and "projects.list" in tools
+                assert "files.change" not in tools
+                assert tools["files.read"].input_schema["properties"]["target"]
+                templates = await session.list_resource_templates()
+                assert templates.next_cursor
+                status = await session.call_tool("gateway.status", {})
+                assert status.structured_content is not None
+                assert status.structured_content["result"]["outcome"] == "ok"
+                assert status.structured_content["data"]["principal"] == "observer"
+                projects = await session.call_tool("projects.list", {})
+                assert (
+                    projects.structured_content["data"]["projects"][0]["project_id"]
+                    == "fixture"
+                )
+                denied = await session.call_tool(
+                    "files.read", {"target": {"path": "/run/agenix/secret"}}
+                )
+                assert denied.is_error
+                assert denied.structured_content["error"]["code"] in {
+                    "policy_denied",
+                    "not_found",
+                }
+
+    anyio.run(probe)

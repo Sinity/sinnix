@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import base64
 import json
 import os
 from pathlib import Path
@@ -9,6 +8,7 @@ from typing import Any
 
 import anyio
 
+from . import actions as action_set
 from .app import canonical_manifest, create_server
 from .capabilities import PRINCIPAL_CAPABILITIES
 from .cli_support import (
@@ -19,10 +19,10 @@ from .cli_support import (
     invoke_mcp,
 )
 from .config import GatewayConfig
-from .registry import REGISTRY
 from .runtime import manifest_measurement
 
 LOCAL_CONFIG_PATH = Path("/etc/sinnix/agent-gateway.json")
+VERSION = "0.3.0"
 
 
 def _default_config_path() -> Path | None:
@@ -41,200 +41,100 @@ async def build_manifest(config: GatewayConfig, principal_name: str) -> dict[str
 
 
 def verify_approval(config: GatewayConfig, principal_name: str) -> dict[str, object]:
+    """The approved manifest hash covers every tool and its schemas."""
     if config.approved_manifest_principal != principal_name:
         raise ValueError(
             "approval principal does not match the selected gateway principal"
         )
-    if (
-        config.approved_manifest_hash is None
-        or config.approved_action_catalog_hash is None
-    ):
-        raise ValueError("both tool manifest and action catalog approvals are required")
-    live_manifest_hash = anyio.run(build_manifest, config, principal_name)["sha256"]
-    live_catalog_hash = REGISTRY.action_catalog_hash(principal_name)
-    mismatches = []
-    if live_manifest_hash != config.approved_manifest_hash:
-        mismatches.append(
-            "tool manifest drift: "
-            f"expected {config.approved_manifest_hash}, got {live_manifest_hash}"
+    if config.approved_manifest_hash is None:
+        raise ValueError("a tool manifest approval is required")
+    live = anyio.run(build_manifest, config, principal_name)["sha256"]
+    if live != config.approved_manifest_hash:
+        raise ValueError(
+            f"tool manifest drift: expected {config.approved_manifest_hash}, got {live}"
         )
-    if live_catalog_hash != config.approved_action_catalog_hash:
-        mismatches.append(
-            "action catalog drift: "
-            f"expected {config.approved_action_catalog_hash}, got {live_catalog_hash}"
-        )
-    if mismatches:
-        raise ValueError("; ".join(mismatches))
     return {
         "principal": principal_name,
-        "tool_manifest_hash": live_manifest_hash,
-        "action_catalog_hash": live_catalog_hash,
+        "tool_manifest_hash": live,
+        "action_catalog_hash": action_set.catalog_hash(principal_name),
     }
 
 
 async def semantic_canary(
     config: GatewayConfig, principal_name: str
 ) -> dict[str, object]:
-    """Exercise public MCP envelopes required for a cold operator session."""
-    catalog = await invoke_mcp(config, principal_name, "catalog", {})
-    catalog_data = await _canary_data(config, principal_name, catalog)
-    if (
-        catalog.get("result", {}).get("outcome") != "ok"
-        or catalog.get("result", {}).get("action") != "gateway.catalog"
-        or not isinstance(catalog_data, dict)
-    ):
+    """Exercise the typed envelopes a cold session starts from."""
+    catalog = await invoke_mcp(config, principal_name, "gateway.catalog", {})
+    data = catalog.get("data") if isinstance(catalog, dict) else None
+    if catalog.get("result", {}).get("outcome") != "ok" or not isinstance(data, dict):
         raise ValueError("semantic canary catalog did not return its typed envelope")
-    actions = {
-        row.get("name")
-        for row in catalog_data.get("actions", [])
-        if isinstance(row, dict)
-    }
-    required = {"resources.get", "projects.list", "jobs.query", "beads.query"}
-    missing = sorted(required - actions)
+    names = {row.get("name") for row in data.get("actions", [])}
+    required = {"gateway.status", "projects.list", "files.read", "beads.query"}
+    missing = sorted(required - names)
     if missing:
         raise ValueError(f"semantic canary catalog omits actions: {', '.join(missing)}")
-    projects = await invoke_mcp(
-        config,
-        principal_name,
-        "query",
-        {"action_name": "projects.list"},
-    )
-    projects_data = await _canary_data(config, principal_name, projects)
-    if (
-        projects.get("result", {}).get("outcome") != "ok"
-        or projects.get("result", {}).get("action") != "projects.list"
-        or not isinstance(projects_data.get("projects"), list)
-    ):
+    projects = await invoke_mcp(config, principal_name, "projects.list", {})
+    rows = projects.get("data", {}).get("projects") if projects.get("data") else None
+    if projects.get("result", {}).get("outcome") != "ok" or not isinstance(rows, list):
         raise ValueError(
             "semantic canary projects.list did not return its typed envelope"
         )
     return {
         "principal": principal_name,
-        "catalog_actions": len(actions),
-        "projects": len(projects_data["projects"]),
+        "catalog_actions": len(names),
+        "projects": len(rows),
     }
 
 
-async def _canary_data(
-    config: GatewayConfig, principal_name: str, envelope: dict[str, Any]
-) -> dict[str, Any]:
-    data = envelope.get("data")
-    if not isinstance(data, dict):
-        return {}
-    artifact = data.get("artifact")
-    if data.get("truncated") is not True or not isinstance(artifact, dict):
-        return data
-    ref = artifact.get("ref")
-    if not isinstance(ref, str) or not ref.startswith("sinnix://artifacts/"):
-        raise ValueError("semantic canary result has no readable artifact")
-    artifact_id = ref.rsplit("/", 1)[-1]
-    chunks: list[bytes] = []
-    offset = 0
-    chunk_bytes = max(1, min(256, config.max_result_bytes // 16))
-    while True:
-        response = await invoke_mcp(
-            config,
-            principal_name,
-            "query",
-            {
-                "action_name": "artifacts.query",
-                "parameters": {
-                    "operation": "read",
-                    "artifact_id": artifact_id,
-                    "offset": offset,
-                    "max_bytes": chunk_bytes,
-                },
-            },
-        )
-        chunk = response.get("data")
-        if response.get("result", {}).get("outcome") != "ok" or not isinstance(
-            chunk, dict
-        ):
-            raise ValueError("semantic canary could not read result artifact")
-        encoded = chunk.get("base64")
-        if not isinstance(encoded, str):
-            raise ValueError("semantic canary artifact returned no bytes")
-        chunks.append(base64.b64decode(encoded, validate=True))
-        next_offset = chunk.get("next_offset")
-        if next_offset is None:
-            break
-        if not isinstance(next_offset, int) or next_offset <= offset:
-            raise ValueError("semantic canary artifact cursor did not advance")
-        offset = next_offset
-    materialized = json.loads(b"".join(chunks))
-    if not isinstance(materialized, dict):
-        raise ValueError("semantic canary artifact is not an object")
-    return materialized
-
-
 def parser() -> argparse.ArgumentParser:
-    result = argparse.ArgumentParser(prog="sinnix-agent-gateway")
-    result.add_argument(
-        "--config",
-        type=Path,
-        default=_default_config_path(),
+    result = argparse.ArgumentParser(
+        prog="sinnix-agent-gateway",
+        description="Invoke one typed gateway action or serve the MCP transport.",
     )
+    result.add_argument("--config", type=Path, default=_default_config_path())
     result.add_argument(
         "--principal", choices=sorted(PRINCIPAL_CAPABILITIES), default="observer"
     )
     subcommands = result.add_subparsers(dest="command")
-
-    subcommands.add_parser("serve")
-    subcommands.add_parser("manifest")
-    subcommands.add_parser("catalog-hash")
-    subcommands.add_parser("approval-check")
-    subcommands.add_parser("canary")
-    subcommands.add_parser("info")
-
-    def add_input_flags(command: argparse.ArgumentParser) -> None:
-        source = command.add_mutually_exclusive_group()
-        source.add_argument("--input", help="inline JSON object")
-        source.add_argument("--input-file", type=Path, help="JSON object file")
-        source.add_argument(
-            "--stdin", action="store_true", help="read one JSON object from stdin"
-        )
-        command.add_argument("--action", "--action-name", dest="action_name")
-        command.add_argument("--ref")
-        command.add_argument("--operation")
-        command.add_argument("--parameters", help="inline JSON object")
-        command.add_argument("--query")
-        command.add_argument("--request-id")
-        command.add_argument("--actor")
-        command.add_argument("--reason")
-        command.add_argument("--idempotency-key")
-        command.add_argument("--deadline-at", type=float)
-        command.add_argument("--preconditions", help="inline JSON object")
-        command.add_argument("--explain", action="store_true")
-        command.add_argument(
-            "--principal",
-            dest="command_principal",
-            choices=sorted(PRINCIPAL_CAPABILITIES),
-        )
-
-    for verb in (
-        "status",
-        "query",
-        "get",
-        "context",
-        "events",
-        "wait",
-        "change",
-        "operate",
-        "run",
+    for name in (
+        "serve",
+        "manifest",
+        "catalog-hash",
+        "approval-check",
+        "canary",
+        "info",
     ):
-        command = subcommands.add_parser(verb)
-        add_input_flags(command)
-        if verb == "change":
-            mode = command.add_mutually_exclusive_group()
-            mode.add_argument("--preview", action="store_true")
-            mode.add_argument("--apply", action="store_true")
+        subcommands.add_parser(name)
 
-    catalog = subcommands.add_parser("catalog")
-    add_input_flags(catalog)
-    display = catalog.add_mutually_exclusive_group()
-    display.add_argument("--schema", metavar="ACTION")
-    display.add_argument("--example", metavar="ACTION")
-    display.add_argument("--complete", nargs="?", const="", metavar="PREFIX")
+    call = subcommands.add_parser(
+        "call",
+        help="invoke an action by name, e.g. call files.read --set path=/etc/os-release",
+    )
+    call.add_argument("action", help="action name, e.g. files.read")
+    source = call.add_mutually_exclusive_group()
+    source.add_argument("--input", help="inline JSON object")
+    source.add_argument("--input-file", type=Path, help="JSON object file")
+    source.add_argument("--stdin", action="store_true", help="read one JSON object")
+    call.add_argument(
+        "--set",
+        dest="assignments",
+        action="append",
+        metavar="KEY=VALUE",
+        help="set one input field; VALUE is parsed as JSON when it is JSON",
+    )
+    call.add_argument("--request-id")
+    call.add_argument("--actor")
+    call.add_argument("--reason")
+    call.add_argument("--idempotency-key")
+    call.add_argument("--deadline-at", type=float)
+
+    catalog = subcommands.add_parser("catalog", help="describe actions")
+    catalog.add_argument("action", nargs="?", help="action name to describe")
+    catalog.add_argument(
+        "--schema", action="store_true", help="print input/output schemas"
+    )
+    catalog.add_argument("--example", action="store_true", help="print examples")
+    catalog.add_argument("--complete", nargs="?", const="", metavar="PREFIX")
     return result
 
 
@@ -242,125 +142,71 @@ def main() -> None:
     arguments = parser().parse_args()
     config = GatewayConfig.load(arguments.config)
     command = arguments.command or "serve"
-    principal_name = (
-        getattr(arguments, "command_principal", None) or arguments.principal
-    )
+    principal = arguments.principal
     if command == "serve":
-        create_server(config, arguments.principal).run("stdio")
+        create_server(config, principal).run("stdio")
     elif command == "manifest":
-        print(
-            json.dumps(anyio.run(build_manifest, config, arguments.principal), indent=2)
-        )
+        print(json.dumps(anyio.run(build_manifest, config, principal), indent=2))
     elif command == "catalog-hash":
         print(
             json.dumps(
                 {
-                    "principal": arguments.principal,
-                    "revision": REGISTRY.revision,
-                    "sha256": REGISTRY.action_catalog_hash(arguments.principal),
+                    "principal": principal,
+                    "revision": action_set.REVISION,
+                    "sha256": action_set.catalog_hash(principal),
                 },
                 indent=2,
             )
         )
     elif command == "approval-check":
         try:
-            print(json.dumps(verify_approval(config, arguments.principal), indent=2))
+            print(json.dumps(verify_approval(config, principal), indent=2))
         except ValueError as error:
             raise SystemExit(str(error)) from error
     elif command == "canary":
         try:
-            print(json.dumps(anyio.run(semantic_canary, config, principal_name)))
+            print(json.dumps(anyio.run(semantic_canary, config, principal)))
         except ValueError as error:
             raise SystemExit(str(error)) from error
     elif command == "info":
         print(
             json.dumps(
                 {
-                    "version": "0.2.0",
-                    "principal": arguments.principal,
+                    "version": VERSION,
+                    "principal": principal,
                     "transport": "stdio",
                     "state": str(config.state_dir),
+                    "actions": len(action_set.visible(principal)),
                 },
                 indent=2,
             )
         )
-    elif command == "catalog" and (
-        arguments.schema
-        or arguments.example
-        or arguments.explain
-        or arguments.complete is not None
-    ):
-        action_name = arguments.schema or arguments.example or arguments.action_name
-        payload = catalog_display(
-            principal=principal_name,
-            action_name=action_name,
-            schema=arguments.schema is not None,
-            example=arguments.example is not None,
-            explain=arguments.explain,
-            complete=arguments.complete,
-        )
+    elif command == "catalog":
+        try:
+            payload = catalog_display(
+                principal=principal,
+                action_name=arguments.action,
+                schema=arguments.schema,
+                example=arguments.example,
+                complete=arguments.complete,
+            )
+        except CliInputError as error:
+            raise SystemExit(str(error)) from error
         print(json.dumps(payload, indent=2, sort_keys=True))
-    elif (
-        command
-        in {
-            "status",
-            "query",
-            "get",
-            "context",
-            "events",
-            "wait",
-            "change",
-            "operate",
-            "run",
-        }
-        and arguments.explain
-    ):
-        action_name = arguments.action_name or {
-            "status": "gateway.status",
-            "get": "resources.get",
-            "context": "projects.context",
-            "events": "audit.events",
-            "wait": "jobs.wait",
-        }.get(command)
-        payload = catalog_display(
-            principal=principal_name,
-            action_name=action_name,
-            explain=True,
-        )
-        print(json.dumps(payload, indent=2, sort_keys=True))
-    elif command in {
-        "status",
-        "catalog",
-        "query",
-        "get",
-        "context",
-        "events",
-        "wait",
-        "change",
-        "operate",
-        "run",
-    }:
+    elif command == "call":
         try:
             payload = build_request(
-                command,
                 inline=arguments.input,
                 input_file=arguments.input_file,
                 use_stdin=arguments.stdin,
-                action_name=arguments.action_name,
-                ref=arguments.ref,
-                operation=arguments.operation,
-                parameters=arguments.parameters,
-                query=arguments.query,
+                assignments=arguments.assignments,
                 request_id=arguments.request_id,
                 actor=arguments.actor,
                 reason=arguments.reason,
                 idempotency_key=arguments.idempotency_key,
                 deadline_at=arguments.deadline_at,
-                preconditions=arguments.preconditions,
-                preview=getattr(arguments, "preview", False),
-                apply=getattr(arguments, "apply", False),
             )
-            response = invoke(config, principal_name, command, payload)
+            response = invoke(config, principal, arguments.action, payload)
         except (CliInputError, ValueError, RuntimeError) as error:
             raise SystemExit(str(error)) from error
         print(json.dumps(response, indent=2, sort_keys=True))

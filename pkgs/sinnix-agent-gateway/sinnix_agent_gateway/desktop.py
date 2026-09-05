@@ -57,13 +57,15 @@ class DesktopService:
             return [self.config.screenshot_control_command, *arguments]
         raise AssertionError(f"unknown desktop owner {owner}")
 
-    def _run(self, owner: str, arguments: list[str]) -> dict[str, Any]:
+    def _run(
+        self, owner: str, arguments: list[str], *, timeout: float = 15
+    ) -> dict[str, Any]:
         route = OwnerRoute(f"desktop-{owner}", EnvironmentProfile.WAYLAND)
         result = self.execution.run(
             self._command(owner, arguments),
             ExecutionProfile(
                 route=route,
-                timeout_seconds=15,
+                timeout_seconds=timeout,
                 max_stdout_bytes=self.config.max_result_bytes,
             ),
         )
@@ -80,18 +82,32 @@ class DesktopService:
         return value
 
     def capture_output(self, fix_hdr: bool = True) -> dict[str, Any]:
+        return self.capture(fix_hdr=fix_hdr)
+
+    def capture(
+        self,
+        *,
+        fix_hdr: bool = True,
+        geometry: str | None = None,
+        output: str | None = None,
+        target: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Capture the focused output, one output, or a region into attested state."""
         self.principal.require(Capability.DESKTOP_READ)
         if not isinstance(fix_hdr, bool):
             raise DesktopError("fix_hdr must be boolean")
         capture_dir = self.config.state_dir / "captures" / uuid.uuid4().hex
         capture_dir.mkdir(mode=0o700, parents=True)
-        arguments = [
-            "capture-output",
-            "--out-dir",
-            str(capture_dir),
-            "--name",
-            "gateway",
-        ]
+        verb = (
+            "capture-output"
+            if geometry is None and output is None
+            else "capture-region"
+        )
+        arguments = [verb, "--out-dir", str(capture_dir), "--name", "gateway"]
+        if geometry is not None:
+            arguments.extend(["--geometry", geometry])
+        if output is not None:
+            arguments.extend(["--output", output])
         if fix_hdr:
             arguments.append("--fix-hdr")
         result = self._run("screenshot", arguments)
@@ -126,7 +142,7 @@ class DesktopService:
         receipt = self.artifacts.attest_capture(
             capture_dir,
             source="desktop-output",
-            target={"kind": "current-output"},
+            target=target or {"kind": "current-output"},
             files=[source for _, source in files_by_variant],
         )
         artifacts = [
@@ -137,6 +153,7 @@ class DesktopService:
                     owner_id="desktop-capture",
                 ),
                 "variant": variant,
+                "path": str(source),
                 "bytes": source.stat().st_size,
                 "content_type": mimetypes.guess_type(source.name)[0]
                 or "application/octet-stream",
@@ -157,6 +174,15 @@ class DesktopService:
                 "color_management": response.get("color_management"),
             },
         }
+
+    def invoke(
+        self, owner: str, arguments: list[str], *, mutating: bool, timeout: float = 15
+    ) -> Any:
+        """Run one declared wrapper verb for a typed action; returns decoded output."""
+        self.principal.require(
+            Capability.DESKTOP_ACTION if mutating else Capability.DESKTOP_READ
+        )
+        return self._run(owner, arguments, timeout=timeout)["result"]
 
     def read(self, operation: str) -> dict[str, Any]:
         self.principal.require(Capability.DESKTOP_READ)

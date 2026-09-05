@@ -90,6 +90,27 @@ class BrowserService:
         finally:
             temporary.unlink(missing_ok=True)
 
+    def owned_page_ids(self) -> set[str]:
+        """Page ids the gateway created; the only mutable or capturable targets."""
+        return set(self._load_targets())
+
+    def register_target(self, target: dict[str, Any]) -> None:
+        targets = self._load_targets()
+        targets[str(target["id"])] = target
+        self._save_targets(targets)
+
+    def forget_target(self, page_id: str) -> None:
+        targets = self._load_targets()
+        targets.pop(page_id, None)
+        self._save_targets(targets)
+
+    def invoke(self, arguments: list[str], *, mutating: bool, timeout: int = 30) -> Any:
+        """Run one declared wrapper verb for a typed action; returns decoded output."""
+        self.principal.require(
+            Capability.BROWSER_ACTION if mutating else Capability.BROWSER_READ
+        )
+        return self._run(arguments, timeout)["result"]
+
     def _require_owned_target(self, page_id: str) -> str:
         page_id = self._string(page_id, "page_id", 256)
         if page_id not in self._load_targets():

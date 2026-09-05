@@ -1,597 +1,1520 @@
 {
-  "action_catalog_hash": "73967b9d691118482283e66b72ecb11faa84c0a62f2b15c4f0838787f9d5242f",
+  "action_catalog_hash": "23ea3f1e63bf903ef81fcbbace343a31149631e79960da38391e8c396ab32af1",
   "examples": [
     {
       "action": "gateway.status",
-      "cli_input": {},
+      "family": "status",
       "input": {},
-      "verb": "status"
+      "title": "Status"
     },
     {
       "action": "gateway.catalog",
-      "cli_input": {
-        "availability": "available",
-        "resource_kind": "bead"
-      },
+      "family": "catalog",
       "input": {
-        "availability": "available",
-        "resource_kind": "bead"
+        "query": "screenshot"
       },
-      "verb": "catalog"
+      "title": "Screenshot capability"
     },
     {
-      "action": "resources.get",
-      "cli_input": {
-        "ref": "sinnix://projects/sinnix"
-      },
+      "action": "gateway.catalog",
+      "family": "catalog",
       "input": {
-        "ref": "sinnix://projects/sinnix"
+        "query": "lynchpin"
       },
-      "verb": "get"
+      "title": "Lynchpin tools"
     },
     {
-      "action": "projects.query",
-      "cli_input": {
-        "action_name": "projects.query",
-        "max_matches": 20,
-        "query": "mkServiceModule",
-        "ref": "sinnix://projects/sinnix"
-      },
+      "action": "files.stat",
+      "family": "query",
       "input": {
-        "max_matches": 20,
-        "query": "mkServiceModule",
-        "ref": "sinnix://projects/sinnix"
-      },
-      "verb": "query"
-    },
-    {
-      "action": "beads.query",
-      "cli_input": {
-        "action_name": "beads.query",
-        "parameters": {
-          "filters": {
-            "priority": {
-              "op": "<=",
-              "value": 1
-            },
-            "status": "open"
-          },
-          "includes": ["dependencies"],
-          "limit": 50,
-          "project_ids": ["polylogue"],
-          "view": "query"
+        "target": {
+          "path": "/etc/os-release"
         }
       },
+      "title": "Stat a file"
+    },
+    {
+      "action": "files.list",
+      "family": "query",
       "input": {
-        "action_name": "beads.query",
-        "parameters": {
-          "filters": {
-            "priority": {
-              "op": "<=",
-              "value": 1
-            },
-            "status": "open"
-          },
-          "includes": ["dependencies"],
-          "limit": 50,
-          "project_ids": ["polylogue"],
-          "view": "query"
+        "target": {
+          "path": "/realm/tmp"
         }
       },
-      "verb": "query"
+      "title": "List /realm/tmp"
     },
     {
-      "action": "projects.context",
-      "cli_input": {
-        "ref": "sinnix://projects/sinnix"
-      },
+      "action": "files.read",
+      "family": "query",
       "input": {
-        "ref": "sinnix://projects/sinnix"
+        "target": {
+          "path": "/etc/os-release"
+        }
       },
-      "verb": "context"
+      "title": "Read /etc/os-release"
     },
     {
-      "action": "audit.events",
-      "cli_input": {
-        "limit": 100
-      },
+      "action": "files.read",
+      "family": "query",
       "input": {
-        "limit": 100
+        "line_count": 21,
+        "line_start": 10,
+        "target": {
+          "path": "/var/log/example.log"
+        }
       },
-      "verb": "events"
+      "title": "Lines 10-30 of a log"
     },
     {
-      "action": "jobs.wait",
-      "cli_input": {
-        "ref": "sinnix://jobs/3b0237a0-32a9-4f6b-a014-2a0ecfd2f75c",
-        "timeout_seconds": 30
-      },
+      "action": "files.search",
+      "family": "query",
       "input": {
-        "ref": "sinnix://jobs/3b0237a0-32a9-4f6b-a014-2a0ecfd2f75c",
-        "timeout_seconds": 30
+        "extensions": [
+          "png"
+        ],
+        "roots": [
+          {
+            "path": "/realm/tmp/work"
+          }
+        ]
       },
-      "verb": "wait"
+      "title": "PNGs under /realm/tmp/work"
     },
     {
-      "action": "projects.change",
-      "cli_input": {
-        "action_name": "projects.change",
-        "idempotency_key": "project-write-example",
-        "operation": "write",
-        "parameters": {
-          "content": "updated content\\n",
-          "path": "README.md"
-        },
-        "preconditions": {
-          "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-        },
-        "ref": "sinnix://projects/sinnix/checkouts/default"
-      },
+      "action": "files.search",
+      "family": "query",
       "input": {
-        "idempotency_key": "project-write-example",
-        "operation": "write",
-        "parameters": {
-          "content": "updated content\\n",
-          "path": "README.md"
-        },
-        "preconditions": {
-          "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-        },
-        "ref": "sinnix://projects/sinnix/checkouts/default"
+        "content_regex": "screenshot_probe",
+        "context_lines": 1,
+        "roots": [
+          {
+            "path": "/realm/project/sinnix"
+          }
+        ]
       },
-      "verb": "change"
+      "title": "Grep a string in a project"
+    },
+    {
+      "action": "files.search",
+      "family": "query",
+      "input": {
+        "modified_within_seconds": 7200,
+        "roots": [
+          {
+            "path": "/realm/tmp"
+          }
+        ]
+      },
+      "title": "Files modified in the last two hours"
+    },
+    {
+      "action": "files.patch",
+      "family": "change",
+      "input": {
+        "edit": {
+          "end_line": 4,
+          "mode": "range",
+          "replacement": "new line",
+          "start_line": 3
+        },
+        "idempotency_key": "patch-notes-1",
+        "target": {
+          "path": "/realm/tmp/work/notes.md"
+        }
+      },
+      "title": "Replace lines 3-4"
+    },
+    {
+      "action": "files.patch",
+      "family": "change",
+      "input": {
+        "edit": {
+          "mode": "unified",
+          "patch": "@@ -1,1 +1,1 @@\n-old\n+new\n"
+        },
+        "expected_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "idempotency_key": "patch-notes-2",
+        "target": {
+          "path": "/realm/tmp/work/notes.md"
+        }
+      },
+      "title": "Apply a unified diff"
     },
     {
       "action": "files.change",
-      "cli_input": {
-        "action_name": "files.change",
-        "idempotency_key": "file-replace-example",
-        "operation": "replace",
-        "parameters": {
-          "content": "updated content\\n"
-        },
-        "ref": "sinnix://files/L3JlYWxtL3RtcC9maWxl"
-      },
+      "family": "change",
       "input": {
-        "idempotency_key": "file-replace-example",
-        "operation": "replace",
-        "parameters": {
-          "content": "updated content\\n"
+        "change": {
+          "content": "hello\n",
+          "operation": "replace"
         },
-        "ref": "sinnix://files/L3JlYWxtL3RtcC9maWxl"
+        "idempotency_key": "write-hello-1",
+        "target": {
+          "path": "/realm/tmp/work/hello.txt"
+        }
       },
-      "verb": "change"
+      "title": "Write a file"
     },
     {
-      "action": "beads.change",
-      "cli_input": {
-        "action_name": "beads.change",
-        "idempotency_key": "bead-comment-example",
-        "operation": "comment",
-        "parameters": {
-          "id": "sinnix-example",
-          "text": "recorded by the operator"
-        },
-        "ref": "sinnix://projects/sinnix"
-      },
+      "action": "files.change",
+      "family": "change",
       "input": {
-        "idempotency_key": "bead-comment-example",
-        "operation": "comment",
-        "parameters": {
-          "id": "sinnix-example",
-          "text": "recorded by the operator"
+        "change": {
+          "destination": {
+            "path": "/realm/tmp/work/archive/hello.txt"
+          },
+          "operation": "move"
         },
-        "ref": "sinnix://projects/sinnix"
+        "idempotency_key": "move-hello-1",
+        "target": {
+          "path": "/realm/tmp/work/hello.txt"
+        }
       },
-      "verb": "change"
-    },
-    {
-      "action": "beads.changeset",
-      "cli_input": {
-        "action_name": "beads.changeset",
-        "idempotency_key": "beads-changeset-example",
-        "operation": "preview",
-        "parameters": {
-          "actions": [
-            {
-              "bind": "parent",
-              "operation": "create",
-              "parameters": {
-                "title": "parent"
-              },
-              "ref": "sinnix://projects/sinnix"
-            },
-            {
-              "operation": "create",
-              "parameters": {
-                "parent": "$parent",
-                "title": "child"
-              },
-              "ref": "sinnix://projects/sinnix"
-            }
-          ]
-        },
-        "ref": "sinnix://projects/sinnix"
-      },
-      "input": {
-        "idempotency_key": "beads-changeset-example",
-        "operation": "preview",
-        "parameters": {
-          "actions": [
-            {
-              "bind": "parent",
-              "operation": "create",
-              "parameters": {
-                "title": "parent"
-              },
-              "ref": "sinnix://projects/sinnix"
-            },
-            {
-              "operation": "create",
-              "parameters": {
-                "parent": "$parent",
-                "title": "child"
-              },
-              "ref": "sinnix://projects/sinnix"
-            }
-          ]
-        },
-        "ref": "sinnix://projects/sinnix"
-      },
-      "verb": "change"
-    },
-    {
-      "action": "beads.operate",
-      "cli_input": {
-        "action_name": "beads.operate",
-        "idempotency_key": "beads-publish-example",
-        "operation": "snapshot.publish",
-        "parameters": {},
-        "ref": "sinnix://projects/sinnix"
-      },
-      "input": {
-        "idempotency_key": "beads-publish-example",
-        "operation": "snapshot.publish",
-        "parameters": {},
-        "ref": "sinnix://projects/sinnix"
-      },
-      "verb": "operate"
-    },
-    {
-      "action": "mcp.change",
-      "cli_input": {
-        "action_name": "mcp.change",
-        "idempotency_key": "mcp-refresh-example",
-        "operation": "call",
-        "parameters": {},
-        "ref": "sinnix://mcp/lynchpin/tools/refresh"
-      },
-      "input": {
-        "idempotency_key": "mcp-refresh-example",
-        "operation": "call",
-        "parameters": {},
-        "ref": "sinnix://mcp/lynchpin/tools/refresh"
-      },
-      "verb": "change"
-    },
-    {
-      "action": "machine.operate",
-      "cli_input": {
-        "action_name": "machine.operate",
-        "idempotency_key": "restart-example",
-        "operation": "restart",
-        "parameters": {},
-        "preconditions": {
-          "expected_revision": 42
-        },
-        "reason": "apply the approved restart",
-        "ref": "sinnix://machine/units/user/example.service"
-      },
-      "input": {
-        "action": "restart",
-        "idempotency_key": "restart-example",
-        "parameters": {},
-        "preconditions": {
-          "expected_revision": 42
-        },
-        "reason": "apply the approved restart",
-        "ref": "sinnix://machine/units/user/example.service"
-      },
-      "verb": "operate"
-    },
-    {
-      "action": "operations.run",
-      "cli_input": {
-        "action_name": "operations.run",
-        "idempotency_key": "declared-check-example",
-        "operation": "check",
-        "parameters": {},
-        "project_id": "sinnix"
-      },
-      "input": {
-        "idempotency_key": "declared-check-example",
-        "operation": "check",
-        "parameters": {},
-        "project_id": "sinnix"
-      },
-      "verb": "run"
-    },
-    {
-      "action": "agent.for_bead",
-      "cli_input": {
-        "action_name": "agent.for_bead",
-        "backend": "codex",
-        "idempotency_key": "bead-agent-example",
-        "model": "gpt-5.6-terra",
-        "reasoning_effort": "high",
-        "ref": "sinnix://projects/sinnix/beads/sinnix-example"
-      },
-      "input": {
-        "backend": "codex",
-        "idempotency_key": "bead-agent-example",
-        "model": "gpt-5.6-terra",
-        "reasoning_effort": "high",
-        "ref": "sinnix://projects/sinnix/beads/sinnix-example"
-      },
-      "verb": "run"
-    },
-    {
-      "action": "jobs.cancel",
-      "cli_input": {
-        "action_name": "jobs.cancel",
-        "idempotency_key": "cancel-example",
-        "preconditions": {
-          "expected_phase": "running"
-        },
-        "ref": "sinnix://jobs/3b0237a0-32a9-4f6b-a014-2a0ecfd2f75c"
-      },
-      "input": {
-        "idempotency_key": "cancel-example",
-        "preconditions": {
-          "expected_phase": "running"
-        },
-        "ref": "sinnix://jobs/3b0237a0-32a9-4f6b-a014-2a0ecfd2f75c"
-      },
-      "verb": "operate"
-    },
-    {
-      "action": "desktop.operate",
-      "cli_input": {
-        "action_name": "desktop.operate",
-        "idempotency_key": "desktop-focus-example",
-        "operation": "focus_window",
-        "parameters": {
-          "window": "address:0xfixture"
-        },
-        "ref": "sinnix://desktop/current"
-      },
-      "input": {
-        "idempotency_key": "desktop-focus-example",
-        "operation": "focus_window",
-        "parameters": {
-          "window": "address:0xfixture"
-        },
-        "ref": "sinnix://desktop/current"
-      },
-      "verb": "operate"
-    },
-    {
-      "action": "terminals.operate",
-      "cli_input": {
-        "action_name": "terminals.operate",
-        "idempotency_key": "terminal-send-example",
-        "operation": "send",
-        "parameters": {
-          "enter": true,
-          "text": "printf fixture"
-        },
-        "ref": "sinnix://terminals/7"
-      },
-      "input": {
-        "idempotency_key": "terminal-send-example",
-        "operation": "send",
-        "parameters": {
-          "enter": true,
-          "text": "printf fixture"
-        },
-        "ref": "sinnix://terminals/7"
-      },
-      "verb": "operate"
-    },
-    {
-      "action": "browser.operate",
-      "cli_input": {
-        "action_name": "browser.operate",
-        "idempotency_key": "browser-window-example",
-        "operation": "agent_window",
-        "parameters": {
-          "url": "https://example.test"
-        },
-        "ref": "sinnix://browser/agent-workspace"
-      },
-      "input": {
-        "idempotency_key": "browser-window-example",
-        "operation": "agent_window",
-        "parameters": {
-          "url": "https://example.test"
-        },
-        "ref": "sinnix://browser/agent-workspace"
-      },
-      "verb": "operate"
-    },
-    {
-      "action": "shell.run",
-      "cli_input": {
-        "action_name": "shell.run",
-        "argv": ["git", "status", "--short"],
-        "checkout_id": "default",
-        "cwd": ".",
-        "idempotency_key": "shell-status-example",
-        "project_id": "sinnix",
-        "timeout_seconds": 300
-      },
-      "input": {
-        "argv": ["git", "status", "--short"],
-        "checkout_id": "default",
-        "cwd": ".",
-        "idempotency_key": "shell-status-example",
-        "project_id": "sinnix",
-        "timeout_seconds": 300
-      },
-      "verb": "run"
+      "title": "Move a file"
     },
     {
       "action": "projects.list",
-      "cli_input": {
-        "action_name": "projects.list"
-      },
+      "family": "query",
       "input": {},
-      "verb": "query"
+      "title": "List projects"
+    },
+    {
+      "action": "projects.get",
+      "family": "get",
+      "input": {
+        "target": {
+          "project": "sinnix"
+        }
+      },
+      "title": "Summary by project id"
+    },
+    {
+      "action": "projects.get",
+      "family": "get",
+      "input": {
+        "projection": "git",
+        "target": {
+          "ref": "sinnix://projects/sinnix"
+        }
+      },
+      "title": "All worktrees"
+    },
+    {
+      "action": "projects.get",
+      "family": "get",
+      "input": {
+        "target": {
+          "path": "/realm/project/sinnix/flake.nix"
+        }
+      },
+      "title": "Checkout containing a path"
     },
     {
       "action": "projects.tree",
-      "cli_input": {
-        "action_name": "projects.tree"
+      "family": "query",
+      "input": {
+        "max_entries": 100,
+        "path": "modules",
+        "target": {
+          "project": "sinnix"
+        }
       },
-      "input": {},
-      "verb": "query"
+      "title": "Top-level modules"
     },
     {
       "action": "projects.read",
-      "cli_input": {
-        "action_name": "projects.read"
+      "family": "query",
+      "input": {
+        "end_line": 80,
+        "path": "CLAUDE.md",
+        "target": {
+          "project": "sinnix"
+        }
       },
-      "input": {},
-      "verb": "query"
+      "title": "Read CLAUDE.md"
     },
     {
       "action": "projects.diff",
-      "cli_input": {
-        "action_name": "projects.diff"
+      "family": "query",
+      "input": {
+        "git_ref": "HEAD",
+        "target": {
+          "project": "sinnix"
+        }
       },
+      "title": "Working tree vs HEAD"
+    },
+    {
+      "action": "projects.search",
+      "family": "query",
+      "input": {
+        "max_matches": 20,
+        "query": "mkServiceModule",
+        "target": {
+          "project": "sinnix"
+        }
+      },
+      "title": "Find a symbol"
+    },
+    {
+      "action": "projects.change",
+      "family": "change",
+      "input": {
+        "change": {
+          "content": "hello\n",
+          "operation": "write",
+          "path": "docs/notes.md"
+        },
+        "expected_head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "idempotency_key": "write-notes-1",
+        "target": {
+          "ref": "sinnix://projects/sinnix/checkouts/default"
+        }
+      },
+      "title": "Write a file"
+    },
+    {
+      "action": "projects.change",
+      "family": "change",
+      "input": {
+        "change": {
+          "operation": "apply_patch",
+          "patch": "--- a/README.md\n+++ b/README.md\n@@ -1 +1 @@\n-old\n+new\n"
+        },
+        "expected_dirty_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "idempotency_key": "patch-readme-1",
+        "target": {
+          "project": "sinnix"
+        }
+      },
+      "title": "Apply a patch"
+    },
+    {
+      "action": "projects.context",
+      "family": "context",
+      "input": {
+        "target": {
+          "project": "sinnix"
+        }
+      },
+      "title": "Orientation"
+    },
+    {
+      "action": "projects.context",
+      "family": "context",
+      "input": {
+        "intent": "project.triage",
+        "target": {
+          "project": "sinnix"
+        }
+      },
+      "title": "Triage"
+    },
+    {
+      "action": "beads.query",
+      "family": "query",
+      "input": {
+        "limit": 10,
+        "projects": [
+          "sinnix"
+        ],
+        "view": "ready"
+      },
+      "title": "Ready work in one project"
+    },
+    {
+      "action": "beads.query",
+      "family": "query",
+      "input": {
+        "filters": {
+          "priority": {
+            "op": "<=",
+            "value": 1
+          },
+          "status": "open"
+        },
+        "includes": [
+          "dependencies"
+        ],
+        "projects": [
+          "polylogue"
+        ]
+      },
+      "title": "Open P0-P1 with dependencies"
+    },
+    {
+      "action": "beads.query",
+      "family": "query",
+      "input": {
+        "native_filters": {
+          "title_contains": "gateway"
+        },
+        "projects": [
+          "sinnix"
+        ],
+        "view": "open"
+      },
+      "title": "Title search"
+    },
+    {
+      "action": "beads.query",
+      "family": "query",
+      "input": {
+        "graph": {
+          "bead": "sinnix-abc1",
+          "depth": 2,
+          "direction": "both"
+        },
+        "projects": [
+          "sinnix"
+        ]
+      },
+      "title": "Dependency graph"
+    },
+    {
+      "action": "beads.get",
+      "family": "get",
+      "input": {
+        "includes": [
+          "comments",
+          "dependencies"
+        ],
+        "target": {
+          "id": "sinnix-abc1"
+        }
+      },
+      "title": "By id"
+    },
+    {
+      "action": "beads.get",
+      "family": "get",
+      "input": {
+        "projection": "notes",
+        "target": {
+          "project": "sinnix",
+          "title_contains": "gateway overhaul"
+        }
+      },
+      "title": "By title"
+    },
+    {
+      "action": "beads.change",
+      "family": "change",
+      "input": {
+        "change": {
+          "operation": "create",
+          "priority": "2",
+          "project": {
+            "project": "sinnix"
+          },
+          "title": "Port beads actions",
+          "type": "task"
+        },
+        "idempotency_key": "create-1"
+      },
+      "title": "Create"
+    },
+    {
+      "action": "beads.change",
+      "family": "change",
+      "input": {
+        "change": {
+          "operation": "comment",
+          "target": {
+            "id": "sinnix-abc1"
+          },
+          "text": "landed in gateway-overhaul"
+        },
+        "idempotency_key": "comment-1"
+      },
+      "title": "Comment"
+    },
+    {
+      "action": "beads.change",
+      "family": "change",
+      "input": {
+        "change": {
+          "operation": "close",
+          "reason": "shipped",
+          "target": {
+            "id": "sinnix-abc1"
+          }
+        },
+        "expected": {
+          "expected_status": "in_progress"
+        },
+        "idempotency_key": "close-1"
+      },
+      "title": "Close with reason"
+    },
+    {
+      "action": "beads.changeset",
+      "family": "change",
+      "input": {
+        "idempotency_key": "changeset-1",
+        "project": {
+          "project": "sinnix"
+        },
+        "steps": [
+          {
+            "bind": "epic",
+            "operation": "create",
+            "parameters": {
+              "title": "Epic",
+              "type": "epic"
+            }
+          },
+          {
+            "operation": "create",
+            "parameters": {
+              "parent": "$epic",
+              "title": "Child"
+            }
+          }
+        ]
+      },
+      "title": "Epic with one child"
+    },
+    {
+      "action": "beads.operate",
+      "family": "operate",
+      "input": {
+        "idempotency_key": "publish-1",
+        "operation": {
+          "operation": "snapshot.publish"
+        },
+        "project": {
+          "project": "sinnix"
+        }
+      },
+      "title": "Publish snapshot"
+    },
+    {
+      "action": "beads.operate",
+      "family": "operate",
+      "input": {
+        "idempotency_key": "restore-1",
+        "operation": {
+          "backup_id": "2026-09-01",
+          "operation": "backup.restore"
+        },
+        "project": {
+          "project": "sinnix"
+        }
+      },
+      "title": "Restore a backup"
+    },
+    {
+      "action": "jobs.list",
+      "family": "query",
+      "input": {
+        "limit": 20
+      },
+      "title": "Newest 20 jobs"
+    },
+    {
+      "action": "jobs.list",
+      "family": "query",
+      "input": {
+        "project": {
+          "project": "sinnix"
+        }
+      },
+      "title": "One project's jobs"
+    },
+    {
+      "action": "jobs.get",
+      "family": "get",
+      "input": {
+        "target": {
+          "job_id": 41
+        }
+      },
+      "title": "Job summary"
+    },
+    {
+      "action": "jobs.get",
+      "family": "get",
+      "input": {
+        "projection": "result",
+        "target": {
+          "ref": "sinnix://jobs/41"
+        }
+      },
+      "title": "Typed result"
+    },
+    {
+      "action": "jobs.logs",
+      "family": "get",
+      "input": {
+        "target": {
+          "job_id": 41
+        }
+      },
+      "title": "First 64 KB of a log"
+    },
+    {
+      "action": "jobs.logs",
+      "family": "get",
+      "input": {
+        "max_bytes": 64000,
+        "offset": 64000,
+        "target": {
+          "ref": "sinnix://jobs/41"
+        }
+      },
+      "title": "Continue from an offset"
+    },
+    {
+      "action": "jobs.wait",
+      "family": "wait",
+      "input": {
+        "target": {
+          "job_id": 41
+        },
+        "timeout_seconds": 60
+      },
+      "title": "Wait a minute"
+    },
+    {
+      "action": "jobs.cancel",
+      "family": "operate",
+      "input": {
+        "expected_phase": "running",
+        "idempotency_key": "cancel-41",
+        "target": {
+          "job_id": 41
+        }
+      },
+      "title": "Cancel a running job"
+    },
+    {
+      "action": "jobs.retry",
+      "family": "operate",
+      "input": {
+        "idempotency_key": "retry-41",
+        "target": {
+          "job_id": 41
+        }
+      },
+      "title": "Retry job 41"
+    },
+    {
+      "action": "operations.run",
+      "family": "run",
+      "input": {
+        "checkout": {
+          "project": "sinnix"
+        },
+        "idempotency_key": "check-1",
+        "operation": "check"
+      },
+      "title": "Run sinnix check"
+    },
+    {
+      "action": "operations.run",
+      "family": "run",
+      "input": {
+        "checkout": {
+          "path": "/realm/worktrees/sinnix-example"
+        },
+        "idempotency_key": "lint-worktree-1",
+        "operation": "lint"
+      },
+      "title": "Run on a worktree"
+    },
+    {
+      "action": "shell.run",
+      "family": "run",
+      "input": {
+        "argv": [
+          "git",
+          "status",
+          "--short"
+        ],
+        "checkout": {
+          "project": "sinnix"
+        },
+        "idempotency_key": "status-1",
+        "timeout_seconds": 300
+      },
+      "title": "git status in sinnix"
+    },
+    {
+      "action": "agent.for_bead",
+      "family": "run",
+      "input": {
+        "bead": {
+          "id": "sinnix-abc1"
+        },
+        "idempotency_key": "lane-sinnix-abc1"
+      },
+      "title": "Start a lane"
+    },
+    {
+      "action": "agent.for_bead",
+      "family": "run",
+      "input": {
+        "backend": "codex",
+        "bead": {
+          "ref": "sinnix://projects/sinnix/beads/sinnix-abc1"
+        },
+        "effort": "high",
+        "idempotency_key": "lane-sinnix-abc1-codex",
+        "model": "gpt-5.6-terra"
+      },
+      "title": "Pin the agent"
+    },
+    {
+      "action": "wait.for",
+      "family": "wait",
+      "input": {
+        "condition": {
+          "kind": "job_terminal",
+          "target": {
+            "job_id": 41
+          }
+        },
+        "timeout_seconds": 120
+      },
+      "title": "Wait for a job"
+    },
+    {
+      "action": "wait.for",
+      "family": "wait",
+      "input": {
+        "condition": {
+          "bead": {
+            "id": "sinnix-abc1"
+          },
+          "kind": "bead_status",
+          "status": "closed"
+        }
+      },
+      "title": "Wait for a bead to close"
+    },
+    {
+      "action": "wait.for",
+      "family": "wait",
+      "input": {
+        "condition": {
+          "kind": "file_exists",
+          "target": {
+            "path": "/realm/tmp/work/out.png"
+          }
+        }
+      },
+      "title": "Wait for a file to appear"
+    },
+    {
+      "action": "wait.for",
+      "family": "wait",
+      "input": {
+        "condition": {
+          "kind": "unit_state",
+          "manager": "user",
+          "state": "active",
+          "unit": "pueued.service"
+        }
+      },
+      "title": "Wait for a unit to be active"
+    },
+    {
+      "action": "events.tail",
+      "family": "events",
+      "input": {
+        "limit": 50
+      },
+      "title": "Latest events"
+    },
+    {
+      "action": "events.tail",
+      "family": "events",
+      "input": {
+        "limit": 100,
+        "projects": [
+          {
+            "project": "sinnix"
+          }
+        ]
+      },
+      "title": "One project"
+    },
+    {
+      "action": "context.compose",
+      "family": "context",
+      "input": {
+        "intent": "project.orientation",
+        "project": {
+          "project": "sinnix"
+        }
+      },
+      "title": "Orient in sinnix"
+    },
+    {
+      "action": "context.compose",
+      "family": "context",
+      "input": {
+        "intent": "job.review",
+        "job": {
+          "job_id": 41
+        }
+      },
+      "title": "Review a job"
+    },
+    {
+      "action": "context.compose",
+      "family": "context",
+      "input": {
+        "intent": "incident",
+        "project": {
+          "project": "sinnix"
+        }
+      },
+      "title": "Incident overview"
+    },
+    {
+      "action": "desktop.snapshot",
+      "family": "status",
       "input": {},
-      "verb": "query"
+      "title": "Observe the desktop"
+    },
+    {
+      "action": "desktop.screenshot",
+      "family": "query",
+      "input": {},
+      "title": "Focused output"
+    },
+    {
+      "action": "desktop.screenshot",
+      "family": "query",
+      "input": {
+        "target": {
+          "kind": "active_window"
+        }
+      },
+      "title": "The active window"
+    },
+    {
+      "action": "desktop.screenshot",
+      "family": "query",
+      "input": {
+        "target": {
+          "kind": "window",
+          "window": {
+            "class": "kitty"
+          }
+        }
+      },
+      "title": "A window by class"
+    },
+    {
+      "action": "desktop.tree",
+      "family": "query",
+      "input": {
+        "max_depth": 10
+      },
+      "title": "Active window tree"
+    },
+    {
+      "action": "desktop.operate",
+      "family": "operate",
+      "input": {
+        "action": {
+          "operation": "focus",
+          "window": {
+            "title_contains": "Codex"
+          }
+        },
+        "idempotency_key": "focus-1"
+      },
+      "title": "Focus a window by title"
+    },
+    {
+      "action": "desktop.operate",
+      "family": "operate",
+      "input": {
+        "action": {
+          "command": "kitty --class scratch",
+          "operation": "launch",
+          "wait_for": {
+            "class": "scratch"
+          }
+        },
+        "idempotency_key": "launch-1"
+      },
+      "title": "Launch and wait"
+    },
+    {
+      "action": "desktop.operate",
+      "family": "operate",
+      "input": {
+        "action": {
+          "key": "L",
+          "mods": "CTRL",
+          "operation": "key"
+        },
+        "idempotency_key": "key-1"
+      },
+      "title": "Ctrl+L in the active window"
+    },
+    {
+      "action": "terminals.list",
+      "family": "catalog",
+      "input": {},
+      "title": "List terminals"
+    },
+    {
+      "action": "terminals.get",
+      "family": "get",
+      "input": {
+        "target": {
+          "focused": true
+        }
+      },
+      "title": "The focused terminal"
+    },
+    {
+      "action": "terminals.screen",
+      "family": "query",
+      "input": {
+        "target": {
+          "title_contains": "Codex"
+        }
+      },
+      "title": "Screen of a titled terminal"
+    },
+    {
+      "action": "terminals.scrollback",
+      "family": "query",
+      "input": {
+        "lines": 200,
+        "target": {
+          "title_contains": "Codex"
+        }
+      },
+      "title": "Last 200 lines of history"
+    },
+    {
+      "action": "terminals.scrollback",
+      "family": "query",
+      "input": {
+        "source": "last_command",
+        "target": {
+          "title_contains": "Codex"
+        }
+      },
+      "title": "Output of the last command"
+    },
+    {
+      "action": "terminals.processes",
+      "family": "query",
+      "input": {
+        "target": {
+          "title_contains": "Codex"
+        }
+      },
+      "title": "Processes in a terminal"
+    },
+    {
+      "action": "terminals.send",
+      "family": "operate",
+      "input": {
+        "idempotency_key": "send-1",
+        "input": {
+          "enter": true,
+          "kind": "text",
+          "text": "status"
+        },
+        "target": {
+          "title_contains": "Codex"
+        }
+      },
+      "title": "Send a line"
+    },
+    {
+      "action": "terminals.send",
+      "family": "operate",
+      "input": {
+        "idempotency_key": "send-2",
+        "input": {
+          "keys": [
+            "ctrl+c"
+          ],
+          "kind": "keys"
+        },
+        "target": {
+          "title_contains": "Codex"
+        }
+      },
+      "title": "Interrupt"
+    },
+    {
+      "action": "terminals.run",
+      "family": "run",
+      "input": {
+        "command": [
+          "git",
+          "status"
+        ],
+        "idempotency_key": "run-1",
+        "target": {
+          "title_contains": "Codex"
+        }
+      },
+      "title": "Run and wait"
+    },
+    {
+      "action": "terminals.run",
+      "family": "run",
+      "input": {
+        "capture_exit_status": true,
+        "command": "make test",
+        "idempotency_key": "run-2",
+        "target": {
+          "title_contains": "Codex"
+        },
+        "timeout_seconds": 600
+      },
+      "title": "Run with exit status"
+    },
+    {
+      "action": "terminals.wait",
+      "family": "wait",
+      "input": {
+        "condition": {
+          "kind": "prompt"
+        },
+        "target": {
+          "title_contains": "Codex"
+        }
+      },
+      "title": "Wait for the prompt"
+    },
+    {
+      "action": "terminals.wait",
+      "family": "wait",
+      "input": {
+        "condition": {
+          "kind": "regex",
+          "pattern": "done|completed"
+        },
+        "target": {
+          "title_contains": "Codex"
+        },
+        "timeout_seconds": 120
+      },
+      "title": "Wait for a pattern"
+    },
+    {
+      "action": "terminals.focus",
+      "family": "operate",
+      "input": {
+        "idempotency_key": "focus-1",
+        "target": {
+          "title_contains": "Codex"
+        }
+      },
+      "title": "Focus by title"
+    },
+    {
+      "action": "terminals.open",
+      "family": "operate",
+      "input": {
+        "cwd": "/realm/project/sinnix",
+        "idempotency_key": "open-1"
+      },
+      "title": "New window in a project"
+    },
+    {
+      "action": "terminals.open",
+      "family": "operate",
+      "input": {
+        "command": [
+          "htop"
+        ],
+        "idempotency_key": "open-2",
+        "placement": "tab"
+      },
+      "title": "Run a command in a new tab"
+    },
+    {
+      "action": "browser.pages",
+      "family": "catalog",
+      "input": {},
+      "title": "List pages"
+    },
+    {
+      "action": "browser.page",
+      "family": "get",
+      "input": {
+        "target": {
+          "url_contains": "example.test"
+        }
+      },
+      "title": "Read a page"
+    },
+    {
+      "action": "browser.screenshot",
+      "family": "query",
+      "input": {
+        "full_page": true,
+        "target": {
+          "url_contains": "example.test"
+        }
+      },
+      "title": "Full-page PNG"
+    },
+    {
+      "action": "browser.operate",
+      "family": "operate",
+      "input": {
+        "action": {
+          "operation": "new",
+          "url": "https://example.test"
+        },
+        "idempotency_key": "new-1"
+      },
+      "title": "Open an agent page"
+    },
+    {
+      "action": "browser.operate",
+      "family": "operate",
+      "input": {
+        "action": {
+          "element": {
+            "ref": "g1e4"
+          },
+          "operation": "click"
+        },
+        "idempotency_key": "click-1",
+        "target": {
+          "url_contains": "example.test"
+        }
+      },
+      "title": "Click by snapshot ref"
+    },
+    {
+      "action": "browser.operate",
+      "family": "operate",
+      "input": {
+        "action": {
+          "element": {
+            "selector": "#q"
+          },
+          "operation": "fill",
+          "value": "sinnix"
+        },
+        "idempotency_key": "fill-1",
+        "target": {
+          "url_contains": "example.test"
+        }
+      },
+      "title": "Fill and submit"
+    },
+    {
+      "action": "browser.operate",
+      "family": "operate",
+      "input": {
+        "action": {
+          "for": "text",
+          "operation": "wait",
+          "value": "Results"
+        },
+        "idempotency_key": "wait-1",
+        "target": {
+          "url_contains": "example.test"
+        }
+      },
+      "title": "Wait for text"
+    },
+    {
+      "action": "machine.snapshot",
+      "family": "status",
+      "input": {},
+      "title": "Machine overview"
     },
     {
       "action": "machine.query",
-      "cli_input": {
-        "action_name": "machine.query"
+      "family": "query",
+      "input": {
+        "cursor": 0,
+        "limit": 50,
+        "operation": "units"
       },
-      "input": {},
-      "verb": "query"
+      "title": "Units page"
     },
     {
-      "action": "capabilities.query",
-      "cli_input": {
-        "action_name": "capabilities.query"
+      "action": "machine.query",
+      "family": "query",
+      "input": {
+        "operation": "actions"
       },
-      "input": {},
-      "verb": "query"
+      "title": "Ops revision"
     },
     {
-      "action": "mcp.query",
-      "cli_input": {
-        "action_name": "mcp.query"
+      "action": "machine.units.list",
+      "family": "query",
+      "input": {
+        "scope": "user",
+        "state": "failed"
       },
-      "input": {},
-      "verb": "query"
+      "title": "Failed user units"
     },
     {
-      "action": "desktop.query",
-      "cli_input": {
-        "action_name": "desktop.query"
+      "action": "machine.units.get",
+      "family": "get",
+      "input": {
+        "target": {
+          "name": "polylogued",
+          "scope": "user"
+        }
       },
-      "input": {},
-      "verb": "query"
+      "title": "Describe polylogued"
     },
     {
-      "action": "terminals.query",
-      "cli_input": {
-        "action_name": "terminals.query"
+      "action": "machine.units.logs",
+      "family": "query",
+      "input": {
+        "lines": 50,
+        "since": "-1h",
+        "target": {
+          "name": "polylogued"
+        }
       },
-      "input": {},
-      "verb": "query"
+      "title": "Last 50 lines"
     },
     {
-      "action": "browser.query",
-      "cli_input": {
-        "action_name": "browser.query"
+      "action": "machine.operate",
+      "family": "operate",
+      "input": {
+        "expected_revision": 42,
+        "idempotency_key": "restart-example",
+        "reason": "apply the approved restart",
+        "request": {
+          "action": "restart"
+        },
+        "target": "sinnix://machine/units/user/example.service"
       },
-      "input": {},
-      "verb": "query"
+      "title": "Restart a unit"
     },
     {
-      "action": "files.query",
-      "cli_input": {
-        "action_name": "files.query"
+      "action": "machine.operate",
+      "family": "operate",
+      "input": {
+        "expected_revision": 42,
+        "idempotency_key": "policy-example",
+        "reason": "bound the runaway",
+        "request": {
+          "action": "set_policy",
+          "property": "MemoryHigh",
+          "value": "4G"
+        },
+        "target": "sinnix://machine/units/user/example.service"
       },
-      "input": {},
-      "verb": "query"
+      "title": "Cap a unit's memory"
     },
     {
-      "action": "sessions.query",
-      "cli_input": {
-        "action_name": "sessions.query"
+      "action": "machine.units.operate",
+      "family": "operate",
+      "input": {
+        "action": "restart",
+        "expected_revision": 42,
+        "idempotency_key": "restart-example-2",
+        "reason": "apply config",
+        "target": {
+          "name": "example",
+          "scope": "user"
+        }
       },
-      "input": {},
-      "verb": "query"
+      "title": "Restart by name"
     },
     {
-      "action": "memory.query",
-      "cli_input": {
-        "action_name": "memory.query"
+      "action": "processes.list",
+      "family": "query",
+      "input": {
+        "name": "rg"
       },
-      "input": {},
-      "verb": "query"
+      "title": "Processes named rg"
     },
     {
-      "action": "timeline.query",
-      "cli_input": {
-        "action_name": "timeline.query"
+      "action": "processes.list",
+      "family": "query",
+      "input": {
+        "unit": {
+          "name": "polylogued"
+        }
       },
-      "input": {},
-      "verb": "query"
+      "title": "Processes of a unit"
     },
     {
-      "action": "artifacts.query",
-      "cli_input": {
-        "action_name": "artifacts.query"
+      "action": "processes.get",
+      "family": "get",
+      "input": {
+        "target": {
+          "pid": 1234
+        }
       },
-      "input": {},
-      "verb": "query"
+      "title": "Inspect pid 1234"
     },
     {
-      "action": "audit.verify",
-      "cli_input": {
-        "action_name": "audit.verify"
+      "action": "processes.tree",
+      "family": "query",
+      "input": {
+        "max_depth": 4,
+        "root": {
+          "unit": {
+            "name": "polylogued"
+          }
+        }
       },
+      "title": "Subtree of a unit's main process"
+    },
+    {
+      "action": "processes.signal",
+      "family": "operate",
+      "input": {
+        "idempotency_key": "stop-4242",
+        "reason": "runaway rg",
+        "request": {
+          "expected_revision": 17,
+          "operation": "stop"
+        },
+        "target": {
+          "pid": 4242
+        }
+      },
+      "title": "Reducer stop"
+    },
+    {
+      "action": "processes.signal",
+      "family": "operate",
+      "input": {
+        "idempotency_key": "hup-kitty-1",
+        "reason": "reload config",
+        "request": {
+          "operation": "signal",
+          "signal": "HUP"
+        },
+        "target": {
+          "name": "kitty"
+        }
+      },
+      "title": "Direct SIGHUP"
+    },
+    {
+      "action": "processes.wait",
+      "family": "wait",
+      "input": {
+        "target": {
+          "pid": 4242
+        },
+        "timeout_seconds": 10
+      },
+      "title": "Wait up to 10 s"
+    },
+    {
+      "action": "mcp.servers",
+      "family": "status",
+      "input": {
+        "servers": [
+          "polylogue"
+        ]
+      },
+      "title": "Probe one server"
+    },
+    {
+      "action": "mcp.servers",
+      "family": "status",
       "input": {},
-      "verb": "query"
+      "title": "Probe all"
+    },
+    {
+      "action": "mcp.tools",
+      "family": "catalog",
+      "input": {
+        "effect": "read",
+        "text": "search"
+      },
+      "title": "Read tools mentioning search"
+    },
+    {
+      "action": "mcp.call",
+      "family": "query",
+      "input": {
+        "arguments": {
+          "query": "gateway"
+        },
+        "target": {
+          "server": "polylogue",
+          "tool": "search"
+        }
+      },
+      "title": "Call by server and tool"
+    },
+    {
+      "action": "mcp.change",
+      "family": "change",
+      "input": {
+        "arguments": {},
+        "idempotency_key": "mcp-refresh-example",
+        "target": {
+          "ref": "sinnix://mcp/lynchpin/tools/refresh"
+        }
+      },
+      "title": "Call a write tool"
+    },
+    {
+      "action": "artifacts.list",
+      "family": "catalog",
+      "input": {
+        "kind": "mcp-stderr",
+        "limit": 20
+      },
+      "title": "Recent MCP stderr captures"
+    },
+    {
+      "action": "artifacts.get",
+      "family": "get",
+      "input": {
+        "target": {
+          "ref": "sinnix://artifacts/00000000-0000-0000-0000-000000000000"
+        }
+      },
+      "title": "By ref"
+    },
+    {
+      "action": "artifacts.read",
+      "family": "query",
+      "input": {
+        "target": {
+          "artifact_id": "00000000-0000-0000-0000-000000000000"
+        }
+      },
+      "title": "First 64 KB of a stored response"
     },
     {
       "action": "captures.query",
-      "cli_input": {
-        "action_name": "captures.query"
-      },
+      "family": "query",
       "input": {},
-      "verb": "query"
+      "title": "Visible lanes"
     },
     {
-      "action": "jobs.query",
-      "cli_input": {
-        "action_name": "jobs.query",
-        "parameters": {
-          "limit": 100
-        }
-      },
+      "action": "captures.query",
+      "family": "query",
       "input": {
-        "parameters": {
-          "limit": 100
+        "request": {
+          "lanes": [
+            "clipboard",
+            "mpris"
+          ],
+          "operation": "query",
+          "since": 1700000000
         }
       },
-      "verb": "query"
+      "title": "Deltas for two lanes"
+    },
+    {
+      "action": "activity.query",
+      "family": "query",
+      "input": {
+        "kinds": [
+          "clipboard",
+          "notifications"
+        ],
+        "limit": 50
+      },
+      "title": "Last hour of clipboard and notifications"
+    },
+    {
+      "action": "sessions.query",
+      "family": "query",
+      "input": {
+        "request": {
+          "limit": 20,
+          "operation": "list",
+          "provider": "claude-code"
+        }
+      },
+      "title": "Recent Claude Code sessions"
+    },
+    {
+      "action": "sessions.query",
+      "family": "query",
+      "input": {
+        "request": {
+          "operation": "search",
+          "provider": "codex",
+          "query": "gateway"
+        }
+      },
+      "title": "Search"
+    },
+    {
+      "action": "memory.query",
+      "family": "query",
+      "input": {
+        "request": {
+          "operation": "search",
+          "query": "screenshot probe"
+        }
+      },
+      "title": "Search all sources"
+    },
+    {
+      "action": "timeline.query",
+      "family": "query",
+      "input": {
+        "end": "2026-09-05T00:00:00Z",
+        "start": "2026-09-04T00:00:00Z"
+      },
+      "title": "Yesterday's sessions"
+    },
+    {
+      "action": "audit.verify",
+      "family": "status",
+      "input": {},
+      "title": "Verify"
+    },
+    {
+      "action": "audit.receipt",
+      "family": "get",
+      "input": {
+        "ref": "sinnix://receipts/00000000-0000-0000-0000-000000000000"
+      },
+      "title": "By ref"
+    },
+    {
+      "action": "results.get",
+      "family": "get",
+      "input": {
+        "result_id": "example-result"
+      },
+      "title": "By id"
+    },
+    {
+      "action": "capabilities.query",
+      "family": "catalog",
+      "input": {
+        "request": {
+          "operation": "search",
+          "query": "screenshot"
+        }
+      },
+      "title": "Search"
+    },
+    {
+      "action": "capabilities.query",
+      "family": "catalog",
+      "input": {
+        "request": {
+          "name": "sinnix-observe",
+          "operation": "describe"
+        }
+      },
+      "title": "Describe"
     }
   ],
-  "revision": "v2-g3.0-pueue-jobs",
-  "schema": "sinnix.gateway-cli-fixtures.v1"
+  "revision": "v3-typed-actions",
+  "schema": "sinnix.gateway-cli-fixtures.v2"
 }

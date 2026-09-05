@@ -31,9 +31,7 @@ def test_generated_artifacts_are_current_and_deterministic() -> None:
         assert check_artifacts(ROOT) == []
     assert render_reference() == render_reference()
     assert render_skill() == render_skill()
-    assert render_skill().startswith(
-        "---\nname: agent-gateway\ndescription: Use when invoking, inspecting, or documenting "
-    )
+    assert render_skill().startswith("---\nname: agent-gateway\ndescription: ")
     assert render_fixtures() == render_fixtures()
     assert (
         json.loads(FIXTURE_FILE.read_text())["action_catalog_hash"]
@@ -44,6 +42,7 @@ def test_generated_artifacts_are_current_and_deterministic() -> None:
 def test_every_generated_example_validates_against_the_live_action_schema() -> None:
     fixtures = json.loads(FIXTURE_FILE.read_text())
     actions = {row["name"]: row for row in catalog_payload()["actions"]}
+    assert set(actions) == {fixture["action"] for fixture in fixtures["examples"]}
     for fixture in fixtures["examples"]:
         schema = actions[fixture["action"]]["input_schema"]
         errors = list(Draft202012Validator(schema).iter_errors(fixture["input"]))
@@ -63,11 +62,11 @@ def test_corrupting_an_action_name_or_field_fails_generation_check(
         target = tmp_path / path
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content)
+    assert check_artifacts(tmp_path) == []
     reference = tmp_path / REFERENCE_PATH
     reference.write_text(
         reference.read_text().replace("`gateway.status`", "`gateway.corrupt`", 1)
     )
     assert check_artifacts(tmp_path)
-
     reference.write_text(render_reference().replace("Catalog SHA-256", "Corrupt field"))
     assert check_artifacts(tmp_path)

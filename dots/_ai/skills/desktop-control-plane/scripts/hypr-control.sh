@@ -19,6 +19,12 @@ Commands:
   keyword <name> <value>
   batch "<command1 ; command2 ; ...>"
   screenshot-probe
+  snapshot                         monitors, workspaces, clients, active window/workspace, cursor; one JSON document
+  window <window> <close|float|fullscreen|move X Y|resize W H>
+  exec <command>                   spawn a command in the session (hl.dsp.exec_cmd)
+  open <uri>                       xdg-open in the session
+  type <window> --text <text> [--delay-ms <n>]   focus, then type with wtype
+  pointer <move X Y | click [left|right|middle] [--double] | drag X1 Y1 X2 Y2 | scroll DX DY>
 
 Notes:
 - This is a thin, safe wrapper around hyprctl for automation.
@@ -349,6 +355,207 @@ screenshot-probe)
       }),
       any_hdr: (map(.colorManagementPreset == "hdr") | any)
     }'
+  ;;
+
+snapshot)
+  need_cmd jq
+  jq -n \
+    --arg generation "$(date +%s%N)" \
+    --argjson monitors "$(hyprctl -j monitors)" \
+    --argjson workspaces "$(hyprctl -j workspaces)" \
+    --argjson clients "$(hyprctl -j clients)" \
+    --argjson active_window "$(hyprctl -j activewindow)" \
+    --argjson active_workspace "$(hyprctl -j activeworkspace)" \
+    --arg cursor "$(hyprctl cursorpos)" \
+    '{
+        generation: $generation,
+        monitors: $monitors,
+        workspaces: $workspaces,
+        clients: $clients,
+        active_window: (if ($active_window | type) == "object" and ($active_window.address // "") != "" then $active_window else null end),
+        active_workspace: $active_workspace,
+        cursor: ($cursor | capture("(?<x>-?[0-9]+), (?<y>-?[0-9]+)") | {x: (.x|tonumber), y: (.y|tonumber)})
+      }'
+  ;;
+
+window)
+  [[ $# -ge 2 ]] || {
+    echo "window requires a window selector and an operation" >&2
+    exit 2
+  }
+  window_lua=$(lua_quote "$1")
+  op="$2"
+  shift 2
+  case "$op" in
+  close) hypr_dispatch "hl.dsp.window.close({ window = $window_lua })" ;;
+  float) hypr_dispatch "hl.dsp.window.float({ window = $window_lua })" ;;
+  fullscreen) hypr_dispatch "hl.dsp.window.fullscreen({ window = $window_lua })" ;;
+  move)
+    [[ $# -eq 2 && $1 =~ ^-?[0-9]+$ && $2 =~ ^-?[0-9]+$ ]] || {
+      echo "window move requires integer X Y" >&2
+      exit 2
+    }
+    hypr_dispatch "hl.dsp.window.move({ window = $window_lua, x = $1, y = $2 })"
+    ;;
+  resize)
+    [[ $# -eq 2 && $1 =~ ^[0-9]+$ && $2 =~ ^[0-9]+$ ]] || {
+      echo "window resize requires integer W H" >&2
+      exit 2
+    }
+    hypr_dispatch "hl.dsp.window.resize({ window = $window_lua, x = $1, y = $2 })"
+    ;;
+  *)
+    echo "unknown window operation: $op" >&2
+    exit 2
+    ;;
+  esac
+  ;;
+
+exec)
+  [[ $# -ge 1 ]] || {
+    echo "exec requires a command" >&2
+    exit 2
+  }
+  hypr_dispatch "hl.dsp.exec_cmd($(lua_quote "$*"))"
+  ;;
+
+open)
+  [[ $# -eq 1 ]] || {
+    echo "open requires one uri" >&2
+    exit 2
+  }
+  hypr_dispatch "hl.dsp.exec_cmd($(lua_quote "xdg-open $(printf '%q' "$1")"))"
+  ;;
+
+type)
+  need_cmd wtype
+  [[ $# -ge 1 ]] || {
+    echo "type requires a window selector" >&2
+    exit 2
+  }
+  window="$1"
+  shift
+  text=""
+  delay_ms=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+    --text)
+      text="${2?missing text}"
+      shift 2
+      ;;
+    --delay-ms)
+      delay_ms="${2:?missing delay}"
+      shift 2
+      ;;
+    *)
+      echo "unknown arg: $1" >&2
+      exit 2
+      ;;
+    esac
+  done
+  [[ -n $text ]] || {
+    echo "type requires --text" >&2
+    exit 2
+  }
+  focus_window "$window" >/dev/null
+  sleep 0.15
+  wtype -d "$delay_ms" -- "$text"
+  ;;
+
+pointer)
+  need_cmd jq
+  [[ $# -ge 1 ]] || {
+    echo "pointer requires an operation" >&2
+    exit 2
+  }
+  op="$1"
+  shift
+  pointer_tool=""
+  if command -v ydotool >/dev/null 2>&1; then pointer_tool="ydotool"; fi
+  pointer_move() {
+    hypr_dispatch "hl.dsp.cursor.move({ x = $1, y = $2 })" >/dev/null
+  }
+  pointer_button() {
+    # ydotool click codes: 0xC0 left, 0xC1 right, 0xC2 middle (press+release)
+    local code
+    case "$1" in
+    left) code=0xC0 ;;
+    right) code=0xC1 ;;
+    middle) code=0xC2 ;;
+    *) code=0xC0 ;;
+    esac
+    ydotool click "$code"
+  }
+  require_pointer_tool() {
+    if [[ -z $pointer_tool ]]; then
+      jq -nc --arg op "$op" '{available: false, operation: $op, reason: "no virtual pointer tool on this host (ydotool); cursor movement only"}'
+      exit 0
+    fi
+  }
+  case "$op" in
+  move)
+    [[ $# -eq 2 && $1 =~ ^-?[0-9]+$ && $2 =~ ^-?[0-9]+$ ]] || {
+      echo "pointer move requires integer X Y" >&2
+      exit 2
+    }
+    pointer_move "$1" "$2"
+    jq -nc --argjson x "$1" --argjson y "$2" '{available: true, operation: "move", x: $x, y: $y}'
+    ;;
+  click)
+    button="left"
+    double=0
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+      left | right | middle)
+        button="$1"
+        shift
+        ;;
+      --double)
+        double=1
+        shift
+        ;;
+      *)
+        echo "unknown arg: $1" >&2
+        exit 2
+        ;;
+      esac
+    done
+    require_pointer_tool
+    pointer_button "$button"
+    if [[ $double -eq 1 ]]; then
+      sleep 0.05
+      pointer_button "$button"
+    fi
+    jq -nc --arg button "$button" --argjson double "$double" '{available: true, operation: "click", button: $button, double: ($double == 1)}'
+    ;;
+  drag)
+    [[ $# -eq 4 ]] || {
+      echo "pointer drag requires X1 Y1 X2 Y2" >&2
+      exit 2
+    }
+    require_pointer_tool
+    pointer_move "$1" "$2"
+    ydotool click 0x40
+    sleep 0.05
+    pointer_move "$3" "$4"
+    sleep 0.05
+    ydotool click 0x80
+    jq -nc '{available: true, operation: "drag"}'
+    ;;
+  scroll)
+    [[ $# -eq 2 && $1 =~ ^-?[0-9]+$ && $2 =~ ^-?[0-9]+$ ]] || {
+      echo "pointer scroll requires integer DX DY" >&2
+      exit 2
+    }
+    require_pointer_tool
+    ydotool mousemove --wheel -x "$1" -y "$2"
+    jq -nc --argjson dx "$1" --argjson dy "$2" '{available: true, operation: "scroll", dx: $dx, dy: $dy}'
+    ;;
+  *)
+    echo "unknown pointer operation: $op" >&2
+    exit 2
+    ;;
+  esac
   ;;
 
 -h | --help | help | "")

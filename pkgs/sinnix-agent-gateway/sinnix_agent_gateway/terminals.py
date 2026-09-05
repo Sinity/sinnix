@@ -45,13 +45,22 @@ class TerminalService:
         self.artifacts = artifacts
         self.execution = execution or OwnerExecution()
 
-    def _run(self, arguments: list[str]) -> dict[str, Any]:
+    def invoke(
+        self, arguments: list[str], *, mutating: bool, timeout: float = 30
+    ) -> Any:
+        """Run one declared wrapper verb for a typed action; returns decoded output."""
+        self.principal.require(
+            Capability.TERMINAL_ACTION if mutating else Capability.TERMINAL_READ
+        )
+        return self._run(arguments, timeout=timeout)["result"]
+
+    def _run(self, arguments: list[str], *, timeout: float = 30) -> dict[str, Any]:
         route = OwnerRoute("terminal-kitty", EnvironmentProfile.TERMINAL)
         result = self.execution.run(
             [self.config.kitty_control_command, *arguments],
             ExecutionProfile(
                 route=route,
-                timeout_seconds=30,
+                timeout_seconds=timeout,
                 max_stdout_bytes=self.config.max_result_bytes,
             ),
         )

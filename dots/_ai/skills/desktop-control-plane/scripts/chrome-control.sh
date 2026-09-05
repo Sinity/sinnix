@@ -66,8 +66,15 @@ Commands:
                                   agent workspace; prints its page id
   toggle-agent-workspace          Switch to the agent workspace, or back to the
                                   previous workspace when already there
-  list                            List all open pages (id, title, url, type)
-  list-tabs                       List only page-type targets
+  list [--json]                   List all open pages (id, title, url, type)
+  list-tabs [--json]              List only page-type targets
+  page-snapshot <page_id> [--max-text <n>] [--max-elements <n>]
+                                  JSON: url, title, text, links, forms and interactive
+                                  elements tagged with data-sinnix-ref ids for this generation
+  key <page_id> --key <Enter|Tab|Escape|...|single char> [--mod ctrl|shift|alt|meta ...]
+                                  Press one key through CDP Input.dispatchKeyEvent
+  download <page_id> --url <url> --out <file>
+                                  Fetch a URL with the page's credentials into a local file (<= 1.5 MB)
   info <page_id>                  Get detailed info for a page
   new-tab [--url <url>] [--background]
                                   Open a new tab without activating it when requested
@@ -428,6 +435,10 @@ disable_agent_window_rules() {
 
 resolve_page_id() {
   local maybe_id="$1"
+  [[ -n $maybe_id ]] || {
+    echo "empty page id" >&2
+    exit 2
+  }
   # If it looks like a full UUID, use it directly
   if [[ $maybe_id =~ ^[A-F0-9]{32}$ ]]; then
     echo "$maybe_id"
@@ -668,8 +679,226 @@ toggle-agent-workspace)
 list | list-tabs)
   filter="."
   [[ $cmd == "list-tabs" ]] && filter='map(select(.type == "page"))'
+  if [[ ${1:-} == "--json" ]]; then
+    curl -fsS "${CDP_BASE}/json" | jq -c "${filter} | map({id, title, url, type})"
+    exit 0
+  fi
   curl -s "${CDP_BASE}/json" | jq -r "${filter} | .[] | [.id, .title[0:80], .url[0:100], .type] | @tsv" 2>/dev/null |
     awk 'BEGIN{print "PAGE_ID\tTITLE\tURL\tTYPE"} {print}'
+  ;;
+
+page-snapshot)
+  page_id=""
+  max_text=20000
+  max_elements=300
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+    --max-text)
+      max_text="${2:?missing max-text}"
+      shift 2
+      ;;
+    --max-elements)
+      max_elements="${2:?missing max-elements}"
+      shift 2
+      ;;
+    *)
+      if [[ -z $page_id ]]; then
+        page_id="$1"
+        shift
+      else
+        echo "unknown arg: $1" >&2
+        exit 2
+      fi
+      ;;
+    esac
+  done
+  [[ -n $page_id ]] || {
+    echo "page-snapshot requires page_id" >&2
+    exit 2
+  }
+  page_id=$(resolve_page_id "$page_id")
+  ws_url=$(get_ws_url "$page_id")
+  [[ -n $ws_url ]] || {
+    echo "page not found: $page_id" >&2
+    exit 1
+  }
+  read -r -d '' snapshot_js <<'JS' || true
+(() => {
+  const MAXT = __MAXT__, MAXE = __MAXE__;
+  const gen = (window.__sinnixGen = (window.__sinnixGen || 0) + 1);
+  const sel = 'a[href],button,input,select,textarea,[role=button],[role=link],[role=textbox],[role=checkbox],[role=menuitem],[role=tab],[contenteditable=true],summary,[onclick]';
+  const vis = e => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+  const trim = (v, n) => String(v == null ? '' : v).trim().slice(0, n);
+  const els = []; let n = 0;
+  for (const e of document.querySelectorAll('[data-sinnix-ref]')) e.removeAttribute('data-sinnix-ref');
+  for (const e of document.querySelectorAll(sel)) {
+    if (!vis(e)) continue;
+    if (n >= MAXE) break;
+    n++;
+    const ref = 'g' + gen + 'e' + n;
+    e.setAttribute('data-sinnix-ref', ref);
+    const r = e.getBoundingClientRect();
+    els.push({
+      ref, tag: e.tagName.toLowerCase(), type: e.getAttribute('type'), role: e.getAttribute('role'),
+      name: trim(e.getAttribute('aria-label') || e.getAttribute('name') || e.getAttribute('placeholder'), 200),
+      text: trim(e.innerText || e.textContent, 200), href: e.href || null,
+      value: (e.tagName === 'INPUT' || e.tagName === 'TEXTAREA' || e.tagName === 'SELECT') ? trim(e.value, 200) : null,
+      disabled: !!e.disabled,
+      rect: { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) }
+    });
+  }
+  const links = Array.from(document.querySelectorAll('a[href]')).slice(0, MAXE)
+    .map(a => ({ text: trim(a.innerText, 200), href: a.href, ref: a.getAttribute('data-sinnix-ref') }));
+  const forms = Array.from(document.forms).map((f, i) => ({
+    index: i, id: f.id || null, name: f.getAttribute('name'), action: f.action || null, method: f.method || null,
+    ref: f.getAttribute('data-sinnix-ref'),
+    fields: Array.from(f.elements).filter(vis).slice(0, 100).map(e => ({
+      ref: e.getAttribute('data-sinnix-ref'), tag: e.tagName.toLowerCase(), type: e.type || null,
+      name: e.name || null, value: trim(e.value, 200)
+    }))
+  }));
+  const body = (document.body && document.body.innerText) || '';
+  return JSON.stringify({
+    generation: gen, url: location.href, title: document.title, ready_state: document.readyState,
+    text: body.slice(0, MAXT), text_truncated: body.length > MAXT, elements: els, links, forms
+  });
+})()
+JS
+  snapshot_js="${snapshot_js//__MAXT__/$max_text}"
+  snapshot_js="${snapshot_js//__MAXE__/$max_elements}"
+  params=$(jq -nc --arg expr "$snapshot_js" '{expression: $expr, returnByValue: true}')
+  cdp_send_with_result "$ws_url" "Runtime.evaluate" "$params" | jq -r '.result.value // empty'
+  ;;
+
+key)
+  page_id=""
+  keyname=""
+  mods=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+    --key)
+      keyname="${2:?missing key}"
+      shift 2
+      ;;
+    --mod)
+      mods+=("${2:?missing mod}")
+      shift 2
+      ;;
+    *)
+      if [[ -z $page_id ]]; then
+        page_id="$1"
+        shift
+      else
+        echo "unknown arg: $1" >&2
+        exit 2
+      fi
+      ;;
+    esac
+  done
+  [[ -n $page_id && -n $keyname ]] || {
+    echo "key requires page_id and --key" >&2
+    exit 2
+  }
+  page_id=$(resolve_page_id "$page_id")
+  ws_url=$(get_ws_url "$page_id")
+  [[ -n $ws_url ]] || {
+    echo "page not found: $page_id" >&2
+    exit 1
+  }
+  modifiers=0
+  for m in "${mods[@]}"; do
+    case "${m,,}" in
+    alt) modifiers=$((modifiers | 1)) ;;
+    ctrl | control) modifiers=$((modifiers | 2)) ;;
+    meta | super) modifiers=$((modifiers | 4)) ;;
+    shift) modifiers=$((modifiers | 8)) ;;
+    *)
+      echo "unknown modifier: $m" >&2
+      exit 2
+      ;;
+    esac
+  done
+  text=""
+  case "$keyname" in
+  Enter | Return) key="Enter" code="Enter" vk=13 text=$'\r' ;;
+  Tab) key="Tab" code="Tab" vk=9 ;;
+  Escape | Esc) key="Escape" code="Escape" vk=27 ;;
+  Backspace) key="Backspace" code="Backspace" vk=8 ;;
+  Delete) key="Delete" code="Delete" vk=46 ;;
+  Space) key=" " code="Space" vk=32 text=" " ;;
+  ArrowLeft | Left) key="ArrowLeft" code="ArrowLeft" vk=37 ;;
+  ArrowUp | Up) key="ArrowUp" code="ArrowUp" vk=38 ;;
+  ArrowRight | Right) key="ArrowRight" code="ArrowRight" vk=39 ;;
+  ArrowDown | Down) key="ArrowDown" code="ArrowDown" vk=40 ;;
+  Home) key="Home" code="Home" vk=36 ;;
+  End) key="End" code="End" vk=35 ;;
+  PageUp) key="PageUp" code="PageUp" vk=33 ;;
+  PageDown) key="PageDown" code="PageDown" vk=34 ;;
+  ?)
+    key="$keyname"
+    upper="${keyname^^}"
+    code="Key${upper}"
+    vk=$(printf '%d' "'$upper")
+    [[ $modifiers -eq 0 || $modifiers -eq 8 ]] && text="$keyname"
+    ;;
+  *)
+    echo "unsupported key: $keyname" >&2
+    exit 2
+    ;;
+  esac
+  for type in keyDown keyUp; do
+    params=$(jq -nc --arg type "$type" --arg key "$key" --arg code "$code" --argjson vk "$vk" --argjson modifiers "$modifiers" --arg text "$text" '{type: $type, key: $key, code: $code, windowsVirtualKeyCode: $vk, nativeVirtualKeyCode: $vk, modifiers: $modifiers}
+       + (if $type == "keyDown" and $text != "" then {text: $text} else {} end)')
+    cdp_send_with_result "$ws_url" "Input.dispatchKeyEvent" "$params" >/dev/null
+  done
+  jq -nc --arg id "$page_id" --arg key "$key" --argjson modifiers "$modifiers" '{id: $id, key: $key, modifiers: $modifiers, pressed: true}'
+  ;;
+
+download)
+  page_id=""
+  url=""
+  out_file=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+    --url)
+      url="${2:?missing url}"
+      shift 2
+      ;;
+    --out)
+      out_file="${2:?missing out}"
+      shift 2
+      ;;
+    *)
+      if [[ -z $page_id ]]; then
+        page_id="$1"
+        shift
+      else
+        echo "unknown arg: $1" >&2
+        exit 2
+      fi
+      ;;
+    esac
+  done
+  [[ -n $page_id && -n $url && -n $out_file ]] || {
+    echo "download requires page_id, --url and --out" >&2
+    exit 2
+  }
+  page_id=$(resolve_page_id "$page_id")
+  ws_url=$(get_ws_url "$page_id")
+  [[ -n $ws_url ]] || {
+    echo "page not found: $page_id" >&2
+    exit 1
+  }
+  download_js=$(jq -nc --arg url "$url" '$url' | jq -r '"fetch(" + tojson + ", {credentials: \"include\"}).then(async r => { const b = new Uint8Array(await r.arrayBuffer()); let s = \"\"; for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i]); return JSON.stringify({status: r.status, type: r.headers.get(\"content-type\"), bytes: b.length, b64: btoa(s)}); })"')
+  params=$(jq -nc --arg expr "$download_js" '{expression: $expr, returnByValue: true, awaitPromise: true}')
+  payload=$(cdp_send_with_result "$ws_url" "Runtime.evaluate" "$params" | jq -r '.result.value // empty')
+  [[ -n $payload ]] || {
+    echo "download produced no payload (response may exceed the 2 MB CDP buffer)" >&2
+    exit 1
+  }
+  mkdir -p "$(dirname "$out_file")"
+  jq -r '.b64' <<<"$payload" | base64 -d >"$out_file"
+  jq -c --arg id "$page_id" --arg url "$url" --arg out "$out_file" 'del(.b64) + {id: $id, url: $url, out: $out}' <<<"$payload"
   ;;
 
 info)

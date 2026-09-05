@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import base64
-import binascii
 import hashlib
 import json
 import time
@@ -11,10 +9,12 @@ from typing import Any, Awaitable, Callable, Mapping
 from uuid import uuid4
 
 import anyio
-from mcp.types import CallToolResult, TextContent, ToolAnnotations
+from mcp.types import CallToolResult, TextContent
 from sinnix_mcp import ErrorCode, RequestEnvelope
 from sinnix_mcp.execution import ExecutionProfile, OwnerDiagnosticError, OwnerExecution
 
+from .action import Action
+from .actions import REVISION as ACTION_REVISION
 from .artifacts import ArtifactService
 from .audit import AuditService
 from .beads import BeadsError, BeadsService
@@ -31,19 +31,20 @@ from .contexts import (
     ContextSnapshotStore,
     source_revision,
 )
-from .contracts import ActionSpec, EffectMode
+from .contracts import EffectMode
 from .desktop import DesktopService
 from .events import EventCursorError, NormalizedEventService
 from .execution import LocalJobs
 from .files import HostFileService
+from .locators import decode_file_ref
 from .machine_actions import MachineActionService
 from .mcp_broker import McpBrokerService
 from .memory import MemoryService
 from .observe import ObserveService
 from .project_context import ProjectContextService
-from .projects import ProjectPreconditionError, ProjectService
+from .projects import ProjectService
 from .redaction import public_error
-from .registry import MACHINE_OPERATIONS, REGISTRY, CatalogSearch, RegistryError
+from .registry import REGISTRY, RegistryError
 from .results import ProtocolError, RequestContext, ResultError, ResultService
 from .route_preflight import GatewayRoutePreflight
 from .schemas import V2ToolEnvelope
@@ -64,25 +65,18 @@ DAEMON_ERROR_CLASSES = {
     ErrorCode.RESULT_INVALID: "owner_failed",
 }
 
-AUDITED_READ_TOOL = ToolAnnotations(
-    readOnlyHint=True,
-    destructiveHint=False,
-    idempotentHint=True,
-    openWorldHint=False,
-)
-
 TOKEN_ESTIMATE_BYTES_PER_TOKEN = 4
-IDEMPOTENT_RUN_TOOL = ToolAnnotations(
-    readOnlyHint=False,
-    destructiveHint=False,
-    idempotentHint=True,
-    openWorldHint=True,
-)
-IDEMPOTENT_MUTATION_TOOL = ToolAnnotations(
-    readOnlyHint=False,
-    destructiveHint=True,
-    idempotentHint=True,
-    openWorldHint=False,
+MACHINE_OPERATIONS = (
+    "interrupt",
+    "freeze",
+    "thaw",
+    "reset_policy",
+    "set_policy",
+    "park",
+    "rebuild_override",
+    "restart",
+    "start",
+    "stop",
 )
 
 
@@ -194,6 +188,10 @@ class Runtime:
     normalized_events: NormalizedEventService | None = None
     waits: BoundedWaitService | None = None
     context_snapshots: ContextSnapshotStore | None = None
+    tool_manifest: Callable[[], Awaitable[dict[str, Any]]] | None = None
+
+    def principal_contract_hash(self) -> str:
+        return _principal_contract(self.principal_name)
 
     @classmethod
     def create(cls, config: GatewayConfig, principal_name: str) -> "Runtime":
@@ -234,9 +232,7 @@ class Runtime:
             beads=runtime.beads,
             audit=runtime.audit,
             transitions_path=config.runtime_transitions,
-            jobs=lambda limit, cursor: runtime.v2_jobs_query(
-                {"limit": limit, **({"cursor": cursor} if cursor else {})}
-            ),
+            jobs=lambda limit, cursor: runtime._recent_jobs(limit, cursor),
         )
         runtime.context_snapshots = ContextSnapshotStore(
             config.state_dir, principal_name
@@ -318,46 +314,6 @@ class Runtime:
             )
         status["route_preflight"] = preflight
         return status
-
-    def catalog(self, search: CatalogSearch) -> dict[str, Any]:
-        def resolve_availability(kind: str, name: str) -> tuple[str, str | None]:
-            if kind == "action":
-                return "available", None
-            if any(
-                action.name != "gateway.catalog"
-                and name in action.resource_kinds
-                and (search.principal is None or search.principal in action.principals)
-                for action in REGISTRY.actions
-            ):
-                return "available", None
-            return (
-                "unavailable",
-                "no migrated V2 action currently exposes this resource",
-            )
-
-        selected_project: dict[str, Any] | None = None
-        if search.project is not None:
-            selected_project = next(
-                (
-                    project
-                    for project in self.projects.list()["projects"]
-                    if project["project_id"] == search.project
-                ),
-                None,
-            )
-            if selected_project is None or not selected_project["available"]:
-                raise ProtocolError(
-                    "unavailable", "project is unavailable to this principal"
-                )
-        catalog = REGISTRY.search(search, availability_resolver=resolve_availability)
-        if selected_project is not None:
-            catalog["project"] = {
-                **selected_project,
-                "ref": REGISTRY.reference(
-                    "project", {"project_id": selected_project["project_id"]}
-                ),
-            }
-        return catalog
 
     def project_authority(self, project_id: str) -> dict[str, Any]:
         checkouts = self.projects.checkouts(project_id)["checkouts"]
@@ -476,28 +432,6 @@ class Runtime:
                 "reason": "project authority exceeded project context response bound",
                 "ref": REGISTRY.reference("project", {"project_id": project_id}),
             },
-        }
-
-    def v2_query(self, reference: str, query: str, max_matches: int) -> dict[str, Any]:
-        project_id, checkout_id, canonical_ref = self._project_reference(
-            reference, allow_checkout=True
-        )
-        if (
-            not isinstance(max_matches, int)
-            or isinstance(max_matches, bool)
-            or not 1 <= max_matches <= 1_000
-        ):
-            raise ProtocolError("invalid_request", "max_matches must be 1-1000")
-        result = self.projects.search(project_id, query, max_matches, checkout_id)
-        selected_checkout = checkout_id or "default"
-        return {
-            "ref": canonical_ref,
-            "project_ref": REGISTRY.reference("project", {"project_id": project_id}),
-            "checkout_ref": REGISTRY.reference(
-                "checkout",
-                {"project_id": project_id, "checkout_id": selected_checkout},
-            ),
-            **result,
         }
 
     def compose_context(self, reference: str, intent: str) -> dict[str, Any]:
@@ -662,9 +596,7 @@ class Runtime:
                     "sinnix://events",
                 ),
                 component("receipts", lambda: self.audit.tail(50), "sinnix://receipts"),
-                component(
-                    "jobs", lambda: self.v2_jobs_query({"limit": 50}), "sinnix://jobs"
-                ),
+                component("jobs", lambda: self._recent_jobs(50), "sinnix://jobs"),
             ]
         context = self.context_composer.compose(intent, target_ref, components)
         by_name = {row["name"]: row for row in context["components"]}
@@ -714,9 +646,6 @@ class Runtime:
             raise ProtocolError("unavailable", "context snapshot store is unavailable")
         self.context_snapshots.put(context)
         return {"ref": target_ref, **context}
-
-    def v2_context(self, reference: str, intent: str = "project") -> dict[str, Any]:
-        return self.compose_context(reference, intent)
 
     def v2_run_for_bead(
         self,
@@ -798,261 +727,6 @@ class Runtime:
             rows.append(row)
         result["events"] = rows
         return result
-
-    def v2_get(
-        self,
-        reference: str,
-        projection: str = "summary",
-        offset: int = 0,
-        max_bytes: int = 64_000,
-        includes: list[str] | None = None,
-        as_of: str | None = None,
-    ) -> dict[str, Any]:
-        try:
-            resource, values = REGISTRY.resolve(reference)
-        except RegistryError as exc:
-            raise ProtocolError(
-                "not_found", "canonical resource was not found"
-            ) from exc
-        canonical_ref = str(resource.ref_template.format(values))
-        if self.principal.name not in resource.principals:
-            raise PolicyError(
-                f"principal {self.principal.name} cannot read {resource.kind} resources"
-            )
-        if projection not in {"summary", "log", "result"}:
-            raise ProtocolError(
-                "invalid_request", "resource projection is not recognized"
-            )
-        if not isinstance(offset, int) or isinstance(offset, bool) or offset < 0:
-            raise ProtocolError("invalid_request", "resource offset is malformed")
-        if (
-            not isinstance(max_bytes, int)
-            or isinstance(max_bytes, bool)
-            or not 1 <= max_bytes <= 262_144
-        ):
-            raise ProtocolError(
-                "invalid_request", "resource max_bytes must be 1-262144"
-            )
-        if resource.kind != "job" and projection != "summary":
-            raise ProtocolError(
-                "invalid_request",
-                "resource projection requires a canonical job reference",
-            )
-        if resource.kind == "project":
-            return {
-                "ref": canonical_ref,
-                "kind": resource.kind,
-                **self.project_authority(values["project_id"]),
-            }
-        if resource.kind == "checkout":
-            return {
-                "ref": canonical_ref,
-                "kind": resource.kind,
-                "checkout": self.projects.checkout(
-                    values["project_id"], values["checkout_id"]
-                ),
-            }
-        if resource.kind == "bead":
-            return {
-                "ref": canonical_ref,
-                "kind": resource.kind,
-                "bead": self.beads.get(
-                    values["project_id"],
-                    values["bead_id"],
-                    includes=includes,
-                    as_of=as_of,
-                ),
-            }
-        if resource.kind == "task_authority":
-            return {
-                "ref": canonical_ref,
-                "kind": resource.kind,
-                "task_authority": self.beads.task_authority_status(
-                    values["project_id"]
-                ),
-            }
-        if resource.kind == "job":
-            job_id = values["job_id"]
-            self.principal.require(Capability.JOB_READ)
-            if projection == "summary":
-                result = self._job("job.get", {"job_id": job_id})
-            elif projection == "log":
-                result = self._job(
-                    "job.logs",
-                    {"job_id": job_id, "offset": offset, "max_bytes": max_bytes},
-                )
-            else:
-                if offset:
-                    raise ProtocolError(
-                        "invalid_request", "job result does not support offsets"
-                    )
-                result = self._job(
-                    "job.result", {"job_id": job_id, "max_bytes": max_bytes}
-                )
-            if result.get("job_id") != job_id:
-                raise ProtocolError(
-                    "owner_failed",
-                    "job owner get response does not match the requested job",
-                )
-            return {
-                "ref": canonical_ref,
-                "kind": resource.kind,
-                "projection": projection,
-                "job": result,
-            }
-        if resource.kind == "artifact":
-            return {
-                "ref": canonical_ref,
-                "kind": resource.kind,
-                "artifact": self.artifacts.read(
-                    values["artifact_id"], offset, max_bytes
-                ),
-            }
-        if resource.kind == "receipt":
-            return {
-                "ref": canonical_ref,
-                "kind": resource.kind,
-                "receipt": self.audit.receipt(values["receipt_id"]),
-            }
-        if resource.kind == "result":
-            return {
-                "ref": canonical_ref,
-                "kind": resource.kind,
-                "result": self.results.read(values["result_id"]),
-            }
-        if resource.kind == "machine_unit":
-            page = self.observe.machine_query("units", limit=500)
-            rows = page.get("rows") if isinstance(page, Mapping) else None
-            if not isinstance(rows, list):
-                raise ProtocolError("unavailable", "machine unit owner is unavailable")
-            unit = next(
-                (
-                    row
-                    for row in rows
-                    if isinstance(row, Mapping)
-                    and row.get("unit") == values["unit"]
-                    and row.get("manager", values["manager"]) == values["manager"]
-                ),
-                None,
-            )
-            if unit is None:
-                raise ProtocolError(
-                    "not_found", "machine unit is not in the current bounded owner page"
-                )
-            return {
-                "ref": canonical_ref,
-                "kind": resource.kind,
-                "unit": dict(unit),
-                "source": page.get("source"),
-            }
-        if resource.kind == "process":
-            page = self.observe.machine_query("workloads", limit=500)
-            rows = page.get("rows") if isinstance(page, Mapping) else None
-            if not isinstance(rows, list):
-                raise ProtocolError("unavailable", "process owner is unavailable")
-            process = next(
-                (
-                    row
-                    for row in rows
-                    if isinstance(row, Mapping)
-                    and str(row.get("pid")) == values["pid"]
-                    and str(row.get("start_ticks", row.get("start_time", "")))
-                    == values["start_ticks"]
-                ),
-                None,
-            )
-            if process is None:
-                raise ProtocolError(
-                    "not_found", "process is not in the current bounded owner page"
-                )
-            return {
-                "ref": canonical_ref,
-                "kind": resource.kind,
-                "process": dict(process),
-                "source": page.get("source"),
-            }
-        if resource.kind == "browser_page":
-            return {
-                "ref": canonical_ref,
-                "kind": resource.kind,
-                "page": self.browser.describe_target(values["page_id"]),
-            }
-        if resource.kind == "browser_workspace":
-            return {
-                "ref": canonical_ref,
-                "kind": resource.kind,
-                "workspace": self.browser.read("status"),
-            }
-        if resource.kind == "terminal":
-            return {
-                "ref": canonical_ref,
-                "kind": resource.kind,
-                "terminal": self.terminals.read(
-                    "capture",
-                    {
-                        "match": f"id:{values['terminal_id']}",
-                        "extent": "last_non_empty_output",
-                    },
-                ),
-            }
-        if resource.kind == "desktop":
-            return {
-                "ref": canonical_ref,
-                "kind": resource.kind,
-                "desktop": self.desktop.read("status"),
-            }
-        if resource.kind == "host_file":
-            return {
-                "ref": canonical_ref,
-                "kind": resource.kind,
-                "file": self.files.read(
-                    "stat", self._decode_file_token(values["file_token"])
-                ),
-            }
-        if resource.kind == "mcp_tool":
-            return {
-                "ref": canonical_ref,
-                "kind": resource.kind,
-                "tool": {
-                    "server": values["server"],
-                    "name": values["tool"],
-                    "availability": "unavailable",
-                    "reason": "live MCP tool metadata requires an asynchronous owner read",
-                },
-            }
-        if resource.kind == "capture_lane":
-            return {
-                "ref": canonical_ref,
-                "kind": resource.kind,
-                "lane": self.captures.lane(values["lane"]),
-            }
-        if resource.kind == "capability":
-            return {
-                "ref": canonical_ref,
-                "kind": resource.kind,
-                "capability": self.capability_index.describe(values["name"]),
-            }
-        if resource.kind == "session":
-            return {
-                "ref": canonical_ref,
-                "kind": resource.kind,
-                "session": self.sessions.read(
-                    f"{values['provider']}:{values['session_id']}", offset, max_bytes
-                ),
-            }
-        if resource.kind == "context_snapshot":
-            if self.context_snapshots is None:
-                raise ProtocolError(
-                    "unavailable", "context snapshot store is unavailable"
-                )
-            try:
-                snapshot = self.context_snapshots.get(values["snapshot_id"])
-            except KeyError as exc:
-                raise ProtocolError(
-                    "not_found", "context snapshot is not retained"
-                ) from exc
-            return {"ref": canonical_ref, "kind": resource.kind, "snapshot": snapshot}
-        raise ValueError(f"V2 get does not support resource kind {resource.kind!r}")
 
     def v2_run_shell(
         self,
@@ -1151,6 +825,18 @@ class Runtime:
         return {**result, "ref": REGISTRY.reference("job", {"job_id": job_id})}
 
     @staticmethod
+    def _resource_reference(
+        reference: str, allowed: set[str], message: str
+    ) -> tuple[Any, dict[str, str], str]:
+        try:
+            resource, values = REGISTRY.resolve(reference)
+        except RegistryError as exc:
+            raise ProtocolError("not_found", message) from exc
+        if resource.kind not in allowed:
+            raise ProtocolError("invalid_request", message)
+        return resource, values, str(resource.ref_template.format(values))
+
+    @staticmethod
     def _required_preconditions(
         preconditions: Mapping[str, Any] | None,
         allowed: set[str],
@@ -1166,380 +852,51 @@ class Runtime:
             )
         return values
 
-    def _project_change_preconditions(
-        self,
-        project_id: str,
-        checkout_id: str | None,
-        preconditions: Mapping[str, Any] | None,
-    ) -> str:
-        values = self._required_preconditions(preconditions, {"head", "dirty_sha256"})
-        selected_checkout = checkout_id or "default"
-        checkout = self.projects.checkout(project_id, selected_checkout)["checkout"]
-        for name, expected in values.items():
-            if not isinstance(expected, str) or checkout.get(name) != expected:
-                raise ProtocolError(
-                    "precondition_failed", f"project checkout {name} no longer matches"
-                )
-        return selected_checkout
-
-    def v2_change(
-        self,
-        *,
-        reference: str,
-        operation: str,
-        path: str | None,
-        content: str | None,
-        patch: str | None,
-        preconditions: Mapping[str, Any] | None,
-    ) -> dict[str, Any]:
-        project_id, checkout_id, canonical_ref = self._project_reference(
-            reference, allow_checkout=True
-        )
-        selected_checkout = self._project_change_preconditions(
-            project_id, checkout_id, preconditions
-        )
-        if operation == "write":
-            if not isinstance(path, str) or not path or not isinstance(content, str):
-                raise ProtocolError(
-                    "invalid_request", "write requires path and content"
-                )
-            if patch is not None:
-                raise ProtocolError("invalid_request", "write does not accept patch")
-            try:
-                result = self.projects.write(
-                    project_id,
-                    path,
-                    content,
-                    selected_checkout,
-                    preconditions,
-                )
-            except ProjectPreconditionError as exc:
-                raise ProtocolError("precondition_failed", str(exc)) from exc
-        elif operation == "apply_patch":
-            if not isinstance(patch, str) or not patch:
-                raise ProtocolError("invalid_request", "apply_patch requires patch")
-            if path is not None or content is not None:
-                raise ProtocolError(
-                    "invalid_request", "apply_patch does not accept path or content"
-                )
-            try:
-                result = self.projects.apply_patch(
-                    project_id,
-                    patch,
-                    selected_checkout,
-                    preconditions,
-                )
-            except ProjectPreconditionError as exc:
-                raise ProtocolError("precondition_failed", str(exc)) from exc
-        else:
-            raise ProtocolError(
-                "invalid_request", "project change operation is not recognized"
-            )
+    def _recent_jobs(self, limit: int, cursor: str | None = None) -> dict[str, Any]:
+        self.principal.require(Capability.JOB_READ)
+        arguments: dict[str, Any] = {"limit": limit}
+        if cursor:
+            arguments["cursor"] = cursor
+        response = self._job("job.list", arguments)
+        jobs = response.get("jobs")
+        if not isinstance(jobs, list):
+            raise ProtocolError("owner_failed", "job owner list response is malformed")
+        rows = [
+            {
+                "ref": REGISTRY.reference("job", {"job_id": str(job.get("job_id"))}),
+                **job,
+            }
+            for job in jobs
+            if isinstance(job, Mapping)
+        ]
         return {
-            "ref": canonical_ref,
-            "project_ref": REGISTRY.reference("project", {"project_id": project_id}),
-            "checkout_ref": REGISTRY.reference(
-                "checkout", {"project_id": project_id, "checkout_id": selected_checkout}
+            "jobs": rows,
+            "limit": limit,
+            "truncated": bool(response.get("truncated")),
+            "next_cursor": response.get("next_cursor"),
+            "snapshot": response.get("snapshot"),
+        }
+
+    def _unit_view(self, values: Mapping[str, str]) -> dict[str, Any]:
+        page = self.observe.machine_query("units", limit=500)
+        rows = page.get("rows") if isinstance(page, Mapping) else None
+        if not isinstance(rows, list):
+            raise ProtocolError("unavailable", "machine unit owner is unavailable")
+        unit = next(
+            (
+                row
+                for row in rows
+                if isinstance(row, Mapping)
+                and row.get("unit") == values["unit"]
+                and row.get("manager", values["manager"]) == values["manager"]
             ),
-            "operation": operation,
-            "owner_result": result,
-        }
-
-    @staticmethod
-    def _parameters(value: Mapping[str, Any] | None) -> dict[str, Any]:
-        if not isinstance(value, Mapping):
-            raise ProtocolError("invalid_request", "parameters must be an object")
-        return dict(value)
-
-    @staticmethod
-    def _resource_reference(
-        reference: str, allowed: set[str], message: str
-    ) -> tuple[Any, dict[str, str], str]:
-        try:
-            resource, values = REGISTRY.resolve(reference)
-        except RegistryError as exc:
-            raise ProtocolError("not_found", message) from exc
-        if resource.kind not in allowed:
-            raise ProtocolError("invalid_request", message)
-        return resource, values, str(resource.ref_template.format(values))
-
-    @staticmethod
-    def _decode_file_token(token: str) -> str:
-        try:
-            padded = token + "=" * (-len(token) % 4)
-            path = base64.b64decode(
-                padded.encode(), altchars=b"-_", validate=True
-            ).decode("utf-8")
-        except (ValueError, UnicodeDecodeError, binascii.Error) as exc:
+            None,
+        )
+        if unit is None:
             raise ProtocolError(
-                "invalid_request", "file reference is malformed"
-            ) from exc
-        if not path or len(path) > 4_096 or not path.startswith("/"):
-            raise ProtocolError("invalid_request", "file reference is malformed")
-        return path
-
-    def v2_file_change(
-        self,
-        *,
-        reference: str,
-        operation: str,
-        parameters: Mapping[str, Any] | None,
-        preconditions: Mapping[str, Any] | None,
-    ) -> dict[str, Any]:
-        _resource, values, canonical_ref = self._resource_reference(
-            reference, {"host_file"}, "ref does not identify a canonical host file"
-        )
-        arguments = self._parameters(parameters)
-        allowed = {
-            "append": {"content"},
-            "copy": {"destination_ref"},
-            "mkdir": set(),
-            "move": {"destination_ref"},
-            "remove": set(),
-            "replace": {"content"},
-        }
-        if operation not in allowed:
-            raise ProtocolError(
-                "unsupported_capability", "file operation is not declared"
+                "not_found", "machine unit is not in the current bounded owner page"
             )
-        if set(arguments) - allowed[operation]:
-            raise ProtocolError(
-                "invalid_request", "file parameters are not valid for this operation"
-            )
-        if operation in {"append", "replace"} and not isinstance(
-            arguments.get("content"), str
-        ):
-            raise ProtocolError("invalid_request", "file operation requires content")
-        destination: str | None = None
-        if operation in {"copy", "move"}:
-            destination_ref = arguments.get("destination_ref")
-            if not isinstance(destination_ref, str):
-                raise ProtocolError(
-                    "invalid_request", "file operation requires destination_ref"
-                )
-            _destination, destination_values, _ = self._resource_reference(
-                destination_ref,
-                {"host_file"},
-                "destination_ref does not identify a canonical host file",
-            )
-            destination = self._decode_file_token(destination_values["file_token"])
-        expected_sha256: str | None = None
-        if preconditions is not None:
-            if not isinstance(preconditions, Mapping) or set(preconditions) - {
-                "expected_sha256"
-            }:
-                raise ProtocolError(
-                    "invalid_request", "file preconditions are not recognized"
-                )
-            value = preconditions.get("expected_sha256")
-            if value is not None and (not isinstance(value, str) or len(value) != 64):
-                raise ProtocolError("invalid_request", "expected_sha256 is malformed")
-            expected_sha256 = value
-        result = self.files.write(
-            operation,
-            self._decode_file_token(values["file_token"]),
-            content=arguments.get("content"),
-            destination=destination,
-            expected_sha256=expected_sha256,
-        )
-        response = {"ref": canonical_ref, **result}
-        if destination is not None:
-            destination_token = (
-                base64.urlsafe_b64encode(destination.encode()).decode().rstrip("=")
-            )
-            response["destination_ref"] = REGISTRY.reference(
-                "host_file", {"file_token": destination_token}
-            )
-        return response
-
-    def v2_beads_query(self, parameters: Mapping[str, Any]) -> dict[str, Any]:
-        values = self._parameters(parameters)
-        graph = values.pop("graph", None)
-        memory = values.pop("memory", None)
-        if graph is not None:
-            projects = values.pop("project_ids", None)
-            if (
-                not isinstance(graph, Mapping)
-                or not isinstance(projects, list)
-                or len(projects) != 1
-            ):
-                raise ProtocolError(
-                    "invalid_request",
-                    "Beads graph requires one project_id and graph object",
-                )
-            return self.beads.graph(projects[0], **dict(graph))
-        if memory is not None:
-            projects = values.pop("project_ids", None)
-            if (
-                not isinstance(memory, Mapping)
-                or not isinstance(projects, list)
-                or len(projects) != 1
-            ):
-                raise ProtocolError(
-                    "invalid_request",
-                    "Beads memory requires one project_id and memory object",
-                )
-            return self.beads.memories(projects[0], **dict(memory))
-        return self.beads.query(**values)
-
-    def v2_beads_change(
-        self,
-        *,
-        reference: str,
-        operation: str,
-        parameters: Mapping[str, Any] | None,
-        preconditions: Mapping[str, Any] | None,
-    ) -> dict[str, Any]:
-        resource, values, canonical_ref = self._resource_reference(
-            reference,
-            {"project", "bead"},
-            "ref does not identify a canonical project or bead",
-        )
-        mutation = self._parameters(parameters)
-        if resource.kind == "bead":
-            mutation.setdefault("id", values["bead_id"])
-        result = self.beads.change(
-            values["project_id"],
-            operation,
-            mutation,
-            mode=str(mutation.pop("mode", "apply")),
-            preconditions=preconditions,
-            preview_digest=mutation.pop("preview_digest", None),
-        )
-        return {"ref": canonical_ref, **result}
-
-    def v2_beads_changeset(
-        self,
-        *,
-        reference: str,
-        operation: str,
-        parameters: Mapping[str, Any] | None,
-    ) -> dict[str, Any]:
-        _resource, values, canonical_ref = self._resource_reference(
-            reference, {"project"}, "ref does not identify a canonical project"
-        )
-        mutation = self._parameters(parameters)
-        actions = mutation.pop("actions", None)
-        if not isinstance(actions, list) or not actions:
-            raise ProtocolError(
-                "invalid_request", "Beads changeset requires ordered actions"
-            )
-        first = actions[0]
-        if not isinstance(first, Mapping) or first.get("ref") != canonical_ref:
-            raise ProtocolError(
-                "invalid_request", "changeset ref must anchor its first action"
-            )
-        result = self.beads.changeset(
-            actions,
-            mode=operation,
-            on_error=mutation.pop("on_error", None),
-            preview_digest=mutation.pop("preview_digest", None),
-        )
-        if mutation:
-            raise ProtocolError(
-                "invalid_request", "Beads changeset received unsupported parameters"
-            )
-        return {"ref": canonical_ref, **result}
-
-    def v2_beads_operate(
-        self,
-        *,
-        reference: str,
-        operation: str,
-        parameters: Mapping[str, Any] | None,
-    ) -> dict[str, Any]:
-        _resource, values, canonical_ref = self._resource_reference(
-            reference, {"project"}, "ref does not identify a canonical project"
-        )
-        return {
-            "ref": canonical_ref,
-            **self.beads.operate(
-                values["project_id"], operation, self._parameters(parameters)
-            ),
-        }
-
-    async def v2_mcp_change(
-        self,
-        *,
-        reference: str,
-        operation: str,
-        parameters: Mapping[str, Any] | None,
-    ) -> dict[str, Any]:
-        _resource, values, canonical_ref = self._resource_reference(
-            reference, {"mcp_tool"}, "ref does not identify a canonical MCP tool"
-        )
-        if operation != "call":
-            raise ProtocolError(
-                "unsupported_capability", "MCP operation is not declared"
-            )
-        result = await self.mcp_broker.call(
-            values["server"], values["tool"], self._parameters(parameters), write=True
-        )
-        return {"ref": canonical_ref, **result}
-
-    def v2_desktop_operate(
-        self, *, reference: str, operation: str, parameters: Mapping[str, Any] | None
-    ) -> dict[str, Any]:
-        _resource, _values, canonical_ref = self._resource_reference(
-            reference, {"desktop"}, "ref does not identify the canonical desktop"
-        )
-        return {
-            "ref": canonical_ref,
-            **self.desktop.action(operation, self._parameters(parameters)),
-        }
-
-    def v2_terminal_operate(
-        self, *, reference: str, operation: str, parameters: Mapping[str, Any] | None
-    ) -> dict[str, Any]:
-        _resource, values, canonical_ref = self._resource_reference(
-            reference, {"terminal"}, "ref does not identify a canonical terminal"
-        )
-        arguments = self._parameters(parameters)
-        if "match" in arguments:
-            raise ProtocolError(
-                "invalid_request", "terminal match is derived from the canonical ref"
-            )
-        return {
-            "ref": canonical_ref,
-            **self.terminals.action(
-                operation, {"match": f"id:{values['terminal_id']}", **arguments}
-            ),
-        }
-
-    def v2_browser_operate(
-        self, *, reference: str, operation: str, parameters: Mapping[str, Any] | None
-    ) -> dict[str, Any]:
-        resource, values, canonical_ref = self._resource_reference(
-            reference,
-            {"browser_workspace", "browser_page"},
-            "ref does not identify a canonical browser target",
-        )
-        arguments = self._parameters(parameters)
-        if operation == "agent_window":
-            if resource.kind != "browser_workspace":
-                raise ProtocolError(
-                    "invalid_request", "agent_window requires the browser workspace ref"
-                )
-        else:
-            if resource.kind != "browser_page":
-                raise ProtocolError(
-                    "invalid_request",
-                    "browser operation requires a gateway-owned page ref",
-                )
-            if "page_id" in arguments:
-                raise ProtocolError(
-                    "invalid_request",
-                    "browser page_id is derived from the canonical ref",
-                )
-            arguments = {"page_id": values["page_id"], **arguments}
-        result = self.browser.action(operation, arguments)
-        response = {"ref": canonical_ref, **result}
-        target = result.get("target")
-        if isinstance(target, Mapping) and isinstance(target.get("id"), str):
-            response["target_ref"] = REGISTRY.reference(
-                "browser_page", {"page_id": target["id"]}
-            )
-        return response
+        return dict(unit)
 
     def _machine_target(self, reference: str) -> tuple[str, dict[str, Any]]:
         try:
@@ -1679,130 +1036,6 @@ class Runtime:
             operator_reason=reason,
         )
         return {"ref": canonical_ref, "action": action, "owner_receipt": owner_receipt}
-
-    def v2_cancel_job(
-        self,
-        *,
-        reference: str,
-        preconditions: Mapping[str, Any] | None,
-    ) -> dict[str, Any]:
-        try:
-            resource, values = REGISTRY.resolve(reference)
-        except RegistryError as exc:
-            raise ProtocolError(
-                "not_found", "canonical job resource was not found"
-            ) from exc
-        if resource.kind != "job":
-            raise ProtocolError(
-                "invalid_request", "cancel requires a canonical job reference"
-            )
-        expected_phase = self._required_preconditions(
-            preconditions, {"expected_phase"}
-        ).get("expected_phase")
-        if not isinstance(expected_phase, str) or not expected_phase:
-            raise ProtocolError("invalid_request", "expected_phase is malformed")
-        job_id = values["job_id"]
-        self.principal.require(Capability.JOB_CANCEL)
-        status = self._job("job.get", {"job_id": job_id})
-        if status.get("job_id") != job_id:
-            raise ProtocolError(
-                "owner_failed",
-                "job owner status response does not match the requested job",
-            )
-        state = status.get("state")
-        phase = state.get("phase") if isinstance(state, Mapping) else None
-        if phase != expected_phase:
-            raise ProtocolError("precondition_failed", "job phase no longer matches")
-        cancelled = self._job("job.cancel", {"job_id": job_id})
-        if cancelled.get("job_id") != job_id or not isinstance(
-            cancelled.get("cancel_requested"), bool
-        ):
-            raise ProtocolError(
-                "owner_failed",
-                "job owner cancel response does not prove cancellation truth",
-            )
-        return {
-            "ref": str(resource.ref_template.format(values)),
-            "previous_state": status,
-            "cancel": cancelled,
-        }
-
-    def v2_wait(
-        self,
-        reference: str,
-        timeout_seconds: int,
-        target: str = "job_terminal",
-        expected: Mapping[str, Any] | None = None,
-        poll_seconds: float = 0.25,
-    ) -> dict[str, Any]:
-        if not isinstance(reference, str) or not 1 <= len(reference) <= 2_048:
-            raise ProtocolError("invalid_request", "wait ref is malformed")
-        if (
-            not isinstance(timeout_seconds, int)
-            or isinstance(timeout_seconds, bool)
-            or not 1 <= timeout_seconds <= 300
-        ):
-            raise ProtocolError(
-                "invalid_request", "wait timeout_seconds must be between 1 and 300"
-            )
-        try:
-            resource, values = REGISTRY.resolve(reference)
-        except RegistryError as exc:
-            raise ProtocolError(
-                "not_found", "canonical job resource was not found"
-            ) from exc
-        try:
-            wait_target = WaitTarget(target)
-        except ValueError as exc:
-            raise ProtocolError(
-                "invalid_request", "wait target is not recognized"
-            ) from exc
-        if wait_target is WaitTarget.JOB_TERMINAL:
-            if resource.kind != "job":
-                raise ProtocolError(
-                    "invalid_request", "job_terminal requires a canonical job reference"
-                )
-            job_id = values["job_id"]
-            self.principal.require(Capability.JOB_READ)
-            result = self._job(
-                "job.wait", {"job_id": job_id, "timeout_seconds": timeout_seconds}
-            )
-            if result.get("job_id") != job_id:
-                raise ProtocolError(
-                    "owner_failed",
-                    "job owner wait response does not match the requested job",
-                )
-            if result.get("timed_out") is True:
-                evidence = result.get("state", result)
-                result = {
-                    **result,
-                    "outcome": "timeout",
-                    "evidence": evidence
-                    if isinstance(evidence, Mapping)
-                    else {"value": evidence},
-                    "source_revision": source_revision(evidence),
-                    "continuation": source_revision(
-                        {"ref": reference, "evidence": evidence}
-                    ),
-                }
-            return {
-                **result,
-                "ref": REGISTRY.reference("job", {"job_id": job_id}),
-                "target": wait_target.value,
-            }
-        if self.waits is None:
-            raise ProtocolError("unavailable", "wait owner is unavailable")
-        try:
-            request = WaitRequest(
-                target=wait_target,
-                reference=reference,
-                expected={} if expected is None else expected,
-                timeout_seconds=timeout_seconds,
-                poll_seconds=poll_seconds,
-            )
-            return self.waits.wait(request)
-        except ValueError as exc:
-            raise ProtocolError("invalid_request", str(exc)) from exc
 
     async def v2_wait_async(
         self,
@@ -1959,7 +1192,7 @@ class Runtime:
                 raise ValueError(
                     "unit waits require a canonical machine unit reference"
                 )
-            current = self.v2_get(request.reference)["unit"]
+            current = self._unit_view(values)
             state = (
                 current.get("active_state", current.get("state"))
                 if isinstance(current, Mapping)
@@ -1974,9 +1207,7 @@ class Runtime:
         if request.target is WaitTarget.FILE_HASH:
             if resource.kind != "host_file":
                 raise ValueError("file waits require a canonical host file reference")
-            current = self.files.read(
-                "stat", self._decode_file_token(values["file_token"])
-            )
+            current = self.files.read("stat", decode_file_ref(request.reference))
             wanted = expected.get("sha256") or expected.get("hash")
             return WaitEvidence(
                 current.get("sha256") == wanted, current, str(current.get("sha256"))
@@ -2012,83 +1243,6 @@ class Runtime:
             )
         raise ValueError(f"wait target {request.target.value} is not implemented")
 
-    def v2_jobs_query(self, parameters: Mapping[str, Any] | None) -> dict[str, Any]:
-        values = self._parameters(parameters)
-        if set(values) - {"limit", "cursor"}:
-            raise ProtocolError(
-                "invalid_request", "jobs.query parameters are not recognized"
-            )
-        limit = values.get("limit", 100)
-        cursor = values.get("cursor")
-        if (
-            not isinstance(limit, int)
-            or isinstance(limit, bool)
-            or not 1 <= limit <= 1_000
-        ):
-            raise ProtocolError("invalid_request", "jobs.query limit must be 1-1000")
-        if cursor is not None and (
-            not isinstance(cursor, str) or not 1 <= len(cursor.encode()) <= 512
-        ):
-            raise ProtocolError("invalid_request", "jobs.query cursor is malformed")
-        self.principal.require(Capability.JOB_READ)
-        arguments: dict[str, Any] = {"limit": limit}
-        if cursor is not None:
-            arguments["cursor"] = cursor
-        response = self._job("job.list", arguments)
-        jobs = response.get("jobs")
-        if not isinstance(jobs, list) or any(
-            not isinstance(job, Mapping) for job in jobs
-        ):
-            raise ProtocolError("owner_failed", "job owner list response is malformed")
-        if len(jobs) > limit:
-            raise ProtocolError(
-                "owner_failed", "job owner list response exceeds its bound"
-            )
-        total = response.get("total")
-        truncated = response.get("truncated")
-        next_cursor = response.get("next_cursor")
-        snapshot = response.get("snapshot")
-        if (
-            (total is not None and (not isinstance(total, int) or total < len(jobs)))
-            or not isinstance(truncated, bool)
-            or (
-                next_cursor is not None
-                and (
-                    not isinstance(next_cursor, str)
-                    or not 1 <= len(next_cursor.encode()) <= 512
-                )
-            )
-            or not isinstance(snapshot, Mapping)
-            or set(snapshot) != {"ordering", "ceiling"}
-            or snapshot.get("ordering") != "created_at_desc_job_id_desc"
-            or not isinstance(snapshot.get("ceiling"), list)
-            or len(snapshot["ceiling"]) != 2
-            or any(not isinstance(value, str) for value in snapshot["ceiling"])
-        ):
-            raise ProtocolError(
-                "owner_failed", "job owner list response omits paging metadata"
-            )
-        if truncated != (next_cursor is not None):
-            raise ProtocolError(
-                "owner_failed", "job owner list paging metadata is inconsistent"
-            )
-        rows: list[dict[str, Any]] = []
-        for job in jobs:
-            job_id = job.get("job_id")
-            if not isinstance(job_id, str) or not job_id:
-                raise ProtocolError(
-                    "owner_failed", "job owner list response omitted a job ID"
-                )
-            rows.append({"ref": REGISTRY.reference("job", {"job_id": job_id}), **job})
-        return {
-            "jobs": rows,
-            "limit": limit,
-            "total": total,
-            "truncated": truncated,
-            "next_cursor": next_cursor,
-            "snapshot": dict(snapshot),
-        }
-
     @staticmethod
     def _resource_refs(result: Any) -> list[str]:
         refs: list[str] = []
@@ -2119,7 +1273,7 @@ class Runtime:
 
     def _record_v2_receipt(
         self,
-        action: ActionSpec,
+        action: Action,
         outcome: str,
         context: RequestContext,
         result: Any | None = None,
@@ -2170,7 +1324,7 @@ class Runtime:
             else action.route,
             "owner_version": owner_version
             if isinstance(owner_version, (str, int))
-            else REGISTRY.revision,
+            else ACTION_REVISION,
             "preconditions": dict(context.preconditions or {}),
             "before_refs": before_refs,
             "after_refs": after_refs,
@@ -2267,7 +1421,7 @@ class Runtime:
         )
 
     def _v2_success(
-        self, action: ActionSpec, result: Any, context: RequestContext
+        self, action: Action, result: Any, context: RequestContext
     ) -> dict[str, Any]:
         receipt = self._record_v2_receipt(action, "ok", context, result=result)
         return self.results.record(
@@ -2283,7 +1437,7 @@ class Runtime:
 
     def _v2_failure(
         self,
-        action: ActionSpec,
+        action: Action,
         exc: Exception,
         context: RequestContext,
         *,
@@ -2360,7 +1514,7 @@ class Runtime:
         )
 
     def _claim_v2_idempotency(
-        self, action: ActionSpec, context: RequestContext
+        self, action: Action, context: RequestContext
     ) -> dict[str, Any] | None:
         if action.effect is EffectMode.READ:
             return None
@@ -2394,7 +1548,7 @@ class Runtime:
         )
 
     def _complete_v2_idempotency(
-        self, action: ActionSpec, context: RequestContext, response: Mapping[str, Any]
+        self, action: Action, context: RequestContext, response: Mapping[str, Any]
     ) -> None:
         if action.effect is not EffectMode.READ and context.idempotency_key is not None:
             self.audit.complete_idempotency(
@@ -2406,18 +1560,14 @@ class Runtime:
 
     def execute_v2(
         self,
-        action: ActionSpec,
+        action: Action,
         callback: Callable[[], Any],
         request: Mapping[str, Any],
-        *,
-        selector_error: Exception | None = None,
     ) -> dict[str, Any]:
         context = RequestContext.create(hashlib.sha256(b"{}").hexdigest())
         reserved = False
         try:
             context = self._request_context(request)
-            if selector_error is not None:
-                raise selector_error
             if self.principal_name not in action.principals:
                 raise PolicyError(
                     f"principal {self.principal_name!r} cannot invoke action {action.name!r}"
@@ -2436,30 +1586,21 @@ class Runtime:
             reserved = action.effect is not EffectMode.READ
             response = self._v2_success(action, callback(), context)
         except Exception as exc:
-            response = self._v2_failure(
-                action,
-                exc,
-                context,
-                enforce_action_failure_codes=selector_error is None,
-            )
+            response = self._v2_failure(action, exc, context)
         if reserved:
             self._complete_v2_idempotency(action, context, response)
         return response
 
     async def execute_v2_async(
         self,
-        action: ActionSpec,
+        action: Action,
         callback: Callable[[], Awaitable[Any]],
         request: Mapping[str, Any],
-        *,
-        selector_error: Exception | None = None,
     ) -> dict[str, Any]:
         context = RequestContext.create(hashlib.sha256(b"{}").hexdigest())
         reserved = False
         try:
             context = self._request_context(request)
-            if selector_error is not None:
-                raise selector_error
             if self.principal_name not in action.principals:
                 raise PolicyError(
                     f"principal {self.principal_name!r} cannot invoke action {action.name!r}"
@@ -2478,19 +1619,14 @@ class Runtime:
             reserved = action.effect is not EffectMode.READ
             response = self._v2_success(action, await callback(), context)
         except Exception as exc:
-            response = self._v2_failure(
-                action,
-                exc,
-                context,
-                enforce_action_failure_codes=selector_error is None,
-            )
+            response = self._v2_failure(action, exc, context)
         if reserved:
             self._complete_v2_idempotency(action, context, response)
         return response
 
     def execute_v2_jsonl(
         self,
-        action: ActionSpec,
+        action: Action,
         command: list[str],
         profile: ExecutionProfile,
         request: Mapping[str, Any],

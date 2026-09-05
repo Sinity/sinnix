@@ -140,11 +140,6 @@ mkServiceModule {
                 default = null;
                 description = "Frozen endpoint tool manifest SHA-256 after publication.";
               };
-              approvedActionCatalogHash = lib.mkOption {
-                type = lib.types.nullOr lib.types.str;
-                default = null;
-                description = "Frozen endpoint action catalog SHA-256 after review.";
-              };
             };
           }
         )
@@ -212,7 +207,6 @@ mkServiceModule {
           projects = endpointProjects endpoint;
           approvals = {
             approvedManifestHash = endpoint.approvedManifestHash;
-            approvedActionCatalogHash = endpoint.approvedActionCatalogHash;
             approvedManifestPrincipal = endpoint.principal;
           };
         })
@@ -291,8 +285,8 @@ mkServiceModule {
             message = "sinnix.services.agent-gateway.endpoints.${name}.tunnelId must be set when the endpoint is enabled";
           }
           {
-            assertion = endpoint.approvedManifestHash != null && endpoint.approvedActionCatalogHash != null;
-            message = "sinnix.services.agent-gateway.endpoints.${name} requires both manifest and action catalog approvals";
+            assertion = endpoint.approvedManifestHash != null;
+            message = "sinnix.services.agent-gateway.endpoints.${name} requires an approved tool manifest hash";
           }
         ]) enabledEndpoints
       );
