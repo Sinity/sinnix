@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 from . import gitcmd, pueue, results, worktrunk
 from .agents import (
@@ -42,12 +42,15 @@ from .manifest import (
 )
 from .projects import ProjectAdapter
 from .prompts import (
+    BdReader,
     PromptConfig,
     PromptError,
     compile_worker_prompt,
     resolve_group,
     resume_prompt,
+    scope_violations,
     validate_members,
+    write_scope,
 )
 from .pueue import PueueError
 from .worktrunk import WorktrunkError
@@ -74,6 +77,19 @@ def _member_sets(
 
 def _live_runs(config: Config, project_id: str) -> list[Run]:
     return [run for run in list_runs(config, project_id) if run.live]
+
+
+def focused_verification(
+    config: Config, project: ProjectAdapter, worktree: Path
+) -> str | None:
+    """The command a worker runs for the descriptor's focused verification."""
+    operation = workspace_of(project).verify.get("focused")
+    if not operation:
+        return None
+    return (
+        f"{config.agentctl_executable} job start {project.project_id} {operation} "
+        f"--workspace {worktree} --wait"
+    )
 
 
 def _base_commit(project: ProjectAdapter) -> str:
@@ -163,6 +179,7 @@ def _prepare(
                         path / WORKTREE_STATE_DIR / "worker.schema.json"
                     ),
                     "harness": run.harness,
+                    "focused_verification": focused_verification(config, project, path),
                 },
             )
             prompt_path = write_prompt(path, "prompt.md", snapshot.prompt)
@@ -355,9 +372,53 @@ def start(
     return {**prepared.to_dict(), "resumed": False, "existing": False}
 
 
-def result(config: Config, run_id: str, worker_id: str, path: Path) -> dict[str, Any]:
+def _scope_check(
+    run: Run, worker: Mapping[str, Any], candidate: str, reader: BdReader
+) -> dict[str, Any]:
+    """The candidate's changed paths against the worker's declared write scope."""
+    worktree = worker.get("worktree")
+    if not worktree:
+        return {}
+    changed = gitcmd.git(
+        Path(worktree),
+        "diff",
+        "--name-only",
+        f"{run.base_commit}..{candidate}",
+        error=BatchError,
+    ).splitlines()
+    globs: list[str] = []
+    for bead_id in worker["beads"]:
+        try:
+            globs.extend(write_scope(reader.show(bead_id)))
+        except PromptError:
+            continue
+    if not globs:
+        return {"scope": "undeclared", "changed_paths": changed}
+    outside = scope_violations(changed, globs)
+    if outside:
+        raise BatchRefusal(
+            "scope_violation",
+            f"{worker['id']} changed paths outside its write scope: "
+            + ", ".join(outside),
+            paths=outside,
+            write_scope=globs,
+        )
+    return {"scope": "declared", "changed_paths": changed}
+
+
+def result(
+    config: Config,
+    run_id: str,
+    worker_id: str,
+    path: Path,
+    *,
+    project: ProjectAdapter | None = None,
+    reader: BdReader | None = None,
+) -> dict[str, Any]:
     """File a worker's result after validating it and binding it to the worktree head."""
     run = load(config, run_id)
+    if run.abandoned is not None:
+        raise BatchRefusal("abandoned", f"run {run_id} was abandoned")
     worker = run.worker(worker_id)
     value, errors = results.load_result(path, kind="worker")
     if errors:
@@ -399,6 +460,11 @@ def result(config: Config, run_id: str, worker_id: str, path: Path) -> dict[str,
             "foreign_beads",
             "result covers beads outside the worker: " + ", ".join(sorted(unknown)),
         )
+    if reader is None:
+        if project is None:
+            raise BatchError("batch result needs the project to read write scopes")
+        reader = SubprocessBeads(project.root)
+    scope = _scope_check(run, worker, value["candidate_sha"], reader)
 
     def record(document: dict[str, Any]) -> None:
         for entry in document["workers"]:
@@ -406,6 +472,7 @@ def result(config: Config, run_id: str, worker_id: str, path: Path) -> dict[str,
                 entry["result"] = value
                 entry["result_path"] = str(path)
                 entry["result_recorded_at"] = now()
+                entry.update(scope)
 
     run = update(config, run_id, record)
     released = False

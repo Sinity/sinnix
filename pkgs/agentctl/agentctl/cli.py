@@ -255,6 +255,7 @@ def parser() -> argparse.ArgumentParser:
     batch_result.add_argument("run_id", help="a run id or its 8-character suffix")
     batch_result.add_argument("worker_id")
     batch_result.add_argument("path", type=Path)
+    _project_option(batch_result)
     _output_arguments(batch_result)
     batch_resume = batch_verbs.add_parser(
         "resume", help="queue a fresh agent into a worker's worktree"
@@ -510,7 +511,12 @@ def _batch(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         return EXIT_OK
     if verb == "result":
         run_id = resolve_run_id(config, arguments.run_id)
-        filed = batch.result(config, run_id, arguments.worker_id, arguments.path)
+        project = resolve_project(
+            config, arguments.project or load(config, run_id).project
+        )
+        filed = batch.result(
+            config, run_id, arguments.worker_id, arguments.path, project=project
+        )
         out.write(
             filed,
             f"recorded result for {arguments.worker_id} in {out.run(run_id)}"

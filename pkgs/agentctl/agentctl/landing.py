@@ -90,7 +90,37 @@ def _worker_results(run: Run) -> list[dict[str, Any]]:
     return [dict(worker["result"]) for worker in run.workers if worker.get("result")]
 
 
-def _integrate(config: Config, project: ProjectAdapter, run: Run, base: str) -> str:
+def _agent_json(value: Any) -> str:
+    return json.dumps(value, indent=2, sort_keys=True)
+
+
+def _results_for_agents(run: Run) -> str:
+    return _agent_json(
+        [prompts.reviewer_view_of_result(r) for r in _worker_results(run)]
+    )
+
+
+def _members_for_agents(run: Run, beads: Beads) -> str:
+    return _agent_json(prompts.landing_members(run.workers, beads))
+
+
+def _review_agent(project: ProjectAdapter, run: Run) -> dict[str, str]:
+    """Backend, model and effort of the reviewer and integrator: the
+    descriptor's `[packets.review]`, else the leader worker's."""
+    declared = project.packets.review
+    if declared:
+        return dict(declared)
+    worker = run.workers[0]
+    return {
+        "backend": str(worker.get("backend") or ""),
+        "model": str(worker.get("model") or ""),
+        "effort": str(worker.get("effort") or ""),
+    }
+
+
+def _integrate(
+    config: Config, project: ProjectAdapter, run: Run, base: str, beads: Beads
+) -> str:
     """Merge every worker branch onto ``base`` in the integration worktree; return HEAD."""
     branch = run.landing["integration_branch"]
     existing = worktrunk.worktrunk_find(project.root, branch)
@@ -128,7 +158,6 @@ def _integrate(config: Config, project: ProjectAdapter, run: Run, base: str) -> 
             continue
         except BatchError:
             conflicts = _git(path, "diff", "--name-only", "--diff-filter=U")
-        worker = run.workers[0]
         prompt = prompts.landing_template("integrate").format(
             run_id=run.run_id,
             base=base,
@@ -137,7 +166,8 @@ def _integrate(config: Config, project: ProjectAdapter, run: Run, base: str) -> 
             or "- (see git status)",
             remaining="\n".join(f"- {name}" for name in branches[position + 1 :])
             or "- (none)",
-            results=json.dumps(_worker_results(run), indent=2, sort_keys=True),
+            members=_members_for_agents(run, beads),
+            results=_results_for_agents(run),
         )
         job = queue_agent(
             config,
@@ -146,9 +176,7 @@ def _integrate(config: Config, project: ProjectAdapter, run: Run, base: str) -> 
             worktree=path,
             prompt=prompt,
             prompt_name="integrate.md",
-            backend=str(worker.get("backend") or ""),
-            model=str(worker.get("model") or ""),
-            effort=str(worker.get("effort") or ""),
+            **_review_agent(project, run),
             binding=binding(run, None),
         )
         waited = launch.wait(job["job_id"], timeout_seconds=MAX_AGENT_TIMEOUT_SECONDS)
@@ -338,12 +366,13 @@ def _review(
     path: Path,
     base: str,
     candidate: str,
+    beads: Beads,
 ) -> dict[str, Any]:
-    worker = run.workers[0]
     prompt = prompts.landing_template("review").format(
         candidate=candidate,
         base=base,
-        results=json.dumps(_worker_results(run), indent=2, sort_keys=True),
+        members=_members_for_agents(run, beads),
+        results=_results_for_agents(run),
     )
     job = queue_agent(
         config,
@@ -352,9 +381,7 @@ def _review(
         worktree=path,
         prompt=prompt,
         prompt_name="review.md",
-        backend=str(worker.get("backend") or ""),
-        model=str(worker.get("model") or ""),
-        effort=str(worker.get("effort") or ""),
+        **_review_agent(project, run),
         schema="judge",
         binding=binding(run, None),
     )
@@ -600,7 +627,7 @@ def _land_locked(
             candidate = (
                 _kept_integration(config, run, base)
                 if keep_integration
-                else _integrate(config, project, run, base)
+                else _integrate(config, project, run, base, beads)
             )
             if candidate == base:
                 raise BatchRefusal(
@@ -618,7 +645,7 @@ def _land_locked(
             path = Path(run.landing["integration_worktree"])
             run, verify_run = _verify(config, project, run, path, candidate, sleep)
             run = land_update(config, run_id, verify_run=verify_run)
-            review_verdict = _review(config, project, run, path, base, candidate)
+            review_verdict = _review(config, project, run, path, base, candidate, beads)
             run = land_update(config, run_id, review_verdict=review_verdict)
             published = _publish(config, project, run, path, base, candidate, sleep)
             if published is not None:

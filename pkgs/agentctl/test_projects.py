@@ -285,3 +285,21 @@ def test_an_absent_config_file_yields_the_defaults(
     assert config.project_roots == ()
     assert config.event_spool == Path("/realm/state/agentctl/events.jsonl")
     assert config.worker_contract.name == "worker-contract.md"
+
+
+def test_packets_review_names_the_reviewer_agent_completely(tmp_path: Path) -> None:
+    root = write_project(tmp_path / "p")
+    descriptor = root / ".agentctl" / "project.toml"
+    base = descriptor.read_text()
+    descriptor.write_text(
+        base
+        + '\n[packets.review]\nbackend = "claude"\nmodel = "claude-opus-5"\neffort = "high"\n'
+    )
+    assert load_project_adapter(root).packets.review == {
+        "backend": "claude",
+        "model": "claude-opus-5",
+        "effort": "high",
+    }
+    descriptor.write_text(base + '\n[packets.review]\nbackend = "claude"\n')
+    with pytest.raises(ProjectConfigError, match=r"\[packets.review\]"):
+        load_project_adapter(root)
