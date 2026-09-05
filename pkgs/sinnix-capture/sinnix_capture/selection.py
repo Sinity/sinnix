@@ -91,10 +91,10 @@ def source_window(raw: str) -> dict:
     return {"class": parsed.get("class"), "title": parsed.get("title")}
 
 
-def _run(argv: list[str]) -> bytes | None:
-    """Command stdout, or None when it could not run or failed."""
+def _run(argv: list[str]) -> tuple[int, bytes]:
+    """A command's exit status and stdout; a status of -1 means it never ran."""
     if not argv:
-        return None
+        return (-1, b"")
     try:
         completed = subprocess.run(
             argv,
@@ -103,10 +103,8 @@ def _run(argv: list[str]) -> bytes | None:
             check=False,
         )
     except OSError:
-        return None
-    if completed.returncode != 0:
-        return None
-    return completed.stdout
+        return (-1, b"")
+    return (completed.returncode, completed.stdout)
 
 
 def _drain_watch_payload() -> None:
@@ -176,18 +174,19 @@ def capture_selection(
 ) -> int:
     _drain_watch_payload()
 
-    offered = _run(shlex.split(list_command))
-    if not offered:
+    # Types the source printed count even if it then exited nonzero: a
+    # partially failed offer still names something worth asking for.
+    _, offered = _run(shlex.split(list_command))
+    mime = pick_mime(offered.decode("utf-8", "replace"))
+    if mime is None:
         # Nothing offered right now (selection cleared, or the owner is
         # gone) -- there is nothing to capture.
         return 0
 
-    mime = pick_mime(offered.decode("utf-8", "replace"))
-    if mime is None:
-        return 0
-
-    content = _run([*shlex.split(paste_command), mime])
-    if not content:
+    # A failed transfer is not a capture: its output is a truncated prefix
+    # of the selection, which would be recorded as the whole of it.
+    status, content = _run([*shlex.split(paste_command), mime])
+    if status != 0 or not content:
         return 0
 
     digest = hashlib.sha256(content).hexdigest()
@@ -197,9 +196,11 @@ def capture_selection(
     if debounce_ms is not None and _is_superseded(debounce_state, debounce_ms):
         return 0
 
-    window_json = _run(shlex.split(window_command)) if window_command else None
+    window_status, window_json = (
+        _run(shlex.split(window_command)) if window_command else (-1, b"")
+    )
     window = source_window(
-        window_json.decode("utf-8", "replace") if window_json else "null"
+        window_json.decode("utf-8", "replace") if window_status == 0 else "null"
     )
 
     size = len(content)
