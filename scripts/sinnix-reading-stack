@@ -61,6 +61,8 @@ def _load() -> list[dict]:
 
 
 def _save(items: list[dict]) -> None:
+    # Durability: atomic only. Every push and pop is also captured to the
+    # activity lake, which is where the stack is reconstructed from.
     write_json_atomic(STATE_FILE, items)
 
 

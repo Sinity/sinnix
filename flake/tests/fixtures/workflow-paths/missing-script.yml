@@ -1,0 +1,13 @@
+# Fixture for the workflow script-path check: one step names a script that is
+# not in the tree, one names a script that is. The detector is proven against
+# this file, so the check cannot pass by finding nothing to look at.
+name: Fixture
+on: workflow_dispatch
+jobs:
+  fixture:
+    runs-on: ubuntu-latest
+    steps:
+      - name: A step whose script was deleted
+        run: python3 scripts/a-script-this-repository-does-not-ship.py --verify
+      - name: A step whose script is still shipped
+        run: bash flake/tests/preflight.sh
