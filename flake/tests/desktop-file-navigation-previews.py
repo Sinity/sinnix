@@ -55,7 +55,9 @@ for case in cases:
         env = dict(os.environ, HOME=tmp, XDG_CACHE_HOME=tmp)
         run = subprocess.run(argv, capture_output=True, text=True, env=env)
         if run.returncode != 0:
-            failures.append(f"{mime}: {path.name} exited {run.returncode}: {run.stderr.strip()}")
+            failures.append(
+                f"{mime}: {path.name} exited {run.returncode}: {run.stderr.strip()}"
+            )
         elif not output.exists() or output.stat().st_size == 0:
             failures.append(f"{mime}: {path.name} produced no thumbnail")
         elif output.read_bytes()[:8] != b"\x89PNG\r\n\x1a\n":

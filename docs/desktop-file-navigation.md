@@ -24,13 +24,13 @@ dispatch closewindow`. Previews were counted from the candidate's own
 claims support. Cost is the closure a candidate adds to the live user profile,
 not its total closure.
 
-| Candidate                                | Previews             | Sidebar places | Wayland app-id       | Added to the profile        |
-| ---------------------------------------- | -------------------- | -------------- | -------------------- | --------------------------- |
-| Nautilus 50.2.2, as configured before     | image only           | 7 of 7         | `org.gnome.Nautilus` | —                           |
-| Nautilus 50.2.2 + ffmpegthumbnailer + evince | image, video, PDF | 7 of 7         | `org.gnome.Nautilus` | 28.5 MiB, 10 store paths    |
-| Thunar 4.20.9 + tumbler 4.20.2            | image, video, PDF    | 7 of 7         | `thunar`             | 31.1 MiB, 17 store paths    |
-| Nemo 6.6.4 + the same two helpers         | image, video, PDF    | 7 of 7         | `nemo`               | 280.8 MiB, 73 store paths   |
-| PCManFM-Qt 2.4.0 + tumbler + the helpers  | image, video, PDF    | 7 of 7         | *empty*              | 8.5 MiB, 8 store paths      |
+| Candidate                                    | Previews          | Sidebar places | Wayland app-id       | Added to the profile      |
+| -------------------------------------------- | ----------------- | -------------- | -------------------- | ------------------------- |
+| Nautilus 50.2.2, as configured before        | image only        | 7 of 7         | `org.gnome.Nautilus` | —                         |
+| Nautilus 50.2.2 + ffmpegthumbnailer + evince | image, video, PDF | 7 of 7         | `org.gnome.Nautilus` | 28.5 MiB, 10 store paths  |
+| Thunar 4.20.9 + tumbler 4.20.2               | image, video, PDF | 7 of 7         | `thunar`             | 31.1 MiB, 17 store paths  |
+| Nemo 6.6.4 + the same two helpers            | image, video, PDF | 7 of 7         | `nemo`               | 280.8 MiB, 73 store paths |
+| PCManFM-Qt 2.4.0 + tumbler + the helpers     | image, video, PDF | 7 of 7         | _empty_              | 8.5 MiB, 8 store paths    |
 
 Facts behind the table:
 
@@ -62,7 +62,7 @@ the manager sidebar.
 That selection was, however, a fallback rather than a decision:
 `xdg.portal.config` was inert because the portal user unit set
 `XDG_DESKTOP_PORTAL_DIR`. xdg-desktop-portal treats that variable as a test
-hook — when it is set, one directory replaces the entire configuration *and*
+hook — when it is set, one directory replaces the entire configuration _and_
 backend search, and `/etc/xdg/xdg-desktop-portal/hyprland-portals.conf` is
 never read. The running instance logged `Choosing gtk.portal for
 org.freedesktop.impl.portal.FileChooser as a last-resort fallback` for every
