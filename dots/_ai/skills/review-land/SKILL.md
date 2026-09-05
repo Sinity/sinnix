@@ -52,8 +52,7 @@ five means the change should be split).
   `gh pr merge --squash --match-head-commit <candidate>` after the required
   checks and the reviewer verdict. Sinnix (`publish = "master"`): the
   candidate commit is fast-forwarded onto master once master still equals
-  the run's base. Hosted Codex review is advisory: read its findings, never
-  wait on it. Body sections for a hand-written PR: Summary, Problem
+  the run's base. Body sections for a hand-written PR: Summary, Problem
   (evidence), Solution (modules + non-obvious decisions), Verification
   (exact commands + the output line that matters).
 - Stage by path, never `git add -A` on significant changes. Never

@@ -19,7 +19,8 @@ get|logs|result <id>` is one job. Job ids are pueue task ids; a run id is
   start and finish, and backpressure freezes, in local time.
 - **Project rules and history**: read the repository's `CLAUDE.md` and its
   per-project memory index (`~/.claude/projects/<p>/memory/MEMORY.md`) before
-  dispatch or integration; use `docs/atlas/` for product orientation.
+  dispatch or integration; the project's atlas directory, when the
+  descriptor declares one, is product orientation.
 
 ## Who drives
 
@@ -60,7 +61,8 @@ call.
 Publication policy is the descriptor's `[workspace].publish`: `pr` pushes the
 candidate as one PR and squash-merges it on exactly that head after the
 required checks and the reviewer verdict; `master` fast-forwards the default
-branch to the candidate. Hosted Codex review is advisory.
+branch to the candidate. Hosted review comments are handled as
+`docs/agentctl.md` states.
 
 ## The operating loop
 
@@ -81,16 +83,17 @@ step 3.
 
 **Stages on the view** and what follows mechanically:
 
-| Stage                | Next                                                              |
-| -------------------- | ----------------------------------------------------------------- |
-| `working`, `landing` | wait                                                              |
-| `stashed`            | `batch result` per external worker; the landing task then runs    |
-| `awaiting workers`   | a failed worker: `batch resume --worker`; missing: `batch result` |
-| `ready to land`      | `batch land`                                                      |
-| `failed: <code>`     | `job logs <landing task>`, fix the cause, `batch land` again      |
-| `landing <phase>`    | same                                                              |
-| `unprepared`         | `batch start` again with the same members                         |
-| `landed`             | nothing                                                           |
+| Stage                       | Next                                                                        |
+| --------------------------- | --------------------------------------------------------------------------- |
+| `working`, `landing`        | wait                                                                        |
+| `stashed`                   | `batch result` per external worker; the landing task then runs              |
+| `awaiting workers`          | a failed worker: `batch resume --worker`; missing: `batch result`           |
+| `ready to land`             | `batch land`                                                                |
+| `landing dependency-failed` | `batch resume --worker <w>` for the failed worker; it re-queues the landing |
+| `failed: <code>`            | `job logs <landing task>`, then `batch land` again                          |
+| `landing <phase>`           | same                                                                        |
+| `unprepared`                | `batch start` again with the same members                                   |
+| `landed`                    | nothing                                                                     |
 
 **Verification**: workers run the descriptor's focused operation; the landing
 task runs the `candidate` profile once on the integrated tree (a hosted check
