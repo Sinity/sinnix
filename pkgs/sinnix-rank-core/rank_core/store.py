@@ -28,6 +28,50 @@ def now() -> str:
 
 
 @dataclass
+class LogReplay:
+    """An append-only judgment log, replayed.
+
+    `live` is what a fit may use. `seen_ids` is every record id the file has
+    ever carried, tombstoned ones included, and is what a drain must dedup
+    against: a record the operator undid is still one this log has seen, and
+    deduping against `live` re-imports it on every drain.
+    """
+
+    live: list[dict] = field(default_factory=list)
+    seen_ids: set[str] = field(default_factory=set)
+    tombstoned: set[str] = field(default_factory=set)
+
+
+def read_log(path: str | Path) -> LogReplay:
+    path = Path(path)
+    rows: list[dict] = []
+    replay = LogReplay()
+    if path.exists():
+        for line in path.read_text().splitlines():
+            if not line.strip():
+                continue
+            rec = json.loads(line)
+            if "delete" in rec:
+                replay.tombstoned.add(rec["delete"])
+            else:
+                rows.append(rec)
+                replay.seen_ids.add(rec.get("id"))
+    replay.live = [r for r in rows if r.get("id") not in replay.tombstoned]
+    return replay
+
+
+def append_log(path: str | Path, record: dict) -> str:
+    """One record appended, with the id and timestamp every log entry carries."""
+    path = Path(path)
+    record.setdefault("id", str(uuid.uuid4()))
+    record.setdefault("at", now())
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a") as f:
+        f.write(json.dumps(record, sort_keys=True) + "\n")
+    return record["id"]
+
+
+@dataclass
 class Comparison:
     id: str
     at: str
@@ -110,25 +154,12 @@ class Store:
 
     # -- comparisons ---------------------------------------------------------
     def load_comparisons(self) -> list[Comparison]:
-        rows, deleted = [], set()
-        if self.comparisons_path.exists():
-            for line in self.comparisons_path.read_text().splitlines():
-                if not line.strip():
-                    continue
-                rec = json.loads(line)
-                if "delete" in rec:
-                    deleted.add(rec["delete"])
-                else:
-                    rows.append(Comparison.from_dict(rec))
-        return [r for r in rows if r.id not in deleted]
+        return [
+            Comparison.from_dict(rec) for rec in read_log(self.comparisons_path).live
+        ]
 
     def _append_raw(self, record: dict) -> str:
-        record.setdefault("id", str(uuid.uuid4()))
-        record.setdefault("at", now())
-        self.domain_dir.mkdir(parents=True, exist_ok=True)
-        with self.comparisons_path.open("a") as f:
-            f.write(json.dumps(record, sort_keys=True) + "\n")
-        return record["id"]
+        return append_log(self.comparisons_path, record)
 
     def record_comparison(
         self,

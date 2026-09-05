@@ -11,8 +11,7 @@ directions, keybind conventions, anything) -- this tool runs the loop the
 stashbox ranker and Gwern's resorter already validated on media libraries:
 
   1. ask the operator to compare pairs of items, choosing the *most
-     informative* next pair (highest-uncertainty anchor + nearest rival,
-     with epsilon exploration -- the resorter heuristic);
+     informative* next pair through `rank_core.build_selector`;
   2. infer latent quality scores under the Bradley-Terry model (the
      Plackett-Luce top-1 extension is kept, so n-wise choice sets from
      other frontends fit too);
@@ -21,9 +20,9 @@ stashbox ranker and Gwern's resorter already validated on media libraries:
      preference weights ("darker preferred", "saturation disliked") that an
      agent can narrate, plus theta/feature correlations as a cross-check.
 
-The fit is `rank_core.fit`, the estate's one ranking engine (docs/ranking.md);
-this file owns the domain file format and the surfaces, not the model. The
-question-selection strategy follows docs/upstream/gwern/resorter.md.
+The fit, the selection strategy and the append-only log replay are
+`rank_core`, the estate's one ranking engine (docs/ranking.md); this file owns
+the domain file format and the surfaces, not the model.
 
 Comparison surfaces, cheapest first:
   * `ask`      -- interactive terminal loop (resorter-style), for text domains;
@@ -55,7 +54,6 @@ import json
 import math
 import mimetypes
 import os
-import random
 import shutil
 import subprocess
 import sys
@@ -65,16 +63,15 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from rank_core import Comparison, Selector, fit, top_k_stability
+from rank_core import Comparison, Selector, build_selector, fit, top_k_stability
+from rank_core.store import append_log
+from rank_core.store import now as now_iso
+from rank_core.store import read_log
 
 SCHEMA = "sinnix-elicit-v1"
 BASE_DIR = Path(os.environ.get("SINNIX_ELICIT_DIR", "/realm/state/elicit"))
 REPORTS_DIR = Path(os.environ.get("SINNIX_HUB_REPORTS_DIR", "/realm/data/derived/reports"))
 FEEDBACK_DIR = Path(os.environ.get("SINNIX_HUB_FEEDBACK_DIR", "/realm/data/derived/hub-feedback"))
-
-
-def now_iso():
-    return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -102,45 +99,18 @@ class Domain:
         return items, by_id
 
     def load_comparisons(self):
-        rows, deleted = [], set()
-        if self.comparisons_path.exists():
-            for line in self.comparisons_path.read_text().splitlines():
-                if not line.strip():
-                    continue
-                rec = json.loads(line)
-                if "delete" in rec:
-                    deleted.add(rec["delete"])
-                else:
-                    rows.append(rec)
-        return [r for r in rows if r.get("id") not in deleted]
+        return read_log(self.comparisons_path).live
 
     def scan_ids(self):
         """(every comparison id the log has ever carried, the tombstoned ones).
 
-        The first set is what `ingest` must dedup against. Deduping against
-        the live records instead re-imports every undone judgment on every
-        drain, and the drain runs on every arriving comparison -- a single
-        undone record grows the log without bound.
+        The first set is what `ingest` must dedup against.
         """
-        seen, deleted = set(), set()
-        if self.comparisons_path.exists():
-            for line in self.comparisons_path.read_text().splitlines():
-                if not line.strip():
-                    continue
-                rec = json.loads(line)
-                if "delete" in rec:
-                    deleted.add(rec["delete"])
-                else:
-                    seen.add(rec.get("id"))
-        return seen, deleted
+        replay = read_log(self.comparisons_path)
+        return replay.seen_ids, replay.tombstoned
 
     def append(self, record):
-        record.setdefault("id", str(uuid.uuid4()))
-        record.setdefault("at", now_iso())
-        self.dir.mkdir(parents=True, exist_ok=True)
-        with self.comparisons_path.open("a") as f:
-            f.write(json.dumps(record, sort_keys=True) + "\n")
-        return record["id"]
+        return append_log(self.comparisons_path, record)
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -196,6 +166,20 @@ def to_comparisons(comparisons, known):
     return out
 
 
+def _fit_domain(items, comparisons, tau=1.0, tol=1e-8, max_iter=2000):
+    """(engine fit, roster ids, the comparisons the engine can use)."""
+    ids = sorted({str(i["id"]) for i in items})
+    usable = to_comparisons(comparisons, set(ids))
+    return fit(ids, usable, tau=tau, tol=tol, max_iter=max_iter), ids, usable
+
+
+def _records(result):
+    return {
+        r.id: {"id": r.id, "theta": r.theta, "se": r.se, "matches": r.matches}
+        for r in result.records.values()
+    }
+
+
 def fit_bradley_terry(items, comparisons, tau=1.0, tol=1e-8, max_iter=2000):
     """theta/se/matches per item id, in this file's dict shape.
 
@@ -203,57 +187,28 @@ def fit_bradley_terry(items, comparisons, tau=1.0, tol=1e-8, max_iter=2000):
     starting point, and the anchored objective has one maximum, so it never
     moved a converged fit.
     """
-    ids = sorted({str(i["id"]) for i in items})
-    result = fit(
-        ids,
-        to_comparisons(comparisons, set(ids)),
-        tau=tau,
-        tol=tol,
-        max_iter=max_iter,
-    )
-    return {
-        r.id: {"id": r.id, "theta": r.theta, "se": r.se, "matches": r.matches}
-        for r in result.records.values()
-    }
+    result, _ids, _usable = _fit_domain(items, comparisons, tau, tol, max_iter)
+    return _records(result)
 
 
 # ──────────────────────────────────────────────────────────────────────────
-# Informative-pair selection (resorter heuristic)
+# Which pairs to ask about
 # ──────────────────────────────────────────────────────────────────────────
-def pick_pairs(items, comparisons, n_pairs, explore_every=3, rng=random):
-    records = fit_bradley_terry(items, comparisons)
-    counts = {str(i["id"]): records[str(i["id"])]["matches"] for i in items}
-    ordered = sorted(records.values(), key=lambda r: r["theta"])
-    rank_pos = {r["id"]: i for i, r in enumerate(ordered)}
-    seen_pairs = {frozenset((str(c.get("a")), str(c.get("b")))) for c in comparisons if c.get("a") and c.get("b")}
+def pick_pairs(items, comparisons, n_pairs, rng=None):
+    """The engine's next questions, in this file's shapes.
 
-    pairs = []
-    used = set()
-    tick = 0
-    ids = [str(i["id"]) for i in items]
-    while len(pairs) < n_pairs:
-        tick += 1
-        if tick > n_pairs * 20:
-            break
-        pool = [i for i in ids if i not in used]
-        if len(pool) < 2:
-            used = set()
-            pool = ids
-        if tick % explore_every == 0:
-            a, b = rng.sample(pool, 2)
-        else:
-            # anchor: most uncertain (max SE; cold start = least seen);
-            # rival: within a rank window, highest SE.
-            anchors = sorted(pool, key=lambda i: (-records[i]["se"], counts[i]))
-            a = rng.choice(anchors[: max(1, min(8, len(anchors)))])
-            apos = rank_pos[a]
-            window = [i for i in pool if i != a and abs(rank_pos[i] - apos) <= 8] or [i for i in pool if i != a]
-            b = max(window, key=lambda i: records[i]["se"])
-        key = frozenset((a, b))
-        if key in {frozenset(p) for p in pairs} or (key in seen_pairs and tick % explore_every != 0):
-            continue
-        pairs.append((a, b))
-        used.update((a, b))
+    Which pair is informative -- the uncertainty anchor, the rank window,
+    exploration, recency, cross-component bridging, and not re-asking a pair
+    the operator already answered -- is `rank_core`'s single answer, shared
+    with every other ranking frontend. This translates the roster and the
+    domain's own records into what the engine takes, and nothing else.
+    """
+    result, ids, usable = _fit_domain(items, comparisons)
+    records = _records(result)
+    if len(ids) < 2:
+        return [], records
+    selector = build_selector(ids, usable, result, grid_n=2, rng=rng)
+    pairs = [tuple(chosen) for chosen, _strategy in selector.pick_sets(n_pairs)]
     return pairs, records
 
 

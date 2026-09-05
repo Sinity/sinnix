@@ -29,7 +29,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from rank_core import Item, Selector, Store, draw, fit, top_k_stability
+from rank_core import Item, Store, build_selector, draw, fit, top_k_stability
 from rank_core.draw import POLICIES
 from rank_core.store import VALID_KINDS
 
@@ -257,29 +257,12 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
-def _seen_sets(comparisons) -> set[frozenset[str]]:
-    return {frozenset(c.set) for c in comparisons}
-
-
-def _selector(items, comparisons, result, grid: int, seed: int | None) -> Selector:
-    selector = Selector(
-        item_ids=list(items.keys()),
-        grid_n=grid,
-        rng=random.Random(seed),
-    )
-    selector.seed_counts(comparisons)
-    selector.update_fit(result)
-    return selector
-
-
 def cmd_next(args: argparse.Namespace) -> int:
     """The next set to put in front of the operator, without owning a TTY.
 
     `compare` is the operator's own loop; an agent mediating a comparison pass
     holds the conversation instead, so it needs the selection and the
-    recording as two separate non-interactive calls. Sets already judged are
-    skipped where the selector offers an unjudged alternative, so a resumed
-    pass spends its questions on new information rather than re-asking.
+    recording as two separate non-interactive calls.
     """
     store = Store(domain_dir(args.domain))
     items, comparisons, result = _fit_domain(store)
@@ -290,13 +273,15 @@ def cmd_next(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 1
-    selector = _selector(items, comparisons, result, args.grid, args.seed)
-    seen = _seen_sets(comparisons)
+    selector = build_selector(
+        list(items),
+        comparisons,
+        result,
+        grid_n=args.grid,
+        rng=random.Random(args.seed),
+    )
+    seen = set(selector.seen_sets)
     chosen, strategy = selector.pick_set()
-    for _ in range(32):
-        if frozenset(chosen) not in seen:
-            break
-        chosen, strategy = selector.pick_set()
     payload = {
         "domain": args.domain,
         "strategy": strategy,
@@ -373,9 +358,7 @@ def cmd_compare(args: argparse.Namespace) -> int:
         print(f"domain {args.domain!r} has fewer than {args.grid} items -- add more first")
         return 1
 
-    selector = Selector(item_ids=list(items.keys()), grid_n=args.grid)
-    selector.seed_counts(comparisons)
-    selector.update_fit(result)
+    selector = build_selector(list(items), comparisons, result, grid_n=args.grid)
     last_id: str | None = None
 
     for round_n in range(1, args.rounds + 1):
