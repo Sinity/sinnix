@@ -21,16 +21,15 @@ live state.
 <epic>` — the graph is the authority; epic child-counts are not closure
   evidence (membership is dependency-based).
 - "Ready" means dependency-ready, not necessarily executable now: live-proof
-  and operator-window items are ready-for-a-window, not ready-for-a-lane.
+  and operator-window items are ready-for-a-window, not ready-for-a-worker.
   Check the bead's design for window/consent requirements before claiming.
 
 ## Claiming and working
 
 - Claim before working. `agentctl batch start` claims every member of a
   batch with `bd update --claim` and `batch land` closes the satisfied ones;
-  workers never touch Beads. Claim by hand only for work you do yourself.
-  Stale leases with dead heartbeats are the recorded smell of abandoned
-  claims — release what you will not finish.
+  workers never touch Beads. Claim by hand only for work you do yourself,
+  and release what you will not finish.
 - Record as you go with `bd` notes. Notes carry dated facts and disproved
   hypotheses — the next session must inherit them, not re-derive them.
 - Relate discovered structure with `bd dep` — convert prose dependencies into
