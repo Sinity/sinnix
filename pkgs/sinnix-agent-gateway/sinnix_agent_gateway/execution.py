@@ -1,4 +1,4 @@
-"""The gateway's job owner: agentctl's launch and lane routes, called in process.
+"""The gateway's job owner: agentctl's launch and batch routes, called in process.
 
 A job is a pueue task. Every operation answers with a ResponseEnvelope; a
 refusal is an ErrorEnvelope whose code the gateway's own error classes cover,

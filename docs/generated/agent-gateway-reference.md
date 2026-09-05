@@ -69,7 +69,7 @@ MCP: call the tool named after the action. CLI: `sinnix-agent-gateway call <acti
 | `jobs.retry`            | `operate` | `systemd-jobs`     | `agent-control, operator`           | Re-run a terminal job in place with the same launch input and id (pueue restart).                                                                                                                                  |
 | `operations.run`        | `run`     | `systemd-jobs`     | `agent-control, operator`           | Queue one project-declared operation in its declared pool on the root or a worktree.                                                                                                                               |
 | `shell.run`             | `run`     | `systemd-jobs`     | `operator`                          | cwd is confined to the checkout; the job's log carries the output.                                                                                                                                                 |
-| `agent.for_bead`        | `run`     | `systemd-jobs`     | `agent-control, operator`           | backend, model and effort default to the bead's model policy. A bead that already has a worktree is refused with conflict.                                                                                         |
+| `agent.for_bead`        | `run`     | `systemd-jobs`     | `agent-control, operator`           | backend, model and effort default to the bead's model policy. Refused when a member is claimed or already in a run.                                                                                                |
 | `wait.for`              | `wait`    | `waits`            | `agent-control, observer, operator` | Conditions: job_terminal, bead_status, bead_revision, unit_state, file_hash, file_exists, capture_freshness, receipt_appearance, terminal_output. A timeout returns the current evidence and a continuation token. |
 | `events.tail`           | `events`  | `events`           | `agent-control, observer, operator` | Pass next_cursor back to continue; a cursor from another principal or project scope fails stale_cursor.                                                                                                            |
 | `context.compose`       | `context` | `context`          | `agent-control, observer, operator` | Each component is budgeted and isolated: an unavailable owner marks its component unavailable with a reason instead of failing the call. The snapshot is persisted under snapshot_ref.                             |
@@ -7574,11 +7574,11 @@ git status in sinnix:
 
 ### `agent.for_bead`
 
-backend, model and effort default to the bead's model policy. A bead that already has a worktree is refused with conflict.
+backend, model and effort default to the bead's model policy. Refused when a member is claimed or already in a run.
 
 Family: `run`. Owner: `systemd-jobs`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
-Aliases: lane start, dispatch, agentctl lane start, work on bead.
+Aliases: dispatch, agentctl batch start, work on bead.
 
 Follow-up actions: `jobs.wait`, `jobs.logs`, `jobs.cancel`.
 
@@ -7781,7 +7781,7 @@ Output: the response envelope's `data` field is `LaneStarted`; the full envelope
 
 Examples:
 
-Start a lane:
+Start a worker:
 
 ```json
 {
