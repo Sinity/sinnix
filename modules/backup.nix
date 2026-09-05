@@ -1303,7 +1303,10 @@ in
           "::$archive_name" \
           ${lib.escapeShellArg "${machineTelemetryBackupRoot}/./"}
 
-        sample_path="$(with_borg_lock borg list --short "::$archive_name" | ${pkgs.gnugrep}/bin/grep -v '/$' | ${pkgs.gnused}/bin/sed -n '1p')"
+        # `borg list --short` prints directories without a trailing slash, so
+        # the archive root `.` would be sampled and its stdout extract is
+        # empty. Probe the newest dump by name.
+        sample_path="$(with_borg_lock borg list --short "::$archive_name" | ${pkgs.gnugrep}/bin/grep -E '\.sqlite\.zst$' | ${pkgs.coreutils}/bin/sort | ${pkgs.coreutils}/bin/tail -n 1)"
         if [ -z "$sample_path" ]; then
           echo "machine telemetry Borg archive contains no dump file" >&2
           exit 1
