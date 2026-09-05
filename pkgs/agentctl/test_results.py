@@ -71,6 +71,13 @@ def test_worker_result_violations_are_named(
     assert any(fragment in error for error in errors), errors
 
 
+def test_a_pattern_must_match_the_whole_string() -> None:
+    schema = {"type": "string", "pattern": "[0-9a-f]{40}"}
+    assert results.validate(schema, "a" * 40) == []
+    assert results.validate(schema, "x" + "a" * 40) == ["$: does not match [0-9a-f]{40}"]
+    assert results.validate(schema, "a" * 40 + "\n") != []
+
+
 def test_a_non_object_is_one_error() -> None:
     assert results.validate_worker_result([]) == ["$: expected object, got list"]
     assert results.validate_worker_result(None) == ["$: expected object, got NoneType"]
