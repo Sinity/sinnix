@@ -35,6 +35,8 @@ def test_the_fixture_descriptor_loads_every_declared_field(project_root: Path) -
     verify = project.operation("verify")
     assert (verify.result, verify.timeout_seconds) == ("json", 120)
     assert verify.dependencies == ()
+    # A descriptor that declares no scratch tier gets none.
+    assert [operation.scratch for operation in project.operations] == ["none"] * 4
     assert [operation.name for operation in project.operations] == [
         "check",
         "nightly",
@@ -118,6 +120,10 @@ def test_retired_keys_in_environment_and_workspace_are_refused(
             '[operations.bad]\ndescription = "x"\nexec = ["x"]\ncache = "bad"\n',
             "cache is invalid",
         ),
+        (
+            '[operations.bad]\ndescription = "x"\nexec = ["x"]\nscratch = "ssd"\n',
+            "scratch is invalid",
+        ),
     ],
 )
 def test_malformed_operations_are_typed_refusals(
@@ -128,6 +134,21 @@ def test_malformed_operations_are_typed_refusals(
     descriptor.write_text(descriptor.read_text() + "\n" + fragment)
     with pytest.raises(ProjectConfigError, match=message):
         load_project_adapter(root)
+
+
+def test_a_declared_scratch_tier_is_carried_by_the_operation(tmp_path: Path) -> None:
+    root = write_project(tmp_path / "p")
+    descriptor = root / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text()
+        + '\n[operations.heavy]\ndescription = "x"\nexec = ["x"]\nscratch = "nvme"\n'
+    )
+
+    project = load_project_adapter(root)
+
+    assert project.operation("heavy").scratch == "nvme"
+    assert project.operation("heavy").catalog_row()["scratch"] == "nvme"
+    assert project.operation("check").scratch == "none"
 
 
 def test_a_malformed_agent_ceiling_is_a_typed_refusal(tmp_path: Path) -> None:

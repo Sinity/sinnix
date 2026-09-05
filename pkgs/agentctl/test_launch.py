@@ -499,6 +499,57 @@ def test_a_binding_is_stored_in_the_launch_input_and_read_back_on_get(
     assert "binding" not in launch.get_job(started["job_id"])
 
 
+def test_a_declared_scratch_tier_reaches_the_launch_input_and_job_get(
+    fake_pueue: FakePueue,
+    config: Config,
+    project_root: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The wrapper is told which directory to own, and `job get` shows what it cost."""
+    monkeypatch.setenv("AGENTCTL_NVME_SCRATCH_ROOT", str(tmp_path / "nvme"))
+    descriptor = project_root / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text() + '\n[operations.heavy]\ndescription = "Fixture heavy"\n'
+        'exec = ["fixture-heavy"]\npool = "bulk"\nresult = "exit"\nscratch = "nvme"\n'
+    )
+    project = load_project_adapter(project_root)
+
+    started = launch.start_operation(config, project, project.operation("heavy"))
+
+    written = read_launch(config, fake_pueue.task(started["job_id"]))
+    reference = Path(fake_pueue.added[0]["command"][1]).stem
+    assert written["scratch"] == {
+        "kind": "nvme",
+        "path": str(tmp_path / "nvme" / reference),
+    }
+    plain = launch.start_operation(config, project, project.operation("check"))
+    assert "scratch" not in read_launch(config, fake_pueue.task(plain["job_id"]))
+
+    outcome = outcome_path_for(written["log_path"])
+    outcome.parent.mkdir(parents=True, exist_ok=True)
+    outcome.write_text(
+        json.dumps(
+            {
+                "outcome": "success",
+                "exit_code": 0,
+                "scratch": {
+                    "kind": "nvme",
+                    "path": written["scratch"]["path"],
+                    "bytes": 2048,
+                    "files": 3,
+                    "truncated": False,
+                },
+            }
+        )
+    )
+    fake_pueue.succeed(started["job_id"])
+
+    document = launch.get_job(started["job_id"], config)
+    assert document["scratch"]["bytes"] == 2048 and document["scratch"]["files"] == 3
+    assert "scratch" not in launch.get_job(plain["job_id"], config)
+
+
 def test_cancelling_a_queued_task_drops_it_out_of_the_queue(
     fake_pueue: FakePueue, config: Config, project_root: Path
 ) -> None:

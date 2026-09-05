@@ -35,6 +35,9 @@ _POOL_NAME = re.compile(r"[a-z][a-z0-9-]{0,63}")
 _ENVIRONMENT_NAME = re.compile(r"[A-Z_][A-Z0-9_]*\Z")
 MAX_OPERATION_SCHEDULE_LENGTH = 256
 CACHE_KINDS = frozenset({"none", "tree+environment"})
+# Where an operation's job-owned scratch directory lives: nowhere, in RAM, or
+# on the NVMe scratch filesystem. `run` owns the roots and the removal.
+SCRATCH_KINDS = frozenset({"none", "tmpfs", "nvme"})
 
 _TABLES = frozenset(
     {"schema", "project", "environment", "workspace", "packets", "operations"}
@@ -88,6 +91,7 @@ _OPERATION_FIELDS = frozenset(
         "schedule",
         "checkout",
         "cache",
+        "scratch",
         "dependencies",
     }
 )
@@ -195,6 +199,7 @@ class ProjectOperation:
     # "default": the operation runs only on the project's main checkout.
     checkout: str = "any"
     cache: str = "none"
+    scratch: str = "none"
     dependencies: tuple[str, ...] = ()
 
     def catalog_row(self) -> dict[str, Any]:
@@ -208,6 +213,7 @@ class ProjectOperation:
             "schedule": self.schedule,
             "checkout": self.checkout,
             "cache": self.cache,
+            "scratch": self.scratch,
             "dependencies": list(self.dependencies),
         }
 
@@ -486,6 +492,10 @@ def _operation(name: str, definition: Any, descriptor: Path) -> ProjectOperation
         if definition["cache"] not in CACHE_KINDS:
             raise ProjectConfigError(f"operations.{name}.cache is invalid")
         fields["cache"] = definition["cache"]
+    if "scratch" in definition:
+        if definition["scratch"] not in SCRATCH_KINDS:
+            raise ProjectConfigError(f"operations.{name}.scratch is invalid")
+        fields["scratch"] = definition["scratch"]
     dependencies = _optional_string_list(
         definition.get("dependencies"), f"operations.{name}.dependencies"
     )

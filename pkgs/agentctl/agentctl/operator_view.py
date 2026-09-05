@@ -511,7 +511,18 @@ class Output:
         exit_text = (
             f" exit {job['exit_code']}" if job.get("exit_code") not in (None, 0) else ""
         )
-        return f"job {job['job_id']} {job['label']} {job['phase']}{exit_text} {when}"
+        scratch = job.get("scratch")
+        scratch_text = (
+            f"; scratch {scratch['kind']} {scratch['bytes']} bytes in "
+            f"{scratch['files']} file(s)"
+            + (" (measurement truncated)" if scratch.get("truncated") else "")
+            if isinstance(scratch, Mapping)
+            else ""
+        )
+        return (
+            f"job {job['job_id']} {job['label']} {job['phase']}{exit_text} "
+            f"{when}{scratch_text}"
+        )
 
     def jobs_table(self, rows: Sequence[Mapping[str, Any]]) -> str:
         if not rows:
