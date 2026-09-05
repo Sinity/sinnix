@@ -3,13 +3,13 @@ from __future__ import annotations
 import base64
 import json
 import mimetypes
-import os
 import uuid
 from pathlib import Path
 from typing import Any
 
 from sinnix_mcp.execution import ExecutionResult
 
+from .atomic import atomic_publish
 from .capabilities import Capability, Principal
 from .config import GatewayConfig
 from .redaction import redact
@@ -78,16 +78,14 @@ class ArtifactService:
             "target": target,
             "files": names,
         }
-        output = directory / "receipt.json"
-        temporary = directory / f".{output.name}.{uuid.uuid4().hex}.tmp"
-        try:
-            temporary.write_text(
-                json.dumps(receipt, sort_keys=True, separators=(",", ":"))
-            )
-            temporary.chmod(0o600)
-            os.replace(temporary, output)
-        finally:
-            temporary.unlink(missing_ok=True)
+        # Durability: atomic only. The receipt can be no more durable than
+        # the capture files it attests, which the gateway does not sync
+        # either; losing it un-attests the directory, which fails closed.
+        atomic_publish(
+            directory / "receipt.json",
+            json.dumps(receipt, sort_keys=True, separators=(",", ":")).encode(),
+            fsync=False,
+        )
         return receipt
 
     def record_owner_diagnostic(
