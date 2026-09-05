@@ -188,7 +188,7 @@ def enqueue(
         "event_spool_path": str(config.event_spool),
     }
     if unit_properties:
-        launch["scope_properties"] = list(unit_properties)
+        launch["unit_properties"] = list(unit_properties)
     if tree_receipt is not None:
         launch["tree_receipt"] = dict(tree_receipt)
     if environment_receipt is not None:

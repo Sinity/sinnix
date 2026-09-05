@@ -199,7 +199,7 @@ class Harness:
     ) -> dict[str, Any]:
         worker = next(item for item in run["workers"] if item["id"] == worker_id)
         document = worker_result(worker["beads"], **overrides)
-        path = Path(worker["worktree"]) / ".lane" / "prompt.result.json"
+        path = Path(worker["worktree"]) / ".agentctl" / "prompt.result.json"
         path.parent.mkdir(exist_ok=True)
         path.write_text(json.dumps(document))
         return batch.result(self.config, run["run_id"], worker_id, path)
@@ -272,7 +272,7 @@ def harness(
         task = fake_pueue.task(job_id)
         assert task is not None
         if ":review:" in task.label:
-            (Path(task.path) / ".lane" / "review.result.json").write_text(
+            (Path(task.path) / ".agentctl" / "review.result.json").write_text(
                 json.dumps(built.verdict)
             )
         fake_pueue.succeed(job_id)
@@ -314,13 +314,13 @@ def test_start_claims_creates_worktrees_and_queues_workers_then_the_landing(
     assert lead["branch"] == f"batch/{run['run_id']}/fx-lead"
     assert Path(lead["worktree"]).name == f"fixture-batch-{run['run_id']}-fx-lead"
     assert harness.wt.trees[lead["branch"]].head == BASE
-    prompt = (Path(lead["worktree"]) / ".lane" / "prompt.md").read_text()
+    prompt = (Path(lead["worktree"]) / ".agentctl" / "prompt.md").read_text()
     payload = json.loads(prompt.split("```json\n", 1)[1].split("\n```", 1)[0])
     assert payload["batch"]["run_id"] == run["run_id"] and payload["batch"][
         "result_path"
     ].endswith("prompt.result.json")
     assert json.loads(
-        (Path(lead["worktree"]) / ".lane" / "worker.schema.json").read_text()
+        (Path(lead["worktree"]) / ".agentctl" / "worker.schema.json").read_text()
     )["required"]
     assert labels(harness.pueue) == [
         f"fixture:worker:{run['run_id']}:fx-lead",
@@ -332,7 +332,7 @@ def test_start_claims_creates_worktrees_and_queues_workers_then_the_landing(
     argv = read_launch(harness.config, worker_task)["argv"]
     assert argv[:3] == ["env", "bash", "-c"]
     assert "--output-schema" in argv and argv[3].endswith(
-        f"batch result {run['run_id']} fx-lead {lead['worktree']}/.lane/prompt.result.json"
+        f"batch result {run['run_id']} fx-lead {lead['worktree']}/.agentctl/prompt.result.json"
     )
     landing = harness.pueue.task(run["landing"]["task_id"])
     assert landing is not None
@@ -530,7 +530,7 @@ def test_explicit_workers_and_external_harness_stash_the_landing(
         and landing.status == "Stashed"
         and landing.dependencies == ()
     )
-    assert (Path(run["workers"][1]["worktree"]) / ".lane" / "prompt.md").is_file()
+    assert (Path(run["workers"][1]["worktree"]) / ".agentctl" / "prompt.md").is_file()
 
     with pytest.raises(BatchRefusal, match="filed no valid result"):
         harness.land(run["run_id"])
@@ -591,7 +591,7 @@ def test_resume_requeues_the_worker_and_a_landing_behind_it(
     assert resumed["job"]["label"] == f"fixture:worker:{run['run_id']}:fx-lead".replace(
         "worker", "resume"
     )
-    prompt = (Path(worker["worktree"]) / ".lane" / "prompt.md").read_text()
+    prompt = (Path(worker["worktree"]) / ".agentctl" / "prompt.md").read_text()
     assert (
         prompt.startswith("# Resume packet") and "## Original dispatch packet" in prompt
     )
@@ -684,7 +684,7 @@ def test_land_integrates_verifies_reviews_publishes_and_closes_satisfied_members
         acceptance["candidate_sha"] == SHA
         and acceptance["published"]["policy"] == "master"
     )
-    assert {bead: state["state"] for bead, state in acceptance["members"].items()} == {
+    assert {bead: state["state"] for bead, state in acceptance["beads"].items()} == {
         "fx-lead": "closed",
         "fx-member": "open",
         "fx-solo": "closed",
@@ -717,7 +717,7 @@ def test_a_failed_close_keeps_that_worker_worktree_and_removes_the_rest(
 
     landed = harness.land(run_id)
 
-    members = landed["acceptance"]["members"]
+    members = landed["acceptance"]["beads"]
     assert members["fx-solo"]["state"] == "open"
     assert "close failed" in members["fx-solo"]["evidence"]
     assert members["fx-lead"]["state"] == "closed"
@@ -739,7 +739,7 @@ def test_cleanup_failure_is_a_residual_and_never_undoes_a_close(
 
     landed = harness.land(run["run_id"])
 
-    assert landed["acceptance"]["members"]["fx-solo"]["state"] == "closed"
+    assert landed["acceptance"]["beads"]["fx-solo"]["state"] == "closed"
     assert landed["acceptance"]["residual"] == [
         f"batch/{run['run_id']}/fx-solo: batch/{run['run_id']}/fx-solo is locked"
     ]
@@ -757,7 +757,7 @@ def test_a_conflict_runs_one_integration_agent_and_requires_every_branch_merged(
     integrate = [label for label in labels(harness.pueue) if ":integrate:" in label]
     assert integrate == [f"fixture:integrate:{run['run_id']}"]
     task = next(t for t in harness.pueue.tasks().values() if t.label == integrate[0])
-    prompt = (Path(task.path) / ".lane" / "integrate.md").read_text()
+    prompt = (Path(task.path) / ".agentctl" / "integrate.md").read_text()
     assert "- a.py" in prompt and f"batch/{run['run_id']}/fx-solo" in prompt
     assert landed["acceptance"]["candidate_sha"] == SHA
 
@@ -971,7 +971,7 @@ def test_pr_policy_pushes_the_branch_waits_for_required_checks_and_merges_the_he
     }
     # Advisory only: a CHANGES_REQUESTED review is recorded, never a gate.
     assert landed["acceptance"]["advisory"] == advisory
-    assert landed["acceptance"]["members"]["fx-solo"]["state"] == "closed"
+    assert landed["acceptance"]["beads"]["fx-solo"]["state"] == "closed"
     assert harness.git.pushes == []
 
 

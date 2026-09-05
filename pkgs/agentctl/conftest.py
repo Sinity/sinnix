@@ -16,7 +16,7 @@ import pytest
 from agentctl import launch as launch_module
 from agentctl import pueue as pueue_module
 from agentctl.config import Config
-from agentctl.packets import PacketError
+from agentctl.prompts import PromptError
 from agentctl.pueue import PueueError, PueueGroupError, Task
 
 
@@ -286,7 +286,7 @@ class FakeBd:
         try:
             return dict(self.beads[bead_id])
         except KeyError as error:
-            raise PacketError(f"bd show {bead_id} returned an invalid bead") from error
+            raise PromptError(f"bd show {bead_id} returned an invalid bead") from error
 
     def list(self) -> Sequence[Mapping[str, Any]]:
         return [dict(bead) for bead in self.beads.values()]

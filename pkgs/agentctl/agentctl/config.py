@@ -14,13 +14,13 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Mapping
 
-from .packets import PacketError
 from .projects import (
     ProjectAdapter,
     ProjectCatalog,
     ProjectConfigError,
     load_project_adapter,
 )
+from .prompts import PromptError
 
 DEFAULT_CONFIG_PATH = Path("/etc/sinnix/agentctl.json")
 DEFAULT_PROJECT_PARENTS = (Path("/realm/project"), Path("/realm/worktrees"))
@@ -159,7 +159,7 @@ def resolve_project_root(selector: str | None, *, cwd: Path | None = None) -> Pa
     for candidate in candidates:
         if (candidate / ".agentctl" / "project.toml").is_file():
             return candidate
-    raise PacketError(
+    raise PromptError(
         f"could not resolve an AgentCTL project for {selector or current}"
     )
 

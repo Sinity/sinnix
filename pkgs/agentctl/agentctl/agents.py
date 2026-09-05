@@ -15,6 +15,9 @@ from .projects import ProjectAdapter, WorkspacePolicy
 from .pueue import PueueError
 
 AGENT_GROUP = "agent"
+# The directory inside a worktree holding what agentctl writes for its agent:
+# the prompt, the result schema and the result. Never committed.
+WORKTREE_STATE_DIR = ".agentctl"
 # A push or fetch runs the repository's pre-push gate.
 PUSH_TIMEOUT_SECONDS = 2_400
 
@@ -39,9 +42,9 @@ def landing_group(project_id: str) -> str:
 
 
 def write_prompt(worktree: Path, name: str, prompt: str) -> Path:
-    lane_dir = worktree / ".lane"
-    lane_dir.mkdir(mode=0o700, exist_ok=True)
-    path = lane_dir / name
+    state_dir = worktree / WORKTREE_STATE_DIR
+    state_dir.mkdir(mode=0o700, exist_ok=True)
+    path = state_dir / name
     descriptor = os.open(
         path, os.O_CREAT | os.O_TRUNC | os.O_WRONLY | os.O_NOFOLLOW, 0o600
     )
@@ -113,11 +116,15 @@ def queue_agent(
     prompt_path = write_prompt(worktree, prompt_name, prompt)
     stem = prompt_name.rsplit(".", 1)[0]
     schema_path = (
-        results.write_schema(worktree / ".lane" / f"{schema}.schema.json", schema)
+        results.write_schema(
+            worktree / WORKTREE_STATE_DIR / f"{schema}.schema.json", schema
+        )
         if schema
         else None
     )
-    result_path = worktree / ".lane" / f"{stem}.result.{'json' if schema else 'md'}"
+    result_path = (
+        worktree / WORKTREE_STATE_DIR / f"{stem}.result.{'json' if schema else 'md'}"
+    )
     runner = _agent_argv(
         config,
         worktree=worktree,
@@ -164,12 +171,12 @@ def queue_agent(
 
 
 def binding(run: Run, worker_id: str | None) -> dict[str, Any]:
-    beads = list(run.worker(worker_id)["beads"]) if worker_id else list(run.members)
+    beads = list(run.worker(worker_id)["beads"]) if worker_id else list(run.beads)
     return {"beads": beads, "run_id": run.run_id, "worker": worker_id}
 
 
 def result_path(worktree: Path) -> Path:
-    return worktree / ".lane" / "prompt.result.json"
+    return worktree / WORKTREE_STATE_DIR / "prompt.result.json"
 
 
 def worker_then(

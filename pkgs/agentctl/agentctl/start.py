@@ -9,6 +9,7 @@ from typing import Any, Sequence
 from . import gitcmd, pueue, results, worktrunk
 from .agents import (
     PUSH_TIMEOUT_SECONDS,
+    WORKTREE_STATE_DIR,
     binding,
     landing_group,
     queue_agent,
@@ -39,15 +40,15 @@ from .manifest import (
     set_worker,
     update,
 )
-from .packets import (
-    PacketConfig,
-    PacketError,
-    compile_launch_snapshot,
-    rebase_prompt,
+from .projects import ProjectAdapter
+from .prompts import (
+    PromptConfig,
+    PromptError,
+    compile_worker_prompt,
     resolve_group,
+    resume_prompt,
     validate_members,
 )
-from .projects import ProjectAdapter
 from .pueue import PueueError
 from .worktrunk import WorktrunkError
 
@@ -105,7 +106,7 @@ def _prepare(
     effort: str | None,
 ) -> Run:
     """Claim, create, enqueue — each step skipped where the manifest records it done."""
-    packets = PacketConfig.load(project.root, shared_template=config.worker_contract)
+    packets = PromptConfig.from_project(project, shared_template=config.worker_contract)
     if run.harness == "queued":
         pueue.group_add(landing_group(project.project_id), 1)
     for index, worker in enumerate(run.workers):
@@ -143,8 +144,8 @@ def _prepare(
             if created.path is None:
                 raise WorktrunkError(f"wt created {branch} without a path")
             path = created.path
-            snapshot = compile_launch_snapshot(
-                worker["leader"],
+            snapshot = compile_worker_prompt(
+                worker_id,
                 project_id=project.project_id,
                 reader=beads,
                 config=packets,
@@ -159,12 +160,16 @@ def _prepare(
                     "base_commit": run.base_commit,
                     "worktree": str(path),
                     "result_path": str(result_path(path)),
-                    "result_schema": str(path / ".lane" / "worker.schema.json"),
+                    "result_schema": str(
+                        path / WORKTREE_STATE_DIR / "worker.schema.json"
+                    ),
                     "harness": run.harness,
                 },
             )
             write_prompt(path, "prompt.md", snapshot.prompt)
-            results.write_schema(path / ".lane" / "worker.schema.json", "worker")
+            results.write_schema(
+                path / WORKTREE_STATE_DIR / "worker.schema.json", "worker"
+            )
             run = set_worker(
                 config,
                 run.run_id,
@@ -183,7 +188,7 @@ def _prepare(
                 project,
                 label=f"{project.project_id}:worker:{run.run_id}:{worker_id}",
                 worktree=path,
-                prompt=(path / ".lane" / "prompt.md").read_text(),
+                prompt=(path / WORKTREE_STATE_DIR / "prompt.md").read_text(),
                 prompt_name="prompt.md",
                 backend=worker["backend"],
                 model=worker["model"],
@@ -260,7 +265,7 @@ def start(
     requested = {bead for _leader, members in member_sets for bead in members}
     claimed: set[str] = set()
     for live in _live_runs(config, project.project_id):
-        if set(live.members) == requested:
+        if set(live.beads) == requested:
             if live.prepared:
                 return {**live.to_dict(), "resumed": False, "existing": True}
             with project_locked(config, project.project_id):
@@ -274,7 +279,7 @@ def start(
                     effort=effort,
                 )
             return {**completed.to_dict(), "resumed": True, "existing": True}
-        claimed.update(live.members)
+        claimed.update(live.beads)
     refusals = validate_members(
         beads, [members for _leader, members in member_sets], claimed=claimed
     )
@@ -298,7 +303,6 @@ def start(
         workers=tuple(
             {
                 "id": leader,
-                "leader": leader,
                 "beads": list(members),
                 "branch": f"batch/{run_id}/{leader}",
                 "worktree": None,
@@ -340,7 +344,7 @@ def start(
     except (
         BatchRefusal,
         BatchError,
-        PacketError,
+        PromptError,
         PueueError,
         WorktrunkError,
         JobError,
@@ -449,13 +453,13 @@ def resume(
         raise BatchRefusal(
             "worker_active", f"task {current.task_id} is still {current.status.lower()}"
         )
-    packets = PacketConfig.load(project.root, shared_template=config.worker_contract)
+    packets = PromptConfig.from_project(project, shared_template=config.worker_contract)
     beads = SubprocessBeads(project.root)
     path = Path(worktree)
-    packet_path = path / ".lane" / "prompt.md"
-    prompt = rebase_prompt(
+    packet_path = path / WORKTREE_STATE_DIR / "prompt.md"
+    prompt = resume_prompt(
         config=packets,
-        bead=beads.show(worker["leader"]),
+        bead=beads.show(worker_id),
         branch=worker["branch"],
         base=run.base_commit,
         worktree=path,

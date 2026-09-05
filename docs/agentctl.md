@@ -117,7 +117,7 @@ task it writes the cancel marker, runs `systemctl --user stop <unit>`, then
 the unit is still active. `systemctl stop` ends the wrapper's wait with a
 success status, which is why the marker is written first. The group comes
 from `PUEUE_GROUP`, so a repository that queues `agentctl-run` with its own
-launch input is contained and cancelled identically. `scope_properties` in
+launch input is contained and cancelled identically. `unit_properties` in
 a launch input are `systemd-run -p` settings on that unit, restricted to
 the ones that bound what the task may consume (`MemoryMax`, `MemoryHigh`,
 `MemorySwapMax`, `MemoryZSwapMax`, `TasksMax`, `CPUWeight`, `IOWeight`),
@@ -170,7 +170,7 @@ landing: {task_id|null, integration_worktree, candidate_sha|null,
           pr_number|null, verify_run, review_verdict, failure|null,
           refreshes, refreshed_base}
 acceptance: {candidate_sha, verify_run, review_verdict, published,
-             members: {<bead>: {state: closed|open, evidence}},
+             beads: {<bead>: {state: closed|open, evidence}},
              recorded_at, residual: [...]} | null
 prepared          every claim, worktree and task exists
 ```
@@ -186,7 +186,7 @@ member with `bd update --claim` as actor `agentctl-batch-<run>`, creates
 one worktree per worker on branch `batch/<run>/<worker>` from `base_commit`
 at `<workspace.root>/<repo>-<branch with / replaced by ->` through `wt switch
 --create`,
-writes the worker packet to `.lane/prompt.md` (0600), queues each
+writes the worker packet to `.agentctl/prompt.md` (0600), queues each
 worker in group `agent` (label `<p>:worker:<run>:<w>`,
 `MemoryMax=<workspace.agent_memory_max>` on its unit), and queues the
 landing task in `<p>-land` with `--after` every worker (label
@@ -195,12 +195,12 @@ landing task in `<p>-land` with `--after` every worker (label
 ```text
 agentctl-run <agent-launch.json>
 <environment.command> run_agent_prompt.sh --agent B --workdir W \
-  --prompt-file W/.lane/prompt.md --last-file W/.lane/prompt.result.json \
+  --prompt-file W/.agentctl/prompt.md --last-file W/.agentctl/prompt.result.json \
   --model M --reasoning-effort E --output-schema worker.schema.json
 ```
 
 followed, in the same task, by `agentctl batch result <run> <w>
-W/.lane/prompt.result.json`, which validates the last file against
+W/.agentctl/prompt.result.json`, which validates the last file against
 `dots/claude/agents/schemas/worker.schema.json` and binds it to the
 worktree head; a zero exit with no valid result is a failed worker, so the
 landing task's dependency does not release. Backend, model and effort come from the flags,
@@ -352,34 +352,33 @@ unattended batches declares a scheduled operation whose `exec` runs
 
 ## Limits
 
-| constant                                                     | origin                                                                    | stands for                                                        |
-| ------------------------------------------------------------ | ------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| `limits.DEFAULT_TIMEOUT_SECONDS` (3,600)                     | arbitrary bound                                                           | the job timeout when an operation declares none                   |
-| `limits.MAX_AGENT_TIMEOUT_SECONDS` (14,400)                  | measurement (a 1h ceiling forced serial re-launch rounds on real workers) | the agent job timeout                                             |
-| `limits.MAX_DECLARED_OPERATION_TIMEOUT_SECONDS` (28,800)     | arbitrary bound                                                           | the ceiling on a declared `timeout_seconds`                       |
-| `limits.AGENT_MEMORY_MAX` (4G)                               | half of the job plane's MemoryHigh                                        | the hard ceiling of one agent's unit                              |
-| `pueue.CALL_TIMEOUT_SECONDS` (60)                            | arbitrary bound (a minute distinguishes a wedged daemon from a slow one)  | max time for one `pueue` round trip                               |
-| `worktrunk.LIST_SCHEMA_VERSION` (2)                          | external tool's contract                                                  | the `wt list` JSON schema this module parses                      |
-| `worktrunk.CALL_TIMEOUT_SECONDS` (60)                        | arbitrary bound (covers one cold forge round trip)                        | max time for one `wt` round trip                                  |
+| constant                                                     | origin                                                                    | stands for                                                       |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `limits.DEFAULT_TIMEOUT_SECONDS` (3,600)                     | arbitrary bound                                                           | the job timeout when an operation declares none                  |
+| `limits.MAX_AGENT_TIMEOUT_SECONDS` (14,400)                  | measurement (a 1h ceiling forced serial re-launch rounds on real workers) | the agent job timeout                                            |
+| `limits.MAX_DECLARED_OPERATION_TIMEOUT_SECONDS` (28,800)     | arbitrary bound                                                           | the ceiling on a declared `timeout_seconds`                      |
+| `limits.AGENT_MEMORY_MAX` (4G)                               | half of the job plane's MemoryHigh                                        | the hard ceiling of one agent's unit                             |
+| `limits.CALL_TIMEOUT_SECONDS` (60)                           | arbitrary bound (a minute distinguishes a wedged daemon from a slow one)  | max time for one `pueue`, `wt`, `gh`, `bd` or local `git` call   |
+| `limits.SYSTEMCTL_TIMEOUT_SECONDS` (30)                      | arbitrary bound                                                           | timeout for one `systemctl`/`systemd-run` call                   |
+| `limits.SHORT_ID` (8)                                        | arbitrary bound                                                           | hex characters shown of a run id's suffix, a commit, a reference |
+| `worktrunk.LIST_SCHEMA_VERSION` (2)                          | external tool's contract                                                  | the `wt list` JSON schema this module parses                     |
 | `worktrunk.GIT_SETTLE_SECONDS` (30)                          | arbitrary bound                                                           | how long a mutation waits for Git to release the repository index |
-| `run.MAX_LOG_BYTES` / `MAX_RESULT_BYTES` (64,000)            | arbitrary bound                                                           | caps on the captured log and typed result                         |
-| `run.TIMEOUT_EXIT_CODE` (124)                                | external tool's contract (`timeout(1)`)                                   | the unit's `RuntimeMaxSec` expired                                |
-| `run.REFUSED_EXIT_CODE` (125)                                | arbitrary bound                                                           | a pre-run refusal (vanished working directory, unreadable input)  |
-| `run.CANCELLED_EXIT_CODE` (130)                              | shell convention (128 + SIGINT)                                           | the cancel marker existed when the wait returned                  |
-| `run.VANISHED_EXIT_CODE` (126)                               | arbitrary bound                                                           | the unit could not be observed after a failing wait               |
-| `run.SLOT_OCCUPIED_EXIT_CODE` (75)                           | external convention (`EX_TEMPFAIL`)                                       | a single-slot pool was held by another unit                       |
-| `batch.PUSH_TIMEOUT_SECONDS` (2,400)                         | arbitrary bound (the push runs the repository's pre-push gate)            | timeout for `git push` and `git fetch` during landing             |
-| `batch.GIT_TIMEOUT_SECONDS` (60)                             | arbitrary bound                                                           | timeout for one local `git` call                                  |
-| `batch.HOSTED_CHECK_TIMEOUT_SECONDS` (7,200)                 | arbitrary bound                                                           | how long landing waits for a required PR check                    |
-| `batch.MAX_REFRESHES` (1)                                    | arbitrary bound                                                           | base movements a landing absorbs before `target_moved_twice`      |
-| `batch.SHORT_RUN_ID` (8)                                     | arbitrary bound                                                           | hex characters in a run id's suffix                               |
-| `packets.MAX_PROMPT_BYTES` (200,000)                         | arbitrary bound                                                           | cap on a compiled prompt                                          |
-| `packets.MAX_SUBJECT_LENGTH` (72)                            | repository commit convention                                              | cap on a PR subject                                               |
-| `backpressure.IO_FULL_FREEZE` (25%)                          | measurement (io full avg10 reached 76% under eight normal-pool jobs)      | the IO stall that freezes a group                                 |
-| `backpressure.MEMORY_FULL_FREEZE` (25%)                      | half of systemd-oomd's kill threshold                                     | the memory stall that freezes a group                             |
-| `backpressure.RESUME_BELOW` (10%)                            | arbitrary bound                                                           | both stalls must fall below this before a group thaws             |
-| `schedule.SYSTEMCTL_TIMEOUT_SECONDS` (10)                    | arbitrary bound                                                           | timeout for one `systemctl`/`systemd-run` call                    |
-| `operator_view.MAX_READY_SHOWN` (8) / `MAX_FAILED_SHOWN` (6) | arbitrary bound                                                           | rows the screen shows                                             |
+| `run.MAX_LOG_BYTES` / `MAX_RESULT_BYTES` (64,000)            | arbitrary bound                                                           | caps on the captured log and typed result                        |
+| `run.TIMEOUT_EXIT_CODE` (124)                                | external tool's contract (`timeout(1)`)                                   | the unit's `RuntimeMaxSec` expired                               |
+| `run.REFUSED_EXIT_CODE` (125)                                | arbitrary bound                                                           | a pre-run refusal (vanished working directory, unreadable input) |
+| `run.CANCELLED_EXIT_CODE` (130)                              | shell convention (128 + SIGINT)                                           | the cancel marker existed when the wait returned                 |
+| `run.VANISHED_EXIT_CODE` (126)                               | arbitrary bound                                                           | the unit could not be observed after a failing wait              |
+| `run.SLOT_OCCUPIED_EXIT_CODE` (75)                           | external convention (`EX_TEMPFAIL`)                                       | a single-slot pool was held by another unit                      |
+| `agents.PUSH_TIMEOUT_SECONDS` (2,400)                        | arbitrary bound (the push runs the repository's pre-push gate)            | timeout for `git push` and `git fetch` during a batch            |
+| `landing.HOSTED_CHECK_TIMEOUT_SECONDS` (7,200)               | arbitrary bound                                                           | how long landing waits for a required PR check                   |
+| `landing.MAX_REFRESHES` (1)                                  | arbitrary bound                                                           | base movements a landing absorbs before `target_moved_twice`     |
+| `prompts.MAX_PROMPT_BYTES` (200,000)                         | arbitrary bound                                                           | cap on a compiled prompt                                         |
+| `prompts.MAX_SUBJECT_LENGTH` (72)                            | repository commit convention                                              | cap on a PR subject                                              |
+| `backpressure.IO_FULL_FREEZE` (25%)                          | measurement (io full avg10 reached 76% under eight normal-pool jobs)      | the IO stall that freezes a group                                |
+| `backpressure.MEMORY_FULL_FREEZE` (25%)                      | half of systemd-oomd's kill threshold                                     | the memory stall that freezes a group                            |
+| `backpressure.RESUME_BELOW` (10%)                            | arbitrary bound                                                           | both stalls must fall below this before a group thaws            |
+| `operator_view.MAX_READY_SHOWN` (8) / `MAX_FAILED_SHOWN` (6) | arbitrary bound                                                           | rows the screen shows                                            |
+>>>>>>> 77ac0b46 (refactor(agentctl): rename the worktree state dir, packets, members and scope keys)
 
 ## Host wiring
 

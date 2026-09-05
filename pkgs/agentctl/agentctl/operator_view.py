@@ -20,8 +20,8 @@ from .github import GithubError
 from .launch import job_view
 from .limits import SHORT_ID
 from .manifest import Run, list_runs, load, short_run_id
-from .packets import PacketError, SubprocessBdReader
 from .projects import ProjectAdapter
+from .prompts import PromptError, SubprocessBdReader
 from .pueue import PueueError, Task
 
 MAX_READY_SHOWN = 8
@@ -271,7 +271,7 @@ def collect(
     reader = SubprocessBdReader(project.root)
     try:
         ready = tuple(reader.ready())
-    except PacketError as error:
+    except PromptError as error:
         ready = ()
         errors.append(f"bd: {error}")
     return Snapshot(

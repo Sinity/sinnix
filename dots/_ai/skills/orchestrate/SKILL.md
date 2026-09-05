@@ -68,7 +68,7 @@ worker prompt, and the result schema), `references/coordinator-contract.md`
 - Claude subagents as workers: `batch start … --workers external` makes the
   same manifest, claims and worktrees and stashes the landing task. Run one
   `lane` subagent per worker in the worktree the manifest names, with the
-  packet at `.lane/prompt.md`; file each result with
+  packet at `.agentctl/prompt.md`; file each result with
   `agentctl batch result <run> <worker> <result.json>`. The last result
   enqueues the landing task. Before trusting a subagent's output, confirm its
   worktree is the linked one the manifest names and is on the worker branch.

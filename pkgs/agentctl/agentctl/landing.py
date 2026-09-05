@@ -10,6 +10,7 @@ from typing import Any, Callable, Mapping
 from . import gitcmd, github, launch, prompts, pueue, results, worktrunk
 from .agents import (
     PUSH_TIMEOUT_SECONDS,
+    WORKTREE_STATE_DIR,
     binding,
     queue_agent,
     workspace_of,
@@ -30,8 +31,8 @@ from .manifest import (
     project_locked,
     update,
 )
-from .packets import PacketError
 from .projects import ProjectAdapter
+from .prompts import PromptError
 from .pueue import PueueError
 from .worktrunk import WorktrunkError
 
@@ -117,7 +118,7 @@ def _integrate(config: Config, project: ProjectAdapter, run: Run, base: str) -> 
         except BatchError:
             conflicts = _git(path, "diff", "--name-only", "--diff-filter=U")
         worker = run.workers[0]
-        prompt = prompts.template("integrate").format(
+        prompt = prompts.landing_template("integrate").format(
             run_id=run.run_id,
             base=base,
             branch=worker_branch,
@@ -148,7 +149,9 @@ def _integrate(config: Config, project: ProjectAdapter, run: Run, base: str) -> 
         dirty = [
             line
             for line in _git(path, "status", "--porcelain=v1").splitlines()
-            if not line[3:].startswith(".lane/")
+            if not (
+                line.startswith("??") and line[3:].startswith(f"{WORKTREE_STATE_DIR}/")
+            )
         ]
         if dirty:
             raise BatchRefusal(
@@ -189,14 +192,14 @@ def _ensure_pr(project: ProjectAdapter, run: Run, path: Path, candidate: str) ->
     if pull is None or pull.get("state") != "OPEN":
         pull = github.pull_request_for_branch(project.root, branch)
     if pull is None:
-        titles = ", ".join(worker["leader"] for worker in run.workers)
+        titles = ", ".join(worker["id"] for worker in run.workers)
         return github.create_pull_request(
             project.root,
             head=branch,
             base=workspace.base_branch,
             title=f"batch {run.run_id}: {titles}"[:72],
             body=f"Batch `{run.run_id}` on base `{run.base_commit}`.\n\nMembers: "
-            + ", ".join(run.members)
+            + ", ".join(run.beads)
             + "\n",
         )
     return int(pull["number"])
@@ -270,7 +273,7 @@ def _review(
     candidate: str,
 ) -> dict[str, Any]:
     worker = run.workers[0]
-    prompt = prompts.template("review").format(
+    prompt = prompts.landing_template("review").format(
         candidate=candidate,
         base=base,
         results=json.dumps(_worker_results(run), indent=2, sort_keys=True),
@@ -294,7 +297,7 @@ def _review(
             "review_failed", f"review task {job['job_id']} {waited.get('phase')}"
         )
     verdict, errors = results.load_result(
-        path / ".lane" / "review.result.json", kind="judge"
+        path / WORKTREE_STATE_DIR / "review.result.json", kind="judge"
     )
     if errors:
         raise BatchRefusal("review_invalid", "; ".join(errors[:6]))
@@ -399,19 +402,19 @@ def _accept(
     published: Mapping[str, Any],
 ) -> Run:
     verdicts = results.satisfied_beads(_worker_results(run))
-    members: dict[str, dict[str, str]] = {}
-    for bead_id in run.members:
+    beads_state: dict[str, dict[str, str]] = {}
+    for bead_id in run.beads:
         if verdicts.get(bead_id):
             try:
                 beads.close(
                     bead_id, reason=f"batch {run.run_id} {candidate}", actor=run.actor
                 )
-                members[bead_id] = {
+                beads_state[bead_id] = {
                     "state": "closed",
                     "evidence": f"batch {run.run_id} {candidate}",
                 }
             except BatchError as error:
-                members[bead_id] = {
+                beads_state[bead_id] = {
                     "state": "open",
                     "evidence": f"close failed: {error}",
                 }
@@ -425,13 +428,13 @@ def _accept(
                 beads.comment(bead_id, residual, actor=run.actor)
             except BatchError as error:
                 residual += f" (comment failed: {error})"
-            members[bead_id] = {"state": "open", "evidence": residual}
+            beads_state[bead_id] = {"state": "open", "evidence": residual}
     acceptance = {
         "candidate_sha": candidate,
         "verify_run": dict(verify_run),
         "review_verdict": dict(review_verdict),
         "published": dict(published),
-        "members": members,
+        "beads": beads_state,
         "advisory": _advisory(project, published),
         "recorded_at": now(),
         "residual": [],
@@ -450,7 +453,7 @@ def _accept(
         still_open = [
             bead_id
             for bead_id in worker["beads"]
-            if members[bead_id]["state"] != "closed"
+            if beads_state[bead_id]["state"] != "closed"
         ]
         if still_open:
             residual.append(
@@ -565,7 +568,7 @@ def land(
         WorktrunkError,
         GithubError,
         JobError,
-        PacketError,
+        PromptError,
     ) as error:
         land_update(config, run_id, failure={"code": "substrate", "detail": str(error)})
         raise
