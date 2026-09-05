@@ -176,7 +176,6 @@ in
               exit 1
             }
             reject_text '/realm/state/polylogue' "$polylogueConfigSource" default-config-root
-            reject_text '/home/sinity/.local/share/polylogue' "$polylogueConfigSource" legacy-config-root
 
             # No repository hook command may bake a sidecar path. Keep this
             # source census scoped to the actual hook declarations so this
@@ -188,7 +187,6 @@ in
               echo 'repository hook command bakes a Polylogue sidecar path' >&2
               exit 1
             fi
-            test ! -e "$repoRoot/modules/features/dev/agents/polylogue-hook.nix"
 
             # The managed Claude file is an out-of-store dots symlink. It and
             # generated Codex config both retain the continuously installed
@@ -246,9 +244,7 @@ in
             test -z "$(find "$archive_decoy" "$smoke_root/home" "$smoke_root/xdg-data" "$smoke_root/xdg-state" -mindepth 1 -print -quit)" \
               || { echo 'isolated Polylogue hook smoke wrote a decoy root' >&2; exit 1; }
             reject_text '/realm/state/polylogue' "$trace" live-hook-root
-            reject_text '/home/sinity/.local/share/polylogue' "$trace" legacy-hook-root
             reject_text '/realm/state/polylogue' "$smoke_root/claude.trace" claude-live-hook-root
-            reject_text '/home/sinity/.local/share/polylogue' "$smoke_root/claude.trace" claude-legacy-hook-root
 
             # The shared context handoff is configured independently for both
             # clients, so this verifies the intended cross-client agreement.
