@@ -26,6 +26,7 @@ in
       file = ./tests.nix;
     })
     ./tests/agent-tools.nix
+    ./tests/agent-gateway-approval.nix
     ./tests/chrome-agent-window.nix
     ./tests/browser-workflow.nix
     ./tests/terminal-capture.nix
