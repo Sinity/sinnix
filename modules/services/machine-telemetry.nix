@@ -448,7 +448,6 @@ mkServiceModule {
           machine-telemetry-sqlite-backup-timer = {
             unit = "machine-telemetry-sqlite-backup.timer";
             kind = "timer";
-            resourceClass = "backup-maintenance";
           };
         };
 
