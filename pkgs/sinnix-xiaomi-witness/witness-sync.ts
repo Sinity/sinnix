@@ -90,6 +90,10 @@ const RAW_KEYS = [
 
 const TOKEN_PATH = `${STATE_DIR}/auth-token.json`;
 const SEEN_PATH = `${STATE_DIR}/seen-hashes.json`;
+// Written when the cloud refuses to refresh the token. The service unit
+// carries ConditionPathExists=!<marker>, so the timer keeps firing but the
+// pass is skipped until the login flow clears it.
+const EXPIRED_MARKER = `${STATE_DIR}/credential-expired`;
 
 type Envelope = {
   kind: string;
@@ -133,6 +137,7 @@ const pending: string[] = [];
 let appended = 0;
 let unchanged = 0;
 let failures = 0;
+let credentialFailures = 0;
 
 async function record(kind: string, day: string | null, data: unknown, subkey?: string): Promise<void> {
   const body = JSON.stringify(data);
@@ -159,6 +164,9 @@ async function record(kind: string, day: string | null, data: unknown, subkey?: 
 
 function fetchFailed(name: string, error: unknown): void {
   failures += 1;
+  if (/serviceToken|token refresh|401|403/i.test((error as Error).message ?? "")) {
+    credentialFailures += 1;
+  }
   pending.push(
     JSON.stringify({
       kind: "vendor_fetch_failed",
@@ -269,5 +277,14 @@ console.log(
   `xiaomi-witness: appended=${appended} unchanged=${unchanged} failures=${failures} sids=${[...bandSids].join(",") || "-"} -> ${dayFile}`,
 );
 // Partial failure still lands what it fetched; only a broadly failed pass
-// (usually an expired token) should alarm.
+// should alarm. An expired credential alarms once: the marker makes every
+// later pass a skipped unit rather than a failed one.
+if (failures >= 5 && credentialFailures === failures) {
+  const { writeFileSync } = await import("node:fs");
+  writeFileSync(
+    EXPIRED_MARKER,
+    JSON.stringify({ fetched_at: fetchedAt, failures, reason: "token refresh refused" }) + "\n",
+  );
+  console.error(`xiaomi-witness: credential expired; run sinnix-xiaomi-witness-login to resume`);
+}
 process.exit(failures >= 5 ? 1 : 0);

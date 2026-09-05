@@ -34,7 +34,16 @@ mkFeatureModule {
           wtype
         ];
 
-        # Clipboard
+        # Clipboard. The Home Manager module renders `clipse -listen`, which
+        # forks and exits, as a oneshot: systemd then tracks nothing and a
+        # dead monitor is never restarted. Run the foreground monitor.
+        systemd.user.services.clipse.Service = {
+          Type = lib.mkForce "simple";
+          ExecStart = lib.mkForce "${lib.getExe pkgs.clipse} -listen-shell";
+          RemainAfterExit = lib.mkForce false;
+          Restart = "on-failure";
+          RestartSec = 2;
+        };
         services.clipse = {
           enable = true;
           systemdTarget = graphicalTarget;
