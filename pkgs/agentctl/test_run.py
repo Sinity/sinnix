@@ -460,7 +460,10 @@ def test_a_unit_of_another_daemon_or_pool_does_not_hold_the_slot(
 ) -> None:
     """A private pueued's units share the slice; a name-only match is not ownership."""
     fake_systemd.active(
-        ("agentctl-pytest-other-0123456789ab.service", "agentctl:ffffffffffff:pytest:3"),
+        (
+            "agentctl-pytest-other-0123456789ab.service",
+            "agentctl:ffffffffffff:pytest:3",
+        ),
         ("agentctl-pytest-x-job-0123456789ab.service", described("pytest-x", 4)),
         ("agentctl-pytest-old-0123456789ab.service", "7"),
     )
@@ -530,7 +533,9 @@ def test_a_pool_without_a_slice_policy_runs_under_the_normal_slice(
     argv = fake_systemd.run_argv()
     assert "--slice=agentctl-normal.slice" in argv
     assert f"--unit={unit_for(launch, 'fixture-land')}" in argv
-    assert any(argument == "--slice=agentctl-pytest.slice" for argument in argv) is False
+    assert (
+        any(argument == "--slice=agentctl-pytest.slice" for argument in argv) is False
+    )
 
 
 def test_an_oversized_log_is_truncated_with_a_marker(tmp_path: Path) -> None:
@@ -662,9 +667,7 @@ def test_a_killed_waiter_leaves_its_unit_which_the_next_run_settles_or_yields_to
     user_manager()
     pool = "fixture"
     fake_pueue.groups[pool] = 1
-    first = write_launch(
-        tmp_path, argv=["sleep", "60"], timeout_seconds=120, pool=pool
-    )
+    first = write_launch(tmp_path, argv=["sleep", "60"], timeout_seconds=120, pool=pool)
     first_task = fake_pueue.add(
         group=pool,
         label="fixture:check",

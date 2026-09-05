@@ -583,7 +583,11 @@ def test_resume_requeues_the_worker_and_a_landing_behind_it(
     assert argv[argv.index("--reasoning-effort") + 1] == "high"
     assert read_launch(harness.config, harness.pueue.task(worker["task_id"]))[
         "binding"
-    ] == {"beads": ["fx-lead", "fx-member"], "run_id": run["run_id"], "worker": "fx-lead"}
+    ] == {
+        "beads": ["fx-lead", "fx-member"],
+        "run_id": run["run_id"],
+        "worker": "fx-lead",
+    }
     assert harness.pueue.removed == [run["landing"]["task_id"]]
     landing = harness.pueue.task(resumed["landing"]["task_id"])
     assert landing is not None and landing.dependencies == (
@@ -677,7 +681,9 @@ def test_land_integrates_verifies_reviews_publishes_and_closes_satisfied_members
         harness.beads.comments[0][0] == "fx-member"
         and "without satisfying" in harness.beads.comments[0][1]
     )
-    assert sorted(harness.wt.removed) == sorted([f"batch/{run_id}/fx-solo", integration])
+    assert sorted(harness.wt.removed) == sorted(
+        [f"batch/{run_id}/fx-solo", integration]
+    )
     assert acceptance["residual"] == [
         f"batch/{run_id}/fx-lead: worktree kept; fx-member still open"
     ]

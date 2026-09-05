@@ -194,9 +194,7 @@ def hosted_check_state(pull: Mapping[str, Any], name: str) -> str:
 
 def pull_request_advisory(root: Path, number: int) -> list[dict[str, Any]]:
     """The PR's reviews and comments: author, state, head sha, url."""
-    value = gh_json(
-        ["pr", "view", str(number), "--json", "reviews,comments"], cwd=root
-    )
+    value = gh_json(["pr", "view", str(number), "--json", "reviews,comments"], cwd=root)
     document = value if isinstance(value, Mapping) else {}
     rows: list[dict[str, Any]] = []
     for kind, key in (("review", "reviews"), ("comment", "comments")):
@@ -209,9 +207,13 @@ def pull_request_advisory(root: Path, number: int) -> list[dict[str, Any]]:
             rows.append(
                 {
                     "kind": kind,
-                    "author": author.get("login") if isinstance(author, Mapping) else None,
+                    "author": author.get("login")
+                    if isinstance(author, Mapping)
+                    else None,
                     "state": entry.get("state"),
-                    "head_sha": commit.get("oid") if isinstance(commit, Mapping) else None,
+                    "head_sha": commit.get("oid")
+                    if isinstance(commit, Mapping)
+                    else None,
                     "url": entry.get("url"),
                 }
             )
