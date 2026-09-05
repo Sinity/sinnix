@@ -40,6 +40,9 @@ duplicate them here. Project semantics live in each repository's `CLAUDE.md`.
   claim a broad invariant from a narrow check.
 - Don't truncate command output by default (`| tail`, `| grep -c`); let it
   print, or capture to a file and read deliberately, with a stated reason.
+  A pipeline exits with its LAST command's status, so a verification piped
+  into `tail` reports success whatever it found. Redirect to a file and read
+  the file; never read a verdict through a pipe.
 - `pkill -f`/`pgrep -f` match the invoking shell's own command line: if the
   pattern's literal text appears anywhere else in the same compound command
   (a relaunch, a grep), you kill your own shell (exit 144). Issue `pkill -f`
@@ -229,6 +232,13 @@ memory, or the owning CLAUDE.md) instead of re-deriving next session.
   whole-suite claims.
 - Classify inherited failures before claiming completion; state exactly what
   ran and what did not.
+- A red default branch is an ordinary state. Fix forward. Never answer a
+  regression by adding a merge gate, a required review, a freeze, or a
+  checklist: serialising every lane behind one queue costs far more than the
+  transient red it prevents, and the cost is permanent while the red is not.
+  Eventual consistency is the design, not a concession. What must never slip
+  is honesty — do not report a green you did not read, and say plainly when
+  something landed without test evidence.
 
 ## Investigation and recovery
 
