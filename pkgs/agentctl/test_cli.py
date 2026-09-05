@@ -289,3 +289,35 @@ def test_batch_reads_accept_the_run_suffix_and_shorten_ids_unless_full(
     _manifest(cli_config, "fixture-20260903-090000-0123abcd")
     assert cli.main(["batch", "status", "0123abcd"]) == cli.EXIT_REFUSED
     assert "names 2 runs" in capsys.readouterr().err
+
+
+def test_job_clean_daemon_era_removes_only_the_listed_subtrees_and_is_idempotent(
+    cli_config: Config, capsys: pytest.CaptureFixture[str]
+) -> None:
+    state = cli_config.state_dir
+    for name in ("leases", "locks", "workspaces", "jobs", "inputs", "runs"):
+        (state / name).mkdir(parents=True, exist_ok=True)
+    (state / "leases" / "held.json").write_text("{}")
+    for name in ("active-jobs.json", "capacity.json", "task-sinnix.lock"):
+        (state / name).write_text("")
+    (state / "jobs" / "fixture-check-1.log").write_text("kept")
+    (state / "jobs" / "fixture-check-1.log.pgid").write_text("123")
+
+    assert cli.main(["job", "clean", "--daemon-era"]) == 0
+    captured = capsys.readouterr()
+    removed = json.loads(captured.out)["removed"]
+    assert {Path(item).name for item in removed} == {
+        "leases",
+        "locks",
+        "workspaces",
+        "active-jobs.json",
+        "capacity.json",
+        "task-sinnix.lock",
+        "fixture-check-1.log.pgid",
+    }
+    assert captured.err.startswith("removed 7 daemon-era path(s) under ")
+    assert (state / "jobs" / "fixture-check-1.log").read_text() == "kept"
+    assert (state / "inputs").is_dir() and (state / "runs").is_dir()
+
+    assert cli.main(["job", "clean", "--daemon-era"]) == 0
+    assert json.loads(capsys.readouterr().out)["removed"] == []
