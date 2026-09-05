@@ -29,8 +29,7 @@ mkFeatureModule {
         home.packages = with pkgs; [
           gocryptfs
           cryptsetup
-          scriptPkgs.encrypt-folder
-          scriptPkgs.decrypt-folder
+          scriptPkgs.crypt-folder
         ];
 
         xdg.configFile."autostart/git-annex.desktop".text = ''
