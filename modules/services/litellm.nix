@@ -35,7 +35,9 @@ mkServiceModule {
       mode = "socket-proxy";
       publicEndpoint = "127.0.0.1:${toString helpers.data.ports.litellm.public}";
       backendEndpoint = "127.0.0.1:${toString helpers.data.ports.litellm.backend}";
+      # Lightweight gateway process, unmeasured; kept at the baseline default.
       idleTimeout = "30s";
+      readinessTimeout = 30;
     };
     observe = {
       enable = true;

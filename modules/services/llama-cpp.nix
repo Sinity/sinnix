@@ -31,7 +31,10 @@ mkServiceModule {
       mode = "socket-proxy";
       publicEndpoint = "127.0.0.1:${toString helpers.data.ports.llamaCpp.public}";
       backendEndpoint = "127.0.0.1:${toString helpers.data.ports.llamaCpp.backend}";
+      # Cold /v1/rerank for the 0.6B reranker is ~1-3s; 30s is ~10-30x headroom
+      # for both timeouts.
       idleTimeout = "30s";
+      readinessTimeout = 30;
       dependsOn = [ "llama-cpp-proxy" ];
     };
     observe = {

@@ -34,7 +34,6 @@ mkServiceModule {
       unit = "weechat-log-sealer.timer";
       manager = "user";
       kind = "timer";
-      resourceClass = "background-maintenance";
       observe = {
         enable = true;
         restartable = false;

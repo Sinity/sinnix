@@ -167,7 +167,6 @@ let
       name,
       description,
       unit,
-      endpoint ? null,
       activation ? { },
       resourceClass ? "interactive-agent",
       stateDirectories ? [ ],
@@ -191,14 +190,7 @@ let
         };
       };
       surface = {
-        inherit unit resourceClass;
-        activation = {
-          mode = "direct";
-        }
-        // lib.optionalAttrs (endpoint != null) {
-          publicEndpoint = endpoint;
-        }
-        // activation;
+        inherit unit resourceClass activation;
         observe = {
           enable = true;
           restartable = true;

@@ -147,7 +147,6 @@ mkFeatureModule {
           unit = "sinnix-wallpaper-timeofday.timer";
           manager = "user";
           kind = "timer";
-          resourceClass = "background-maintenance";
           observe = {
             enable = true;
             restartable = false;

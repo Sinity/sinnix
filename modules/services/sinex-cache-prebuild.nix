@@ -43,7 +43,6 @@ mkServiceModule {
     unit = "sinex-cache-prebuild.timer";
     manager = "user";
     kind = "timer";
-    resourceClass = "background-maintenance";
     observe = {
       enable = true;
       restartable = false;

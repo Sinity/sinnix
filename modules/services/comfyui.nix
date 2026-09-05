@@ -29,7 +29,15 @@ mkServiceModule {
       mode = "socket-proxy";
       publicEndpoint = "127.0.0.1:${toString helpers.data.ports.comfyui.public}";
       backendEndpoint = "127.0.0.1:${toString helpers.data.ports.comfyui.backend}";
+      # Cold start to a 200 from `/` is ~105s: the
+      # mmartial/comfyui-nvidia-docker image re-resolves its Python venv on
+      # every launch, re-downloading a ~930MB torch wheel, which dominates the
+      # cost before any checkpoint loads. 900s idle because a real ComfyUI
+      # session (queue a generation, wait on output) is a long round trip;
+      # 180s readiness keeps a stuck container failing loud instead of hanging
+      # for the full idle timeout.
       idleTimeout = "900s";
+      readinessTimeout = 180;
       exclusiveResource = "gpu-inference";
       dependsOn = [ "comfyui-proxy" ];
     };

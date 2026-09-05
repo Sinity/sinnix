@@ -265,226 +265,239 @@ in
 {
   options.sinnix.runtime.surfaces = lib.mkOption {
     type = lib.types.attrsOf (
-      lib.types.submodule {
-        options = {
-          unit = lib.mkOption {
-            type = lib.types.str;
-            description = "systemd unit name owned by this runtime surface.";
-          };
-          manager = lib.mkOption {
-            type = lib.types.enum [
-              "system"
-              "user"
-            ];
-            default = "system";
-            description = "systemd manager that owns the unit.";
-          };
-          kind = lib.mkOption {
-            type = lib.types.enum [
-              "service"
-              "socket"
-              "timer"
-              "target"
-              "slice"
-              "scope"
-            ];
-            default = "service";
-            description = ''
-              Runtime surface kind. Every value here is a real systemd unit
-              type, and the assertion below enforces that `unit` ends in it.
-              There is deliberately no "capture" member: a lane whose writer
-              is not a unit belongs in sinnix.runtime.captures, not here with
-              a synthetic unit name that makes the `unit` field mean two
-              different things depending on this one.
-            '';
-          };
-          resourceClass = lib.mkOption {
-            type = lib.types.enum resourceClassNames;
-            default = "system";
-            description = "Sinnix runtime resource class.";
-          };
-          resources = {
-            MemoryHigh = lib.mkOption {
-              type = lib.types.nullOr lib.types.str;
-              default = null;
+      lib.types.submodule (
+        { name, config, ... }:
+        {
+          options = {
+            unit = lib.mkOption {
+              type = lib.types.str;
+              description = "systemd unit name owned by this runtime surface.";
             };
-            MemoryMax = lib.mkOption {
-              type = lib.types.nullOr lib.types.str;
-              default = null;
-            };
-            MemoryLow = lib.mkOption {
-              type = lib.types.nullOr lib.types.str;
-              default = null;
-            };
-            CPUWeight = lib.mkOption {
-              type = lib.types.nullOr lib.types.int;
-              default = null;
-            };
-            IOWeight = lib.mkOption {
-              type = lib.types.nullOr lib.types.int;
-              default = null;
-            };
-            Nice = lib.mkOption {
-              type = lib.types.nullOr lib.types.int;
-              default = null;
-            };
-            TimeoutStartSec = lib.mkOption {
-              type = lib.types.nullOr lib.types.str;
-              default = null;
-            };
-            TimeoutStopSec = lib.mkOption {
-              type = lib.types.nullOr lib.types.str;
-              default = null;
-            };
-          };
-          workload = {
-            class = lib.mkOption {
+            manager = lib.mkOption {
               type = lib.types.enum [
-                "interactive"
-                "protected"
-                "sacrificial"
-                "substrate"
-                "unclassified"
+                "system"
+                "user"
               ];
-              default = "unclassified";
-              description = "Workload policy class for runtime, telemetry, and pressure decisions.";
+              default = "system";
+              description = "systemd manager that owns the unit.";
             };
-            rationale = lib.mkOption {
-              type = lib.types.str;
-              default = "";
-              description = "Reason this surface has its workload class.";
-            };
-            processMatchers = lib.mkOption {
-              type = lib.types.listOf lib.types.str;
-              default = [ ];
-              description = "Bounded fallback matchers for children without their own unit identity.";
-            };
-            earlyoomAvoid = lib.mkOption {
-              type = lib.types.bool;
-              default = false;
-              description = "Add this surface's processMatchers to the earlyoom emergency avoid pattern (session-recovery surfaces only).";
-            };
-          };
-          observe = {
-            enable = lib.mkOption {
-              type = lib.types.bool;
-              default = false;
-              description = "Expose this surface in /etc/sinnix/runtime-inventory.json.";
-            };
-            restartable = lib.mkOption {
-              type = lib.types.bool;
-              default = false;
-              description = "Whether operators may restart this surface directly.";
-            };
-          };
-          # A machine-readable carrier for "yes, this is down, we know".
-          # Without one, every fresh agent session rediscovers an intentional
-          # outage as an emergency and re-reports it. An acknowledgement is
-          # not a mute: the surface still appears, in its own section, with
-          # the reason and the tracking reference attached, so a stale ack is
-          # visible rather than a permanent silence.
-          acknowledged = {
-            down = lib.mkOption {
-              type = lib.types.bool;
-              default = false;
-              description = "This surface is expected to be down; do not report it as a failure.";
-            };
-            reason = lib.mkOption {
-              type = lib.types.str;
-              default = "";
-              description = "Why it is down, in one line, for a human reading a status page.";
-            };
-            since = lib.mkOption {
-              type = lib.types.str;
-              default = "";
-              description = "ISO date the acknowledgement was made, so its age is auditable.";
-            };
-            ref = lib.mkOption {
-              type = lib.types.str;
-              default = "";
-              description = "Tracking reference (Beads id) for the work that ends the outage.";
-            };
-          };
-          captures = lib.mkOption {
-            type = lib.types.listOf captureLaneType;
-            default = [ ];
-            description = "Capture outputs produced by this runtime surface.";
-          };
-          activation = {
-            mode = lib.mkOption {
+            kind = lib.mkOption {
               type = lib.types.enum [
-                "direct"
-                "socket-proxy"
+                "service"
+                "socket"
+                "timer"
+                "target"
+                "slice"
+                "scope"
               ];
-              default = "direct";
-              description = "How this surface is activated and exposed to local clients.";
-            };
-            publicEndpoint = lib.mkOption {
-              type = lib.types.nullOr lib.types.str;
-              default = null;
-              description = "Local endpoint presented to clients, if any.";
-            };
-            backendEndpoint = lib.mkOption {
-              type = lib.types.nullOr lib.types.str;
-              default = null;
-              description = "Private backend endpoint behind an activation proxy, if any.";
-            };
-            idleTimeout = lib.mkOption {
-              type = lib.types.nullOr lib.types.str;
-              default = null;
-              description = "Idle timeout after which an activated backend may stop.";
-            };
-            readinessTimeout = lib.mkOption {
-              type = lib.types.nullOr lib.types.ints.positive;
-              default = null;
+              default = "service";
               description = ''
-                Seconds a socket-proxy front door blocks its own start,
-                waiting for the backend to accept a TCP connection, before
-                giving up. Bounds the queueing window for a cold-start
-                request: without it, systemd-socket-proxyd starts
-                forwarding as soon as its unit starts, not once the
-                backend actually binds, so requests arriving mid-load get
-                refused instead of parked.
+                Runtime surface kind. Every value here is a real systemd unit
+                type, and the assertion below enforces that `unit` ends in it.
+                There is deliberately no "capture" member: a lane whose writer
+                is not a unit belongs in sinnix.runtime.captures, not here with
+                a synthetic unit name that makes the `unit` field mean two
+                different things depending on this one.
               '';
             };
-            exclusiveResource = lib.mkOption {
-              type = lib.types.nullOr lib.types.str;
-              default = null;
-              description = "Resource admission key shared by mutually exclusive surfaces.";
+            resourceClass = lib.mkOption {
+              type = lib.types.enum resourceClassNames;
+              default = "system";
+              # A class becomes real by way of serviceConfig, which only a
+              # service has: mkRuntimeServiceConfig resolves a surface by its
+              # `<unit>.service` name and can never reach a timer. Rejecting the
+              # combination here rather than deleting the inert keys once is what
+              # stops a tenth from being added.
+              apply =
+                value:
+                lib.throwIf (config.kind == "timer" && value != "system")
+                  "sinnix.runtime.surfaces.${name}: a timer has no serviceConfig, so resourceClass = \"${value}\" can never apply; declare it on the .service surface this timer triggers"
+                  value;
+              description = "Sinnix runtime resource class.";
             };
-            dependsOn = lib.mkOption {
-              type = lib.types.listOf lib.types.str;
-              default = [ ];
-              description = "Runtime surface names required by this activation path.";
+            resources = {
+              MemoryHigh = lib.mkOption {
+                type = lib.types.nullOr lib.types.str;
+                default = null;
+              };
+              MemoryMax = lib.mkOption {
+                type = lib.types.nullOr lib.types.str;
+                default = null;
+              };
+              MemoryLow = lib.mkOption {
+                type = lib.types.nullOr lib.types.str;
+                default = null;
+              };
+              CPUWeight = lib.mkOption {
+                type = lib.types.nullOr lib.types.int;
+                default = null;
+              };
+              IOWeight = lib.mkOption {
+                type = lib.types.nullOr lib.types.int;
+                default = null;
+              };
+              Nice = lib.mkOption {
+                type = lib.types.nullOr lib.types.int;
+                default = null;
+              };
+              TimeoutStartSec = lib.mkOption {
+                type = lib.types.nullOr lib.types.str;
+                default = null;
+              };
+              TimeoutStopSec = lib.mkOption {
+                type = lib.types.nullOr lib.types.str;
+                default = null;
+              };
             };
-            # Long-running consumers of a socket-proxied surface MUST speak to
-            # the publicEndpoint: traffic against the private backend port is
-            # invisible to the proxy's idle timer, so mid-work the proxy
-            # idle-exits and tears the backend (and the consumer) down with it.
-            # Declaring the consumer here renders its environment override
-            # automatically.
-            consumers = lib.mkOption {
-              type = lib.types.listOf (
-                lib.types.submodule {
-                  options = {
-                    unit = lib.mkOption {
-                      type = lib.types.str;
-                      description = "systemd service name (without .service) of the consumer.";
-                    };
-                    environment = lib.mkOption {
-                      type = lib.types.attrsOf lib.types.str;
-                      default = { };
-                      description = "Environment forced onto the consumer, pointing it at publicEndpoint.";
-                    };
-                  };
-                }
-              );
+            workload = {
+              class = lib.mkOption {
+                type = lib.types.enum [
+                  "interactive"
+                  "protected"
+                  "sacrificial"
+                  "substrate"
+                  "unclassified"
+                ];
+                default = "unclassified";
+                description = "Workload policy class for runtime, telemetry, and pressure decisions.";
+              };
+              rationale = lib.mkOption {
+                type = lib.types.str;
+                default = "";
+                description = "Reason this surface has its workload class.";
+              };
+              processMatchers = lib.mkOption {
+                type = lib.types.listOf lib.types.str;
+                default = [ ];
+                description = "Bounded fallback matchers for children without their own unit identity.";
+              };
+              earlyoomAvoid = lib.mkOption {
+                type = lib.types.bool;
+                default = false;
+                description = "Add this surface's processMatchers to the earlyoom emergency avoid pattern (session-recovery surfaces only).";
+              };
+            };
+            observe = {
+              enable = lib.mkOption {
+                type = lib.types.bool;
+                default = false;
+                description = "Expose this surface in /etc/sinnix/runtime-inventory.json.";
+              };
+              restartable = lib.mkOption {
+                type = lib.types.bool;
+                default = false;
+                description = "Whether operators may restart this surface directly.";
+              };
+            };
+            # A machine-readable carrier for "yes, this is down, we know".
+            # Without one, every fresh agent session rediscovers an intentional
+            # outage as an emergency and re-reports it. An acknowledgement is
+            # not a mute: the surface still appears, in its own section, with
+            # the reason and the tracking reference attached, so a stale ack is
+            # visible rather than a permanent silence.
+            acknowledged = {
+              down = lib.mkOption {
+                type = lib.types.bool;
+                default = false;
+                description = "This surface is expected to be down; do not report it as a failure.";
+              };
+              reason = lib.mkOption {
+                type = lib.types.str;
+                default = "";
+                description = "Why it is down, in one line, for a human reading a status page.";
+              };
+              since = lib.mkOption {
+                type = lib.types.str;
+                default = "";
+                description = "ISO date the acknowledgement was made, so its age is auditable.";
+              };
+              ref = lib.mkOption {
+                type = lib.types.str;
+                default = "";
+                description = "Tracking reference (Beads id) for the work that ends the outage.";
+              };
+            };
+            captures = lib.mkOption {
+              type = lib.types.listOf captureLaneType;
               default = [ ];
-              description = "Units doing long-running work against this surface via the public endpoint.";
+              description = "Capture outputs produced by this runtime surface.";
+            };
+            activation = {
+              mode = lib.mkOption {
+                type = lib.types.enum [
+                  "direct"
+                  "socket-proxy"
+                ];
+                default = "direct";
+                description = "How this surface is activated and exposed to local clients.";
+              };
+              publicEndpoint = lib.mkOption {
+                type = lib.types.nullOr lib.types.str;
+                default = null;
+                description = "Local endpoint presented to clients, if any.";
+              };
+              backendEndpoint = lib.mkOption {
+                type = lib.types.nullOr lib.types.str;
+                default = null;
+                description = "Private backend endpoint behind an activation proxy, if any.";
+              };
+              idleTimeout = lib.mkOption {
+                type = lib.types.nullOr lib.types.str;
+                default = null;
+                description = "Idle timeout after which an activated backend may stop.";
+              };
+              readinessTimeout = lib.mkOption {
+                type = lib.types.nullOr lib.types.ints.positive;
+                default = null;
+                description = ''
+                  Seconds a socket-proxy front door blocks its own start,
+                  waiting for the backend to accept a TCP connection, before
+                  giving up. Bounds the queueing window for a cold-start
+                  request: without it, systemd-socket-proxyd starts
+                  forwarding as soon as its unit starts, not once the
+                  backend actually binds, so requests arriving mid-load get
+                  refused instead of parked.
+                '';
+              };
+              exclusiveResource = lib.mkOption {
+                type = lib.types.nullOr lib.types.str;
+                default = null;
+                description = "Resource admission key shared by mutually exclusive surfaces.";
+              };
+              dependsOn = lib.mkOption {
+                type = lib.types.listOf lib.types.str;
+                default = [ ];
+                description = "Runtime surface names required by this activation path.";
+              };
+              # Long-running consumers of a socket-proxied surface MUST speak to
+              # the publicEndpoint: traffic against the private backend port is
+              # invisible to the proxy's idle timer, so mid-work the proxy
+              # idle-exits and tears the backend (and the consumer) down with it.
+              # Declaring the consumer here renders its environment override
+              # automatically.
+              consumers = lib.mkOption {
+                type = lib.types.listOf (
+                  lib.types.submodule {
+                    options = {
+                      unit = lib.mkOption {
+                        type = lib.types.str;
+                        description = "systemd service name (without .service) of the consumer.";
+                      };
+                      environment = lib.mkOption {
+                        type = lib.types.attrsOf lib.types.str;
+                        default = { };
+                        description = "Environment forced onto the consumer, pointing it at publicEndpoint.";
+                      };
+                    };
+                  }
+                );
+                default = [ ];
+                description = "Units doing long-running work against this surface via the public endpoint.";
+              };
             };
           };
-        };
-      }
+        }
+      )
     );
     default = { };
     description = "Enabled runtime units and capture surfaces declared by owning modules.";

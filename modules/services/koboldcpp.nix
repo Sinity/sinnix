@@ -26,7 +26,13 @@ mkServiceModule {
       mode = "socket-proxy";
       publicEndpoint = "127.0.0.1:${toString helpers.data.ports.koboldcpp.public}";
       backendEndpoint = "127.0.0.1:${toString helpers.data.ports.koboldcpp.backend}";
+      # Unmeasurable: koboldcpp-cuda here fails CUDA init with `undefined
+      # symbol: cuMemCreate` from koboldcpp_cublas.so on model load, so GPU
+      # inference is non-functional regardless of timeout. Sized from its role
+      # instead -- the deliberately-slow RAM-offloaded tier for GGUFs larger
+      # than ollama's daily driver -- so at least as generous as ollama's 240s.
       idleTimeout = "300s";
+      readinessTimeout = 300;
       exclusiveResource = "gpu-inference";
       dependsOn = [ "koboldcpp-proxy" ];
     };

@@ -164,6 +164,7 @@ in
             sinnix.services.tts.enable = true;
             sinnix.services.llama-cpp.enable = true;
             sinnix.services.muse-glimmer.enable = true;
+            sinnix.services.qwen38-vram.enable = true;
             sinnix.services.comfyui.enable = true;
             sinnix.services.musicgen.enable = true;
             sinnix.services.ocr.enable = true;
@@ -233,6 +234,10 @@ in
               muse-glimmer = {
                 service = "muse-glimmer.service";
                 proxy = "muse-glimmer-proxy.service";
+              };
+              qwen38-vram = {
+                service = "qwen38-vram.service";
+                proxy = "qwen38-vram-proxy.service";
               };
             };
             conflictsOf = unit: config.systemd.services.${lib.removeSuffix ".service" unit}.conflicts or [ ];
