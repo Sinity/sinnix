@@ -28,18 +28,18 @@ from .projects import ProjectAdapter, ProjectOperation
 from .pueue import PueueError, Task
 from .run import (
     CANCELLED_EXIT_CODE,
-    Outcome,
     MAX_LOG_BYTES,
     MAX_RESULT_BYTES,
     REFUSED_EXIT_CODE,
     SLOT_OCCUPIED_EXIT_CODE,
     TIMEOUT_EXIT_CODE,
     VANISHED_EXIT_CODE,
+    Outcome,
     cancel_marker_for,
     outcome_path_for,
+    systemd_environment,
     unit_for,
     unit_pool,
-    systemd_environment,
 )
 
 QUEUE_RUN_EXECUTABLE = "agentctl-run"

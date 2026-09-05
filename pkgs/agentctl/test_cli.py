@@ -307,8 +307,9 @@ def test_batch_list_reads_each_run_pr_through_the_project(
     monkeypatch.setattr(
         cli.batch.github,
         "pull_request",
-        lambda root, number: asked.append((str(root), number))
-        or {"number": number, "state": "MERGED"},
+        lambda root, number: (
+            asked.append((str(root), number)) or {"number": number, "state": "MERGED"}
+        ),
     )
 
     assert cli.main(["batch", "list", "fixture", "--json"]) == 0

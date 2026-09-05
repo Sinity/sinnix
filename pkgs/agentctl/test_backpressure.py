@@ -274,7 +274,12 @@ def test_a_group_seen_running_after_our_pause_is_released_and_an_operator_repaus
     result, calls = _tick(
         monkeypatch,
         {"io_full_avg60": 1.0, "memory_full_avg60": 1.0},
-        {"agent": "Running", "pytest": "Running", "normal": "Running", "bulk": "Running"},
+        {
+            "agent": "Running",
+            "pytest": "Running",
+            "normal": "Running",
+            "bulk": "Running",
+        },
         spool=spool,
     )
     assert calls == [] and result["action"] == "hold"
@@ -288,7 +293,12 @@ def test_a_group_seen_running_after_our_pause_is_released_and_an_operator_repaus
     result, calls = _tick(
         monkeypatch,
         {"io_full_avg60": 1.0, "memory_full_avg60": 1.0},
-        {"agent": "Running", "pytest": "Paused", "normal": "Running", "bulk": "Running"},
+        {
+            "agent": "Running",
+            "pytest": "Paused",
+            "normal": "Running",
+            "bulk": "Running",
+        },
         spool=spool,
     )
     assert calls == [] and result["action"] == "hold"

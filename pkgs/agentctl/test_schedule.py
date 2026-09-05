@@ -91,7 +91,9 @@ def test_a_rebuilt_agentctl_replaces_the_timer_that_execs_the_old_path(
     from dataclasses import replace
 
     first = schedule.apply(config)
-    rebuilt = replace(config, agentctl_executable="/nix/store/new-agentctl/bin/agentctl")
+    rebuilt = replace(
+        config, agentctl_executable="/nix/store/new-agentctl/bin/agentctl"
+    )
 
     second = schedule.apply(rebuilt)
 
