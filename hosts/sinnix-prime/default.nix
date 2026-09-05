@@ -73,7 +73,7 @@
               "self"
             ];
           };
-          approvedManifestHash = "36fe758042d742aa9d5eb1762c91c6838d8b95fe6841184f2f2b7fb2c95da95d";
+          approvedManifestHash = "7960deaa209aa29fee1577184efd8dbc1bf640d36f0fd547ee78bf856b6abc95";
         };
       };
     };
