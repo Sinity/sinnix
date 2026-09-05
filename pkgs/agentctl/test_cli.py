@@ -6,9 +6,9 @@ import json
 from pathlib import Path
 
 import pytest
-from conftest import FakePueue
 from agentctl import cli
 from agentctl.config import Config
+from conftest import FakePueue
 
 
 @pytest.fixture
@@ -145,7 +145,9 @@ def test_backpressure_tick_reports_the_decision(
         "read_pressure",
         lambda _root: {"io_full_avg60": 0.0, "memory_full_avg60": 0.0},
     )
-    monkeypatch.setattr(backpressure.pueue, "groups_status", lambda: {"agent": "Running"})
+    monkeypatch.setattr(
+        backpressure.pueue, "groups_status", lambda: {"agent": "Running"}
+    )
 
     assert cli.main(["backpressure", "tick"]) == 0
     assert json.loads(capsys.readouterr().out)["action"] == "hold"

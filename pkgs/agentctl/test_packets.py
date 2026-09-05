@@ -6,7 +6,6 @@ import json
 from pathlib import Path
 
 import pytest
-from conftest import FakeBd, bead
 from agentctl.packets import (
     MAX_PROMPT_BYTES,
     MAX_SUBJECT_LENGTH,
@@ -17,6 +16,7 @@ from agentctl.packets import (
     rebase_prompt,
     resolve_group,
 )
+from conftest import FakeBd, bead
 
 
 def reader() -> FakeBd:

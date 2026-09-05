@@ -8,13 +8,13 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from conftest import FakeBd, FakePueue, bead
 from agentctl import operator_view
 from agentctl.config import Config
 from agentctl.lanes import LaneRow
 from agentctl.projects import load_project_adapter
 from agentctl.pueue import Task
 from agentctl.worktrunk import Worktree
+from conftest import FakeBd, FakePueue, bead
 
 NOW = datetime(2026, 9, 3, 9, 0, tzinfo=UTC)
 

@@ -12,6 +12,12 @@ import json
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
+from agentctl import lanes, launch
+from agentctl.config import Config, ConfigError, load_config, resolve_project
+from agentctl.packets import PacketError
+from agentctl.projects import ProjectConfigError
+from agentctl.pueue import PueueError
+from agentctl.worktrunk import WorktrunkError
 from sinnix_mcp import (
     ErrorCode,
     ErrorEnvelope,
@@ -19,12 +25,6 @@ from sinnix_mcp import (
     RequestEnvelope,
     ResponseEnvelope,
 )
-from agentctl import lanes, launch
-from agentctl.config import Config, ConfigError, load_config, resolve_project
-from agentctl.packets import PacketError
-from agentctl.projects import ProjectConfigError
-from agentctl.pueue import PueueError
-from agentctl.worktrunk import WorktrunkError
 
 OWNER = "systemd-jobs"
 JOB_LIST_ORDERING = "created_at_desc_job_id_desc"

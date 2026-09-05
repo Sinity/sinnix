@@ -5,10 +5,10 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
-from sinnix_agent_gateway.execution import LocalJobs
-from sinnix_mcp import ErrorCode, RequestEnvelope
 from agentctl import lanes, launch
 from agentctl.config import Config
+from sinnix_agent_gateway.execution import LocalJobs
+from sinnix_mcp import ErrorCode, RequestEnvelope
 
 DESCRIPTOR = """
 schema = 1

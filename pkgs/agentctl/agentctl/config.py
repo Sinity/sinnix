@@ -46,7 +46,9 @@ class Config:
 
 
 def default_state_dir() -> Path:
-    base = Path(os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state"))
+    base = Path(
+        os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
+    )
     state_dir = base / "agentctl"
     previous = base / "sinnixd"
     if not state_dir.exists() and previous.is_dir():
@@ -54,7 +56,10 @@ def default_state_dir() -> Path:
             os.rename(previous, state_dir)
         except OSError as error:
             # A persistence bind mount cannot be renamed; the operator moves it.
-            print(f"agentctl: could not move {previous} to {state_dir}: {error}", file=sys.stderr)
+            print(
+                f"agentctl: could not move {previous} to {state_dir}: {error}",
+                file=sys.stderr,
+            )
         else:
             print(f"agentctl: moved state {previous} -> {state_dir}", file=sys.stderr)
     return state_dir
