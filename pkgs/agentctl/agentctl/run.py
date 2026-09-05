@@ -482,6 +482,13 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
     )
     if pool:
         environment["AGENTCTL_POOL"] = pool
+    # Consumers still reading the pre-rename names; deleted once Polylogue's
+    # devtools read AGENTCTL_* (PR Sinity/polylogue#4681).
+    for name, value in list(environment.items()):
+        if name.startswith("AGENTCTL_") and name != "AGENTCTL_POOL":
+            environment.setdefault("SINNIXD_" + name[len("AGENTCTL_") :], value)
+    if pool:
+        environment.setdefault("SINNIXD_QUEUE_POOL", pool)
     argv = list(launch["argv"])
     executable = shutil.which(argv[0], path=environment.get("PATH", os.defpath))
     properties: dict[str, str] = {}
