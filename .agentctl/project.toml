@@ -20,6 +20,8 @@ default_base = "origin/master"
 identity_check = ["git", "diff", "--quiet", "--", "flake.nix"]
 checkpoint_untracked = true
 verification_operations = ["check", "lint"]
+verify = { focused = "verify_quick", candidate = "check", corpus = "check_all" }
+publish = "master"
 
 [packets]
 template = "dots/_ai/skills/orchestrate/references/worker-contract.md"

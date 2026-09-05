@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# The backend adapter `agentctl lane start` queues: one prompt file, one backend invocation.
+# The backend adapter agentctl queues for a batch worker, reviewer or integrator:
+# one prompt file, one backend invocation, optionally one structured result.
 set -euo pipefail
 
 agent=""
@@ -10,13 +11,16 @@ model=""
 reasoning_effort=""
 credential_profile="subscription"
 resume_session_id=""
+output_schema=""
 
 usage() {
   cat <<'EOF'
-Usage: run_agent_prompt.sh --agent <backend> --workdir <path> --prompt-file <path> --last-file <path> --model <model> --reasoning-effort <effort> [--credential-profile subscription|api] [--resume-session-id <id>]
+Usage: run_agent_prompt.sh --agent <backend> --workdir <path> --prompt-file <path> --last-file <path> --model <model> --reasoning-effort <effort> [--credential-profile subscription|api] [--resume-session-id <id>] [--output-schema <file>]
 
 This is agentctl's private backend adapter. pueue owns the job's identity, log,
 result, cancellation and timeout; this script only builds the backend argv.
+With --output-schema the backend's final message is JSON conforming to that
+schema and is written to the last file (claude, codex).
 EOF
 }
 
@@ -54,6 +58,10 @@ while [[ $# -gt 0 ]]; do
     resume_session_id="${2:?missing native session id}"
     shift 2
     ;;
+  --output-schema)
+    output_schema="${2:?missing schema file}"
+    shift 2
+    ;;
   -h | --help)
     usage
     exit 0
@@ -76,6 +84,10 @@ done
 }
 [[ $credential_profile == subscription || $credential_profile == api ]] || {
   echo "invalid credential profile" >&2
+  exit 2
+}
+[[ -z $output_schema || -r $output_schema ]] || {
+  echo "output schema is unreadable: $output_schema" >&2
   exit 2
 }
 mkdir -p "$(dirname "$last_file")"
@@ -101,9 +113,31 @@ agent_bin="$(resolve_agent_bin "$agent")" || {
 }
 cd "$workdir"
 
+# claude --output-format json prints one envelope whose `structured_output`
+# holds the schema-conforming object; the last file receives only that object
+# so every backend leaves the same document.
+unwrap_claude_json() {
+  python3 -c '
+import json, sys
+raw = sys.stdin.read()
+sys.stdout.write(raw)
+document = json.loads(raw)
+if isinstance(document, list):
+    document = next((item for item in document if item.get("type") == "result"), document[-1])
+value = document.get("structured_output", document.get("result"))
+if isinstance(value, str):
+    value = json.loads(value)
+with open(sys.argv[1], "w") as handle:
+    json.dump(value, handle, indent=2)
+' "$last_file"
+}
+
 case "$agent" in
 codex)
   codex_args=(exec -C "$workdir" --model "$model" --output-last-message "$last_file")
+  if [[ -n $output_schema ]]; then
+    codex_args+=(--output-schema "$output_schema")
+  fi
   if [[ -n $resume_session_id ]]; then
     codex_args+=(resume "$resume_session_id")
   fi
@@ -117,10 +151,19 @@ claude)
   if [[ -n $resume_session_id ]]; then
     resume_args=(--resume "$resume_session_id")
   fi
+  claude_args=("${resume_args[@]}" --print -p "$(<"$prompt_file")" --model "$model" --effort "$reasoning_effort")
+  if [[ -n $output_schema ]]; then
+    claude_args+=(--output-format json --json-schema "$output_schema")
+  fi
   if [[ $credential_profile == subscription ]]; then
-    env -u ANTHROPIC_API_KEY "$agent_bin" "${resume_args[@]}" --print -p "$(<"$prompt_file")" --model "$model" --effort "$reasoning_effort" | tee "$last_file"
+    claude_cmd=(env -u ANTHROPIC_API_KEY "$agent_bin")
   else
-    "$agent_bin" "${resume_args[@]}" --print -p "$(<"$prompt_file")" --model "$model" --effort "$reasoning_effort" | tee "$last_file"
+    claude_cmd=("$agent_bin")
+  fi
+  if [[ -n $output_schema ]]; then
+    "${claude_cmd[@]}" "${claude_args[@]}" | unwrap_claude_json
+  else
+    "${claude_cmd[@]}" "${claude_args[@]}" | tee "$last_file"
   fi
   ;;
 gemini)

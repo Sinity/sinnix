@@ -1,7 +1,7 @@
-"""The operator's one screen: queue, lanes, PRs, ready work.
+"""The operator's one screen: queue, runs and their workers, ready work.
 
-Assembled from `pueue status --json`, `wt list --format=json`,
-`gh pr list --json` and `bd ready --json`; rendered as text in local time.
+Assembled from `pueue status --json`, the run manifests and `bd ready
+--json`; rendered as text in local time.
 Every "next" here is a description of the mechanical state, not a decision:
 nothing in this module dispatches.
 """
@@ -13,14 +13,13 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Mapping, Sequence
 
-from . import pueue
+from . import batch, pueue
+from .batch import Run, run_stage, worker_stage
 from .config import Config
-from .lanes import LaneRow, _codex_review_gate, _merged_pr_matches_tree, lane_rows
 from .launch import job_view
 from .packets import PacketError, SubprocessBdReader
 from .projects import ProjectAdapter
 from .pueue import PueueError, Task
-from .worktrunk import WorktrunkError
 
 MAX_READY_SHOWN = 8
 MAX_FAILED_SHOWN = 6
@@ -32,17 +31,13 @@ class Snapshot:
     now: datetime
     tasks: tuple[Task, ...]
     groups: Mapping[str, str]
-    lanes: tuple[LaneRow, ...]
+    runs: tuple[Run, ...]
     ready: tuple[Mapping[str, Any], ...]
     errors: tuple[str, ...] = field(default_factory=tuple)
-    # Bead records of the lanes whose merged PR could complete them, keyed by
-    # bead id: a merge is only this lane's when the PR binds this bead.
-    beads: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        agents = agents_by_bead(self.tasks)
         return {
-            "schema": "sinnix.agentctl.view.v2",
+            "schema": "sinnix.agentctl.view.v3",
             "project": self.project_id,
             "at": self.now.isoformat(),
             "groups": {
@@ -50,15 +45,7 @@ class Snapshot:
                 for name, status in sorted(self.groups.items())
             },
             "jobs": [job_view(task) for task in self.tasks],
-            "lanes": [
-                lane_dict(
-                    row,
-                    agents.get(row.bead or ""),
-                    self.now,
-                    self.beads.get(row.bead or ""),
-                )
-                for row in self.lanes
-            ],
+            "runs": [run_dict(run, self.tasks, self.now) for run in self.runs],
             "ready": [
                 {
                     "id": bead.get("id"),
@@ -102,145 +89,77 @@ def local_clock(stamp: str | None, *, seconds: bool = False) -> str:
     return moment.astimezone().strftime("%H:%M:%S" if seconds else "%H:%M")
 
 
-def _checks(pull: Mapping[str, Any]) -> str:
-    rollup = pull.get("statusCheckRollup")
-    if not isinstance(rollup, list) or not rollup:
-        return "none"
-    outcomes: list[str] = []
-    for check in rollup:
-        if not isinstance(check, Mapping):
-            continue
-        verdict = str(check.get("conclusion") or check.get("state") or "").upper()
-        status = str(check.get("status") or "").upper()
-        if verdict in {"SUCCESS", "NEUTRAL", "SKIPPED"}:
-            outcomes.append("pass")
-        elif verdict in {
-            "FAILURE",
-            "ERROR",
-            "CANCELLED",
-            "TIMED_OUT",
-            "ACTION_REQUIRED",
-        }:
-            outcomes.append("fail")
-        elif status and status != "COMPLETED":
-            outcomes.append("pending")
-        else:
-            outcomes.append("pending")
-    if "fail" in outcomes:
-        return "fail"
-    if "pending" in outcomes:
-        return "pending"
-    return "pass"
-
-
-def pr_summary(pull: Mapping[str, Any] | None) -> dict[str, Any] | None:
-    if pull is None:
+def _task(tasks: Sequence[Task], task_id: Any) -> Task | None:
+    if not isinstance(task_id, int):
         return None
-    head = pull.get("headRefOid")
-    codex_review = (
-        _codex_review_gate(pull, head)["status"]
-        if isinstance(head, str) and head
-        else "pending"
-    )
+    return next((task for task in tasks if task.task_id == task_id), None)
+
+
+def run_dict(run: Run, tasks: Sequence[Task], now: datetime) -> dict[str, Any]:
+    """One run's rows: stage from pueue first, the manifest second."""
+    worker_tasks = [_task(tasks, worker.get("task_id")) for worker in run.workers]
+    landing_task = _task(tasks, run.landing.get("task_id"))
+    workers = []
+    for worker, task in zip(run.workers, worker_tasks, strict=True):
+        since = (task.started_at or task.enqueued_at) if task else None
+        workers.append(
+            {
+                "id": worker["id"],
+                "beads": list(worker["beads"]),
+                "branch": worker["branch"],
+                "worktree": worker.get("worktree"),
+                "stage": worker_stage(worker, task),
+                "job": task.task_id if task else None,
+                "since": since,
+                "elapsed": age(since, now) if since else None,
+            }
+        )
+    landing = run.landing
     return {
-        "number": pull.get("number"),
-        "state": pull.get("state"),
-        "url": pull.get("url"),
-        "draft": bool(pull.get("isDraft")),
-        "mergeable": pull.get("mergeable"),
-        "review": pull.get("reviewDecision") or None,
-        "codex_review": codex_review,
-        "checks": _checks(pull),
-        "auto_merge": bool(pull.get("autoMergeRequest")),
-        "updated_at": pull.get("updatedAt"),
+        "run": run.run_id,
+        "harness": run.harness,
+        "base_commit": run.base_commit,
+        "stage": run_stage(run, landing_task, worker_tasks),
+        "next": run_next(run, landing_task, worker_tasks),
+        "workers": workers,
+        "landing": {
+            "job": landing_task.task_id if landing_task else None,
+            "phase": job_view(landing_task)["phase"] if landing_task else None,
+            "candidate_sha": landing.get("candidate_sha"),
+            "pr_number": landing.get("pr_number"),
+            "failure": landing.get("failure"),
+        },
+        "accepted": run.acceptance is not None,
     }
 
 
-def agents_by_bead(tasks: Sequence[Task]) -> dict[str, Task]:
-    """The newest lane or rebase task per bead."""
-    newest: dict[str, Task] = {}
-    for task in tasks:
-        parts = task.label.split(":")
-        if len(parts) == 3 and parts[1] in {"lane", "rebase"}:
-            current = newest.get(parts[2])
-            if current is None or task.task_id > current.task_id:
-                newest[parts[2]] = task
-    return newest
-
-
-def lane_stage(
-    row: LaneRow, agent: Task | None, bead: Mapping[str, Any] | None = None
-) -> tuple[str, str]:
-    """(stage, next): what the lane's facts say it is, and what follows mechanically."""
-    pull = pr_summary(row.pr)
-    # A lane whose job has not finished is that job, whatever its branch and PR
-    # look like: nothing may act on a worktree an agent still holds.
-    if agent is not None and not agent.terminal:
-        return f"{agent.label.split(':')[1]} {job_view(agent)['phase']}", "wait"
-    # Completion is a merged PR bound to this bead, branch and head — the same
-    # evidence lane sync requires. wt's integrated verdict is satisfied by a
-    # branch that carries no commit of its own.
-    if _merged_pr_matches_tree(row, bead)[0]:
-        return "merged", "lane sync"
-    if pull and pull["state"] == "OPEN":
-        if pull["mergeable"] == "CONFLICTING":
-            return "conflicting", "lane rebase"
-        if pull["checks"] == "fail":
-            return "checks failing", "fix in lane, push"
-        if pull["checks"] == "pending":
-            return "checks running", "wait"
-        if pull["review"] == "CHANGES_REQUESTED":
-            return "changes requested", "fix in lane, push"
-        if pull["codex_review"] == "findings":
-            return "Codex findings", "fix in lane, push"
-        if pull["codex_review"] == "pending":
-            return "Codex review pending", "wait"
-        if pull["auto_merge"]:
-            return "auto-merge armed", "wait for merge"
-        # Publication arms the merge behind the gate; the screen never asks for
-        # a merge by hand.
-        return "pr open", "lane publish"
-    if pull and pull["state"] == "CLOSED":
-        return "pr closed", "lane sync or restart"
-    if pull and pull["state"] == "MERGED":
-        # The merge published an earlier head, so it does not complete this
-        # lane and lane sync will name which binding failed. The integrated
-        # verdict cannot prove completion, but it does say whether the branch
-        # still holds work of its own to publish.
-        following = "lane sync" if row.worktree.integrated else "lane publish"
-        return "merged PR is not this head", following
-    if agent is not None:
-        phase = job_view(agent)["phase"]
-        if phase == "succeeded":
-            return "unpublished", "lane publish"
-        return f"{agent.label.split(':')[1]} {phase}", "job logs, then lane rebase"
-    return "idle", "lane rebase or publish"
-
-
-def lane_dict(
-    row: LaneRow,
-    agent: Task | None,
-    now: datetime,
-    bead: Mapping[str, Any] | None = None,
-) -> dict[str, Any]:
-    tree = row.worktree
-    stage, following = lane_stage(row, agent, bead)
-    since = agent.started_at or agent.enqueued_at if agent else None
-    return {
-        "lane": tree.path.name if tree.path else tree.branch,
-        "branch": tree.branch,
-        "worktree": str(tree.path) if tree.path else None,
-        "bead": row.bead,
-        "stage": stage,
-        "next": following,
-        "since": since,
-        "elapsed": age(since, now) if since else None,
-        "dirty": tree.dirty,
-        "wt_state": tree.state,
-        "head": tree.head,
-        "agent": job_view(agent) if agent else None,
-        "pr": pr_summary(row.pr),
-    }
+def run_next(
+    run: Run, landing: Task | None, worker_tasks: Sequence[Task | None]
+) -> str:
+    """What follows mechanically; nothing here dispatches."""
+    stage = run_stage(run, landing, worker_tasks)
+    if stage in {"working", "landing"}:
+        return "wait"
+    if stage == "landed":
+        return "-"
+    if stage == "stashed":
+        return "batch result, then the landing task runs"
+    if stage.startswith("failed") or stage.startswith("landing "):
+        return (
+            f"job logs {landing.task_id}, then batch land or batch resume"
+            if landing
+            else "batch land"
+        )
+    if stage == "unprepared":
+        return "batch start again"
+    if stage == "awaiting workers":
+        failed = [
+            task
+            for task in worker_tasks
+            if task is not None and task.terminal and not task.succeeded
+        ]
+        return "batch resume --worker" if failed else "batch result"
+    return "batch land"
 
 
 def _group_counts(tasks: Sequence[Task], group: str) -> dict[str, int]:
@@ -271,36 +190,21 @@ def collect(
     except PueueError as error:
         tasks, groups = (), {}
         errors.append(f"pueue: {error}")
-    try:
-        lanes = tuple(lane_rows(project, full=False))
-    except (WorktrunkError, PacketError, RuntimeError) as error:
-        lanes = ()
-        errors.append(f"lanes: {error}")
+    runs = tuple(batch.list_runs(config, project.project_id))
     reader = SubprocessBdReader(project.root)
     try:
         ready = tuple(reader.ready())
     except PacketError as error:
         ready = ()
         errors.append(f"bd: {error}")
-    beads: dict[str, Mapping[str, Any]] = {}
-    for row in lanes:
-        if row.bead is None or row.bead in beads or row.pr is None:
-            continue
-        if row.pr.get("state") != "MERGED":
-            continue
-        try:
-            beads[row.bead] = reader.show(row.bead)
-        except PacketError as error:
-            errors.append(f"bd: {error}")
     return Snapshot(
         project_id=project.project_id,
         now=now or datetime.now(UTC),
         tasks=tasks,
         groups=groups,
-        lanes=lanes,
+        runs=runs,
         ready=ready,
         errors=tuple(errors),
-        beads=beads,
     )
 
 
@@ -346,21 +250,16 @@ def render(snapshot: Snapshot) -> str:
         if task.terminal and not task.succeeded and task.result != "Killed"
     ]
     failed.sort(key=lambda task: task.ended_at or "", reverse=True)
-    agents = agents_by_bead(snapshot.tasks)
-    lane_facts = [
-        (
-            row,
-            lane_stage(
-                row, agents.get(row.bead or ""), snapshot.beads.get(row.bead or "")
-            ),
-        )
-        for row in snapshot.lanes
-    ]
+    runs = [run_dict(run, snapshot.tasks, now) for run in snapshot.runs]
     attention = [
-        (row, stage)
-        for row, (stage, _next) in lane_facts
-        if stage in {"conflicting", "checks failing", "changes requested"}
-        or stage.endswith(("failed", "timed-out", "refused", "cancelled"))
+        row
+        for row in runs
+        if row["stage"].startswith(("failed", "landing "))
+        or any(
+            worker["stage"]
+            in {"failed", "timed-out", "refused", "cancelled", "launch-failed"}
+            for worker in row["workers"]
+        )
     ]
     if failed or attention:
         lines.append("== needs attention")
@@ -370,11 +269,8 @@ def render(snapshot: Snapshot) -> str:
                 f"  ! job {task.task_id} {task.label} {job_view(task)['phase']}{exit_text}"
                 f" at {local_clock(task.ended_at)} ({age(task.ended_at, now)} ago)"
             )
-        for row, stage in attention:
-            name = row.worktree.path.name if row.worktree.path else row.worktree.branch
-            pull = pr_summary(row.pr)
-            pr_text = f" PR #{pull['number']}" if pull else ""
-            lines.append(f"  ! {name} {stage}{pr_text}")
+        for row in attention:
+            lines.append(f"  ! run {row['run']} {row['stage']}: {row['next']}")
     else:
         lines.append("== nothing needs attention")
 
@@ -399,36 +295,37 @@ def render(snapshot: Snapshot) -> str:
             .join(("  ", ""))
         )
 
-    lines.append(f"== lanes: {len(snapshot.lanes)}")
-    if lane_facts:
+    open_runs = [row for row in runs if not row["accepted"]]
+    lines.append(f"== runs: {len(open_runs)} open, {len(runs) - len(open_runs)} landed")
+    if open_runs:
         rows = []
-        for row, (stage, following) in sorted(
-            lane_facts, key=lambda item: item[0].worktree.branch or ""
-        ):
-            agent = agents.get(row.bead or "")
-            since = (agent.started_at or agent.enqueued_at) if agent else None
-            pull = pr_summary(row.pr)
-            pr_text = (
-                f"#{pull['number']} {str(pull['state']).lower()} checks:{pull['checks']}"
-                f"{' auto' if pull['auto_merge'] else ''}"
-                if pull
-                else "-"
-            )
+        for row in open_runs:
+            for worker in row["workers"]:
+                rows.append(
+                    (
+                        row["run"],
+                        worker["id"],
+                        worker["stage"],
+                        f"{local_clock(worker['since'])} {worker['elapsed']}"
+                        if worker["since"]
+                        else "-",
+                        f"#{worker['job']}" if worker["job"] is not None else "-",
+                        "",
+                    )
+                )
+            landing = row["landing"]
             rows.append(
                 (
-                    row.worktree.path.name
-                    if row.worktree.path
-                    else row.worktree.branch,
-                    row.bead or "",
-                    stage + (" dirty" if row.worktree.dirty else ""),
-                    f"{local_clock(since)} {age(since, now)}" if since else "-",
-                    f"#{agent.task_id}" if agent else "-",
-                    pr_text,
-                    following,
+                    row["run"],
+                    "landing",
+                    row["stage"],
+                    "-",
+                    f"#{landing['job']}" if landing["job"] is not None else "-",
+                    row["next"],
                 )
             )
         lines.append(
-            table(("lane", "bead", "stage", "since", "job", "pr", "next"), rows)
+            table(("run", "worker", "stage", "since", "job", "next"), rows)
             .replace("\n", "\n  ")
             .join(("  ", ""))
         )
@@ -442,4 +339,4 @@ def render(snapshot: Snapshot) -> str:
     return "\n".join(lines)
 
 
-__all__ = ["Snapshot", "collect", "render", "table", "age", "local_clock", "lane_stage"]
+__all__ = ["Snapshot", "collect", "render", "table", "age", "local_clock", "run_dict"]

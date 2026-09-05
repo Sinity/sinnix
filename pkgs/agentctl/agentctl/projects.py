@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -40,8 +40,20 @@ CACHE_KINDS = frozenset({"none", "tree+environment"})
 # inert here and ignored rather than taking the project out of service.
 _IGNORED_TABLES = frozenset({"conflicts", "owner_adapters", "packets"})
 _WORKSPACE_FIELDS = frozenset(
-    {"root", "default_base", "agent_memory_max", "verification_operations"}
+    {
+        "root",
+        "default_base",
+        "agent_memory_max",
+        "verification_operations",
+        "verify",
+        "publish",
+    }
 )
+# `[workspace].verify` names one operation per profile; `candidate` may be
+# `hosted:<check>` for a project whose candidate verification is a required
+# PR check.
+_VERIFY_PROFILES = frozenset({"focused", "candidate", "corpus"})
+PUBLISH_POLICIES = frozenset({"pr", "master"})
 # systemd's size grammar for MemoryMax: an integer with an optional K/M/G/T
 # suffix.
 _MEMORY_SIZE = re.compile(r"[1-9][0-9]*[KMGT]?\Z")
@@ -120,6 +132,16 @@ class WorkspacePolicy:
     # an agent's resources.
     agent_memory_max: str = AGENT_MEMORY_MAX
     verification_operations: tuple[str, ...] = ()
+    # Profile name -> operation name, or `hosted:<check>` for `candidate`.
+    verify: Mapping[str, str] = field(default_factory=dict)
+    # How a landed candidate reaches the default branch: a squash-merged PR
+    # or a fast-forward push.
+    publish: str = "pr"
+
+    @property
+    def base_branch(self) -> str:
+        base = self.default_base
+        return base.split("/", 1)[1] if base.startswith("origin/") else base
 
     def catalog_row(self) -> dict[str, Any]:
         return {
@@ -127,6 +149,8 @@ class WorkspacePolicy:
             "default_base": self.default_base,
             "agent_memory_max": self.agent_memory_max,
             "verification_operations": list(self.verification_operations),
+            "verify": dict(self.verify),
+            "publish": self.publish,
         }
 
 
@@ -287,11 +311,27 @@ def _workspace(raw: Mapping[str, Any], descriptor: Path) -> WorkspacePolicy | No
         raise ProjectConfigError(
             f"{descriptor} workspace.verification_operations must be unique"
         )
+    raw_verify = raw_workspace.get("verify", {})
+    if (
+        not isinstance(raw_verify, Mapping)
+        or set(raw_verify) - _VERIFY_PROFILES
+        or any(not isinstance(value, str) or not value for value in raw_verify.values())
+    ):
+        raise ProjectConfigError(
+            f"{descriptor} workspace.verify must map focused/candidate/corpus to operation names"
+        )
+    publish = raw_workspace.get("publish", "pr")
+    if publish not in PUBLISH_POLICIES:
+        raise ProjectConfigError(
+            f"{descriptor} workspace.publish must be one of {sorted(PUBLISH_POLICIES)}"
+        )
     return WorkspacePolicy(
         root=Path(root),
         default_base=default_base,
         agent_memory_max=memory_max,
         verification_operations=verification_operations,
+        verify=dict(raw_verify),
+        publish=publish,
     )
 
 
@@ -411,6 +451,12 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
     workspace = _workspace(raw, descriptor)
     if workspace is not None:
         unknown_verifiers = set(workspace.verification_operations) - operation_names
+        unknown_verifiers.update(
+            name
+            for profile, name in workspace.verify.items()
+            if not (profile == "candidate" and name.startswith("hosted:"))
+            and name not in operation_names
+        )
         if unknown_verifiers:
             raise ProjectConfigError(
                 f"{descriptor} workspace verification operation(s) are undeclared: "

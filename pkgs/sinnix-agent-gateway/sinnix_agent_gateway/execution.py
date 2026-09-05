@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from agentctl import lanes, launch
+from agentctl import batch, launch
 from agentctl.config import Config, ConfigError, load_config, resolve_project
 from agentctl.packets import PacketError
 from agentctl.projects import ProjectConfigError
@@ -147,7 +147,8 @@ class LocalJobs:
             return self._error(request, ErrorCode.OWNER_UNAVAILABLE, str(error))
         except (
             launch.JobError,
-            lanes.LaneError,
+            batch.BatchRefusal,
+            batch.BatchError,
             WorktrunkError,
             ConfigError,
             PacketError,
@@ -288,29 +289,33 @@ class LocalJobs:
         }
 
     def _agent_start(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
-        """A lane: agentctl compiles the prompt, creates the worktree, queues the agent."""
+        """A batch of one seed: agentctl validates, claims, creates the worktree, queues the worker."""
         project = self._project(_require_str(arguments, "project_id"))
-        lane = lanes.lane_start(
+        run = batch.start(
             self.config,
             project,
-            _require_str(arguments, "bead_id"),
+            [_require_str(arguments, "bead_id")],
             backend=_optional_str(arguments, "backend"),
             model=_optional_str(arguments, "model"),
             effort=_optional_str(arguments, "effort"),
         )
+        worker = run["workers"][0]
+        task = (
+            launch.get_job(worker["task_id"])
+            if worker.get("task_id") is not None
+            else None
+        )
         return {
-            **job_payload(lane["job"]),
+            **(job_payload(task) if task else {}),
+            "run_id": run["run_id"],
             "lane": {
-                key: lane[key]
-                for key in (
-                    "bead",
-                    "beads",
-                    "branch",
-                    "worktree",
-                    "backend",
-                    "model",
-                    "effort",
-                )
+                "bead": worker["leader"],
+                "beads": list(worker["beads"]),
+                "branch": worker["branch"],
+                "worktree": worker.get("worktree"),
+                "backend": worker.get("backend"),
+                "model": worker.get("model"),
+                "effort": worker.get("effort"),
             },
         }
 

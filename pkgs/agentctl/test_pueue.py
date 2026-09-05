@@ -163,6 +163,35 @@ def test_add_names_the_group_label_directory_and_dependencies(
     ]
 
 
+def test_add_stashed_holds_the_task_and_enqueue_releases_it(
+    stub_pueue: Path, tmp_path: Path
+) -> None:
+    """The landing task of an external run waits stashed until its results are filed."""
+    task_id = pueue.add(
+        group="fixture-land",
+        label="fixture:land:run-1",
+        command=("agentctl", "batch", "land", "run-1"),
+        working_directory=tmp_path,
+        after=(3,),
+        stashed=True,
+    )
+    pueue.enqueue(task_id)
+
+    calls = _calls(stub_pueue)
+    assert "--stashed" in calls[0]
+    assert calls[0].index("--stashed") < calls[0].index("--")
+    assert calls[1] == ["enqueue", "7"]
+
+
+def test_group_add_creates_only_a_missing_group(stub_pueue: Path) -> None:
+    pueue.group_add("agent", 8)
+    pueue.group_add("fixture-land", 1)
+
+    calls = _calls(stub_pueue)
+    assert [call[0] for call in calls] == ["group", "group", "group"]
+    assert calls[-1] == ["group", "add", "--parallel", "1", "fixture-land"]
+
+
 def test_the_client_environment_carries_no_inherited_secret(
     stub_pueue: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -141,6 +141,47 @@ def test_verification_operations_and_dependencies_are_validated(tmp_path: Path) 
         load_project_adapter(root)
 
 
+def test_verify_profiles_and_publish_policy_are_validated(
+    project_root: Path, tmp_path: Path
+) -> None:
+    adapter = load_project_adapter(project_root)
+    assert adapter.workspace is not None
+    assert adapter.workspace.verify == {
+        "focused": "verify_quick",
+        "candidate": "check",
+        "corpus": "verify",
+    }
+    assert adapter.workspace.publish == "master"
+    assert adapter.workspace.base_branch == "master"
+
+    descriptor = (project_root / ".agentctl" / "project.toml").read_text()
+    hosted = descriptor.replace(
+        'candidate = "check"', 'candidate = "hosted:verify"'
+    ).replace('publish = "master"', 'publish = "pr"')
+    hosted_root = write_project(tmp_path / "hosted")
+    (hosted_root / ".agentctl" / "project.toml").write_text(hosted)
+    loaded = load_project_adapter(hosted_root)
+    assert loaded.workspace is not None
+    assert loaded.workspace.verify["candidate"] == "hosted:verify"
+    assert loaded.workspace.publish == "pr"
+
+    for broken, fragment in (
+        (
+            descriptor.replace('candidate = "check"', 'candidate = "nowhere"'),
+            "undeclared",
+        ),
+        (
+            descriptor.replace('publish = "master"', 'publish = "email"'),
+            "workspace.publish",
+        ),
+        (descriptor.replace("focused = ", "nightly = "), "workspace.verify"),
+    ):
+        broken_root = write_project(tmp_path / "broken")
+        (broken_root / ".agentctl" / "project.toml").write_text(broken)
+        with pytest.raises(ProjectConfigError, match=fragment):
+            load_project_adapter(broken_root)
+
+
 def test_default_agent_ceiling_is_per_lane(tmp_path: Path) -> None:
     root = write_project(tmp_path / "p")
     descriptor = root / ".agentctl" / "project.toml"

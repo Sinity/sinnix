@@ -162,7 +162,9 @@ mkFeatureModule {
               set -u
               pueue=${pkgs.pueue}/bin/pueue
               for _ in $(seq 1 50); do "$pueue" status >/dev/null 2>&1 && break; sleep 0.2; done
-              for spec in agent:8 pytest:1 bulk:1 normal:2 interactive:4; do
+              # One landing slot per project: `agentctl batch land` serializes
+              # through <project>-land.
+              for spec in agent:8 pytest:1 bulk:1 normal:2 interactive:4 sinnix-land:1 polylogue-land:1 sinex-land:1 lynchpin-land:1; do
                 name=''${spec%%:*}; slots=''${spec##*:}
                 "$pueue" group add "$name" >/dev/null 2>&1 || true
                 "$pueue" parallel -g "$name" "$slots" >/dev/null
