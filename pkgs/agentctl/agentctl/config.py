@@ -15,7 +15,12 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from .packets import PacketError
-from .projects import ProjectAdapter, ProjectCatalog, load_project_adapter
+from .projects import (
+    ProjectAdapter,
+    ProjectCatalog,
+    ProjectConfigError,
+    load_project_adapter,
+)
 
 DEFAULT_CONFIG_PATH = Path("/etc/sinnix/agentctl.json")
 DEFAULT_PROJECT_PARENTS = (Path("/realm/project"), Path("/realm/worktrees"))
@@ -161,5 +166,5 @@ def resolve_project(config: Config, selector: str | None) -> ProjectAdapter:
             return catalog.get(selector)
         except KeyError as error:
             if "out of service" in str(error):
-                raise
+                raise ProjectConfigError(str(error.args[0])) from error
     return load_project_adapter(resolve_project_root(selector))

@@ -321,10 +321,26 @@ def test_job_clean_daemon_era_removes_only_the_listed_subtrees_and_is_idempotent
     cli_config: Config, capsys: pytest.CaptureFixture[str]
 ) -> None:
     state = cli_config.state_dir
-    for name in ("leases", "locks", "workspaces", "jobs", "inputs", "runs"):
+    for name in (
+        "leases",
+        "locks",
+        "workspaces",
+        "logs",
+        "results",
+        "jobs-archive",
+        "jobs",
+        "inputs",
+        "runs",
+    ):
         (state / name).mkdir(parents=True, exist_ok=True)
     (state / "leases" / "held.json").write_text("{}")
-    for name in ("active-jobs.json", "capacity.json", "task-sinnix.lock"):
+    (state / "logs" / "old.log").write_text("")
+    for name in (
+        "active-jobs.json",
+        "capacity.json",
+        "task-sinnix.lock",
+        "schedules.json",
+    ):
         (state / name).write_text("")
     (state / "jobs" / "fixture-check-1.log").write_text("kept")
     (state / "jobs" / "fixture-check-1.log.pgid").write_text("123")
@@ -336,12 +352,16 @@ def test_job_clean_daemon_era_removes_only_the_listed_subtrees_and_is_idempotent
         "leases",
         "locks",
         "workspaces",
+        "logs",
+        "results",
+        "jobs-archive",
         "active-jobs.json",
         "capacity.json",
         "task-sinnix.lock",
+        "schedules.json",
         "fixture-check-1.log.pgid",
     }
-    assert captured.err.startswith("removed 7 daemon-era path(s) under ")
+    assert captured.err.startswith("removed 11 daemon-era path(s) under ")
     assert (state / "jobs" / "fixture-check-1.log").read_text() == "kept"
     assert (state / "inputs").is_dir() and (state / "runs").is_dir()
 
@@ -372,3 +392,22 @@ def test_job_start_passes_arguments_after_a_bare_double_dash(
     )
     launch_input = json.loads(Path(fake_pueue.added[0]["command"][1]).read_text())
     assert tuple(launch_input["argv"])[-3:] == ("x.py", "-n", "0")
+
+
+def test_an_unknown_operation_is_a_refusal_and_a_key_error_is_not(
+    fake_pueue: FakePueue,
+    cli_config: Config,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert cli.main(["job", "start", "fixture", "nope"]) == cli.EXIT_REFUSED
+    assert "unknown project operation: fixture.nope" in capsys.readouterr().err
+    assert cli.main(["job", "fire", "fixture", "nope"]) == cli.EXIT_REFUSED
+    assert "unknown project operation: fixture.nope" in capsys.readouterr().err
+
+    def broken(project_id: str | None = None) -> list[dict[str, object]]:
+        raise KeyError("phase")
+
+    monkeypatch.setattr(cli.launch, "list_jobs", broken)
+    with pytest.raises(KeyError):
+        cli.main(["job", "list"])
