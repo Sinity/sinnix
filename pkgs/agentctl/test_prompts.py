@@ -6,16 +6,17 @@ import json
 from pathlib import Path
 
 import pytest
-from agentctl.packets import (
+from agentctl.projects import load_project_adapter
+from agentctl.prompts import (
     MAX_PROMPT_BYTES,
     MAX_SUBJECT_LENGTH,
-    PacketConfig,
-    PacketError,
+    PromptConfig,
+    PromptError,
     bead_digest,
     bead_subject,
-    compile_launch_snapshot,
-    rebase_prompt,
+    compile_worker_prompt,
     resolve_group,
+    resume_prompt,
     validate_members,
 )
 from conftest import FakeBd, bead
@@ -66,7 +67,7 @@ def test_a_closed_leader_is_never_a_member() -> None:
     leader, members = resolve_group("fx-lead", closed_lead)
     assert members == ("fx-member",)
     closed_lead.beads["fx-member"]["status"] = "deferred"
-    with pytest.raises(PacketError, match="no open members"):
+    with pytest.raises(PromptError, match="no open members"):
         resolve_group("fx-lead", closed_lead)
 
 
@@ -129,9 +130,9 @@ def test_write_scopes_must_be_disjoint_across_workers() -> None:
 def test_snapshot_carries_beads_dimensions_branch_atlas_and_the_contract(
     project_root: Path,
 ) -> None:
-    config = PacketConfig.load(project_root)
+    config = PromptConfig.from_project(load_project_adapter(project_root))
 
-    snapshot = compile_launch_snapshot(
+    snapshot = compile_worker_prompt(
         "fx-lead", project_id="fixture", reader=reader(), config=config
     )
 
@@ -154,7 +155,7 @@ def test_snapshot_carries_beads_dimensions_branch_atlas_and_the_contract(
 def test_snapshot_projects_rich_relationship_records_without_changing_dispatched_beads(
     project_root: Path,
 ) -> None:
-    config = PacketConfig.load(project_root)
+    config = PromptConfig.from_project(load_project_adapter(project_root))
     rich = reader()
     rich.beads["fx-parent"] = bead("fx-parent", "Parent", issue_type="epic")
     rich.beads["fx-dependency"] = bead(
@@ -176,7 +177,7 @@ def test_snapshot_projects_rich_relationship_records_without_changing_dispatched
         }
     )
 
-    snapshot = compile_launch_snapshot(
+    snapshot = compile_worker_prompt(
         "fx-lead", project_id="fixture", reader=rich, config=config
     )
 
@@ -204,9 +205,9 @@ def test_snapshot_projects_rich_relationship_records_without_changing_dispatched
 
 
 def test_explicit_backend_model_effort_override_the_policy(project_root: Path) -> None:
-    config = PacketConfig.load(project_root)
+    config = PromptConfig.from_project(load_project_adapter(project_root))
 
-    snapshot = compile_launch_snapshot(
+    snapshot = compile_worker_prompt(
         "fx-solo",
         project_id="fixture",
         reader=reader(),
@@ -224,9 +225,9 @@ def test_explicit_backend_model_effort_override_the_policy(project_root: Path) -
 
 
 def test_codex_model_alias_resolves_before_dispatch(project_root: Path) -> None:
-    config = PacketConfig.load(project_root)
+    config = PromptConfig.from_project(load_project_adapter(project_root))
 
-    snapshot = compile_launch_snapshot(
+    snapshot = compile_worker_prompt(
         "fx-solo",
         project_id="fixture",
         reader=reader(),
@@ -239,10 +240,10 @@ def test_codex_model_alias_resolves_before_dispatch(project_root: Path) -> None:
 
 
 def test_unknown_model_alias_is_rejected_with_valid_choices(project_root: Path) -> None:
-    config = PacketConfig.load(project_root)
+    config = PromptConfig.from_project(load_project_adapter(project_root))
 
-    with pytest.raises(PacketError, match=r"unknown model alias 'moon'.*luna"):
-        compile_launch_snapshot(
+    with pytest.raises(PromptError, match=r"unknown model alias 'moon'.*luna"):
+        compile_worker_prompt(
             "fx-solo",
             project_id="fixture",
             reader=reader(),
@@ -252,10 +253,10 @@ def test_unknown_model_alias_is_rejected_with_valid_choices(project_root: Path) 
 
 
 def test_model_backend_mismatch_is_rejected_before_dispatch(project_root: Path) -> None:
-    config = PacketConfig.load(project_root)
+    config = PromptConfig.from_project(load_project_adapter(project_root))
 
-    with pytest.raises(PacketError, match="incompatible"):
-        compile_launch_snapshot(
+    with pytest.raises(PromptError, match="incompatible"):
+        compile_worker_prompt(
             "fx-solo",
             project_id="fixture",
             reader=reader(),
@@ -269,11 +270,11 @@ def test_a_prompt_over_budget_embeds_digests_instead_of_bodies(
     project_root: Path,
 ) -> None:
     """Breaks if a large bead body is dropped silently or the digest cannot be verified."""
-    config = PacketConfig.load(project_root)
+    config = PromptConfig.from_project(load_project_adapter(project_root))
     big = reader()
     big.beads["fx-solo"]["description"] = "x" * MAX_PROMPT_BYTES
 
-    snapshot = compile_launch_snapshot(
+    snapshot = compile_worker_prompt(
         "fx-solo", project_id="fixture", reader=big, config=config
     )
 
@@ -289,19 +290,19 @@ def test_a_prompt_over_budget_embeds_digests_instead_of_bodies(
 def test_a_prompt_over_budget_even_as_digests_is_refused(
     project_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    config = PacketConfig.load(project_root)
-    monkeypatch.setattr("agentctl.packets.MAX_PROMPT_BYTES", 500)
+    config = PromptConfig.from_project(load_project_adapter(project_root))
+    monkeypatch.setattr("agentctl.prompts.MAX_PROMPT_BYTES", 500)
 
-    with pytest.raises(PacketError, match="over the"):
-        compile_launch_snapshot(
+    with pytest.raises(PromptError, match="over the"):
+        compile_worker_prompt(
             "fx-solo", project_id="fixture", reader=reader(), config=config
         )
 
 
 def test_explicit_members_and_branch_carry_the_batch_facts(project_root: Path) -> None:
-    config = PacketConfig.load(project_root)
+    config = PromptConfig.from_project(load_project_adapter(project_root))
 
-    snapshot = compile_launch_snapshot(
+    snapshot = compile_worker_prompt(
         "fx-lead",
         project_id="fixture",
         reader=reader(),
@@ -314,8 +315,8 @@ def test_explicit_members_and_branch_carry_the_batch_facts(project_root: Path) -
     assert snapshot.bead_ids == ("fx-lead", "fx-solo")
     assert snapshot.branch == "batch/run-1/fx-lead"
     assert snapshot.to_dict()["batch"] == {"run_id": "run-1", "worker_id": "fx-lead"}
-    with pytest.raises(PacketError, match="not among the members"):
-        compile_launch_snapshot(
+    with pytest.raises(PromptError, match="not among the members"):
+        compile_worker_prompt(
             "fx-lead",
             project_id="fixture",
             reader=reader(),
@@ -344,10 +345,10 @@ def test_subject_is_type_prefixed_and_bounded() -> None:
     assert len(long) <= MAX_SUBJECT_LENGTH
 
 
-def test_rebase_prompt_names_the_worktree_branch_and_base(project_root: Path) -> None:
-    config = PacketConfig.load(project_root)
+def test_resume_prompt_names_the_worktree_branch_and_base(project_root: Path) -> None:
+    config = PromptConfig.from_project(load_project_adapter(project_root))
 
-    prompt = rebase_prompt(
+    prompt = resume_prompt(
         config=config,
         bead=bead("fx-solo", "Solo bead"),
         branch="feature/packet/fx-solo",
@@ -359,7 +360,7 @@ def test_rebase_prompt_names_the_worktree_branch_and_base(project_root: Path) ->
     assert "origin/master" in prompt
     assert "Do not push" in prompt
     assert "Commit by path" in prompt
-    with_packet = rebase_prompt(
+    with_packet = resume_prompt(
         config=config,
         bead=bead("fx-solo", "Solo bead"),
         branch="feature/packet/fx-solo",
@@ -371,10 +372,10 @@ def test_rebase_prompt_names_the_worktree_branch_and_base(project_root: Path) ->
 
 
 def test_a_missing_worker_contract_is_a_typed_refusal(project_root: Path) -> None:
-    config = PacketConfig.load(project_root)
+    config = PromptConfig.from_project(load_project_adapter(project_root))
     config.template_path.unlink()
 
-    with pytest.raises(PacketError, match="worker-contract template"):
-        compile_launch_snapshot(
+    with pytest.raises(PromptError, match="worker-contract template"):
+        compile_worker_prompt(
             "fx-solo", project_id="fixture", reader=reader(), config=config
         )

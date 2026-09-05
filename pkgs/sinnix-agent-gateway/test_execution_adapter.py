@@ -173,7 +173,6 @@ def test_agent_start_is_a_batch_of_one_seed(
             "workers": [
                 {
                     "id": seeds[0],
-                    "leader": seeds[0],
                     "beads": list(seeds),
                     "branch": f"batch/fixture-run/{seeds[0]}",
                     "worktree": f"/realm/worktrees/fixture-batch-fixture-run-{seeds[0]}",

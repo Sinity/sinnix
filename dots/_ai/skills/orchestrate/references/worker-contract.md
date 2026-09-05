@@ -14,7 +14,7 @@ names, and exits with one result document.
    are orientation, not scope.
 2. **Stay in the worktree.** Commit by path on the worker branch; never write
    to another checkout, `$HOME` outside the workspace, or live services.
-   `.lane/` is never committed.
+   `.agentctl/` holds the prompt, schema and result and is never committed.
 3. **Verify the candidate.** Run the snapshot's `verification_commands` and
    the project's focused checks in the foreground. Bug fixes show red before
    green. A selected green proves the selected scope only; say which

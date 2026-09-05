@@ -18,9 +18,8 @@ from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping
 
 from .config import Config
+from .limits import SHORT_ID
 
-# Hex characters in a run id's random suffix; tables show the suffix alone.
-SHORT_RUN_ID = 8
 HARNESSES = ("queued", "external")
 REVIEW_PROFILE = "review"
 
@@ -106,7 +105,7 @@ class Run:
         raise BatchRefusal("worker", f"run {self.run_id} has no worker {worker_id}")
 
     @property
-    def members(self) -> tuple[str, ...]:
+    def beads(self) -> tuple[str, ...]:
         return tuple(bead for item in self.workers for bead in item["beads"])
 
     @property
@@ -215,7 +214,7 @@ def list_runs(config: Config, project_id: str | None = None) -> list[Run]:
 
 def new_run_id(project_id: str) -> str:
     stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
-    return f"{project_id}-{stamp}-{uuid.uuid4().hex[:SHORT_RUN_ID]}"
+    return f"{project_id}-{stamp}-{uuid.uuid4().hex[:SHORT_ID]}"
 
 
 def short_run_id(run_id: str) -> str:

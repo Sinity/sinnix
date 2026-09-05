@@ -280,13 +280,13 @@ def test_units_stay_distinct_when_their_launch_inputs_share_a_name() -> None:
     assert all(len(unit) < 256 for unit in units)
 
 
-def test_scope_properties_bound_the_task_unit_itself(
+def test_unit_properties_bound_the_task_unit_itself(
     tmp_path: Path, fake_systemd: FakeSystemd, fake_pueue: FakePueue
 ) -> None:
     launch = write_launch(
         tmp_path,
         pool="agent",
-        scope_properties=["MemoryMax=10G", "CPUWeight=50"],
+        unit_properties=["MemoryMax=10G", "CPUWeight=50"],
     )
 
     assert main([str(launch)]) == 0
@@ -311,7 +311,7 @@ def test_a_property_that_does_not_bound_the_task_is_refused(
     tmp_path: Path, setting: str
 ) -> None:
     """A launch input may lower what its own task consumes, and nothing else."""
-    launch = write_launch(tmp_path, scope_properties=[setting])
+    launch = write_launch(tmp_path, unit_properties=[setting])
 
     assert main([str(launch)]) == REFUSED_EXIT_CODE
 

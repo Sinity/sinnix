@@ -51,7 +51,6 @@ def worker(
 ) -> dict[str, Any]:
     return {
         "id": worker_id,
-        "leader": worker_id,
         "beads": [worker_id],
         "branch": f"batch/run-1/{worker_id}",
         "worktree": f"/w/{worker_id}",
@@ -101,7 +100,7 @@ def run(
                 "refreshes": 0,
                 "failure": failure,
             },
-            "acceptance": {"candidate_sha": SHA, "members": {}} if accepted else None,
+            "acceptance": {"candidate_sha": SHA, "beads": {}} if accepted else None,
             "prepared": True,
         }
     )

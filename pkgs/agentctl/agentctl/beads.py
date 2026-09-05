@@ -7,7 +7,7 @@ from typing import Any, Mapping, Protocol, Sequence
 
 from .limits import CALL_TIMEOUT_SECONDS
 from .manifest import BatchError
-from .packets import SubprocessBdReader
+from .prompts import SubprocessBdReader
 
 
 class Beads(Protocol):

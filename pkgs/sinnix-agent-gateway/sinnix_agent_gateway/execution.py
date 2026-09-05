@@ -14,8 +14,8 @@ from typing import Any, Callable, Mapping
 
 from agentctl import batch, launch
 from agentctl.config import Config, ConfigError, load_config, resolve_project
-from agentctl.packets import PacketError
 from agentctl.projects import ProjectConfigError
+from agentctl.prompts import PromptError
 from agentctl.pueue import PueueError
 from agentctl.worktrunk import WorktrunkError
 from sinnix_mcp import (
@@ -151,7 +151,7 @@ class LocalJobs:
             batch.BatchError,
             WorktrunkError,
             ConfigError,
-            PacketError,
+            PromptError,
             ProjectConfigError,
             KeyError,
             OSError,
@@ -191,7 +191,7 @@ class LocalJobs:
     def _project(self, project_id: str) -> Any:
         try:
             return resolve_project(self.config, project_id)
-        except (KeyError, PacketError) as error:
+        except (KeyError, PromptError) as error:
             raise _Refusal(
                 ErrorCode.INVALID_ARGUMENT, f"unknown project: {project_id}"
             ) from error
@@ -309,7 +309,7 @@ class LocalJobs:
             **(job_payload(task) if task else {}),
             "run_id": run["run_id"],
             "lane": {
-                "bead": worker["leader"],
+                "bead": worker["id"],
                 "beads": list(worker["beads"]),
                 "branch": worker["branch"],
                 "worktree": worker.get("worktree"),

@@ -65,6 +65,22 @@ _IGNORED_WORKSPACE_FIELDS = frozenset(
         "verification_operations",
     }
 )
+# `[packets]`: how a worker prompt is compiled. `backend`, `model` and
+# `effort` may sit in the table or under `[packets.defaults]`.
+_PACKETS_FIELDS = frozenset(
+    {
+        "template",
+        "atlas_dir",
+        "branch_prefix",
+        "template_version",
+        "model_policy",
+        "defaults",
+        "backend",
+        "model",
+        "effort",
+    }
+)
+_PACKETS_DEFAULTS = ("backend", "model", "effort", "template_version", "branch_prefix")
 _OPERATION_FIELDS = frozenset(
     {
         "description",
@@ -153,6 +169,21 @@ class WorkspacePolicy:
 
 
 @dataclass(frozen=True)
+class PacketsPolicy:
+    """The descriptor's `[packets]`; None or empty means the compiler's default."""
+
+    template: Path | None = None
+    atlas_dir: Path | None = None
+    branch_prefix: str | None = None
+    template_version: str | None = None
+    backend: str | None = None
+    model: str | None = None
+    effort: str | None = None
+    # Policy name -> (backend, model), from `[packets.model_policy.<name>]`.
+    model_policy: Mapping[str, tuple[str, str]] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class ProjectOperation:
     name: str
     description: str
@@ -191,6 +222,7 @@ class ProjectAdapter:
     environment: ProjectEnvironment
     workspace: WorkspacePolicy | None
     operations: tuple[ProjectOperation, ...]
+    packets: PacketsPolicy = field(default_factory=PacketsPolicy)
 
     @property
     def agent_capable(self) -> bool:
@@ -326,6 +358,56 @@ def _workspace(raw: Mapping[str, Any], descriptor: Path) -> WorkspacePolicy | No
             )
         fields["publish"] = raw_workspace["publish"]
     return WorkspacePolicy(root=Path(root), default_base=default_base, **fields)
+
+
+def _packets(raw: Mapping[str, Any], root: Path, descriptor: Path) -> PacketsPolicy:
+    packets = raw.get("packets", {})
+    if not isinstance(packets, Mapping):
+        raise ProjectConfigError(f"{descriptor} [packets] must be a table")
+    unknown = set(packets) - _PACKETS_FIELDS
+    if unknown:
+        raise ProjectConfigError(
+            f"{descriptor} [packets] contains unknown fields: "
+            + ", ".join(sorted(unknown))
+        )
+    defaults = packets.get("defaults", {})
+    if not isinstance(defaults, Mapping) or set(defaults) - set(_PACKETS_DEFAULTS):
+        raise ProjectConfigError(
+            f"{descriptor} [packets.defaults] may set only "
+            + ", ".join(_PACKETS_DEFAULTS)
+        )
+    fields: dict[str, Any] = {}
+    for name in ("template", "atlas_dir"):
+        if name in packets:
+            value = packets[name]
+            if not isinstance(value, str) or not value:
+                raise ProjectConfigError(
+                    f"{descriptor} packets.{name} must be a non-empty path"
+                )
+            path = Path(value)
+            fields[name] = path if path.is_absolute() else root / path
+    for name in _PACKETS_DEFAULTS:
+        value = packets.get(name, defaults.get(name))
+        if value is None:
+            continue
+        if not isinstance(value, str) or not value:
+            raise ProjectConfigError(
+                f"{descriptor} packets.{name} must be a non-empty string"
+            )
+        fields[name] = value
+    raw_map = packets.get("model_policy", {})
+    if not isinstance(raw_map, Mapping):
+        raise ProjectConfigError(f"{descriptor} packets.model_policy must be a table")
+    policy_map: dict[str, tuple[str, str]] = {}
+    for policy, value in raw_map.items():
+        backend = value.get("backend") if isinstance(value, Mapping) else None
+        model = value.get("model") if isinstance(value, Mapping) else None
+        if not isinstance(backend, str) or not isinstance(model, str):
+            raise ProjectConfigError(
+                f"{descriptor} packets.model_policy entries need backend and model"
+            )
+        policy_map[str(policy)] = (backend, model)
+    return PacketsPolicy(model_policy=policy_map, **fields)
 
 
 def _operation(name: str, definition: Any, descriptor: Path) -> ProjectOperation:
@@ -487,6 +569,7 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
         environment=_environment(raw, descriptor),
         workspace=workspace,
         operations=operations,
+        packets=_packets(raw, root, descriptor),
     )
 
 

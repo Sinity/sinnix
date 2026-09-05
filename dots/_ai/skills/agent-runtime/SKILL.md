@@ -73,7 +73,7 @@ queued|external] [--backend B --model M --effort E]` validates the members,
   branch `batch/<run>/<worker>` at `<workspace.root>/<repo>-<branch with /
 replaced by ->` through `wt switch --create` (the project's `wt.toml` hooks
   provision it), writes the
-  packet to `.lane/prompt.md`, queues each worker in group `agent` inside a
+  packet to `.agentctl/prompt.md`, queues each worker in group `agent` inside a
   unit capped at the descriptor's `agent_memory_max`, and queues the landing
   task behind them in `<project>-land`. `--workers external` skips the
   worker enqueue and stashes the landing task for another harness's
@@ -101,11 +101,11 @@ job, the landing task and what follows next, and the ready beads.
 
 Agents have `lane` on PATH:
 
-- `lane task` prints the dispatch packet (`.lane/prompt.md`).
+- `lane task` prints the dispatch packet (`.agentctl/prompt.md`).
 - `lane verify` runs the descriptor's focused verification through
   `agentctl job start <project> <focused> --workspace . --wait`.
 - `lane done <result.json>` requires a clean tree, validates the document
-  against `.lane/worker.schema.json` with `candidate_sha` equal to HEAD, and
+  against `.agentctl/worker.schema.json` with `candidate_sha` equal to HEAD, and
   prints it as the final message. It never pushes; the landing task
   publishes.
 

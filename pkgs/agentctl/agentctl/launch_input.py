@@ -111,13 +111,13 @@ def read_input(path: Path) -> dict[str, Any]:
         not isinstance(pool, str) or POOL_NAME.fullmatch(pool) is None
     ):
         raise QueueInputError("launch input pool must be a lowercase pueue group name")
-    properties = value.get("scope_properties")
+    properties = value.get("unit_properties")
     if properties is not None and (
         not isinstance(properties, list)
         or not all(supported_unit_property(item) for item in properties)
     ):
         raise QueueInputError(
-            "launch input scope_properties must be "
+            "launch input unit_properties must be "
             f"{'/'.join(sorted(UNIT_PROPERTIES))} settings"
         )
     return value

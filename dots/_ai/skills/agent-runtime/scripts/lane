@@ -37,7 +37,7 @@ project_id() {
 
 lane_task() {
   local prompt
-  prompt=${AGENTCTL_JOB_PROMPT_FILE:-$(repo_root)/.lane/prompt.md}
+  prompt=${AGENTCTL_JOB_PROMPT_FILE:-$(repo_root)/.agentctl/prompt.md}
   [[ -r $prompt ]] || die "dispatch packet is unavailable: $prompt"
   cat -- "$prompt"
 }
@@ -73,14 +73,15 @@ lane_verify() {
 }
 
 git_offenders() {
-  git status --porcelain=v1 --untracked-files=all | grep -v ' \.lane/' || true
+  # Untracked files under .agentctl/ are agentctl's own (prompt, schema, result).
+  git status --porcelain=v1 --untracked-files=all | grep -v '^?? \.agentctl/' || true
 }
 
 validate_result() {
   # The worker schema `agentctl batch start` writes next to the packet, checked
   # with a closed-object validator covering the schema's own vocabulary.
   local result=$1 schema
-  schema=$(repo_root)/.lane/worker.schema.json
+  schema=$(repo_root)/.agentctl/worker.schema.json
   [[ -r $schema ]] || die "worker schema is unavailable: $schema"
   command -v python3 >/dev/null 2>&1 || die "python3 is required to validate the result"
   python3 - "$schema" "$result" <<'EOF'

@@ -293,7 +293,7 @@ def _service_command(
         f"WorkingDirectory={launch['working_directory']}",
         f"StandardOutput={'append' if stdout == log_path else 'file'}:{stdout}",
         f"StandardError=append:{log_path}",
-        *(launch.get("scope_properties") or ()),
+        *(launch.get("unit_properties") or ()),
     ]
     return [
         "systemd-run",

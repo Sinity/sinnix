@@ -25,8 +25,8 @@ git -C "$repo" commit -qm initial
 git -C "$repo" branch -M batch/fixture/w1
 git -C "$repo" push -q --set-upstream origin batch/fixture/w1
 
-mkdir -p "$repo/.lane"
-cp "$schema" "$repo/.lane/worker.schema.json"
+mkdir -p "$repo/.agentctl"
+cp "$schema" "$repo/.agentctl/worker.schema.json"
 
 write_result() {
   local sha=$1
@@ -53,7 +53,7 @@ git -C "$repo" commit -qm 'fixture WIP'
 head=$(git -C "$repo" rev-parse HEAD)
 write_result "$head"
 
-# A dirty tree is refused; `.lane/` is not counted.
+# A dirty tree is refused; untracked files under `.agentctl/` are not counted.
 printf 'dirty\n' >"$repo/dirty.txt"
 set +e
 dirty_output=$(cd "$repo" && "$lane" done "$root/result.json" 2>&1)
@@ -127,7 +127,7 @@ verify_output=$(cd "$repo" && PATH="$bin:$PATH" AGENTCTL_TIMEOUT_SECONDS=60 "$la
 grep -Fq 'succeeded' <<<"$verify_output"
 grep -Fq "job start fixture verify_quick --workspace $repo --wait --timeout-seconds 60" "$AGENTCTL_CALLS"
 
-printf 'launch snapshot\n' >"$repo/.lane/prompt.md"
+printf 'launch snapshot\n' >"$repo/.agentctl/prompt.md"
 task_output=$(cd "$repo" && "$lane" task)
 test "$task_output" = 'launch snapshot'
 printf 'named prompt\n' >"$root/named.md"

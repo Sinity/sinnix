@@ -47,13 +47,13 @@ from .manifest import (
     resolve_run_id,
 )
 from .operator_view import Output, local_clock, table
-from .packets import PacketError
 from .projects import (
     ProjectAdapter,
     ProjectConfigError,
     ProjectEnvironmentError,
     ProjectOperation,
 )
+from .prompts import PromptError
 from .pueue import PueueError
 from .schedule import TimerError
 from .worktrunk import WorktrunkError
@@ -72,7 +72,7 @@ _REFUSALS = (
     BatchRefusal,
     ConfigError,
     JobError,
-    PacketError,
+    PromptError,
     ProjectConfigError,
     ProjectEnvironmentError,
 )
@@ -433,7 +433,7 @@ def _batch(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         )
         landed = batch.land(config, project, run_id)
         acceptance = landed["acceptance"] or {}
-        members = acceptance.get("members", {})
+        members = acceptance.get("beads", {})
         out.write(
             landed,
             f"{out.run_lines(landed)}\nlanded {out.sha(acceptance.get('candidate_sha'))}: "
