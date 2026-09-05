@@ -1,16 +1,18 @@
-"""One publish for gateway state files.
+"""One publish for state files.
 
-Write to a private temporary in the destination's own directory, then
-rename over the destination: a reader sees either the whole old file or the
-whole new one, never a partial write, and a failed write leaves the old
-content untouched. The temporary is removed on every path.
+Write to a private temporary in the destination's own directory, then rename
+over the destination: a reader sees either the whole old file or the whole new
+one, never a partial write, and a failed write leaves the old content
+untouched. The temporary is removed on every path.
 
-``fsync`` has no default. Each caller states whether its content must
-survive a crash, because the answer differs per file and the five hand-
-rolled copies this replaces silently disagreed about it. There is no
-file-only sync level: fsyncing a file whose new directory entry is not
-synced does not guarantee the published name is findable after a crash, so
-it buys latency without buying the guarantee.
+``fsync`` has no default. Each caller states whether its content must survive
+a crash, because the answer differs per file. There is no file-only sync
+level: fsyncing a file whose new directory entry is not synced does not
+guarantee the published name is findable afterwards, so it buys latency
+without buying the guarantee.
+
+Serialization belongs to the caller. ``atomic_json.write_json_atomic`` and
+``ledger.write_jsonl_atomic`` are the JSON and JSONL encoders over this.
 """
 
 from __future__ import annotations
@@ -19,14 +21,15 @@ import os
 import uuid
 from pathlib import Path
 
-MODE = 0o600
+PRIVATE_MODE = 0o600
 
 
 def atomic_publish(
-    destination: Path,
+    destination: Path | str,
     payload: bytes,
     *,
     fsync: bool,
+    mode: int = PRIVATE_MODE,
     exclusive: bool = False,
 ) -> bool:
     """Publish *payload* at *destination* as one indivisible step.
@@ -37,18 +40,19 @@ def atomic_publish(
     whether this call published; False means ``exclusive`` and the
     destination already existed.
 
-    The temporary is created 0600 rather than chmod'd afterwards: a state
-    file must never be briefly readable by anyone else, however narrow the
-    window.
+    The temporary carries the final mode from creation rather than being
+    chmod'd afterwards: a private state file must never be briefly readable
+    by anyone else, however narrow the window.
     """
+    destination = Path(destination)
     directory = destination.parent
     temporary = directory / f".{destination.name}.{uuid.uuid4().hex}.tmp"
     try:
         descriptor = os.open(
-            temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC, MODE
+            temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC, mode
         )
         with os.fdopen(descriptor, "wb") as handle:
-            os.fchmod(handle.fileno(), MODE)
+            os.fchmod(handle.fileno(), mode)
             handle.write(payload)
             handle.flush()
             if fsync:

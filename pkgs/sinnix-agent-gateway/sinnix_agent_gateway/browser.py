@@ -6,6 +6,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from sinnix_lib.atomic import atomic_publish
 from sinnix_mcp.execution import (
     ExecutionProfile,
     OwnerDiagnosticError,
@@ -14,7 +15,6 @@ from sinnix_mcp.execution import (
 )
 
 from .artifacts import ArtifactService
-from .atomic import atomic_publish
 from .capabilities import Capability, Principal
 from .config import GatewayConfig
 

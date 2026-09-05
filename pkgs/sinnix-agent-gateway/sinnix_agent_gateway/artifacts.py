@@ -7,9 +7,9 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from sinnix_lib.atomic import atomic_publish
 from sinnix_mcp.execution import ExecutionResult
 
-from .atomic import atomic_publish
 from .capabilities import Capability, Principal
 from .config import GatewayConfig
 from .redaction import redact

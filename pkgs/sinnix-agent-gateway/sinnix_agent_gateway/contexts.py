@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from .atomic import atomic_publish
+from sinnix_lib.atomic import atomic_publish
 
 
 def _canonical(value: Any) -> bytes:
