@@ -60,17 +60,6 @@ class PacketError(ValueError):
     """A packet cannot be compiled or dispatched safely."""
 
 
-def project_id_from_descriptor(root: Path) -> str:
-    try:
-        raw = tomllib.loads((root / ".agentctl" / "project.toml").read_text())
-        project_id = raw["project"]["id"]
-    except (KeyError, OSError, TypeError, tomllib.TOMLDecodeError) as error:
-        raise PacketError(f"project descriptor is invalid: {root}") from error
-    if not isinstance(project_id, str) or not project_id:
-        raise PacketError(f"project descriptor has no project.id: {root}")
-    return project_id
-
-
 class BdReader(Protocol):
     def show(self, bead_id: str) -> Mapping[str, Any]: ...
 
