@@ -64,7 +64,9 @@ async def semantic_canary(
     config: GatewayConfig, principal_name: str
 ) -> dict[str, object]:
     """Exercise the typed envelopes a cold session starts from."""
-    catalog = await invoke_mcp(config, principal_name, "gateway.catalog", {})
+    catalog = await invoke_mcp(
+        config, principal_name, "gateway.catalog", {"limit": 500}
+    )
     data = catalog.get("data") if isinstance(catalog, dict) else None
     if catalog.get("result", {}).get("outcome") != "ok" or not isinstance(data, dict):
         raise ValueError("semantic canary catalog did not return its typed envelope")
@@ -79,6 +81,8 @@ async def semantic_canary(
         raise ValueError(
             "semantic canary projects.list did not return its typed envelope"
         )
+    if data.get("truncated"):
+        raise ValueError("semantic canary catalog was truncated")
     return {
         "principal": principal_name,
         "catalog_actions": len(names),
