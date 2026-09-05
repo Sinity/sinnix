@@ -97,6 +97,7 @@
           name = "sinnix-census";
           suiteDir = ../../pkgs/sinnix-census/tests;
           scripts = [ "sinnix-census" ];
+          extraPythonPackages = [ (pkgs.callPackage ../../pkgs/sinnix-lib/pkg.nix { }) ];
         };
         speaker-verify-suite = mkScriptSuite {
           name = "sinnix-speaker-verify";

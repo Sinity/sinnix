@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from sinnix_lib.process import run
+from sinnix_lib.values import int_or_none
+
 from ..runtime_inventory import (
     load_inventory,
     managed_units,
@@ -11,26 +14,26 @@ from ..runtime_inventory import (
     resource_class_for_unit,
     workload_for_unit,
 )
-from ..util import int_or_none, run_cmd, split_props, words
+from ..util import split_props, words
 
 
 def collect_noctalia_health() -> dict[str, Any]:
-    proc = run_cmd(["noctalia", "config", "validate"], timeout=3)
-    if proc is None:
+    result = run(["noctalia", "config", "validate"], timeout=3)
+    if result.error is not None:
         return {
             "status": "unavailable",
             "config_warning_count": None,
             "plugin_compatibility": "unknown",
         }
-    output = f"{proc.stdout}\n{proc.stderr}"
+    output = f"{result.stdout}\n{result.stderr}"
     warnings = sum(
         1 for line in output.splitlines() if "WRN" in line or "warning" in line.lower()
     )
     return {
-        "status": "healthy" if proc.returncode == 0 else "invalid",
+        "status": "healthy" if result.returncode == 0 else "invalid",
         "config_warning_count": warnings,
         "plugin_compatibility": "compatible"
-        if proc.returncode == 0 and warnings == 0
+        if result.returncode == 0 and warnings == 0
         else "warning",
     }
 
@@ -98,10 +101,10 @@ def systemctl_show(unit: str, user: bool = False) -> dict[str, str]:
         "-p",
         "Result",
     ]
-    proc = run_cmd(cmd, timeout=3)
-    if not proc or proc.returncode not in (0, 1):
+    result = run(cmd, timeout=3)
+    if result.error is not None or result.returncode not in (0, 1):
         return {"Id": unit, "LoadState": "unknown"}
-    props = split_props(proc.stdout)
+    props = split_props(result.stdout)
     props.setdefault("Id", unit)
     return props
 

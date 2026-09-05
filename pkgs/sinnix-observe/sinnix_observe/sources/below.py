@@ -6,7 +6,9 @@ import os
 from pathlib import Path
 from typing import Any
 
-from ..util import float_or_zero, run_cmd
+from sinnix_lib.process import run
+
+from ..util import float_or_zero
 
 
 def parse_below_tsv(text: str) -> list[list[str]]:
@@ -40,7 +42,7 @@ def collect_below(
         except OSError:
             cgroup_text = ""
     else:
-        proc = run_cmd(
+        result = run(
             [
                 "below",
                 "dump",
@@ -58,7 +60,7 @@ def collect_below(
             ],
             timeout=10,
         )
-        cgroup_text = proc.stdout if proc and proc.returncode == 0 else ""
+        cgroup_text = result.stdout if result.ok else ""
 
     cgroup_by_path: dict[str, dict[str, Any]] = {}
     for row in parse_below_tsv(cgroup_text):
@@ -94,7 +96,7 @@ def collect_below(
         except OSError:
             process_text = ""
     else:
-        proc = run_cmd(
+        result = run(
             [
                 "below",
                 "dump",
@@ -112,7 +114,7 @@ def collect_below(
             ],
             timeout=10,
         )
-        process_text = proc.stdout if proc and proc.returncode == 0 else ""
+        process_text = result.stdout if result.ok else ""
 
     process_by_pid: dict[str, dict[str, Any]] = {}
     for row in parse_below_tsv(process_text):
