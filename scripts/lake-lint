@@ -18,11 +18,27 @@ set -euo pipefail
 
 status=0
 
+# The roots are absolute by contract. LAKE_LINT_ROOT_PREFIX exists so the
+# suite can exercise this manifest against a fixture tree; production leaves
+# it empty.
+prefix="${LAKE_LINT_ROOT_PREFIX:-}"
+
+# A directory carrying CACHEDIR.TAG is a tool's regenerable cache, not a
+# taxonomy node - the same property the backup policy uses to classify this
+# class. Foreign test runners drop them into roots they do not own (a
+# polylogue subprocess test resolves its rootdir to /realm and writes
+# /realm/.pytest_cache), and this lint gates every lane's verification, so a
+# gate that turns red for a cache is a gate that gets ignored. A renamed data
+# node never carries the tag.
+is_tool_cache() {
+  [ -f "$1/CACHEDIR.TAG" ]
+}
+
 # check_root <root> -- <required nodes...> -- <optional nodes...>
 # Required: must exist on disk and be named here. Optional: allowed if
 # present (markers, trash, mount scaffolding), never required.
 check_root() {
-  local root="$1"
+  local root="$prefix$1"
   shift
   local -a required=() optional=()
   local mode=required
@@ -48,7 +64,7 @@ check_root() {
         break
       fi
     done
-    if [ "$ok" -ne 0 ]; then
+    if [ "$ok" -ne 0 ] && ! is_tool_cache "$entry"; then
       echo "lake-lint: UNEXPECTED node: $entry"
       status=1
     fi
