@@ -87,7 +87,7 @@ sinnix.services.agent-gateway.endpoints.operator = {
 };
 ```
 
-Every enabled endpoint receives its own generated config, MCP wrapper, approval gate, state directory, runtime credential, health port, systemd user service and runtime surface. Prime enables the private operator endpoint on loopback port 3088.
+Every enabled endpoint receives its own generated config, MCP wrapper, approval gate, state directory, runtime credential, health port, systemd user service and runtime surface. `approvedManifestHash` covers every tool's name, title, description, annotations and input schema, so any change under `sinnix_agent_gateway/actions` needs the new value in the same commit: `sinnix-agent-gateway --principal <principal> manifest | jq -r .sha256`. The flake check `agent-gateway-approval` fails when the recorded hash and the built package disagree. Prime enables the private operator endpoint on loopback port 3088.
 
 ## Deployment and proof
 
