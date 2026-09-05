@@ -1,10 +1,12 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
   "required": ["candidate_sha", "beads", "unresolved", "verification"],
   "properties": {
-    "candidate_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "candidate_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
     "beads": {
       "type": "array",
       "minItems": 1,
@@ -13,7 +15,10 @@
         "additionalProperties": false,
         "required": ["id", "criteria"],
         "properties": {
-          "id": { "type": "string", "minLength": 1 },
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
           "criteria": {
             "type": "array",
             "items": {
@@ -21,12 +26,17 @@
               "additionalProperties": false,
               "required": ["text", "status", "evidence"],
               "properties": {
-                "text": { "type": "string", "minLength": 1 },
+                "text": {
+                  "type": "string",
+                  "minLength": 1
+                },
                 "status": {
                   "type": "string",
                   "enum": ["satisfied", "unsatisfied", "superseded"]
                 },
-                "evidence": { "type": "string" }
+                "evidence": {
+                  "type": "string"
+                }
               }
             }
           }
@@ -35,7 +45,10 @@
     },
     "unresolved": {
       "type": "array",
-      "items": { "type": "string", "minLength": 1 }
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
     },
     "verification": {
       "type": "array",
@@ -44,8 +57,13 @@
         "additionalProperties": false,
         "required": ["command", "receipt"],
         "properties": {
-          "command": { "type": "string", "minLength": 1 },
-          "receipt": { "type": "string" }
+          "command": {
+            "type": "string",
+            "minLength": 1
+          },
+          "receipt": {
+            "type": "string"
+          }
         }
       }
     }

@@ -429,3 +429,31 @@ def test_write_scope_membership_covers_files_directories_and_globs() -> None:
     assert not in_scope("srcs/a.py", globs)
     assert scope_violations(["src/a.py", "tests/t.py"], globs) == ["tests/t.py"]
     assert scope_violations(["a"], []) == ["a"]
+
+
+def test_an_effort_outside_the_backends_set_is_refused(project_root: Path) -> None:
+    config = PromptConfig.from_project(load_project_adapter(project_root))
+    with pytest.raises(PromptError, match="effort must be one of"):
+        compile_worker_prompt(
+            "fx-solo",
+            project_id="fixture",
+            reader=reader(),
+            config=config,
+            effort="max",
+        )
+    bad = reader()
+    bad.beads["fx-solo"]["metadata"]["effort"] = "ultra"
+    with pytest.raises(PromptError, match="effort must be one of"):
+        compile_worker_prompt(
+            "fx-solo", project_id="fixture", reader=bad, config=config
+        )
+    assert (
+        compile_worker_prompt(
+            "fx-solo",
+            project_id="fixture",
+            reader=reader(),
+            config=config,
+            effort="xhigh",
+        ).dimensions.effort
+        == "xhigh"
+    )

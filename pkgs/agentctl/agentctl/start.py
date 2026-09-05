@@ -49,6 +49,7 @@ from .prompts import (
     resolve_group,
     resume_prompt,
     scope_violations,
+    validate_effort,
     validate_members,
     write_scope,
 )
@@ -550,7 +551,9 @@ def resume(
         prompt_name=f"resume-{attempt}.md",
         backend=backend or worker.get("backend") or packets.default_backend,
         model=model or worker.get("model") or packets.default_model,
-        effort=effort or worker.get("effort") or packets.default_effort,
+        effort=validate_effort(
+            effort or worker.get("effort") or packets.default_effort
+        ),
         schema="worker",
         then=worker_then(config, run_id, worker_id, resume_result),
         binding=binding(run, worker_id),

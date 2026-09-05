@@ -86,6 +86,10 @@ done
   echo "invalid credential profile" >&2
   exit 2
 }
+[[ $reasoning_effort =~ ^(low|medium|high|xhigh)$ ]] || {
+  echo "invalid reasoning effort: $reasoning_effort (low|medium|high|xhigh)" >&2
+  exit 2
+}
 [[ -z $output_schema || -r $output_schema ]] || {
   echo "output schema is unreadable: $output_schema" >&2
   exit 2
@@ -115,21 +119,40 @@ cd "$workdir"
 
 # claude --output-format json prints one envelope whose `structured_output`
 # holds the schema-conforming object; the last file receives only that object
-# so every backend leaves the same document.
+# so every backend leaves the same document. Empty stdin is claude's failure
+# to report, not this function's: it exits 0 so the pipeline status is
+# claude's own.
 unwrap_claude_json() {
   python3 -c '
 import json, sys
 raw = sys.stdin.read()
 sys.stdout.write(raw)
+if not raw.strip():
+    print("claude printed no result", file=sys.stderr)
+    sys.exit(0)
 document = json.loads(raw)
 if isinstance(document, list):
     document = next((item for item in document if item.get("type") == "result"), document[-1])
 value = document.get("structured_output", document.get("result"))
 if isinstance(value, str):
-    value = json.loads(value)
+    try:
+        value = json.loads(value)
+    except json.JSONDecodeError:
+        print("claude result is not JSON: " + value[:200], file=sys.stderr)
+        sys.exit(1)
 with open(sys.argv[1], "w") as handle:
     json.dump(value, handle, indent=2)
 ' "$last_file"
+}
+
+# Run a pipeline and exit with the producer's status when it failed, else
+# the consumer's.
+pipeline_status() {
+  local producer=$1 consumer=$2
+  if ((producer != 0)); then
+    exit "$producer"
+  fi
+  exit "$consumer"
 }
 
 case "$agent" in
@@ -153,18 +176,27 @@ claude)
   fi
   claude_args=("${resume_args[@]}" --print -p "$(<"$prompt_file")" --model "$model" --effort "$reasoning_effort")
   if [[ -n $output_schema ]]; then
-    claude_args+=(--output-format json --json-schema "$output_schema")
+    # --json-schema takes the schema text, not a path.
+    claude_args+=(--output-format json --json-schema "$(<"$output_schema")")
   fi
   if [[ $credential_profile == subscription ]]; then
     claude_cmd=(env -u ANTHROPIC_API_KEY "$agent_bin")
   else
     claude_cmd=("$agent_bin")
   fi
+  set +e
   if [[ -n $output_schema ]]; then
     "${claude_cmd[@]}" "${claude_args[@]}" | unwrap_claude_json
   else
     "${claude_cmd[@]}" "${claude_args[@]}" | tee "$last_file"
   fi
+  statuses=("${PIPESTATUS[@]}")
+  set -e
+  if [[ -n $output_schema && ${statuses[0]} -eq 0 && ! -s $last_file ]]; then
+    echo "claude exited 0 without a structured result" >&2
+    exit 1
+  fi
+  pipeline_status "${statuses[0]}" "${statuses[1]}"
   ;;
 gemini)
   "$agent_bin" <"$prompt_file" | tee "$last_file"
