@@ -50,6 +50,8 @@ class FakePueue:
     paused: set[str] = field(default_factory=set)
     fail_add: bool = False
     fail_tasks: bool = False
+    # Seconds a `wait` that never saw its task finish has consumed.
+    clock: float = 0.0
 
     def add(
         self,
@@ -67,21 +69,21 @@ class FakePueue:
             raise PueueGroupError(group)
         task_id = self.next_id
         self.next_id += 1
+        # An idle group starts a task with no dependencies at once; one queued
+        # behind others waits for them, and a stashed one waits to be enqueued.
+        status = "Stashed" if stashed else "Queued" if after else "Running"
         self._tasks[task_id] = Task(
             task_id=task_id,
             label=label,
             group=group,
-            # A fixture task is immediately running by default, matching an
-            # idle group's real behavior; tests that need the queued window
-            # itself call .queue(task_id) explicitly.
-            status="Stashed" if stashed else "Running",
+            status=status,
             result=None,
             exit_code=None,
             path=str(working_directory),
             dependencies=tuple(after),
             command=" ".join(command),
             enqueued_at="2026-09-03T08:00:00+00:00",
-            started_at=None if stashed else "2026-09-03T08:00:01+00:00",
+            started_at="2026-09-03T08:00:01+00:00" if status == "Running" else None,
         )
         self.added.append(
             {
@@ -138,13 +140,15 @@ class FakePueue:
         self.removed.extend(task_ids)
 
     def wait(self, task_id: int, *, timeout_seconds: float) -> Task:
+        """The registered transition runs, else the whole timeout elapses."""
         self.waited.append(task_id)
         transition = self._on_wait.pop(task_id, None)
         if transition is not None:
             transition(self)
         task = self._tasks.get(task_id)
         if task is None or not task.terminal:
-            raise PueueError(f"fixture task {task_id} never reached a terminal state")
+            self.clock += timeout_seconds
+            raise PueueError(f"fixture task {task_id} did not finish in time")
         return task
 
     def finish_when_waited(
