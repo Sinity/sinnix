@@ -452,7 +452,7 @@ mkServiceModule {
       # directory and the drain to run when an elicit record lands.
       #
       # The drain runs as a transient unit rather than a child of the reducer:
-      # `sinnix-elicit` writes under /realm/data/notes/preferences, which the
+      # `sinnix-elicit` writes under /realm/state/elicit, which the
       # reducer's own ProtectSystem=strict sandbox has no business opening, and
       # a named transient unit keeps the run visible in the journal under the
       # name the timer used to have.

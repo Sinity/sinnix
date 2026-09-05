@@ -57,7 +57,7 @@ MAX_BODY = 1 << 20  # 1 MiB: a generous annotated report, not a file upload
 
 # Mirrors sinnix-elicit's own BASE_DIR default (scripts/sinnix-elicit); a
 # domain writes its model at <root>/<domain>/model.json.
-ELICIT_MODEL_DIR_DEFAULT = Path("/realm/data/notes/preferences")
+ELICIT_MODEL_DIR_DEFAULT = Path("/realm/state/elicit")
 ELICIT_DOMAIN_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
