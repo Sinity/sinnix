@@ -102,7 +102,9 @@ owns, ends the run as `slot_occupied` without starting the command.
 `pueue add` publishes the adding client's environment into world-readable
 state, so every add goes through the adapter's scrubbed environment (`HOME`,
 `PATH`, `XDG_RUNTIME_DIR`, `XDG_DATA_HOME`); the launch input carries the
-real one.
+real one, plus `AGENTCTL_CONFIG` set to the configuration file this process
+read, so the agentctl calls inside a task (`batch result`, `batch land`) see
+the same projects, state directory and event spool.
 
 Groups admit work: `agent:8 pytest:1 bulk:1 normal:2 interactive:4`, plus
 `<project>-land` of parallelism 1 for sinnix, polylogue, sinex and lynchpin

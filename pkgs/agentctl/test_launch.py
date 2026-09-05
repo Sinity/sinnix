@@ -9,7 +9,7 @@ from typing import Callable
 
 import pytest
 from agentctl import launch
-from agentctl.config import Config
+from agentctl.config import Config, load_config
 from agentctl.launch import JobError
 from agentctl.projects import load_project_adapter
 from agentctl.pueue import PueueGroupError, Task
@@ -687,3 +687,33 @@ def test_list_filters_by_project_prefix(
 
     assert [row["label"] for row in launch.list_jobs("fixture")] == ["fixture:check"]
     assert len(launch.list_jobs()) == 2
+
+
+def test_every_queued_task_carries_the_config_the_launch_was_started_with(
+    fake_pueue: FakePueue,
+    project_root: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Anti-vacuity: without this the `agentctl batch result` step of a worker
+    task queued under AGENTCTL_CONFIG reads the default state directory and
+    refuses its own run as unknown."""
+    location = tmp_path / "agentctl.json"
+    location.write_text(
+        json.dumps(
+            {
+                "project_roots": [str(project_root)],
+                "state_dir": str(tmp_path / "state"),
+                "event_spool": str(tmp_path / "events.jsonl"),
+            }
+        )
+    )
+    monkeypatch.setenv("AGENTCTL_CONFIG", str(location))
+    config = load_config()
+    assert config.config_path == location
+    project = config.catalog().get("fixture")
+
+    started = launch.start_operation(config, project, project.operation("check"))
+
+    written = read_launch(config, fake_pueue.task(started["job_id"]))
+    assert written["environment"]["AGENTCTL_CONFIG"] == str(location)

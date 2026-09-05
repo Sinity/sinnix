@@ -186,6 +186,12 @@ def enqueue(
     """
     reference = _reference(label)
     log_path = config.jobs_dir / f"{reference}.log"
+    environment = dict(environment)
+    if config.config_path is not None:
+        # A queued task calls agentctl again (`batch result`, `batch land`);
+        # without the config it read the default one and answers about another
+        # state directory.
+        environment["AGENTCTL_CONFIG"] = str(config.config_path)
     launch: dict[str, Any] = {
         "job_id": reference,
         "project_id": project.project_id,
@@ -194,7 +200,7 @@ def enqueue(
         "kind": kind,
         "label": label,
         "argv": list(argv),
-        "environment": dict(environment),
+        "environment": environment,
         "working_directory": str(working_directory),
         "timeout_seconds": timeout_seconds,
         "result_kind": result_kind,
