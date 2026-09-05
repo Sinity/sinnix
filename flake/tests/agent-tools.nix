@@ -851,6 +851,7 @@ in
                 config = Config(
                     project_roots=(root,),
                     agent_runner=Path("/nonexistent"),
+                    worker_contract=Path("/nonexistent"),
                     event_spool=Path(state) / "events.jsonl",
                     state_dir=Path(state),
                     agentctl_executable="agentctl",
