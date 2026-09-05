@@ -69,9 +69,10 @@ manifest is `~/.local/state/agentctl/runs/<run>.json`.
 
 - `agentctl batch start [project] <bead>… [--worker a,b]… [--workers
 queued|external] [--backend B --model M --effort E]` validates the members,
-  writes the manifest, claims the beads, creates
-  `<workspace.root>/<repo>-batch-<run>-<worker>` per worker through `wt
-switch --create` (the project's `wt.toml` hooks provision it), writes the
+  writes the manifest, claims the beads, creates one worktree per worker on
+  branch `batch/<run>/<worker>` at `<workspace.root>/<repo>-<branch with /
+replaced by ->` through `wt switch --create` (the project's `wt.toml` hooks
+  provision it), writes the
   packet to `.lane/prompt.md`, queues each worker in group `agent` inside a
   unit capped at the descriptor's `agent_memory_max`, and queues the landing
   task behind them in `<project>-land`. `--workers external` skips the
@@ -101,11 +102,12 @@ job, the landing task and what follows next, and the ready beads.
 Agents have `lane` on PATH:
 
 - `lane task` prints the dispatch packet (`.lane/prompt.md`).
-- `lane verify` runs the descriptor's focused verification as a job and
-  waits.
-- `lane done report.md` requires a clean tree, pushes the branch, and emits
-  the report as the final message. `lane done --incomplete report.md` pushes
-  committed WIP and marks the report partial.
+- `lane verify` runs the descriptor's focused verification through
+  `agentctl job start <project> <focused> --workspace . --wait`.
+- `lane done <result.json>` requires a clean tree, validates the document
+  against `.lane/worker.schema.json` with `candidate_sha` equal to HEAD, and
+  prints it as the final message. It never pushes; the landing task
+  publishes.
 
 ## Failures
 
