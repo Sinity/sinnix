@@ -283,7 +283,12 @@ def test_a_comparison_naming_an_unknown_item_is_dropped_not_ranked(elicit_module
     comparisons = [
         {"id": "1", "kind": "pair", "a": "a", "b": "b", "outcome": 1.0},
         {"id": "2", "kind": "pair", "a": "ghost", "b": "b", "outcome": 1.0},
-        {"id": "3", "kind": "choice-set", "set": ["a", "b", "ghost"], "winner": "ghost"},
+        {
+            "id": "3",
+            "kind": "choice-set",
+            "set": ["a", "b", "ghost"],
+            "winner": "ghost",
+        },
     ]
     fitted = elicit_module.fit_bradley_terry(items, comparisons)
     assert set(fitted) == {"a", "b"}
