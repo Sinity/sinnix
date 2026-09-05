@@ -32,6 +32,7 @@ REFUSALS: dict[str, str] = {
     "candidate_mismatch": "the result's candidate_sha is not the worktree HEAD",
     "checks_failed": "a required PR check failed, or did not finish (`timed_out`)",
     "empty_candidate": "the candidate equals the base commit: nothing to land",
+    "candidate_off_base": "the candidate does not descend from the run base",
     "exists": "a manifest with this run id already exists",
     "foreign_beads": "the result covers beads outside the worker",
     "harness": "the harness is neither `queued` nor `external`",
