@@ -105,6 +105,11 @@ def parser() -> argparse.ArgumentParser:
     for name in ("get", "logs", "result", "cancel", "retry"):
         one = job_verbs.add_parser(name)
         one.add_argument("job_id", type=int)
+    clean = job_verbs.add_parser(
+        "clean", help="delete a terminal task and its artifacts (never by age)"
+    )
+    clean.add_argument("job_id", type=int, nargs="?")
+    clean.add_argument("--all-terminal", action="store_true")
     wait = job_verbs.add_parser("wait")
     wait.add_argument("job_id", type=int)
     wait.add_argument("--timeout-seconds", type=int, default=DEFAULT_WAIT_SECONDS)
@@ -266,7 +271,7 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         out.emit(rows, out.jobs_table(rows))
         return EXIT_OK
     if verb == "get":
-        job = launch.get_job(arguments.job_id)
+        job = launch.get_job(arguments.job_id, config)
         out.emit(job, out.job_line(job))
         return EXIT_OK
     if verb == "logs":
@@ -288,12 +293,17 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         return EXIT_OK
     if verb == "cancel":
         job = launch.cancel(config, arguments.job_id)
-        survivors = job["reaped"]["scope"]["survivors"]
-        out.emit(
-            job,
-            out.job_line(job)
-            + (f"; {len(survivors)} processes survived the reap" if survivors else ""),
-        )
+        out.emit(job, f"{out.job_line(job)}; {job['state']}")
+        return EXIT_REFUSED if job["state"] == "failed" else EXIT_OK
+    if verb == "clean":
+        if arguments.all_terminal:
+            rows = launch.clean_terminal(config)
+            out.emit(rows, "\n".join(out.job_line(row) for row in rows))
+            return EXIT_OK
+        if arguments.job_id is None:
+            raise JobError("job clean needs a job id or --all-terminal")
+        job = launch.clean(config, arguments.job_id)
+        out.emit(job, out.job_line(job))
         return EXIT_OK
     if verb == "retry":
         job = launch.retry(arguments.job_id)

@@ -25,14 +25,19 @@ from . import pueue
 from .config import Config
 from .projects import ProjectAdapter, ProjectOperation
 from .pueue import PueueError, Task
-from .queue_run import (
+from .run import (
+    CANCELLED_EXIT_CODE,
     MAX_LOG_BYTES,
     MAX_RESULT_BYTES,
     REFUSED_EXIT_CODE,
+    SLOT_OCCUPIED_EXIT_CODE,
     TIMEOUT_EXIT_CODE,
+    VANISHED_EXIT_CODE,
+    cancel_marker_for,
+    outcome_path_for,
     scope_pool,
     scope_unit_for,
-    stop_scope,
+    systemd_environment,
 )
 
 QUEUE_RUN_EXECUTABLE = "agentctl-run"
@@ -166,8 +171,13 @@ def enqueue(
     scope_properties: Sequence[str] = (),
     tree_receipt: Mapping[str, Any] | None = None,
     environment_receipt: Mapping[str, str] | None = None,
+    binding: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Write the launch input, add the pueue task, return the job view."""
+    """Write the launch input, add the pueue task, return the job view.
+
+    ``binding`` is what the caller ties the task to (``beads``, ``run_id``);
+    it is stored as written and read back on ``job get``.
+    """
     reference = _reference(label)
     log_path = config.jobs_dir / f"{reference}.log"
     launch: dict[str, Any] = {
@@ -191,6 +201,8 @@ def enqueue(
         launch["tree_receipt"] = dict(tree_receipt)
     if environment_receipt is not None:
         launch["environment_receipt"] = dict(environment_receipt)
+    if binding:
+        launch["binding"] = dict(binding)
     if result_kind != "exit":
         launch["result_path"] = str(config.jobs_dir / f"{reference}.result")
     input_path = config.inputs_dir / f"{reference}.json"
@@ -365,11 +377,17 @@ def phase_of(task: Task) -> str:
         return "dependency-failed"
     if task.result == "FailedToSpawn":
         return "launch-failed"
-    if task.exit_code == TIMEOUT_EXIT_CODE:
-        return "timed-out"
-    if task.exit_code == REFUSED_EXIT_CODE:
-        return "refused"
-    return "failed"
+    return _WRAPPER_PHASES.get(task.exit_code, "failed")
+
+
+# The wrapper's own exit statuses; any other status is the command's.
+_WRAPPER_PHASES = {
+    TIMEOUT_EXIT_CODE: "timed-out",
+    REFUSED_EXIT_CODE: "refused",
+    CANCELLED_EXIT_CODE: "cancelled",
+    VANISHED_EXIT_CODE: "vanished",
+    SLOT_OCCUPIED_EXIT_CODE: "slot-occupied",
+}
 
 
 def launch_input_path(task: Task) -> Path | None:
@@ -445,9 +463,9 @@ def launch_reference(task: Task) -> str | None:
 
 
 def scope_unit(task: Task) -> str | None:
-    """The transient scope holding this task's workload.
+    """The transient service holding this task's workload.
 
-    Derived from the queue's own record so a cancel reaches the cgroup after the
+    Derived from the queue's own record so a cancel reaches the unit after the
     wrapper is gone and after the launch input its owner wrote has been deleted.
     """
     path = launch_input_path(task)
@@ -495,8 +513,11 @@ def _task(task_id: int) -> Task:
     return task
 
 
-def get_job(task_id: int) -> dict[str, Any]:
-    return job_view(_task(task_id))
+def get_job(task_id: int, config: Config | None = None) -> dict[str, Any]:
+    task = _task(task_id)
+    view = job_view(task)
+    binding = (_launch_input(config, task) or {}).get("binding") if config else None
+    return {**view, "binding": binding} if binding else view
 
 
 def _artifact(config: Config, task: Task, suffix: str) -> Path | None:
@@ -546,54 +567,126 @@ def result(config: Config, task_id: int) -> dict[str, Any]:
         value: Any = json.loads(text)
     except json.JSONDecodeError:
         value = text
-    return {**view, "kind": "artifact", "value": value}
+    return {**view, "kind": "artifact", "value": value, **_outcome(config, task)}
 
 
-def _stop(task_id: int) -> str:
-    """Make a task not run, whatever state pueue has it in.
+def _outcome(config: Config, task: Task) -> dict[str, Any]:
+    """The wrapper's own record of how the run ended, when it left one."""
+    log = _artifact(config, task, ".log")
+    raw = read_bounded(outcome_path_for(log), 4096) if log is not None else None
+    try:
+        record = json.loads(raw.decode("utf-8")) if raw else None
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        record = None
+    return {"outcome": record} if isinstance(record, dict) else {}
 
-    `pueue kill` is defined for a task that has a process; it refuses a queued
-    one, which then runs later as though nothing had been cancelled. Dropping
-    such a task from the queue is what cancelling it means. Each round re-reads
-    the state, because a task can start between the read and the request.
-    """
-    for _ in range(2):
-        task = pueue.task(task_id)
-        if task is None:
-            return "forgotten"
-        if task.terminal:
-            return "terminal"
-        try:
-            if task.started_at is None:
-                pueue.remove([task_id])
-                return "dropped"
-            pueue.kill(task_id)
-            return "killed"
-        except PueueError:
-            continue
-    raise JobError(f"pueue would not stop task {task_id}")
+
+def _unit_active(unit: str) -> bool:
+    try:
+        completed = subprocess.run(
+            ["systemctl", "--user", "is-active", "--quiet", unit],
+            capture_output=True,
+            check=False,
+            timeout=30,
+            env=systemd_environment(),
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return completed.returncode == 0
 
 
 def cancel(config: Config, task_id: int) -> dict[str, Any]:
-    """Stop the task through pueue, then reap everything it started.
+    """Make the task not run: drop it while queued, stop its unit while running.
 
-    pueue kills with SIGKILL, which the wrapper cannot catch, so the workload is
-    reaped from outside: its scope's cgroup holds every descendant, including
-    those that left the process group. The scope is named before the stop, while
-    pueue still records the command that names it.
+    pueue kills the wrapper with SIGKILL, which stops nothing inside the unit,
+    so the unit is stopped first. `systemctl stop` ends the wrapper's wait with
+    a success status, which is why the cancel marker is written before it: the
+    wrapper reports `cancelled` when it finds one.
     """
     task = _task(task_id)
+    view = job_view(task)
+    if task.terminal:
+        return {**view, "state": "terminal", "unit": None}
+    if task.started_at is None:
+        try:
+            pueue.remove([task_id])
+            return {
+                **view,
+                "phase": "cancelled",
+                "terminal": True,
+                "state": "removed",
+                "unit": None,
+            }
+        except PueueError:
+            task = _task(task_id)
     unit = scope_unit(task)
-    outcome = _stop(task_id)
-    reaped: dict[str, Any] = {"scope": stop_scope(unit)}
-    # A dropped task is one pueue no longer holds, so its own view is the last
-    # one there was; the phase says what agentctl did with it.
-    view = (
-        {**job_view(task), "phase": "cancelled", "terminal": True}
-        if outcome == "dropped"
-        else get_job(task_id)
-    )
-    return {**view, "cancelled": outcome, "reaped": reaped}
+    log = _artifact(config, task, ".log")
+    if log is not None:
+        marker = cancel_marker_for(log)
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text("")
+    if unit is not None:
+        subprocess.run(
+            ["systemctl", "--user", "stop", unit],
+            capture_output=True,
+            check=False,
+            timeout=60,
+            env=systemd_environment(),
+        )
+    try:
+        pueue.kill(task_id)
+    except PueueError:
+        # The wrapper may already have returned once its unit stopped.
+        pass
+    state = "failed" if unit is not None and _unit_active(unit) else "stopped"
+    current = pueue.task(task_id)
+    return {
+        **(job_view(current) if current is not None else view),
+        "state": state,
+        "unit": unit,
+    }
+
+
+def _own_artifacts(config: Config, task: Task) -> list[Path]:
+    paths: list[Path] = []
+    for suffix in (".log", ".result"):
+        artifact = _artifact(config, task, suffix)
+        if artifact is not None:
+            paths.append(artifact)
+    log = _artifact(config, task, ".log")
+    if log is not None:
+        paths.extend((cancel_marker_for(log), outcome_path_for(log)))
+    launch_input = launch_input_path(task)
+    if launch_input is not None and _task_owned(config, task, launch_input):
+        paths.append(launch_input)
+    return paths
+
+
+def clean(config: Config, task_id: int) -> dict[str, Any]:
+    """Delete a terminal task and its artifacts. Ownership, never age."""
+    task = _task(task_id)
+    if not task.terminal:
+        raise JobError(
+            f"task {task_id} is still {task.status.lower()}; cancel it first"
+        )
+    removed = []
+    for path in _own_artifacts(config, task):
+        try:
+            path.unlink()
+            removed.append(str(path))
+        except OSError:
+            continue
+    pueue.remove([task_id])
+    return {**job_view(task), "cleaned": True, "removed": removed}
+
+
+def clean_terminal(config: Config) -> list[dict[str, Any]]:
+    """`clean` for every terminal task that ran the wrapper."""
+    return [
+        clean(config, task.task_id)
+        for task in sorted(pueue.tasks().values(), key=lambda item: item.task_id)
+        if task.terminal and launch_input_path(task) is not None
+    ]
 
 
 def retry(task_id: int) -> dict[str, Any]:
