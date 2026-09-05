@@ -42,6 +42,8 @@ _tmp_do_not_include_in_version_control.md
 # Promote reusable conclusions into reviewed docs or Beads issues instead.
 .agent/scratch/
 .agent/ops/
+# A lane's private worktree state (agentctl).
+.lane/
 .cache/
 .playwright-mcp/
 

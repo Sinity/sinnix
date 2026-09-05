@@ -338,16 +338,22 @@ in
             && userSlices.session.MemoryLow == "5G"
             && !(poolSlices.agentctl-agent ? MemoryMax)
             && !(poolSlices.agentctl-agent ? ManagedOOMPreference)
+            && !(poolSlices.agentctl-agent ? ManagedOOMMemoryPressure)
+            && !(poolSlices.agentctl-agent ? ManagedOOMSwap)
+            && poolSlices.agentctl-agent ? MemoryHigh
             && poolSlices.agentctl-pytest.MemoryHigh == "6G"
             && poolSlices.agentctl-pytest.MemoryMax == "8G"
             && poolSlices.agentctl-pytest.MemorySwapMax == "0"
+            && poolSlices.agentctl-pytest.ManagedOOMMemoryPressure == "kill"
             && poolSlices.agentctl-pytest.CPUWeight == 20
             && poolSlices.agentctl-pytest.IOWeight == 20
             && poolSlices.agentctl-bulk.MemoryHigh == "10G"
             && poolSlices.agentctl-bulk.MemoryMax == "14G"
             && poolSlices.agentctl-bulk.MemorySwapMax == "0"
+            && poolSlices.agentctl-bulk.ManagedOOMMemoryPressure == "kill"
             && poolSlices.agentctl-bulk.CPUWeight == 20
             && poolSlices.agentctl-bulk.IOWeight == 10
+            && lib.all (slice: slice.IOAccounting == true) (lib.attrValues poolSlices)
           )
           "agentctl coordinator work must yield to protected interactive slices; pool slices own fixed caps";
         pkgs.runCommand "sinnix-agent-resource-policy-check" { } ''
@@ -764,8 +770,8 @@ in
 
             user=/user.slice/user-1000.slice/user@1000.service
 
-            # A lane's queued task: the scope that owns its MemoryMax.
-            expect contained "0::$user/agentctl.slice/agentctl-agent.slice/agentctl-agent-sinnix-lane-sinnix-5ntw-9b15d371.scope"
+            # A lane's queued task: the service that owns its MemoryMax.
+            expect contained "0::$user/agentctl.slice/agentctl-agent.slice/agentctl-agent-sinnix-lane-sinnix-5ntw-9b15d371.service"
             # A pool scope systemd named, rather than one named for a launch input.
             expect contained "0::$user/agentctl.slice/agentctl-agent.slice/run-p988139-i193814380.scope"
             # A pool other than agent still bounds what it launches.
