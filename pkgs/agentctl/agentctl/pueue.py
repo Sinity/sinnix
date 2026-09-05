@@ -14,16 +14,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from .limits import CALL_TIMEOUT_SECONDS
+
 # pueue records the environment of the `pueue add` client into its state file,
 # which is world-readable. A daemon that added tasks with its own environment
 # would publish every inherited secret; the wrapper reconstructs the declared
 # environment at exec time instead.
 _CLIENT_ENVIRONMENT_KEYS = ("HOME", "PATH", "XDG_RUNTIME_DIR", "XDG_DATA_HOME")
 
-# Every call is a local socket round trip. A minute distinguishes a wedged
-# daemon from a slow one; `wait` is the one call that legitimately blocks and
-# carries its own deadline.
-CALL_TIMEOUT_SECONDS = 60
+# `wait` is the one call that legitimately blocks and carries its own deadline.
 
 TERMINAL_STATUS = "Done"
 

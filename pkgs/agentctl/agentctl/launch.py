@@ -22,8 +22,10 @@ import uuid
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Mapping, Sequence
 
-from . import pueue
+from . import gitcmd, pueue
 from .config import Config
+from .launch_input import write_input
+from .limits import CALL_TIMEOUT_SECONDS, SHORT_ID, SYSTEMCTL_TIMEOUT_SECONDS
 from .projects import ProjectAdapter, ProjectOperation
 from .pueue import PueueError, Task
 from .run import (
@@ -47,7 +49,6 @@ QUEUE_RUN_EXECUTABLE = "agentctl-run"
 # workstation has queued is 21 KB. The bound is what keeps a task from naming
 # an arbitrarily large file and having agentctl read it.
 MAX_LAUNCH_INPUT_BYTES = 1_048_576
-_RESULT_KINDS = {"exit": "exit", "json": "json", "pytest": "pytest"}
 # The label kinds under which a batch queues agents rather than declared operations.
 AGENT_OPERATIONS = frozenset({"worker", "resume", "integrate", "review"})
 # How long a cancel waits for the wrapper to record `cancelled` after its
@@ -66,32 +67,11 @@ def label_for(project_id: str, operation: str) -> str:
 
 def _reference(label: str) -> str:
     safe = re.sub(r"[^A-Za-z0-9._-]+", "-", label).strip("-") or "job"
-    return f"{safe}-{uuid.uuid4().hex[:8]}"
-
-
-def _write_private(path: Path, content: bytes) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor = os.open(
-        path, os.O_CREAT | os.O_TRUNC | os.O_WRONLY | os.O_NOFOLLOW, 0o600
-    )
-    with os.fdopen(descriptor, "wb") as handle:
-        handle.write(content)
+    return f"{safe}-{uuid.uuid4().hex[:SHORT_ID]}"
 
 
 def _git(path: Path, *arguments: str) -> str:
-    try:
-        completed = subprocess.run(
-            ["git", "-C", str(path), *arguments],
-            capture_output=True,
-            text=True,
-            timeout=60,
-            check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired) as error:
-        raise JobError(f"could not read Git tree for {path}") from error
-    if completed.returncode != 0:
-        raise JobError(completed.stderr.strip() or "could not read Git tree")
-    return completed.stdout.strip()
+    return gitcmd.git(path, *arguments, error=JobError)
 
 
 def _tree_receipt(path: Path) -> dict[str, Any]:
@@ -218,9 +198,7 @@ def enqueue(
     if result_kind != "exit":
         launch["result_path"] = str(config.jobs_dir / f"{reference}.result")
     input_path = config.inputs_dir / f"{reference}.json"
-    _write_private(
-        input_path, json.dumps(launch, sort_keys=True, separators=(",", ":")).encode()
-    )
+    write_input(input_path, launch)
     try:
         task_id = pueue.add(
             group=group,
@@ -236,9 +214,7 @@ def enqueue(
     # The task id goes back into the input so its artifacts can be found
     # after pueue has forgotten the task.
     launch["queue_task_id"] = task_id
-    _write_private(
-        input_path, json.dumps(launch, sort_keys=True, separators=(",", ":")).encode()
-    )
+    write_input(input_path, launch)
     task = pueue.task(task_id)
     return job_view(task) if task is not None else {"job_id": task_id, "label": label}
 
@@ -349,7 +325,7 @@ def _start_operation(
         argv=project.environment.command_for((*operation.command, *extra_argv)),
         working_directory=working_directory,
         timeout_seconds=operation.timeout_seconds,
-        result_kind=_RESULT_KINDS[operation.result],
+        result_kind=operation.result,
         environment=environment,
         after=dependency_ids,
         tree_receipt=tree_receipt,
@@ -606,7 +582,7 @@ def _unit_active(unit: str) -> bool:
             ["systemctl", "--user", "is-active", "--quiet", unit],
             capture_output=True,
             check=False,
-            timeout=30,
+            timeout=SYSTEMCTL_TIMEOUT_SECONDS,
             env=systemd_environment(),
         )
     except (OSError, subprocess.TimeoutExpired):
@@ -663,7 +639,7 @@ def cancel(
             ["systemctl", "--user", "stop", unit],
             capture_output=True,
             check=False,
-            timeout=60,
+            timeout=CALL_TIMEOUT_SECONDS,
             env=systemd_environment(),
         )
     deadline = time.monotonic() + settle_seconds

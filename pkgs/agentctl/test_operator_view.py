@@ -8,9 +8,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from agentctl import batch, operator_view
-from agentctl.batch import Run
+from agentctl import manifest, operator_view
 from agentctl.config import Config
+from agentctl.manifest import Run
 from agentctl.projects import load_project_adapter
 from agentctl.pueue import Task
 from conftest import FakeBd, FakePueue, bead
@@ -286,9 +286,9 @@ def test_collect_reads_each_source_and_keeps_going_when_one_is_down(
         command=("true",),
         working_directory=project_root,
     )
-    manifest = run("run-1", [worker("fx-1", task_id=1)])
-    batch.create(config, manifest)
-    batch.create(
+    run_manifest = run("run-1", [worker("fx-1", task_id=1)])
+    manifest.create(config, run_manifest)
+    manifest.create(
         config,
         Run.from_dict(
             {

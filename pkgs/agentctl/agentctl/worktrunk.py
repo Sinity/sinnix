@@ -23,6 +23,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator, Mapping, Sequence
 
+from .limits import CALL_TIMEOUT_SECONDS
+
 # wt list schema 2 is the contract this module parses. wt still defaults to
 # schema 1 and takes 2 only from user config, so every call pins it: agentctl
 # must not read a different shape because the invoking user configured one.
@@ -45,10 +47,6 @@ INTEGRATED_STATE = "integrated"
 # Removal is asynchronous by default; a caller that drops a workspace and then
 # reports it gone must observe the removal, so every call passes --foreground.
 _REMOVE_ARGUMENTS = ("--reap", "--foreground", "-y", "--format", "json")
-
-# wt answers from local Git plus, for --prs, the forge. A minute covers a cold
-# forge call; longer means wt is wedged, not slow.
-CALL_TIMEOUT_SECONDS = 60
 
 # A mutation returns while the Git process it started may still hold the
 # repository index. The next writer then finds an `index.lock` no process

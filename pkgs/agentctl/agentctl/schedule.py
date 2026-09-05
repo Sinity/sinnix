@@ -15,9 +15,9 @@ import subprocess
 from typing import Any, Sequence
 
 from .config import Config
+from .limits import SYSTEMCTL_TIMEOUT_SECONDS
 
 UNIT_PREFIX = "agentctl-schedule-"
-SYSTEMCTL_TIMEOUT_SECONDS = 10
 
 
 class TimerError(RuntimeError):

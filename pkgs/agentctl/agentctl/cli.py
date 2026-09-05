@@ -31,16 +31,22 @@ import argparse
 import json
 import sys
 import time
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from . import backpressure, batch, launch, operator_view, schedule
-from .batch import BatchError, BatchRefusal
 from .config import Config, ConfigError, load_config, resolve_project
 from .github import GithubError
 from .launch import JobError
-from .operator_view import age, local_clock, table
+from .manifest import (
+    HARNESSES,
+    BatchError,
+    BatchRefusal,
+    list_runs,
+    load,
+    resolve_run_id,
+)
+from .operator_view import Output, local_clock, table
 from .packets import PacketError
 from .projects import (
     ProjectAdapter,
@@ -61,7 +67,6 @@ EXIT_JOB_NOT_SUCCEEDED = 4
 DEFAULT_WAIT_SECONDS = 3_600
 DEFAULT_EVENT_LINES = 40
 FOLLOW_POLL_SECONDS = 1.0
-SHORT_SHA = 8
 
 _REFUSALS = (
     BatchRefusal,
@@ -198,7 +203,7 @@ def parser() -> argparse.ArgumentParser:
     )
     batch_start.add_argument(
         "--workers",
-        choices=batch.HARNESSES,
+        choices=HARNESSES,
         default="queued",
         dest="harness",
         help="queued: agentctl runs the workers; external: another harness does",
@@ -255,111 +260,6 @@ def parser() -> argparse.ArgumentParser:
     pressure_verbs = pressure.add_subparsers(dest="backpressure_verb", required=True)
     _output_arguments(pressure_verbs.add_parser("tick"))
     return root
-
-
-class Output:
-    """One place that decides what stdout and stderr carry."""
-
-    def __init__(self, *, as_json: bool, full: bool) -> None:
-        self.as_json = as_json
-        self.full = full
-        self.now = datetime.now(UTC)
-
-    def read(self, document: Any, text: str | None = None) -> None:
-        """A read: the table a person reads, or the document with ``--json``."""
-        if self.as_json or text is None:
-            print(json.dumps(document, indent=2, sort_keys=True))
-        else:
-            print(text)
-
-    def write(self, document: Any, summary: str) -> None:
-        """A write: the document on stdout, one summary line on stderr."""
-        print(json.dumps(document, indent=2, sort_keys=True))
-        print(summary, file=sys.stderr)
-
-    def run(self, run_id: str) -> str:
-        return run_id if self.full else batch.short_run_id(run_id)
-
-    def sha(self, value: Any) -> str:
-        text = str(value or "")
-        if not text:
-            return "-"
-        return text if self.full else text[:SHORT_SHA]
-
-    def when(self, stamp: str | None, ended: str | None = None) -> str:
-        """Local clock and age, e.g. ``14:02 3m``."""
-        until = operator_view.parse_stamp(ended) or self.now
-        return f"{local_clock(stamp)} {age(stamp, until)}"
-
-    def job_line(self, job: Mapping[str, Any]) -> str:
-        started = job.get("started_at") or job.get("enqueued_at")
-        ended = job.get("ended_at")
-        when = (
-            f"finished {local_clock(ended)} after {age(started, operator_view.parse_stamp(ended) or self.now)}"
-            if ended
-            else f"since {local_clock(started)} ({age(started, self.now)})"
-        )
-        exit_text = (
-            f" exit {job['exit_code']}" if job.get("exit_code") not in (None, 0) else ""
-        )
-        return f"job {job['job_id']} {job['label']} {job['phase']}{exit_text} {when}"
-
-    def jobs_table(self, rows: Sequence[Mapping[str, Any]]) -> str:
-        if not rows:
-            return "(no jobs)"
-        return table(
-            ("id", "label", "phase", "started", "age", "exit", "cwd"),
-            [
-                (
-                    row["job_id"],
-                    row["label"],
-                    row["phase"],
-                    local_clock(row.get("started_at") or row.get("enqueued_at")),
-                    age(
-                        row.get("started_at") or row.get("enqueued_at"),
-                        operator_view.parse_stamp(row.get("ended_at")) or self.now,
-                    ),
-                    "" if row.get("exit_code") is None else row["exit_code"],
-                    row.get("path", ""),
-                )
-                for row in rows
-            ],
-        )
-
-    def run_lines(self, document: Mapping[str, Any]) -> str:
-        workers = ", ".join(
-            f"{worker['id']}[{worker.get('stage') or ('task ' + str(worker.get('task_id')) if worker.get('task_id') is not None else 'external')}]"
-            for worker in document["workers"]
-        )
-        landing = document["landing"]
-        return (
-            f"run {self.run(document['run_id'])} {document['project']} {document['harness']} "
-            f"base {self.sha(document['base_commit'])} stage {document.get('stage', '-')} "
-            f"started {self.when(document.get('created_at'))}\n"
-            f"workers: {workers}\n"
-            f"landing: task {landing.get('task_id')} candidate {self.sha(landing.get('candidate_sha'))}"
-            f"{' PR #' + str(landing['pr_number']) if landing.get('pr_number') else ''}"
-            f"{' failure ' + landing['failure']['code'] if landing.get('failure') else ''}"
-        )
-
-    def runs_table(self, rows: Sequence[Mapping[str, Any]]) -> str:
-        if not rows:
-            return "(no runs)"
-        return table(
-            ("run", "harness", "stage", "started", "age", "workers", "candidate"),
-            [
-                (
-                    self.run(row["run_id"]),
-                    row["harness"],
-                    row["stage"],
-                    local_clock(row.get("created_at")),
-                    age(row.get("created_at"), self.now),
-                    " ".join(f"{w['id']}:{w['stage']}" for w in row["workers"]),
-                    self.sha(row["landing"].get("candidate_sha")),
-                )
-                for row in rows
-            ],
-        )
 
 
 def _is_project(config: Config, token: str) -> bool:
@@ -527,9 +427,9 @@ def _batch(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         out.write(started, f"{out.run_lines(started)}\n{note}")
         return EXIT_OK
     if verb == "land":
-        run_id = batch.resolve_run_id(config, arguments.run_id)
+        run_id = resolve_run_id(config, arguments.run_id)
         project = resolve_project(
-            config, arguments.project or batch.load(config, run_id).project
+            config, arguments.project or load(config, run_id).project
         )
         landed = batch.land(config, project, run_id)
         acceptance = landed["acceptance"] or {}
@@ -548,9 +448,9 @@ def _batch(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         )
         return EXIT_OK
     if verb == "status":
-        run_id = batch.resolve_run_id(config, arguments.run_id)
+        run_id = resolve_run_id(config, arguments.run_id)
         project = resolve_project(
-            config, arguments.project or batch.load(config, run_id).project
+            config, arguments.project or load(config, run_id).project
         )
         document = batch.status(config, run_id, project=project)
         out.read(document, out.run_lines(document))
@@ -559,12 +459,12 @@ def _batch(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         project = _select_project(config, arguments.project, arguments.selector)
         rows = [
             batch.status(config, run.run_id, project=project)
-            for run in batch.list_runs(config, project.project_id)
+            for run in list_runs(config, project.project_id)
         ]
         out.read(rows, out.runs_table(rows))
         return EXIT_OK
     if verb == "result":
-        run_id = batch.resolve_run_id(config, arguments.run_id)
+        run_id = resolve_run_id(config, arguments.run_id)
         filed = batch.result(config, run_id, arguments.worker_id, arguments.path)
         out.write(
             filed,
@@ -577,9 +477,9 @@ def _batch(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         )
         return EXIT_OK
     if verb == "resume":
-        run_id = batch.resolve_run_id(config, arguments.run_id)
+        run_id = resolve_run_id(config, arguments.run_id)
         project = resolve_project(
-            config, arguments.project or batch.load(config, run_id).project
+            config, arguments.project or load(config, run_id).project
         )
         resumed = batch.resume(
             config,

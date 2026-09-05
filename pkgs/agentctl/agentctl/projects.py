@@ -19,6 +19,7 @@ import tomllib
 from .environment import build_environment
 from .limits import (
     AGENT_MEMORY_MAX,
+    DECLARABLE_RESULT_KINDS,
     DEFAULT_TIMEOUT_SECONDS,
     MAX_DECLARED_OPERATION_TIMEOUT_SECONDS,
     valid_timeout_seconds,
@@ -33,7 +34,6 @@ class ProjectConfigError(ValueError):
 _POOL_NAME = re.compile(r"[a-z][a-z0-9-]{0,63}")
 _ENVIRONMENT_NAME = re.compile(r"[A-Z_][A-Z0-9_]*\Z")
 MAX_OPERATION_SCHEDULE_LENGTH = 256
-RESULT_KINDS = frozenset({"exit", "json", "pytest"})
 CACHE_KINDS = frozenset({"none", "tree+environment"})
 
 # Retired descriptor tables still present in deployed descriptors. They are
@@ -157,8 +157,8 @@ class ProjectOperation:
     name: str
     description: str
     command: tuple[str, ...]
-    pool: str
-    result: str
+    pool: str = "normal"
+    result: str = "exit"
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS
     schedule: str | None = None
     # "default": the operation runs only on the project's main checkout.
@@ -295,32 +295,37 @@ def _workspace(raw: Mapping[str, Any], descriptor: Path) -> WorkspacePolicy | No
         raise ProjectConfigError(
             f"{descriptor} workspace.default_base must be non-empty"
         )
-    memory_max = raw_workspace.get("agent_memory_max", AGENT_MEMORY_MAX)
-    if not isinstance(memory_max, str) or _MEMORY_SIZE.fullmatch(memory_max) is None:
-        raise ProjectConfigError(
-            f"{descriptor} workspace.agent_memory_max must be a systemd size such as 10G"
-        )
-    raw_verify = raw_workspace.get("verify", {})
-    if (
-        not isinstance(raw_verify, Mapping)
-        or set(raw_verify) - _VERIFY_PROFILES
-        or any(not isinstance(value, str) or not value for value in raw_verify.values())
-    ):
-        raise ProjectConfigError(
-            f"{descriptor} workspace.verify must map focused/candidate/corpus to operation names"
-        )
-    publish = raw_workspace.get("publish", "pr")
-    if publish not in PUBLISH_POLICIES:
-        raise ProjectConfigError(
-            f"{descriptor} workspace.publish must be one of {sorted(PUBLISH_POLICIES)}"
-        )
-    return WorkspacePolicy(
-        root=Path(root),
-        default_base=default_base,
-        agent_memory_max=memory_max,
-        verify=dict(raw_verify),
-        publish=publish,
-    )
+    fields: dict[str, Any] = {}
+    if "agent_memory_max" in raw_workspace:
+        memory_max = raw_workspace["agent_memory_max"]
+        if (
+            not isinstance(memory_max, str)
+            or _MEMORY_SIZE.fullmatch(memory_max) is None
+        ):
+            raise ProjectConfigError(
+                f"{descriptor} workspace.agent_memory_max must be a systemd size such as 10G"
+            )
+        fields["agent_memory_max"] = memory_max
+    if "verify" in raw_workspace:
+        raw_verify = raw_workspace["verify"]
+        if (
+            not isinstance(raw_verify, Mapping)
+            or set(raw_verify) - _VERIFY_PROFILES
+            or any(
+                not isinstance(value, str) or not value for value in raw_verify.values()
+            )
+        ):
+            raise ProjectConfigError(
+                f"{descriptor} workspace.verify must map focused/candidate/corpus to operation names"
+            )
+        fields["verify"] = dict(raw_verify)
+    if "publish" in raw_workspace:
+        if raw_workspace["publish"] not in PUBLISH_POLICIES:
+            raise ProjectConfigError(
+                f"{descriptor} workspace.publish must be one of {sorted(PUBLISH_POLICIES)}"
+            )
+        fields["publish"] = raw_workspace["publish"]
+    return WorkspacePolicy(root=Path(root), default_base=default_base, **fields)
 
 
 def _operation(name: str, definition: Any, descriptor: Path) -> ProjectOperation:
@@ -338,21 +343,28 @@ def _operation(name: str, definition: Any, descriptor: Path) -> ProjectOperation
     if not isinstance(description, str) or not description:
         raise ProjectConfigError(f"{descriptor} operation {name} requires description")
     command = _string_list(definition.get("exec"), f"operations.{name}.exec")
-    pool = definition.get("pool", "normal")
-    result = definition.get("result", "exit")
-    if not isinstance(pool, str) or not _POOL_NAME.fullmatch(pool):
-        raise ProjectConfigError(f"operations.{name}.pool is invalid")
-    if result not in RESULT_KINDS:
-        raise ProjectConfigError(f"operations.{name}.result is invalid")
-    timeout_seconds = definition.get("timeout_seconds", DEFAULT_TIMEOUT_SECONDS)
-    if not valid_timeout_seconds(timeout_seconds, kind="declared-operation"):
-        raise ProjectConfigError(
-            f"operations.{name}.timeout_seconds must be between 1 and "
-            f"{MAX_DECLARED_OPERATION_TIMEOUT_SECONDS}"
-        )
-    checkout = definition.get("checkout", "any")
-    if checkout not in {"any", "default"}:
-        raise ProjectConfigError(f"operations.{name}.checkout is invalid")
+    fields: dict[str, Any] = {}
+    if "pool" in definition:
+        pool = definition["pool"]
+        if not isinstance(pool, str) or not _POOL_NAME.fullmatch(pool):
+            raise ProjectConfigError(f"operations.{name}.pool is invalid")
+        fields["pool"] = pool
+    if "result" in definition:
+        if definition["result"] not in DECLARABLE_RESULT_KINDS:
+            raise ProjectConfigError(f"operations.{name}.result is invalid")
+        fields["result"] = definition["result"]
+    if "timeout_seconds" in definition:
+        timeout_seconds = definition["timeout_seconds"]
+        if not valid_timeout_seconds(timeout_seconds, kind="declared-operation"):
+            raise ProjectConfigError(
+                f"operations.{name}.timeout_seconds must be between 1 and "
+                f"{MAX_DECLARED_OPERATION_TIMEOUT_SECONDS}"
+            )
+        fields["timeout_seconds"] = timeout_seconds
+    if "checkout" in definition:
+        if definition["checkout"] not in {"any", "default"}:
+            raise ProjectConfigError(f"operations.{name}.checkout is invalid")
+        fields["checkout"] = definition["checkout"]
     schedule = definition.get("schedule")
     if schedule is not None and (
         not isinstance(schedule, str)
@@ -365,9 +377,10 @@ def _operation(name: str, definition: Any, descriptor: Path) -> ProjectOperation
         raise ProjectConfigError(
             f"operations.{name}.schedule must be a non-empty OnCalendar expression"
         )
-    cache = definition.get("cache", "none")
-    if cache not in CACHE_KINDS:
-        raise ProjectConfigError(f"operations.{name}.cache is invalid")
+    if "cache" in definition:
+        if definition["cache"] not in CACHE_KINDS:
+            raise ProjectConfigError(f"operations.{name}.cache is invalid")
+        fields["cache"] = definition["cache"]
     dependencies = _optional_string_list(
         definition.get("dependencies"), f"operations.{name}.dependencies"
     )
@@ -377,13 +390,9 @@ def _operation(name: str, definition: Any, descriptor: Path) -> ProjectOperation
         name=name,
         description=description,
         command=command,
-        pool=pool,
-        result=result,
-        timeout_seconds=timeout_seconds,
         schedule=schedule,
-        checkout=checkout,
-        cache=cache,
         dependencies=dependencies,
+        **fields,
     )
 
 
