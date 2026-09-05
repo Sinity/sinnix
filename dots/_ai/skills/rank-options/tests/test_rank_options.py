@@ -47,6 +47,13 @@ ROUND_ROBIN = [
     ("opt-cli-only", "opt-nothing", "opt-cli-only"),
 ]
 
+ROUND_ROBIN_ORDER = [
+    "opt-hub-page",
+    "opt-phone-deck",
+    "opt-cli-only",
+    "opt-nothing",
+]
+
 
 class Rank:
     """One `SINNIX_RANK_ROOT` and the CLI calls made against it."""
@@ -87,6 +94,9 @@ class Rank:
             "record", domain, "--set", f"{left},{right}", "--winner", winner
         ).stdout.strip()
 
+    def next_set(self, domain: str, *flags: str) -> dict:
+        return json.loads(self.ok("next", domain, "--json", *flags).stdout)
+
     def status(self, domain: str, *flags: str) -> dict:
         return json.loads(
             self.ok("status", domain, "--json", "--seed", "7", *flags).stdout
@@ -94,6 +104,9 @@ class Rank:
 
     def order(self, domain: str) -> list[str]:
         return [entry["id"] for entry in self.status(domain)["items"]]
+
+    def matches(self, domain: str) -> dict[str, float]:
+        return {entry["id"]: entry["matches"] for entry in self.status(domain)["items"]}
 
     def comparison_ids(self, domain: str) -> list[str]:
         path = self.root / domain / "comparisons.jsonl"
@@ -136,23 +149,69 @@ def test_cold_fixture_produces_a_fitted_order_with_uncertainty_and_stopping(rank
 
     assert rank.item_ids("cold") == [item_id for item_id, _ in FOUR_OPTIONS]
     assert report["evidence"]["operator_comparisons"] == len(ROUND_ROBIN)
-    assert [entry["id"] for entry in report["items"]] == [
-        "opt-hub-page",
-        "opt-phone-deck",
-        "opt-cli-only",
-        "opt-nothing",
-    ]
+    assert [entry["id"] for entry in report["items"]] == ROUND_ROBIN_ORDER
     assert all(entry["se"] > 0 for entry in report["items"])
-    assert 0.0 <= report["stability"]["p_stable"] <= 1.0
+    assert all(entry["matches"] == 3 for entry in report["items"])
+    assert 0.0 < report["stability"]["p_stable"] < 1.0
     assert report["evidence"]["connected"] is True
     assert report["evidence"]["unjudged_items"] == []
-    assert isinstance(report["evidence"]["settled"], bool)
+
+    # Six comparisons over four options do not reach the stopping threshold,
+    # and the report says so with the measured number rather than a flag.
+    assert report["evidence"]["settled"] is False
+    assert report["evidence"]["reasons"] == [
+        f"top-1 stability {report['stability']['p_stable']:.0%} is below the "
+        f"{report['evidence']['stop_at']:.0%} threshold"
+    ]
+
+
+def test_next_offers_a_registered_pair_and_recording_it_extends_the_evidence(
+    rank: Rank,
+):
+    assert rank.add("loop", FOUR_OPTIONS).returncode == 0
+    offered = rank.next_set("loop", "--seed", "3")
+
+    ids = [entry["id"] for entry in offered["set"]]
+    labels = [entry["label"] for entry in offered["set"]]
+    assert len(ids) == 2
+    assert set(ids) <= {item_id for item_id, _ in FOUR_OPTIONS}
+    assert labels == [dict(FOUR_OPTIONS)[item_id] for item_id in ids], (
+        "the pair carries the operator-facing labels, not bare ids"
+    )
+
+    rank.record("loop", ids[0], ids[1], ids[0])
+    evidence = rank.status("loop")["evidence"]
+    assert evidence["operator_comparisons"] == 1
+    assert sorted(evidence["unjudged_items"]) == sorted(
+        item_id for item_id, _ in FOUR_OPTIONS if item_id not in ids
+    )
+
+
+def test_a_longer_agreeing_pass_reaches_a_settled_stop(rank: Rank):
+    seed_round_robin(rank, "settled")
+    for _ in range(6):
+        for challenger in ("opt-phone-deck", "opt-cli-only", "opt-nothing"):
+            rank.record("settled", "opt-hub-page", challenger, "opt-hub-page")
+
+    report = rank.status("settled")
+    assert report["evidence"]["operator_comparisons"] == len(ROUND_ROBIN) + 18
+    assert report["stability"]["p_stable"] >= report["evidence"]["stop_at"]
+    assert report["evidence"]["reasons"] == []
+    assert report["evidence"]["settled"] is True
+    assert [entry["id"] for entry in report["items"]] == ROUND_ROBIN_ORDER
 
 
 def test_reversing_one_decisive_comparison_changes_the_order(rank: Rank):
     seed_round_robin(rank, "forward")
     seed_round_robin(rank, "flipped", flip=("opt-phone-deck", "opt-cli-only"))
-    assert rank.order("forward") != rank.order("flipped")
+
+    assert rank.order("forward") == ROUND_ROBIN_ORDER
+    assert rank.order("flipped") == [
+        "opt-hub-page",
+        "opt-cli-only",
+        "opt-phone-deck",
+        "opt-nothing",
+    ]
 
 
 # -- criterion 2: reinvocation resumes ---------------------------------------
@@ -162,6 +221,7 @@ def test_reinvocation_resumes_without_duplicating_items_or_evidence(rank: Rank):
     seed_round_robin(rank, "resume")
     first_items = rank.item_ids("resume")
     first_comparisons = rank.comparison_ids("resume")
+    first_report = rank.status("resume")
 
     # The skill's documented resume step: re-register the same roster, then
     # keep going.
@@ -171,6 +231,7 @@ def test_reinvocation_resumes_without_duplicating_items_or_evidence(rank: Rank):
 
     assert rank.item_ids("resume") == first_items
     assert rank.comparison_ids("resume") == first_comparisons
+    assert rank.status("resume")["items"] == first_report["items"]
 
     rank.record("resume", "opt-hub-page", "opt-cli-only", "opt-hub-page")
     assert rank.comparison_ids("resume")[: len(first_comparisons)] == first_comparisons
@@ -185,6 +246,7 @@ def test_reinvocation_resumes_without_duplicating_items_or_evidence(rank: Rank):
 
 def test_duplicate_label_is_refused_and_records_are_not_merged(rank: Rank):
     seed_round_robin(rank, "labels")
+    before = rank.comparison_ids("labels")
     collision = rank.add("labels", [("opt-hub-page-2", FOUR_OPTIONS[0][1])])
 
     assert collision.returncode == 2
@@ -200,6 +262,17 @@ def test_duplicate_label_is_refused_and_records_are_not_merged(rank: Rank):
     ids = rank.item_ids("labels")
     assert ids.count("opt-hub-page") == 1
     assert ids.count("opt-hub-page-2") == 1
+
+    # The same-label twin is a separate identity: it inherits none of the
+    # comparisons recorded against the option it reads like.
+    assert rank.comparison_ids("labels") == before
+    assert rank.matches("labels") == {
+        "opt-hub-page": 3,
+        "opt-phone-deck": 3,
+        "opt-cli-only": 3,
+        "opt-nothing": 3,
+        "opt-hub-page-2": 0,
+    }
 
 
 def test_changed_option_under_an_existing_id_is_refused(rank: Rank):
@@ -218,6 +291,8 @@ def test_changed_option_under_an_existing_id_is_refused(rank: Rank):
     assert rank.status("revision")["evidence"]["operator_comparisons"] == len(
         ROUND_ROBIN
     )
+    assert rank.matches("revision")["opt-hub-page"] == 3
+    assert rank.matches("revision")["opt-hub-page-v2"] == 0
 
     revised = rank.add(
         "revision", [("opt-phone-deck", "Ship it as a phone deck")], "--revise"
@@ -225,21 +300,49 @@ def test_changed_option_under_an_existing_id_is_refused(rank: Rank):
     assert revised.returncode == 0
     labels = {entry["id"]: entry["label"] for entry in rank.status("revision")["items"]}
     assert labels["opt-phone-deck"] == "Ship it as a phone deck"
+    assert rank.matches("revision")["opt-phone-deck"] == 3
 
 
 # -- criterion 4: disconnected / insufficient evidence -----------------------
 
 
-def test_disconnected_evidence_is_reported_and_never_settled(rank: Rank):
-    assert rank.add("split", FOUR_OPTIONS).returncode == 0
-    rank.record("split", "opt-hub-page", "opt-phone-deck", "opt-hub-page")
-    rank.record("split", "opt-cli-only", "opt-nothing", "opt-cli-only")
+def seed_two_components(rank: Rank, domain: str) -> None:
+    assert rank.add(domain, FOUR_OPTIONS).returncode == 0
+    rank.record(domain, "opt-hub-page", "opt-phone-deck", "opt-hub-page")
+    rank.record(domain, "opt-cli-only", "opt-nothing", "opt-cli-only")
 
-    evidence = rank.status("split")["evidence"]
+
+def test_disconnected_evidence_is_reported_and_never_settled(rank: Rank):
+    seed_two_components(rank, "split")
+    report = rank.status("split")
+    evidence = report["evidence"]
+
     assert evidence["components"] == 2
     assert evidence["connected"] is False
     assert evidence["settled"] is False
     assert any("disconnected" in reason for reason in evidence["reasons"])
+    # The component field is what tells a reader which parts of the printed
+    # order are mutually comparable at all. Its numbering is an arbitrary
+    # label; the partition is the claim.
+    component = {entry["id"]: entry["component"] for entry in report["items"]}
+    assert component["opt-hub-page"] == component["opt-phone-deck"]
+    assert component["opt-cli-only"] == component["opt-nothing"]
+    assert component["opt-hub-page"] != component["opt-cli-only"]
+
+
+def test_a_cross_component_comparison_connects_the_graph(rank: Rank):
+    seed_two_components(rank, "bridge")
+    before = rank.comparison_ids("bridge")
+
+    # The skill's documented fix: ask one comparison across the two
+    # components named by the `component` field.
+    rank.record("bridge", "opt-phone-deck", "opt-cli-only", "opt-phone-deck")
+
+    evidence = rank.status("bridge")["evidence"]
+    assert evidence["components"] == 1
+    assert evidence["connected"] is True
+    assert not any("disconnected" in reason for reason in evidence["reasons"])
+    assert rank.comparison_ids("bridge")[: len(before)] == before
 
 
 def test_no_comparisons_is_reported_as_no_evidence(rank: Rank):
@@ -266,16 +369,31 @@ def test_status_text_output_names_the_unsettled_reasons(rank: Rank):
 # -- criterion 5: installed through the shared roster ------------------------
 
 
-def roster_names() -> list[str]:
-    return re.findall(r'"([^"]+)"', ROSTER.read_text())
+def roster_names(roster: Path) -> list[str]:
+    """The roster is a Nix list of bare strings, one per line."""
+    return re.findall(r'^\s*"([^"]+)"\s*$', roster.read_text(), flags=re.MULTILINE)
 
 
-def test_skill_is_installed_through_the_shared_roster():
+def test_skill_is_installed_through_the_shared_roster(tmp_path: Path):
     assert SKILL_DIR.is_dir(), "the skill source directory must exist"
-    assert "rank-options" in roster_names(), (
+    assert "rank-options" in roster_names(ROSTER), (
         f"{ROSTER} does not list rank-options; the shared skill farm installs "
         f"only rostered names, so the directory alone ships nothing"
     )
+
+    # The membership predicate reads the roster, not the directory: with the
+    # entry dropped it reports absence even though the source tree is intact.
+    dropped = tmp_path / "shared-agent-skills.nix"
+    dropped.write_text(
+        "\n".join(
+            line
+            for line in ROSTER.read_text().splitlines()
+            if line.strip() != '"rank-options"'
+        )
+    )
+    assert dropped.read_text() != ROSTER.read_text()
+    assert "rank-options" not in roster_names(dropped)
+    assert SKILL_DIR.is_dir()
 
 
 def test_skill_passes_package_validation():
@@ -294,9 +412,9 @@ def test_skill_passes_package_validation():
 # -- criterion 6: private option text never reaches tracked output -----------
 
 
-def repo_text_contains(needle: str) -> list[str]:
+def text_contains(root: Path, needle: str) -> list[str]:
     hits = []
-    for path in REPO_ROOT.rglob("*"):
+    for path in root.rglob("*"):
         if not path.is_file() or path.is_symlink():
             continue
         if ".git" in path.parts:
@@ -309,27 +427,45 @@ def repo_text_contains(needle: str) -> list[str]:
     return hits
 
 
-def test_private_option_text_stays_in_local_ranking_state(rank: Rank, tmp_path: Path):
-    canary = f"canary-{uuid.uuid4().hex}"
+def seed_private_options(rank: Rank, canary: str) -> None:
     options = [(f"opt-private-{i}", f"{canary} option {i}") for i in range(1, 5)]
     assert rank.add("private", options).returncode == 0
     rank.record("private", options[0][0], options[1][0], options[0][0])
     rank.record("private", options[1][0], options[2][0], options[1][0])
     rank.record("private", options[2][0], options[3][0], options[2][0])
 
+
+def test_private_option_text_stays_out_of_the_tree(rank: Rank, tmp_path: Path):
+    canary = f"canary-{uuid.uuid4().hex}"
+    seed_private_options(rank, canary)
+
     report_path = tmp_path / "report.json"
     report_path.write_text(json.dumps(rank.status("private"), indent=2))
 
-    # The canary really is in the local state, so the absence checks below are
-    # about where it went, not about whether it was ever used.
+    # The canary really is in the local state and in the report, so the
+    # absence check below is about where it went, not about whether it was
+    # ever used.
     assert canary in (rank.root / "private" / "items.jsonl").read_text()
     assert canary in report_path.read_text()
 
-    assert repo_text_contains(canary) == []
+    # The scan finds a canary a file does carry, so finding none in the
+    # repository is a fact about the repository.
+    planted = tmp_path / "planted" / "options.jsonl"
+    planted.parent.mkdir()
+    planted.write_text(f'{{"id": "opt-leak", "label": "{canary} option 1"}}\n')
+    assert text_contains(planted.parent, canary) == [str(planted)]
 
+    assert text_contains(REPO_ROOT, canary) == []
+
+
+def test_private_option_text_stays_out_of_the_diff(rank: Rank):
     git = shutil.which("git")
     if git is None or not (REPO_ROOT / ".git").exists():
         pytest.skip("no git checkout to diff")
+
+    canary = f"canary-{uuid.uuid4().hex}"
+    seed_private_options(rank, canary)
+
     for argv in (
         [git, "-C", str(REPO_ROOT), "status", "--porcelain"],
         [git, "-C", str(REPO_ROOT), "diff"],

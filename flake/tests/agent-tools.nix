@@ -1115,6 +1115,51 @@ in
             ${pkgs.bash}/bin/bash ${../../flake/tests/recovery-skills.sh} "$freeze" "$recover"
             touch "$out"
           '';
+      # The rank-options skill is instructions over scripts/sinnix-rank, so its
+      # suite drives the real CLI in a repository-shaped fixture root, and the
+      # installation claim is checked against the farm the clients actually
+      # get rather than against the roster's text.
+      #
+      # Provably fails when: `record` stores the loser, `settled` stops
+      # following the stopping threshold in either direction, a re-`add`
+      # re-appends registered items, `add` stops refusing a duplicate label or
+      # a changed option under a live id, the evidence block stops reporting
+      # disconnected components, private option text reaches the working tree
+      # or the diff, or the roster stops listing the skill (the farm then
+      # carries no rank-options entry). Each verified by mutation.
+      rankOptionsSkillFixture =
+        let
+          sharedSkillFarm =
+            (import ../../modules/features/dev/agents/skill-farm.nix {
+              inherit lib pkgs;
+              dotsRoot = inputs.self + "/dots";
+            }).sharedSkillFarm;
+        in
+        pkgs.runCommand "rank-options-skill-fixture"
+          {
+            inherit sharedSkillFarm;
+            nativeBuildInputs = [
+              (pkgs.python3.withPackages (ps: [ ps.pytest ]))
+              pkgs.coreutils
+            ];
+          }
+          ''
+            test -e "$sharedSkillFarm/rank-options/SKILL.md"
+
+            root="$TMPDIR/repo"
+            mkdir -p "$root/scripts" "$root/pkgs" "$root/flake/data" "$root/dots/_ai/skills"
+            install -m 0755 ${../../scripts/sinnix-rank} "$root/scripts/sinnix-rank"
+            patchShebangs "$root/scripts/sinnix-rank"
+            cp -r ${../../pkgs/sinnix-rank-core} "$root/pkgs/sinnix-rank-core"
+            cp ${../../flake/data/shared-agent-skills.nix} "$root/flake/data/shared-agent-skills.nix"
+            cp -r ${../../dots/_ai/skills/rank-options} "$root/dots/_ai/skills/rank-options"
+            cp -r ${../../dots/_ai/skills/skill-authoring} "$root/dots/_ai/skills/skill-authoring"
+            chmod -R u+w "$root"
+            cd "$root"
+            HOME="$TMPDIR/home" SINNIX_REPO_ROOT="$root" \
+              python3 -m pytest -q dots/_ai/skills/rank-options/tests
+            touch "$out"
+          '';
       hooksHarnessFixture =
         pkgs.runCommand "hooks-harness-fixture"
           {
@@ -1211,6 +1256,7 @@ in
         chatgpt-conversations = chatgptConversationsFixture;
         desktop-capture = desktopCaptureFixture;
         recovery-skills = recoverySkillsFixture;
+        rank-options-skill = rankOptionsSkillFixture;
         hooks-harness = hooksHarnessFixture;
         agent-definitions = agentDefinitionsFixture;
         settings-env-lint = settingsEnvLintFixture;
