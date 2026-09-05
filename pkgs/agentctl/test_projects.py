@@ -23,7 +23,11 @@ def test_the_fixture_descriptor_loads_every_declared_field(project_root: Path) -
     assert project.workspace is not None
     assert project.workspace.default_base == "origin/master"
     assert project.workspace.agent_memory_max == "10G"
-    assert project.workspace.verification_operations == ("verify_quick",)
+    assert project.workspace.verify == {
+        "focused": "verify_quick",
+        "candidate": "check",
+        "corpus": "verify",
+    }
     nightly = project.operation("nightly")
     assert nightly.schedule == "*-*-* 03:17:00"
     assert nightly.checkout == "default"
@@ -116,12 +120,7 @@ def test_verification_operations_and_dependencies_are_validated(tmp_path: Path) 
     root = write_project(tmp_path / "p")
     descriptor = root / ".agentctl" / "project.toml"
     descriptor.write_text(
-        descriptor.read_text()
-        .replace(
-            'verification_operations = ["verify_quick"]',
-            'verification_operations = ["verify_quick", "check"]',
-        )
-        .replace(
+        descriptor.read_text().replace(
             'exec = ["fixture-verify"]\npool = "pytest"',
             'exec = ["fixture-verify"]\npool = "pytest"\ndependencies = ["missing"]',
         )
@@ -259,3 +258,4 @@ def test_an_absent_config_file_yields_the_defaults(
     assert isinstance(config, Config)
     assert config.project_roots == ()
     assert config.event_spool == Path("/realm/state/agentctl/events.jsonl")
+    assert config.worker_contract.name == "worker-contract.md"

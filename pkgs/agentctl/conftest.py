@@ -327,7 +327,6 @@ inherit = ["PATH"]
 root = "{worktrees}"
 default_base = "origin/master"
 agent_memory_max = "10G"
-verification_operations = ["verify_quick"]
 verify = {{ focused = "verify_quick", candidate = "check", corpus = "verify" }}
 publish = "master"
 
@@ -397,6 +396,7 @@ def config(tmp_path: Path, project_root: Path) -> Config:
     return Config(
         project_roots=(project_root,),
         agent_runner=runner,
+        worker_contract=project_root / "contract.md",
         event_spool=tmp_path / "events.jsonl",
         state_dir=tmp_path / "state",
         agentctl_executable="/fixture/agentctl",
