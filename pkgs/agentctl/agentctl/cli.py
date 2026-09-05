@@ -547,7 +547,7 @@ def _batch(arguments: argparse.Namespace, config: Config, out: Output) -> int:
     if verb == "list":
         project = _select_project(config, arguments.project, arguments.selector)
         rows = [
-            batch.status(config, run.run_id)
+            batch.status(config, run.run_id, project=project)
             for run in batch.list_runs(config, project.project_id)
         ]
         out.read(rows, out.runs_table(rows))
