@@ -749,23 +749,6 @@ def test_the_wrapper_returns_only_once_the_unit_cgroup_is_empty(
     assert outcome_of(tmp_path)["unit"] == unit_for(launch, "fixture")
 
 
-def test_worker_mirrors_the_pre_rename_names_for_older_consumers(
-    tmp_path: Path, fake_systemd: FakeSystemd, fake_pueue: FakePueue
-) -> None:
-    launch = write_launch(
-        tmp_path,
-        argv=[
-            "sh",
-            "-c",
-            'printf \'%s %s %s %s\' "$SINNIXD_JOB_ID" "$SINNIXD_PROJECT_ID" "$SINNIXD_OPERATION" "$SINNIXD_QUEUE_POOL"',
-        ],
-        pool="pytest",
-    )
-
-    assert main([str(launch)]) == 0
-    assert log_of(tmp_path) == "job-a fixture check pytest"
-
-
 def test_a_killed_waiter_leaves_its_unit_which_the_next_run_settles_or_yields_to(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_pueue: FakePueue
 ) -> None:

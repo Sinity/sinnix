@@ -466,12 +466,6 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
         environment["AGENTCTL_POOL"] = pool
     if scratch_dir is not None:
         environment["AGENTCTL_SCRATCH"] = str(scratch_dir)
-    # Polylogue's devtools read the SINNIXD_* names; removed with them.
-    for name, value in list(environment.items()):
-        if name.startswith("AGENTCTL_") and name != "AGENTCTL_POOL":
-            environment.setdefault("SINNIXD_" + name[len("AGENTCTL_") :], value)
-    if pool:
-        environment.setdefault("SINNIXD_QUEUE_POOL", pool)
     argv = list(launch["argv"])
     executable = shutil.which(argv[0], path=environment.get("PATH", os.defpath))
     properties: dict[str, str] = {}
