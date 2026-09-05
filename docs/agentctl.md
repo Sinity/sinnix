@@ -253,6 +253,48 @@ A refusal or substrate error after step 1 is written to `landing.failure`
 with its code; `batch status` shows `failed: <code>` and `view` names what
 follows.
 
+### Refusals
+
+A batch verb that cannot proceed exits 1 with `<code>: <detail>`; a landing
+records the same document in `landing.failure` (`checks_failed` and
+`verify_failed` carry `timed_out: true` when a deadline passed rather than a
+check failing). The codes:
+
+| code                           | meaning                                                                             |
+| ------------------------------ | ----------------------------------------------------------------------------------- |
+| `already_accepted`             | the run has an acceptance record; nothing runs again                                |
+| `ambiguous_run`                | the suffix names more than one run                                                  |
+| `candidate_mismatch`           | the result's candidate_sha is not the worktree HEAD                                 |
+| `checks_failed`                | a required PR check failed, or did not finish (`timed_out`)                         |
+| `empty_candidate`              | the candidate equals the base commit: nothing to land                               |
+| `exists`                       | a manifest with this run id already exists                                          |
+| `foreign_beads`                | the result covers beads outside the worker                                          |
+| `harness`                      | the harness is neither `queued` nor `external`                                      |
+| `head_moved`                   | the PR head is no longer the verified candidate                                     |
+| `integration_dirty`            | the integration agent left an unclean tree                                          |
+| `integration_failed`           | the integration task did not succeed                                                |
+| `integration_incomplete`       | a worker branch is not merged into the candidate                                    |
+| `integration_worktree_missing` | the integration branch is registered without a directory that could be unregistered |
+| `invalid_result`               | the worker result does not validate against its schema                              |
+| `manifest`                     | the run manifest is unreadable or not this contract                                 |
+| `members`                      | a bead cannot join the batch (`refusals` names each reason)                         |
+| `no_candidate_profile`         | the descriptor declares no [workspace].verify.candidate                             |
+| `project`                      | the run belongs to another project                                                  |
+| `publish_rejected`             | the push was rejected for a reason a refresh cannot fix                             |
+| `review_failed`                | the review task did not succeed                                                     |
+| `review_invalid`               | the verdict does not validate against the judge schema                              |
+| `review_rejected`              | the verdict is not `pass`                                                           |
+| `runner`                       | the agent runner is missing or not executable                                       |
+| `target_moved_twice`           | the default branch moved again after one refresh                                    |
+| `unknown_run`                  | no run has this id or suffix                                                        |
+| `verify_failed`                | candidate verification failed, or did not finish (`timed_out`)                      |
+| `worker_active`                | the worker's task is still queued or running                                        |
+| `worker_failed`                | the worker's task ended without success                                             |
+| `worker_missing`               | the run has no such worker, or the worker has no worktree                           |
+| `worker_not_done`              | a worker's task has not finished                                                    |
+| `worker_result_missing`        | a worker filed no valid result                                                      |
+| `workspace`                    | the descriptor declares no [workspace]                                              |
+
 ### Result
 
 A worker exits with the JSON document `worker.schema.json` describes:

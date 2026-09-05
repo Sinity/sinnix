@@ -443,7 +443,8 @@ def resume(
     worktree = worker.get("worktree")
     if not worktree or not Path(worktree).is_dir():
         raise BatchRefusal(
-            "worktree", f"worker {worker_id} has no worktree; start the batch instead"
+            "worker_missing",
+            f"worker {worker_id} has no worktree; start the batch instead",
         )
     tasks = pueue.tasks()
     current = (
