@@ -835,7 +835,7 @@ in
 
             added = []
 
-            def add(*, group, label, command, working_directory, after=()):
+            def add(*, group, label, command, working_directory, after=(), stashed=False):
                 added.append({"group": group, "label": label, "command": command})
                 return 7
 

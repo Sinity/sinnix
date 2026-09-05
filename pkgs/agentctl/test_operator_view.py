@@ -1,4 +1,4 @@
-"""The operator screen: pueue, worktrunk, gh and bd facts, in local time, nothing decided."""
+"""The operator screen: pueue and manifest facts, in local time, nothing decided."""
 
 from __future__ import annotations
 
@@ -8,15 +8,15 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from agentctl import operator_view
+from agentctl import batch, operator_view
+from agentctl.batch import Run
 from agentctl.config import Config
-from agentctl.lanes import LaneRow
 from agentctl.projects import load_project_adapter
 from agentctl.pueue import Task
-from agentctl.worktrunk import Worktree
 from conftest import FakeBd, FakePueue, bead
 
 NOW = datetime(2026, 9, 3, 9, 0, tzinfo=UTC)
+SHA = "c" * 40
 
 
 def task(
@@ -39,81 +39,71 @@ def task(
         dependencies=(),
         command="agentctl-run /s/inputs/ref.json",
         enqueued_at="2026-09-03T08:00:00+00:00",
-        started_at="2026-09-03T08:30:00+00:00",
+        started_at=None
+        if status in {"Queued", "Stashed"}
+        else "2026-09-03T08:30:00+00:00",
         ended_at="2026-09-03T08:40:00+00:00" if status == "Done" else None,
     )
 
 
-def lane(
-    branch: str,
-    bead_id: str,
-    *,
-    pr: dict[str, Any] | None = None,
-    state: str = "ahead",
-    dirty: bool = False,
-) -> LaneRow:
-    return LaneRow(
-        worktree=Worktree(
-            branch=branch,
-            path=Path("/w") / branch.replace("/", "-"),
-            head="h",
-            main=False,
-            dirty=dirty,
-            state=state,
-        ),
-        bead=bead_id,
-        pr=pr,
-    )
-
-
-def pull(
-    number: int,
-    *,
-    mergeable: str = "MERGEABLE",
-    checks: str = "SUCCESS",
-    auto: bool = False,
-    state: str = "OPEN",
-    review: str = "",
-    head: str = "h",
-    body: str = "",
+def worker(
+    worker_id: str, *, task_id: int | None, result: bool = False
 ) -> dict[str, Any]:
     return {
-        "number": number,
-        "state": state,
-        "body": body,
-        "mergeable": mergeable,
-        "headRefOid": head,
-        "reviewDecision": review,
-        "reviews": [
-            {
-                "author": {"login": "chatgpt-codex-connector"},
-                "state": "APPROVED",
-                "commit": {"oid": "h"},
-            }
-        ],
-        "comments": [],
-        "reactionGroups": [],
-        "autoMergeRequest": {"enabledAt": "x"} if auto else None,
-        "statusCheckRollup": [
-            {"__typename": "CheckRun", "status": "COMPLETED", "conclusion": checks}
-        ],
+        "id": worker_id,
+        "leader": worker_id,
+        "beads": [worker_id],
+        "branch": f"batch/run-1/{worker_id}",
+        "worktree": f"/w/{worker_id}",
+        "task_id": task_id,
+        "task_ids": [task_id] if task_id is not None else [],
+        "claimed": True,
+        "result_path": None,
+        "result": {
+            "candidate_sha": SHA,
+            "beads": [],
+            "unresolved": [],
+            "verification": [],
+        }
+        if result
+        else None,
     }
 
 
-def merged_pull(
-    number: int, branch: str, bead_id: str, *, head: str = "h"
-) -> dict[str, Any]:
-    """A merged PR whose publication marker binds this bead, branch and head."""
-    marker = json.dumps(
-        {"bead": bead_id, "branch": branch, "head": head},
-        separators=(",", ":"),
-        sort_keys=True,
-    )
-    return pull(
-        number,
-        state="MERGED",
-        head=head,
-        body=f"Landed.\n\n<!-- agentctl:lane-publication {marker} -->\n",
+def run(
+    run_id: str,
+    workers: list[dict[str, Any]],
+    *,
+    landing_task: int | None = None,
+    accepted: bool = False,
+    failure: dict[str, Any] | None = None,
+    harness: str = "queued",
+) -> Run:
+    return Run.from_dict(
+        {
+            "run_id": run_id,
+            "project": "fixture",
+            "base_commit": "b" * 40,
+            "created_at": "2026-09-03T08:00:00+00:00",
+            "harness": harness,
+            "runtime_revision": "/nix/store/x",
+            "verify_profile": "check",
+            "review_profile": "review",
+            "workers": workers,
+            "landing": {
+                "task_id": landing_task,
+                "integration_branch": f"batch/{run_id}/integration",
+                "integration_worktree": None,
+                "pr_number": None,
+                "candidate_sha": SHA if accepted else None,
+                "verify_run": None,
+                "review_verdict": None,
+                "refreshes": 0,
+                "failure": failure,
+            },
+            "acceptance": {"candidate_sha": SHA, "members": {}} if accepted else None,
+            "prepared": True,
+        }
     )
 
 
@@ -123,11 +113,11 @@ def snapshot(**overrides: Any) -> operator_view.Snapshot:
         "now": NOW,
         "tasks": (
             task(1, "fixture:verify_all", group="pytest"),
-            task(2, "fixture:lane:fx-1", group="agent"),
+            task(2, "fixture:worker:run-1:fx-1", group="agent"),
             task(3, "fixture:check", status="Done", result="Failed", exit_code=2),
             task(
                 4,
-                "fixture:lane:fx-2",
+                "fixture:worker:run-1:fx-2",
                 status="Done",
                 result="Success",
                 exit_code=0,
@@ -135,210 +125,134 @@ def snapshot(**overrides: Any) -> operator_view.Snapshot:
             ),
             task(
                 5,
-                "fixture:lane:fx-4",
+                "fixture:worker:run-2:fx-4",
                 status="Done",
                 result="Failed",
                 exit_code=1,
                 group="agent",
             ),
+            task(6, "fixture:land:run-1", status="Queued", group="fixture-land"),
+            task(
+                7,
+                "fixture:land:run-2",
+                status="Done",
+                result="DependencyFailed",
+                group="fixture-land",
+            ),
+            task(8, "fixture:land:run-3", status="Running", group="fixture-land"),
+            task(9, "fixture:land:run-5", status="Stashed", group="fixture-land"),
         ),
         "groups": {"agent": "Running", "normal": "Paused", "pytest": "Running"},
-        "lanes": (
-            lane(
-                "feature/packet/fx-1",
-                "fx-1",
-                pr=pull(41, mergeable="CONFLICTING", auto=True),
+        "runs": (
+            run(
+                "run-1",
+                [worker("fx-1", task_id=2), worker("fx-2", task_id=4, result=True)],
+                landing_task=6,
             ),
-            lane("feature/packet/fx-2", "fx-2", pr=pull(42, checks="FAILURE")),
-            lane("feature/packet/fx-3", "fx-3", dirty=True),
-            lane("feature/packet/fx-4", "fx-4"),
-            lane("feature/packet/fx-5", "fx-5", pr=pull(45, auto=True)),
-            lane("feature/packet/fx-6", "fx-6", state="integrated"),
-            lane(
-                "feature/packet/fx-7",
-                "fx-7",
-                pr=merged_pull(47, "feature/packet/fx-7", "fx-7"),
-                state="integrated",
+            run("run-2", [worker("fx-4", task_id=5)], landing_task=7),
+            run("run-3", [worker("fx-5", task_id=None, result=True)], landing_task=8),
+            run("run-4", [worker("fx-6", task_id=None, result=True)], accepted=True),
+            run(
+                "run-5",
+                [worker("fx-7", task_id=None)],
+                landing_task=9,
+                harness="external",
             ),
         ),
         "ready": (bead("fx-9", "Ready work"),),
-        "beads": {"fx-7": bead("fx-7", "Landed work")},
     }
     values.update(overrides)
     return operator_view.Snapshot(**values)
 
 
-def stages_of(snap: operator_view.Snapshot) -> dict[str, tuple[str, str]]:
-    agents = operator_view.agents_by_bead(snap.tasks)
+def stages_of(snap: operator_view.Snapshot) -> dict[str, dict[str, Any]]:
     return {
-        row.bead: operator_view.lane_stage(
-            row, agents.get(row.bead or ""), snap.beads.get(row.bead or "")
-        )
-        for row in snap.lanes
+        row["run"]: row
+        for row in (operator_view.run_dict(r, snap.tasks, NOW) for r in snap.runs)
     }
 
 
-def test_stage_and_next_follow_from_the_queue_then_pr_then_agent_facts() -> None:
-    """Breaks if a conflicting PR, a red check, or a failed agent stops naming its next step."""
+def test_stage_and_next_follow_from_the_queue_then_the_manifest() -> None:
+    """Breaks if a failed worker, a stashed landing or a landed run stops naming its next step."""
     stages = stages_of(snapshot())
-    assert stages["fx-1"] == ("lane running", "wait")
-    assert stages["fx-2"] == ("checks failing", "fix in lane, push")
-    assert stages["fx-3"] == ("idle", "lane rebase or publish")
-    assert stages["fx-4"] == ("lane failed", "job logs, then lane rebase")
-    assert stages["fx-5"] == ("auto-merge armed", "wait for merge")
-    assert stages["fx-7"] == ("merged", "lane sync")
-    conflicting = operator_view.lane_stage(
-        lane("feature/packet/fx-1", "fx-1", pr=pull(41, mergeable="CONFLICTING")), None
+    assert (stages["run-1"]["stage"], stages["run-1"]["next"]) == ("working", "wait")
+    assert [w["stage"] for w in stages["run-1"]["workers"]] == ["running", "done"]
+    assert (stages["run-2"]["stage"], stages["run-2"]["next"]) == (
+        "landing dependency-failed",
+        "job logs 7, then batch land or batch resume",
     )
-    assert conflicting == ("conflicting", "lane rebase")
-    done = operator_view.lane_stage(
-        lane("b", "fx-2"),
-        task(4, "fixture:lane:fx-2", status="Done", result="Success", group="agent"),
-    )
-    assert done == ("unpublished", "lane publish")
+    assert stages["run-2"]["workers"][0]["stage"] == "failed"
+    assert (stages["run-3"]["stage"], stages["run-3"]["next"]) == ("landing", "wait")
+    assert (stages["run-4"]["stage"], stages["run-4"]["next"]) == ("landed", "-")
+    assert stages["run-5"]["stage"] == "stashed"
+    assert stages["run-5"]["next"].startswith("batch result")
+    assert stages["run-5"]["workers"][0]["stage"] == "awaiting result"
 
 
-def test_a_lane_is_merged_only_through_a_merged_pr_that_binds_it() -> None:
-    """Breaks if wt's integrated verdict or an unbound merged PR reads as completion."""
-    fresh = lane("feature/packet/fx-6", "fx-6", state="integrated")
-    assert operator_view.lane_stage(fresh, None) == ("idle", "lane rebase or publish")
-    bound = lane(
-        "feature/packet/fx-7",
-        "fx-7",
-        pr=merged_pull(47, "feature/packet/fx-7", "fx-7"),
-        state="integrated",
+def test_an_active_worker_or_landing_task_is_never_landed() -> None:
+    """jcub: a run whose worker or landing task is queued or running is that task."""
+    accepted = run(
+        "run-x", [worker("fx", task_id=2, result=True)], landing_task=6, accepted=True
     )
-    assert operator_view.lane_stage(bound, None, bead("fx-7", "Landed work")) == (
-        "merged",
-        "lane sync",
+    row = operator_view.run_dict(accepted, snapshot().tasks, NOW)
+    assert row["stage"] == "working"
+    accepted_landing = run(
+        "run-y", [worker("fx", task_id=4, result=True)], landing_task=8, accepted=True
     )
-    # The lane's branch was moved onto the squash commit after its PR merged:
-    # nothing of its own is left, and lane sync names the failed binding.
-    past_head = lane(
-        "feature/packet/fx-7",
-        "fx-7",
-        pr=merged_pull(47, "feature/packet/fx-7", "fx-7", head="earlier"),
-        state="integrated",
+    row = operator_view.run_dict(accepted_landing, snapshot().tasks, NOW)
+    assert row["stage"] == "landing"
+    queued_landing = run(
+        "run-z", [worker("fx", task_id=4, result=True)], landing_task=6, accepted=True
     )
-    assert operator_view.lane_stage(past_head, None, bead("fx-7", "Landed work")) == (
-        "merged PR is not this head",
-        "lane sync",
+    assert (
+        operator_view.run_dict(queued_landing, snapshot().tasks, NOW)["stage"]
+        == "landing"
     )
-    # The same PR with work pushed after the merge: this head is unpublished.
-    ahead = lane(
-        "feature/packet/fx-7",
-        "fx-7",
-        pr=merged_pull(47, "feature/packet/fx-7", "fx-7", head="earlier"),
-    )
-    assert operator_view.lane_stage(ahead, None, bead("fx-7", "Landed work")) == (
-        "merged PR is not this head",
-        "lane publish",
-    )
-    other_bead = lane(
-        "feature/packet/fx-7",
-        "fx-7",
-        pr=merged_pull(47, "feature/packet/fx-7", "fx-8"),
-        state="integrated",
-    )
-    assert operator_view.lane_stage(other_bead, None, bead("fx-7", "Landed work")) == (
-        "merged PR is not this head",
-        "lane sync",
-    )
+    # Only once nothing is live does the acceptance record decide.
+    quiet = run("run-q", [worker("fx", task_id=4, result=True)], accepted=True)
+    assert operator_view.run_dict(quiet, snapshot().tasks, NOW)["stage"] == "landed"
 
 
-def test_a_lane_with_an_unfinished_job_reports_that_job() -> None:
-    """Breaks if branch or PR state is read before the queue, sending work at a live lane."""
-    fresh = lane("feature/packet/fx-1", "fx-1", state="integrated")
-    running = task(2, "fixture:lane:fx-1", group="agent")
-    assert operator_view.lane_stage(fresh, running) == ("lane running", "wait")
-    conflicting = lane(
-        "feature/packet/fx-1", "fx-1", pr=pull(41, mergeable="CONFLICTING")
+def test_a_recorded_failure_names_itself_and_a_failed_worker_asks_for_resume() -> None:
+    failed = run(
+        "run-f",
+        [worker("fx", task_id=4, result=True)],
+        failure={"code": "review_rejected", "detail": "x"},
     )
-    queued = task(9, "fixture:rebase:fx-1", status="Queued", group="agent")
-    assert operator_view.lane_stage(conflicting, queued) == ("rebase queued", "wait")
-    landed = lane(
-        "feature/packet/fx-7",
-        "fx-7",
-        pr=merged_pull(47, "feature/packet/fx-7", "fx-7"),
-        state="integrated",
-    )
-    assert operator_view.lane_stage(landed, running, bead("fx-7", "Landed work")) == (
-        "lane running",
-        "wait",
-    )
+    row = operator_view.run_dict(failed, snapshot().tasks, NOW)
+    assert row["stage"] == "failed: review_rejected"
+    assert row["next"] == "batch land"
+    awaiting = run("run-w", [worker("fx", task_id=5)])
+    row = operator_view.run_dict(awaiting, snapshot().tasks, NOW)
+    assert (row["stage"], row["next"]) == ("awaiting workers", "batch resume --worker")
 
 
-def test_no_lane_next_action_merges_by_hand() -> None:
-    """Breaks if an open PR's next action is a gh merge instead of the armed gate."""
-    green = lane("feature/packet/fx-5", "fx-5", pr=pull(45))
-    assert operator_view.lane_stage(green, None) == ("pr open", "lane publish")
-    assert not [
-        following
-        for _stage, following in stages_of(snapshot()).values()
-        if following.startswith("gh ")
-    ]
-
-
-def test_render_shows_groups_attention_jobs_lanes_with_timing_and_ready() -> None:
+def test_render_shows_groups_attention_jobs_runs_with_timing_and_ready() -> None:
     text = operator_view.render(snapshot())
 
     assert "== fixture at" in text
     assert "normal idle PAUSED" in text
     assert "agent 1 running" in text
     assert "! job 3 fixture:check failed exit 2 at" in text and "(20m ago)" in text
-    assert "! feature-packet-fx-2 checks failing PR #42" in text
-    assert "! feature-packet-fx-4 lane failed" in text
-    assert "== jobs: 2 active" in text
-    assert "== lanes: 7" in text
-    lane_lines = {
-        line.split()[0]: line
-        for line in text.splitlines()
-        if line.strip().startswith("feature-packet-")
-    }
-    assert "lane running" in lane_lines["feature-packet-fx-1"]
-    assert "#2" in lane_lines["feature-packet-fx-1"]
-    assert "30m" in lane_lines["feature-packet-fx-1"]
-    assert "#41 open checks:pass auto" in lane_lines["feature-packet-fx-1"]
-    assert lane_lines["feature-packet-fx-1"].rstrip().endswith("wait")
-    assert "idle dirty" in lane_lines["feature-packet-fx-3"]
-    assert lane_lines["feature-packet-fx-6"].rstrip().endswith("lane rebase or publish")
-    assert lane_lines["feature-packet-fx-7"].rstrip().endswith("lane sync")
+    assert "! run run-2 landing dependency-failed: job logs 7" in text
+    assert "== jobs: 5 active" in text
+    assert "== runs: 4 open, 1 landed" in text
+    rows = [
+        line.split() for line in text.splitlines() if line.strip().startswith("run-")
+    ]
+    by_key = {(row[0], row[1]): row for row in rows}
+    assert by_key[("run-1", "fx-1")][2] == "running"
+    assert "#2" in by_key[("run-1", "fx-1")] and "30m" in by_key[("run-1", "fx-1")]
+    assert by_key[("run-1", "landing")][-1] == "wait"
+    assert by_key[("run-2", "fx-4")][2] == "failed"
+    assert ("run-4", "landing") not in by_key
     assert "== ready: 1 beads" in text and "fx-9" in text
 
 
 def test_render_says_nothing_needs_attention_when_nothing_does() -> None:
-    text = operator_view.render(snapshot(tasks=(), lanes=(), ready=()))
+    text = operator_view.render(snapshot(tasks=(), runs=(), ready=()))
     assert "== nothing needs attention" in text
-    assert "== lanes: 0" in text
-
-
-def test_checks_summary_orders_fail_over_pending_over_pass() -> None:
-    assert operator_view._checks({"statusCheckRollup": []}) == "none"
-    assert (
-        operator_view._checks(
-            {
-                "statusCheckRollup": [
-                    {"status": "IN_PROGRESS"},
-                    {"conclusion": "SUCCESS", "status": "COMPLETED"},
-                ]
-            }
-        )
-        == "pending"
-    )
-    assert (
-        operator_view._checks(
-            {
-                "statusCheckRollup": [
-                    {"status": "IN_PROGRESS"},
-                    {"conclusion": "FAILURE", "status": "COMPLETED"},
-                ]
-            }
-        )
-        == "fail"
-    )
-    assert (
-        operator_view._checks({"statusCheckRollup": [{"state": "SUCCESS"}]}) == "pass"
-    )
+    assert "== runs: 0 open, 0 landed" in text
 
 
 def test_age_and_local_clock_read_iso_stamps() -> None:
@@ -372,10 +286,16 @@ def test_collect_reads_each_source_and_keeps_going_when_one_is_down(
         command=("true",),
         working_directory=project_root,
     )
-    monkeypatch.setattr(
-        operator_view,
-        "lane_rows",
-        lambda project, full=False: [lane("feature/packet/fx-1", "fx-1")],
+    manifest = run("run-1", [worker("fx-1", task_id=1)])
+    batch.create(config, manifest)
+    batch.create(
+        config,
+        Run.from_dict(
+            {
+                **run("run-2", [worker("fx-2", task_id=None)]).to_dict(),
+                "project": "other",
+            }
+        ),
     )
     monkeypatch.setattr(
         operator_view,
@@ -385,7 +305,7 @@ def test_collect_reads_each_source_and_keeps_going_when_one_is_down(
 
     collected = operator_view.collect(config, project, now=NOW)
     assert [item.label for item in collected.tasks] == ["fixture:check"]
-    assert [row.bead for row in collected.lanes] == ["fx-1"]
+    assert [item.run_id for item in collected.runs] == ["run-1"]
     assert [item["id"] for item in collected.ready] == ["fx-1"]
     assert collected.errors == ()
 
@@ -398,7 +318,7 @@ def test_collect_reads_each_source_and_keeps_going_when_one_is_down(
 
 def test_to_dict_carries_stage_next_timing_and_group_counts() -> None:
     payload = snapshot().to_dict()
-    assert payload["schema"] == "sinnix.agentctl.view.v2"
+    assert payload["schema"] == "sinnix.agentctl.view.v3"
     assert payload["groups"]["normal"] == {
         "status": "Paused",
         "running": 0,
@@ -406,13 +326,14 @@ def test_to_dict_carries_stage_next_timing_and_group_counts() -> None:
         "paused": 0,
     }
     assert payload["groups"]["agent"]["running"] == 1
-    lanes = {row["bead"]: row for row in payload["lanes"]}
-    assert lanes["fx-1"]["stage"] == "lane running" and lanes["fx-1"]["next"] == "wait"
-    assert lanes["fx-7"]["stage"] == "merged" and lanes["fx-7"]["next"] == "lane sync"
+    runs = {row["run"]: row for row in payload["runs"]}
+    assert runs["run-1"]["stage"] == "working" and runs["run-1"]["next"] == "wait"
+    assert runs["run-4"]["stage"] == "landed" and runs["run-4"]["accepted"]
+    first = runs["run-1"]["workers"][0]
+    assert first["elapsed"] == "30m" and first["since"] == "2026-09-03T08:30:00+00:00"
+    assert first["job"] == 2
     assert (
-        lanes["fx-1"]["elapsed"] == "30m"
-        and lanes["fx-1"]["since"] == "2026-09-03T08:30:00+00:00"
+        runs["run-1"]["landing"]["job"] == 6
+        and runs["run-1"]["landing"]["phase"] == "queued"
     )
-    assert lanes["fx-1"]["agent"]["job_id"] == 2
-    assert lanes["fx-2"]["pr"]["checks"] == "fail"
-    assert lanes["fx-3"]["pr"] is None and lanes["fx-3"]["agent"] is None
+    json.dumps(payload)

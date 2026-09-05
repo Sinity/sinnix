@@ -41,6 +41,8 @@ QUEUE_RUN_EXECUTABLE = "agentctl-run"
 # an arbitrarily large file and having agentctl read it.
 MAX_LAUNCH_INPUT_BYTES = 1_048_576
 _RESULT_KINDS = {"exit": "exit", "json": "json", "pytest": "pytest"}
+# The label kinds under which a batch queues agents rather than declared operations.
+AGENT_OPERATIONS = frozenset({"worker", "resume", "integrate", "review"})
 
 
 class JobError(RuntimeError):
@@ -160,6 +162,7 @@ def enqueue(
     environment: Mapping[str, str],
     kind: str = "declared-operation",
     after: Sequence[int] = (),
+    stashed: bool = False,
     scope_properties: Sequence[str] = (),
     tree_receipt: Mapping[str, Any] | None = None,
     environment_receipt: Mapping[str, str] | None = None,
@@ -201,6 +204,7 @@ def enqueue(
             command=(QUEUE_RUN_EXECUTABLE, str(input_path)),
             working_directory=working_directory,
             after=after,
+            stashed=stashed,
         )
     except PueueError:
         input_path.unlink(missing_ok=True)
@@ -453,8 +457,8 @@ def scope_unit(task: Task) -> str | None:
 
 def job_view(task: Task) -> dict[str, Any]:
     project, _, operation = task.label.partition(":")
-    # Agent labels are <project>:lane:<bead> or <project>:rebase:<bead>.
-    agent = operation.split(":", 1)[0] in {"lane", "rebase"} and ":" in operation
+    # Agent labels are <project>:<kind>:<run>[:<worker>] for a batch's agents.
+    agent = operation.split(":", 1)[0] in AGENT_OPERATIONS and ":" in operation
     return {
         "job_id": task.task_id,
         "label": task.label,

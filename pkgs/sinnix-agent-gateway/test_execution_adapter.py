@@ -5,7 +5,7 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
-from agentctl import lanes, launch
+from agentctl import batch, launch
 from agentctl.config import Config
 from sinnix_agent_gateway.execution import LocalJobs
 from sinnix_mcp import ErrorCode, RequestEnvelope
@@ -158,27 +158,42 @@ def test_shell_start_queues_the_argv_inside_the_checkout(
     assert len(seen) == 9
 
 
-def test_agent_start_is_a_lane(
+def test_agent_start_is_a_batch_of_one_seed(
     adapter: LocalJobs, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Red if the gateway compiles its own prompt or worktree instead of
-    handing the bead to agentctl's lane route."""
+    handing the bead to agentctl's batch route."""
     seen: dict[str, Any] = {}
 
-    def fake_lane_start(config, project, bead_id, *, backend, model, effort):
-        seen.update(project=project.project_id, bead=bead_id, backend=backend)
+    def fake_start(config, project, seeds, *, backend, model, effort, **_kwargs):
+        seen.update(project=project.project_id, seeds=list(seeds), backend=backend)
         return {
-            "bead": bead_id,
-            "beads": [bead_id],
-            "branch": f"feature/packet/{bead_id}",
-            "worktree": f"/realm/worktrees/fixture-feature-packet-{bead_id}",
-            "backend": backend or "codex",
-            "model": model or "policy",
-            "effort": effort or "medium",
-            "job": {**JOB_ROW, "label": f"fixture:lane:{bead_id}", "group": "agent"},
+            "run_id": "fixture-run",
+            "workers": [
+                {
+                    "id": seeds[0],
+                    "leader": seeds[0],
+                    "beads": list(seeds),
+                    "branch": f"batch/fixture-run/{seeds[0]}",
+                    "worktree": f"/realm/worktrees/fixture-batch-fixture-run-{seeds[0]}",
+                    "backend": backend or "codex",
+                    "model": model or "policy",
+                    "effort": effort or "medium",
+                    "task_id": JOB_ROW["job_id"],
+                }
+            ],
         }
 
-    monkeypatch.setattr(lanes, "lane_start", fake_lane_start)
+    monkeypatch.setattr(batch, "start", fake_start)
+    monkeypatch.setattr(
+        launch,
+        "get_job",
+        lambda task_id: {
+            **JOB_ROW,
+            "label": "fixture:worker:fixture-run:fixture-1",
+            "group": "agent",
+        },
+    )
     response = adapter.dispatch(
         _request(
             "job.agent.start",
@@ -187,18 +202,19 @@ def test_agent_start_is_a_lane(
     )
     assert response.error is None, response.error
     payload = response.payload.inline
-    assert seen == {"project": "fixture", "bead": "fixture-1", "backend": "claude"}
+    assert seen == {"project": "fixture", "seeds": ["fixture-1"], "backend": "claude"}
     assert payload["group"] == "agent"
-    assert payload["lane"]["branch"] == "feature/packet/fixture-1"
+    assert payload["run_id"] == "fixture-run"
+    assert payload["lane"]["branch"] == "batch/fixture-run/fixture-1"
     assert payload["lane"]["model"] == "policy"
 
-    def refuse(config, project, bead_id, **_kwargs):
-        raise lanes.LaneError("feature/packet/fixture-1 already has a worktree")
+    def refuse(config, project, seeds, **_kwargs):
+        raise batch.BatchRefusal("members", "fixture-1: claimed by agent-x")
 
-    monkeypatch.setattr(lanes, "lane_start", refuse)
+    monkeypatch.setattr(batch, "start", refuse)
     refused = adapter.dispatch(
         _request("job.agent.start", {"project_id": "fixture", "bead_id": "fixture-1"})
     )
     assert refused.error is not None
     assert refused.error.code is ErrorCode.OPERATION_FAILED
-    assert "already has a worktree" in refused.error.message
+    assert "claimed by agent-x" in refused.error.message

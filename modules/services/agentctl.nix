@@ -28,31 +28,13 @@ mkServiceModule {
         throw "sinnix.services.agentctl.projectRoots must contain unique absolute project roots";
     description = "Explicit project roots whose .agentctl/project.toml descriptors agentctl reads; no parent directory is scanned.";
   };
-  extraOptions.refill = {
-    enable = lib.mkEnableOption "the opt-in refill timer: each firing runs `agentctl refill <project> --limit N`";
-    project = lib.mkOption {
-      type = lib.types.str;
-      default = "polylogue";
-      description = "The project id whose ready beads the timer starts lanes for.";
-    };
-    limit = lib.mkOption {
-      type = lib.types.ints.positive;
-      default = 1;
-      description = "Lanes started per firing.";
-    };
-    onCalendar = lib.mkOption {
-      type = lib.types.str;
-      default = "hourly";
-      description = "OnCalendar expression of the refill timer.";
-    };
-  };
   extraOptions.agentRunner = lib.mkOption {
     type = lib.types.str;
     default = "${config.sinnix.paths.dotsRoot}/_ai/skills/agent-runtime/scripts/run_agent_prompt.sh";
-    description = "The backend adapter `agentctl lane start` queues; it turns a prompt file into one backend invocation.";
+    description = "The backend adapter agentctl queues for batch workers and reviewers; it turns a prompt file into one backend invocation.";
   };
   # No runtime surface: the job plane is pueued (declared by the CLI feature)
-  # inside the agentctl slice hierarchy, and the units here are two timers.
+  # inside the agentctl slice hierarchy, and the unit here is one timer.
   configFn =
     { cfg, ... }:
     lib.mkMerge [
@@ -104,26 +86,6 @@ mkServiceModule {
           };
         }
       )
-      (lib.mkIf cfg.refill.enable (
-        lib.sinnix.mkScheduledJob
-          {
-            inherit config;
-            unitName = "agentctl-refill";
-            description = "Start lanes for ready ${cfg.refill.project} beads";
-          }
-          {
-            manager = "user";
-            resourceClass = "background-maintenance";
-            execStart = "${scriptPkgs.agentctl}/bin/agentctl refill ${lib.escapeShellArg cfg.refill.project} --limit ${toString cfg.refill.limit}";
-            serviceConfig = {
-              TimeoutStartSec = "10min";
-            };
-            timer = {
-              onCalendar = cfg.refill.onCalendar;
-              description = "Start lanes for ready ${cfg.refill.project} beads";
-            };
-          }
-      ))
       {
         environment.etc."sinnix/agentctl.json".text = builtins.toJSON {
           project_roots = cfg.projectRoots;

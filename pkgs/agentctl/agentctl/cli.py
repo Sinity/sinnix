@@ -2,8 +2,8 @@
 
 Every verb runs to completion in this process, does what it was told, and
 reports. Reads print tables in local time; `--json` prints the document.
-Exit status: 0 done, 1 refused or failed, 2 usage, 3 the waited job did not
-succeed.
+Exit status: 0 done, 2 refused (usage, validation, policy), 3 a tool agentctl
+drives failed (pueue, wt, gh, git, bd), 4 the waited job did not succeed.
 """
 
 from __future__ import annotations
@@ -16,9 +16,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from . import backpressure, lanes, launch, operator_view, schedule
+from . import backpressure, batch, launch, operator_view, schedule
+from .batch import BatchError, BatchRefusal
 from .config import Config, ConfigError, load_config, resolve_project
-from .lanes import LaneError
+from .github import GithubError
 from .launch import JobError
 from .operator_view import age, local_clock, table
 from .packets import PacketError
@@ -28,26 +29,25 @@ from .schedule import TimerError
 from .worktrunk import WorktrunkError
 
 EXIT_OK = 0
-EXIT_REFUSED = 1
+EXIT_REFUSED = 2
 EXIT_USAGE = 2
-EXIT_JOB_NOT_SUCCEEDED = 3
+EXIT_SUBSTRATE = 3
+EXIT_JOB_NOT_SUCCEEDED = 4
 
 DEFAULT_WAIT_SECONDS = 3_600
 DEFAULT_EVENT_LINES = 40
 FOLLOW_POLL_SECONDS = 1.0
 
-_ERRORS = (
+_REFUSALS = (
+    BatchRefusal,
     ConfigError,
     JobError,
-    LaneError,
     PacketError,
     ProjectConfigError,
     ProjectEnvironmentError,
-    PueueError,
-    TimerError,
-    WorktrunkError,
     KeyError,
 )
+_SUBSTRATE_ERRORS = (BatchError, GithubError, PueueError, TimerError, WorktrunkError)
 
 
 def _agent_arguments(target: argparse.ArgumentParser) -> None:
@@ -59,7 +59,7 @@ def _agent_arguments(target: argparse.ArgumentParser) -> None:
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(
         prog="agentctl",
-        description="Jobs over pueue, lanes over worktrunk + gh + bd, one operator view.",
+        description="Jobs over pueue, batches over worktrunk + gh + bd, one operator view.",
     )
     root.add_argument(
         "--config", type=Path, help="agentctl.json (default /etc/sinnix/agentctl.json)"
@@ -109,40 +109,49 @@ def parser() -> argparse.ArgumentParser:
     wait.add_argument("job_id", type=int)
     wait.add_argument("--timeout-seconds", type=int, default=DEFAULT_WAIT_SECONDS)
 
-    lane = verbs.add_parser(
-        "lane", help="a worktree with an agent in it and a PR at the end"
+    batch_verb = verbs.add_parser(
+        "batch", help="several workers on one base commit, landed as one candidate"
     )
-    lane_verbs = lane.add_subparsers(dest="lane_verb", required=True)
-    lane_start = lane_verbs.add_parser("start")
-    lane_start.add_argument("project")
-    lane_start.add_argument("bead")
-    _agent_arguments(lane_start)
-    publish = lane_verbs.add_parser("publish")
-    publish.add_argument(
-        "path",
-        type=Path,
-        nargs="?",
-        default=Path.cwd(),
-        help="the worktree (default: cwd)",
+    batch_verbs = batch_verb.add_subparsers(dest="batch_verb", required=True)
+    batch_start = batch_verbs.add_parser("start")
+    batch_start.add_argument("project")
+    batch_start.add_argument(
+        "bead", nargs="*", help="seed beads; each one's dispatch group is a worker"
     )
-    publish.add_argument("--bead")
-    publish.add_argument("--title")
-    publish.add_argument("--body-file", type=Path)
-    rebase = lane_verbs.add_parser("rebase")
-    rebase.add_argument("project")
-    rebase.add_argument("bead")
-    _agent_arguments(rebase)
-    sync = lane_verbs.add_parser("sync")
-    sync.add_argument("project", nargs="?", help=project_help)
-    sync.add_argument("--actor", default="agentctl")
-
-    refill = verbs.add_parser(
-        "refill", help="start lanes for ready beads without a worktree or PR"
+    batch_start.add_argument(
+        "--worker",
+        action="append",
+        default=[],
+        metavar="BEADS",
+        help="an explicit worker: comma-separated bead ids, the first leads",
     )
-    refill.add_argument("project", nargs="?", help=project_help)
-    refill.add_argument("--limit", type=int, default=1)
-    refill.add_argument("--dry-run", action="store_true")
-    _agent_arguments(refill)
+    batch_start.add_argument(
+        "--workers",
+        choices=batch.HARNESSES,
+        default="queued",
+        dest="harness",
+        help="queued: agentctl runs the workers; external: another harness does",
+    )
+    _agent_arguments(batch_start)
+    for name in ("land", "status"):
+        one = batch_verbs.add_parser(name)
+        one.add_argument("run_id")
+        one.add_argument("--project", help=project_help)
+    batch_list = batch_verbs.add_parser("list")
+    batch_list.add_argument("project", nargs="?", help=project_help)
+    batch_result = batch_verbs.add_parser(
+        "result", help="file a worker's schema-validated result"
+    )
+    batch_result.add_argument("run_id")
+    batch_result.add_argument("worker_id")
+    batch_result.add_argument("path", type=Path)
+    batch_resume = batch_verbs.add_parser(
+        "resume", help="queue a fresh agent into a worker's worktree"
+    )
+    batch_resume.add_argument("run_id")
+    batch_resume.add_argument("--worker", required=True, dest="worker_id")
+    batch_resume.add_argument("--project", help=project_help)
+    _agent_arguments(batch_resume)
 
     view = verbs.add_parser("view", help="the operator screen")
     view.add_argument("project", nargs="?", help=project_help)
@@ -303,82 +312,137 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
     raise AssertionError(verb)
 
 
-def _lane(arguments: argparse.Namespace, config: Config, out: Output) -> int:
-    verb = arguments.lane_verb
+def _run_line(document: Mapping[str, Any]) -> str:
+    workers = ", ".join(
+        f"{worker['id']}[{worker.get('stage') or ('task ' + str(worker.get('task_id')) if worker.get('task_id') is not None else 'external')}]"
+        for worker in document["workers"]
+    )
+    landing = document["landing"]
+    return (
+        f"run {document['run_id']} {document['project']} {document['harness']} "
+        f"base {document['base_commit'][:12]} stage {document.get('stage', '-')}\n"
+        f"workers: {workers}\n"
+        f"landing: task {landing.get('task_id')} candidate {str(landing.get('candidate_sha') or '-')[:12]}"
+        f"{' PR #' + str(landing['pr_number']) if landing.get('pr_number') else ''}"
+        f"{' failure ' + landing['failure']['code'] if landing.get('failure') else ''}"
+    )
+
+
+def _batch(arguments: argparse.Namespace, config: Config, out: Output) -> int:
+    verb = arguments.batch_verb
     if verb == "start":
         project = resolve_project(config, arguments.project)
-        started = lanes.lane_start(
-            config,
-            project,
-            arguments.bead,
-            backend=arguments.backend,
-            model=arguments.model,
-            effort=arguments.effort,
-        )
-        out.emit(
-            started,
-            f"lane {started['bead']} on {started['branch']} at {started['worktree']}\n"
-            f"{started['backend']} {started['model']} {started['effort']}: {out.job_line(started['job'])}",
-        )
-        return EXIT_OK
-    if verb == "publish":
-        published = lanes.lane_publish(
-            config,
-            arguments.path,
-            bead_id=arguments.bead,
-            title=arguments.title,
-            body_file=arguments.body_file,
-        )
-        out.emit(
-            published,
-            f"PR #{published['pr']} {'opened' if published['created'] else 'already open'} "
-            f"for {published['branch']}: {published['subject']}\n"
-            f"{'auto-merge armed' if published['auto_merge'] else 'auto-merge unavailable'}: "
-            f"{published['url']}\n"
-            f"next action: {published['next_action']}",
-        )
-        return EXIT_OK
-    if verb == "rebase":
-        project = resolve_project(config, arguments.project)
-        rebased = lanes.lane_rebase(
-            config,
-            project,
-            arguments.bead,
-            backend=arguments.backend,
-            model=arguments.model,
-            effort=arguments.effort,
-        )
-        out.emit(
-            rebased,
-            f"rebase {rebased['bead']} in {rebased['worktree']}: {out.job_line(rebased['job'])}",
-        )
-        return EXIT_OK
-    if verb == "sync":
-        project = resolve_project(config, arguments.project)
-        synced = lanes.lane_sync(config, project, actor=arguments.actor)
-        lines = [
-            f"closed {len(synced['closed'])} bead(s): {', '.join(synced['closed']) or '-'}",
-            f"removed {len(synced['removed'])} worktree(s): {', '.join(synced['removed']) or '-'}",
+        workers = [
+            [item.strip() for item in group.split(",") if item.strip()]
+            for group in arguments.worker
         ]
-        if synced["remaining"]:
-            lines.append(
-                table(
-                    ("branch", "bead", "state", "pr", "note"),
-                    [
-                        (
-                            row["branch"],
-                            row.get("bead") or "",
-                            f"{row['state']}{' dirty' if row.get('dirty') else ''}",
-                            f"#{row['pr']} {row['pr_state']}" if row.get("pr") else "-",
-                            row.get("reason") or "",
-                        )
-                        for row in synced["remaining"]
-                    ],
-                )
+        started = batch.start(
+            config,
+            project,
+            arguments.bead,
+            workers=workers or None,
+            harness=arguments.harness,
+            backend=arguments.backend,
+            model=arguments.model,
+            effort=arguments.effort,
+        )
+        note = (
+            "already prepared; nothing launched"
+            if started.get("existing") and not started.get("resumed")
+            else "preparation completed"
+            if started.get("resumed")
+            else "started"
+        )
+        out.emit(started, f"{_run_line(started)}\n{note}")
+        return EXIT_OK
+    if verb == "land":
+        project = resolve_project(
+            config, arguments.project or _run_project(config, arguments.run_id)
+        )
+        landed = batch.land(config, project, arguments.run_id)
+        acceptance = landed["acceptance"] or {}
+        members = acceptance.get("members", {})
+        out.emit(
+            landed,
+            f"{_run_line(landed)}\nlanded {acceptance.get('candidate_sha', '')[:12]}: "
+            + ", ".join(
+                f"{bead} {state['state']}" for bead, state in sorted(members.items())
             )
-        out.emit(synced, "\n".join(lines))
+            + (
+                f"\nresidual: {'; '.join(acceptance['residual'])}"
+                if acceptance.get("residual")
+                else ""
+            ),
+        )
+        return EXIT_OK
+    if verb == "status":
+        project = resolve_project(
+            config, arguments.project or _run_project(config, arguments.run_id)
+        )
+        document = batch.status(config, arguments.run_id, project=project)
+        out.emit(document, _run_line(document))
+        return EXIT_OK
+    if verb == "list":
+        project = resolve_project(config, arguments.project)
+        rows = [
+            batch.status(config, run.run_id)
+            for run in batch.list_runs(config, project.project_id)
+        ]
+        out.emit(
+            rows,
+            table(
+                ("run", "harness", "stage", "workers", "candidate"),
+                [
+                    (
+                        row["run_id"],
+                        row["harness"],
+                        row["stage"],
+                        " ".join(f"{w['id']}:{w['stage']}" for w in row["workers"]),
+                        str(row["landing"].get("candidate_sha") or "-")[:12],
+                    )
+                    for row in rows
+                ],
+            )
+            if rows
+            else "(no runs)",
+        )
+        return EXIT_OK
+    if verb == "result":
+        filed = batch.result(
+            config, arguments.run_id, arguments.worker_id, arguments.path
+        )
+        out.emit(
+            filed,
+            f"recorded result for {arguments.worker_id} in {arguments.run_id}"
+            + (
+                " and released the landing task"
+                if filed.get("landing_released")
+                else ""
+            ),
+        )
+        return EXIT_OK
+    if verb == "resume":
+        project = resolve_project(
+            config, arguments.project or _run_project(config, arguments.run_id)
+        )
+        resumed = batch.resume(
+            config,
+            project,
+            arguments.run_id,
+            arguments.worker_id,
+            backend=arguments.backend,
+            model=arguments.model,
+            effort=arguments.effort,
+        )
+        out.emit(
+            resumed, f"resumed {arguments.worker_id}: {out.job_line(resumed['job'])}"
+        )
         return EXIT_OK
     raise AssertionError(verb)
+
+
+def _run_project(config: Config, run_id: str) -> str:
+    return batch.load(config, run_id).project
 
 
 def _event_line(event: Mapping[str, Any]) -> str:
@@ -497,34 +561,8 @@ def _dispatch(arguments: argparse.Namespace, config: Config, out: Output) -> int
         return EXIT_OK
     if verb == "job":
         return _job(arguments, config, out)
-    if verb == "lane":
-        return _lane(arguments, config, out)
-    if verb == "refill":
-        project = resolve_project(config, arguments.project)
-        refilled = lanes.refill(
-            config,
-            project,
-            limit=arguments.limit,
-            dry_run=arguments.dry_run,
-            backend=arguments.backend,
-            model=arguments.model,
-            effort=arguments.effort,
-        )
-        lines = [
-            f"{refilled['ready']} ready, {refilled['taken']} taken, "
-            f"{len(refilled['candidates'])} candidate(s): {', '.join(refilled['candidates']) or '-'}"
-        ]
-        if refilled["dry_run"]:
-            lines.append("dry run: nothing started")
-        lines.extend(
-            f"started {row['bead']} on {row['branch']}: {out.job_line(row['job'])}"
-            for row in refilled["started"]
-        )
-        lines.extend(
-            f"failed {row['bead']}: {row['error']}" for row in refilled["failed"]
-        )
-        out.emit(refilled, "\n".join(lines))
-        return EXIT_REFUSED if refilled["failed"] else EXIT_OK
+    if verb == "batch":
+        return _batch(arguments, config, out)
     if verb == "view":
         project = resolve_project(config, arguments.project)
         snapshot = operator_view.collect(config, project, now=out.now)
@@ -559,12 +597,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         config = load_config(arguments.config)
         return _dispatch(arguments, config, out)
-    except _ERRORS as error:
+    except _REFUSALS as error:
         message = (
             error.args[0] if isinstance(error, KeyError) and error.args else str(error)
         )
         print(f"agentctl: {message}", file=sys.stderr)
         return EXIT_REFUSED
+    except _SUBSTRATE_ERRORS as error:
+        print(f"agentctl: {error}", file=sys.stderr)
+        return EXIT_SUBSTRATE
 
 
 if __name__ == "__main__":  # pragma: no cover - console entry point

@@ -1,80 +1,61 @@
 # Worker contract
 
-Everything in this file is compiled verbatim into every dispatched lane's
-prompt. Write only what the worker must decide; what a gate enforces is not
-repeated here.
+Compiled verbatim into every batch worker's prompt. A worker implements the
+beads in its launch snapshot, on the branch and in the worktree the snapshot
+names, and exits with one result document.
 
-## The dispatch contract
+## What a worker does
 
-1. **Implement from the launch snapshot.** The packet above carries the bead
-   descriptions and acceptance criteria as they stood at dispatch time, the
-   worktree and branch, and the files in scope. Where the packet names atlas
-   sheets, read them for orientation rather than re-deriving the area.
-2. **Verify your candidate.** Focused runs are `devtools test <selection>`.
-   Run the static gate with `lane verify`; it submits the declared
-   `verify_quick` operation to pueue and waits for that task. Do not invoke
-   `devtools verify --quick` directly inside a lane. Do not start or wait for
-   affected or complete verification. The coordinator runs batch verification
-   after integrating compatible candidates and one complete run after the
-   merge batch. Fix, test,
-   iterate until green. Do not spawn
-   review subagents — hosted PR review and the test oracle are the check.
-   `devtools verify` selects from the checkout's one testmon datafile
-   (`.cache/testmon/testmondata`) and writes back; a corrupt or foreign
-   datafile stops the run with `graph_unusable` — delete the datafile and
-   rerun. A selected green proves the selected scope only; say which
-   selection ran.
-3. **Red first for bug fixes.** Demonstrate the failure, then fix it, then show
-   green. Each new test names what mutation would make it red.
-4. **Fail-closed needs a derivation, not a reflex.** Before adding a guard
-   that refuses input, measure what the real corpus contains: a refusal path
-   must name the evidence that legitimate data never hits it. A guard that
-   refuses real production records is a defect, not safety. Where behavior
-   differs between synthetic fixtures and the live archive, run the relevant
-   reader against the live archive read-only and report the counts.
-5. **Commit by path and stop.** When the work is complete and the quick gate
-   is green, commit the candidate and run `lane done report.md`. Do not open a
-   PR, merge, rebuild the host, or publish. The coordinator integrates several
-   candidates and owns the repository's publication policy.
-6. **Report once, honestly.** Per-bead and per-acceptance-criterion
-   disposition, the exact commands and the result line that matters, diffstat,
-   residual risk. Refuting a finding needs evidence. The report is the
-   deliverable: going idle without one is a contract violation. Report in the
-   job result only (`lane done report.md` emits it). Piped exit codes lie
-   (`cmd | tail` reports tail's status); use pipestatus or capture to a file
-   before claiming a gate passed.
-7. **No scope expansion.** Discoveries become filings or report notes, never
-   inline extra work.
-8. **Exit with a clean candidate.** Fetch and report whether the candidate is
-   based on current `origin/master`; do not rebase merely to hand the
-   coordinator a cosmetically current branch. A conflict is resolved once on
-   the integration branch. A failure you attribute to master is a claim
-   that needs a command: run that gate against a clean `origin/master`
-   checkout and quote its exit code, or own the failure. When comparing
-   failing sets with master, disable order randomization on both sides
-   (`-p no:randomly`) and compare the sets, not the totals.
-9. **Machine trailer.** End the report with exact lines `LANE-BRANCH: <branch>`
-   / `LANE-COMMIT: <sha>` / `LANE-QUICK: green|red|blocked-env` /
-   `LANE-CLASSIFICATION: <one line per finding>`.
-10. **Write the integration note.** Put Summary, Problem, Solution,
-    Verification, and residual risk in `.lane/body.md` for the coordinator to
-    combine into the batch publication record. `.lane/` is never committed.
-11. **Do not damage live operator state.** Forbidden: deleting or overwriting
-    installed tools, dotfiles, or anything under `$HOME` outside your
-    workspace; `switch`/`boot` or any system or Home-Manager rebuild; stopping,
-    masking, or reconfiguring live services. Retiring an installed tool means
-    deleting it from the source tree and saying so. Allowed without asking:
-    read-only live evidence — query the archive, read `/realm/state`,
-    `sinnix-observe`, and your own `sinnix-chrome-control agent-window`; leave
-    the operator's tabs alone. Writes to live state only when the packet names
-    the paths or services; absent that, report what you would have done.
-12. **Ship the declaration with the change.** A new insight needs its rigor
-    contract and field contracts; a new document its catalog entry; a
-    durable-tier change its numbered migration and a derived one its lifecycle
-    class; a new module a consumer that reaches it and a test that exercises
-    it. The gate that will refuse you is the one to run before reporting.
-13. **Purge, do not retain.** Retiring a route deletes the module, its
-    compatibility aliases and re-exports, its docs, and its tests in the same
-    change. If one symbol still has a real consumer, move it to its true
-    owner and delete the rest. Do not add a test asserting deleted code is
-    gone.
+1. **Implement from the launch snapshot.** The `beads` entries carry the
+   descriptions and acceptance criteria as they stood at dispatch. When
+   `bead_bodies` is `digest`, read each full body with `bd show <id> --json`
+   and check its sha256 of `<title>\n<description>` against `digest`; a
+   mismatch is reported, not implemented. Atlas sheets named in the snapshot
+   are orientation, not scope.
+2. **Stay in the worktree.** Commit by path on the worker branch; never write
+   to another checkout, `$HOME` outside the workspace, or live services.
+   `.lane/` is never committed.
+3. **Verify the candidate.** Run the snapshot's `verification_commands` and
+   the project's focused checks in the foreground. Bug fixes show red before
+   green. A selected green proves the selected scope only; say which
+   selection ran. Piped exit codes lie (`cmd | tail`); capture the status.
+4. **Do not publish, do not claim beads.** No push, no PR, no merge, no
+   rebase onto a newer base, no rebuild of the host. No `bd update`,
+   `claim`, `close` or `comment`: `batch start` claimed the beads and
+   `batch land` closes them from the acceptance record.
+5. **No scope expansion.** Discoveries go into `unresolved`, never into
+   extra work.
+6. **Exit with a clean tree and the result document.** The final message is
+   the JSON below and nothing else; a worker whose result does not validate
+   has failed, whatever its exit status.
+
+## The result
+
+Validated against `dots/claude/agents/schemas/worker.schema.json`:
+
+```json
+{
+  "candidate_sha": "<40-hex HEAD of the worker branch>",
+  "beads": [
+    {
+      "id": "<bead id>",
+      "criteria": [
+        {
+          "text": "<the acceptance criterion as written>",
+          "status": "satisfied | unsatisfied | superseded",
+          "evidence": "<command and result line, path:line, or why superseded>"
+        }
+      ]
+    }
+  ],
+  "unresolved": ["<finding or follow-up not implemented>"],
+  "verification": [{ "command": "<exact command>", "receipt": "<result line>" }]
+}
+```
+
+- `candidate_sha` must equal `git rev-parse HEAD` in the worktree when the
+  result is filed.
+- Every bead in the snapshot appears in `beads` with every criterion. A bead
+  is closed at landing only when all its criteria are `satisfied` or
+  `superseded`; anything else leaves it open with the residual as a comment.
+- Refuting a criterion or a finding needs evidence, not a claim.

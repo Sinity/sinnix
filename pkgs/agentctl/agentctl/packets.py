@@ -6,6 +6,8 @@ the worker contract and atlas sheets, and the prompt is the join.
 
 from __future__ import annotations
 
+import fnmatch
+import hashlib
 import json
 import re
 import subprocess
@@ -17,6 +19,12 @@ import tomllib
 
 TEMPLATE_VERSION = "v2"
 MAX_PROMPT_BYTES = 200_000
+# When the full bead bodies do not fit the budget, each is embedded as a
+# digest and this many leading characters; the worker reads the rest with
+# `bd show` and checks the digest.
+DIGEST_EXCERPT_CHARS = 600
+EXECUTABLE_STATUSES = frozenset({"open", "in_progress"})
+_INACTIVE_STATUSES = frozenset({"closed", "deferred"})
 # A PR title is the squash subject; GitHub wraps past this, and the
 # repository's commit convention stops here.
 MAX_SUBJECT_LENGTH = 72
@@ -305,9 +313,12 @@ class PacketSnapshot:
     atlas_refs: tuple[str, ...]
     worker_contract_path: str
     prompt: str
+    # Batch facts the worker needs beyond the beads: run id, worker id, base
+    # commit, result path and schema. Empty outside a batch.
+    batch: Mapping[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        document = {
             "schema_version": 2,
             "template_version": self.dimensions.template_version,
             "project_id": self.project_id,
@@ -319,9 +330,17 @@ class PacketSnapshot:
             "atlas_refs": list(self.atlas_refs),
             "worker_contract_path": self.worker_contract_path,
         }
+        if self.batch:
+            document["batch"] = dict(self.batch)
+        return document
 
 
 def resolve_group(bead_id: str, reader: BdReader) -> tuple[str, tuple[str, ...]]:
+    """The seed's dispatch group: its leader id and the open members.
+
+    A group is co-executed OPEN work: a closed or deferred member — the leader
+    included — is done and its spec is never reissued as an instruction.
+    """
     seed = reader.show(bead_id)
     group = _metadata(seed).get("dispatch_group")
     leader_id = group if isinstance(group, str) and group else bead_id
@@ -330,15 +349,141 @@ def resolve_group(bead_id: str, reader: BdReader) -> tuple[str, tuple[str, ...]]
         for row in reader.list()
         if isinstance(row.get("id"), str)
         and _metadata(row).get("dispatch_group") == leader_id
-        # A dispatch group is co-executed OPEN work; closed members are done
-        # and their specs must not be reissued as instructions.
-        and row.get("status") not in {"closed", "deferred"}
+        and row.get("status") not in _INACTIVE_STATUSES
     }
-    member_ids.add(leader_id)
-    member_ids.add(bead_id)
+    for candidate in (leader_id, bead_id):
+        record = seed if candidate == bead_id else _bead_or_none(reader, candidate)
+        if record is not None and record.get("status") not in _INACTIVE_STATUSES:
+            member_ids.add(candidate)
+    if not member_ids:
+        raise PacketError(f"dispatch group {leader_id} has no open members")
     if not all(isinstance(item, str) and item for item in member_ids):
         raise PacketError("dispatch group contains an invalid bead id")
     return leader_id, tuple(sorted(member_ids))
+
+
+def _bead_or_none(reader: BdReader, bead_id: str) -> Mapping[str, Any] | None:
+    try:
+        return reader.show(bead_id)
+    except PacketError:
+        return None
+
+
+@dataclass(frozen=True)
+class Refusal:
+    """Why a bead cannot be a batch member. ``code`` is stable; ``detail`` is for people."""
+
+    code: str
+    bead: str
+    detail: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {"code": self.code, "bead": self.bead, "detail": self.detail}
+
+
+def write_scope(bead: Mapping[str, Any]) -> tuple[str, ...]:
+    """The globs a bead's worker may write, from metadata ``write_scope``."""
+    value = _metadata(bead).get("write_scope")
+    if isinstance(value, str):
+        return tuple(item.strip() for item in value.split(";") if item.strip())
+    if isinstance(value, list):
+        return tuple(item for item in value if isinstance(item, str) and item)
+    return ()
+
+
+def _scopes_overlap(left: str, right: str) -> bool:
+    """Identical globs, one a directory prefix of the other, or one matching the other."""
+    if left == right:
+        return True
+    left_dir = left.rstrip("/") + "/"
+    right_dir = right.rstrip("/") + "/"
+    if left.startswith(right_dir) or right.startswith(left_dir):
+        return True
+    return fnmatch.fnmatchcase(left, right) or fnmatch.fnmatchcase(right, left)
+
+
+def _open_external_blockers(
+    bead: Mapping[str, Any], members: set[str], reader: BdReader
+) -> list[str]:
+    blockers: list[str] = []
+    for item in bead.get("dependencies") or ():
+        if isinstance(item, str):
+            record = _bead_or_none(reader, item)
+            kind = "blocks"
+        elif isinstance(item, Mapping):
+            record = item
+            kind = str(item.get("dependency_type") or item.get("edge_type") or "blocks")
+        else:
+            continue
+        if record is None or kind != "blocks":
+            continue
+        blocker = record.get("id")
+        if (
+            isinstance(blocker, str)
+            and blocker not in members
+            and record.get("status") not in _INACTIVE_STATUSES
+        ):
+            blockers.append(blocker)
+    return blockers
+
+
+def validate_members(
+    reader: BdReader,
+    workers: Sequence[Sequence[str]],
+    *,
+    claimed: set[str],
+) -> list[Refusal]:
+    """Every reason the workers' members cannot run together, or an empty list.
+
+    ``workers`` groups member ids per worker; ``claimed`` holds ids already in
+    another run. A member is executable when it exists, is open or in
+    progress, has no open ``blocks`` dependency outside the member set, is
+    unclaimed, belongs to one worker only, and its write scope is disjoint
+    from every other worker's.
+    """
+    refusals: list[Refusal] = []
+    members = {item for worker in workers for item in worker}
+    seen: dict[str, int] = {}
+    scopes: list[tuple[int, str, str]] = []
+    for index, worker in enumerate(workers):
+        for bead_id in worker:
+            if bead_id in seen and seen[bead_id] != index:
+                refusals.append(Refusal("duplicate", bead_id, "listed in two workers"))
+                continue
+            seen[bead_id] = index
+            bead = _bead_or_none(reader, bead_id)
+            if bead is None:
+                refusals.append(Refusal("missing", bead_id, "bd has no such bead"))
+                continue
+            status = str(bead.get("status") or "")
+            if status not in EXECUTABLE_STATUSES:
+                refusals.append(Refusal("status", bead_id, f"status is {status!r}"))
+                continue
+            if bead_id in claimed:
+                refusals.append(Refusal("in_run", bead_id, "already in another run"))
+                continue
+            assignee = bead.get("assignee")
+            if status == "in_progress" and isinstance(assignee, str) and assignee:
+                refusals.append(Refusal("claimed", bead_id, f"claimed by {assignee}"))
+                continue
+            blockers = _open_external_blockers(bead, members, reader)
+            if blockers:
+                refusals.append(
+                    Refusal("blocked", bead_id, "blocked by " + ", ".join(blockers))
+                )
+                continue
+            scopes.extend((index, bead_id, glob) for glob in write_scope(bead))
+    for position, (index, bead_id, glob) in enumerate(scopes):
+        for other_index, other_bead, other_glob in scopes[position + 1 :]:
+            if other_index != index and _scopes_overlap(glob, other_glob):
+                refusals.append(
+                    Refusal(
+                        "write_scope",
+                        bead_id,
+                        f"{glob!r} overlaps {other_bead}'s {other_glob!r}",
+                    )
+                )
+    return refusals
 
 
 def _policy_dimensions(
@@ -407,6 +552,28 @@ def _bounded(prompt: str) -> str:
     return prompt
 
 
+def _fits(prompt: str) -> bool:
+    return len(prompt.encode()) <= MAX_PROMPT_BYTES
+
+
+def bead_digest(bead: Mapping[str, Any]) -> str:
+    """sha256 of the bead's title and description, as the worker recomputes it."""
+    text = f"{bead.get('title') or ''}\n{bead.get('description') or ''}"
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+def digest_bead(bead: Mapping[str, Any]) -> dict[str, Any]:
+    description = str(bead.get("description") or "")
+    return {
+        "id": bead.get("id"),
+        "title": bead.get("title"),
+        "status": bead.get("status"),
+        "digest": bead_digest(bead),
+        "excerpt": description[:DIGEST_EXCERPT_CHARS],
+        "truncated": len(description) > DIGEST_EXCERPT_CHARS,
+    }
+
+
 _RELATIONSHIP_FIELDS = (
     "id",
     "status",
@@ -457,18 +624,38 @@ def _project_relationships(bead: Mapping[str, Any], reader: BdReader) -> dict[st
     return projected
 
 
+_DIGEST_INSTRUCTION = (
+    "The bead bodies exceed the prompt budget, so each `beads` entry carries "
+    "only an excerpt and a sha256 digest of `<title>\\n<description>`. Read each "
+    "full body with `bd show <id> --json` and verify its digest before "
+    "implementing; a mismatch means the bead changed after dispatch — stop and "
+    "report it."
+)
+
+
 def _render_prompt(snapshot: PacketSnapshot, template: str) -> str:
-    payload = json.dumps(snapshot.to_dict(), indent=2, sort_keys=True)
-    return _bounded(
-        f"# Dispatch packet ({snapshot.dimensions.template_version})\n\n"
-        "The following is the immutable dispatch-time snapshot. Implement every "
-        "bead in this lane, run the listed verification commands, and report "
-        "once with exact results.\n\n"
-        "## Launch snapshot\n\n"
-        f"```json\n{payload}\n```\n\n"
-        f"## Operating rules (`{snapshot.worker_contract_path}`)\n\n"
-        f"{template}\n"
-    )
+    def render(payload: Mapping[str, Any], note: str) -> str:
+        document = json.dumps(payload, indent=2, sort_keys=True)
+        return (
+            f"# Dispatch packet ({snapshot.dimensions.template_version})\n\n"
+            "The following is the immutable dispatch-time snapshot. Implement every "
+            "bead in this worker, run the listed verification commands, and report "
+            f"once with exact results.{note}\n\n"
+            "## Launch snapshot\n\n"
+            f"```json\n{document}\n```\n\n"
+            f"## Operating rules (`{snapshot.worker_contract_path}`)\n\n"
+            f"{template}\n"
+        )
+
+    full = render(snapshot.to_dict(), "")
+    if _fits(full):
+        return full
+    digested = {
+        **snapshot.to_dict(),
+        "beads": [digest_bead(bead) for bead in snapshot.beads],
+        "bead_bodies": "digest",
+    }
+    return _bounded(render(digested, " " + _DIGEST_INSTRUCTION))
 
 
 def _template(config: PacketConfig) -> tuple[str, str]:
@@ -495,8 +682,17 @@ def compile_launch_snapshot(
     backend: str | None = None,
     model: str | None = None,
     effort: str | None = None,
+    member_ids: Sequence[str] | None = None,
+    branch: str | None = None,
+    batch: Mapping[str, Any] | None = None,
 ) -> PacketSnapshot:
-    leader_id, bead_ids = resolve_group(bead_id, reader)
+    """The prompt for ``bead_id``'s group, or for ``member_ids`` led by ``bead_id``."""
+    if member_ids is None:
+        leader_id, bead_ids = resolve_group(bead_id, reader)
+    else:
+        leader_id, bead_ids = bead_id, tuple(sorted(set(member_ids)))
+        if leader_id not in bead_ids:
+            raise PacketError(f"leader {leader_id} is not among the members")
     beads = tuple(
         _project_relationships(reader.show(item), reader) for item in bead_ids
     )
@@ -511,11 +707,12 @@ def compile_launch_snapshot(
     )
     template, contract_path = _template(config)
     branch_value = _metadata(ordered[0]).get("branch")
-    branch = (
-        branch_value
-        if isinstance(branch_value, str) and branch_value
-        else config.branch_for(leader_id)
-    )
+    if branch is None:
+        branch = (
+            branch_value
+            if isinstance(branch_value, str) and branch_value
+            else config.branch_for(leader_id)
+        )
     snapshot = PacketSnapshot(
         project_id=project_id,
         leader_id=leader_id,
@@ -528,6 +725,7 @@ def compile_launch_snapshot(
         ),
         worker_contract_path=contract_path,
         prompt="",
+        batch=dict(batch or {}),
     )
     return PacketSnapshot(
         **{**snapshot.__dict__, "prompt": _render_prompt(snapshot, template)}
@@ -541,8 +739,13 @@ def rebase_prompt(
     branch: str,
     base: str,
     worktree: Path,
+    packet: str | None = None,
 ) -> str:
-    """The prompt for an agent that brings an existing lane back onto its base."""
+    """The prompt for a fresh agent resuming an existing worker's worktree.
+
+    ``packet`` is the worker's original dispatch prompt; the rules and result
+    contract it carries apply unchanged.
+    """
     template, contract_path = _template(config)
     snapshot = json.dumps(
         {
@@ -554,14 +757,17 @@ def rebase_prompt(
         indent=2,
         sort_keys=True,
     )
+    original = f"\n\n## Original dispatch packet\n\n{packet}" if packet else ""
     return _bounded(
-        "# Rebase packet\n\n"
-        f"The lane below lives in `{worktree}` on `{branch}`. Fetch, rebase it "
-        f"onto `{base}`, resolve every conflict against the bead's intent, run "
-        "the quick gate in the rebased state, and push with `--force-with-lease`. "
-        "Any uncommitted work in the worktree is yours. A conflict you cannot "
-        "resolve honestly is reported, never forced to green.\n\n"
+        "# Resume packet\n\n"
+        f"The worker below lives in `{worktree}` on `{branch}`, branched from "
+        f"`{base}`. Continue its work: any uncommitted change in the worktree is "
+        "yours, an unfinished merge or rebase is resolved against the bead's "
+        "intent, and the result is committed on this branch. Do not push, "
+        "publish, or rebase onto anything newer than the base. A conflict you "
+        "cannot resolve honestly is reported, never forced to green.\n\n"
         f"```json\n{snapshot}\n```\n\n"
         f"## Operating rules (`{contract_path}`)\n\n"
         f"{template}\n"
+        f"{original}"
     )

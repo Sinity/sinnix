@@ -161,8 +161,13 @@ def add(
     command: Sequence[str],
     working_directory: Path,
     after: Sequence[int] = (),
+    stashed: bool = False,
 ) -> int:
-    """Enqueue one command and return the task id pueue assigned it."""
+    """Enqueue one command and return the task id pueue assigned it.
+
+    ``after`` lists the tasks this one waits for; ``stashed`` adds it held, to
+    be released later by :func:`enqueue`.
+    """
     if not command:
         raise PueueError("pueue add requires a command")
     # pueue joins the command into one string and runs it through a shell.
@@ -181,6 +186,8 @@ def add(
     ]
     for dependency in after:
         arguments.extend(["--after", str(dependency)])
+    if stashed:
+        arguments.append("--stashed")
     arguments.append("--")
     arguments.extend(command)
     try:
@@ -210,6 +217,18 @@ def tasks() -> dict[int, Task]:
 
 def task(task_id: int) -> Task | None:
     return tasks().get(task_id)
+
+
+def enqueue(task_id: int) -> None:
+    """Release a stashed task into its group's queue."""
+    _run(["enqueue", str(task_id)])
+
+
+def group_add(name: str, parallel: int) -> None:
+    """Create a group with that parallelism; an existing group is left as it is."""
+    if name in groups():
+        return
+    _run(["group", "add", "--parallel", str(parallel), name])
 
 
 def groups() -> dict[str, int]:

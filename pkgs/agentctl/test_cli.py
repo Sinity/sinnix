@@ -68,12 +68,17 @@ def test_job_start_with_wait_reports_a_failure_in_the_exit_status(
 def test_errors_are_one_line_on_stderr_and_a_nonzero_status(
     fake_pueue: FakePueue, cli_config: Config, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert cli.main(["job", "start", "fixture", "missing"]) == 1
+    assert cli.main(["job", "start", "fixture", "missing"]) == cli.EXIT_REFUSED
     assert "unknown project operation" in capsys.readouterr().err
-    assert cli.main(["job", "get", "99"]) == 1
+    assert cli.main(["job", "get", "99"]) == cli.EXIT_REFUSED
     assert "no task 99" in capsys.readouterr().err
-    assert cli.main(["project", "get", "nowhere"]) == 1
+    assert cli.main(["project", "get", "nowhere"]) == cli.EXIT_REFUSED
     assert "nowhere" in capsys.readouterr().err
+    assert cli.main(["batch", "status", "no-such-run"]) == cli.EXIT_REFUSED
+    assert "no run no-such-run" in capsys.readouterr().err
+    fake_pueue.fail_tasks = True
+    assert cli.main(["job", "list"]) == cli.EXIT_SUBSTRATE
+    assert "fixture pueue status failed" in capsys.readouterr().err
 
 
 def test_project_verbs_read_the_catalog(
@@ -109,7 +114,7 @@ def test_events_tail_prints_the_last_lines_filtered_by_project(
 def test_a_missing_spool_is_reported(
     cli_config: Config, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert cli.main(["events", "tail"]) == 1
+    assert cli.main(["events", "tail"]) == cli.EXIT_REFUSED
     assert "no event spool" in capsys.readouterr().err
 
 
@@ -119,7 +124,6 @@ def test_view_json_is_the_snapshot(
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(cli.operator_view, "lane_rows", lambda project, full=False: [])
     monkeypatch.setattr(
         cli.operator_view,
         "SubprocessBdReader",

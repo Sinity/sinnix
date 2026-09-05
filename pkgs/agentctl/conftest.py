@@ -30,6 +30,7 @@ class FakePueue:
     restarted: list[int] = field(default_factory=list)
     removed: list[int] = field(default_factory=list)
     waited: list[int] = field(default_factory=list)
+    enqueued: list[int] = field(default_factory=list)
     _logs: dict[int, str] = field(default_factory=dict)
     _on_wait: dict[int, Callable[["FakePueue"], None]] = field(default_factory=dict)
     groups: dict[str, int] = field(
@@ -57,6 +58,7 @@ class FakePueue:
         command: Sequence[str],
         working_directory: Path,
         after: Sequence[int] = (),
+        stashed: bool = False,
     ) -> int:
         if self.fail_add:
             raise PueueError("fixture pueue add failed")
@@ -71,14 +73,14 @@ class FakePueue:
             # A fixture task is immediately running by default, matching an
             # idle group's real behavior; tests that need the queued window
             # itself call .queue(task_id) explicitly.
-            status="Running",
+            status="Stashed" if stashed else "Running",
             result=None,
             exit_code=None,
             path=str(working_directory),
             dependencies=tuple(after),
             command=" ".join(command),
             enqueued_at="2026-09-03T08:00:00+00:00",
-            started_at="2026-09-03T08:00:01+00:00",
+            started_at=None if stashed else "2026-09-03T08:00:01+00:00",
         )
         self.added.append(
             {
@@ -88,9 +90,19 @@ class FakePueue:
                 "command": tuple(command),
                 "working_directory": working_directory,
                 "after": tuple(after),
+                "stashed": stashed,
             }
         )
         return task_id
+
+    def enqueue(self, task_id: int) -> None:
+        task = self._tasks[task_id]
+        if task.status == "Stashed":
+            self._tasks[task_id] = replace(task, status="Queued")
+        self.enqueued.append(task_id)
+
+    def group_add(self, name: str, parallel: int) -> None:
+        self.groups.setdefault(name, parallel)
 
     def tasks(self) -> dict[int, Task]:
         if self.fail_tasks:
@@ -205,6 +217,8 @@ def fake_pueue(monkeypatch: pytest.MonkeyPatch) -> FakePueue:
         "remove",
         "wait",
         "groups_status",
+        "enqueue",
+        "group_add",
         "pause",
         "resume",
         "log",
@@ -314,6 +328,8 @@ root = "{worktrees}"
 default_base = "origin/master"
 agent_memory_max = "10G"
 verification_operations = ["verify_quick"]
+verify = {{ focused = "verify_quick", candidate = "check", corpus = "verify" }}
+publish = "master"
 
 [packets]
 template = "contract.md"
