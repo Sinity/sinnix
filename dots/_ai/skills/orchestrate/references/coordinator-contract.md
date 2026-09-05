@@ -61,10 +61,11 @@ the extension point: `.agentctl/project.toml` in the repo, live on the next
 call.
 
 Publication policy is the descriptor's `[workspace].publish`: `pr` pushes the
-candidate as one PR and squash-merges it on exactly that head after the
-required checks and the reviewer verdict; `master` fast-forwards the default
-branch to the candidate. Hosted review comments are handled as
-`docs/agentctl.md` states.
+candidate as one PR (titled with the leader bead's subject) and
+squash-merges it on exactly that head after the required checks and the
+reviewer verdict, then deletes the remote integration branch; the beads
+close on the merge commit. `master` fast-forwards the default branch to the
+candidate. Hosted review comments are handled as `docs/agentctl.md` states.
 
 ## The operating loop
 

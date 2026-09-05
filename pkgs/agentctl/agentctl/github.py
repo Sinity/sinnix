@@ -224,6 +224,21 @@ def pull_request_advisory(root: Path, number: int) -> list[dict[str, Any]]:
     return rows
 
 
+def merge_commit(pull: Mapping[str, Any]) -> str | None:
+    """The merge commit of a merged PR, or None while it is not merged."""
+    commit = pull.get("mergeCommit")
+    oid = commit.get("oid") if isinstance(commit, Mapping) else None
+    if pull.get("state") == "MERGED" and isinstance(oid, str) and oid:
+        return oid
+    return None
+
+
+def delete_remote_branch(root: Path, branch: str) -> None:
+    gitcmd.git(
+        root, "push", "origin", "--delete", f"refs/heads/{branch}", error=GithubError
+    )
+
+
 def merge_pr(root: Path, number: int, sha: str) -> None:
     """Squash-merge the PR only while its head is still ``sha``."""
     try:

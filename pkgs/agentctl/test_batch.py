@@ -26,6 +26,8 @@ MOVED = "d" * 40
 MOVED_AGAIN = "e" * 40
 # A worker commit that is not SHA: a second branch with its own head.
 OTHER = "f" * 40
+# The squash-merge commit a PR landing produces on the default branch.
+MERGED = "9" * 40
 
 
 @dataclass
@@ -1094,11 +1096,13 @@ def test_pr_policy_pushes_the_branch_waits_for_required_checks_and_merges_the_he
 
     def pull(root: Path, number: int) -> dict[str, Any]:
         calls.append(("pull", number))
+        merged = any(call[0] == "merge" for call in calls)
         return {
             "number": number,
-            "state": "OPEN",
+            "state": "MERGED" if merged else "OPEN",
             "headRefOid": SHA,
             "statusCheckRollup": [],
+            "mergeCommit": {"oid": MERGED} if merged else None,
         }
 
     monkeypatch.setattr(
@@ -1114,7 +1118,15 @@ def test_pr_policy_pushes_the_branch_waits_for_required_checks_and_merges_the_he
     monkeypatch.setattr(
         github,
         "create_pull_request",
-        lambda root, **kw: calls.append(("create", kw["head"], kw["base"])) or 41,
+        lambda root, **kw: (
+            calls.append(("create", kw["head"], kw["base"], kw["title"], kw["body"]))
+            or 41
+        ),
+    )
+    monkeypatch.setattr(
+        github,
+        "delete_remote_branch",
+        lambda root, branch: calls.append(("delete", branch)),
     )
     monkeypatch.setattr(
         github, "required_checks", lambda root, base: ("lint", "verify")
@@ -1150,8 +1162,10 @@ def test_pr_policy_pushes_the_branch_waits_for_required_checks_and_merges_the_he
 
     branch = f"batch/{run['run_id']}/integration"
     assert ("push", branch, SHA, None) in calls
-    assert ("create", branch, "master") in calls
-    assert calls.count(("create", branch, "master")) == 1
+    created = [call for call in calls if call[0] == "create"]
+    assert len(created) == 1 and created[0][1:3] == (branch, "master")
+    assert created[0][3] == "fix: Solo"
+    assert "**fx-solo** Solo\n- [x] done" in created[0][4]
     assert landed["landing"]["pr_number"] == 41
     assert landed["landing"]["verify_run"] == {
         "kind": "hosted",
@@ -1160,13 +1174,19 @@ def test_pr_policy_pushes_the_branch_waits_for_required_checks_and_merges_the_he
         "candidate_sha": SHA,
         "phase": "succeeded",
     }
-    assert calls[-2:] == [("merge", 41, SHA), ("advisory", 41)]
+    assert [call for call in calls if call[0] in {"merge", "delete", "advisory"}] == [
+        ("merge", 41, SHA),
+        ("delete", branch),
+        ("advisory", 41),
+    ]
     assert landed["acceptance"]["published"] == {
         "policy": "pr",
         "pr": 41,
         "candidate_sha": SHA,
         "base_commit": BASE,
+        "merge_commit": MERGED,
     }
+    assert harness.beads.closed[0][1] == f"batch {run['run_id']} {MERGED}"
     # Advisory only: a CHANGES_REQUESTED review is recorded, never a gate.
     assert landed["acceptance"]["advisory"] == advisory
     assert landed["acceptance"]["beads"]["fx-solo"]["state"] == "closed"
@@ -1531,3 +1551,98 @@ def test_review_and_integration_agents_use_the_packets_review_table(
     worker_task = harness.pueue.task(run["workers"][0]["task_id"])
     argv = read_launch(harness.config, worker_task)["argv"]
     assert argv[argv.index("--agent") + 1] == "codex"
+
+
+def pr_project(harness: Harness) -> None:
+    descriptor = harness.project.descriptor
+    descriptor.write_text(
+        descriptor.read_text()
+        .replace('publish = "master"', 'publish = "pr"')
+        .replace('candidate = "check"', 'candidate = "hosted:verify"')
+    )
+    harness.project = load_project_adapter(harness.project.root)
+
+
+def test_a_required_check_never_reported_is_check_missing_after_ten_minutes(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Breaks if a landing waits two hours on a check no runner will ever report."""
+    pr_project(harness)
+    clock = [0.0]
+    monkeypatch.setattr(landing_module.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(github, "push_branch", lambda *a, **k: None)
+    monkeypatch.setattr(github, "remote_head", lambda root, branch: None)
+    monkeypatch.setattr(
+        github,
+        "pull_request",
+        lambda root, number: {
+            "number": number,
+            "state": "OPEN",
+            "headRefOid": SHA,
+            "statusCheckRollup": [],
+        },
+    )
+    monkeypatch.setattr(github, "pull_request_for_branch", lambda root, branch: None)
+    monkeypatch.setattr(github, "create_pull_request", lambda root, **kw: 7)
+    run = prepared_run(harness, "fx-solo")
+
+    def sleep(seconds: float) -> None:
+        clock[0] += seconds
+
+    with pytest.raises(BatchRefusal, match="check_missing") as refused:
+        batch.land(
+            harness.config,
+            harness.project,
+            run["run_id"],
+            beads=harness.beads,
+            sleep=sleep,
+        )
+    assert refused.value.to_dict()["checks"] == ["verify"]
+    assert clock[0] < landing_module.HOSTED_CHECK_TIMEOUT_SECONDS
+    assert clock[0] >= landing_module.CHECK_MISSING_SECONDS
+    stored = manifest.load(harness.config, run["run_id"])
+    assert stored.landing["failure"]["code"] == "check_missing"
+
+
+def test_an_already_merged_pr_on_the_candidate_is_accepted_without_reintegrating(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Breaks if a landing that merged and died before accepting re-merges or opens a second PR."""
+    pr_project(harness)
+    run = prepared_run(harness, "fx-solo")
+
+    def stopped(document: dict[str, Any]) -> None:
+        document["landing"].update(
+            {
+                "pr_number": 41,
+                "candidate_sha": SHA,
+                "verify_run": {"kind": "hosted", "check": "verify", "pr": 41},
+                "review_verdict": {"verdict": "pass", "candidate_sha": SHA},
+            }
+        )
+
+    manifest.update(harness.config, run["run_id"], stopped)
+    monkeypatch.setattr(
+        github,
+        "pull_request",
+        lambda root, number: {
+            "number": number,
+            "state": "MERGED",
+            "headRefOid": SHA,
+            "mergeCommit": {"oid": MERGED},
+        },
+    )
+    monkeypatch.setattr(github, "pull_request_advisory", lambda root, number: [])
+    for name in ("push_branch", "create_pull_request", "merge_pr"):
+
+        def forbidden(*args: Any, name: str = name, **kwargs: Any) -> None:
+            pytest.fail(f"{name} must not run")
+
+        monkeypatch.setattr(github, name, forbidden)
+
+    landed = harness.land(run["run_id"])
+
+    assert harness.git.merges == [] and harness.waited == []
+    assert landed["acceptance"]["published"]["merge_commit"] == MERGED
+    assert landed["acceptance"]["verify_run"]["pr"] == 41
+    assert harness.beads.closed[0][1] == f"batch {run['run_id']} {MERGED}"

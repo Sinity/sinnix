@@ -232,3 +232,26 @@ def test_advisory_lists_reviews_and_comments_with_author_state_head_and_url(
     assert _calls(recorded_gh["ledger"])[-1] == "pr view 7 --json reviews,comments"
     recorded_gh["script"].write_text(json.dumps({"stdout": "", "exit": 0}))
     assert github.pull_request_advisory(tmp_path, 7) == []
+
+
+def test_merge_commit_is_read_only_from_a_merged_pr() -> None:
+    assert (
+        github.merge_commit({"state": "MERGED", "mergeCommit": {"oid": "a" * 40}})
+        == "a" * 40
+    )
+    assert (
+        github.merge_commit({"state": "OPEN", "mergeCommit": {"oid": "a" * 40}}) is None
+    )
+    assert github.merge_commit({"state": "MERGED", "mergeCommit": None}) is None
+    assert github.merge_commit({}) is None
+
+
+def test_delete_remote_branch_names_the_ref(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[tuple[str, ...]] = []
+    monkeypatch.setattr(
+        github.gitcmd, "git", lambda root, *args, **kw: calls.append(args) or ""
+    )
+    github.delete_remote_branch(tmp_path, "batch/r/integration")
+    assert calls == [("push", "origin", "--delete", "refs/heads/batch/r/integration")]

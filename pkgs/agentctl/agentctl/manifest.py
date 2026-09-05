@@ -31,6 +31,7 @@ REFUSALS: dict[str, str] = {
     "already_accepted": "the run has an acceptance record; nothing runs again",
     "ambiguous_run": "the suffix names more than one run",
     "candidate_mismatch": "the result's candidate_sha is not the worktree HEAD",
+    "check_missing": "a required PR check was not reported within ten minutes",
     "checks_failed": "a required PR check failed, or did not finish (`timed_out`)",
     "empty_candidate": "the candidate equals the base commit: nothing to land",
     "candidate_off_base": "the candidate does not descend from the run base",
