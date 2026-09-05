@@ -6,6 +6,7 @@ description: Use when invoking, inspecting, or documenting Sinnix Agent Gateway 
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v2-g3.0-pueue-jobs -->
 <!-- gateway-catalog-sha256: 73967b9d691118482283e66b72ecb11faa84c0a62f2b15c4f0838787f9d5242f -->
+
 # Agent Gateway V2
 
 Use `sinnix-agent-gateway` when a local agent needs the same principal-scoped routes and normalized envelopes as MCP. The complete action schemas and examples are in `docs/generated/agent-gateway-reference.md`.

@@ -166,4 +166,3 @@ def tick(*, spool: Path | None, pressure_root: Path = Path("/proc/pressure")) ->
         "signal": signal,
         **pressure,
     }
-

@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from conftest import write_project
 from agentctl.config import Config, load_config, resolve_project
 from agentctl.projects import (
     ProjectCatalog,
@@ -13,6 +12,7 @@ from agentctl.projects import (
     ProjectEnvironmentError,
     load_project_adapter,
 )
+from conftest import write_project
 
 
 def test_the_fixture_descriptor_loads_every_declared_field(project_root: Path) -> None:
