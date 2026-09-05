@@ -2,7 +2,7 @@
 # @sinnix-package
 # description: Preference elicitation over arbitrary item domains via pairwise comparison (Bradley-Terry)
 # runtimeInputs: coreutils xdg-utils
-# pythonPackages: @sinnix-rank-core
+# pythonPackages: @sinnix-lib @sinnix-rank-core
 
 """Domain-general preference elicitation for the operator.
 
@@ -65,9 +65,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from rank_core import Comparison, build_selector, fit, top_k_stability
-from rank_core.store import append_log
-from rank_core.store import now as now_iso
-from rank_core.store import read_log
+from rank_core.store import append_log, read_log
+from sinnix_lib.ledger import utc_ts
 
 SCHEMA = "sinnix-elicit-v1"
 BASE_DIR = Path(os.environ.get("SINNIX_ELICIT_DIR", "/realm/state/elicit"))
@@ -469,7 +468,7 @@ def cmd_ingest(domain, args):
                     "b": str(payload["b"]),
                     "outcome": outcome,
                     "session": payload.get("session"),
-                    "at": payload.get("at", now_iso()),
+                    "at": payload.get("at", utc_ts()),
                 }
             except (KeyError, TypeError, ValueError):
                 continue
@@ -563,7 +562,7 @@ def fit_and_save_model(domain, items, comparisons):
     model = {
         "schema": "sinnix-elicit-model-v1",
         "domain": domain.name,
-        "fitted_at": now_iso(),
+        "fitted_at": utc_ts(),
         "n_comparisons": len(comparisons),
         "ranking": [
             {**r, "label": by_id[r["id"]].get("label", r["id"]), "theta": round(r["theta"], 4), "se": round(r["se"], 4)}

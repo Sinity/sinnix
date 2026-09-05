@@ -15,16 +15,13 @@ is always reproducible.
 from __future__ import annotations
 
 import json
-import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from sinnix_lib.ledger import utc_ts
+
 VALID_KINDS = {"pair", "choice-set", "skip", "incomparable"}
-
-
-def now() -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
 @dataclass
@@ -64,7 +61,7 @@ def append_log(path: str | Path, record: dict) -> str:
     """One record appended, with the id and timestamp every log entry carries."""
     path = Path(path)
     record.setdefault("id", str(uuid.uuid4()))
-    record.setdefault("at", now())
+    record.setdefault("at", utc_ts())
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a") as f:
         f.write(json.dumps(record, sort_keys=True) + "\n")
