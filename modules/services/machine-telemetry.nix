@@ -25,6 +25,14 @@ let
   # btrbk→borg coverage.
   backupRoot = "/realm/state/db-dumps/machine-telemetry";
   backupSnapshotRoot = "${realmRoot}/state/machine-telemetry-backup-snapshots";
+  # The run is two passes over a database now past 38 GB, inside a unit capped
+  # at 80 MB/s reading /realm: an integrity walk of the snapshot, then the
+  # compression pass a live run measured at 9m07s for 34.7 GiB plus the archive
+  # test. Giving the walk 18 of the 30 minutes leaves the compressor its
+  # measured cost with margin, and makes a walk that no longer fits fail as
+  # itself rather than as an opaque unit timeout.
+  backupTimeoutMinutes = 30;
+  integrityBudgetSeconds = backupTimeoutMinutes * 60 * 3 / 5;
   manifestPath = "${dataDir}/manifest.json";
   username = config.sinnix.user.name;
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
@@ -232,6 +240,10 @@ mkServiceModule {
               fi
             }
             trap cleanup EXIT
+            # A default-handled SIGTERM ends the shell without running its EXIT
+            # trap, and every stamped snapshot has its own name, so the
+            # subvolumes of every cancelled run would otherwise accumulate.
+            trap 'cleanup; exit 143' INT TERM
 
             # The database is NOCOW, so cloning its file is not a reliable
             # constant-time operation. A read-only subvolume snapshot freezes
@@ -242,7 +254,10 @@ mkServiceModule {
               exit 1
             fi
             btrfs subvolume snapshot -r ${lib.escapeShellArg dbRoot} "$snapshot"
-            sinnix-sqlite-backup --immutable-source "$snapshot/telemetry.sqlite" "$final"
+            sinnix-sqlite-backup \
+              --immutable-source \
+              --check-budget-seconds ${toString integrityBudgetSeconds} \
+              "$snapshot/telemetry.sqlite" "$final"
             chown ${lib.escapeShellArg username}:users "$final"
 
           '';
@@ -259,7 +274,7 @@ mkServiceModule {
           user = "root";
           serviceConfig = {
             Group = "users";
-            TimeoutStartSec = "30min";
+            TimeoutStartSec = "${toString backupTimeoutMinutes}min";
           };
           unit = {
             after = [
