@@ -71,6 +71,7 @@ through a generated HTML page served by the hub.
 
 ```bash
 sinnix elicit init wallpaper --items items.json --image-features
+sinnix elicit serve wallpaper --open         # side-by-side page on this machine
 sinnix elicit session wallpaper -n 20        # page on the hub, tap from the phone
 sinnix elicit ask wallpaper                  # terminal loop
 sinnix elicit rank wallpaper                 # fitted order + `explain`
@@ -100,6 +101,34 @@ A tap posts to the hub's `/feedback` spool and `sinnix-elicit autoingest`
 drains it into the domain, coalesced per burst. The drain dedups against every
 comparison id the log has ever carried, tombstones included: a record the
 operator undid is still one this domain has seen.
+
+### `serve`
+
+`session` renders a fixed pair list, so nothing refits between taps. `serve`
+runs the same judgment against a live process on this machine: two images
+filling the screen, one keypress each (left/right pick, `d` draw, `s` skip,
+`u` undo, `q` quit), a refit after every answer, and the next pair chosen from
+what the operator just said. It ranks a 126-image roster in one sitting.
+
+It selects through `rank_core.Selector`, not this file's `pick_pairs`: a cold
+roster is one connected component per item, and only the Selector deliberately
+bridges components, without which thetas across the roster stay mutually
+meaningless however long the operator clicks. The status bar carries the
+evidence — comparison count, items seen, component count, and
+`top_k_stability` for the top ten, which is the answer to "am I done".
+
+Every judgment is appended to the domain's own log through the same store as
+every other surface, and `u` tombstones rather than rewriting. The server
+re-reads the log's full id set before each append, tombstones included, so a
+retried POST and a record the hub drain landed concurrently are both
+recognised as already seen.
+
+The port is ephemeral by default and the URL is printed: this is an
+operator-run foreground process, not a declared service, so it claims no
+number from `flake/data/ports.nix`. `--open` follows the URL with `xdg-open`.
+Images are read only from the paths `items.json` declares; a request naming
+anything else is a 404. Both the roster's image paths and the comparisons stay
+in local state.
 
 ## `rank-options` skill
 
