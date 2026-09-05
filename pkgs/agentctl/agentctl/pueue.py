@@ -6,6 +6,7 @@ own state is the record. This module is the only place that shells out to it.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -123,6 +124,19 @@ def _client_environment() -> dict[str, str]:
     return {
         key: os.environ[key] for key in _CLIENT_ENVIRONMENT_KEYS if key in os.environ
     }
+
+
+def daemon_tag() -> str:
+    """A short name for the daemon this module's calls reach.
+
+    The client resolves its daemon from ``$HOME/.config/pueue/pueue.yml``
+    (this module forwards HOME alone, never XDG_CONFIG_HOME), so the tag is a
+    digest of that path: one per daemon, stable across restarts, different for
+    a daemon started under another home.
+    """
+    home = _client_environment().get("HOME") or str(Path.home())
+    config = str(Path(home) / ".config" / "pueue" / "pueue.yml")
+    return hashlib.sha256(config.encode()).hexdigest()[:12]
 
 
 def _run(arguments: Sequence[str], *, timeout: float = CALL_TIMEOUT_SECONDS) -> str:

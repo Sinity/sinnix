@@ -21,7 +21,7 @@ from agentctl.run import (
     VANISHED_EXIT_CODE,
     cancel_marker_for,
     outcome_path_for,
-    scope_unit_for,
+    unit_for,
 )
 from conftest import FakePueue, read_launch
 
@@ -45,7 +45,7 @@ def test_start_writes_the_launch_input_and_queues_the_wrapper_in_the_pool(
     assert written["argv"] == ["env", "fixture-verify"]
     assert written["timeout_seconds"] == 120
     assert written["pool"] == "pytest"
-    assert launch.scope_unit(fake_pueue.task(1)) == scope_unit_for(input_path, "pytest")
+    assert launch.unit_of(fake_pueue.task(1)) == unit_for(input_path, "pytest")
     assert written["result_kind"] == "json"
     assert written["result_path"].endswith(".result")
     assert written["event_spool_path"] == str(config.event_spool)
@@ -228,13 +228,13 @@ def test_phases_come_from_pueue_results_and_the_wrapper_exit_codes(
     assert phases == [
         "succeeded",
         "failed",
-        "timed-out",
+        "timeout",
         "refused",
         "cancelled",
         "queued",
         "cancelled",
         "vanished",
-        "slot-occupied",
+        "slot_occupied",
     ]
 
 
@@ -285,7 +285,7 @@ def test_cancel_marks_then_stops_the_unit_then_kills_the_task(
     project = load_project_adapter(project_root)
     started = launch.start_operation(config, project, project.operation("check"))
     task = fake_pueue.task(started["job_id"])
-    unit = launch.scope_unit(task)
+    unit = launch.unit_of(task)
     marker = cancel_marker_for(read_launch(config, task)["log_path"])
 
     cancelled = launch.cancel(config, started["job_id"])
@@ -438,7 +438,7 @@ def test_a_task_whose_launch_input_agentctl_did_not_write_names_its_own_scope(
 
     cancelled = launch.cancel(config, task_id)
 
-    unit = scope_unit_for(foreign, "pytest")
+    unit = unit_for(foreign, "pytest")
     assert ["systemctl", "--user", "stop", unit] in recording_systemctl()
     assert cancelled["unit"] == unit
     assert cancel_marker_for(foreign.parent / "slot.log").exists()
@@ -469,7 +469,7 @@ def test_a_command_that_only_mentions_the_wrapper_owns_no_scope_and_no_artifacts
     task = fake_pueue.task(task_id)
 
     assert launch.launch_input_path(task) is None
-    assert launch.scope_unit(task) is None
+    assert launch.unit_of(task) is None
     cancelled = launch.cancel(config, task_id)
 
     assert cancelled["unit"] is None

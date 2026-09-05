@@ -28,6 +28,7 @@ from .projects import ProjectAdapter, ProjectOperation
 from .pueue import PueueError, Task
 from .run import (
     CANCELLED_EXIT_CODE,
+    Outcome,
     MAX_LOG_BYTES,
     MAX_RESULT_BYTES,
     REFUSED_EXIT_CODE,
@@ -36,8 +37,8 @@ from .run import (
     VANISHED_EXIT_CODE,
     cancel_marker_for,
     outcome_path_for,
-    scope_pool,
-    scope_unit_for,
+    unit_for,
+    unit_pool,
     systemd_environment,
 )
 
@@ -169,7 +170,7 @@ def enqueue(
     kind: str = "declared-operation",
     after: Sequence[int] = (),
     stashed: bool = False,
-    scope_properties: Sequence[str] = (),
+    unit_properties: Sequence[str] = (),
     tree_receipt: Mapping[str, Any] | None = None,
     environment_receipt: Mapping[str, str] | None = None,
     binding: Mapping[str, Any] | None = None,
@@ -196,8 +197,8 @@ def enqueue(
         "log_path": str(log_path),
         "event_spool_path": str(config.event_spool),
     }
-    if scope_properties:
-        launch["scope_properties"] = list(scope_properties)
+    if unit_properties:
+        launch["scope_properties"] = list(unit_properties)
     if tree_receipt is not None:
         launch["tree_receipt"] = dict(tree_receipt)
     if environment_receipt is not None:
@@ -381,13 +382,14 @@ def phase_of(task: Task) -> str:
     return _WRAPPER_PHASES.get(task.exit_code, "failed")
 
 
-# The wrapper's own exit statuses; any other status is the command's.
+# The wrapper's own exit statuses, named as run.Outcome names them; any
+# other status is the command's.
 _WRAPPER_PHASES = {
-    TIMEOUT_EXIT_CODE: "timed-out",
+    TIMEOUT_EXIT_CODE: Outcome.TIMEOUT.value,
     REFUSED_EXIT_CODE: "refused",
-    CANCELLED_EXIT_CODE: "cancelled",
-    VANISHED_EXIT_CODE: "vanished",
-    SLOT_OCCUPIED_EXIT_CODE: "slot-occupied",
+    CANCELLED_EXIT_CODE: Outcome.CANCELLED.value,
+    VANISHED_EXIT_CODE: Outcome.VANISHED.value,
+    SLOT_OCCUPIED_EXIT_CODE: Outcome.SLOT_OCCUPIED.value,
 }
 
 
@@ -463,15 +465,15 @@ def launch_reference(task: Task) -> str | None:
     return path.stem if path is not None else None
 
 
-def scope_unit(task: Task) -> str | None:
+def unit_of(task: Task) -> str | None:
     """The transient service holding this task's workload.
 
     Derived from the queue's own record so a cancel reaches the unit after the
     wrapper is gone and after the launch input its owner wrote has been deleted.
     """
     path = launch_input_path(task)
-    pool = scope_pool(task.group)
-    return scope_unit_for(path, pool) if path is not None and pool else None
+    pool = unit_pool(task.group)
+    return unit_for(path, pool) if path is not None and pool else None
 
 
 def job_view(task: Task) -> dict[str, Any]:
@@ -620,7 +622,7 @@ def cancel(config: Config, task_id: int) -> dict[str, Any]:
             }
         except PueueError:
             task = _task(task_id)
-    unit = scope_unit(task)
+    unit = unit_of(task)
     log = _artifact(config, task, ".log")
     if log is not None:
         marker = cancel_marker_for(log)

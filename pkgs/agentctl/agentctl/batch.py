@@ -475,7 +475,7 @@ def queue_agent(
         environment=environment,
         kind="attested-agent",
         after=after,
-        scope_properties=(f"MemoryMax={workspace.agent_memory_max}",),
+        unit_properties=(f"MemoryMax={workspace.agent_memory_max}",),
     )
 
 

@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 from agentctl import launch, pueue
 from agentctl.config import Config
-from agentctl.run import scope_unit_for
+from agentctl.run import unit_for
 
 # Recorded from `pueue status --json` on pueue 4.0.4 after one failing task.
 LIVE_STATUS = {
@@ -419,7 +419,7 @@ def test_a_private_pueue_task_places_its_child_in_the_declared_pool_scope(
 
     assert finished.succeeded, pueue.log(task_id)
     cgroup = log_path.read_text()
-    assert f"/{scope_unit_for(launch_path, 'pytest')}" in cgroup
+    assert f"/{unit_for(launch_path, 'pytest')}" in cgroup
     assert "/agentctl-pytest.slice/" in cgroup
 
 
@@ -574,7 +574,7 @@ def test_cancelling_a_task_reaps_every_descendant_it_started(
         )
         time.sleep(0.1)
     descendants = [int(pid) for pid in started]
-    unit = scope_unit_for(launch_path, "pytest")
+    unit = unit_for(launch_path, "pytest")
     for pid in descendants:
         assert unit in Path(f"/proc/{pid}/cgroup").read_text(), (
             "a descendant outside the task's scope is one a cancel cannot reach"
