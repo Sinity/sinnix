@@ -15,8 +15,11 @@ from agentctl.prompts import (
     bead_digest,
     bead_subject,
     compile_worker_prompt,
+    in_scope,
+    public_bead,
     resolve_group,
     resume_prompt,
+    scope_violations,
     validate_members,
 )
 from conftest import FakeBd, bead
@@ -379,3 +382,50 @@ def test_a_missing_worker_contract_is_a_typed_refusal(project_root: Path) -> Non
         compile_worker_prompt(
             "fx-solo", project_id="fixture", reader=reader(), config=config
         )
+
+
+def test_the_packet_drops_people_stamps_and_counters_from_beads(
+    project_root: Path,
+) -> None:
+    """Breaks if a prompt, which is public text, names the bead's owner or author."""
+    config = PromptConfig.from_project(load_project_adapter(project_root))
+    rich = reader()
+    rich.beads["fx-solo"].update(
+        {
+            "owner": "someone@example.com",
+            "created_by": "agentctl-canary",
+            "created_at": "2026-09-05T11:38:12Z",
+            "updated_at": "2026-09-05T14:06:20Z",
+            "dependent_count": 0,
+            "comment_count": 3,
+            "revision": -4732049828547806182,
+            "acceptance_criteria": "kept",
+        }
+    )
+    snapshot = compile_worker_prompt(
+        "fx-solo", project_id="fixture", reader=rich, config=config
+    )
+    (dispatched,) = snapshot.beads
+    assert set(dispatched) == {
+        "id",
+        "title",
+        "issue_type",
+        "status",
+        "description",
+        "metadata",
+        "acceptance_criteria",
+    }
+    assert "someone@example.com" not in snapshot.prompt
+    assert public_bead(rich.beads["fx-solo"])["acceptance_criteria"] == "kept"
+    assert "untrusted process" in snapshot.prompt.split("```json", 1)[0]
+
+
+def test_write_scope_membership_covers_files_directories_and_globs() -> None:
+    globs = ["src/", "docs/*.md", "flake.nix"]
+    assert in_scope("src/a/b.py", globs)
+    assert in_scope("docs/x.md", globs)
+    assert in_scope("flake.nix", globs)
+    assert not in_scope("docs/x.txt", globs)
+    assert not in_scope("srcs/a.py", globs)
+    assert scope_violations(["src/a.py", "tests/t.py"], globs) == ["tests/t.py"]
+    assert scope_violations(["a"], []) == ["a"]

@@ -54,6 +54,7 @@ REFUSALS: dict[str, str] = {
     "review_invalid": "the verdict does not validate against the judge schema",
     "review_rejected": "the verdict is not `pass`",
     "runner": "the agent runner is missing or not executable",
+    "scope_violation": "the candidate changes paths outside the worker's declared write scope",
     "target_moved_twice": "the default branch moved again after one refresh",
     "unknown_run": "no run has this id or suffix",
     "verify_failed": "candidate verification failed, or did not finish (`timed_out`)",

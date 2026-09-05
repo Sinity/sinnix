@@ -60,7 +60,8 @@ PUBLISH_POLICIES = frozenset({"pr", "master"})
 # suffix.
 _MEMORY_SIZE = re.compile(r"[1-9][0-9]*[KMGT]?\Z")
 # `[packets]`: how a worker prompt is compiled. `backend`, `model` and
-# `effort` may sit in the table or under `[packets.defaults]`.
+# `effort` may sit in the table or under `[packets.defaults]`;
+# `[packets.review]` names the reviewer's and integrator's agent.
 _PACKETS_FIELDS = frozenset(
     {
         "template",
@@ -69,12 +70,14 @@ _PACKETS_FIELDS = frozenset(
         "template_version",
         "model_policy",
         "defaults",
+        "review",
         "backend",
         "model",
         "effort",
     }
 )
 _PACKETS_DEFAULTS = ("backend", "model", "effort", "template_version", "branch_prefix")
+_PACKETS_REVIEW = ("backend", "model", "effort")
 _OPERATION_FIELDS = frozenset(
     {
         "description",
@@ -175,6 +178,9 @@ class PacketsPolicy:
     effort: str | None = None
     # Policy name -> (backend, model), from `[packets.model_policy.<name>]`.
     model_policy: Mapping[str, tuple[str, str]] = field(default_factory=dict)
+    # `[packets.review]`: backend, model, effort of the reviewer and the
+    # integration agent; None means the leader worker's.
+    review: Mapping[str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -398,6 +404,20 @@ def _packets(raw: Mapping[str, Any], root: Path, descriptor: Path) -> PacketsPol
                 f"{descriptor} packets.{name} must be a non-empty string"
             )
         fields[name] = value
+    raw_review = packets.get("review")
+    if raw_review is not None:
+        if (
+            not isinstance(raw_review, Mapping)
+            or set(raw_review) != set(_PACKETS_REVIEW)
+            or any(
+                not isinstance(value, str) or not value for value in raw_review.values()
+            )
+        ):
+            raise ProjectConfigError(
+                f"{descriptor} [packets.review] must set exactly "
+                + ", ".join(_PACKETS_REVIEW)
+            )
+        fields["review"] = dict(raw_review)
     raw_map = packets.get("model_policy", {})
     if not isinstance(raw_map, Mapping):
         raise ProjectConfigError(f"{descriptor} packets.model_policy must be a table")
