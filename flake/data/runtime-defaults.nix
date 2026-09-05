@@ -349,7 +349,9 @@ rec {
         CPUWeight = 100;
         IOWeight = 100;
       };
-      # Each pueue task is a transient scope in one of these slices. The
+      # Each pueue task is a transient service in one of these slices. The
+      # outer agentctl.slice and the agent pool are never oomd or swap
+      # victims; the pytest and bulk pools are killed at their own pressure. The
       # reservations are fixed against the workstation's 32 GiB physical
       # memory: app 6 GiB, session 5 GiB, desktop shell 512 MiB, and the
       # remaining job plane is admitted by pool rather than free-RAM probes.

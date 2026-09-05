@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from conftest import FakePueue
 from agentctl.run import (
     CANCELLED_EXIT_CODE,
     MAX_LOG_BYTES,
@@ -22,6 +21,7 @@ from agentctl.run import (
     outcome_path_for,
     scope_unit_for,
 )
+from conftest import FakePueue
 
 
 def user_manager() -> None:
