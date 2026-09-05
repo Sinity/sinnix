@@ -3,6 +3,7 @@
 # description: Pairwise/choice-set preference ranking CLI (backlog, ideas, any list) over the shared rank-core engine
 # runtimeInputs: coreutils @sinnix-steer
 # pythonPackages: @sinnix-rank-core
+# docs: docs/ranking.md
 
 """Text frontend for rank_core: register items into a domain, run resorter-
 style pairwise prompting sessions, check the fitted ranking + stopping
