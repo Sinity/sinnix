@@ -43,51 +43,19 @@ let
     "xdg-desktop-portal-hyprland.service"
   ];
 
+  # Repo scripts symlinked into ~/.local/bin under their own names.
   scriptLinks = [
-    {
-      target = "audio";
-      source = "audio";
-    }
-    {
-      target = "rawlog";
-      source = "rawlog";
-    }
-    {
-      target = "toggle-scratch";
-      source = "toggle-scratch";
-    }
-    {
-      target = "rawlog-capture";
-      source = "rawlog-capture";
-    }
-    {
-      target = "kitty-grid";
-      source = "kitty-grid";
-    }
-    {
-      target = "rawlog-loop";
-      source = "rawlog-loop";
-    }
-    {
-      target = "weechat-scratchpad";
-      source = "weechat-scratchpad";
-    }
-    {
-      target = "kitty-scrollback-capture";
-      source = "kitty-scrollback-capture";
-    }
-    {
-      target = "kitty-scrollback-view";
-      source = "kitty-scrollback-view";
-    }
-    {
-      target = "hyprland-ocr";
-      source = "hyprland-ocr";
-    }
-    {
-      target = "dismiss-scratchpads";
-      source = "dismiss-scratchpads";
-    }
+    "audio"
+    "rawlog"
+    "toggle-scratch"
+    "rawlog-capture"
+    "kitty-grid"
+    "rawlog-loop"
+    "weechat-scratchpad"
+    "kitty-scrollback-capture"
+    "kitty-scrollback-view"
+    "hyprland-ocr"
+    "dismiss-scratchpads"
   ];
 in
 {
@@ -326,10 +294,10 @@ in
           home.file =
             scratchpadData.confFiles
             // lib.listToAttrs (
-              map (link: {
-                name = ".local/bin/${link.target}";
+              map (script: {
+                name = ".local/bin/${script}";
                 value = {
-                  source = config.lib.file.mkOutOfStoreSymlink "${repoRoot}/scripts/${link.source}";
+                  source = config.lib.file.mkOutOfStoreSymlink "${repoRoot}/scripts/${script}";
                   force = true;
                 };
               }) scriptLinks
