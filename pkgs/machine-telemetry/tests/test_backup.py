@@ -266,6 +266,32 @@ def test_immutable_large_snapshot_rejects_corruption(tmp_path: Path) -> None:
     assert not list(tmp_path.glob("*.tmp*"))
 
 
+def test_copied_large_database_rejects_corruption(tmp_path: Path) -> None:
+    """The copying route walks the copy before publishing, like the immutable route.
+
+    Mutation: reading schema_version instead of walking the copy accepts the
+    corrupt overflow page, because page one is intact.
+    """
+    source = tmp_path / "source.db"
+    seed_large_database(source)
+    output = tmp_path / "out.zst"
+    with source.open("r+b") as database:
+        database.seek(2 * 512)
+        database.write((3).to_bytes(4, byteorder="big"))
+
+    result = subprocess.run(
+        [str(SCRIPT), str(source), str(output)],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+    assert result.returncode != 0
+    assert "quick_check(1) failed" in result.stderr
+    assert not output.exists()
+    assert not list(tmp_path.glob("*.tmp*"))
+
+
 def test_integrity_walk_stops_when_it_outlasts_its_budget(
     tmp_path: Path, slow_walk_database: Path
 ) -> None:
