@@ -91,10 +91,6 @@ let
   borgRepoSinexBlobsPath = "${borgRepoRoot}/borg-sinex-blobs-v1";
   borgRepoPolylogueStatePath = "${borgRepoRoot}/borg-polylogue-state-v1";
   btrfsImageRoot = "${borgRepoRoot}/btrfs-images";
-  btrfsImageRetentionDays = 30;
-  # Never let the age rule take a label below this many images, however long
-  # its captures have been failing.
-  btrfsImageKeepMinimum = 2;
   # Real images run 0.8-3.9 GB. A floor three orders of magnitude below the
   # smallest observed one only rejects a stub, never a small-but-real capture.
   btrfsImageMinBytes = 64 * 1024 * 1024;
@@ -195,21 +191,6 @@ let
       qualify = pattern: if lib.hasPrefix "**" pattern then pattern else "${rootRelative}/${pattern}";
     in
     lib.concatMapStringsSep " " (pattern: "--exclude ${lib.escapeShellArg (qualify pattern)}") exclude;
-
-  borgRetentionArgs = [
-    "--keep-within"
-    "7d"
-    "--keep-daily"
-    "60"
-    "--keep-weekly"
-    "26"
-    "--keep-monthly"
-    "24"
-    "--keep-yearly"
-    "5"
-  ];
-
-  mkBorgRetentionArgs = lib.concatMapStringsSep " " lib.escapeShellArg borgRetentionArgs;
 
   mkBorgCommonScript = repo: repoPath: ''
     export BORG_REPO=${lib.escapeShellArg repo}
@@ -388,9 +369,9 @@ let
           btrfs subvolume delete ${lib.escapeShellArg snapshotDir}/"$queued_snapshot"
         done
 
-      # Retention pruning and compaction are deliberately batched in
-      # borgbackup-maintenance.service. Running compaction on every path wake
-      # would turn "continuous" backups into repeated HDD churn.
+      # Compaction is deliberately batched in borgbackup-maintenance.service.
+      # Running it on every path wake would turn "continuous" backups into
+      # repeated HDD churn.
       marker=${lib.escapeShellArg "${borgDrainStateRoot}/${label}.last-success"}
       {
         printf 'archive=%s\n' "$archive_name"
@@ -473,6 +454,18 @@ let
     # /realm/library and /realm/state, which stay in coverage. If a named
     # volume ever appears here, this exclusion starts dropping real state.
     "state/containers"
+    # Scratch trees, declared unbacked in /realm/INVENTORY.md: TMPDIR and job
+    # scratch under tmp/, agent checkouts under worktrees/ whose commits live
+    # in their origin repositories. Neither self-describes as a cache, so both
+    # had been archiving in full -- 47.5 GB over 248,583 entries and 1.4 GB
+    # over 95,835 entries respectively, measured in archive
+    # realm-realm.20260905T160000+0200.
+    #
+    # Top-level entries, not `**/tmp` or `**/worktrees`: a tmp/ inside a real
+    # dataset stays covered. inbox/ is deliberately absent -- downloads land
+    # there (196 GB in the same archive) and exist nowhere else.
+    "tmp"
+    "worktrees"
     "**/inbox/monero"
     "**/node_modules"
     "**/target"
@@ -1432,8 +1425,12 @@ in
       '';
     })
 
+    # Backup policy is indefinite lossless retention: no archive is deleted
+    # because of its age, count or size. Compaction only reclaims segment
+    # space that no archive references, so every archive ever written stays
+    # addressable and restorable.
     (mkBackupJob "borgbackup-maintenance" {
-      description = "Prune and compact Borg backup repositories";
+      description = "Compact Borg backup repositories";
       unit = {
         after = [
           outerRealmMountUnit
@@ -1522,7 +1519,6 @@ in
 
           acquire_borg_global_lock_or_skip "Borg maintenance"
           recover_stale_borg_locks "$repo"
-          with_borg_lock borg prune --lock-wait ${toString borgLockWaitSec} ${mkBorgRetentionArgs} "$repo"
           with_borg_lock borg compact --lock-wait ${toString borgLockWaitSec} "$repo"
         }
 
@@ -1582,9 +1578,10 @@ in
         stamp="$(date -u +%Y%m%dT%H%M%SZ)"
         install -d -m 0700 -o root -g root "${btrfsImageRoot}"
 
-        # btrfs-image writes to "$out.tmp" and renames only on success, and
-        # the 30-day prune below matches finished images only, so a dead run
-        # leaves multi-GB orphans indefinitely.
+        # btrfs-image writes to "$out.tmp" and renames only on success, so a
+        # run killed mid-capture leaves a multi-GB partial file that is not an
+        # image of anything. Only that in-flight debris is swept; finished
+        # images (no .tmp suffix) are kept indefinitely.
         find "${btrfsImageRoot}" -type f -name '*.btrfs-image.tmp' -mtime +1 -delete
 
         # btrfs-image walks a MOUNTED, actively-written filesystem: there is
@@ -1663,45 +1660,13 @@ in
           return 1
         }
 
-        # Retention is a consequence of a successful capture, never a
-        # scheduled event of its own. The prune used to be one unconditional
-        # sweep of the whole directory at the end of the run, which meant a
-        # label that had just failed still had its history aged out: persist
-        # last captured 2026-08-01 while its 2026-07-18 predecessor was
-        # already past the age rule, so the next few runs would have deleted
-        # persist's images one at a time while every capture kept failing,
-        # ending at zero images for a filesystem the unit exists to protect.
-        # A producer does not delete its own last evidence, so the sweep is
-        # per-label, gated on that label landing a fresh image in THIS run,
-        # and floored at the newest ${toString btrfsImageKeepMinimum}
-        # regardless of age.
-        prune_label() {
-          label="$1"
-          kept=0
-          # Names carry a basic-format UTC stamp, so a reverse lexical sort is
-          # a newest-first chronological sort.
-          for name in $(find "${btrfsImageRoot}" -maxdepth 1 -type f \
-            -name "$label-*.btrfs-image" -printf '%f\n' | sort -r); do
-            kept=$((kept + 1))
-            if [ "$kept" -le ${toString btrfsImageKeepMinimum} ]; then
-              continue
-            fi
-            find "${btrfsImageRoot}/$name" -maxdepth 0 \
-              -mtime +${toString btrfsImageRetentionDays} -delete
-          done
-        }
-
         # Per-label accounting: a combined exit code hides which target is
         # actually broken. persist goes first -- see the comment above.
         rc=0
-        if capture_image persist /dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02; then
-          prune_label persist
-        else
+        if ! capture_image persist /dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02; then
           rc=1
         fi
-        if capture_image realm /dev/disk/by-uuid/43701cf7-7880-4e0c-9725-b6e12d91898a; then
-          prune_label realm
-        else
+        if ! capture_image realm /dev/disk/by-uuid/43701cf7-7880-4e0c-9725-b6e12d91898a; then
           rc=1
         fi
 
@@ -1864,8 +1829,7 @@ in
           fi
         done
 
-        # Retention pruning and compaction are batched by
-        # borgbackup-maintenance.service.
+        # Compaction is batched by borgbackup-maintenance.service.
       '';
     })
 
