@@ -54,6 +54,15 @@ components, items with no comparisons, the stopping threshold, and
 `settled` with the reasons it is not. A total order always exists; whether it
 means anything is what `evidence` answers.
 
+## Steering's activity menu
+
+`sinnix-steer activity menu` and both rituals order the activity registry by
+the fit over the `steering-activities` domain, so the morning shortlist is the
+head of the operator's own preference order at the energy tier he states. The
+fit runs over the whole registry, so the energy filter chooses what is shown
+and never what it is worth. With no comparisons recorded the order is the
+registry's own and the CLI says so.
+
 ## `rank-options` skill
 
 `dots/_ai/skills/rank-options` routes agent-generated shortlists through the
