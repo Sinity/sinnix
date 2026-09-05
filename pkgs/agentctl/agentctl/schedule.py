@@ -3,8 +3,9 @@
 systemd's only role: the durable wake-up a calendar needs. Each declared
 schedule is one transient user timer running `agentctl job fire`. The timer
 set is reconciled from the descriptors alone — the unit name encodes the
-project, operation and expression, so a changed schedule is a new unit and
-the old one is stopped. No state file.
+project, operation, expression and the agentctl executable, so a changed
+schedule or a rebuilt agentctl is a new unit and the old one is stopped. No
+state file.
 """
 
 from __future__ import annotations
@@ -44,8 +45,10 @@ def timer_persistent(on_calendar: str) -> bool:
     return not (spec.startswith("*:") or spec.startswith("*-*-* *:"))
 
 
-def unit_for(project_id: str, operation: str, schedule: str) -> str:
-    digest = hashlib.sha256(f"{project_id}:{operation}:{schedule}".encode()).hexdigest()
+def unit_for(project_id: str, operation: str, schedule: str, executable: str) -> str:
+    digest = hashlib.sha256(
+        f"{project_id}:{operation}:{schedule}:{executable}".encode()
+    ).hexdigest()
     return UNIT_PREFIX + digest[:24]
 
 
@@ -75,7 +78,12 @@ def apply(config: Config) -> dict[str, Any]:
     desired: dict[str, dict[str, str]] = {}
     for project, operation in catalog.scheduled_operations():
         assert operation.schedule is not None
-        unit = unit_for(project.project_id, operation.name, operation.schedule)
+        unit = unit_for(
+            project.project_id,
+            operation.name,
+            operation.schedule,
+            config.agentctl_executable,
+        )
         desired[unit] = {
             "project": project.project_id,
             "operation": operation.name,
