@@ -610,7 +610,7 @@ def _prepare(
     effort: str | None,
 ) -> Run:
     """Claim, create, enqueue — each step skipped where the manifest records it done."""
-    packets = PacketConfig.load(project.root)
+    packets = PacketConfig.load(project.root, shared_template=config.worker_contract)
     if run.harness == "queued":
         pueue.group_add(landing_group(project.project_id), 1)
     for index, worker in enumerate(run.workers):
@@ -913,7 +913,7 @@ def resume(
         raise BatchRefusal(
             "worker_active", f"task {current.task_id} is still {current.status.lower()}"
         )
-    packets = PacketConfig.load(project.root)
+    packets = PacketConfig.load(project.root, shared_template=config.worker_contract)
     beads = SubprocessBeads(project.root)
     path = Path(worktree)
     packet_path = path / ".lane" / "prompt.md"

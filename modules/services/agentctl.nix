@@ -33,6 +33,11 @@ mkServiceModule {
     default = "${config.sinnix.paths.dotsRoot}/_ai/skills/agent-runtime/scripts/run_agent_prompt.sh";
     description = "The backend adapter agentctl queues for batch workers and reviewers; it turns a prompt file into one backend invocation.";
   };
+  extraOptions.workerContract = lib.mkOption {
+    type = lib.types.str;
+    default = "${config.sinnix.paths.dotsRoot}/_ai/skills/orchestrate/references/worker-contract.md";
+    description = "The worker contract compiled into a worker prompt when a project descriptor names no template of its own.";
+  };
   # No runtime surface: the job plane is pueued (declared by the CLI feature)
   # inside the agentctl slice hierarchy, and the unit here is one timer.
   configFn =
@@ -90,6 +95,7 @@ mkServiceModule {
         environment.etc."sinnix/agentctl.json".text = builtins.toJSON {
           project_roots = cfg.projectRoots;
           agent_runner = cfg.agentRunner;
+          worker_contract = cfg.workerContract;
           event_spool = eventSpool;
           agentctl = "${scriptPkgs.agentctl}/bin/agentctl";
         };

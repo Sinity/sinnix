@@ -44,7 +44,6 @@ _WORKSPACE_FIELDS = frozenset(
         "root",
         "default_base",
         "agent_memory_max",
-        "verification_operations",
         "verify",
         "publish",
     }
@@ -63,6 +62,7 @@ _IGNORED_WORKSPACE_FIELDS = frozenset(
         "identity_check",
         "checkpoint_untracked",
         "provision",
+        "verification_operations",
     }
 )
 _OPERATION_FIELDS = frozenset(
@@ -131,7 +131,6 @@ class WorkspacePolicy:
     # The hard MemoryMax of one agent's scope; the descriptor's only say in
     # an agent's resources.
     agent_memory_max: str = AGENT_MEMORY_MAX
-    verification_operations: tuple[str, ...] = ()
     # Profile name -> operation name, or `hosted:<check>` for `candidate`.
     verify: Mapping[str, str] = field(default_factory=dict)
     # How a landed candidate reaches the default branch: a squash-merged PR
@@ -148,7 +147,6 @@ class WorkspacePolicy:
             "root": str(self.root),
             "default_base": self.default_base,
             "agent_memory_max": self.agent_memory_max,
-            "verification_operations": list(self.verification_operations),
             "verify": dict(self.verify),
             "publish": self.publish,
         }
@@ -163,8 +161,7 @@ class ProjectOperation:
     result: str
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS
     schedule: str | None = None
-    # "default": the operation runs only on the project's main checkout. A
-    # complete corpus run belongs to the master boundary, not to a lane.
+    # "default": the operation runs only on the project's main checkout.
     checkout: str = "any"
     cache: str = "none"
     dependencies: tuple[str, ...] = ()
@@ -303,14 +300,6 @@ def _workspace(raw: Mapping[str, Any], descriptor: Path) -> WorkspacePolicy | No
         raise ProjectConfigError(
             f"{descriptor} workspace.agent_memory_max must be a systemd size such as 10G"
         )
-    verification_operations = _string_list(
-        raw_workspace.get("verification_operations"),
-        "workspace.verification_operations",
-    )
-    if len(set(verification_operations)) != len(verification_operations):
-        raise ProjectConfigError(
-            f"{descriptor} workspace.verification_operations must be unique"
-        )
     raw_verify = raw_workspace.get("verify", {})
     if (
         not isinstance(raw_verify, Mapping)
@@ -329,7 +318,6 @@ def _workspace(raw: Mapping[str, Any], descriptor: Path) -> WorkspacePolicy | No
         root=Path(root),
         default_base=default_base,
         agent_memory_max=memory_max,
-        verification_operations=verification_operations,
         verify=dict(raw_verify),
         publish=publish,
     )
@@ -450,13 +438,12 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
         )
     workspace = _workspace(raw, descriptor)
     if workspace is not None:
-        unknown_verifiers = set(workspace.verification_operations) - operation_names
-        unknown_verifiers.update(
+        unknown_verifiers = {
             name
             for profile, name in workspace.verify.items()
             if not (profile == "candidate" and name.startswith("hosted:"))
             and name not in operation_names
-        )
+        }
         if unknown_verifiers:
             raise ProjectConfigError(
                 f"{descriptor} workspace verification operation(s) are undeclared: "

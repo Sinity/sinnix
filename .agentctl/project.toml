@@ -19,7 +19,6 @@ root = "/realm/worktrees"
 default_base = "origin/master"
 identity_check = ["git", "diff", "--quiet", "--", "flake.nix"]
 checkpoint_untracked = true
-verification_operations = ["check", "lint"]
 verify = { focused = "verify_quick", candidate = "check", corpus = "check_all" }
 publish = "master"
 

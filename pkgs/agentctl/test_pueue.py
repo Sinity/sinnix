@@ -550,6 +550,7 @@ def test_cancelling_a_task_reaps_every_descendant_it_started(
     config = Config(
         project_roots=(),
         agent_runner=tmp_path / "absent",
+        worker_contract=tmp_path / "absent.md",
         event_spool=tmp_path / "events.jsonl",
         state_dir=tmp_path / "state",
         agentctl_executable="/fixture/agentctl",

@@ -19,6 +19,8 @@ from .projects import ProjectAdapter, ProjectCatalog, load_project_adapter
 
 DEFAULT_CONFIG_PATH = Path("/etc/sinnix/agentctl.json")
 DEFAULT_PROJECT_PARENTS = (Path("/realm/project"), Path("/realm/worktrees"))
+# Where this workstation keeps the shared skills when no agentctl.json says.
+DEFAULT_SKILLS_DIR = Path("/realm/project/sinnix/dots/_ai/skills")
 
 
 class ConfigError(ValueError):
@@ -29,6 +31,9 @@ class ConfigError(ValueError):
 class Config:
     project_roots: tuple[Path, ...]
     agent_runner: Path
+    # The worker contract compiled into a worker prompt when the project's
+    # descriptor names no template of its own.
+    worker_contract: Path
     event_spool: Path
     state_dir: Path
     agentctl_executable: str
@@ -68,9 +73,9 @@ def default_state_dir() -> Path:
 def _default(state_dir: Path | None = None) -> Config:
     return Config(
         project_roots=(),
-        agent_runner=Path(
-            "/realm/project/sinnix/dots/_ai/skills/agent-runtime/scripts/run_agent_prompt.sh"
-        ),
+        agent_runner=DEFAULT_SKILLS_DIR / "agent-runtime/scripts/run_agent_prompt.sh",
+        worker_contract=DEFAULT_SKILLS_DIR
+        / "orchestrate/references/worker-contract.md",
         event_spool=Path("/realm/state/agentctl/events.jsonl"),
         state_dir=state_dir or default_state_dir(),
         agentctl_executable="/run/current-system/sw/bin/agentctl",
@@ -116,6 +121,9 @@ def load_config(path: Path | None = None) -> Config:
         project_roots=_paths(raw.get("project_roots", []), "project_roots"),
         agent_runner=_path(
             raw.get("agent_runner"), "agent_runner", config.agent_runner
+        ),
+        worker_contract=_path(
+            raw.get("worker_contract"), "worker_contract", config.worker_contract
         ),
         event_spool=_path(raw.get("event_spool"), "event_spool", config.event_spool),
         agentctl_executable=str(raw.get("agentctl") or config.agentctl_executable),

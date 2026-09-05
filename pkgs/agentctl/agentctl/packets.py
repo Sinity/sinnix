@@ -173,7 +173,9 @@ class PacketConfig:
     )
 
     @classmethod
-    def load(cls, root: Path) -> PacketConfig:
+    def load(cls, root: Path, *, shared_template: Path | None = None) -> PacketConfig:
+        """The descriptor's ``[packets]``; ``shared_template`` is the worker
+        contract a descriptor that names none uses."""
         descriptor = root / ".agentctl" / "project.toml"
         try:
             raw = tomllib.loads(descriptor.read_text())
@@ -188,20 +190,14 @@ class PacketConfig:
         if not isinstance(defaults, Mapping):
             raise PacketError("[packets.defaults] must be a table")
 
-        def path_value(name: str, fallback: str) -> Path:
+        def path_value(name: str, fallback: str | Path) -> Path:
             value = packets.get(name, fallback)
+            if isinstance(value, Path):
+                return value
             if not isinstance(value, str) or not value:
                 raise PacketError(f"packets.{name} must be a non-empty path")
             path = Path(value)
-            if path.is_absolute():
-                return path
-            local = root / path
-            if local.exists() or name != "template":
-                return local
-            # The worker contract lives in sinnix; other projects reference it
-            # by the same relative path.
-            shared = Path("/realm/project/sinnix") / path
-            return shared if shared.exists() else local
+            return path if path.is_absolute() else root / path
 
         def string_value(name: str, fallback: str) -> str:
             value = packets.get(name, defaults.get(name, fallback))
@@ -222,7 +218,9 @@ class PacketConfig:
                 raise PacketError("packets.model_policy entries need backend and model")
             policy_map[policy] = (backend, model)
         return cls(
-            template_path=path_value("template", DEFAULT_TEMPLATE_RELATIVE_PATH),
+            template_path=path_value(
+                "template", shared_template or DEFAULT_TEMPLATE_RELATIVE_PATH
+            ),
             atlas_dir=path_value("atlas_dir", DEFAULT_ATLAS_RELATIVE_PATH),
             project_root=root,
             template_version=string_value("template_version", TEMPLATE_VERSION),
