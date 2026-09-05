@@ -11,18 +11,19 @@
 { inputs, ... }:
 {
   perSystem =
-    { system, ... }:
+    {
+      system,
+      sinnixScriptRegistry,
+      ...
+    }:
     let
-      pkgs = inputs.nixpkgs.legacyPackages.${system};
-      scriptRegistry = import ../scripts.nix { inherit inputs pkgs; };
-
       # sinnix-phone-dispatcher's checkPhase needs the package built at all,
       # and its pkg.nix pulls in sinnix-steer (runtimeInputs pkgs.claude-code)
-      # as steerPackage -- claude-code is unfree, and plain legacyPackages
-      # (unconfigured, same instance every other check here uses) refuses to
-      # even evaluate its drvPath. One locally-configured instance, same
-      # pattern as flake/overlay/package/local-ai.nix's aiPkgs, rather than
-      # flipping allowUnfree for every check in the tree.
+      # as steerPackage -- claude-code is unfree, and the shared registry's
+      # unconfigured pkgs refuses to even evaluate its drvPath. One
+      # locally-configured instance, same pattern as
+      # flake/overlay/package/local-ai.nix's aiPkgs, rather than flipping
+      # allowUnfree for every check in the tree.
       unfreePkgs = import inputs.nixpkgs {
         inherit system;
         config.allowUnfree = true;
@@ -39,19 +40,19 @@
         # in hashing.py -- caught by
         # test_is_near_duplicate_threshold_is_inclusive_boundary (1 failed,
         # 53 passed); reverted after confirming red.
-        sinnix-capture-screen-suite = scriptRegistry.packageSet.sinnix-capture-screen;
+        sinnix-capture-screen-suite = sinnixScriptRegistry.packageSet.sinnix-capture-screen;
 
         # Provably fails when: the "5m"/"2h" duration-unit table drifts from
         # real seconds. Verified by changing the minute multiplier 60.0 ->
         # 61.0 in pause.py -- caught by test_parse_duration[5m-300.0] (1
         # failed, 60 passed); reverted after confirming red.
-        sinnix-audio-capture-suite = scriptRegistry.packageSet.sinnix-audio-capture;
+        sinnix-audio-capture-suite = sinnixScriptRegistry.packageSet.sinnix-audio-capture;
 
         # Provably fails when: the debounce gate's suppress condition
         # inverts. Verified by flipping `< self._min_interval` to `>` in
         # debounce.py -- caught by three tests (two unit, one daemon
         # integration: 3 failed, 16 passed); reverted after confirming red.
-        sinnix-capture-a11y-suite = scriptRegistry.packageSet.sinnix-capture-a11y;
+        sinnix-capture-a11y-suite = sinnixScriptRegistry.packageSet.sinnix-capture-a11y;
 
         # Provably fails when: /today stops distinguishing open from closed
         # commitments. Verified by changing store.py's open_commitments query
@@ -63,14 +64,14 @@
         # `table { width: 100%; }` CSS rule -- a pre-existing test-quality
         # defect, out of scope here since it isn't this task's reachability
         # question.)
-        sinnix-cockpit-suite = scriptRegistry.packageSet.sinnix-cockpit;
+        sinnix-cockpit-suite = sinnixScriptRegistry.packageSet.sinnix-cockpit;
 
         # Provably fails when: STRIP_SENTENCE rules stop dropping the
         # sentence they match (keep everything else). Verified by inverting
         # the `not pattern.search(s)` keep-predicate in filter.py -- caught
         # by four tests including the STRIP_SENTENCE case (4 failed, 4
         # passed); reverted after confirming red.
-        sinnix-deslop-suite = scriptRegistry.packageSet.sinnix-deslop;
+        sinnix-deslop-suite = sinnixScriptRegistry.packageSet.sinnix-deslop;
 
         # Provably fails when: send_token dedup stops recognizing a token
         # it's already seen. Verified by making seen_token() always return
@@ -93,16 +94,16 @@
         # resolved.parents` -> `False`) in projects.py -- caught by
         # test_project_tree_and_read_reject_symlink_escape ("DID NOT RAISE
         # ProjectError"; 1 failed, 23 passed); reverted after confirming red.
-        sinnix-agent-gateway-suite = scriptRegistry.packageSet.sinnix-agent-gateway;
+        sinnix-agent-gateway-suite = sinnixScriptRegistry.packageSet.sinnix-agent-gateway;
 
         # Owner-execution has daemon and adapter consumers. This package check
         # exercises its bounded subprocess contract at its package boundary.
-        sinnix-mcp-suite = scriptRegistry.packageSet.sinnix-mcp;
+        sinnix-mcp-suite = sinnixScriptRegistry.packageSet.sinnix-mcp;
 
         # Provably fails when: the launch input stops carrying the descriptor's
         # argv, pool, label or artifact paths, or the pueue adapter misreads
         # the daemon's JSON. The suite drives a private pueued end to end.
-        agentctl-suite = scriptRegistry.packageSet.agentctl;
+        agentctl-suite = sinnixScriptRegistry.packageSet.agentctl;
       };
     };
 }

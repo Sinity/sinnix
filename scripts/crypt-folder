@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Encrypt a folder into a gocryptfs store, or mount one
+# runtimeInputs: coreutils gocryptfs rsync util-linux
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  crypt-folder encrypt <source-folder> <encrypted-folder>
+  crypt-folder decrypt <encrypted-folder> <mount-point>
+USAGE
+}
+
+encrypt_folder() {
+  local source="$1" encrypted="$2" mount_point
+
+  if [ ! -d "$source" ]; then
+    echo "Error: Source folder does not exist" >&2
+    exit 1
+  fi
+
+  mkdir -p "$encrypted"
+
+  # find's exit status reports errors, not matches, so emptiness must be read
+  # from its output.
+  if [ -f "$encrypted/gocryptfs.conf" ] || [ -n "$(find "$encrypted" -mindepth 1 -print -quit)" ]; then
+    echo "Error: Encrypted folder already initialised or non-empty" >&2
+    exit 1
+  fi
+
+  gocryptfs -init "$encrypted"
+  mount_point="/tmp/encrypt-mount-$$"
+  mkdir -p "$mount_point"
+
+  cleanup() {
+    if mountpoint -q "$mount_point"; then
+      fusermount -u "$mount_point" || true
+    fi
+    rmdir "$mount_point" 2>/dev/null || true
+  }
+  trap cleanup EXIT
+
+  gocryptfs "$encrypted" "$mount_point"
+  rsync -av --progress "$source/" "$mount_point/"
+  trap - EXIT
+  cleanup
+}
+
+decrypt_folder() {
+  local encrypted="$1" mount_point="$2"
+
+  if [ ! -d "$encrypted" ]; then
+    echo "Error: Encrypted folder does not exist" >&2
+    exit 1
+  fi
+
+  mkdir -p "$mount_point"
+  gocryptfs "$encrypted" "$mount_point"
+}
+
+if [ $# -ne 3 ]; then
+  usage >&2
+  exit 1
+fi
+
+subcommand="$1"
+shift
+
+case "$subcommand" in
+  encrypt) encrypt_folder "$@" ;;
+  decrypt) decrypt_folder "$@" ;;
+  *)
+    echo "crypt-folder: unknown subcommand '$subcommand'" >&2
+    usage >&2
+    exit 1
+    ;;
+esac

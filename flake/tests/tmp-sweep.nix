@@ -5,12 +5,14 @@ let
 in
 {
   perSystem =
-    { system, ... }:
+    {
+      system,
+      sinnixScriptRegistry,
+      ...
+    }:
     let
-      pkgs = inputs.nixpkgs.legacyPackages.${system};
       testLib = import ../test-lib.nix { inherit inputs lib; };
       inherit (testLib) evalTestSpec mkRuntimeCheck;
-      scriptRegistry = import ../scripts.nix { inherit inputs pkgs; };
 
       spec = testLib.mkFeatureTest {
         name = "tmp-sweep-placement";
@@ -68,7 +70,7 @@ in
       # merely names it in TMPDIR while working elsewhere.
       checks.tmp-sweep-runtime = mkRuntimeCheck system {
         name = "tmp-sweep-runtime";
-        nativeBuildInputs = [ scriptRegistry.packageSet.sinnix-tmp-sweep ];
+        nativeBuildInputs = [ sinnixScriptRegistry.packageSet.sinnix-tmp-sweep ];
         script = ''
           root="$HOME/scratch"
           mkdir -p "$root/nix-shell.leaked/deep" "$root/nix-shell.cwd" "$root/nix-shell.named"
@@ -99,7 +101,7 @@ in
       # only a handful of candidates on a host of thousands of processes.
       checks.tmp-sweep-scale = mkRuntimeCheck system {
         name = "tmp-sweep-scale";
-        nativeBuildInputs = [ scriptRegistry.packageSet.sinnix-tmp-sweep ];
+        nativeBuildInputs = [ sinnixScriptRegistry.packageSet.sinnix-tmp-sweep ];
         script = ''
           root="$HOME/scale"
           mkdir -p "$root"
