@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sqlite3
 
 import pytest
@@ -32,7 +33,7 @@ def test_util_happy_path() -> None:
     assert util.parse_counts(None) == {}
     assert util.normalize_timestamp(None) is None
     assert util.normalize_timestamp("2026-01-01T00:00:00Z") == "2026-01-01T00:00:00Z"
-    assert util.utc_now().endswith("+00:00")
+    assert util.normalize_timestamp("1767225600") == "2026-01-01T00:00:00Z"
     assert util.split_props("A=1\nB=2") == {"A": "1", "B": "2"}
 
 
@@ -564,3 +565,26 @@ def test_gateway_polylogue_probe_failure_surfaces_as_a_gap_category() -> None:
         {},
     )
     assert rows[0]["gaps"] == ["agent_gateway.polylogue.unavailable"]
+
+
+def test_report_header_stamps_one_utc_grammar_through_the_shared_helper(
+    monkeypatch,
+) -> None:
+    """``generated_at`` and the epoch-derived row stamps share one grammar.
+
+    The report is read as one document -- the header's stamp is compared
+    against the row stamps ``normalize_timestamp`` mints from epoch seconds --
+    so both are ``%Y-%m-%dT%H:%M:%SZ``, and the header's comes from the
+    estate's helper rather than a local copy.
+    """
+    args = argparse.Namespace(since="10 min ago", duration="10 min")
+    assert re.fullmatch(
+        r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z",
+        cli._report_header(args)["generated_at"],
+    )
+    assert re.fullmatch(
+        r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", util.normalize_timestamp("1767225600")
+    )
+
+    monkeypatch.setattr(cli, "utc_ts", lambda: "SENTINEL-UTC-TS")
+    assert cli._report_header(args)["generated_at"] == "SENTINEL-UTC-TS"

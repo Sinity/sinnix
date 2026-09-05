@@ -2,17 +2,13 @@
 
 from __future__ import annotations
 
-import datetime as dt
 import json
 import re
+import time
 from pathlib import Path
 from typing import Any
 
 from sinnix_lib.values import float_or_none
-
-
-def utc_now() -> str:
-    return dt.datetime.now(dt.UTC).replace(microsecond=0).isoformat()
 
 
 def split_props(text: str) -> dict[str, str]:
@@ -56,12 +52,8 @@ def normalize_timestamp(value: Any) -> str | None:
     text = str(value)
     if re.fullmatch(r"\d+(\.\d+)?", text):
         try:
-            return (
-                dt.datetime.fromtimestamp(float(text), dt.UTC)
-                .replace(microsecond=0)
-                .isoformat()
-            )
-        except (OSError, ValueError):
+            return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(float(text)))
+        except (OSError, ValueError, OverflowError):
             return text
     return text
 

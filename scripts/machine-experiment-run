@@ -25,6 +25,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from sinnix_lib.ledger import utc_ts
 from sinnix_lib.process import run
 from sinnix_lib.values import read_text
 
@@ -33,10 +34,6 @@ SCHEMA = "machine-experiment-run-v1"
 # One budget for every state probe below: none of them is worth stalling the
 # experiment window this manifest is supposed to bracket.
 PROBE_TIMEOUT = 3.0
-
-
-def utc_now() -> str:
-    return dt.datetime.now(dt.UTC).replace(microsecond=0).isoformat()
 
 
 def git_state(cwd: Path) -> dict[str, Any]:
@@ -399,7 +396,7 @@ def main() -> int:
         "notes": args.note,
         "stdout_path": "stdout.log",
         "stderr_path": "stderr.log",
-        "started_at": utc_now(),
+        "started_at": utc_ts(),
         "pre_state": observed_state(system_units, user_units),
     }
     if pre_quiet is not None:
@@ -408,7 +405,7 @@ def main() -> int:
 
     exit_status = run_workload(command, run_dir)
 
-    manifest["ended_at"] = utc_now()
+    manifest["ended_at"] = utc_ts()
     manifest["exit_status"] = exit_status
     manifest["post_state"] = observed_state(system_units, user_units)
     if pre_quiet is not None:

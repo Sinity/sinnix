@@ -4,19 +4,16 @@ import json
 import os
 import subprocess
 from collections import deque
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
 from sinnix_lib.atomic_json import write_json_atomic
+from sinnix_lib.ledger import utc_ts
 
 from . import SCHEMA
 from .anchor import expire_anchor, reduce_anchor_event
 from .hyprland import HyprlandState, Socket2Adapter, reduce_socket_event
-
-
-def now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 class Reducer:
@@ -68,7 +65,7 @@ class Reducer:
             )
 
     def refresh(self) -> dict[str, Any]:
-        observed_at = now_iso()
+        observed_at = utc_ts()
         agent_jobs, agent_jobs_health = self._agent_jobs_snapshot(observed_at)
         clodex, clodex_health = self._clodex_snapshot(observed_at)
         try:
@@ -281,7 +278,7 @@ class Reducer:
             "schema": SCHEMA,
             "status": "healthy" if self.snapshot_path.exists() else "starting",
             "sequence": self.sequence,
-            "observed_at": now_iso(),
+            "observed_at": utc_ts(),
         }
 
     def events_since(self, sequence: int | None) -> list[dict[str, Any]]:
