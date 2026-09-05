@@ -59,6 +59,7 @@ in
     ./tests/earlyoom.nix
     ./tests/tmp-sweep.nix
     ./tests/activitywatch.nix
+    ./tests/workflows.nix
   ];
 
   perSystem =
