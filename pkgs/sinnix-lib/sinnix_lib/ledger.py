@@ -13,11 +13,12 @@ from __future__ import annotations
 
 import json
 import os
-import tempfile
 import time
 from collections.abc import Iterable, Iterator, Mapping
 from pathlib import Path
 from typing import Any
+
+from .atomic import atomic_publish
 
 
 def utc_ts() -> str:
@@ -100,26 +101,18 @@ def write_jsonl_atomic(
     *,
     mode: int = 0o644,
 ) -> None:
-    """Publish a whole JSONL file at once: tmp in the same dir, ``os.replace``.
+    """Publish a whole JSONL file at once.
 
     The other half of the ledger shape. ``append_jsonl`` extends a log that
     is its own history; this one republishes a derived index whose previous
     content is worthless, and a reader must never see it half-written.
+    Durability: atomic only -- a derived index is rebuilt from the sources
+    that outlive a crash.
     """
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=p.parent, prefix=p.name + ".", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            for record in records:
-                fh.write(
-                    json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n"
-                )
-        os.chmod(tmp, mode)
-        os.replace(tmp, p)
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+    body = "".join(
+        json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n"
+        for record in records
+    )
+    atomic_publish(p, body.encode("utf-8"), fsync=False, mode=mode)
