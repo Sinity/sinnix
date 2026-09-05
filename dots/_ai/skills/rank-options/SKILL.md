@@ -116,8 +116,9 @@ only for fixing the wording of an option that did not change.
 were never compared with each other, `evidence.connected` is false and
 `components` is greater than one. Items in different components have thetas
 anchored only to the model's virtual tie; ordering across them is not a
-result. `next` deliberately schedules cross-component comparisons, so the fix
-is to keep going, not to reinterpret the numbers.
+result. `next` answers a split domain with a cross-component pair — its
+`strategy` reads `bridge` — so the fix is to ask what it offers, not to
+reinterpret the numbers.
 
 **Interruption.** The store is append-only, so a pass that stops mid-way loses
 nothing. To resume, run `add` again with the same domain and the same ids (a
