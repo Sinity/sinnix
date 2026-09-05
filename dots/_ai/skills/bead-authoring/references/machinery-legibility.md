@@ -42,9 +42,8 @@ rewrites route to coordinator judgment.
    lives in another repository, the bead carries `owner:external-repo:<name>`
    (label) and either narrows to the in-repo surface or holds a blocks-edge
    to the tracked successor in the owning backend. Triage filters these out
-   of dispatch; a lane discovering external ownership is a filing defect,
-   not lane judgment. (Measured: 3 of 13 in pilot slice A — 2bc2/Beads,
-   unsjb/sinnixd, ux8oj/AgentCTL — each previously cost a dispatched lane.)
+   of dispatch; a worker discovering external ownership is a filing defect,
+   not worker judgment.
 
 ## Pre-check before dispatching triage
 

@@ -38,8 +38,7 @@ The corpus runs once at the master boundary through the descriptor's
 Every dispatch names backend, model, and effort explicitly; only forks inherit.
 Use another family when an independent failure mode is worth its cost, not as
 the default implementation route. Codex sessions: `gpt-5.6-luna` at high for
-the coordinating seat, `gpt-5.6-terra` at high for unattended workers;
-`gpt-5.5` is retired for new work.
+the coordinating seat, `gpt-5.6-terra` at high for unattended workers.
 
 Multi-model redundancy runs only on a predeclared trigger: irreversible
 action, destructive-data risk, no executable oracle, or concrete disagreement

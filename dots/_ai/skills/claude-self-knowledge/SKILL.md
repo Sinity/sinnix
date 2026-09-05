@@ -39,12 +39,7 @@ the territory.
   completion auto-notifies the parent (>=2.1.211) — never poll.
 - **Forks** (`/subtask`): inherit full conversation + system prompt + model
   (prompt-cache reuse); for context-heavy side-tasks; cannot nest.
-- **Agent teams**: DISABLED by operator decision (2026-08-25) — they were
-  used with no advantage over subagents and their idle teammates linger
-  (teammates also don't auto-deliver final reports: the silent-idle failure
-  mode). The env flag is removed from managed settings; sessions started
-  before the next activation may still have it. Use forks and ordinary
-  subagents.
+- **Agent teams**: disabled; use subagents.
 - **Agent definitions** (`.claude/agents/*.md`): body = the subagent's entire
   system prompt; frontmatter: `model`, `effort`, `tools`, `isolation:
 worktree`, `skills`, `memory`, `maxTurns`, hooks. Bake standing contracts
