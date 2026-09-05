@@ -87,6 +87,9 @@ class Rank:
             "record", domain, "--set", f"{left},{right}", "--winner", winner
         ).stdout.strip()
 
+    def next_set(self, domain: str, *flags: str) -> dict:
+        return json.loads(self.ok("next", domain, "--json", *flags).stdout)
+
     def status(self, domain: str, *flags: str) -> dict:
         return json.loads(
             self.ok("status", domain, "--json", "--seed", "7", *flags).stdout
@@ -240,6 +243,23 @@ def test_disconnected_evidence_is_reported_and_never_settled(rank: Rank):
     assert evidence["connected"] is False
     assert evidence["settled"] is False
     assert any("disconnected" in reason for reason in evidence["reasons"])
+
+
+def test_next_offers_a_cross_component_pair_while_the_evidence_is_split(rank: Rank):
+    """What the skill tells the agent to do about a split domain: keep asking
+    what `next` offers. Each `next` is its own process, so a bridge that only
+    came due on a later pick of one selector would never be offered at all."""
+    assert rank.add("bridged", FOUR_OPTIONS).returncode == 0
+    rank.record("bridged", "opt-hub-page", "opt-phone-deck", "opt-hub-page")
+    rank.record("bridged", "opt-cli-only", "opt-nothing", "opt-cli-only")
+
+    component = {
+        entry["id"]: entry["component"] for entry in rank.status("bridged")["items"]
+    }
+    for seed in ("1", "2", "3", "4", "5"):
+        offered = rank.next_set("bridged", "--seed", seed)
+        assert offered["strategy"] == "bridge"
+        assert len({component[entry["id"]] for entry in offered["set"]}) == 2
 
 
 def test_no_comparisons_is_reported_as_no_evidence(rank: Rank):

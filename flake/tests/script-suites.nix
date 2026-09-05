@@ -18,6 +18,10 @@
           name,
           suiteDir,
           scripts,
+          # Where the suite sits in the reproduced tree. A skill's tests
+          # resolve the repository root by walking up from their own file, so
+          # they only find the scripts they drive under their real path.
+          testsDir ? "pkgs/${name}/tests",
           # Sibling sources the suite imports directly (a collector module
           # inlined into a unit, for instance) must sit where the suite
           # expects them, next to its tests directory.
@@ -43,7 +47,7 @@
           }
           ''
             root="$TMPDIR/root"
-            mkdir -p "$root/scripts" "$root/pkgs/${name}/tests"
+            mkdir -p "$root/scripts" "$root/${testsDir}"
             ${builtins.concatStringsSep "\n" (
               map (script: ''
                 install -m 0755 ${../../scripts + "/${script}"} "$root/scripts/${script}"
@@ -61,9 +65,9 @@
                 cp ${entry.source} "$root/${entry.dest}"
               '') extraFiles
             )}
-            cp ${suiteDir}/*.py "$root/pkgs/${name}/tests/"
+            cp ${suiteDir}/*.py "$root/${testsDir}/"
             cd "$root"
-            HOME="$TMPDIR/home" python3 -m pytest -q "pkgs/${name}/tests"
+            HOME="$TMPDIR/home" python3 -m pytest -q "${testsDir}"
             touch "$out"
           '';
     in
@@ -157,6 +161,39 @@
           ];
           extraPythonPackages = [
             (pkgs.callPackage ../../pkgs/sinnix-rank-core/pkg.nix { })
+          ];
+        };
+        # The rank-options workflow, driven through the CLI the skill
+        # documents. Provably fails when: `add` stops refusing a reused
+        # identity, `status` stops reporting what the evidence does not
+        # support, `next` stops offering a cross-component pair while the
+        # comparisons are split, the skill leaves the installed roster, or
+        # option text reaches a tracked file.
+        rank-options-skill = mkScriptSuite {
+          name = "rank-options";
+          suiteDir = ../../dots/_ai/skills/rank-options/tests;
+          testsDir = "dots/_ai/skills/rank-options/tests";
+          scripts = [ "sinnix-rank" ];
+          extraPythonPackages = [
+            (pkgs.callPackage ../../pkgs/sinnix-rank-core/pkg.nix { })
+          ];
+          extraFiles = [
+            {
+              source = ../../dots/_ai/skills/rank-options/SKILL.md;
+              dest = "dots/_ai/skills/rank-options/SKILL.md";
+            }
+            {
+              source = ../../dots/_ai/skills/rank-options/fixtures/options.example.jsonl;
+              dest = "dots/_ai/skills/rank-options/fixtures/options.example.jsonl";
+            }
+            {
+              source = ../../dots/_ai/skills/skill-authoring/scripts/validate_skill.py;
+              dest = "dots/_ai/skills/skill-authoring/scripts/validate_skill.py";
+            }
+            {
+              source = ../../flake/data/shared-agent-skills.nix;
+              dest = "flake/data/shared-agent-skills.nix";
+            }
           ];
         };
       };
