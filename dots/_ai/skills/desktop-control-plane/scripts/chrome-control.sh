@@ -266,6 +266,9 @@ cdp_read_response() {
 }
 
 cdp_now_us() {
+  # EPOCHREALTIME follows LC_NUMERIC; a comma decimal separator would turn
+  # the arithmetic below into a comma expression.
+  local LC_ALL=C
   local seconds fraction
   seconds="${EPOCHREALTIME%%.*}"
   fraction="${EPOCHREALTIME#*.}000000"
