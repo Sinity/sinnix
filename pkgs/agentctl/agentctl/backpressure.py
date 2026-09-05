@@ -15,10 +15,8 @@ from typing import Mapping, Sequence
 from . import pueue
 from .pueue import PueueError
 
-# Measured 2026-09-02 12:29Z: io full avg10 reached 76% under eight concurrent
-# normal-pool jobs, against single digits on an idle host. 25% was the point
-# where new work stopped being admitted, and it is the point where the queue
-# now freezes instead.
+# Eight concurrent normal-pool jobs drive io full avg10 past 75%; at 25% new
+# work stops being admitted, so that is where the queue freezes.
 IO_FULL_FREEZE = 25.0
 
 # systemd-oomd on this host kills at memory full 50% sustained 30s. Freezing at
@@ -41,8 +39,10 @@ CLOSE_ORDER = {
 MANAGED_GROUPS = ("agent", "pytest", "normal", "bulk")
 
 # Every pause this module records names itself, and `tick` reopens only a
-# group whose most recent pause event is its own: an operator's
-# `pueue pause -g X` leaves no event and stays paused until the operator says.
+# group whose most recent pause event is its own and that has not run since:
+# an operator's `pueue pause -g X` leaves no event and stays paused until the
+# operator says, and a group seen running after our pause was released by
+# the operator, so a later pause of theirs is theirs too.
 OWNER = "agentctl"
 
 
@@ -142,7 +142,7 @@ def paused_by_us(spool: Path | None) -> set[str]:
             continue
         if event.get("action") == "closed":
             latest[group] = event.get("owner") == OWNER
-        elif event.get("action") == "opened":
+        elif event.get("action") in {"opened", "released"}:
             latest.pop(group, None)
     return {group for group, ours in latest.items() if ours}
 
@@ -161,6 +161,12 @@ def tick(*, spool: Path | None, pressure_root: Path = Path("/proc/pressure")) ->
 
     desired_paused = _desired_paused(pressure, paused)
     ours = paused_by_us(spool)
+    # A group running while the spool says we paused it was started by the
+    # operator; record the release so a later operator pause is not reopened.
+    for name in sorted(ours):
+        if groups.get(name) == "Running":
+            _append(spool, {"action": "released", "group": name})
+            ours.discard(name)
     obsolete = [name for name in paused if name not in desired_paused and name in ours]
     if obsolete:
         target = obsolete[0]
