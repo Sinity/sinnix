@@ -34,6 +34,9 @@ MAX_SUBJECT_LENGTH = 72
 DEFAULT_BACKEND = "codex"
 DEFAULT_MODEL = "gpt-5.6-luna"
 DEFAULT_EFFORT = "medium"
+# The reasoning efforts every backend adapter accepts; the runner script
+# checks the same set.
+EFFORT = re.compile(r"^(low|medium|high|xhigh)$")
 DEFAULT_TEMPLATE_RELATIVE_PATH = (
     "dots/_ai/skills/orchestrate/references/worker-contract.md"
 )
@@ -80,6 +83,14 @@ UNTRUSTED_JSON_PREAMBLE = (
 
 class PromptError(ValueError):
     """A prompt cannot be compiled or dispatched safely."""
+
+
+def validate_effort(value: str) -> str:
+    if EFFORT.fullmatch(value) is None:
+        raise PromptError(
+            f"effort must be one of low, medium, high, xhigh; got {value!r}"
+        )
+    return value
 
 
 class BdReader(Protocol):
@@ -512,7 +523,7 @@ def _policy_dimensions(
         template_version=config.template_version,
         backend=effective_backend,
         model=effective_model,
-        effort=effort or declared_effort,
+        effort=validate_effort(effort or declared_effort),
         model_policy=policy_name,
         verification_commands=values("verification_commands"),
         affected_paths=values("affected_paths"),

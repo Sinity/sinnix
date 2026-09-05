@@ -139,9 +139,15 @@ def test_write_schema_round_trips_the_embedded_document(tmp_path: Path) -> None:
 )
 @pytest.mark.parametrize("kind", ["worker", "judge"])
 def test_embedded_schemas_match_the_agent_schema_files(kind: str) -> None:
-    """Breaks if either copy of a schema is edited without the other."""
+    """Breaks if either copy of a schema is edited without the other, or a
+    `$schema` key returns: `claude --json-schema` rejects it."""
     on_disk = json.loads((SCHEMA_DIR / f"{kind}.schema.json").read_text())
     assert on_disk == results.SCHEMAS[kind]
+    assert "$schema" not in on_disk
+
+
+def test_no_embedded_schema_carries_a_dollar_schema_key() -> None:
+    assert all("$schema" not in schema for schema in results.SCHEMAS.values())
 
 
 def test_satisfied_beads_needs_every_criterion_across_every_result() -> None:

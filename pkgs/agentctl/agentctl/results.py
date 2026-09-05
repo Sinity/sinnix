@@ -3,7 +3,8 @@
 Both schemas live beside the agent definitions
 (`dots/claude/agents/schemas/*.schema.json`) for the backends' structured
 output flags; the same documents are embedded here so validation needs no
-checkout. The validator covers the JSON Schema subset those documents use:
+checkout. Neither carries a `$schema` key: `claude --json-schema` rejects
+it. The validator covers the JSON Schema subset those documents use:
 object/array/string/number/boolean types, required, additionalProperties,
 enum, pattern, minItems, minLength, minimum and maximum.
 """
@@ -18,7 +19,6 @@ from typing import Any, Mapping, Sequence
 SHA_PATTERN = "^[0-9a-f]{40}$"
 
 WORKER_SCHEMA: dict[str, Any] = {
-    "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
     "additionalProperties": False,
     "required": ["candidate_sha", "beads", "unresolved", "verification"],
@@ -69,7 +69,6 @@ WORKER_SCHEMA: dict[str, Any] = {
 }
 
 JUDGE_SCHEMA: dict[str, Any] = {
-    "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
     "additionalProperties": False,
     "required": [
