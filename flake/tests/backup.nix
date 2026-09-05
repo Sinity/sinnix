@@ -392,6 +392,78 @@ in
             }
           ];
 
+      # The stale-lock guard, driven through the drain job's own call site.
+      # The snapshot directory stays empty, so the drain reaches the guard and
+      # then has nothing left to archive.
+      liveHolderLockScript =
+        rewriteBackupHook backupRuntimeEval.config.systemd.services.borgbackup-job-realm.script
+          [
+            {
+              from = "/outer-realm/backup/borg-realm-v2";
+              to = "$TMPDIR/live-holder/repo";
+            }
+            {
+              from = "/persist/root/.cache/borg-drain";
+              to = "$TMPDIR/live-holder/drain-state";
+            }
+            {
+              from = "/persist/root/.cache/borg";
+              to = "$TMPDIR/live-holder/cache";
+            }
+            {
+              from = "/run/lock/sinnix-borg.lock";
+              to = "$TMPDIR/live-holder/global.lock";
+            }
+            {
+              from = "install -d -m 0700 -o root -g root";
+              to = "install -d -m 0700";
+            }
+            {
+              from = "install -d -m 0755 -o root -g root";
+              to = "install -d -m 0755";
+            }
+            {
+              from = "${pkgs.util-linux}/bin/mountpoint";
+              to = "$TMPDIR/mock-bin/mountpoint";
+            }
+            {
+              from = "${pkgs.util-linux}/bin/umount";
+              to = "$TMPDIR/mock-bin/umount";
+            }
+            {
+              from = "${pkgs.util-linux}/bin/mount";
+              to = "$TMPDIR/mock-bin/mount";
+            }
+            {
+              from = "/realm/.btrfs/snapshot";
+              to = "$TMPDIR/live-holder/snapshots";
+            }
+            {
+              from = "/run/borgbackup-snapshot-inputs/realm";
+              to = "$TMPDIR/live-holder/bind";
+            }
+          ];
+
+      # The same guard through the maintenance job's call site, which passes
+      # the repository as an argument. Only the realm repository is created,
+      # so the other four are skipped as uninitialized.
+      deadHolderLockScript =
+        rewriteBackupHook backupRuntimeEval.config.systemd.services.borgbackup-maintenance.script
+          [
+            {
+              from = "/outer-realm/backup";
+              to = "$TMPDIR/dead-holder/repos";
+            }
+            {
+              from = "/persist/root/.cache/borg";
+              to = "$TMPDIR/dead-holder/cache";
+            }
+            {
+              from = "/run/lock/sinnix-borg.lock";
+              to = "$TMPDIR/dead-holder/global.lock";
+            }
+          ];
+
       backupBorgHookRuntime = mkRuntimeCheck system {
         name = "backup-borg-hook-runtime-check";
         nativeBuildInputs = [
@@ -551,6 +623,11 @@ in
               fi
               ;;
             break-lock)
+              repo="''${@: -1}"
+              repo_path="''${repo#file://}"
+              rm -rf "$repo_path/lock.exclusive"
+              ;;
+            prune | compact)
               ;;
             *)
               echo "unexpected borg command: $*" >&2
@@ -569,11 +646,6 @@ in
           fi
           echo "unexpected btrfs command: $*" >&2
           exit 64
-          EOF
-
-          cat > "$TMPDIR/mock-bin/pgrep" <<'EOF'
-          #!${pkgs.bash}/bin/bash
-          exit 1
           EOF
 
           cat > "$TMPDIR/mock-bin/git" <<'EOF'
@@ -601,7 +673,6 @@ in
             "$TMPDIR/mock-bin/umount" \
             "$TMPDIR/mock-bin/borg" \
             "$TMPDIR/mock-bin/btrfs" \
-            "$TMPDIR/mock-bin/pgrep" \
             "$TMPDIR/mock-bin/git" \
             "$TMPDIR/mock-bin/dolt"
 
@@ -653,6 +724,18 @@ in
           ${sinexBeadsDrillScript}
           EOF
 
+          cat > "$TMPDIR/run-live-holder-lock.sh" <<'EOF'
+          #!${pkgs.bash}/bin/bash
+          set -euo pipefail
+          ${liveHolderLockScript}
+          EOF
+
+          cat > "$TMPDIR/run-dead-holder-lock.sh" <<'EOF'
+          #!${pkgs.bash}/bin/bash
+          set -euo pipefail
+          ${deadHolderLockScript}
+          EOF
+
           cat > "$TMPDIR/run-polylogue-state-backup.sh" <<'EOF'
           #!${pkgs.bash}/bin/bash
           set -euo pipefail
@@ -665,7 +748,9 @@ in
             "$TMPDIR/run-missing-realm-hook.sh" \
             "$TMPDIR/run-sinex-blob-backup.sh" \
             "$TMPDIR/run-sinex-beads-drill.sh" \
-            "$TMPDIR/run-polylogue-state-backup.sh"
+            "$TMPDIR/run-polylogue-state-backup.sh" \
+            "$TMPDIR/run-live-holder-lock.sh" \
+            "$TMPDIR/run-dead-holder-lock.sh"
 
           "$TMPDIR/run-realm-hook.sh"
           "$TMPDIR/run-persist-hook.sh"
@@ -745,6 +830,82 @@ in
             .dolt_commit == "synthetic-dolt-commit" and
             .ok == true
           ' "$beads_drill_log" >/dev/null
+
+          # A repository lock is broken on the evidence Borg itself writes:
+          # one empty file per holder inside lock.exclusive, named
+          # "<hostid>.<pid>-<threadid>". The live holder here carries the comm
+          # of the wrapped Borg binary, which is what production runs.
+          mkdir -p \
+            "$TMPDIR/live-holder/repo" \
+            "$TMPDIR/live-holder/snapshots" \
+            "$TMPDIR/dead-holder/repos/borg-realm-v2"
+          touch \
+            "$TMPDIR/live-holder/repo/config" \
+            "$TMPDIR/dead-holder/repos/borg-realm-v2/config"
+
+          # The trailing `true` keeps the holder in its own process: bash execs
+          # a lone final command in place, which would rename it to `sleep`.
+          cp "$(command -v bash)" "$TMPDIR/mock-bin/.borg-wrapped"
+          "$TMPDIR/mock-bin/.borg-wrapped" \
+            -c 'touch "$TMPDIR/live-holder.ready"; sleep 600; true' \
+            </dev/null >/dev/null 2>&1 &
+          live_holder_pid=$!
+          # The marker is written after the holder has replaced its image, so
+          # its name is settled before anything reads it.
+          for _ in $(seq 100); do
+            if [ -e "$TMPDIR/live-holder.ready" ]; then
+              break
+            fi
+            sleep 0.1
+          done
+          test "$(cat "/proc/$live_holder_pid/comm")" = .borg-wrapped
+
+          "$TMPDIR/mock-bin/.borg-wrapped" -c 'exit 0' &
+          dead_holder_pid=$!
+          wait "$dead_holder_pid"
+          if [ -e "/proc/$dead_holder_pid" ]; then
+            echo "the dead-holder case needs a pid that is really gone" >&2
+            exit 1
+          fi
+
+          # Past the staleness threshold, and with a host id whose node
+          # component matches nothing on this machine -- Borg's own node id is
+          # not stable, so only the hostname in front of it may be compared.
+          stale_mtime="$(date -d '-5 hours' +%Y%m%d%H%M)"
+          live_holder="$(uname -n)@281474976710655.$live_holder_pid-0"
+          dead_holder="$(uname -n)@281474976710655.$dead_holder_pid-0"
+          mkdir -p "$TMPDIR/live-holder/repo/lock.exclusive"
+          touch "$TMPDIR/live-holder/repo/lock.exclusive/$live_holder"
+          touch -t "$stale_mtime" "$TMPDIR/live-holder/repo/lock.exclusive"
+          mkdir -p "$TMPDIR/dead-holder/repos/borg-realm-v2/lock.exclusive"
+          touch "$TMPDIR/dead-holder/repos/borg-realm-v2/lock.exclusive/$dead_holder"
+          touch -t "$stale_mtime" "$TMPDIR/dead-holder/repos/borg-realm-v2/lock.exclusive"
+
+          "$TMPDIR/run-live-holder-lock.sh" > "$TMPDIR/live-holder.log" 2>&1
+          "$TMPDIR/run-dead-holder-lock.sh" > "$TMPDIR/dead-holder.log" 2>&1
+          kill "$live_holder_pid"
+
+          if grep -q "break-lock file://$TMPDIR/live-holder/repo" "$TMPDIR/logs/borg.log"; then
+            echo "the guard broke a repository lock whose recorded holder was running" >&2
+            exit 1
+          fi
+          if [ ! -d "$TMPDIR/live-holder/repo/lock.exclusive" ]; then
+            echo "the live holder's lock directory did not survive the drain" >&2
+            exit 1
+          fi
+          if ! grep -q "is held by $live_holder; refusing break-lock" "$TMPDIR/live-holder.log"; then
+            echo "the guard did not name the recorded holder it refused to evict" >&2
+            exit 1
+          fi
+
+          if ! grep -q "break-lock file://$TMPDIR/dead-holder/repos/borg-realm-v2" "$TMPDIR/logs/borg.log"; then
+            echo "a stale lock whose recorded holder is gone was never handed to break-lock" >&2
+            exit 1
+          fi
+          if [ -d "$TMPDIR/dead-holder/repos/borg-realm-v2/lock.exclusive" ]; then
+            echo "a stale lock whose recorded holder is gone was not broken" >&2
+            exit 1
+          fi
 
           set +e
           "$TMPDIR/run-missing-realm-hook.sh" > "$TMPDIR/missing-realm.log" 2>&1
