@@ -443,10 +443,6 @@ mkServiceModule {
           machine-telemetry-sqlite-backup = {
             unit = "machine-telemetry-sqlite-backup.service";
             resourceClass = "backup-maintenance";
-            resources = {
-              MemoryHigh = "2G";
-              MemoryMax = "4G";
-            };
             observe.enable = true;
           };
           machine-telemetry-sqlite-backup-timer = {
