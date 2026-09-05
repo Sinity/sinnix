@@ -141,6 +141,19 @@
             }
           ];
         };
+        # Provably fails when: elicit's fit stops reproducing the model its
+        # live domains were ranked under (ties, choice sets, item priors, ids
+        # the roster no longer carries), or `ingest` stops recognising a
+        # tombstoned record as one it has already seen and re-imports every
+        # undone judgment on every drain.
+        elicit-suite = mkScriptSuite {
+          name = "sinnix-elicit";
+          suiteDir = ../../pkgs/sinnix-elicit/tests;
+          scripts = [ "sinnix-elicit" ];
+          extraPythonPackages = [
+            (pkgs.callPackage ../../pkgs/sinnix-rank-core/pkg.nix { })
+          ];
+        };
       };
     };
 }
