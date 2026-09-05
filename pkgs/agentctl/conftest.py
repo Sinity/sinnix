@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 import pytest
+from agentctl import launch as launch_module
 from agentctl import pueue as pueue_module
 from agentctl.config import Config
 from agentctl.packets import PacketError
@@ -226,6 +227,12 @@ def fake_pueue(monkeypatch: pytest.MonkeyPatch) -> FakePueue:
         monkeypatch.setattr(pueue_module, name, getattr(fake, name))
     monkeypatch.setattr(pueue_module, "groups", lambda: dict(fake.groups))
     return fake
+
+
+@pytest.fixture(autouse=True)
+def _no_cancel_settle_wait(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A fake task never exits on its own; tests of the wait pass their own."""
+    monkeypatch.setattr(launch_module, "CANCEL_SETTLE_SECONDS", 0.0)
 
 
 @pytest.fixture(autouse=True)

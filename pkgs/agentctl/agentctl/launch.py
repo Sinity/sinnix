@@ -20,7 +20,7 @@ import subprocess
 import time
 import uuid
 from pathlib import Path, PurePosixPath
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from . import pueue
 from .config import Config
@@ -50,6 +50,10 @@ MAX_LAUNCH_INPUT_BYTES = 1_048_576
 _RESULT_KINDS = {"exit": "exit", "json": "json", "pytest": "pytest"}
 # The label kinds under which a batch queues agents rather than declared operations.
 AGENT_OPERATIONS = frozenset({"worker", "resume", "integrate", "review"})
+# How long a cancel waits for the wrapper to record `cancelled` after its
+# unit is stopped before pueue kills the wrapper outright.
+CANCEL_SETTLE_SECONDS = 15.0
+CANCEL_POLL_SECONDS = 0.5
 
 
 class JobError(RuntimeError):
@@ -223,6 +227,12 @@ def enqueue(
     except PueueError:
         input_path.unlink(missing_ok=True)
         raise
+    # The task id goes back into the input so its artifacts can be found
+    # after pueue has forgotten the task.
+    launch["queue_task_id"] = task_id
+    _write_private(
+        input_path, json.dumps(launch, sort_keys=True, separators=(",", ":")).encode()
+    )
     task = pueue.task(task_id)
     return job_view(task) if task is not None else {"job_id": task_id, "label": label}
 
@@ -598,14 +608,25 @@ def _unit_active(unit: str) -> bool:
     return completed.returncode == 0
 
 
-def cancel(config: Config, task_id: int) -> dict[str, Any]:
+def cancel(
+    config: Config,
+    task_id: int,
+    *,
+    settle_seconds: float | None = None,
+    sleep: Callable[[float], None] = time.sleep,
+) -> dict[str, Any]:
     """Make the task not run: drop it while queued, stop its unit while running.
 
-    pueue kills the wrapper with SIGKILL, which stops nothing inside the unit,
-    so the unit is stopped first. `systemctl stop` ends the wrapper's wait with
-    a success status, which is why the cancel marker is written before it: the
-    wrapper reports `cancelled` when it finds one.
+    pueue kills the wrapper with SIGKILL, which stops nothing inside the unit
+    and leaves no outcome record, so the unit is stopped first and the
+    wrapper is given ``settle_seconds`` to record `cancelled` and exit on its
+    own; only a wrapper still running after that is killed. `systemctl stop`
+    ends the wrapper's wait with a success status, which is why the cancel
+    marker is written before it: the wrapper reports `cancelled` when it
+    finds one, and consumes the marker.
     """
+    if settle_seconds is None:
+        settle_seconds = CANCEL_SETTLE_SECONDS
     task = _task(task_id)
     view = job_view(task)
     if task.terminal:
@@ -613,15 +634,18 @@ def cancel(config: Config, task_id: int) -> dict[str, Any]:
     if task.started_at is None:
         try:
             pueue.remove([task_id])
+        except PueueError:
+            task = _task(task_id)
+        else:
+            removed = _unlink_all(_own_artifacts(config, task))
             return {
                 **view,
                 "phase": "cancelled",
                 "terminal": True,
                 "state": "removed",
                 "unit": None,
+                "removed": removed,
             }
-        except PueueError:
-            task = _task(task_id)
     unit = unit_of(task)
     log = _artifact(config, task, ".log")
     if log is not None:
@@ -636,18 +660,36 @@ def cancel(config: Config, task_id: int) -> dict[str, Any]:
             timeout=60,
             env=systemd_environment(),
         )
-    try:
-        pueue.kill(task_id)
-    except PueueError:
-        # The wrapper may already have returned once its unit stopped.
-        pass
-    state = "failed" if unit is not None and _unit_active(unit) else "stopped"
+    deadline = time.monotonic() + settle_seconds
     current = pueue.task(task_id)
+    while current is not None and not current.terminal:
+        if time.monotonic() >= deadline:
+            try:
+                pueue.kill(task_id)
+            except PueueError:
+                pass
+            current = pueue.task(task_id)
+            break
+        sleep(CANCEL_POLL_SECONDS)
+        current = pueue.task(task_id)
+    state = "failed" if unit is not None and _unit_active(unit) else "stopped"
     return {
         **(job_view(current) if current is not None else view),
         "state": state,
         "unit": unit,
+        **_outcome(config, current if current is not None else task),
     }
+
+
+def _unlink_all(paths: Sequence[Path]) -> list[str]:
+    removed = []
+    for path in paths:
+        try:
+            path.unlink()
+            removed.append(str(path))
+        except OSError:
+            continue
+    return removed
 
 
 def _own_artifacts(config: Config, task: Task) -> list[Path]:
@@ -666,21 +708,50 @@ def _own_artifacts(config: Config, task: Task) -> list[Path]:
 
 
 def clean(config: Config, task_id: int) -> dict[str, Any]:
-    """Delete a terminal task and its artifacts. Ownership, never age."""
-    task = _task(task_id)
+    """Delete a terminal task and its artifacts. Ownership, never age.
+
+    A task pueue no longer knows is cleaned by the artifacts its launch
+    input under the state directory still names.
+    """
+    task = pueue.task(task_id)
+    if task is None:
+        removed = _unlink_all(_orphaned_artifacts(config, task_id))
+        if not removed:
+            raise JobError(f"pueue has no task {task_id}")
+        return {"job_id": task_id, "cleaned": True, "removed": removed}
     if not task.terminal:
         raise JobError(
             f"task {task_id} is still {task.status.lower()}; cancel it first"
         )
-    removed = []
-    for path in _own_artifacts(config, task):
-        try:
-            path.unlink()
-            removed.append(str(path))
-        except OSError:
-            continue
+    removed = _unlink_all(_own_artifacts(config, task))
     pueue.remove([task_id])
     return {**job_view(task), "cleaned": True, "removed": removed}
+
+
+def _orphaned_artifacts(config: Config, task_id: int) -> list[Path]:
+    """The artifacts of the launch input under inputs/ that names ``task_id``."""
+    if not config.inputs_dir.is_dir():
+        return []
+    for input_path in sorted(config.inputs_dir.glob("*.json")):
+        raw = read_bounded(input_path, MAX_LAUNCH_INPUT_BYTES)
+        try:
+            value = json.loads(raw.decode("utf-8")) if raw else None
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        if not isinstance(value, dict) or value.get("queue_task_id") != task_id:
+            continue
+        paths = [input_path]
+        for key in ("log_path", "result_path"):
+            declared = value.get(key)
+            if isinstance(declared, str) and declared:
+                path = Path(declared)
+                if path.resolve().is_relative_to(config.state_dir.resolve()):
+                    paths.append(path)
+        log = value.get("log_path")
+        if isinstance(log, str) and log:
+            paths.extend((cancel_marker_for(log), outcome_path_for(log)))
+        return paths
+    return []
 
 
 def clean_terminal(config: Config) -> list[dict[str, Any]]:
@@ -692,10 +763,13 @@ def clean_terminal(config: Config) -> list[dict[str, Any]]:
     ]
 
 
-# State the daemon wrote and no verb reads. Present only on a host whose
-# state directory predates the in-process CLI.
+# State under the state directory that no verb reads.
 DAEMON_ERA_PATHS = (
     "active-jobs.json",
+    "schedules.json",
+    "logs",
+    "results",
+    "jobs-archive",
     "active-jobs.lock",
     "admission.json",
     "capacity.json",
