@@ -42,7 +42,12 @@ from .github import GithubError
 from .launch import JobError
 from .operator_view import age, local_clock, table
 from .packets import PacketError
-from .projects import ProjectAdapter, ProjectConfigError, ProjectEnvironmentError
+from .projects import (
+    ProjectAdapter,
+    ProjectConfigError,
+    ProjectEnvironmentError,
+    ProjectOperation,
+)
 from .pueue import PueueError
 from .schedule import TimerError
 from .worktrunk import WorktrunkError
@@ -65,7 +70,6 @@ _REFUSALS = (
     PacketError,
     ProjectConfigError,
     ProjectEnvironmentError,
-    KeyError,
 )
 _SUBSTRATE_ERRORS = (BatchError, GithubError, PueueError, TimerError, WorktrunkError)
 
@@ -385,13 +389,20 @@ def _select_project(
     return resolve_project(config, explicit or selector)
 
 
+def _operation(project: ProjectAdapter, name: str) -> ProjectOperation:
+    try:
+        return project.operation(name)
+    except KeyError as error:
+        raise JobError(str(error.args[0])) from error
+
+
 def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
     verb = arguments.job_verb
     if verb == "start":
         project, rest = _split_target(config, arguments.project, arguments.target)
         if not rest:
             raise JobError("job start needs an operation")
-        operation = project.operation(rest[0])
+        operation = _operation(project, rest[0])
         started = launch.start_operation(
             config,
             project,
@@ -415,7 +426,7 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         project, rest = _split_target(config, arguments.project, arguments.target)
         if len(rest) != 1:
             raise JobError("job fire needs exactly one operation")
-        fired = launch.fire(config, project, project.operation(rest[0]))
+        fired = launch.fire(config, project, _operation(project, rest[0]))
         text = (
             out.job_line(fired)
             if fired.get("fired")
@@ -740,10 +751,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         config = load_config(arguments.config)
         return _dispatch(arguments, config, out)
     except _REFUSALS as error:
-        message = (
-            error.args[0] if isinstance(error, KeyError) and error.args else str(error)
-        )
-        print(f"agentctl: {message}", file=sys.stderr)
+        print(f"agentctl: {error}", file=sys.stderr)
         return EXIT_REFUSED
     except _SUBSTRATE_ERRORS as error:
         print(f"agentctl: {error}", file=sys.stderr)
