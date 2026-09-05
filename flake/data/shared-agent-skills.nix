@@ -21,6 +21,7 @@
   "orchestrate"
   "polylogue"
   "prompting"
+  "rank-options"
   "recap"
   "review-land"
   "skill-authoring"
