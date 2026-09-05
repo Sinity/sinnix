@@ -28,7 +28,10 @@ names, and exits with one result document.
 4. **Do not publish, do not claim beads.** No push, no PR, no merge, no
    rebase onto a newer base, no rebuild of the host. No `bd update`,
    `claim`, `close` or `comment`: `batch start` claimed the beads and
-   `batch land` closes them from the acceptance record.
+   `batch land` closes them from the acceptance record. The unit enforces
+   this: `git push` has no reachable remote, no credential is forwarded,
+   `bd` is read-only, the project checkout is read-only and the other
+   workers' worktrees are inaccessible.
 5. **No scope expansion.** Discoveries go into `unresolved`, never into
    extra work.
 6. **Exit with a clean tree and the result document.** The final message is

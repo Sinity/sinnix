@@ -120,9 +120,10 @@ from `PUEUE_GROUP`, so a repository that queues `agentctl-run` with its own
 launch input is contained and cancelled identically. `unit_properties` in
 a launch input are `systemd-run -p` settings on that unit, restricted to
 the ones that bound what the task may consume (`MemoryMax`, `MemoryHigh`,
-`MemorySwapMax`, `MemoryZSwapMax`, `TasksMax`, `CPUWeight`, `IOWeight`),
-and a launch must not start a unit of its own: it would land outside the
-task's cgroup, where a cancel cannot reach it. `agentctl.slice` and
+`MemorySwapMax`, `MemoryZSwapMax`, `TasksMax`, `CPUWeight`, `IOWeight`) or
+reach (`ReadOnlyPaths`, `ReadWritePaths`, `InaccessiblePaths`, one absolute
+path each), and a launch must not start a unit of its own: it would land
+outside the task's cgroup, where a cancel cannot reach it. `agentctl.slice` and
 `agentctl-agent.slice` are never systemd-oomd or swap victims; the pytest
 and bulk slices have fixed memory, swap, CPU and IO budgets,
 `MemorySwapMax=0`, and are killed by systemd-oomd at their own memory
@@ -151,9 +152,9 @@ and runs with `GIT_OPTIONAL_LOCKS=0`.
 
 A batch is several workers on one base commit, landed as one candidate.
 Its inputs and outcomes live in one run manifest,
-`$XDG_STATE_HOME/agentctl/runs/<run-id>.json`, written once by
-`batch start` and appended with worker results, landing state and the
-acceptance record. pueue holds the live task state, Beads the claims,
+`$XDG_STATE_HOME/agentctl/runs/<run-id>.json` (mode 0600 in a 0700
+directory), written once by `batch start` and appended with worker
+results, landing state and the acceptance record. pueue holds the live task state, Beads the claims,
 worktrunk the worktrees, GitHub the PR; the manifest is not a database.
 
 ### The manifest
@@ -220,6 +221,17 @@ landing task's dependency does not release. Backend, model and effort come from 
 the bead's `model_policy` metadata, or the descriptor's `[packets.defaults]`.
 The environment carries `BEADS_ACTOR` set to the task label with `:`
 replaced by `-`; agent jobs cap at four hours.
+
+Worker, resume and review units cannot publish or mutate tasks: their
+environment sets `remote.origin.pushurl=/nonexistent` and an empty
+`credential.helper` through `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_n`/
+`GIT_CONFIG_VALUE_n`, drops `SSH_AUTH_SOCK`, sets `GH_TOKEN` empty, and
+puts `$XDG_STATE_HOME/agentctl/shims` first on `PATH`, whose `bd` execs
+`bd --readonly`. Integration and landing tasks keep the real environment.
+Every agent unit runs with `ReadOnlyPaths=<project root>`,
+`ReadWritePaths=<project root>/.git` and `InaccessiblePaths=` for the
+run's other worker worktrees (all worker worktrees for the reviewer and
+integrator).
 
 The packet is a JSON snapshot followed by the worker contract. The snapshot
 carries the beads without their owner, author, timestamps or counters, the

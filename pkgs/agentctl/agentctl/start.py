@@ -12,6 +12,7 @@ from .agents import (
     WORKTREE_STATE_DIR,
     binding,
     landing_group,
+    other_worktrees,
     queue_agent,
     queue_landing,
     result_path,
@@ -214,6 +215,7 @@ def _prepare(
                 schema="worker",
                 then=worker_then(config, run.run_id, worker_id, result_path(path)),
                 binding=binding(run, worker_id),
+                inaccessible=other_worktrees(project, run, worker_id),
             )
             run = set_worker(config, run.run_id, index, task_id=job["job_id"])
     if run.landing.get("task_id") is None:
@@ -557,6 +559,7 @@ def resume(
         schema="worker",
         then=worker_then(config, run_id, worker_id, resume_result),
         binding=binding(run, worker_id),
+        inaccessible=other_worktrees(project, run, worker_id),
     )
     task_id = job["job_id"]
 

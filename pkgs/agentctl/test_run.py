@@ -297,6 +297,30 @@ def test_unit_properties_bound_the_task_unit_itself(
         assert argv.index(setting) < argv.index("--")
 
 
+def test_path_properties_bound_what_the_unit_can_reach(
+    tmp_path: Path, fake_systemd: FakeSystemd, fake_pueue: FakePueue
+) -> None:
+    launch = write_launch(
+        tmp_path,
+        pool="agent",
+        unit_properties=[
+            "ReadOnlyPaths=/realm/project/x",
+            "ReadWritePaths=/realm/project/x/.git",
+            "InaccessiblePaths=-/realm/worktrees/x-other",
+        ],
+    )
+
+    assert main([str(launch)]) == 0
+
+    argv = fake_systemd.run_argv()
+    for setting in (
+        "ReadOnlyPaths=/realm/project/x",
+        "ReadWritePaths=/realm/project/x/.git",
+        "InaccessiblePaths=-/realm/worktrees/x-other",
+    ):
+        assert argv[argv.index(setting) - 1] == "-p"
+
+
 @pytest.mark.parametrize(
     "setting",
     [
@@ -305,6 +329,9 @@ def test_unit_properties_bound_the_task_unit_itself(
         "User=root",
         "Delegate=yes",
         "MemoryMax=; rm -rf /",
+        "ReadOnlyPaths=relative/path",
+        "InaccessiblePaths=/a /b",
+        "BindPaths=/realm/project/x",
     ],
 )
 def test_a_property_that_does_not_bound_the_task_is_refused(

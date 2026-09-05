@@ -12,6 +12,7 @@ from .agents import (
     PUSH_TIMEOUT_SECONDS,
     WORKTREE_STATE_DIR,
     binding,
+    other_worktrees,
     queue_agent,
     workspace_of,
     worktree_path,
@@ -178,6 +179,7 @@ def _integrate(
             prompt_name="integrate.md",
             **_review_agent(project, run),
             binding=binding(run, None),
+            inaccessible=other_worktrees(project, run, None),
         )
         waited = launch.wait(job["job_id"], timeout_seconds=MAX_AGENT_TIMEOUT_SECONDS)
         if waited.get("phase") != "succeeded":
@@ -455,6 +457,7 @@ def _review(
         **_review_agent(project, run),
         schema="judge",
         binding=binding(run, None),
+        inaccessible=other_worktrees(project, run, None),
     )
     waited = launch.wait(job["job_id"], timeout_seconds=MAX_AGENT_TIMEOUT_SECONDS)
     if waited.get("phase") != "succeeded":
