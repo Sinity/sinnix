@@ -1,8 +1,7 @@
 """The live plane: the Unix-socket HTTP API, the `serve` command that starts
 it alongside the phone-stream receiver, and the sd_notify/watchdog wiring
-systemd's Type=simple + NotifyAccess=main + WatchdogSec expects (same
-mechanism as sinnix-ops-reducer's server.py -- no libsystemd, a datagram to
-$NOTIFY_SOCKET)."""
+systemd's Type=simple + NotifyAccess=main + WatchdogSec expects
+(sinnix_lib.systemd: no libsystemd, a datagram to $NOTIFY_SOCKET)."""
 
 from __future__ import annotations
 
@@ -11,7 +10,6 @@ import hashlib
 import json
 import os
 import signal
-import socket
 import socketserver
 import sys
 import threading
@@ -22,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from sinnix_lib.ledger import utc_ts
+from sinnix_lib.systemd import sd_notify, watchdog_period
 
 from .execute import execute
 from .glance import build_glance, build_jobs, build_steering
@@ -199,30 +198,6 @@ class UnixHTTPServer(socketserver.ThreadingUnixStreamServer):
         return request, ("unix", 0)
 
 
-def notify_systemd(message: str) -> None:
-    """sd_notify without libsystemd: it is a datagram to $NOTIFY_SOCKET."""
-    address = os.environ.get("NOTIFY_SOCKET")
-    if not address:
-        return
-    if address.startswith("@"):  # abstract namespace
-        address = "\0" + address[1:]
-    try:
-        with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as sock:
-            sock.connect(address)
-            sock.sendall(message.encode())
-    except OSError:
-        return
-
-
-def watchdog_period() -> float:
-    """Half of WatchdogSec, systemd's own recommended keepalive interval."""
-    try:
-        usec = int(os.environ.get("WATCHDOG_USEC", "0"))
-    except ValueError:
-        return 0.0
-    return usec / 2_000_000 if usec > 0 else 0.0
-
-
 def cmd_serve(args: argparse.Namespace) -> int:
     ensure_dirs()
     sock_path = Path(args.socket)
@@ -270,7 +245,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
     server_thread.start()
     print(f"serving on {sock_path}", file=sys.stderr)
 
-    notify_systemd("READY=1")
+    sd_notify("READY=1")
     watchdog = watchdog_period()
     try:
         while not shutdown_event.is_set():
@@ -280,7 +255,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
             # would defeat that.
             shutdown_event.wait(timeout=watchdog if watchdog else 5.0)
             if watchdog and not shutdown_event.is_set():
-                notify_systemd("WATCHDOG=1")
+                sd_notify("WATCHDOG=1")
     finally:
         server.shutdown()
         server_thread.join()

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import secrets
 import socket
 import sys
@@ -12,6 +11,8 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+
+from sinnix_lib.systemd import sd_notify, watchdog_period
 
 from . import capabilities, health, pages, terminals
 from .actions import ActionError, ActionService
@@ -577,30 +578,6 @@ class Handler(BaseHTTPRequestHandler):
         return
 
 
-def notify_systemd(message: str) -> None:
-    """sd_notify without libsystemd: it is a datagram to $NOTIFY_SOCKET."""
-    address = os.environ.get("NOTIFY_SOCKET")
-    if not address:
-        return
-    if address.startswith("@"):  # abstract namespace
-        address = "\0" + address[1:]
-    try:
-        with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as sock:
-            sock.connect(address)
-            sock.sendall(message.encode())
-    except OSError:
-        return
-
-
-def watchdog_period() -> float:
-    """Half of WatchdogSec, systemd's own recommended keepalive interval."""
-    try:
-        usec = int(os.environ.get("WATCHDOG_USEC", "0"))
-    except ValueError:
-        return 0.0
-    return usec / 2_000_000 if usec > 0 else 0.0
-
-
 def run_sweep(
     inventory_path: Path, emitter_factory: Callable[[], health.Emitter]
 ) -> None:
@@ -680,7 +657,7 @@ def serve(
         servers = [http]
     for server in servers:
         threading.Thread(target=server.serve_forever, daemon=True).start()
-    notify_systemd("READY=1")
+    sd_notify("READY=1")
     watchdog = watchdog_period()
     last_sweep = 0.0
     last_ping = 0.0
@@ -700,7 +677,7 @@ def serve(
             # its own thread would keep ticking through exactly that.
             if watchdog and time.monotonic() - last_ping >= watchdog:
                 last_ping = time.monotonic()
-                notify_systemd("WATCHDOG=1")
+                sd_notify("WATCHDOG=1")
     finally:
         for server in servers:
             server.shutdown()
