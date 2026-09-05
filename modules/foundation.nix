@@ -103,10 +103,6 @@ in
               type = types.str;
               default = "${config.projectRoot}/dots";
             };
-            cryptoRoot = mkOption {
-              type = types.str;
-              default = "/monero";
-            };
           };
         }
       );

@@ -483,11 +483,6 @@ in
               description = "Units doing long-running work against this surface via the public endpoint.";
             };
           };
-          dynamic = lib.mkOption {
-            type = lib.types.bool;
-            default = false;
-            description = "Whether this inventory surface represents transient children selected by the declared unit/cgroup contract.";
-          };
         };
       }
     );
