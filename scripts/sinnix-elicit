@@ -48,6 +48,7 @@ by this tool, backed up as part of /realm/state):
 from __future__ import annotations
 
 import argparse
+import random
 import datetime as dt
 import html
 import json
@@ -63,7 +64,7 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from rank_core import Comparison, Selector, build_selector, fit, top_k_stability
+from rank_core import Comparison, build_selector, fit, top_k_stability
 from rank_core.store import append_log
 from rank_core.store import now as now_iso
 from rank_core.store import read_log
@@ -659,7 +660,7 @@ def cmd_domains(_domain, _args):
 # operator just said, and a 126-image roster is one sitting rather than rounds
 # of page, tap, drain, refit.
 #
-# It selects through `rank_core.Selector` rather than this file's `pick_pairs`
+# It selects through `rank_core.build_selector`, the one entry point every
 # because a cold roster starts as one connected component per item, and only
 # the Selector deliberately bridges components -- without that, thetas across
 # the roster stay mutually meaningless however long the operator clicks.
@@ -787,13 +788,12 @@ class ServeSession:
         self.stability_samples = stability_samples
         self.session = session or ("serve-" + dt.datetime.now().strftime("%Y%m%d-%H%M%S"))
         self.rng = random.Random(seed)
-        self.selector = Selector(item_ids=self.ids, grid_n=2, rng=self.rng)
+        self.selector = None
         self.lock = threading.RLock()
         self.queue = []
         self.recorded = []
         self.done = False
         self.reload()
-        self.selector.seed_counts(to_comparisons(self.comparisons, set(self.ids)))
 
     # ── state ────────────────────────────────────────────────────────────
     def reload(self):
@@ -805,8 +805,11 @@ class ServeSession:
         seen, tombstoned = self.domain.scan_ids()
         self.known_ids = seen | tombstoned
         self.comparisons = self.domain.load_comparisons()
-        self.fit = fit(self.ids, to_comparisons(self.comparisons, set(self.ids)))
-        self.selector.update_fit(self.fit)
+        engine_comparisons = to_comparisons(self.comparisons, set(self.ids))
+        self.fit = fit(self.ids, engine_comparisons)
+        self.selector = build_selector(
+            self.ids, engine_comparisons, self.fit, grid_n=2, rng=self.rng
+        )
         self.judged = {
             frozenset((str(c.get("a")), str(c.get("b"))))
             for c in self.comparisons
