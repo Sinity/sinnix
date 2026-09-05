@@ -267,11 +267,6 @@ class ObserveService:
             if self.config.approved_manifest_principal == principal_name
             else None
         )
-        approved_catalog_hash = (
-            self.config.approved_action_catalog_hash
-            if self.config.approved_manifest_principal == principal_name
-            else None
-        )
         snapshot = self._connector_snapshot()
         observed_hash = (
             snapshot["manifest_sha256"]
@@ -295,14 +290,6 @@ class ObserveService:
                     "principal": principal_name,
                     "sha256": action_catalog_hash,
                 },
-                "nix_approved": (
-                    {
-                        "principal": self.config.approved_manifest_principal,
-                        "sha256": approved_catalog_hash,
-                    }
-                    if approved_catalog_hash is not None
-                    else None
-                ),
                 "chatgpt_observed": (
                     {
                         "principal": principal_name,
@@ -312,14 +299,8 @@ class ObserveService:
                     else None
                 ),
                 "comparisons": {
-                    "live_to_nix_approved": self._comparison(
-                        action_catalog_hash, approved_catalog_hash
-                    ),
                     "live_to_chatgpt_observed": self._comparison(
                         action_catalog_hash, observed_catalog_hash
-                    ),
-                    "nix_approved_to_chatgpt_observed": self._comparison(
-                        approved_catalog_hash, observed_catalog_hash
                     ),
                 },
             },

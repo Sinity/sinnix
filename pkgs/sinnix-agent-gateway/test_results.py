@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import base64
-import concurrent.futures
 import hashlib
 import json
 import subprocess
@@ -11,19 +10,46 @@ import time
 from pathlib import Path
 
 import pytest
+from sinnix_agent_gateway.action import Action, MutationControls, RequestControls
+from sinnix_agent_gateway.actions import BY_NAME as ACTIONS
 from sinnix_agent_gateway.app import Runtime
 from sinnix_agent_gateway.audit import AuditService
 from sinnix_agent_gateway.capabilities import Principal
 from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
-from sinnix_agent_gateway.contracts import ActionSpec, EffectMode, VerbFamily
-from sinnix_agent_gateway.registry import REGISTRY
+from sinnix_agent_gateway.contracts import VerbFamily
 from sinnix_agent_gateway.results import (
     EXPECTED_ERROR_CODES,
     ProtocolError,
     ResultError,
     ResultService,
 )
+from sinnix_agent_gateway.schemas import GatewayModel
 from sinnix_mcp.execution import ExecutionProfile, OwnerRoute
+
+
+class _Out(GatewayModel):
+    model_config = {"extra": "allow"}
+
+
+class _ReadIn(RequestControls):
+    pass
+
+
+class _ChangeIn(MutationControls):
+    pass
+
+
+def _fixture_action(name: str, family: VerbFamily, principals: set[str]) -> Action:
+    return Action(
+        name=name,
+        family=family,
+        owner="fixture",
+        summary="fixture",
+        Input=_ChangeIn if family is VerbFamily.CHANGE else _ReadIn,
+        Output=_Out,
+        handler=lambda runtime, inp: {},
+        principals=frozenset(principals),
+    )
 
 
 def config(tmp_path, *, max_result_bytes: int = 262_144):
@@ -87,7 +113,7 @@ def test_result_snapshot_rejects_cross_principal_reads(tmp_path) -> None:
 
 def test_runtime_v2_envelopes_success_and_public_error(tmp_path) -> None:
     runtime = Runtime.create(config(tmp_path), "observer")
-    action = REGISTRY.action("gateway.catalog")
+    action = ACTIONS["gateway.catalog"]
 
     success = runtime.execute_v2(
         action,
@@ -137,7 +163,7 @@ def test_runtime_v2_replaces_an_oversized_owner_payload_with_an_artifact(
     tmp_path,
 ) -> None:
     runtime = Runtime.create(config(tmp_path, max_result_bytes=1_024), "observer")
-    action = REGISTRY.action("gateway.catalog")
+    action = ACTIONS["gateway.catalog"]
 
     response = runtime.execute_v2(
         action, lambda: {"rows": ["x" * 2_000]}, {"text": "large"}
@@ -152,17 +178,7 @@ def test_runtime_v2_replaces_an_oversized_owner_payload_with_an_artifact(
 
 def test_runtime_v2_keeps_each_expected_failure_in_a_typed_envelope(tmp_path) -> None:
     runtime = Runtime.create(config(tmp_path), "observer")
-    action = ActionSpec(
-        name="fixture.typed-failure",
-        verb=VerbFamily.QUERY,
-        domain="fixture",
-        owner="fixture",
-        route="fixture.query",
-        effect=EffectMode.READ,
-        principals=frozenset({"observer"}),
-        input_schema={"type": "object"},
-        output_schema={"type": "object"},
-    )
+    action = _fixture_action("fixture.typed-failure", VerbFamily.QUERY, {"observer"})
 
     for code in EXPECTED_ERROR_CODES:
         response = runtime.execute_v2(
@@ -186,7 +202,7 @@ def test_jsonl_snapshot_pages_a_million_rows_without_logical_result_buffering(
     tmp_path,
 ) -> None:
     runtime = Runtime.create(config(tmp_path), "observer")
-    action = REGISTRY.action("gateway.catalog")
+    action = ACTIONS["gateway.catalog"]
     command = [
         sys.executable,
         "-c",
@@ -238,7 +254,7 @@ def test_snapshot_cursor_expires(tmp_path) -> None:
     runtime = Runtime.create(config(tmp_path), "observer")
     runtime.results.cursor_ttl_seconds = -1
     response = runtime.execute_v2_jsonl(
-        REGISTRY.action("gateway.catalog"),
+        ACTIONS["gateway.catalog"],
         [sys.executable, "-c", "print('{\\\"row\\\": 1}'); print('{\\\"row\\\": 2}')"],
         ExecutionProfile(route=OwnerRoute("expired-cursor")),
         {"query": "expiry"},
@@ -255,7 +271,7 @@ def test_snapshot_cursor_expires(tmp_path) -> None:
 
 def test_jsonl_stream_failure_cancels_child_and_removes_temp_writer(tmp_path) -> None:
     runtime = Runtime.create(config(tmp_path), "observer")
-    action = REGISTRY.action("gateway.catalog")
+    action = ACTIONS["gateway.catalog"]
     response = runtime.execute_v2_jsonl(
         action,
         [
@@ -283,19 +299,7 @@ def test_mutation_idempotency_replays_receipt_without_second_owner_write(
     tmp_path,
 ) -> None:
     runtime = Runtime.create(config(tmp_path), "operator")
-    action = ActionSpec(
-        name="fixture.change",
-        verb=VerbFamily.CHANGE,
-        domain="fixture",
-        owner="fixture",
-        route="fixture.write",
-        effect=EffectMode.CHANGE,
-        principals=frozenset({"operator"}),
-        input_schema={"type": "object"},
-        output_schema={"type": "object"},
-        supports_idempotency=True,
-        receipt_policy="audit",
-    )
+    action = _fixture_action("fixture.change", VerbFamily.CHANGE, {"operator"})
     writes = []
 
     def write() -> dict[str, object]:
@@ -318,7 +322,7 @@ def test_declared_deadline_and_idempotency_failures_persist_bounded_envelopes(
     tmp_path,
 ) -> None:
     runtime = Runtime.create(config(tmp_path), "operator")
-    action = REGISTRY.action("agent.for_bead")
+    action = ACTIONS["agent.for_bead"]
     request = {
         "ref": "sinnix://projects/fixture/beads/fixture-1",
         "checkout_id": "default",
@@ -362,18 +366,8 @@ def test_concurrent_matching_idempotency_returns_conflict_then_replays(
     tmp_path,
 ) -> None:
     runtime = Runtime.create(config(tmp_path), "operator")
-    action = ActionSpec(
-        name="fixture.concurrent-change",
-        verb=VerbFamily.CHANGE,
-        domain="fixture",
-        owner="fixture",
-        route="fixture.write",
-        effect=EffectMode.CHANGE,
-        principals=frozenset({"operator"}),
-        input_schema={"type": "object"},
-        output_schema={"type": "object"},
-        supports_idempotency=True,
-        receipt_policy="audit",
+    action = _fixture_action(
+        "fixture.concurrent-change", VerbFamily.CHANGE, {"operator"}
     )
     started, release = threading.Event(), threading.Event()
     writes: list[str] = []
@@ -403,19 +397,7 @@ def test_concurrent_matching_idempotency_returns_conflict_then_replays(
 
 def test_partial_completion_is_explicitly_non_atomic(tmp_path) -> None:
     runtime = Runtime.create(config(tmp_path), "operator")
-    action = ActionSpec(
-        name="fixture.change",
-        verb=VerbFamily.CHANGE,
-        domain="fixture",
-        owner="fixture",
-        route="fixture.write",
-        effect=EffectMode.CHANGE,
-        principals=frozenset({"operator"}),
-        input_schema={"type": "object"},
-        output_schema={"type": "object"},
-        supports_idempotency=True,
-        receipt_policy="audit",
-    )
+    action = _fixture_action("fixture.change", VerbFamily.CHANGE, {"operator"})
 
     response = runtime.execute_v2(
         action,
@@ -435,7 +417,7 @@ def test_v2_rejects_ignored_preconditions(tmp_path) -> None:
     runtime = Runtime.create(config(tmp_path), "observer")
 
     response = runtime.execute_v2(
-        REGISTRY.action("gateway.catalog"),
+        ACTIONS["gateway.catalog"],
         lambda: {"rows": []},
         {"preconditions": {"unexpected": "state"}},
     )
@@ -471,192 +453,6 @@ def _project_runtime(tmp_path: Path) -> Runtime:
 def _checkout_preconditions(runtime: Runtime) -> dict[str, str]:
     checkout = runtime.projects.checkout("fixture", "default")["checkout"]
     return {"head": checkout["head"], "dirty_sha256": checkout["dirty_sha256"]}
-
-
-def test_v2_change_uses_canonical_checkout_preconditions_and_idempotency(
-    tmp_path,
-) -> None:
-    runtime = _project_runtime(tmp_path)
-    action = REGISTRY.action("projects.change")
-    reference = "sinnix://projects/fixture/checkouts/default"
-    preconditions = _checkout_preconditions(runtime)
-    request = {
-        "ref": reference,
-        "operation": "write",
-        "path": "tracked.txt",
-        "content": "after\n",
-        "preconditions": preconditions,
-        "idempotency_key": "project-write",
-    }
-
-    first = runtime.execute_v2(
-        action,
-        lambda: runtime.v2_change(
-            reference=reference,
-            operation="write",
-            path="tracked.txt",
-            content="after\n",
-            patch=None,
-            preconditions=preconditions,
-        ),
-        request,
-    )
-    replay = runtime.execute_v2(
-        action,
-        lambda: (_ for _ in ()).throw(AssertionError("owner was called on replay")),
-        request,
-    )
-    stale = runtime.execute_v2(
-        action,
-        lambda: runtime.v2_change(
-            reference=reference,
-            operation="write",
-            path="tracked.txt",
-            content="stale\n",
-            patch=None,
-            preconditions=preconditions,
-        ),
-        {**request, "content": "stale\n", "idempotency_key": "project-stale"},
-    )
-
-    assert first["data"]["ref"] == reference
-    assert first["data"]["checkout_ref"] == reference
-    assert first["data"]["owner_result"] == {
-        "project_id": "fixture",
-        "path": "tracked.txt",
-        "bytes": len(b"after\n"),
-    }
-    assert replay == first
-    assert stale["error"]["code"] == "precondition_failed"
-    assert (tmp_path / "project" / "tracked.txt").read_text() == "after\n"
-
-
-def test_v2_change_project_root_selects_default_checkout_with_worktrees(
-    tmp_path,
-) -> None:
-    runtime = _project_runtime(tmp_path)
-    project = tmp_path / "project"
-    linked = tmp_path / "linked"
-    subprocess.run(
-        ["git", "worktree", "add", "--quiet", "-b", "fixture-linked", linked],
-        cwd=project,
-        check=True,
-    )
-    preconditions = _checkout_preconditions(runtime)
-
-    response = runtime.execute_v2(
-        REGISTRY.action("projects.change"),
-        lambda: runtime.v2_change(
-            reference="sinnix://projects/fixture",
-            operation="write",
-            path="tracked.txt",
-            content="root checkout\n",
-            patch=None,
-            preconditions=preconditions,
-        ),
-        {
-            "ref": "sinnix://projects/fixture",
-            "operation": "write",
-            "parameters": {"path": "tracked.txt", "content": "root checkout\n"},
-            "preconditions": preconditions,
-            "idempotency_key": "project-root-worktree",
-        },
-    )
-
-    assert response["result"]["outcome"] == "ok"
-    assert response["data"]["checkout_ref"] == (
-        "sinnix://projects/fixture/checkouts/default"
-    )
-    assert (project / "tracked.txt").read_text() == "root checkout\n"
-    assert (linked / "tracked.txt").read_text() == "before\n"
-
-
-def test_v2_change_rechecks_preconditions_atomically_for_concurrent_mutations(
-    tmp_path,
-) -> None:
-    runtime = _project_runtime(tmp_path)
-    action = REGISTRY.action("projects.change")
-    reference = "sinnix://projects/fixture/checkouts/default"
-    preconditions = _checkout_preconditions(runtime)
-
-    def mutate(content: str, idempotency_key: str) -> dict[str, object]:
-        request = {
-            "ref": reference,
-            "operation": "write",
-            "parameters": {"path": "tracked.txt", "content": content},
-            "preconditions": preconditions,
-            "idempotency_key": idempotency_key,
-        }
-        return runtime.execute_v2(
-            action,
-            lambda: runtime.v2_change(
-                reference=reference,
-                operation="write",
-                path="tracked.txt",
-                content=content,
-                patch=None,
-                preconditions=preconditions,
-            ),
-            request,
-        )
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-        responses = list(
-            executor.map(
-                lambda item: mutate(*item),
-                (("first\n", "concurrent-first"), ("second\n", "concurrent-second")),
-            )
-        )
-
-    assert sorted(response["result"]["outcome"] for response in responses) == [
-        "error",
-        "ok",
-    ]
-    failure = next(
-        response for response in responses if response["result"]["outcome"] == "error"
-    )
-    assert failure["error"]["code"] == "precondition_failed"
-    assert (tmp_path / "project" / "tracked.txt").read_text() in {
-        "first\n",
-        "second\n",
-    }
-
-
-def test_v2_change_preserves_project_patch_owner_contract(tmp_path) -> None:
-    runtime = _project_runtime(tmp_path)
-    preconditions = _checkout_preconditions(runtime)
-    patch = """diff --git a/tracked.txt b/tracked.txt
---- a/tracked.txt
-+++ b/tracked.txt
-@@ -1 +1 @@
--before
-+patched
-"""
-
-    response = runtime.execute_v2(
-        REGISTRY.action("projects.change"),
-        lambda: runtime.v2_change(
-            reference="sinnix://projects/fixture",
-            operation="apply_patch",
-            path=None,
-            content=None,
-            patch=patch,
-            preconditions=preconditions,
-        ),
-        {
-            "ref": "sinnix://projects/fixture",
-            "operation": "apply_patch",
-            "patch": patch,
-            "preconditions": preconditions,
-            "idempotency_key": "project-patch",
-        },
-    )
-
-    assert response["data"]["owner_result"] == {
-        "project_id": "fixture",
-        "applied": True,
-    }
-    assert (tmp_path / "project" / "tracked.txt").read_text() == "patched\n"
 
 
 @pytest.mark.parametrize(
@@ -704,7 +500,7 @@ def test_v2_operate_maps_canonical_targets_and_validates_owner_receipts(
         "preconditions": {"expected_revision": 7},
     }
     response = runtime.execute_v2(
-        REGISTRY.action("machine.operate"),
+        ACTIONS["machine.operate"],
         lambda: runtime.v2_operate(
             reference=reference,
             action="restart",
@@ -740,7 +536,7 @@ def test_v2_operate_rejects_mismatched_owner_receipt(tmp_path) -> None:
         "expected_revision": 7,
     }  # type: ignore[method-assign]
     response = runtime.execute_v2(
-        REGISTRY.action("machine.operate"),
+        ACTIONS["machine.operate"],
         lambda: runtime.v2_operate(
             reference="sinnix://machine/units/user/fixture.service",
             action="restart",

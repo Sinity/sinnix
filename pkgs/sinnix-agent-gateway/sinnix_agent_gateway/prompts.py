@@ -109,9 +109,9 @@ class PromptGenerator:
         actions = [
             {
                 "name": row.get("name"),
-                "verb": row.get("verb"),
+                "family": row.get("verb"),
                 "effect": row.get("effect"),
-                "route": row.get("route"),
+                "summary": row.get("documentation"),
                 "resource_kinds": row.get("resource_kinds", []),
             }
             for row in catalog.get("actions", [])

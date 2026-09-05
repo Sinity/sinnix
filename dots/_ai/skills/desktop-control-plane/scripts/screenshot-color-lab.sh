@@ -16,6 +16,9 @@ Commands:
       Capture focused output using both grimblast and grim.
       If --fix-hdr and current preset is hdr, create corrected variants via ImageMagick.
 
+  capture-region [--out-dir DIR] [--name NAME] [--geometry "X,Y WxH" | --output NAME] [--fix-hdr] [--brightness PCT] [--saturation PCT] [--gamma VALUE]
+      Capture one output by name or one region without any picker (grim only).
+
   capture-area [--out-dir DIR] [--name NAME] [--fix-hdr] [--brightness PCT] [--saturation PCT] [--gamma VALUE]
       Capture area (grimblast freeze picker + slurp/grim fallback).
 
@@ -80,7 +83,7 @@ probe)
       }'
   ;;
 
-capture-output | capture-area)
+capture-output | capture-area | capture-region)
   need_cmd hyprctl
   need_cmd jq
   out_dir="/realm/data/activity/screenshot"
@@ -89,9 +92,19 @@ capture-output | capture-area)
   brightness=105
   saturation=125
   gamma=0.90
+  geometry=""
+  output_name=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
+    --geometry)
+      geometry="${2:?missing geometry}"
+      shift 2
+      ;;
+    --output)
+      output_name="${2:?missing output}"
+      shift 2
+      ;;
     --out-dir)
       out_dir="${2:?missing out-dir}"
       shift 2
@@ -127,7 +140,19 @@ capture-output | capture-area)
   raw1="$out_dir/${name}.grimblast.png"
   raw2="$out_dir/${name}.grim.png"
 
-  if [[ $cmd == "capture-output" ]]; then
+  if [[ $cmd == "capture-region" ]]; then
+    need_cmd grim
+    [[ -n $geometry || -n $output_name ]] || {
+      echo "capture-region requires --geometry or --output" >&2
+      exit 2
+    }
+    raw1=""
+    if [[ -n $geometry ]]; then
+      grim -g "$geometry" "$raw2"
+    else
+      grim -o "$output_name" "$raw2"
+    fi
+  elif [[ $cmd == "capture-output" ]]; then
     monitor="$(focused_monitor_name)"
     [[ -n $monitor ]] || {
       echo "could not resolve focused monitor" >&2
@@ -178,7 +203,7 @@ capture-output | capture-area)
     --arg cm "$cm" \
     --arg raw1 "$raw1" \
     --arg raw2 "$raw2" \
-    --argjson corrected "$(printf '%s\n' "${corrected[@]:-}" | jq -R . | jq -s .)" \
+    --argjson corrected "$(printf '%s\n' "${corrected[@]:-}" | jq -R 'select(length > 0)' | jq -s .)" \
     '{
         mode: $cmd,
         output_dir: $out_dir,

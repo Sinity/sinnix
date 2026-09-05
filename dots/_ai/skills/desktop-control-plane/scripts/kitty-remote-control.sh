@@ -18,6 +18,7 @@ Commands:
   key --match <expr> --keys <key1> [key2 ...]
   capture --match <expr> [--extent screen|all|selection|last_cmd_output|last_non_empty_output] [--ansi] [--out file]
   await --match <expr> --pattern <regex> [--timeout-sec <n>] [--interval-sec <n>] [--extent <extent>] [--ansi] [--out file]
+  launch [--cwd <dir>] [--title <title>] [--type os-window|window|tab] [--command <command>]
   send-await --match <expr> --text <text> --pattern <regex> [--enter] [--bracketed-paste] [--timeout-sec <n>] [--interval-sec <n>] [--extent <extent>] [--ansi] [--out file]
 
 Examples:
@@ -545,6 +546,46 @@ send-await)
     echo "send-await timed out after ${timeout_sec}s (pattern not observed)" >&2
     exit 124
   fi
+  ;;
+
+launch)
+  cwd=""
+  title=""
+  window_type="os-window"
+  command_text=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+    --cwd)
+      cwd="${2:?missing cwd}"
+      shift 2
+      ;;
+    --title)
+      title="${2:?missing title}"
+      shift 2
+      ;;
+    --type)
+      window_type="${2:?missing type}"
+      shift 2
+      ;;
+    --command)
+      command_text="${2:?missing command}"
+      shift 2
+      ;;
+    *)
+      echo "unknown arg: $1" >&2
+      exit 2
+      ;;
+    esac
+  done
+  args=(launch --type "$window_type" --keep-focus)
+  [[ -n $cwd ]] && args+=(--cwd "$cwd")
+  [[ -n $title ]] && args+=(--title "$title")
+  if [[ -n $command_text ]]; then
+    args+=(--hold "$SHELL" -c "$command_text")
+  fi
+  new_id="$(run_kitty "${args[@]}")"
+  need_cmd jq
+  jq -nc --argjson id "${new_id:-null}" --arg cwd "$cwd" --arg title "$title" '{id: $id, cwd: $cwd, title: $title}'
   ;;
 
 -h | --help | help)

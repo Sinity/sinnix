@@ -164,7 +164,13 @@ def _entry(child: Path) -> FileEntry | None:
     if kind == "symlink":
         try:
             resolved = child.resolve()
-            kind = "directory" if resolved.is_dir() else "file" if resolved.is_file() else "symlink"
+            kind = (
+                "directory"
+                if resolved.is_dir()
+                else "file"
+                if resolved.is_file()
+                else "symlink"
+            )
         except OSError:
             pass
     return FileEntry(
@@ -360,7 +366,8 @@ ACTIONS: tuple[Action, ...] = (
         aliases=("cat", "open", "view", "image", "picture", "screenshot file"),
         examples=(
             Example(
-                title="Read /etc/os-release", input={"target": {"path": "/etc/os-release"}}
+                title="Read /etc/os-release",
+                input={"target": {"path": "/etc/os-release"}},
             ),
             Example(
                 title="Lines 10-30 of a log",
@@ -532,7 +539,9 @@ def _search(runtime: Runtime, inp: SearchInput) -> SearchResult:
     if inp.max_depth is not None:
         argv.append(f"--max-depth={inp.max_depth}")
     if inp.kind != "any":
-        argv.append(f"--type={ {'file': 'f', 'directory': 'd', 'symlink': 'l'}[inp.kind] }")
+        argv.append(
+            f"--type={ {'file': 'f', 'directory': 'd', 'symlink': 'l'}[inp.kind] }"
+        )
     for extension in inp.extensions:
         argv.append(f"--extension={extension.lstrip('.')}")
     if inp.min_bytes is not None:
@@ -546,9 +555,7 @@ def _search(runtime: Runtime, inp: SearchInput) -> SearchResult:
     else:
         argv.append("--case-sensitive")
     if inp.name_glob and inp.path_regex:
-        raise ProtocolError(
-            "invalid_request", "give name_glob or path_regex, not both"
-        )
+        raise ProtocolError("invalid_request", "give name_glob or path_regex, not both")
     if inp.name_glob:
         argv.extend(["--glob", inp.name_glob])
     elif inp.path_regex:
@@ -558,8 +565,14 @@ def _search(runtime: Runtime, inp: SearchInput) -> SearchResult:
     argv.extend(["--"] if not (inp.name_glob or inp.path_regex) else [])
     argv.extend(str(root) for root in roots)
     output, timed_out, _ = _run(argv, inp.timeout_seconds)
-    paths = [piece.decode("utf-8", "surrogateescape") for piece in output.split(b"\0") if piece]
-    entries = [entry for entry in (_entry(Path(path)) for path in paths[: inp.limit]) if entry]
+    paths = [
+        piece.decode("utf-8", "surrogateescape")
+        for piece in output.split(b"\0")
+        if piece
+    ]
+    entries = [
+        entry for entry in (_entry(Path(path)) for path in paths[: inp.limit]) if entry
+    ]
     return SearchResult(
         roots=root_refs,
         matches=[FileMatch(**entry.model_dump()) for entry in entries],
@@ -678,16 +691,19 @@ def _apply_unified(
             found = None
             for delta in range(1, 200):
                 for candidate in (position - delta, position + delta):
-                    if 0 <= candidate <= len(result) - len(old) and result[
-                        candidate : candidate + len(old)
-                    ] == old:
+                    if (
+                        0 <= candidate <= len(result) - len(old)
+                        and result[candidate : candidate + len(old)] == old
+                    ):
                         found = candidate
                         break
                 if found is not None:
                     break
             if found is None:
                 rejected.append(
-                    RejectedHunk(index=index, reason="context does not match", header=header)
+                    RejectedHunk(
+                        index=index, reason="context does not match", header=header
+                    )
                 )
                 continue
             position = found
@@ -709,7 +725,9 @@ def _patch(runtime: Runtime, inp: PatchInput) -> PatchResult:
     if inp.preconditions:
         extra = set(inp.preconditions) - {"expected_sha256"}
         if extra:
-            raise ProtocolError("invalid_request", "file preconditions are not recognized")
+            raise ProtocolError(
+                "invalid_request", "file preconditions are not recognized"
+            )
         expected = expected or inp.preconditions.get("expected_sha256")
     if expected is not None and expected != before:
         raise ProtocolError(
@@ -738,13 +756,20 @@ def _patch(runtime: Runtime, inp: PatchInput) -> PatchResult:
         if edit.end_line < edit.start_line - 1 or edit.start_line > len(lines) + 1:
             raise ProtocolError("invalid_request", "line range is outside the file")
         current = lines[edit.start_line - 1 : edit.end_line]
-        if edit.expected_text is not None and _split_lines(edit.expected_text) != current:
+        if (
+            edit.expected_text is not None
+            and _split_lines(edit.expected_text) != current
+        ):
             raise ProtocolError(
                 "precondition_failed",
                 "range text differs from expected_text",
                 details={"current_text": "\n".join(current)[:4_000]},
             )
-        updated = lines[: edit.start_line - 1] + _split_lines(edit.replacement) + lines[edit.end_line :]
+        updated = (
+            lines[: edit.start_line - 1]
+            + _split_lines(edit.replacement)
+            + lines[edit.end_line :]
+        )
         applied = 1
     new_text = "\n".join(updated) + ("\n" if trailing_newline and updated else "")
     encoded = new_text.encode()
@@ -839,7 +864,9 @@ def _change(runtime: Runtime, inp: ChangeInput) -> ChangeResult:
     expected = inp.expected_sha256
     if inp.preconditions:
         if set(inp.preconditions) - {"expected_sha256"}:
-            raise ProtocolError("invalid_request", "file preconditions are not recognized")
+            raise ProtocolError(
+                "invalid_request", "file preconditions are not recognized"
+            )
         expected = expected or inp.preconditions.get("expected_sha256")
     op = inp.change
     destination: str | None = None
@@ -896,10 +923,13 @@ def _change(runtime: Runtime, inp: ChangeInput) -> ChangeResult:
         created=bool(result.get("created", False)),
         removed=bool(result.get("removed", False)),
         bytes=result.get("bytes"),
-        previous_sha256=result.get("previous_sha256") or (
+        previous_sha256=result.get("previous_sha256")
+        or (
             result.get("sha256") if isinstance(op, (CopyOp, MoveOp, RemoveOp)) else None
         ),
-        sha256=result.get("sha256") if not isinstance(op, (CopyOp, MoveOp, RemoveOp)) else None,
+        sha256=result.get("sha256")
+        if not isinstance(op, (CopyOp, MoveOp, RemoveOp))
+        else None,
         affordances=["files.stat", "files.read", "files.list"],
     )
 
@@ -933,7 +963,10 @@ ACTIONS = ACTIONS + (
             ),
             Example(
                 title="Files modified in the last two hours",
-                input={"roots": [{"path": "/realm/tmp"}], "modified_within_seconds": 7200},
+                input={
+                    "roots": [{"path": "/realm/tmp"}],
+                    "modified_within_seconds": 7200,
+                },
             ),
         ),
     ),
@@ -956,7 +989,12 @@ ACTIONS = ACTIONS + (
                 title="Replace lines 3-4",
                 input={
                     "target": {"path": "/realm/tmp/work/notes.md"},
-                    "edit": {"mode": "range", "start_line": 3, "end_line": 4, "replacement": "new line"},
+                    "edit": {
+                        "mode": "range",
+                        "start_line": 3,
+                        "end_line": 4,
+                        "replacement": "new line",
+                    },
                     "idempotency_key": "patch-notes-1",
                 },
             ),
@@ -964,7 +1002,10 @@ ACTIONS = ACTIONS + (
                 title="Apply a unified diff",
                 input={
                     "target": {"path": "/realm/tmp/work/notes.md"},
-                    "edit": {"mode": "unified", "patch": "@@ -1,1 +1,1 @@\n-old\n+new\n"},
+                    "edit": {
+                        "mode": "unified",
+                        "patch": "@@ -1,1 +1,1 @@\n-old\n+new\n",
+                    },
                     "expected_sha256": "0" * 64,
                     "idempotency_key": "patch-notes-2",
                 },
@@ -998,7 +1039,10 @@ ACTIONS = ACTIONS + (
                 title="Move a file",
                 input={
                     "target": {"path": "/realm/tmp/work/hello.txt"},
-                    "change": {"operation": "move", "destination": {"path": "/realm/tmp/work/archive/hello.txt"}},
+                    "change": {
+                        "operation": "move",
+                        "destination": {"path": "/realm/tmp/work/archive/hello.txt"},
+                    },
                     "idempotency_key": "move-hello-1",
                 },
             ),

@@ -40,7 +40,6 @@ def _text_block(envelope: dict[str, Any]) -> TextContent:
 
 
 def build_tool(action: Action, runtime: Runtime) -> Tool:
-    envelope_model = action.envelope_model()
     # The SDK validates arguments before calling the tool; a permissive model
     # lets every call reach the gateway kernel so schema failures are typed,
     # receipted and audited like any other failure.
@@ -48,10 +47,7 @@ def build_tool(action: Action, runtime: Runtime) -> Tool:
         f"{action.Input.__name__}Args",
         __base__=ArgModelBase,
         __config__=None,
-        **{
-            name: (Any, None)
-            for name in action.Input.model_fields
-        },
+        **dict.fromkeys(action.Input.model_fields, (Any, None)),
     )
     arg_model.model_config = {**ArgModelBase.model_config, "extra": "allow"}
 
@@ -84,7 +80,7 @@ def build_tool(action: Action, runtime: Runtime) -> Tool:
                 blocks.extend(raw.blocks)
                 raw = raw.data
             if isinstance(raw, action.Output):
-                return raw.model_dump(mode="json")
+                return raw.model_dump(mode="json", by_alias=True)
             try:
                 validated = action.Output.model_validate(raw)
             except ValidationError as exc:
@@ -93,33 +89,24 @@ def build_tool(action: Action, runtime: Runtime) -> Tool:
                     "owner result does not match the declared output",
                     details={"problems": exc.errors(include_url=False)[:8]},
                 ) from exc
-            return validated.model_dump(mode="json")
+            return validated.model_dump(mode="json", by_alias=True)
 
         response = await runtime.execute_v2_async(action, callback, request)
         return _project(response, blocks)
 
-    def _project(response: dict[str, Any], blocks: list[Any]) -> Any:
-        if response["result"]["outcome"] == "ok":
-            if not blocks:
-                return response
-            return CallToolResult(
-                content=[_text_block(response), *blocks],
-                structured_content=response,
-            )
+    def _project(response: dict[str, Any], blocks: list[Any]) -> CallToolResult:
+        ok = response["result"]["outcome"] == "ok"
         return CallToolResult(
-            content=[_text_block(response)],
+            content=[_text_block(response), *(blocks if ok else [])],
             structured_content=response,
-            is_error=True,
+            is_error=not ok,
         )
 
     invoke.__name__ = action.name
     invoke.__doc__ = action.summary
-    metadata = FuncMetadata(
-        arg_model=arg_model,
-        output_model=envelope_model,
-        output_schema=envelope_model.model_json_schema(by_alias=True),
-        wrap_output=False,
-    )
+    # The envelope is validated by the runtime and documented once; publishing
+    # it per tool would multiply the manifest several times over.
+    metadata = FuncMetadata(arg_model=arg_model, output_model=None, output_schema=None)
     tool = Tool(
         fn=invoke,
         name=action.name,

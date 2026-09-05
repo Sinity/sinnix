@@ -2,6 +2,7 @@
   python3Packages,
   lib,
   fetchPypi,
+  file,
   git,
   ripgrep,
   fd,
@@ -113,7 +114,7 @@ let
 in
 python3Packages.buildPythonApplication {
   pname = "sinnix-agent-gateway";
-  version = "0.2.0";
+  version = "0.3.0";
   pyproject = true;
   src = ./.;
 
@@ -124,9 +125,12 @@ python3Packages.buildPythonApplication {
     sinnix-mcp
     sinnix-lib
     agentctl
+    python3Packages.psutil
   ];
 
   nativeCheckInputs = [
+    fd
+    file
     git
     python3Packages.pytest
     ripgrep
@@ -140,6 +144,7 @@ python3Packages.buildPythonApplication {
       git
       ripgrep
       fd
+      file
       gnused
       gnutar
       gzip

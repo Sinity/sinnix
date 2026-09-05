@@ -46,7 +46,7 @@ READ_FAMILIES = frozenset(
 )
 
 FAMILY_EFFECT: dict[VerbFamily, EffectMode] = {
-    **{family: EffectMode.READ for family in READ_FAMILIES},
+    **dict.fromkeys(READ_FAMILIES, EffectMode.READ),
     VerbFamily.CHANGE: EffectMode.CHANGE,
     VerbFamily.OPERATE: EffectMode.OPERATE,
     VerbFamily.RUN: EffectMode.RUN,
@@ -63,7 +63,7 @@ _RUN_ANNOTATIONS = ToolAnnotations(
 )
 
 FAMILY_ANNOTATIONS: dict[VerbFamily, ToolAnnotations] = {
-    **{family: _READ_ANNOTATIONS for family in READ_FAMILIES},
+    **dict.fromkeys(READ_FAMILIES, _READ_ANNOTATIONS),
     VerbFamily.CHANGE: _MUTATION_ANNOTATIONS,
     VerbFamily.OPERATE: _MUTATION_ANNOTATIONS,
     VerbFamily.RUN: _RUN_ANNOTATIONS,
@@ -220,7 +220,7 @@ class Action:
         return inspect.iscoroutinefunction(self.handler)
 
     def input_schema(self) -> dict[str, Any]:
-        return self.Input.model_json_schema(by_alias=True)
+        return strip_titles(self.Input.model_json_schema(by_alias=True))
 
     def envelope_model(self) -> type[V2ToolEnvelope]:
         """The typed response envelope: ``data`` is this action's Output."""
@@ -258,6 +258,19 @@ class Action:
             "examples": [example.model_dump() for example in self.examples],
             "documentation": self.documentation or self.summary,
         }
+
+
+def strip_titles(schema: Any) -> Any:
+    """Drop pydantic's auto-generated ``title`` keys; they carry no contract."""
+    if isinstance(schema, dict):
+        return {
+            key: strip_titles(value)
+            for key, value in schema.items()
+            if not (key == "title" and isinstance(value, str))
+        }
+    if isinstance(schema, list):
+        return [strip_titles(item) for item in schema]
+    return schema
 
 
 def validate_actions(

@@ -32,7 +32,6 @@ def config(tmp_path: Path) -> GatewayConfig:
         state_dir=tmp_path / "state",
         projects={"fixture": ProjectConfig(project_id="fixture", path=project)},
         approved_manifest_hash="approved-fixture-hash",
-        approved_action_catalog_hash="catalog-hash",
     )
 
 
@@ -53,8 +52,10 @@ def structured(result) -> dict:
 def tiny_png() -> bytes:
     def chunk(kind: bytes, payload: bytes) -> bytes:
         body = kind + payload
-        return struct.pack(">I", len(payload)) + body + struct.pack(
-            ">I", zlib.crc32(body) & 0xFFFFFFFF
+        return (
+            struct.pack(">I", len(payload))
+            + body
+            + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
         )
 
     raw = b"\x00\xff\x00\x00\xff"  # one row, filter 0, one RGB pixel
@@ -75,8 +76,9 @@ def test_every_action_publishes_its_model_schema(tmp_path: Path) -> None:
         schema = tool.parameters
         assert schema.get("additionalProperties") is False, action.name
         assert "parameters" not in schema["properties"], action.name
-        assert tool.output_schema is not None
-        assert "data" in tool.output_schema["properties"]
+        assert tool.output_schema is None
+        assert "data" in action.output_schema()["properties"]
+        assert "title" not in schema
         assert action.examples, f"{action.name} declares no example"
         if action.family in {VerbFamily.CHANGE, VerbFamily.OPERATE, VerbFamily.RUN}:
             assert issubclass(action.Input, MutationControls)
@@ -113,15 +115,39 @@ def test_action_declaration_invariants() -> None:
         ok: bool
 
     with pytest.raises(ValueError, match="dotted"):
-        Action(name="plain", family=VerbFamily.QUERY, owner="x", summary="s", Input=Input, Output=Output, handler=lambda r, i: None)
+        Action(
+            name="plain",
+            family=VerbFamily.QUERY,
+            owner="x",
+            summary="s",
+            Input=Input,
+            Output=Output,
+            handler=lambda r, i: None,
+        )
     with pytest.raises(ValueError, match="MutationControls"):
-        Action(name="x.change", family=VerbFamily.CHANGE, owner="x", summary="s", Input=Input, Output=Output, handler=lambda r, i: None)
+        Action(
+            name="x.change",
+            family=VerbFamily.CHANGE,
+            owner="x",
+            summary="s",
+            Input=Input,
+            Output=Output,
+            handler=lambda r, i: None,
+        )
     with pytest.raises(ValueError, match="mutation controls"):
 
         class Mutating(MutationControls):
             pass
 
-        Action(name="x.read", family=VerbFamily.QUERY, owner="x", summary="s", Input=Mutating, Output=Output, handler=lambda r, i: None)
+        Action(
+            name="x.read",
+            family=VerbFamily.QUERY,
+            owner="x",
+            summary="s",
+            Input=Mutating,
+            Output=Output,
+            handler=lambda r, i: None,
+        )
 
 
 def test_file_locator_round_trips_paths_and_refs() -> None:
@@ -154,7 +180,11 @@ def test_files_actions_accept_paths_and_return_child_refs(tmp_path: Path) -> Non
     assert child["kind"] == "file" and child["bytes"] == 25
 
     hidden = structured(
-        call(server, "files.list", {"target": {"path": str(root)}, "include_hidden": True})
+        call(
+            server,
+            "files.list",
+            {"target": {"path": str(root)}, "include_hidden": True},
+        )
     )
     assert ".hidden" in [e["name"] for e in hidden["data"]["entries"]]
 
@@ -224,7 +254,11 @@ def test_files_search_paths_and_content(tmp_path: Path) -> None:
         call(
             server,
             "files.search",
-            {"roots": [{"path": str(root)}], "extensions": ["png"], "case_insensitive": True},
+            {
+                "roots": [{"path": str(root)}],
+                "extensions": ["png"],
+                "case_insensitive": True,
+            },
         )
     )
     assert pngs["data"]["engine"] == "fd"
@@ -232,7 +266,11 @@ def test_files_search_paths_and_content(tmp_path: Path) -> None:
     assert all(decode_file_ref(m["ref"]) == m["path"] for m in pngs["data"]["matches"])
 
     by_glob = structured(
-        call(server, "files.search", {"roots": [{"path": str(root)}], "name_glob": "*.md"})
+        call(
+            server,
+            "files.search",
+            {"roots": [{"path": str(root)}], "name_glob": "*.md"},
+        )
     )
     assert [m["name"] for m in by_glob["data"]["matches"]] == ["notes.md"]
 
@@ -254,7 +292,11 @@ def test_files_search_paths_and_content(tmp_path: Path) -> None:
     assert (2, True) in numbers and (1, False) in numbers
 
     limited = structured(
-        call(server, "files.search", {"roots": [{"path": str(root)}], "kind": "file", "limit": 1})
+        call(
+            server,
+            "files.search",
+            {"roots": [{"path": str(root)}], "kind": "file", "limit": 1},
+        )
     )
     assert limited["data"]["returned"] == 1 and limited["data"]["truncated"] is True
 
@@ -263,7 +305,9 @@ def test_files_patch_modes_and_preconditions(tmp_path: Path) -> None:
     server = create_server(config(tmp_path), "operator")
     target = tmp_path / "notes.md"
     target.write_text("one\ntwo\nthree\nfour\n")
-    before = structured(call(server, "files.stat", {"target": {"path": str(target)}}))["data"]["sha256"]
+    before = structured(call(server, "files.stat", {"target": {"path": str(target)}}))[
+        "data"
+    ]["sha256"]
 
     ranged = structured(
         call(
@@ -271,7 +315,13 @@ def test_files_patch_modes_and_preconditions(tmp_path: Path) -> None:
             "files.patch",
             {
                 "target": {"path": str(target)},
-                "edit": {"mode": "range", "start_line": 2, "end_line": 3, "replacement": "TWO\nTHREE", "expected_text": "two\nthree"},
+                "edit": {
+                    "mode": "range",
+                    "start_line": 2,
+                    "end_line": 3,
+                    "replacement": "TWO\nTHREE",
+                    "expected_text": "two\nthree",
+                },
                 "expected_sha256": before,
                 "idempotency_key": "patch-1",
             },
@@ -287,7 +337,12 @@ def test_files_patch_modes_and_preconditions(tmp_path: Path) -> None:
         "files.patch",
         {
             "target": {"path": str(target)},
-            "edit": {"mode": "range", "start_line": 1, "end_line": 1, "replacement": "x"},
+            "edit": {
+                "mode": "range",
+                "start_line": 1,
+                "end_line": 1,
+                "replacement": "x",
+            },
             "expected_sha256": before,
             "idempotency_key": "patch-2",
         },
@@ -309,7 +364,10 @@ def test_files_patch_modes_and_preconditions(tmp_path: Path) -> None:
             },
         )
     )
-    assert unified["data"]["applied_hunks"] == 2 and unified["data"]["rejected_hunks"] == []
+    assert (
+        unified["data"]["applied_hunks"] == 2
+        and unified["data"]["rejected_hunks"] == []
+    )
     assert target.read_text() == "ONE\nTWO\nTHREE\nFOUR\n"
 
     partial = structured(
@@ -318,7 +376,10 @@ def test_files_patch_modes_and_preconditions(tmp_path: Path) -> None:
             "files.patch",
             {
                 "target": {"path": str(target)},
-                "edit": {"mode": "unified", "patch": "@@ -1,1 +1,1 @@\n-ONE\n+1\n@@ -3,1 +3,1 @@\n-nope\n+never\n"},
+                "edit": {
+                    "mode": "unified",
+                    "patch": "@@ -1,1 +1,1 @@\n-ONE\n+1\n@@ -3,1 +3,1 @@\n-nope\n+never\n",
+                },
                 "idempotency_key": "patch-4",
             },
         )
@@ -333,7 +394,12 @@ def test_files_patch_modes_and_preconditions(tmp_path: Path) -> None:
             "files.patch",
             {
                 "target": {"path": str(target)},
-                "edit": {"mode": "range", "start_line": 1, "end_line": 1, "replacement": "dry"},
+                "edit": {
+                    "mode": "range",
+                    "start_line": 1,
+                    "end_line": 1,
+                    "replacement": "dry",
+                },
                 "dry_run": True,
                 "idempotency_key": "patch-5",
             },
@@ -347,7 +413,12 @@ def test_files_patch_modes_and_preconditions(tmp_path: Path) -> None:
             "files.patch",
             {
                 "target": {"path": str(target)},
-                "edit": {"mode": "range", "start_line": 1, "end_line": 1, "replacement": "dry"},
+                "edit": {
+                    "mode": "range",
+                    "start_line": 1,
+                    "end_line": 1,
+                    "replacement": "dry",
+                },
                 "dry_run": True,
                 "idempotency_key": "patch-5",
             },
@@ -364,7 +435,11 @@ def test_files_change_operations(tmp_path: Path) -> None:
         call(
             server,
             "files.change",
-            {"target": {"path": str(root / "nested")}, "change": {"operation": "mkdir", "parents": True}, "idempotency_key": "c1"},
+            {
+                "target": {"path": str(root / "nested")},
+                "change": {"operation": "mkdir", "parents": True},
+                "idempotency_key": "c1",
+            },
         )
     )
     assert made["data"]["created"] is True and (root / "nested").is_dir()
@@ -373,14 +448,22 @@ def test_files_change_operations(tmp_path: Path) -> None:
         call(
             server,
             "files.change",
-            {"target": {"path": str(root / "a.txt")}, "change": {"operation": "create", "content": "a\n"}, "idempotency_key": "c2"},
+            {
+                "target": {"path": str(root / "a.txt")},
+                "change": {"operation": "create", "content": "a\n"},
+                "idempotency_key": "c2",
+            },
         )
     )
     assert created["data"]["created"] is True and created["data"]["sha256"]
     again = call(
         server,
         "files.change",
-        {"target": {"path": str(root / "a.txt")}, "change": {"operation": "create", "content": "b\n"}, "idempotency_key": "c3"},
+        {
+            "target": {"path": str(root / "a.txt")},
+            "change": {"operation": "create", "content": "b\n"},
+            "idempotency_key": "c3",
+        },
     )
     assert structured(again)["error"]["code"] == "conflict"
 
@@ -388,7 +471,11 @@ def test_files_change_operations(tmp_path: Path) -> None:
         call(
             server,
             "files.change",
-            {"target": {"path": str(root / "a.txt")}, "change": {"operation": "append", "content": "more\n"}, "idempotency_key": "c4"},
+            {
+                "target": {"path": str(root / "a.txt")},
+                "change": {"operation": "append", "content": "more\n"},
+                "idempotency_key": "c4",
+            },
         )
     )
     assert appended["data"]["previous_sha256"] == created["data"]["sha256"]
@@ -400,13 +487,18 @@ def test_files_change_operations(tmp_path: Path) -> None:
             "files.change",
             {
                 "target": {"path": str(root / "a.txt")},
-                "change": {"operation": "move", "destination": {"path": str(root / "nested" / "a.txt")}},
+                "change": {
+                    "operation": "move",
+                    "destination": {"path": str(root / "nested" / "a.txt")},
+                },
                 "idempotency_key": "c5",
             },
         )
     )
     assert moved["data"]["removed"] is True
-    assert decode_file_ref(moved["data"]["destination_ref"]) == str(root / "nested" / "a.txt")
+    assert decode_file_ref(moved["data"]["destination_ref"]) == str(
+        root / "nested" / "a.txt"
+    )
     assert not (root / "a.txt").exists() and (root / "nested" / "a.txt").exists()
 
     stale = call(
@@ -425,10 +517,16 @@ def test_files_change_operations(tmp_path: Path) -> None:
         call(
             server,
             "files.change",
-            {"target": {"path": str(root / "nested" / "a.txt")}, "change": {"operation": "remove"}, "idempotency_key": "c7"},
+            {
+                "target": {"path": str(root / "nested" / "a.txt")},
+                "change": {"operation": "remove"},
+                "idempotency_key": "c7",
+            },
         )
     )
-    assert removed["data"]["removed"] is True and not (root / "nested" / "a.txt").exists()
+    assert (
+        removed["data"]["removed"] is True and not (root / "nested" / "a.txt").exists()
+    )
 
     (tmp_path / "obs").mkdir()
     observer = create_server(config(tmp_path / "obs"), "observer")
@@ -437,3 +535,30 @@ def test_files_change_operations(tmp_path: Path) -> None:
         return {tool.name for tool in await observer.list_tools()}
 
     assert "files.change" not in anyio.run(observer_tools)
+
+
+def test_gateway_status_and_catalog_are_typed(tmp_path: Path) -> None:
+    server = create_server(config(tmp_path), "operator")
+    status = structured(call(server, "gateway.status", {}))
+    assert status["result"]["outcome"] == "ok", status
+    assert status["data"]["principal"] == "operator"
+    assert status["data"]["tool_count"] > 10
+    assert status["data"]["route_preflight"]["status"] in {"ready", "degraded"}
+
+    catalog = structured(call(server, "gateway.catalog", {"query": "screenshot"}))
+    assert catalog["result"]["outcome"] == "ok", catalog
+    names = [row["name"] for row in catalog["data"]["actions"]]
+    assert "files.read" in names  # alias "screenshot file"
+    assert catalog["data"]["catalog_sha256"] == status["data"]["action_catalog_hash"]
+
+    everything = structured(call(server, "gateway.catalog", {"include_schemas": True}))
+    rows = {row["name"]: row for row in everything["data"]["actions"]}
+    assert rows["files.read"]["input_schema"]["properties"]["target"]
+    assert "host_file" in {r["kind"] for r in everything["data"]["resources"]}
+    host_file = next(
+        r for r in everything["data"]["resources"] if r["kind"] == "host_file"
+    )
+    assert "files.read" in host_file["actions"]
+
+    by_family = structured(call(server, "gateway.catalog", {"family": "change"}))
+    assert {row["family"] for row in by_family["data"]["actions"]} == {"change"}

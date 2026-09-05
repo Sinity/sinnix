@@ -52,11 +52,11 @@ class GatewayConfig:
     observe_command: str = "sinnix-observe"
     max_result_bytes: int = 262_144
     approved_manifest_hash: str | None = None
-    approved_action_catalog_hash: str | None = None
     approved_manifest_principal: str = "observer"
     connector_snapshot_path: Path | None = None
     systemd_run_command: str = "systemd-run"
     systemctl_command: str = "systemctl"
+    journalctl_command: str = "journalctl"
     ops_socket_path: Path = field(default_factory=default_ops_socket_path)
     hypr_control_command: str = "sinnix-hypr-control"
     screenshot_control_command: str = "sinnix-screenshot-control"
@@ -186,7 +186,6 @@ class GatewayConfig:
             observe_command=raw.get("observeCommand", "sinnix-observe"),
             max_result_bytes=int(raw.get("maxResultBytes", 262_144)),
             approved_manifest_hash=raw.get("approvedManifestHash"),
-            approved_action_catalog_hash=raw.get("approvedActionCatalogHash"),
             approved_manifest_principal=raw.get(
                 "approvedManifestPrincipal", "observer"
             ),
@@ -195,6 +194,7 @@ class GatewayConfig:
             else None,
             systemd_run_command=raw.get("systemdRunCommand", "systemd-run"),
             systemctl_command=raw.get("systemctlCommand", "systemctl"),
+            journalctl_command=raw.get("journalctlCommand", "journalctl"),
             ops_socket_path=Path(raw.get("opsSocketPath", default_ops_socket_path())),
             hypr_control_command=raw.get("hyprControlCommand", "sinnix-hypr-control"),
             screenshot_control_command=raw.get(
