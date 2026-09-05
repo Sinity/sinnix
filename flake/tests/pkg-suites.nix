@@ -114,7 +114,7 @@
         # process.py -- caught by test_run_returns_a_result_when_the_command_hangs
         # (subprocess.TimeoutExpired; 1 failed, 30 passed); reverted after
         # confirming red.
-        sinnix-lib-suite = scriptRegistry.packageSet.sinnix-lib;
+        sinnix-lib-suite = sinnixScriptRegistry.packageSet.sinnix-lib;
 
         # Provably fails when: the launch input stops carrying the descriptor's
         # argv, pool, label or artifact paths, or the pueue adapter misreads
