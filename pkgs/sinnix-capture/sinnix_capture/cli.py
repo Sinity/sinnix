@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from .query import query as query_lanes
+from .selection import capture_selection
 from .writer import CaptureWriter
 
 
@@ -37,6 +38,23 @@ def _cmd_write(args: argparse.Namespace) -> int:
 
     emit(json.loads(args.payload) if args.payload is not None else json.load(sys.stdin))
     return 0
+
+
+def _cmd_selection(args: argparse.Namespace) -> int:
+    try:
+        return capture_selection(
+            capture_root=args.capture_root,
+            lane=args.lane,
+            list_command=args.list_command,
+            paste_command=args.paste_command,
+            window_command=args.window_command,
+            dedup_state=args.dedup_state,
+            debounce_ms=args.debounce_ms,
+            debounce_state=args.debounce_state,
+        )
+    except ValueError as exc:
+        print(f"sinnix-capture: {exc}", file=sys.stderr)
+        return 2
 
 
 def _cmd_query(args: argparse.Namespace) -> int:
@@ -74,6 +92,47 @@ def main(argv: list[str] | None = None) -> int:
         help="Print each written envelope to stdout (interactive/debug use)",
     )
     write_p.set_defaults(func=_cmd_write)
+
+    selection_p = sub.add_parser(
+        "selection",
+        help="Capture the current Wayland selection into a lane",
+    )
+    selection_p.add_argument("--capture-root", required=True, type=Path)
+    selection_p.add_argument("--lane", required=True)
+    selection_p.add_argument(
+        "--list-command",
+        required=True,
+        help="Command printing the offered MIME types, one per line",
+    )
+    selection_p.add_argument(
+        "--paste-command",
+        required=True,
+        help="Command printing the selection; the chosen MIME type is appended to its argv",
+    )
+    selection_p.add_argument(
+        "--window-command",
+        default=None,
+        help="Command printing the focused window as JSON, for source attribution",
+    )
+    selection_p.add_argument(
+        "--dedup-state",
+        default=None,
+        type=Path,
+        help="Track the last captured content here and skip an immediate repeat of it",
+    )
+    selection_p.add_argument(
+        "--debounce-ms",
+        default=None,
+        type=int,
+        help="Settle this long and yield to any newer trigger, collapsing one gesture's re-offers",
+    )
+    selection_p.add_argument(
+        "--debounce-state",
+        default=None,
+        type=Path,
+        help="Trigger file the debounce window arbitrates on",
+    )
+    selection_p.set_defaults(func=_cmd_selection)
 
     query_p = sub.add_parser("query", help="Per-lane record deltas since a timestamp")
     query_p.add_argument("--capture-root", required=True, type=Path)
