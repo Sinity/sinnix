@@ -1,0 +1,174 @@
+#!/usr/bin/env python3
+# @sinnix-package
+# description: Move elicitation domains from the prose tree to the owned state root, verifying every file
+# runtimeInputs: coreutils systemd
+
+"""One-shot, idempotent move of elicitation state to /realm/state/elicit.
+
+Elicitation state is items, an append-only comparison log, and a fitted model:
+operator judgments that cannot be recomputed from anything. Moving them is
+therefore a verified move, not a copy:
+
+  * it refuses to run while the drain unit is active, because the producer
+    initialises a domain directory it does not find, and an interleaved run
+    would write an empty domain into the root being moved away from;
+  * each domain moves by rename, so no reader ever sees a half-populated or
+    empty destination -- there is no window between "exists" and "complete";
+  * every file's size and digest is recorded before the move and re-checked
+    after it, and a missing, extra, or changed file fails the run;
+  * a domain already at the destination is verified against the source and
+    left alone, so re-running after an interruption completes the move rather
+    than merging two copies.
+
+The retired root is left in place, empty. Deleting it is a separate decision
+made after the new root is in a backup.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+OLD_ROOT = Path("/realm/data/notes/preferences")
+NEW_ROOT = Path("/realm/state/elicit")
+DRAIN_UNIT = "sinnix-elicit-autoingest.service"
+
+
+def digest(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def inventory(domain_dir: Path) -> dict[str, tuple[int, str]]:
+    """{relative path: (size, sha256)} for every file under *domain_dir*."""
+    out = {}
+    for path in sorted(domain_dir.rglob("*")):
+        if path.is_file():
+            out[str(path.relative_to(domain_dir))] = (path.stat().st_size, digest(path))
+    return out
+
+
+def compare(expected: dict, actual: dict, where: Path) -> list[str]:
+    problems = []
+    for name in sorted(set(expected) - set(actual)):
+        problems.append(f"{where}: missing {name}")
+    for name in sorted(set(actual) - set(expected)):
+        problems.append(f"{where}: unexpected {name}")
+    for name in sorted(set(expected) & set(actual)):
+        if expected[name] != actual[name]:
+            problems.append(
+                f"{where}: {name} changed "
+                f"(size/digest {expected[name]} -> {actual[name]})"
+            )
+    return problems
+
+
+def drain_is_active(unit: str = DRAIN_UNIT) -> bool:
+    """True unless systemd says the drain is inactive.
+
+    Unknown means active here: a probe that cannot answer must not be read as
+    permission to move state out from under a writer.
+    """
+    try:
+        result = subprocess.run(
+            ["systemctl", "--user", "is-active", unit],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        print(f"cannot probe {unit}: {exc}", file=sys.stderr)
+        return True
+    return result.stdout.strip() not in ("inactive", "failed", "unknown")
+
+
+def migrate(old_root: Path, new_root: Path, dry_run: bool = False) -> int:
+    if not old_root.exists():
+        print(f"nothing to migrate: {old_root} does not exist")
+        return 0
+    domains = sorted(d for d in old_root.iterdir() if d.is_dir())
+    if not domains:
+        print(f"nothing to migrate: {old_root} holds no domains")
+        return 0
+
+    before = {d.name: inventory(d) for d in domains}
+    for name, files in before.items():
+        total = sum(size for size, _ in files.values())
+        print(f"{name}: {len(files)} file(s), {total} bytes")
+    if dry_run:
+        print(f"would move {len(domains)} domain(s) to {new_root}")
+        return 0
+
+    new_root.mkdir(parents=True, exist_ok=True)
+    problems = []
+    for source in domains:
+        destination = new_root / source.name
+        if destination.exists():
+            # A previous run already moved this one, or something else owns
+            # the name. Either way, verify rather than merge.
+            problems += compare(
+                before[source.name], inventory(destination), destination
+            )
+            print(f"{source.name}: already at {destination}, verified")
+            continue
+        os.rename(source, destination)
+        print(f"{source.name}: {source} -> {destination}")
+
+    for name, files in before.items():
+        problems += compare(files, inventory(new_root / name), new_root / name)
+
+    if problems:
+        for problem in problems:
+            print(problem, file=sys.stderr)
+        print(
+            f"{len(problems)} problem(s): the source is unchanged where it was "
+            "not moved, and nothing was deleted",
+            file=sys.stderr,
+        )
+        return 1
+
+    print(f"verified {len(before)} domain(s) at {new_root} (size and sha256)")
+    remaining = sorted(p.name for p in old_root.iterdir()) if old_root.exists() else []
+    print(
+        f"{old_root} left in place"
+        + (f", still holding: {', '.join(remaining)}" if remaining else ", now empty")
+    )
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--from", dest="old_root", type=Path, default=OLD_ROOT)
+    parser.add_argument("--to", dest="new_root", type=Path, default=NEW_ROOT)
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="report the inventory that would move, and move nothing",
+    )
+    parser.add_argument(
+        "--unit",
+        default=DRAIN_UNIT,
+        help="the drain unit that must be inactive for the move to be safe",
+    )
+    args = parser.parse_args(argv)
+
+    if drain_is_active(args.unit):
+        print(
+            f"{args.unit} is active: stop it before migrating, or the drain "
+            "writes a domain into the root being moved away from",
+            file=sys.stderr,
+        )
+        return 2
+    return migrate(args.old_root, args.new_root, args.dry_run)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

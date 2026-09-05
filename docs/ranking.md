@@ -54,6 +54,53 @@ components, items with no comparisons, the stopping threshold, and
 `settled` with the reasons it is not. A total order always exists; whether it
 means anything is what `evidence` answers.
 
+## Steering's activity menu
+
+`sinnix-steer activity menu` and both rituals order the activity registry by
+the fit over the `steering-activities` domain, so the morning shortlist is the
+head of the operator's own preference order at the energy tier he states. The
+fit runs over the whole registry, so the energy filter chooses what is shown
+and never what it is worth. With no comparisons recorded the order is the
+registry's own and the CLI says so.
+
+## `sinnix-elicit`
+
+The image and phone-session frontend: a domain is a roster of items with
+optional images, descriptions, and feature vectors, compared by tapping
+through a generated HTML page served by the hub.
+
+```bash
+sinnix elicit init wallpaper --items items.json --image-features
+sinnix elicit session wallpaper -n 20        # page on the hub, tap from the phone
+sinnix elicit ask wallpaper                  # terminal loop
+sinnix elicit rank wallpaper                 # fitted order + `explain`
+sinnix elicit explain wallpaper              # which features the choices track
+```
+
+It fits through `rank_core` and owns only its own surfaces. Two things it does
+that the engine does not:
+
+- a record naming an id that is not in `items.json` is dropped, where the
+  engine would fit a comparison-only id. The roster is the operator's declared
+  item set, so a stale id is evidence about something deleted;
+- `explain` regresses standardised feature deltas on the operator's choices,
+  which is a question about the items rather than about the ranking.
+
+Its domain format is its own: `items.json` (a JSON array, editable),
+`comparisons.jsonl` with `{a, b, outcome}` pairwise records, and `model.json`,
+the one cached fit in the estate — the hub serves it back mid-session at
+`GET /feedback/elicit/<domain>`. State lives at `/realm/state/elicit/<domain>` --
+mutable application state, in the state root, not in the prose tree;
+`SINNIX_ELICIT_DIR` moves the root for fixtures. `sinnix-elicit-migrate` moves
+domains there from the retired root: it refuses to run while the drain unit is
+active, moves each domain by rename, and re-checks every file's size and
+sha256 at the destination.
+
+A tap posts to the hub's `/feedback` spool and `sinnix-elicit autoingest`
+drains it into the domain, coalesced per burst. The drain dedups against every
+comparison id the log has ever carried, tombstones included: a record the
+operator undid is still one this domain has seen.
+
 ## `rank-options` skill
 
 `dots/_ai/skills/rank-options` routes agent-generated shortlists through the
