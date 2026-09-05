@@ -243,7 +243,9 @@ def _verify(
                     )
             if not _wait_seconds(sleep, deadline):
                 raise BatchRefusal(
-                    "verify_timeout", f"hosted check {check} did not finish"
+                    "verify_failed",
+                    f"hosted check {check} did not finish",
+                    timed_out=True,
                 )
     operation = project.operation(profile)
     started = launch.start_operation(config, project, operation, workspace=path)
@@ -375,7 +377,9 @@ def _publish(
                 "checks_failed", f"PR #{number} has a failing required check"
             )
         if not _wait_seconds(sleep, deadline):
-            raise BatchRefusal("checks_timeout", f"PR #{number} checks did not finish")
+            raise BatchRefusal(
+                "checks_failed", f"PR #{number} checks did not finish", timed_out=True
+            )
     try:
         github.merge_pr(project.root, number, candidate)
     except GithubError as error:
