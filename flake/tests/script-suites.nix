@@ -23,12 +23,20 @@
           # expects them, next to its tests directory.
           packageFiles ? [ ],
           pythonPackages ? [ ],
+          # Repository files the suite reads at a path of its own choosing --
+          # a declarative source it asserts stays untouched, for instance.
+          extraFiles ? [ ],
+          # Python packages built in this repository rather than named in
+          # nixpkgs.
+          extraPythonPackages ? [ ],
           nativeBuildInputs ? [ ],
         }:
         pkgs.runCommand "sinnix-${name}-suite-check"
           {
             nativeBuildInputs = [
-              (pkgs.python3.withPackages (ps: [ ps.pytest ] ++ map (name: ps.${name}) pythonPackages))
+              (pkgs.python3.withPackages (
+                ps: [ ps.pytest ] ++ map (name: ps.${name}) pythonPackages ++ extraPythonPackages
+              ))
               pkgs.coreutils
             ]
             ++ nativeBuildInputs;
@@ -46,6 +54,12 @@
               map (file: ''
                 cp ${../../pkgs + "/${name}/${file}"} "$root/pkgs/${name}/${file}"
               '') packageFiles
+            )}
+            ${builtins.concatStringsSep "\n" (
+              map (entry: ''
+                mkdir -p "$root/$(dirname ${entry.dest})"
+                cp ${entry.source} "$root/${entry.dest}"
+              '') extraFiles
             )}
             cp ${suiteDir}/*.py "$root/pkgs/${name}/tests/"
             cd "$root"
@@ -102,6 +116,30 @@
           name = "sinnix-picker";
           suiteDir = ../../pkgs/sinnix-picker/tests;
           scripts = [ "sinnix-picker" ];
+        };
+        # Provably fails when: a binding's ranking identity starts tracking
+        # source order or its /nix/store action path, a usage prior stops
+        # distinguishing "never measured" from "measured zero", operator
+        # comparisons stop displacing that prior at the documented evidence
+        # threshold, a retired binding survives into the next manifest, or
+        # deck-forge stops taking its drill order from the manifest.
+        rank-keybinds-suite = mkScriptSuite {
+          name = "sinnix-rank-keybinds";
+          suiteDir = ../../pkgs/sinnix-rank-keybinds/tests;
+          scripts = [
+            "sinnix-rank-keybinds"
+            "sinnix-rank"
+            "sinnix-deck-forge"
+          ];
+          extraPythonPackages = [
+            (pkgs.callPackage ../../pkgs/sinnix-rank-core/pkg.nix { })
+          ];
+          extraFiles = [
+            {
+              source = ../../modules/features/desktop/hyprland/bindings.nix;
+              dest = "modules/features/desktop/hyprland/bindings.nix";
+            }
+          ];
         };
       };
     };
