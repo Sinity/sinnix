@@ -7,6 +7,7 @@ against a re-parsed dict.
 
 from __future__ import annotations
 
+import inspect
 import json
 import threading
 import time
@@ -17,13 +18,14 @@ from pathlib import Path
 
 import pytest
 from sinnix_ops_reducer.feedback import (
+    ELICIT_MODEL_DIR_DEFAULT,
     CoalescingTrigger,
     FeedbackSpool,
     is_elicit,
     resolve_elicit_model,
 )
 from sinnix_ops_reducer.reducer import Reducer
-from sinnix_ops_reducer.server import Handler
+from sinnix_ops_reducer.server import Handler, serve
 
 
 def test_spool_line_carries_the_v1_envelope(tmp_path: Path) -> None:
@@ -104,6 +106,20 @@ def test_resolve_elicit_model_rejects_traversal_and_odd_charsets(
     assert resolve_elicit_model(tmp_path, "") is None
     assert resolve_elicit_model(tmp_path, "a" * 65) is None
     assert resolve_elicit_model(tmp_path, "a" * 64) is not None
+
+
+def test_the_elicit_model_root_default_is_the_owned_state_root() -> None:
+    """The hub reads the model from where sinnix-elicit writes it. Neither
+    side is configured, so the two defaults are the contract; a server built
+    with no elicit argument at all has to resolve there."""
+    assert ELICIT_MODEL_DIR_DEFAULT == Path("/realm/state/elicit")
+    assert resolve_elicit_model(ELICIT_MODEL_DIR_DEFAULT, "wallpaper") == Path(
+        "/realm/state/elicit/wallpaper/model.json"
+    )
+    assert (
+        inspect.signature(serve).parameters["elicit_model_dir"].default
+        == ELICIT_MODEL_DIR_DEFAULT
+    )
 
 
 @pytest.fixture

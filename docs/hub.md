@@ -339,7 +339,7 @@ once, a few seconds after the last tap, rather than once per tap.
 `GET /feedback/elicit/<domain>` is the one read this route does carry, and it
 is a different decision from the spool refusal above, not a walk-back of it:
 it serves back a domain's own fitted `model.json` (`sinnix-elicit`'s
-`/realm/data/notes/preferences/<domain>/model.json`), a derived
+`/realm/state/elicit/<domain>/model.json`), a derived
 Bradley-Terry fit over items the operator defined themselves on this host,
 not an arbitrary posted payload. Bounded the same way as everything else
 here — the domain name is checked against a fixed charset and the resolved
