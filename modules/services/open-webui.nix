@@ -22,7 +22,7 @@ mkAiService {
   description = "Open WebUI chat frontend for local models";
   docs = "docs/local-ai-activation.md";
   unit = "open-webui.service";
-  endpoint = "127.0.0.1:${toString helpers.data.ports.openWebui}";
+  activation.publicEndpoint = "127.0.0.1:${toString helpers.data.ports.openWebui}";
   stateDirectories = [ "/var/lib/open-webui" ];
   requiresCuda = false;
   extraOptions = {

@@ -23,7 +23,10 @@ mkServiceModule {
       mode = "socket-proxy";
       publicEndpoint = "127.0.0.1:${toString helpers.data.ports.musicgen.public}";
       backendEndpoint = "127.0.0.1:${toString helpers.data.ports.musicgen.backend}";
+      # Unmeasured (disabled on this host). Same all-in-one Gradio+PyTorch
+      # toolkit shape as ComfyUI, so sized to the same tier.
       idleTimeout = "900s";
+      readinessTimeout = 180;
       exclusiveResource = "gpu-inference";
       dependsOn = [ "musicgen-proxy" ];
     };

@@ -30,13 +30,15 @@ mkAiService {
   description = "Kokoro-82M TTS (CPU, OpenAI-compatible /v1/audio/speech, containerized)";
   docs = "docs/local-ai-activation.md";
   unit = "podman-kokoro.service";
-  endpoint = "127.0.0.1:${toString helpers.data.ports.kokoro.public}";
   backendKind = "container";
   requiresCuda = false;
   activation = {
     mode = "socket-proxy";
+    publicEndpoint = "127.0.0.1:${toString helpers.data.ports.kokoro.public}";
     backendEndpoint = "127.0.0.1:${toString helpers.data.ports.kokoro.backend}";
+    # Unmeasured; kept at the baseline default.
     idleTimeout = "30s";
+    readinessTimeout = 30;
     dependsOn = [ "kokoro-proxy" ];
   };
   extraOptions = {

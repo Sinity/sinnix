@@ -21,7 +21,11 @@ mkServiceModule {
       mode = "socket-proxy";
       publicEndpoint = "127.0.0.1:${toString helpers.data.ports.ocr.public}";
       backendEndpoint = "127.0.0.1:${toString helpers.data.ports.ocr.backend}";
+      # Unmeasured (disabled on this host). marker-api's Surya weights are
+      # small (~1-2GB) next to ComfyUI's checkpoint tree, so sized to the tts
+      # container tier.
       idleTimeout = "300s";
+      readinessTimeout = 60;
       exclusiveResource = "gpu-inference";
       dependsOn = [ "ocr-proxy" ];
     };
