@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import subprocess
+import threading
 from pathlib import Path
 
 import pytest
@@ -235,3 +237,81 @@ def test_find_skips_items_that_carry_no_branch(tmp_path: Path) -> None:
     )
     assert worktrunk_find(root, "feature/lane") is None
     assert worktrunk_find(root, "master") is not None
+
+
+def _fake_wt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, body: str) -> Path:
+    """A `wt` earlier on PATH than the real one, running ``body``."""
+    directory = tmp_path / "wt-bin"
+    directory.mkdir(exist_ok=True)
+    script = directory / "wt"
+    script.write_text("#!/bin/sh\n" + body)
+    script.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{directory}{os.pathsep}{os.environ['PATH']}")
+    runtime = tmp_path / "runtime"
+    runtime.mkdir(exist_ok=True)
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime))
+    return script
+
+
+def test_two_removals_in_one_repository_never_overlap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Anti-vacuity: the fixture holds the repository for 200 ms, so without the
+    per-repository lock the two calls interleave every time."""
+    root = _repository(tmp_path / "repo")
+    ledger = tmp_path / "ledger"
+    _fake_wt(
+        tmp_path,
+        monkeypatch,
+        f'printf "enter %s\\n" "$4" >> {ledger}\n'
+        "sleep 0.2\n"
+        f'printf "exit %s\\n" "$4" >> {ledger}\n',
+    )
+
+    threads = [
+        threading.Thread(target=worktrunk_remove, args=(root, name))
+        for name in ("feature/one", "feature/two")
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    lines = [line.split() for line in ledger.read_text().splitlines()]
+    assert [step for step, _branch in lines] == ["enter", "exit", "enter", "exit"]
+    assert lines[0][1] == lines[1][1] and lines[2][1] == lines[3][1]
+
+
+def test_removal_returns_only_once_the_shared_index_lock_is_released(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Anti-vacuity: wt's force removal returned before its own Git cleanup
+    finished and left an unowned index lock behind, blocking the next
+    fast-forward in a repository agentctl does not own."""
+    root = _repository(tmp_path / "repo")
+    index_lock = root / ".git" / "index.lock"
+    _fake_wt(
+        tmp_path,
+        monkeypatch,
+        f": > {index_lock}\n"
+        f"( sleep 0.5; rm -f {index_lock} ) >/dev/null 2>&1 &\n"
+        "exit 0\n",
+    )
+
+    worktrunk_remove(root, "feature/lane")
+
+    assert not index_lock.exists()
+
+
+def test_an_index_lock_the_mutation_did_not_create_is_left_alone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A lock from another process is not this call's to wait for or to delete."""
+    root = _repository(tmp_path / "repo")
+    index_lock = root / ".git" / "index.lock"
+    index_lock.write_text("")
+    _fake_wt(tmp_path, monkeypatch, "exit 0\n")
+
+    worktrunk_remove(root, "feature/lane")
+
+    assert index_lock.exists()

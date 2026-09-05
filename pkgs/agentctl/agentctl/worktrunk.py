@@ -3,16 +3,25 @@
 agentctl does not create, provision, classify, or remove worktrees. ``wt`` does,
 against the project's own ``.config/wt.toml`` hooks, and publishes the result as
 JSON. This module is the only place that shells out to it.
+
+Listing is a read and runs whenever it is asked. Creation and removal write
+the repository's shared Git state: they hold one lock per repository and
+return only once Git has released that repository's index.
 """
 
 from __future__ import annotations
 
+import fcntl
+import hashlib
 import json
 import os
 import subprocess
+import tempfile
+import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Iterator, Mapping, Sequence
 
 # wt list schema 2 is the contract this module parses. wt still defaults to
 # schema 1 and takes 2 only from user config, so every call pins it: agentctl
@@ -40,6 +49,13 @@ _REMOVE_ARGUMENTS = ("--reap", "--foreground", "-y", "--format", "json")
 # wt answers from local Git plus, for --prs, the forge. A minute covers a cold
 # forge call; longer means wt is wedged, not slow.
 CALL_TIMEOUT_SECONDS = 60
+
+# A mutation returns while the Git process it started may still hold the
+# repository index. The next writer then finds an `index.lock` no process
+# owns. This is how long a mutation waits for that lock to be released; the
+# lock is never removed here, because it belongs to Git.
+GIT_SETTLE_SECONDS = 30
+_SETTLE_POLL_SECONDS = 0.05
 
 
 def _read_only_git_environment() -> dict[str, str]:
@@ -176,6 +192,100 @@ def _run(root: Path, arguments: Sequence[str]) -> str:
     return completed.stdout
 
 
+def _common_git_directory(root: Path) -> Path | None:
+    """The `.git` every worktree of this repository shares, or None.
+
+    Creation and removal write there, whichever worktree they are asked from,
+    so it names both the lock and the index they contend for.
+    """
+    try:
+        completed = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(root),
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=CALL_TIMEOUT_SECONDS,
+            env=_read_only_git_environment(),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if completed.returncode != 0:
+        return None
+    directory = completed.stdout.strip()
+    return Path(directory) if directory else None
+
+
+def _lock_directory() -> Path:
+    runtime = os.environ.get("XDG_RUNTIME_DIR")
+    if runtime:
+        return Path(runtime) / "agentctl"
+    return Path(tempfile.gettempdir()) / f"agentctl-{os.getuid()}"
+
+
+@contextmanager
+def _repository_locked(root: Path, common: Path | None) -> Iterator[None]:
+    """One worktrunk mutation per repository at a time.
+
+    `wt` mutates the repository's shared registry, index and refs; two
+    concurrent mutations interleave there whichever worktrees they were asked
+    from. The lock is keyed by the common `.git` so every worktree of one
+    repository takes the same one, and it lives outside the repository:
+    agentctl does not own that checkout.
+    """
+    key = str((common or root).resolve())
+    directory = _lock_directory()
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"worktrunk-{hashlib.sha256(key.encode()).hexdigest()[:16]}.lock"
+    with path.open("w") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+
+
+def _index_lock_state(path: Path) -> tuple[int, int] | None:
+    try:
+        info = path.lstat()
+    except OSError:
+        return None
+    return (info.st_ino, info.st_mtime_ns)
+
+
+def _mutate(root: Path, arguments: Sequence[str], verb: str) -> str:
+    """Run one `wt` mutation, and return only once Git has released the index.
+
+    A mutation whose Git process is still finishing leaves an `index.lock`
+    behind it; a caller that returned already would hand the next writer a
+    repository it cannot write. A lock that was there before the mutation
+    belongs to somebody else and is neither waited for nor removed.
+    """
+    common = _common_git_directory(root)
+    with _repository_locked(root, common):
+        if common is None:
+            return _run(root, arguments)
+        index_lock = common / "index.lock"
+        before = _index_lock_state(index_lock)
+        output = _run(root, arguments)
+        deadline = time.monotonic() + GIT_SETTLE_SECONDS
+        while True:
+            current = _index_lock_state(index_lock)
+            if current is None or current == before:
+                return output
+            if time.monotonic() >= deadline:
+                raise WorktrunkError(
+                    f"wt {verb} left {index_lock} held after "
+                    f"{GIT_SETTLE_SECONDS} seconds"
+                )
+            time.sleep(_SETTLE_POLL_SECONDS)
+
+
 def _decode(payload: str, what: str) -> Any:
     # wt pretty-prints its JSON across lines and may precede it with progress
     # output, so the document runs from the first brace to the end of stdout.
@@ -235,7 +345,7 @@ def worktrunk_create(
     ]
     if base is not None:
         arguments.extend(["--base", base])
-    document = _decode(_run(root, arguments), "switch")
+    document = _decode(_mutate(root, arguments, "switch"), "switch")
     if not isinstance(document, Mapping) or not document.get("path"):
         raise WorktrunkError("wt switch published no worktree path")
     created = worktrunk_find(root, branch)
@@ -249,4 +359,4 @@ def worktrunk_remove(root: Path, branch: str, *, force: bool = False) -> None:
     arguments = ["remove", branch, *_REMOVE_ARGUMENTS]
     if force:
         arguments.append("--force")
-    _run(root, arguments)
+    _mutate(root, arguments, "remove")

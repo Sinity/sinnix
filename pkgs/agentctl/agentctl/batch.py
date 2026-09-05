@@ -898,6 +898,23 @@ def result(config: Config, run_id: str, worker_id: str, path: Path) -> dict[str,
             "empty_candidate",
             f"result names the base commit {run.base_commit[:12]}; a worker with nothing to commit is not a candidate",
         )
+    if worktree:
+        # Landing merges every worker branch onto the run's base; a candidate
+        # that does not descend from it carries work from somewhere else.
+        try:
+            _git(
+                Path(worktree),
+                "merge-base",
+                "--is-ancestor",
+                run.base_commit,
+                value["candidate_sha"],
+            )
+        except BatchError as error:
+            raise BatchRefusal(
+                "candidate_off_base",
+                f"result names {value['candidate_sha'][:12]}, which does not "
+                f"descend from the run's base {run.base_commit[:12]}",
+            ) from error
     unknown = {entry["id"] for entry in value["beads"]} - set(worker["beads"])
     if unknown:
         raise BatchRefusal(
