@@ -192,6 +192,32 @@ def hosted_check_state(pull: Mapping[str, Any], name: str) -> str:
     return "missing"
 
 
+def pull_request_advisory(root: Path, number: int) -> list[dict[str, Any]]:
+    """The PR's reviews and comments: author, state, head sha, url."""
+    value = gh_json(
+        ["pr", "view", str(number), "--json", "reviews,comments"], cwd=root
+    )
+    document = value if isinstance(value, Mapping) else {}
+    rows: list[dict[str, Any]] = []
+    for kind, key in (("review", "reviews"), ("comment", "comments")):
+        entries = document.get(key)
+        for entry in entries if isinstance(entries, list) else []:
+            if not isinstance(entry, Mapping):
+                continue
+            author = entry.get("author")
+            commit = entry.get("commit")
+            rows.append(
+                {
+                    "kind": kind,
+                    "author": author.get("login") if isinstance(author, Mapping) else None,
+                    "state": entry.get("state"),
+                    "head_sha": commit.get("oid") if isinstance(commit, Mapping) else None,
+                    "url": entry.get("url"),
+                }
+            )
+    return rows
+
+
 def merge_pr(root: Path, number: int, sha: str) -> None:
     """Squash-merge the PR only while its head is still ``sha``."""
     try:

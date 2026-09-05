@@ -283,8 +283,7 @@ def load(config: Config, run_id: str) -> Run:
 
 
 @contextmanager
-def _locked(path: Path) -> Iterator[None]:
-    lock = path.with_suffix(".lock")
+def _flock(lock: Path) -> Iterator[None]:
     lock.parent.mkdir(parents=True, exist_ok=True)
     with lock.open("w") as handle:
         fcntl.flock(handle, fcntl.LOCK_EX)
@@ -292,6 +291,19 @@ def _locked(path: Path) -> Iterator[None]:
             yield
         finally:
             fcntl.flock(handle, fcntl.LOCK_UN)
+
+
+def _locked(path: Path) -> Iterator[None]:
+    return _flock(path.with_suffix(".lock"))
+
+
+def project_lock_path(config: Config, project_id: str) -> Path:
+    return runs_dir(config) / f"{project_id}.lock"
+
+
+def _project_locked(config: Config, project_id: str) -> Iterator[None]:
+    """One worktree creation or removal per project at a time: `wt` is not reentrant."""
+    return _flock(project_lock_path(config, project_id))
 
 
 def update(config: Config, run_id: str, fn: Callable[[dict[str, Any]], None]) -> Run:
@@ -420,11 +432,13 @@ def queue_agent(
     then: Sequence[str] = (),
     after: Sequence[int] = (),
     timeout_seconds: int = MAX_AGENT_TIMEOUT_SECONDS,
+    binding: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Queue one agent in the agent group; ``then`` runs after a successful agent.
 
     With ``schema`` the backend must answer with a conforming JSON document,
-    written beside the prompt as ``<prompt stem>.result.json``.
+    written beside the prompt as ``<prompt stem>.result.json``. ``binding``
+    names the beads, run and worker the task serves; `job get` shows it.
     """
     workspace = _workspace(project)
     prompt_path = _write_prompt(worktree, prompt_name, prompt)
@@ -476,7 +490,13 @@ def queue_agent(
         kind="attested-agent",
         after=after,
         unit_properties=(f"MemoryMax={workspace.agent_memory_max}",),
+        binding=binding,
     )
+
+
+def _binding(run: Run, worker_id: str | None) -> dict[str, Any]:
+    beads = list(run.worker(worker_id)["beads"]) if worker_id else list(run.members)
+    return {"beads": beads, "run_id": run.run_id, "worker": worker_id}
 
 
 def _result_path(worktree: Path) -> Path:
@@ -562,7 +582,7 @@ def _base_commit(project: ProjectAdapter) -> str:
     return _git(project.root, "rev-parse", "--verify", f"{base}^{{commit}}")
 
 
-def _new_run_id(project_id: str, leaders: Sequence[str]) -> str:
+def _new_run_id(project_id: str) -> str:
     stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     return f"{project_id}-{stamp}-{uuid.uuid4().hex[:SHORT_RUN_ID]}"
 
@@ -616,8 +636,21 @@ def _prepare(
     for index, worker in enumerate(run.workers):
         worker_id = worker["id"]
         if not worker.get("claimed"):
+            # Each claim is recorded as it lands, so a failure part-way
+            # through a worker releases exactly the beads it took.
             for bead_id in worker["beads"]:
+                if bead_id in (run.workers[index].get("claimed_beads") or []):
+                    continue
                 beads.claim(bead_id, actor=run.actor)
+                run = _set_worker(
+                    config,
+                    run.run_id,
+                    index,
+                    claimed_beads=[
+                        *(run.workers[index].get("claimed_beads") or []),
+                        bead_id,
+                    ],
+                )
             run = _set_worker(config, run.run_id, index, claimed=True)
         if not worker.get("worktree"):
             branch = worker["branch"]
@@ -682,6 +715,7 @@ def _prepare(
                 effort=worker["effort"],
                 schema="worker",
                 then=_worker_then(config, run.run_id, worker_id, path),
+                binding=_binding(run, worker_id),
             )
             run = _set_worker(config, run.run_id, index, task_id=job["job_id"])
     if run.landing.get("task_id") is None:
@@ -709,18 +743,21 @@ def _rollback(
     except BatchRefusal:
         return
     for worker in run.workers:
-        if worker.get("claimed"):
-            for bead_id in worker["beads"]:
-                try:
-                    beads.unclaim(bead_id, actor=run.actor)
-                except BatchError:
-                    pass
+        claimed = worker.get("claimed_beads") or (
+            worker["beads"] if worker.get("claimed") else []
+        )
+        for bead_id in claimed:
+            try:
+                beads.unclaim(bead_id, actor=run.actor)
+            except BatchError:
+                pass
         if worker.get("worktree"):
             try:
                 worktrunk.worktrunk_remove(project.root, worker["branch"], force=True)
             except WorktrunkError:
                 pass
     manifest_path(config, run_id).unlink(missing_ok=True)
+    manifest_path(config, run_id).with_suffix(".lock").unlink(missing_ok=True)
 
 
 def start(
@@ -751,8 +788,8 @@ def start(
         if set(live.members) == requested:
             if live.prepared:
                 return {**live.to_dict(), "resumed": False, "existing": True}
-            return {
-                **_prepare(
+            with _project_locked(config, project.project_id):
+                completed = _prepare(
                     config,
                     project,
                     live,
@@ -760,10 +797,8 @@ def start(
                     backend=backend,
                     model=model,
                     effort=effort,
-                ).to_dict(),
-                "resumed": True,
-                "existing": True,
-            }
+                )
+            return {**completed.to_dict(), "resumed": True, "existing": True}
         claimed.update(live.members)
     refusals = validate_members(
         beads, [members for _leader, members in member_sets], claimed=claimed
@@ -775,9 +810,7 @@ def start(
             refusals=[item.to_dict() for item in refusals],
         )
     base_commit = _base_commit(project)
-    run_id = _new_run_id(
-        project.project_id, [leader for leader, _members in member_sets]
-    )
+    run_id = _new_run_id(project.project_id)
     run = Run(
         run_id=run_id,
         project=project.project_id,
@@ -797,6 +830,7 @@ def start(
                 "task_id": None,
                 "task_ids": [],
                 "claimed": False,
+                "claimed_beads": [],
                 "result_path": None,
                 "result": None,
             }
@@ -818,9 +852,16 @@ def start(
     )
     create(config, run)
     try:
-        prepared = _prepare(
-            config, project, run, beads, backend=backend, model=model, effort=effort
-        )
+        with _project_locked(config, project.project_id):
+            prepared = _prepare(
+                config,
+                project,
+                run,
+                beads,
+                backend=backend,
+                model=model,
+                effort=effort,
+            )
     except (
         BatchRefusal,
         BatchError,
@@ -942,6 +983,7 @@ def resume(
         effort=effort or worker.get("effort") or packets.default_effort,
         schema="worker",
         then=_worker_then(config, run_id, worker_id, path),
+        binding=_binding(run, worker_id),
     )
     task_id = job["job_id"]
 
@@ -1027,7 +1069,19 @@ def _integrate(config: Config, project: ProjectAdapter, run: Run, base: str) -> 
     """Merge every worker branch onto ``base`` in the integration worktree; return HEAD."""
     branch = run.landing["integration_branch"]
     existing = worktrunk.worktrunk_find(project.root, branch)
-    if existing is not None and existing.path is not None and existing.path.is_dir():
+    if existing is not None and (existing.path is None or not existing.path.is_dir()):
+        # The branch is registered but its directory is gone; `wt` refuses
+        # to create a worktree for a branch it already lists.
+        try:
+            worktrunk.worktrunk_remove(project.root, branch, force=True)
+        except WorktrunkError as error:
+            raise BatchRefusal(
+                "integration_worktree_missing",
+                f"{branch} is registered without a worktree directory and "
+                f"could not be unregistered: {error}",
+            ) from error
+        existing = None
+    if existing is not None and existing.path is not None:
         path = existing.path
         try:
             _git(path, "merge", "--abort")
@@ -1070,6 +1124,7 @@ def _integrate(config: Config, project: ProjectAdapter, run: Run, base: str) -> 
             backend=str(worker.get("backend") or ""),
             model=str(worker.get("model") or ""),
             effort=str(worker.get("effort") or ""),
+            binding=_binding(run, None),
         )
         waited = launch.wait(job["job_id"], timeout_seconds=MAX_AGENT_TIMEOUT_SECONDS)
         if waited.get("phase") != "succeeded":
@@ -1218,6 +1273,7 @@ def _review(
         model=str(worker.get("model") or ""),
         effort=str(worker.get("effort") or ""),
         schema="judge",
+        binding=_binding(run, None),
     )
     waited = launch.wait(job["job_id"], timeout_seconds=MAX_AGENT_TIMEOUT_SECONDS)
     if waited.get("phase") != "succeeded":
@@ -1276,8 +1332,13 @@ def _publish(
                 timeout=PUSH_TIMEOUT_SECONDS,
             )
         except BatchError as error:
-            if "stale info" in str(error) or "rejected" in str(error):
+            message = str(error)
+            # Only a lease that no longer matches means the target moved;
+            # a protected branch or a hook rejects the same push forever.
+            if "stale info" in message or "fetch first" in message:
                 return None
+            if "rejected" in message:
+                raise BatchRefusal("publish_rejected", message) from error
             raise
         return {"policy": "master", "candidate_sha": candidate, "base_commit": base}
     number = _ensure_pr(project, run, path, candidate)
@@ -1358,6 +1419,7 @@ def _accept(
         "review_verdict": dict(review_verdict),
         "published": dict(published),
         "members": members,
+        "advisory": _advisory(project, published),
         "recorded_at": _now(),
         "residual": [],
     }
@@ -1368,14 +1430,27 @@ def _accept(
 
     run = update(config, run.run_id, record)
     residual: list[str] = []
-    for branch in [
-        *(worker["branch"] for worker in run.workers),
-        run.landing["integration_branch"],
-    ]:
-        try:
-            worktrunk.worktrunk_remove(project.root, branch, force=True)
-        except WorktrunkError as error:
-            residual.append(f"{branch}: {error}")
+    # A worker's worktree is removed only once every bead it carried is
+    # closed; the integration worktree is published and always goes.
+    removable = [run.landing["integration_branch"]]
+    for worker in run.workers:
+        still_open = [
+            bead_id
+            for bead_id in worker["beads"]
+            if members[bead_id]["state"] != "closed"
+        ]
+        if still_open:
+            residual.append(
+                f"{worker['branch']}: worktree kept; {', '.join(still_open)} still open"
+            )
+        else:
+            removable.append(worker["branch"])
+    with _project_locked(config, project.project_id):
+        for branch in removable:
+            try:
+                worktrunk.worktrunk_remove(project.root, branch, force=True)
+            except WorktrunkError as error:
+                residual.append(f"{branch}: {error}")
     if residual:
 
         def note(document: dict[str, Any]) -> None:
@@ -1383,6 +1458,19 @@ def _accept(
 
         run = update(config, run.run_id, note)
     return run
+
+
+def _advisory(
+    project: ProjectAdapter, published: Mapping[str, Any]
+) -> list[dict[str, Any]]:
+    """The hosted reviews and comments on the candidate PR. Never a gate."""
+    number = published.get("pr")
+    if published.get("policy") != "pr" or not isinstance(number, int):
+        return []
+    try:
+        return github.pull_request_advisory(project.root, number)
+    except GithubError:
+        return []
 
 
 def land(

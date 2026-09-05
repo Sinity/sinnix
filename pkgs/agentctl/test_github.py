@@ -182,3 +182,53 @@ def test_required_checks_are_empty_for_an_unprotected_branch(
         )
     )
     assert github.required_checks(tmp_path, "master") == ()
+
+
+def test_advisory_lists_reviews_and_comments_with_author_state_head_and_url(
+    recorded_gh: dict[str, Any], tmp_path: Path
+) -> None:
+    recorded_gh["script"].write_text(
+        json.dumps(
+            {
+                "stdout": json.dumps(
+                    {
+                        "reviews": [
+                            {
+                                "author": {"login": "reviewer"},
+                                "state": "APPROVED",
+                                "commit": {"oid": "a" * 40},
+                            }
+                        ],
+                        "comments": [
+                            {
+                                "author": {"login": "someone"},
+                                "body": "nit",
+                                "url": "https://github.com/o/r/pull/7#issuecomment-1",
+                            }
+                        ],
+                    }
+                ),
+                "exit": 0,
+            }
+        )
+    )
+
+    assert github.pull_request_advisory(tmp_path, 7) == [
+        {
+            "kind": "review",
+            "author": "reviewer",
+            "state": "APPROVED",
+            "head_sha": "a" * 40,
+            "url": None,
+        },
+        {
+            "kind": "comment",
+            "author": "someone",
+            "state": None,
+            "head_sha": None,
+            "url": "https://github.com/o/r/pull/7#issuecomment-1",
+        },
+    ]
+    assert _calls(recorded_gh["ledger"])[-1] == "pr view 7 --json reviews,comments"
+    recorded_gh["script"].write_text(json.dumps({"stdout": "", "exit": 0}))
+    assert github.pull_request_advisory(tmp_path, 7) == []
