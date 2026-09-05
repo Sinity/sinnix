@@ -5,6 +5,7 @@ mkFeatureModule {
     "mime"
   ];
   description = "Desktop MIME associations";
+  docs = "docs/desktop-file-navigation.md";
   configFn =
     {
       config,
@@ -14,6 +15,15 @@ mkFeatureModule {
     }:
     let
       browserDefaultDesktop = "google-chrome.desktop";
+      # inode/directory resolves by desktop-entry order when it is not
+      # declared, and every terminal emulator claims it. Folder opening
+      # belongs to the declared GUI manager; the terminal route is entered
+      # deliberately through Yazi, not by a MIME dispatch.
+      folderAssociations = {
+        "inode/directory" = [
+          config.sinnix.features.desktop.common-apps.fileNavigation.managerDesktopEntry
+        ];
+      };
       browserMimeTypes = [
         "text/html"
         "x-scheme-handler/http"
@@ -122,14 +132,16 @@ mkFeatureModule {
 
           xdg.mimeApps = {
             enable = true;
-            associations.added = mediaAssociations // browserDefaults // previewAssociations;
+            associations.added =
+              mediaAssociations // browserDefaults // previewAssociations // folderAssociations;
             associations.removed = {
               "video/mp4" = [ "svp-manager4.desktop" ];
               "video/mkv" = [ "svp-manager4.desktop" ];
               "video/webm" = [ "svp-manager4.desktop" ];
               "video/x-matroska" = [ "svp-manager4.desktop" ];
             };
-            defaultApplications = mediaAssociations // browserDefaults // previewAssociations;
+            defaultApplications =
+              mediaAssociations // browserDefaults // previewAssociations // folderAssociations;
           };
         };
     };
