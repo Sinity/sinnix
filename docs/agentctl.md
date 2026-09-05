@@ -170,7 +170,8 @@ workers: [{id, beads: [...], branch, worktree, task_id|null, task_ids,
 landing: {task_id|null, integration_branch, integration_worktree,
           candidate_sha|null, pr_number|null, verify_run, review_verdict,
           failure|null, refreshes, refreshed_base}
-acceptance: {candidate_sha, verify_run, review_verdict, published,
+acceptance: {candidate_sha, verify_run, review_verdict,
+             published: {policy, candidate_sha, base_commit, pr, merge_commit},
              beads: {<bead>: {state: closed|open, evidence}},
              advisory, recorded_at, residual: [...]} | null
 prepared          every claim, worktree and task exists
@@ -275,15 +276,23 @@ resumes from the manifest. The whole landing holds
 5. Publish, after re-reading the remote default branch equals the run's
    base. `publish = "master"`: push `candidate_sha` to the default branch
    with `--force-with-lease=<branch>:<base>`. `publish = "pr"`: create or
-   reuse the PR by stored number, wait for the required checks on exactly
-   `candidate_sha`, then `gh pr merge --squash --match-head-commit <sha>`.
-   If the target moved, one refresh rebases the run on the new base and
-   repeats from step 2; a second movement stops with `target_moved_twice`.
+   reuse the PR by stored number (title: the leader bead's subject; body:
+   each bead's title and one checkbox line per criterion from the worker
+   results), wait for the required checks on exactly `candidate_sha`, then
+   `gh pr merge --squash --match-head-commit <sha>`, read the merge commit
+   back and delete the remote integration branch. A required check GitHub
+   has not reported at all ten minutes after the wait began is
+   `check_missing`. A stored PR already merged on `candidate_sha` is the
+   publication: nothing is merged again. If the target moved, one refresh
+   rebases the run on the new base and repeats from step 2; a second
+   movement stops with `target_moved_twice`.
 6. Accept: write the acceptance record, `bd close` each bead whose criteria
-   are all satisfied or superseded in its worker's result, `bd comment` the
-   rest with the residual, then `wt remove` the worker worktrees. A cleanup
-   failure leaves the beads closed and a named residual; a close failure
-   leaves worktrees.
+   are all satisfied or superseded in its worker's result with the landed
+   commit (the merge commit under `pr`, the candidate under `master`),
+   `bd comment` the rest with the residual, then `wt remove` the worker
+   worktrees. A cleanup failure leaves the beads closed and a named
+   residual; a close failure leaves worktrees. A landing whose stored PR is
+   merged on the stored candidate goes straight to this step.
 
 A refusal or substrate error after step 1 is written to `landing.failure`
 with its code; `batch status` shows `failed: <code>` and `view` names what
@@ -313,6 +322,7 @@ check failing). The codes:
 | `already_accepted`             | the run has an acceptance record; nothing runs again                                |
 | `ambiguous_run`                | the suffix names more than one run                                                  |
 | `candidate_mismatch`           | the result's candidate_sha is not the worktree HEAD                                 |
+| `check_missing`                | a required PR check was not reported within ten minutes                             |
 | `checks_failed`                | a required PR check failed, or did not finish (`timed_out`)                         |
 | `empty_candidate`              | the candidate equals the base commit: nothing to land                               |
 | `candidate_off_base`           | the candidate does not descend from the run base                                    |
@@ -454,33 +464,34 @@ unattended batches declares a scheduled operation whose `exec` runs
 
 ## Limits
 
-| constant                                                     | origin                                                                    | stands for                                                        |
-| ------------------------------------------------------------ | ------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| `limits.DEFAULT_TIMEOUT_SECONDS` (3,600)                     | arbitrary bound                                                           | the job timeout when an operation declares none                   |
-| `limits.MAX_AGENT_TIMEOUT_SECONDS` (14,400)                  | measurement (a 1h ceiling forced serial re-launch rounds on real workers) | the agent job timeout                                             |
-| `limits.MAX_DECLARED_OPERATION_TIMEOUT_SECONDS` (28,800)     | arbitrary bound                                                           | the ceiling on a declared `timeout_seconds`                       |
-| `limits.AGENT_MEMORY_MAX` (4G)                               | half of the job plane's MemoryHigh                                        | the hard ceiling of one agent's unit                              |
-| `limits.CALL_TIMEOUT_SECONDS` (60)                           | arbitrary bound (a minute distinguishes a wedged daemon from a slow one)  | max time for one `pueue`, `wt`, `gh`, `bd` or local `git` call    |
-| `limits.SYSTEMCTL_TIMEOUT_SECONDS` (30)                      | arbitrary bound                                                           | timeout for one `systemctl`/`systemd-run` call                    |
-| `limits.SHORT_ID` (8)                                        | arbitrary bound                                                           | hex characters shown of a run id's suffix, a commit, a reference  |
-| `worktrunk.LIST_SCHEMA_VERSION` (2)                          | external tool's contract                                                  | the `wt list` JSON schema this module parses                      |
-| `worktrunk.GIT_SETTLE_SECONDS` (30)                          | arbitrary bound                                                           | how long a mutation waits for Git to release the repository index |
-| `run.MAX_LOG_BYTES` / `MAX_RESULT_BYTES` (64,000)            | arbitrary bound                                                           | caps on the captured log and typed result                         |
-| `run.TIMEOUT_EXIT_CODE` (124)                                | external tool's contract (`timeout(1)`)                                   | the unit's `RuntimeMaxSec` expired                                |
-| `run.REFUSED_EXIT_CODE` (125)                                | arbitrary bound                                                           | a pre-run refusal (vanished working directory, unreadable input)  |
-| `run.CANCELLED_EXIT_CODE` (130)                              | shell convention (128 + SIGINT)                                           | the cancel marker existed when the wait returned                  |
-| `run.VANISHED_EXIT_CODE` (126)                               | arbitrary bound                                                           | the unit could not be observed after a failing wait               |
-| `run.SLOT_OCCUPIED_EXIT_CODE` (75)                           | external convention (`EX_TEMPFAIL`)                                       | a single-slot pool was held by another unit                       |
-| `agents.PUSH_TIMEOUT_SECONDS` (2,400)                        | arbitrary bound (the push runs the repository's pre-push gate)            | timeout for `git push` and `git fetch` during a batch             |
-| `landing.HOSTED_CHECK_TIMEOUT_SECONDS` (7,200)               | arbitrary bound                                                           | how long landing waits for a required PR check                    |
-| `landing.MAX_REFRESHES` (1)                                  | arbitrary bound                                                           | base movements a landing absorbs before `target_moved_twice`      |
-| `prompts.MAX_PROMPT_BYTES` (200,000)                         | arbitrary bound                                                           | cap on a compiled prompt                                          |
-| `prompts.MAX_SUBJECT_LENGTH` (72)                            | repository commit convention                                              | cap on a PR subject                                               |
-| `prompts.RESULT_TEXT_CHARS` (200)                            | arbitrary bound                                                           | characters of a criterion's text a landing agent sees             |
-| `backpressure.IO_FULL_FREEZE` (25%)                          | measurement (io full avg10 reached 76% under eight normal-pool jobs)      | the IO stall that freezes a group                                 |
-| `backpressure.MEMORY_FULL_FREEZE` (25%)                      | half of systemd-oomd's kill threshold                                     | the memory stall that freezes a group                             |
-| `backpressure.RESUME_BELOW` (10%)                            | arbitrary bound                                                           | both stalls must fall below this before a group thaws             |
-| `operator_view.MAX_READY_SHOWN` (8) / `MAX_FAILED_SHOWN` (6) | arbitrary bound                                                           | rows the screen shows                                             |
+| constant                                                     | origin                                                                    | stands for                                                           |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `limits.DEFAULT_TIMEOUT_SECONDS` (3,600)                     | arbitrary bound                                                           | the job timeout when an operation declares none                      |
+| `limits.MAX_AGENT_TIMEOUT_SECONDS` (14,400)                  | measurement (a 1h ceiling forced serial re-launch rounds on real workers) | the agent job timeout                                                |
+| `limits.MAX_DECLARED_OPERATION_TIMEOUT_SECONDS` (28,800)     | arbitrary bound                                                           | the ceiling on a declared `timeout_seconds`                          |
+| `limits.AGENT_MEMORY_MAX` (4G)                               | half of the job plane's MemoryHigh                                        | the hard ceiling of one agent's unit                                 |
+| `limits.CALL_TIMEOUT_SECONDS` (60)                           | arbitrary bound (a minute distinguishes a wedged daemon from a slow one)  | max time for one `pueue`, `wt`, `gh`, `bd` or local `git` call       |
+| `limits.SYSTEMCTL_TIMEOUT_SECONDS` (30)                      | arbitrary bound                                                           | timeout for one `systemctl`/`systemd-run` call                       |
+| `limits.SHORT_ID` (8)                                        | arbitrary bound                                                           | hex characters shown of a run id's suffix, a commit, a reference     |
+| `worktrunk.LIST_SCHEMA_VERSION` (2)                          | external tool's contract                                                  | the `wt list` JSON schema this module parses                         |
+| `worktrunk.GIT_SETTLE_SECONDS` (30)                          | arbitrary bound                                                           | how long a mutation waits for Git to release the repository index    |
+| `run.MAX_LOG_BYTES` / `MAX_RESULT_BYTES` (64,000)            | arbitrary bound                                                           | caps on the captured log and typed result                            |
+| `run.TIMEOUT_EXIT_CODE` (124)                                | external tool's contract (`timeout(1)`)                                   | the unit's `RuntimeMaxSec` expired                                   |
+| `run.REFUSED_EXIT_CODE` (125)                                | arbitrary bound                                                           | a pre-run refusal (vanished working directory, unreadable input)     |
+| `run.CANCELLED_EXIT_CODE` (130)                              | shell convention (128 + SIGINT)                                           | the cancel marker existed when the wait returned                     |
+| `run.VANISHED_EXIT_CODE` (126)                               | arbitrary bound                                                           | the unit could not be observed after a failing wait                  |
+| `run.SLOT_OCCUPIED_EXIT_CODE` (75)                           | external convention (`EX_TEMPFAIL`)                                       | a single-slot pool was held by another unit                          |
+| `agents.PUSH_TIMEOUT_SECONDS` (2,400)                        | arbitrary bound (the push runs the repository's pre-push gate)            | timeout for `git push` and `git fetch` during a batch                |
+| `landing.HOSTED_CHECK_TIMEOUT_SECONDS` (7,200)               | arbitrary bound                                                           | how long landing waits for a required PR check                       |
+| `landing.CHECK_MISSING_SECONDS` (600)                        | arbitrary bound                                                           | how long a required check may stay unreported before `check_missing` |
+| `landing.MAX_REFRESHES` (1)                                  | arbitrary bound                                                           | base movements a landing absorbs before `target_moved_twice`         |
+| `prompts.MAX_PROMPT_BYTES` (200,000)                         | arbitrary bound                                                           | cap on a compiled prompt                                             |
+| `prompts.MAX_SUBJECT_LENGTH` (72)                            | repository commit convention                                              | cap on a PR subject                                                  |
+| `prompts.RESULT_TEXT_CHARS` (200)                            | arbitrary bound                                                           | characters of a criterion's text a landing agent sees                |
+| `backpressure.IO_FULL_FREEZE` (25%)                          | measurement (io full avg10 reached 76% under eight normal-pool jobs)      | the IO stall that freezes a group                                    |
+| `backpressure.MEMORY_FULL_FREEZE` (25%)                      | half of systemd-oomd's kill threshold                                     | the memory stall that freezes a group                                |
+| `backpressure.RESUME_BELOW` (10%)                            | arbitrary bound                                                           | both stalls must fall below this before a group thaws                |
+| `operator_view.MAX_READY_SHOWN` (8) / `MAX_FAILED_SHOWN` (6) | arbitrary bound                                                           | rows the screen shows                                                |
 
 ## Host wiring
 

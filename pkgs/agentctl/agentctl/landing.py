@@ -268,7 +268,62 @@ def _wait_seconds(sleep: Callable[[float], None], deadline: float) -> bool:
     return True
 
 
-def _ensure_pr(project: ProjectAdapter, run: Run, path: Path, candidate: str) -> int:
+def _pr_text(run: Run, beads: Beads) -> tuple[str, str]:
+    """The PR title (the leader bead's subject) and body (titles, criteria)."""
+    leader = run.workers[0]["id"]
+    try:
+        title = prompts.bead_subject(beads.show(leader))
+    except PromptError:
+        title = f"chore: batch {run.run_id}"
+    criteria = {
+        entry["id"]: [
+            f"- [{'x' if item.get('status') in {'satisfied', 'superseded'} else ' '}] "
+            f"{str(item.get('text') or '')[: prompts.RESULT_TEXT_CHARS]}"
+            for item in entry.get("criteria") or ()
+        ]
+        for result in _worker_results(run)
+        for entry in result.get("beads") or ()
+    }
+    lines = [f"Batch `{run.run_id}` on base `{run.base_commit[:12]}`.", ""]
+    for bead_id in run.beads:
+        try:
+            bead_title = str(beads.show(bead_id).get("title") or "")
+        except PromptError:
+            bead_title = ""
+        lines.append(f"**{bead_id}** {bead_title}".rstrip())
+        lines.extend(criteria.get(bead_id, []))
+        lines.append("")
+    return title, "\n".join(lines).rstrip() + "\n"
+
+
+def _merged(project: ProjectAdapter, run: Run, candidate: str) -> dict[str, Any] | None:
+    """The stored PR as a publication when it is merged on exactly ``candidate``."""
+    number = run.landing.get("pr_number")
+    if not isinstance(number, int):
+        return None
+    pull = github.pull_request(project.root, number) or {}
+    merged = github.merge_commit(pull)
+    if merged is None or pull.get("headRefOid") != candidate:
+        return None
+    return {
+        "policy": "pr",
+        "pr": number,
+        "candidate_sha": candidate,
+        "merge_commit": merged,
+    }
+
+
+def _merged_earlier(project: ProjectAdapter, run: Run) -> dict[str, Any] | None:
+    """A landing that merged its PR and stopped before accepting: its publication."""
+    candidate = run.landing.get("candidate_sha")
+    if workspace_of(project).publish != "pr" or not isinstance(candidate, str):
+        return None
+    return _merged(project, run, candidate)
+
+
+def _ensure_pr(
+    project: ProjectAdapter, run: Run, path: Path, candidate: str, beads: Beads
+) -> int:
     workspace = workspace_of(project)
     branch = run.landing["integration_branch"]
     github.push_branch(
@@ -285,17 +340,30 @@ def _ensure_pr(project: ProjectAdapter, run: Run, path: Path, candidate: str) ->
     if pull is None or pull.get("state") != "OPEN":
         pull = github.pull_request_for_branch(project.root, branch)
     if pull is None:
-        titles = ", ".join(worker["id"] for worker in run.workers)
+        title, body = _pr_text(run, beads)
         return github.create_pull_request(
             project.root,
             head=branch,
             base=workspace.base_branch,
-            title=f"batch {run.run_id}: {titles}"[:72],
-            body=f"Batch `{run.run_id}` on base `{run.base_commit}`.\n\nMembers: "
-            + ", ".join(run.beads)
-            + "\n",
+            title=title,
+            body=body,
         )
     return int(pull["number"])
+
+
+def _refuse_missing_checks(
+    pull: Mapping[str, Any], required: Sequence[str], since: float, number: int
+) -> None:
+    """A required check GitHub never reported within the window is `check_missing`."""
+    missing = [
+        name for name in required if github.hosted_check_state(pull, name) == "missing"
+    ]
+    if missing and time.monotonic() - since >= CHECK_MISSING_SECONDS:
+        raise BatchRefusal(
+            "check_missing",
+            f"PR #{number} never reported required check(s) {', '.join(missing)}",
+            checks=missing,
+        )
 
 
 def _verify(
@@ -305,6 +373,7 @@ def _verify(
     path: Path,
     candidate: str,
     sleep: Callable[[float], None],
+    beads: Beads,
 ) -> tuple[Run, dict[str, Any]]:
     profile = run.verify_profile or workspace_of(project).verify.get("candidate")
     if not profile:
@@ -314,12 +383,14 @@ def _verify(
         )
     if profile.startswith("hosted:"):
         check = profile.removeprefix("hosted:")
-        number = _ensure_pr(project, run, path, candidate)
+        number = _ensure_pr(project, run, path, candidate, beads)
         run = land_update(config, run.run_id, pr_number=number)
-        deadline = time.monotonic() + HOSTED_CHECK_TIMEOUT_SECONDS
+        started = time.monotonic()
+        deadline = started + HOSTED_CHECK_TIMEOUT_SECONDS
         while True:
             pull = github.pull_request(project.root, number) or {}
             if pull.get("headRefOid") == candidate:
+                _refuse_missing_checks(pull, (check,), started, number)
                 state = github.hosted_check_state(pull, check)
                 if state == "success":
                     receipt = {
@@ -427,9 +498,14 @@ def _publish(
     base: str,
     candidate: str,
     sleep: Callable[[float], None],
+    beads: Beads,
 ) -> dict[str, Any] | None:
     """Publish the candidate; None means the target moved and a refresh is due."""
     workspace = workspace_of(project)
+    if workspace.publish == "pr":
+        merged = _merged(project, run, candidate)
+        if merged is not None:
+            return {**merged, "base_commit": base}
     if _remote_base(project) != base:
         return None
     if workspace.publish == "master":
@@ -452,16 +528,20 @@ def _publish(
                 raise BatchRefusal("publish_rejected", message) from error
             raise
         return {"policy": "master", "candidate_sha": candidate, "base_commit": base}
-    number = _ensure_pr(project, run, path, candidate)
+    number = _ensure_pr(project, run, path, candidate, beads)
     run = land_update(config, run.run_id, pr_number=number)
     required = github.required_checks(project.root, workspace.base_branch)
-    deadline = time.monotonic() + HOSTED_CHECK_TIMEOUT_SECONDS
+    started = time.monotonic()
+    deadline = started + HOSTED_CHECK_TIMEOUT_SECONDS
     while True:
         pull = github.pull_request(project.root, number) or {}
         if pull.get("headRefOid") != candidate:
             raise BatchRefusal(
                 "head_moved", f"PR #{number} head is no longer {candidate[:12]}"
             )
+        if github.merge_commit(pull):
+            break
+        _refuse_missing_checks(pull, required, started, number)
         state = github.check_rollup(pull, required)
         if state == "ready":
             break
@@ -473,18 +553,31 @@ def _publish(
             raise BatchRefusal(
                 "checks_failed", f"PR #{number} checks did not finish", timed_out=True
             )
-    try:
-        github.merge_pr(project.root, number, candidate)
-    except GithubError as error:
-        if "no longer" in str(error):
-            raise BatchRefusal("head_moved", str(error)) from error
-        raise
-    return {
+    if not github.merge_commit(pull):
+        try:
+            github.merge_pr(project.root, number, candidate)
+        except GithubError as error:
+            if "no longer" in str(error):
+                raise BatchRefusal("head_moved", str(error)) from error
+            raise
+        pull = github.pull_request(project.root, number) or {}
+    merged = github.merge_commit(pull)
+    if merged is None or pull.get("headRefOid") != candidate:
+        raise BatchRefusal(
+            "head_moved", f"PR #{number} did not merge on {candidate[:12]}"
+        )
+    published = {
         "policy": "pr",
         "pr": number,
         "candidate_sha": candidate,
         "base_commit": base,
+        "merge_commit": merged,
     }
+    try:
+        github.delete_remote_branch(project.root, run.landing["integration_branch"])
+    except GithubError as error:
+        published["remote_branch"] = f"kept: {error}"
+    return published
 
 
 def _accept(
@@ -500,15 +593,18 @@ def _accept(
 ) -> Run:
     verdicts = results.satisfied_beads(_worker_results(run))
     beads_state: dict[str, dict[str, str]] = {}
+    # What reached the default branch: the squash-merge commit under the PR
+    # policy, the candidate itself under the master policy.
+    landed = str(published.get("merge_commit") or candidate)
     for bead_id in run.beads:
         if verdicts.get(bead_id):
             try:
                 beads.close(
-                    bead_id, reason=f"batch {run.run_id} {candidate}", actor=run.actor
+                    bead_id, reason=f"batch {run.run_id} {landed}", actor=run.actor
                 )
                 beads_state[bead_id] = {
                     "state": "closed",
-                    "evidence": f"batch {run.run_id} {candidate}",
+                    "evidence": f"batch {run.run_id} {landed}",
                 }
             except BatchError as error:
                 beads_state[bead_id] = {
@@ -517,9 +613,9 @@ def _accept(
                 }
         else:
             residual = (
-                f"batch {run.run_id} landed {candidate} without satisfying every criterion"
+                f"batch {run.run_id} landed {landed} without satisfying every criterion"
                 if bead_id in verdicts
-                else f"batch {run.run_id} landed {candidate}; no worker result covered this bead"
+                else f"batch {run.run_id} landed {landed}; no worker result covered this bead"
             )
             try:
                 beads.comment(bead_id, residual, actor=run.actor)
@@ -623,6 +719,19 @@ def _land_locked(
     try:
         _refuse_unless_workers_done(run)
         base = str(run.landing.get("refreshed_base") or run.base_commit)
+        merged = _merged_earlier(project, run)
+        if merged is not None:
+            run = _accept(
+                config,
+                project,
+                run,
+                beads,
+                candidate=str(run.landing["candidate_sha"]),
+                verify_run=run.landing.get("verify_run") or {},
+                review_verdict=run.landing.get("review_verdict") or {},
+                published={**merged, "base_commit": base},
+            )
+            return run.to_dict()
         while True:
             candidate = (
                 _kept_integration(config, run, base)
@@ -643,11 +752,15 @@ def _land_locked(
                 failure=None,
             )
             path = Path(run.landing["integration_worktree"])
-            run, verify_run = _verify(config, project, run, path, candidate, sleep)
+            run, verify_run = _verify(
+                config, project, run, path, candidate, sleep, beads
+            )
             run = land_update(config, run_id, verify_run=verify_run)
             review_verdict = _review(config, project, run, path, base, candidate, beads)
             run = land_update(config, run_id, review_verdict=review_verdict)
-            published = _publish(config, project, run, path, base, candidate, sleep)
+            published = _publish(
+                config, project, run, path, base, candidate, sleep, beads
+            )
             if published is not None:
                 break
             if keep_integration:
