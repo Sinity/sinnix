@@ -11,6 +11,7 @@ import signal
 import sqlite3
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -21,7 +22,7 @@ class BackupCancelled(Exception):
 
 cancel_requested = False
 FULL_INTEGRITY_PAGE_LIMIT = 100_000
-QUICK_CHECK_PROGRESS_OPS = 10_000
+CHECK_POLL_SECONDS = 0.02
 # Every sidecar cleanup() ever creates ends in one of these compound
 # suffixes: raw_path (".tmp"), its journal/WAL siblings (".tmp-journal",
 # ".tmp-wal"), and compressed_path (output suffix + ".tmp", e.g. ".zst.tmp",
@@ -79,37 +80,96 @@ def run_command(command: list[str]) -> None:
         raise subprocess.CalledProcessError(process.returncode, command)
 
 
-def require_quick_check(connection: sqlite3.Connection) -> None:
-    """Reject a corrupt immutable snapshot while allowing cancellation."""
+def run_check(
+    connection: sqlite3.Connection, statement: str, deadline: float | None
+) -> tuple[str, ...]:
+    """Run an integrity pragma that a signal or a deadline can still stop.
 
-    def interrupt_if_cancelled() -> int:
-        return int(cancel_requested)
+    An integrity pragma runs its whole scan inside one VDBE opcode, so a
+    progress handler fires at statement boundaries rather than during the walk
+    and cannot end one in flight. sqlite3_interrupt does, from another thread.
+    """
+    stop = threading.Event()
+    reason: list[str] = []
 
-    connection.set_progress_handler(interrupt_if_cancelled, QUICK_CHECK_PROGRESS_OPS)
-    try:
-        integrity = connection.execute("PRAGMA quick_check(1)").fetchone()
-    except sqlite3.OperationalError:
-        if cancel_requested:
-            raise BackupCancelled from None
-        raise
-    finally:
-        connection.set_progress_handler(None, 0)
+    def watchdog() -> None:
+        while not stop.wait(CHECK_POLL_SECONDS):
+            if cancel_requested:
+                reason.append("cancelled")
+            elif deadline is not None and time.monotonic() >= deadline:
+                reason.append("deadline")
+            else:
+                continue
+            connection.interrupt()
+            return
+
     if cancel_requested:
         raise BackupCancelled
-    if integrity != ("ok",):
-        raise RuntimeError(f"SQLite quick_check failed: {integrity!r}")
-    print("SQLite quick_check(1): ok")
+    watcher = threading.Thread(target=watchdog, daemon=True)
+    watcher.start()
+    try:
+        verdict = connection.execute(statement).fetchone()
+    except sqlite3.OperationalError:
+        if reason[:1] == ["cancelled"]:
+            raise BackupCancelled from None
+        if reason[:1] == ["deadline"]:
+            raise RuntimeError(
+                f"SQLite {statement} exceeded its integrity budget"
+            ) from None
+        raise
+    finally:
+        stop.set()
+        watcher.join(timeout=5)
+    if cancel_requested:
+        raise BackupCancelled
+    return verdict
+
+
+def check_immutable_snapshot(
+    connection: sqlite3.Connection, deadline: float | None
+) -> str:
+    """Prove the snapshot's pages and b-trees before anything is published.
+
+    The source subvolume is NOCOW, which also turns off Btrfs data checksums,
+    so this pragma is the only thing standing between silent page damage and an
+    archive of it.
+
+    Above the page limit the check is quick_check rather than integrity_check:
+    quick_check walks every page and b-tree once, while integrity_check
+    additionally cross-verifies every index entry against its table, which does
+    not stream and scales with index count. The argument bounds the reported
+    error list to one row, so a shredded database cannot accumulate a result
+    row per damaged page inside the unit's memory ceiling.
+    """
+    page_count = int(connection.execute("PRAGMA page_count").fetchone()[0])
+    check = (
+        "integrity_check" if page_count <= FULL_INTEGRITY_PAGE_LIMIT else "quick_check(1)"
+    )
+    # The walk is the longest silent stretch of the run, so say what started.
+    print(f"sqlite-backup: {check} over {page_count} pages", flush=True)
+    verdict = run_check(connection, f"PRAGMA {check}", deadline)
+    if verdict != ("ok",):
+        raise RuntimeError(f"SQLite {check} failed: {verdict!r}")
+    return check
 
 
 def compress(source_path: Path, compressed_path: Path) -> None:
     run_command(["zstd", "-T1", "-q", "-f", str(source_path), "-o", str(compressed_path)])
     if not compressed_path.is_file() or compressed_path.stat().st_size == 0:
         raise RuntimeError("SQLite compression produced no artifact")
-    print("SQLite compression: ok")
+    # zstd exiting zero only means it wrote a frame. Testing the frame decodes
+    # it and compares the XXH64 content checksum it embeds by default, which is
+    # what makes the artifact's bytes -- not just the compressor's exit status
+    # -- the thing that gates publication.
+    run_command(["zstd", "-t", "-q", str(compressed_path)])
 
 
 def backup_database(
-    source_path: Path, output_path: Path, *, immutable_source: bool = False
+    source_path: Path,
+    output_path: Path,
+    *,
+    immutable_source: bool = False,
+    check_budget_seconds: float = 0.0,
 ) -> None:
     raw_path = output_path.with_name(output_path.name.removesuffix(".zst") + ".tmp")
     compressed_path = output_path.with_suffix(output_path.suffix + ".tmp")
@@ -132,24 +192,46 @@ def backup_database(
             wal_path = Path(f"{source_path}-wal")
             if wal_path.exists() and wal_path.stat().st_size > 0:
                 raise RuntimeError("immutable SQLite source must not have a WAL")
+            source_bytes = source_path.stat().st_size
             source = sqlite3.connect(
                 f"file:{source_path}?mode=ro&immutable=1", uri=True, timeout=5.0
             )
             source.execute("PRAGMA busy_timeout=5000")
-            page_count = int(source.execute("PRAGMA page_count").fetchone()[0])
-            if page_count <= FULL_INTEGRITY_PAGE_LIMIT:
-                integrity = source.execute("PRAGMA integrity_check").fetchone()
-                if integrity != ("ok",):
-                    raise RuntimeError(f"SQLite integrity_check failed: {integrity!r}")
-                print("SQLite integrity_check: ok")
-            else:
-                require_quick_check(source)
+            # A b-tree walk visits pages in logical order, which SQLite serves
+            # one QD1 4 KiB pread at a time; over a mapping the same walk gets
+            # kernel readahead instead. Measured cold on a 928 MB fixture, 522s
+            # unmapped against 4.0s mapped. SQLite caps a mapping at
+            # SQLITE_MAX_MMAP_SIZE (2 GiB here) and preads the remainder, so
+            # this covers the head of a large database and all of a small one.
+            # Mapped pages are clean page cache, so the cost is address space
+            # rather than resident memory.
+            source.execute(f"PRAGMA mmap_size={source_bytes}")
+            started = time.monotonic()
+            check = check_immutable_snapshot(
+                source, started + check_budget_seconds if check_budget_seconds else None
+            )
+            check_seconds = time.monotonic() - started
             source.close()
             source = None
+            compress_started = time.monotonic()
             compress(source_path, compressed_path)
+            compress_seconds = time.monotonic() - compress_started
+            archive_bytes = compressed_path.stat().st_size
             os.chmod(compressed_path, 0o600)
             os.replace(compressed_path, output_path)
             os.chmod(output_path, 0o600)
+            print(
+                "sqlite-backup receipt:"
+                f" source={source_path}"
+                f" source_bytes={source_bytes}"
+                f" check={check}"
+                " verdict=ok"
+                f" check_seconds={check_seconds:.1f}"
+                f" archive={output_path}"
+                f" archive_bytes={archive_bytes}"
+                " archive_check=zstd-t:ok"
+                f" compress_seconds={compress_seconds:.1f}"
+            )
             return
         source = sqlite3.connect(source_path, timeout=5.0)
         source.execute("PRAGMA busy_timeout=5000")
@@ -180,10 +262,9 @@ def backup_database(
             if integrity != ("ok",):
                 raise RuntimeError(f"SQLite integrity_check failed: {integrity!r}")
         else:
-            # A full integrity scan of the live 22 GB telemetry projection
-            # exceeds the timer's 30-minute budget. Opening the copied database
-            # and reading its schema proves the SQLite header and WAL can be
-            # consumed; bounded fixtures still receive full integrity_check.
+            # Opening the copied database and reading its schema proves the
+            # SQLite header and WAL can be consumed, which is weaker than the
+            # walk --immutable-source performs above.
             target.execute("PRAGMA schema_version").fetchone()
         target.close()
         target = None
@@ -208,11 +289,25 @@ def main() -> int:
         action="store_true",
         help="compress a verified WAL-free filesystem snapshot without copying it",
     )
+    parser.add_argument(
+        "--check-budget-seconds",
+        type=float,
+        default=0.0,
+        help=(
+            "fail instead of publishing when the immutable snapshot's integrity"
+            " walk outlasts this many seconds (0 leaves it unbounded)"
+        ),
+    )
     args = parser.parse_args()
     signal.signal(signal.SIGTERM, request_cancel)
     signal.signal(signal.SIGINT, request_cancel)
     try:
-        backup_database(args.source, args.output, immutable_source=args.immutable_source)
+        backup_database(
+            args.source,
+            args.output,
+            immutable_source=args.immutable_source,
+            check_budget_seconds=args.check_budget_seconds,
+        )
     except BackupCancelled:
         print("SQLite backup cancelled", file=sys.stderr)
         return 143
