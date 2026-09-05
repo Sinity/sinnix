@@ -6,7 +6,7 @@ reports.
 Output: a read verb (``project``, ``job list|get|logs|result|wait``,
 ``batch status|list``, ``view``, ``events tail``) prints a table in local
 time with an age column, or the document with ``--json``. A write verb
-(``job start|fire|cancel|retry|clean``, ``batch start|land|result|resume``,
+(``job start|fire|cancel|retry|clean``, ``batch start|land|abandon|result|resume``,
 ``schedule apply``, ``backpressure tick``) prints the document as JSON on
 stdout and one summary line on stderr. Tables show a run's 8-character
 suffix and 8 characters of a commit; ``--full`` prints them whole, and every
@@ -185,7 +185,11 @@ def parser() -> argparse.ArgumentParser:
         "batch", help="several workers on one base commit, landed as one candidate"
     )
     batch_verbs = batch_verb.add_subparsers(dest="batch_verb", required=True)
-    batch_start = batch_verbs.add_parser("start")
+    batch_start = batch_verbs.add_parser(
+        "start",
+        help="validate the members, claim them, create one worktree per worker, "
+        "queue the workers and the landing task behind them",
+    )
     batch_start.add_argument(
         "target",
         nargs="*",
@@ -210,12 +214,38 @@ def parser() -> argparse.ArgumentParser:
     )
     _agent_arguments(batch_start)
     _output_arguments(batch_start)
-    for name in ("land", "status"):
-        one = batch_verbs.add_parser(name)
-        one.add_argument("run_id", help="a run id or its 8-character suffix")
-        _project_option(one)
-        _output_arguments(one)
-    batch_list = batch_verbs.add_parser("list")
+    batch_land = batch_verbs.add_parser(
+        "land",
+        help="integrate, verify, review, publish and accept a run; "
+        "the landing task's body, re-runnable after a named failure",
+    )
+    batch_land.add_argument("run_id", help="a run id or its 8-character suffix")
+    batch_land.add_argument(
+        "--keep-integration",
+        action="store_true",
+        help="land the integration worktree's current HEAD without re-merging",
+    )
+    _project_option(batch_land)
+    _output_arguments(batch_land)
+    batch_status = batch_verbs.add_parser(
+        "status",
+        help="one run: the manifest joined with pueue task state and the landing PR",
+    )
+    batch_status.add_argument("run_id", help="a run id or its 8-character suffix")
+    _project_option(batch_status)
+    _output_arguments(batch_status)
+    batch_abandon = batch_verbs.add_parser(
+        "abandon",
+        help="release a run: unclaim its members, remove worktrees holding "
+        "no unpreserved work, mark the manifest abandoned",
+    )
+    batch_abandon.add_argument("run_id", help="a run id or its 8-character suffix")
+    batch_abandon.add_argument("--reason", default="", help="recorded in the manifest")
+    _project_option(batch_abandon)
+    _output_arguments(batch_abandon)
+    batch_list = batch_verbs.add_parser(
+        "list", help="every run of a project with its stage"
+    )
     batch_list.add_argument("selector", nargs="?", metavar="project", help=PROJECT_HELP)
     _project_option(batch_list)
     _output_arguments(batch_list)
@@ -431,7 +461,9 @@ def _batch(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         project = resolve_project(
             config, arguments.project or load(config, run_id).project
         )
-        landed = batch.land(config, project, run_id)
+        landed = batch.land(
+            config, project, run_id, keep_integration=arguments.keep_integration
+        )
         acceptance = landed["acceptance"] or {}
         members = acceptance.get("beads", {})
         out.write(
@@ -454,6 +486,19 @@ def _batch(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         )
         document = batch.status(config, run_id, project=project)
         out.read(document, out.run_lines(document))
+        return EXIT_OK
+    if verb == "abandon":
+        run_id = resolve_run_id(config, arguments.run_id)
+        project = resolve_project(
+            config, arguments.project or load(config, run_id).project
+        )
+        abandoned = batch.abandon(config, project, run_id, reason=arguments.reason)
+        residual = abandoned["abandoned"]["residual"]
+        out.write(
+            abandoned,
+            f"abandoned {out.run(run_id)}"
+            + (f"\nresidual: {'; '.join(residual)}" if residual else ""),
+        )
         return EXIT_OK
     if verb == "list":
         project = _select_project(config, arguments.project, arguments.selector)

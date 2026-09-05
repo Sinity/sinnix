@@ -73,7 +73,7 @@ def _member_sets(
 
 
 def _live_runs(config: Config, project_id: str) -> list[Run]:
-    return [run for run in list_runs(config, project_id) if run.acceptance is None]
+    return [run for run in list_runs(config, project_id) if run.live]
 
 
 def _base_commit(project: ProjectAdapter) -> str:
@@ -165,7 +165,7 @@ def _prepare(
                     "harness": run.harness,
                 },
             )
-            write_prompt(path, "prompt.md", snapshot.prompt)
+            prompt_path = write_prompt(path, "prompt.md", snapshot.prompt)
             results.write_schema(
                 path / WORKTREE_STATE_DIR / "worker.schema.json", "worker"
             )
@@ -174,6 +174,7 @@ def _prepare(
                 run.run_id,
                 index,
                 worktree=str(path),
+                prompt_path=str(prompt_path),
                 result_path=str(result_path(path)),
                 backend=snapshot.dimensions.backend,
                 model=snapshot.dimensions.model,
@@ -193,7 +194,7 @@ def _prepare(
                 model=worker["model"],
                 effort=worker["effort"],
                 schema="worker",
-                then=worker_then(config, run.run_id, worker_id, path),
+                then=worker_then(config, run.run_id, worker_id, result_path(path)),
                 binding=binding(run, worker_id),
             )
             run = set_worker(config, run.run_id, index, task_id=job["job_id"])
@@ -309,6 +310,7 @@ def start(
                 "task_ids": [],
                 "claimed": False,
                 "claimed_beads": [],
+                "prompt_path": None,
                 "result_path": None,
                 "result": None,
             }
@@ -438,6 +440,8 @@ def resume(
     run = load(config, run_id)
     if run.acceptance is not None:
         raise BatchRefusal("already_accepted", f"run {run_id} has landed")
+    if run.abandoned is not None:
+        raise BatchRefusal("abandoned", f"run {run_id} was abandoned")
     worker = run.worker(worker_id)
     worktree = worker.get("worktree")
     if not worktree or not Path(worktree).is_dir():
@@ -465,18 +469,23 @@ def resume(
         worktree=path,
         packet=packet_path.read_text() if packet_path.is_file() else None,
     )
+    # Each resume keeps its own packet and result beside the original.
+    attempt = len(worker.get("task_ids") or []) + 1
+    while (path / WORKTREE_STATE_DIR / f"resume-{attempt}.md").exists():
+        attempt += 1
+    resume_result = path / WORKTREE_STATE_DIR / f"resume-{attempt}.result.json"
     job = queue_agent(
         config,
         project,
         label=f"{project.project_id}:resume:{run_id}:{worker_id}",
         worktree=path,
         prompt=prompt,
-        prompt_name="prompt.md",
+        prompt_name=f"resume-{attempt}.md",
         backend=backend or worker.get("backend") or packets.default_backend,
         model=model or worker.get("model") or packets.default_model,
         effort=effort or worker.get("effort") or packets.default_effort,
         schema="worker",
-        then=worker_then(config, run_id, worker_id, path),
+        then=worker_then(config, run_id, worker_id, resume_result),
         binding=binding(run, worker_id),
     )
     task_id = job["job_id"]
@@ -487,6 +496,10 @@ def resume(
                 entry["task_id"] = task_id
                 entry["task_ids"] = [*entry.get("task_ids", []), task_id]
                 entry["result"] = None
+                entry["result_path"] = str(resume_result)
+                entry["prompt_path"] = str(
+                    path / WORKTREE_STATE_DIR / f"resume-{attempt}.md"
+                )
         document["landing"]["failure"] = None
 
     run = update(config, run_id, record)

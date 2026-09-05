@@ -41,6 +41,8 @@ Look for the verb before writing any procedure: `agentctl <verb> --help`.
 | start a batch that Claude subagents will work | `agentctl batch start <p> <bead>… --workers external`                                 |
 | file an external worker's result              | `agentctl batch result <run> <worker> <result.json>`                                  |
 | land a run by hand, or again after a failure  | `agentctl batch land <run>`                                                           |
+| land a hand fix made on the integration tree  | `agentctl batch land <run> --keep-integration`                                        |
+| release a run that will not land              | `agentctl batch abandon <run> [--reason R]`                                           |
 | one run, every run                            | `agentctl batch status <run>`, `agentctl batch list <p>`                              |
 | re-queue an agent into a worker's worktree    | `agentctl batch resume <run> --worker <w> [--backend B --model M --effort E]`         |
 | run a declared operation                      | `agentctl job start <p> <operation> [--workspace <path>] [--wait]`                    |
@@ -93,7 +95,7 @@ step 3.
 | `failed: <code>`            | `job logs <landing task>`, then `batch land` again                          |
 | `landing <phase>`           | same                                                                        |
 | `unprepared`                | `batch start` again with the same members                                   |
-| `landed`                    | nothing                                                                     |
+| `landed`, `abandoned`       | nothing                                                                     |
 
 **Verification**: workers run the descriptor's focused operation; the landing
 task runs the `candidate` profile once on the integrated tree (a hosted check
@@ -105,7 +107,11 @@ receipts where the project writes them.
 **Fix loops preserve batch ownership.** A finding isolated to one worker's
 change goes back to that worker (`batch resume`). Integration conflicts and
 cross-worker findings are fixed on the integration branch by the integration
-agent the landing task queues.
+agent the landing task queues, or by hand in the integration worktree
+followed by `batch land --keep-integration`. A failed review's verdict is in
+the manifest's `landing.review_verdict`. A run that will not land is
+released with `batch abandon`; it keeps any worktree holding unpreserved
+work and names it in the residual.
 
 **Substrate defects** are next work items: file instances in the owning
 project's Beads with reproduction evidence. Deploy sinnix through the devshell

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Sequence
 
 from . import gitcmd, github, launch, prompts, pueue, results, worktrunk
 from .agents import (
@@ -26,6 +26,7 @@ from .manifest import (
     BatchRefusal,
     Run,
     land_update,
+    landing_locked,
     load,
     now,
     project_locked,
@@ -37,7 +38,11 @@ from .pueue import PueueError
 from .worktrunk import WorktrunkError
 
 HOSTED_CHECK_TIMEOUT_SECONDS = 2 * 3_600
+# A required check that GitHub has not reported at all within this window is
+# `check_missing`: no runner will pick it up.
+CHECK_MISSING_SECONDS = 600
 POLL_INTERVAL_SECONDS = 15
+CONFLICT_MARKER = r"^(<{7}|={7}|>{7})"
 # How many times the default branch may move under a run before landing
 # stops with `target_moved_twice`.
 MAX_REFRESHES = 1
@@ -47,9 +52,15 @@ def _git(path: Path, *arguments: str, timeout: float = CALL_TIMEOUT_SECONDS) -> 
     return gitcmd.git(path, *arguments, timeout=timeout, error=BatchError)
 
 
-def _refuse_unless_workers_done(run: Run) -> None:
+def _refuse_unless_live(run: Run) -> None:
     if run.acceptance is not None:
         raise BatchRefusal("already_accepted", f"run {run.run_id} has landed")
+    if run.abandoned is not None:
+        raise BatchRefusal("abandoned", f"run {run.run_id} was abandoned")
+
+
+def _refuse_unless_workers_done(run: Run) -> None:
+    _refuse_unless_live(run)
     tasks = pueue.tasks() if run.harness == "queued" else {}
     for worker in run.workers:
         if run.harness == "queued":
@@ -146,26 +157,80 @@ def _integrate(config: Config, project: ProjectAdapter, run: Run, base: str) -> 
                 "integration_failed",
                 f"integration task {job['job_id']} {waited.get('phase')}",
             )
-        dirty = [
-            line
-            for line in _git(path, "status", "--porcelain=v1").splitlines()
-            if not (
-                line.startswith("??") and line[3:].startswith(f"{WORKTREE_STATE_DIR}/")
-            )
-        ]
-        if dirty:
-            raise BatchRefusal(
-                "integration_dirty", "integration agent left an unclean tree"
-            )
-        for name in branches:
-            try:
-                _git(path, "merge-base", "--is-ancestor", name, "HEAD")
-            except BatchError as error:
-                raise BatchRefusal(
-                    "integration_incomplete", f"{name} is not merged"
-                ) from error
+        _refuse_unless_integrated(path, branches, who="integration agent")
         break
-    return _git(path, "rev-parse", "HEAD")
+    candidate = _git(path, "rev-parse", "HEAD")
+    _refuse_conflict_markers(path, base, candidate)
+    return candidate
+
+
+def _dirty_paths(path: Path) -> list[str]:
+    return [
+        line
+        for line in _git(path, "status", "--porcelain=v1").splitlines()
+        if not (line.startswith("??") and line[3:].startswith(f"{WORKTREE_STATE_DIR}/"))
+    ]
+
+
+def _refuse_unless_integrated(path: Path, branches: Sequence[str], *, who: str) -> None:
+    if _dirty_paths(path):
+        raise BatchRefusal("integration_dirty", f"{who} left an unclean tree")
+    for name in branches:
+        try:
+            _git(path, "merge-base", "--is-ancestor", name, "HEAD")
+        except BatchError as error:
+            raise BatchRefusal(
+                "integration_incomplete", f"{name} is not merged"
+            ) from error
+
+
+def _refuse_conflict_markers(path: Path, base: str, candidate: str) -> None:
+    """Refuse a candidate whose changed files carry a conflict marker line."""
+    changed = _git(path, "diff", "--name-only", f"{base}..{candidate}").splitlines()
+    if not changed:
+        return
+    hits = gitcmd.git(
+        path,
+        "grep",
+        "-nE",
+        CONFLICT_MARKER,
+        candidate,
+        "--",
+        *changed,
+        ok_statuses=(0, 1),
+        error=BatchError,
+    )
+    if hits:
+        lines = hits.splitlines()
+        raise BatchRefusal(
+            "integration_conflict_markers",
+            "conflict markers in " + "; ".join(lines[:6]),
+            markers=lines,
+        )
+
+
+def _kept_integration(config: Config, run: Run, base: str) -> str:
+    """The integration worktree's HEAD, checked as an integration would be."""
+    worktree = run.landing.get("integration_worktree")
+    if not worktree or not Path(worktree).is_dir():
+        raise BatchRefusal(
+            "integration_worktree_missing",
+            f"run {run.run_id} has no integration worktree to keep",
+        )
+    path = Path(worktree)
+    _refuse_unless_integrated(
+        path, [worker["branch"] for worker in run.workers], who="the kept worktree"
+    )
+    candidate = _git(path, "rev-parse", "HEAD")
+    try:
+        _git(path, "merge-base", "--is-ancestor", base, candidate)
+    except BatchError as error:
+        raise BatchRefusal(
+            "candidate_off_base",
+            f"kept head {candidate[:12]} does not descend from {base[:12]}",
+        ) from error
+    _refuse_conflict_markers(path, base, candidate)
+    return candidate
 
 
 def _wait_seconds(sleep: Callable[[float], None], deadline: float) -> bool:
@@ -304,6 +369,7 @@ def _review(
     if errors:
         raise BatchRefusal("review_invalid", "; ".join(errors[:6]))
     record = {**verdict, "candidate_sha": candidate, "job_id": job["job_id"]}
+    land_update(config, run.run_id, review_verdict=record)
     if verdict["verdict"] != "pass":
         raise BatchRefusal(
             "review_rejected",
@@ -500,17 +566,42 @@ def land(
     *,
     beads: Beads | None = None,
     sleep: Callable[[float], None] = time.sleep,
+    keep_integration: bool = False,
 ) -> dict[str, Any]:
-    """Integrate, verify, review, publish, accept. Refuses until every worker is done."""
+    """Integrate, verify, review, publish, accept. Refuses until every worker is done.
+
+    With ``keep_integration`` the integration worktree's current HEAD is the
+    candidate: nothing is re-merged, so a hand fix there lands.
+    """
     run = load(config, run_id)
     if run.project != project.project_id:
         raise BatchRefusal("project", f"run {run_id} belongs to {run.project}")
     beads = beads or SubprocessBeads(project.root)
+    with landing_locked(config, run_id):
+        return _land_locked(
+            config, project, run, beads, sleep=sleep, keep_integration=keep_integration
+        )
+
+
+def _land_locked(
+    config: Config,
+    project: ProjectAdapter,
+    run: Run,
+    beads: Beads,
+    *,
+    sleep: Callable[[float], None],
+    keep_integration: bool,
+) -> dict[str, Any]:
+    run_id = run.run_id
     try:
         _refuse_unless_workers_done(run)
         base = str(run.landing.get("refreshed_base") or run.base_commit)
         while True:
-            candidate = _integrate(config, project, run, base)
+            candidate = (
+                _kept_integration(config, run, base)
+                if keep_integration
+                else _integrate(config, project, run, base)
+            )
             if candidate == base:
                 raise BatchRefusal(
                     "empty_candidate",
@@ -532,6 +623,12 @@ def land(
             published = _publish(config, project, run, path, base, candidate, sleep)
             if published is not None:
                 break
+            if keep_integration:
+                raise BatchRefusal(
+                    "publish_rejected",
+                    f"{workspace_of(project).base_branch} moved past {base[:12]}; "
+                    "a kept integration head is not refreshed",
+                )
             if int(run.landing.get("refreshes") or 0) >= MAX_REFRESHES:
                 raise BatchRefusal(
                     "target_moved_twice",
@@ -559,6 +656,7 @@ def land(
         )
     except BatchRefusal as refusal:
         if refusal.code not in {
+            "abandoned",
             "already_accepted",
             "worker_not_done",
             "worker_failed",
@@ -577,3 +675,84 @@ def land(
         land_update(config, run_id, failure={"code": "substrate", "detail": str(error)})
         raise
     return run.to_dict()
+
+
+def _unpreserved(path: Path, *, base: str, branch: str) -> str | None:
+    """Why removing this worktree would lose work, or None when nothing would."""
+    if _dirty_paths(path):
+        return "uncommitted changes"
+    head = _git(path, "rev-parse", "HEAD")
+    if head == base:
+        return None
+    holders = [
+        ref
+        for ref in _git(
+            path, "for-each-ref", "--format=%(refname)", "--contains", head
+        ).split()
+        if ref != f"refs/heads/{branch}"
+    ]
+    return None if holders else f"commits only on {branch}"
+
+
+def abandon(
+    config: Config,
+    project: ProjectAdapter,
+    run_id: str,
+    *,
+    reason: str = "",
+    beads: Beads | None = None,
+) -> dict[str, Any]:
+    """Release a run: unclaim its members, remove the worktrees that hold no
+    unpreserved work, mark the manifest abandoned."""
+    run = load(config, run_id)
+    if run.project != project.project_id:
+        raise BatchRefusal("project", f"run {run_id} belongs to {run.project}")
+    _refuse_unless_live(run)
+    beads = beads or SubprocessBeads(project.root)
+    landing_id = run.landing.get("task_id")
+    landing_task = pueue.task(landing_id) if isinstance(landing_id, int) else None
+    if landing_task is not None and landing_task.status == "Running":
+        raise BatchRefusal(
+            "landing_in_progress", f"landing task {landing_id} is running"
+        )
+    with landing_locked(config, run_id):
+        residual: list[str] = []
+        for worker in run.workers:
+            task_id = worker.get("task_id")
+            task = pueue.task(task_id) if isinstance(task_id, int) else None
+            if task is not None and not task.terminal:
+                launch.cancel(config, task_id)
+        if landing_task is not None and not landing_task.terminal:
+            launch.cancel(config, landing_id)
+        for bead_id in run.beads:
+            try:
+                beads.unclaim(bead_id, actor=run.actor)
+            except BatchError as error:
+                residual.append(f"{bead_id}: unclaim failed: {error}")
+        branches = [worker["branch"] for worker in run.workers]
+        branches.append(run.landing["integration_branch"])
+        with project_locked(config, project.project_id):
+            for branch in branches:
+                tree = worktrunk.worktrunk_find(project.root, branch)
+                if tree is None:
+                    continue
+                if tree.path is not None and tree.path.is_dir():
+                    try:
+                        keep = _unpreserved(
+                            tree.path, base=run.base_commit, branch=branch
+                        )
+                    except BatchError as error:
+                        keep = str(error)
+                    if keep:
+                        residual.append(f"{branch}: worktree kept; {keep}")
+                        continue
+                try:
+                    worktrunk.worktrunk_remove(project.root, branch, force=True)
+                except WorktrunkError as error:
+                    residual.append(f"{branch}: {error}")
+        record = {"reason": reason, "at": now(), "residual": residual}
+
+        def mark(document: dict[str, Any]) -> None:
+            document["abandoned"] = record
+
+        return update(config, run_id, mark).to_dict()

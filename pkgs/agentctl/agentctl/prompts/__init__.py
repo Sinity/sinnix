@@ -390,8 +390,8 @@ def validate_members(
 
     ``workers`` groups member ids per worker; ``claimed`` holds ids already in
     another run. A member is executable when it exists, is open or in
-    progress, has no open ``blocks`` dependency outside the member set, is
-    unclaimed, belongs to one worker only, and its write scope is disjoint
+    progress, has no open ``blocks`` dependency outside the member set, has
+    no assignee, belongs to one worker only, and its write scope is disjoint
     from every other worker's.
     """
     refusals: list[Refusal] = []
@@ -416,7 +416,7 @@ def validate_members(
                 refusals.append(Refusal("in_run", bead_id, "already in another run"))
                 continue
             assignee = bead.get("assignee")
-            if status == "in_progress" and isinstance(assignee, str) and assignee:
+            if isinstance(assignee, str) and assignee:
                 refusals.append(Refusal("claimed", bead_id, f"claimed by {assignee}"))
                 continue
             blockers = _open_external_blockers(bead, members, reader)

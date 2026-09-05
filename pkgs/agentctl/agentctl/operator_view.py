@@ -52,6 +52,8 @@ def run_stage(
         return "stashed" if landing.status == "Stashed" else "landing"
     if run.acceptance is not None:
         return "landed"
+    if run.abandoned is not None:
+        return "abandoned"
     failure = run.landing.get("failure")
     if failure:
         return f"failed: {failure.get('code')}"
@@ -217,7 +219,7 @@ def run_next(
     stage = run_stage(run, landing, worker_tasks)
     if stage in {"working", "landing"}:
         return "wait"
-    if stage == "landed":
+    if stage in {"landed", "abandoned"}:
         return "-"
     if stage == "stashed":
         return "batch result, then the landing task runs"
@@ -372,8 +374,14 @@ def render(snapshot: Snapshot) -> str:
             .join(("  ", ""))
         )
 
-    open_runs = [row for row in runs if not row["accepted"]]
-    lines.append(f"== runs: {len(open_runs)} open, {len(runs) - len(open_runs)} landed")
+    open_runs = [
+        row for row in runs if not row["accepted"] and row["stage"] != "abandoned"
+    ]
+    landed = [row for row in runs if row["accepted"]]
+    lines.append(
+        f"== runs: {len(open_runs)} open, {len(landed)} landed, "
+        f"{len(runs) - len(open_runs) - len(landed)} abandoned"
+    )
     if open_runs:
         rows = []
         for row in open_runs:

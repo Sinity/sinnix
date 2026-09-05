@@ -180,7 +180,7 @@ def result_path(worktree: Path) -> Path:
 
 
 def worker_then(
-    config: Config, run_id: str, worker_id: str, worktree: Path
+    config: Config, run_id: str, worker_id: str, result: Path
 ) -> tuple[str, ...]:
     return (
         config.agentctl_executable,
@@ -188,7 +188,7 @@ def worker_then(
         "result",
         run_id,
         worker_id,
-        str(result_path(worktree)),
+        str(result),
     )
 
 

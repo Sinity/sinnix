@@ -29,7 +29,7 @@ command, the run manifest of a batch, and one operator screen.
 | `batch land <run>`                                                                                        | the landing task's body: integrate, verify, review, publish, record acceptance, close satisfied beads, remove worktrees; re-runnable                                                                                                       |
 | `batch status <run>` / `batch list [p]`                                                                   | the manifest joined with pueue task state and the landing PR                                                                                                                                                                               |
 | `batch result <run> <worker> <result.json>`                                                               | file a schema-validated result for a worker another harness ran; releases the stashed landing task once every worker has one                                                                                                               |
-| `batch resume <run> --worker <w>`                                                                         | queue a fresh agent into the worker's existing worktree with the original packet                                                                                                                                                           |
+| `batch resume <run> --worker <w>`                                                                         | queue a fresh agent into the worker's existing worktree with a resume packet (`.agentctl/resume-<n>.md`) carrying the original                                                                                                             |
 | `view [p]`                                                                                                | queue groups, what needs attention, active jobs, open runs with each worker's stage, ready beads                                                                                                                                           |
 | `events tail [--lines N] [--follow] [--project p]`                                                        | the event spool (`/realm/state/agentctl/events.jsonl`)                                                                                                                                                                                     |
 | `schedule apply`                                                                                          | make the transient timer set equal the declared schedules                                                                                                                                                                                  |
@@ -174,7 +174,12 @@ acceptance: {candidate_sha, verify_run, review_verdict, published,
              beads: {<bead>: {state: closed|open, evidence}},
              advisory, recorded_at, residual: [...]} | null
 prepared          every claim, worktree and task exists
+abandoned         {reason, at, residual: [...]} | null
 ```
+
+A worker's `prompt_path` is its current packet: `.agentctl/prompt.md` at
+start, `.agentctl/resume-<n>.md` after the n-th resume; `result_path` is the
+matching `<stem>.result.json`. The original packet is never overwritten.
 
 Record-only fields, written for the audit trail and read by no verb:
 `runtime_revision`, `review_profile`, a worker's `task_ids` and
@@ -187,8 +192,8 @@ Record-only fields, written for the audit trail and read by no verb:
 `batch start` resolves each seed bead's open dispatch group into one worker
 (`--worker a,b` names one explicitly; the first bead leads) and validates
 every member: it exists, is open or in progress, has no open external
-blocker, is not claimed or in another run, and no two workers share a write
-scope; a closed leader is skipped. It then writes the manifest, claims each
+blocker, has no assignee, is not in a live run, and no two workers share a
+write scope; a closed leader is skipped. It then writes the manifest, claims each
 member with `bd update --claim` as actor `agentctl-batch-<run>`, creates
 one worktree per worker on branch `batch/<run>/<worker>` from `base_commit`
 at `<workspace.root>/<repo>-<branch with / replaced by ->` through `wt switch
@@ -226,23 +231,31 @@ graph.
 
 `batch land <run>` is the landing task's body and can be run by hand; every
 step is recorded in `landing` before the next starts, and a repeat run
-resumes from the manifest.
+resumes from the manifest. The whole landing holds
+`runs/<run>.land.lock`; a second landing of the same run is refused with
+`landing_in_progress`.
 
 1. Refuse unless every worker task succeeded with a valid result, and
-   refuse a run that already has an acceptance record.
+   refuse a run that already has an acceptance record or was abandoned.
 2. Create a fresh integration worktree from `base_commit` and merge the
    worker branches in manifest order with `git merge --no-ff`. A conflict
    queues one integration agent (label `<p>:integrate:<run>`) with the
    conflicts and the remaining branches; the merged head is
-   `candidate_sha`.
+   `candidate_sha`. The files the candidate changes are scanned for a line
+   starting with `<<<<<<<`, `=======` or `>>>>>>>`; a hit is
+   `integration_conflict_markers`. With `--keep-integration` the
+   integration worktree's current HEAD is the candidate instead: it must be
+   clean, contain every worker branch and descend from the base, and a
+   moved default branch is `publish_rejected` rather than refreshed.
 3. Verify: one job of the descriptor's `verify.candidate` operation in the
    integration worktree, or, when it is `hosted:<check>`, the PR is pushed
    and that required check is awaited. The receipt is `verify_run`.
 4. Review: one reviewer job (label `<p>:review:<run>`) on
    `git diff base..candidate` with the `review` agent definition and
-   `judge.schema.json`; the verdict is bound to `candidate_sha` and must be
-   `pass`. Hosted review comments on the candidate PR are listed in the
-   acceptance record as advisory.
+   `judge.schema.json`; the verdict is written to `landing.review_verdict`
+   whatever it says, is bound to `candidate_sha`, and must be `pass`. Hosted
+   review comments on the candidate PR are listed in the acceptance record
+   as advisory.
 5. Publish, after re-reading the remote default branch equals the run's
    base. `publish = "master"`: push `candidate_sha` to the default branch
    with `--force-with-lease=<branch>:<base>`. `publish = "pr"`: create or
@@ -260,6 +273,17 @@ A refusal or substrate error after step 1 is written to `landing.failure`
 with its code; `batch status` shows `failed: <code>` and `view` names what
 follows.
 
+### Abandon
+
+`batch abandon <run> [--reason R]` releases a run that will not land. It is
+refused while the landing task is running (`landing_in_progress`), after
+acceptance, or twice. It cancels queued worker and landing tasks, unclaims
+every member as the run's actor, removes each worker and integration
+worktree whose tree is clean and whose HEAD is the base or is held by
+another ref (`wt remove` deletes the branch, so a commit only on it would
+be lost), and records `abandoned: {reason, at, residual}`; kept worktrees
+and failed unclaims are the residual. The members can then start again.
+
 ### Refusals
 
 A batch verb that cannot proceed exits 1 with `<code>: <detail>`; a landing
@@ -269,6 +293,7 @@ check failing). The codes:
 
 | code                           | meaning                                                                             |
 | ------------------------------ | ----------------------------------------------------------------------------------- |
+| `abandoned`                    | the run was abandoned; nothing runs again                                           |
 | `already_accepted`             | the run has an acceptance record; nothing runs again                                |
 | `ambiguous_run`                | the suffix names more than one run                                                  |
 | `candidate_mismatch`           | the result's candidate_sha is not the worktree HEAD                                 |
@@ -279,11 +304,13 @@ check failing). The codes:
 | `foreign_beads`                | the result covers beads outside the worker                                          |
 | `harness`                      | the harness is neither `queued` nor `external`                                      |
 | `head_moved`                   | the PR head is no longer the verified candidate                                     |
+| `integration_conflict_markers` | a file the candidate changes carries a conflict marker                              |
 | `integration_dirty`            | the integration agent left an unclean tree                                          |
 | `integration_failed`           | the integration task did not succeed                                                |
 | `integration_incomplete`       | a worker branch is not merged into the candidate                                    |
 | `integration_worktree_missing` | the integration branch is registered without a directory that could be unregistered |
 | `invalid_result`               | the worker result does not validate against its schema                              |
+| `landing_in_progress`          | another landing of this run holds the landing lock or its task is running           |
 | `manifest`                     | the run manifest is unreadable or not this contract                                 |
 | `members`                      | a bead cannot join the batch (`refusals` names each reason)                         |
 | `no_candidate_profile`         | the descriptor declares no [workspace].verify.candidate                             |
@@ -429,8 +456,6 @@ unattended batches declares a scheduled operation whose `exec` runs
 | `backpressure.MEMORY_FULL_FREEZE` (25%)                      | half of systemd-oomd's kill threshold                                     | the memory stall that freezes a group                             |
 | `backpressure.RESUME_BELOW` (10%)                            | arbitrary bound                                                           | both stalls must fall below this before a group thaws             |
 | `operator_view.MAX_READY_SHOWN` (8) / `MAX_FAILED_SHOWN` (6) | arbitrary bound                                                           | rows the screen shows                                             |
-
-> > > > > > > 77ac0b46 (refactor(agentctl): rename the worktree state dir, packets, members and scope keys)
 
 ## Host wiring
 
