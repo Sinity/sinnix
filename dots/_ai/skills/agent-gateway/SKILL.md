@@ -127,7 +127,7 @@ Effectful actions (families change, operate, run) require `idempotency_key`; rep
 
 - `operations.run` — Queue one project-declared operation in its declared pool on the root or a worktree.
 - `shell.run` — cwd is confined to the checkout; the job's log carries the output.
-- `agent.for_bead` — backend, model and effort default to the bead's model policy. A bead that already has a worktree is refused with conflict.
+- `agent.for_bead` — backend, model and effort default to the bead's model policy. Refused when a member is claimed or already in a run.
 - `terminals.run` — Completion and output rely on kitty shell integration (at_prompt, last_cmd_output). exit_status is reported only with capture_exit_status, which appends a visible marker to the command line.
 
 The complete schemas and examples are in `docs/generated/agent-gateway-reference.md`.

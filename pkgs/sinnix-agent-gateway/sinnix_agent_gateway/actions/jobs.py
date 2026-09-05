@@ -521,7 +521,7 @@ def _run_shell(runtime: Runtime, inp: ShellRunInput) -> JobView:
     return _job_view(result)
 
 
-# ----------------------------------------------------------------- lanes
+# ---------------------------------------------------------------- workers
 
 
 class LaneStarted(GatewayModel):
@@ -779,18 +779,18 @@ ACTIONS: tuple[Action, ...] = (
         name="agent.for_bead",
         family=VerbFamily.RUN,
         owner="systemd-jobs",
-        summary="Start a lane for one bead: compile the prompt, create the worktree, queue the agent.",
+        summary="Start a batch of one worker for one bead: compile the packet, create the worktree, queue the agent.",
         Input=LaneStartInput,
         Output=LaneStarted,
         handler=_lane_start,
         principals=CONTROL_OPERATOR,
         resource_kinds=("project", "bead", "job"),
         affordances=("jobs.wait", "jobs.logs", "jobs.cancel"),
-        aliases=("lane start", "dispatch", "agentctl lane start", "work on bead"),
-        documentation="backend, model and effort default to the bead's model policy. A bead that already has a worktree is refused with conflict.",
+        aliases=("dispatch", "agentctl batch start", "work on bead"),
+        documentation="backend, model and effort default to the bead's model policy. Refused when a member is claimed or already in a run.",
         examples=(
             Example(
-                title="Start a lane",
+                title="Start a worker",
                 input={
                     "bead": {"id": "sinnix-abc1"},
                     "idempotency_key": "lane-sinnix-abc1",

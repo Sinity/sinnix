@@ -2,7 +2,7 @@
 
 Sinnix is the declarative NixOS/user-environment configuration for the primary
 workstation and the home of `agentctl`, the CLI that queues declared project
-operations and runs coding-agent lanes. Keep configuration declarative,
+operations and runs coding-agent batches. Keep configuration declarative,
 generated surfaces reproducible, and host behavior observable without encoding
 operational rituals in agent prose.
 
@@ -25,7 +25,7 @@ modules/
   services/             fixed system/user services
   lib/                  module factories and shared Nix helpers
 pkgs/
-  agentctl/             agentctl: jobs over pueue, lanes over worktrunk, gh and bd
+  agentctl/             agentctl: jobs over pueue, batches over worktrunk, gh and bd
   sinnix-agent-gateway/ typed gateway transport, policy, and action catalog
 scripts/                small independently packaged utilities
 dots/                   managed user configuration and agent instructions
@@ -40,10 +40,10 @@ The ownership boundaries are:
   operator screen. pueue owns the queue and every process; worktrunk owns
   worktrees; GitHub owns PRs and merge; Beads owns tasks.
 - The gateway owns principal/capability policy and high-level machine/project
-  tools; it calls agentctl's launch and lane routes in process and does not
+  tools; it calls agentctl's launch and batch routes in process and does not
   implement another job controller.
 - Project descriptors (`.agentctl/project.toml`) own repository semantics:
-  environment, declared operations, result parsing, lane defaults.
+  environment, declared operations, result parsing, packet defaults.
 - Systemd remains live process/service authority. Do not duplicate its process
   tree, timeout, signal, or result state in shell supervisors.
 
@@ -82,16 +82,7 @@ worktree, landed as one candidate by a task queued behind them. Verbs:
 It does not own product-domain concurrency. For example, Sinex work-item byte,
 rate, and destructive-operation budgets remain inside Sinex.
 
-Do not recreate any of the retired forms:
-
-- no public `sinnix-scope`;
-- no `sinnix-agent-scope-exec`;
-- no command-basename interception in direnv;
-- no static command classes or per-agent memory envelopes;
-- no gateway-local job manifests;
-- no job/instance controller scripts in skills;
-- no process ownership inferred from command lines;
-- no orphan MCP sweeper.
+Host execution goes through declared agentctl operations.
 
 ## Resource policy
 
@@ -102,8 +93,8 @@ the slice hierarchy, not by per-job arithmetic. Fixed runtime surfaces use the
 resource classes and slice budgets declared in
 `flake/data/runtime-defaults.nix`; do not restate those values here.
 
-Hard `MemoryMax` is reserved for explicit safety boundaries (an agent lane's
-scope). Environment construction, scratch ownership, logging, timeout,
+Hard `MemoryMax` is reserved for explicit safety boundaries (a batch worker's
+unit). Environment construction, scratch ownership, logging, timeout,
 cancellation, and process cleanup are common runtime policy, not project
 recipes.
 
@@ -148,9 +139,9 @@ The managed agent configuration should be small:
 - compact project skills plus common runtime/review/investigation skills;
 - Polylogue capture hooks;
 - one destructive-command guard;
-- the shared `agentctl` job and lane lifecycle.
+- the shared `agentctl` job and batch lifecycle.
 
-Model/effort is a field of every lane launch. The event spool records every
+Backend, model and effort are fields of every worker launch. The event spool records every
 launch. Do not maintain shell-parsed dispatch ledgers or subagent stop ledgers.
 
 ## Development workflow

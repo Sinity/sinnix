@@ -655,10 +655,10 @@ class Runtime:
         model: str | None,
         reasoning_effort: str | None,
     ) -> dict[str, Any]:
-        """A lane for one bead: agentctl compiles the prompt, creates the worktree, queues the agent."""
+        """A batch of one worker for one bead: agentctl compiles the packet, creates the worktree, queues the agent."""
         self.principal.require(Capability.JOB_START)
         _resource, values, bead_ref = self._resource_reference(
-            reference or "", {"bead"}, "a lane requires a canonical Beads reference"
+            reference or "", {"bead"}, "a worker requires a canonical Beads reference"
         )
         for name, value in (
             ("backend", backend),
@@ -682,7 +682,7 @@ class Runtime:
         job_id = result.get("job_id")
         if not isinstance(job_id, str) or not job_id:
             raise ProtocolError(
-                "owner_failed", "lane start response omitted the job ID"
+                "owner_failed", "agent.for_bead response omitted the job ID"
             )
         return {
             **result,
