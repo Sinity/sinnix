@@ -1646,3 +1646,96 @@ def test_an_already_merged_pr_on_the_candidate_is_accepted_without_reintegrating
     assert landed["acceptance"]["published"]["merge_commit"] == MERGED
     assert landed["acceptance"]["verify_run"]["pr"] == 41
     assert harness.beads.closed[0][1] == f"batch {run['run_id']} {MERGED}"
+
+
+# ---------------------------------------------------------------- agent containment
+
+
+def test_worker_and_review_units_cannot_push_or_write_beads(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Breaks if an agent unit can publish, use a forwarded credential, or mutate Beads."""
+    descriptor = harness.project.descriptor
+    descriptor.write_text(
+        descriptor.read_text().replace(
+            'inherit = ["PATH"]', 'inherit = ["PATH", "SSH_AUTH_SOCK", "GH_TOKEN"]'
+        )
+    )
+    monkeypatch.setenv("SSH_AUTH_SOCK", "/run/user/1000/ssh-agent")
+    monkeypatch.setenv("GH_TOKEN", "ghp_secret")
+    harness.project = load_project_adapter(harness.project.root)
+    run = prepared_run(harness, "fx-lead", "fx-solo")
+    harness.git.conflict_on = {f"batch/{run['run_id']}/fx-solo"}
+    harness.land(run["run_id"])
+    tasks = {t.label: t for t in harness.pueue.tasks().values()}
+    shim = harness.config.state_dir / "shims"
+
+    for kind in ("worker", "review"):
+        label = next(
+            name for name in tasks if name.startswith(f"fixture:{kind}:{run['run_id']}")
+        )
+        environment = read_launch(harness.config, tasks[label])["environment"]
+        assert "SSH_AUTH_SOCK" not in environment
+        assert environment["GH_TOKEN"] == ""
+        assert environment["GIT_CONFIG_COUNT"] == "2"
+        assert (environment["GIT_CONFIG_KEY_0"], environment["GIT_CONFIG_VALUE_0"]) == (
+            "remote.origin.pushurl",
+            "/nonexistent",
+        )
+        assert (environment["GIT_CONFIG_KEY_1"], environment["GIT_CONFIG_VALUE_1"]) == (
+            "credential.helper",
+            "",
+        )
+        assert environment["PATH"].split(os.pathsep)[0] == str(shim)
+    for kind in ("integrate", "land"):
+        label = next(
+            name for name in tasks if name.startswith(f"fixture:{kind}:{run['run_id']}")
+        )
+        environment = read_launch(harness.config, tasks[label])["environment"]
+        assert "GIT_CONFIG_COUNT" not in environment
+        assert environment.get("SSH_AUTH_SOCK") == "/run/user/1000/ssh-agent"
+        assert environment.get("GH_TOKEN") == "ghp_secret"
+    bd = shim / "bd"
+    assert bd.stat().st_mode & 0o777 == 0o700 and shim.stat().st_mode & 0o777 == 0o700
+    assert 'exec bd --readonly "$@"' in bd.read_text()
+
+
+def test_agent_units_cannot_reach_sibling_worktrees_or_write_the_checkout(
+    harness: Harness,
+) -> None:
+    run = prepared_run(harness, "fx-lead", "fx-solo")
+    lead, solo = run["workers"]
+    root = harness.project.root
+    for worker, other in ((lead, solo), (solo, lead)):
+        properties = read_launch(harness.config, harness.pueue.task(worker["task_id"]))[
+            "unit_properties"
+        ]
+        assert properties == [
+            "MemoryMax=10G",
+            f"ReadOnlyPaths={root}",
+            f"ReadWritePaths={root / '.git'}",
+            f"InaccessiblePaths=-{other['worktree']}",
+        ]
+    harness.git.conflict_on = {f"batch/{run['run_id']}/fx-solo"}
+    harness.land(run["run_id"])
+    for kind in ("review", "integrate"):
+        task = next(
+            t
+            for t in harness.pueue.tasks().values()
+            if t.label == f"fixture:{kind}:{run['run_id']}"
+        )
+        properties = read_launch(harness.config, task)["unit_properties"]
+        assert f"InaccessiblePaths=-{lead['worktree']}" in properties
+        assert f"InaccessiblePaths=-{solo['worktree']}" in properties
+        assert f"ReadOnlyPaths={root}" in properties
+    landing = harness.pueue.task(run["landing"]["task_id"])
+    assert "unit_properties" not in read_launch(harness.config, landing)
+
+
+def test_manifests_and_the_runs_directory_are_private(harness: Harness) -> None:
+    run = harness.start("fx-solo")
+    path = manifest.manifest_path(harness.config, run["run_id"])
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert path.parent.stat().st_mode & 0o777 == 0o700
+    manifest.land_update(harness.config, run["run_id"], refreshes=1)
+    assert path.stat().st_mode & 0o777 == 0o600

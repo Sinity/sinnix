@@ -29,9 +29,9 @@ REQUIRED_FIELDS = (
 # pueue's group name grammar.
 POOL_NAME = re.compile(r"[a-z][a-z0-9-]{0,63}\Z")
 # The unit settings agentctl passes through to `systemd-run -p`. Each one only
-# bounds what the workload may consume, so a launch input can limit its own
-# task and nothing else: no capability, no namespace, no credential, no
-# execution setting is reachable from here.
+# bounds what the workload may consume or reach, so a launch input can limit
+# its own task and nothing else: no capability, no credential, no execution
+# setting is reachable from here.
 UNIT_PROPERTIES = frozenset(
     {
         "MemoryMax",
@@ -44,6 +44,13 @@ UNIT_PROPERTIES = frozenset(
     }
 )
 UNIT_PROPERTY_VALUE = re.compile(r"(infinity|[0-9]+[KMGTPE]?)\Z")
+# Path settings: one absolute path per property, optionally `-`-prefixed so
+# a missing path is ignored. `ReadWritePaths` only re-opens what a
+# `ReadOnlyPaths` on a parent closed.
+UNIT_PATH_PROPERTIES = frozenset(
+    {"InaccessiblePaths", "ReadOnlyPaths", "ReadWritePaths"}
+)
+UNIT_PATH_VALUE = re.compile(r"-?/[^\x00-\x20:]+\Z")
 
 
 class QueueInputError(ValueError):
@@ -55,11 +62,13 @@ def supported_unit_property(value: object) -> bool:
     if not isinstance(value, str):
         return False
     name, separator, size = value.partition("=")
-    return bool(
-        separator
-        and name in UNIT_PROPERTIES
-        and UNIT_PROPERTY_VALUE.fullmatch(size) is not None
-    )
+    if not separator:
+        return False
+    if name in UNIT_PROPERTIES:
+        return UNIT_PROPERTY_VALUE.fullmatch(size) is not None
+    if name in UNIT_PATH_PROPERTIES:
+        return UNIT_PATH_VALUE.fullmatch(size) is not None
+    return False
 
 
 def write_input(path: Path, document: Mapping[str, Any]) -> None:
@@ -118,6 +127,6 @@ def read_input(path: Path) -> dict[str, Any]:
     ):
         raise QueueInputError(
             "launch input unit_properties must be "
-            f"{'/'.join(sorted(UNIT_PROPERTIES))} settings"
+            f"{'/'.join(sorted(UNIT_PROPERTIES | UNIT_PATH_PROPERTIES))} settings"
         )
     return value

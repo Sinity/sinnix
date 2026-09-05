@@ -20,6 +20,58 @@ AGENT_GROUP = "agent"
 WORKTREE_STATE_DIR = ".agentctl"
 # A push or fetch runs the repository's pre-push gate.
 PUSH_TIMEOUT_SECONDS = 2_400
+# The agent kinds that must not publish or mutate tasks: their environment
+# cannot push, has no forwarded credential, and sees a read-only `bd`.
+RESTRICTED_KINDS = frozenset({"worker", "resume", "review"})
+BD_SHIM = """#!/bin/sh
+# agentctl: agents read Beads and never write them.
+self=$(dirname "$0")
+PATH=$(printf %s "$PATH" | tr ':' '\\n' | grep -vx "$self" | paste -sd:)
+export PATH
+exec bd --readonly "$@"
+"""
+
+
+def bd_shim_dir(config: Config) -> Path:
+    """A directory holding only a `bd` that execs `bd --readonly`."""
+    directory = config.state_dir / "shims"
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    shim = directory / "bd"
+    if not shim.is_file() or shim.read_text() != BD_SHIM:
+        descriptor = os.open(
+            shim, os.O_CREAT | os.O_TRUNC | os.O_WRONLY | os.O_NOFOLLOW, 0o700
+        )
+        with os.fdopen(descriptor, "w") as handle:
+            handle.write(BD_SHIM)
+    os.chmod(shim, 0o700)
+    return directory
+
+
+def restrict_environment(config: Config, environment: dict[str, str]) -> None:
+    """Take publication and task mutation out of an agent's reach: git cannot
+    push, no SSH agent or GitHub token is forwarded, `bd` is read-only."""
+    environment.pop("SSH_AUTH_SOCK", None)
+    environment["GH_TOKEN"] = ""
+    environment["GIT_CONFIG_COUNT"] = "2"
+    environment["GIT_CONFIG_KEY_0"] = "remote.origin.pushurl"
+    environment["GIT_CONFIG_VALUE_0"] = "/nonexistent"
+    environment["GIT_CONFIG_KEY_1"] = "credential.helper"
+    environment["GIT_CONFIG_VALUE_1"] = ""
+    shim = str(bd_shim_dir(config))
+    current = environment.get("PATH", os.defpath)
+    environment["PATH"] = f"{shim}{os.pathsep}{current}" if current else shim
+
+
+def path_properties(
+    project: ProjectAdapter, *, inaccessible: Sequence[Path]
+) -> tuple[str, ...]:
+    """The unit's filesystem bounds: the project checkout read-only with its
+    `.git` writable, and the named worktrees unreachable."""
+    return (
+        f"ReadOnlyPaths={project.root}",
+        f"ReadWritePaths={project.root / '.git'}",
+        *(f"InaccessiblePaths=-{path}" for path in inaccessible),
+    )
 
 
 def workspace_of(project: ProjectAdapter) -> WorkspacePolicy:
@@ -105,12 +157,14 @@ def queue_agent(
     after: Sequence[int] = (),
     timeout_seconds: int = MAX_AGENT_TIMEOUT_SECONDS,
     binding: Mapping[str, Any] | None = None,
+    inaccessible: Sequence[Path] = (),
 ) -> dict[str, Any]:
     """Queue one agent in the agent group; ``then`` runs after a successful agent.
 
     With ``schema`` the backend must answer with a conforming JSON document,
     written beside the prompt as ``<prompt stem>.result.json``. ``binding``
     names the beads, run and worker the task serves; `job get` shows it.
+    ``inaccessible`` names the worktrees the unit must not reach.
     """
     workspace = workspace_of(project)
     prompt_path = write_prompt(worktree, prompt_name, prompt)
@@ -152,6 +206,8 @@ def queue_agent(
     environment["AGENTCTL_PRINCIPAL"] = "agent-control"
     environment["AGENTCTL_PROJECT_ID"] = project.project_id
     operation = label.split(":", 1)[1]
+    if operation.split(":", 1)[0] in RESTRICTED_KINDS:
+        restrict_environment(config, environment)
     return launch.enqueue(
         config,
         project=project,
@@ -165,8 +221,25 @@ def queue_agent(
         environment=environment,
         kind="attested-agent",
         after=after,
-        unit_properties=(f"MemoryMax={workspace.agent_memory_max}",),
+        unit_properties=(
+            f"MemoryMax={workspace.agent_memory_max}",
+            *path_properties(project, inaccessible=inaccessible),
+        ),
         binding=binding,
+    )
+
+
+def other_worktrees(
+    project: ProjectAdapter, run: Run, worker_id: str | None
+) -> tuple[Path, ...]:
+    """Every worker worktree of the run except ``worker_id``'s own; one not
+    yet created is where `wt` will place it."""
+    return tuple(
+        Path(worker["worktree"])
+        if worker.get("worktree")
+        else worktree_path(project, worker["branch"])
+        for worker in run.workers
+        if worker["id"] != worker_id
     )
 
 
