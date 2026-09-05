@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Callable
 
 import pytest
 from agentctl import cli
 from agentctl.config import Config
-from conftest import FakePueue
+from conftest import FakePueue, read_launch
 
 
 @pytest.fixture
@@ -34,15 +35,17 @@ def cli_config(
 def test_job_start_get_logs_and_wait_round_trip(
     fake_pueue: FakePueue, cli_config: Config, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert cli.main(["--json", "job", "start", "fixture", "check", "--", "--flag"]) == 0
-    started = json.loads(capsys.readouterr().out)
+    assert cli.main(["job", "start", "fixture", "check", "--", "--flag"]) == 0
+    captured = capsys.readouterr()
+    started = json.loads(captured.out)
     assert started["job_id"] == 1 and started["phase"] == "running"
+    assert captured.err.startswith("job 1 fixture:check running since ")
     assert fake_pueue.added[0]["label"] == "fixture:check"
 
     assert cli.main(["job", "list", "--project", "fixture"]) == 0
     listed = capsys.readouterr().out
-    assert "fixture:check" in listed and "elapsed" in listed
-    assert cli.main(["--json", "job", "list", "--project", "fixture"]) == 0
+    assert "fixture:check" in listed and "age" in listed
+    assert cli.main(["job", "list", "--project", "fixture", "--json"]) == 0
     assert json.loads(capsys.readouterr().out)[0]["label"] == "fixture:check"
 
     fake_pueue.finish_when_waited(1, lambda fake: fake.succeed(1))
@@ -54,6 +57,22 @@ def test_job_start_get_logs_and_wait_round_trip(
     assert line.startswith("job 1 fixture:check succeeded finished ")
 
 
+def test_job_start_infers_the_project_from_the_working_directory(
+    fake_pueue: FakePueue,
+    cli_config: Config,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(cli_config.project_roots[0])
+    assert cli.main(["job", "start", "check", "--", "--flag"]) == 0
+    assert json.loads(capsys.readouterr().out)["label"] == "fixture:check"
+    assert read_launch(cli_config, fake_pueue.task(1))["argv"][-1] == "--flag"
+    assert cli.main(["job", "start", "--project", "fixture", "check"]) == 0
+    assert json.loads(capsys.readouterr().out)["label"] == "fixture:check"
+    assert cli.main(["job", "start", str(cli_config.project_roots[0]), "check"]) == 0
+    assert json.loads(capsys.readouterr().out)["label"] == "fixture:check"
+
+
 def test_job_start_with_wait_reports_a_failure_in_the_exit_status(
     fake_pueue: FakePueue, cli_config: Config, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -62,7 +81,40 @@ def test_job_start_with_wait_reports_a_failure_in_the_exit_status(
         cli.main(["job", "start", "fixture", "check", "--wait"])
         == cli.EXIT_JOB_NOT_SUCCEEDED
     )
-    assert "failed exit 3" in capsys.readouterr().out
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["phase"] == "failed"
+    assert "failed exit 3" in captured.err
+
+
+def test_write_verbs_print_json_and_one_summary_line_on_stderr(
+    fake_pueue: FakePueue,
+    cli_config: Config,
+    capsys: pytest.CaptureFixture[str],
+    recording_systemctl: Callable[[], list[list[str]]],
+) -> None:
+    assert cli.main(["job", "start", "fixture", "check"]) == 0
+    capsys.readouterr()
+    assert cli.main(["job", "cancel", "1"]) == 0
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["state"] == "stopped"
+    assert captured.err.count("\n") == 1 and "; stopped" in captured.err
+    assert cli.main(["job", "clean", "1"]) == 0
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["cleaned"] is True
+    assert captured.err.endswith("; cleaned\n")
+
+
+def test_exit_codes_are_the_documented_table() -> None:
+    assert (
+        cli.EXIT_OK,
+        cli.EXIT_REFUSED,
+        cli.EXIT_USAGE,
+        cli.EXIT_SUBSTRATE,
+        cli.EXIT_JOB_NOT_SUCCEEDED,
+    ) == (0, 1, 2, 3, 4)
+    with pytest.raises(SystemExit) as usage:
+        cli.main(["job", "get"])
+    assert usage.value.code == cli.EXIT_USAGE
 
 
 def test_errors_are_one_line_on_stderr_and_a_nonzero_status(
@@ -175,3 +227,65 @@ def test_default_state_dir_moves_the_previous_directory_once(
     assert default_state_dir() == tmp_path / "agentctl"
     assert previous.is_dir()
     assert capsys.readouterr().err == ""
+
+
+def _manifest(config: Config, run_id: str) -> None:
+    from agentctl import batch
+
+    batch.runs_dir(config).mkdir(parents=True, exist_ok=True)
+    batch.manifest_path(config, run_id).write_text(
+        json.dumps(
+            {
+                "run_id": run_id,
+                "project": "fixture",
+                "base_commit": "a" * 40,
+                "created_at": "2026-09-03T08:00:00+00:00",
+                "harness": "external",
+                "workers": [
+                    {
+                        "id": "w1",
+                        "beads": ["fixture-1"],
+                        "branch": f"batch/{run_id}/w1",
+                        "worktree": "/nowhere",
+                        "task_id": None,
+                    }
+                ],
+                "landing": {"task_id": None, "candidate_sha": "b" * 40},
+                "acceptance": None,
+                "prepared": True,
+            }
+        )
+    )
+
+
+def test_batch_reads_accept_the_run_suffix_and_shorten_ids_unless_full(
+    fake_pueue: FakePueue, cli_config: Config, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _manifest(cli_config, "fixture-20260903-080000-0123abcd")
+    assert cli.main(["batch", "status", "0123abcd"]) == 0
+    text = capsys.readouterr().out
+    assert text.startswith("run 0123abcd fixture external base aaaaaaaa stage")
+    assert "started 2026" not in text and "candidate bbbbbbbb" in text
+    assert cli.main(["batch", "status", "0123abcd", "--full"]) == 0
+    text = capsys.readouterr().out
+    assert "run fixture-20260903-080000-0123abcd" in text and "b" * 40 in text
+    assert cli.main(["batch", "list", "fixture"]) == 0
+    listed = capsys.readouterr().out
+    assert listed.splitlines()[0].split() == [
+        "run",
+        "harness",
+        "stage",
+        "started",
+        "age",
+        "workers",
+        "candidate",
+    ]
+    assert "0123abcd" in listed and "fixture-20260903" not in listed
+    assert cli.main(["batch", "list", "fixture", "--json"]) == 0
+    assert (
+        json.loads(capsys.readouterr().out)[0]["run_id"]
+        == "fixture-20260903-080000-0123abcd"
+    )
+    _manifest(cli_config, "fixture-20260903-090000-0123abcd")
+    assert cli.main(["batch", "status", "0123abcd"]) == cli.EXIT_REFUSED
+    assert "names 2 runs" in capsys.readouterr().err

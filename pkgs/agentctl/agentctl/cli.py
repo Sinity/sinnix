@@ -1,9 +1,28 @@
 """agentctl: an in-process CLI over pueue, worktrunk, gh and bd.
 
 Every verb runs to completion in this process, does what it was told, and
-reports. Reads print tables in local time; `--json` prints the document.
-Exit status: 0 done, 2 refused (usage, validation, policy), 3 a tool agentctl
-drives failed (pueue, wt, gh, git, bd), 4 the waited job did not succeed.
+reports.
+
+Output: a read verb (``project``, ``job list|get|logs|result|wait``,
+``batch status|list``, ``view``, ``events tail``) prints a table in local
+time with an age column, or the document with ``--json``. A write verb
+(``job start|fire|cancel|retry|clean``, ``batch start|land|result|resume``,
+``schedule apply``, ``backpressure tick``) prints the document as JSON on
+stdout and one summary line on stderr. Tables show a run's 8-character
+suffix and 8 characters of a commit; ``--full`` prints them whole, and every
+verb that takes a run accepts either form.
+
+The project is ``--project``, a leading positional that names a configured
+project or a checkout path, or else the checkout enclosing the working
+directory.
+
+Exit status, the one table for the package:
+
+  0  done
+  1  refused (validation, policy, a missing object) or the action failed
+  2  usage
+  3  a tool agentctl drives failed (pueue, wt, gh, git, bd, systemd)
+  4  the waited job (``job wait``, ``job start --wait``) did not succeed
 """
 
 from __future__ import annotations
@@ -23,13 +42,13 @@ from .github import GithubError
 from .launch import JobError
 from .operator_view import age, local_clock, table
 from .packets import PacketError
-from .projects import ProjectConfigError, ProjectEnvironmentError
+from .projects import ProjectAdapter, ProjectConfigError, ProjectEnvironmentError
 from .pueue import PueueError
 from .schedule import TimerError
 from .worktrunk import WorktrunkError
 
 EXIT_OK = 0
-EXIT_REFUSED = 2
+EXIT_REFUSED = 1
 EXIT_USAGE = 2
 EXIT_SUBSTRATE = 3
 EXIT_JOB_NOT_SUCCEEDED = 4
@@ -37,6 +56,7 @@ EXIT_JOB_NOT_SUCCEEDED = 4
 DEFAULT_WAIT_SECONDS = 3_600
 DEFAULT_EVENT_LINES = 40
 FOLLOW_POLL_SECONDS = 1.0
+SHORT_SHA = 8
 
 _REFUSALS = (
     BatchRefusal,
@@ -49,11 +69,33 @@ _REFUSALS = (
 )
 _SUBSTRATE_ERRORS = (BatchError, GithubError, PueueError, TimerError, WorktrunkError)
 
+PROJECT_HELP = "project id or checkout path (default: the checkout enclosing the working directory)"
+
 
 def _agent_arguments(target: argparse.ArgumentParser) -> None:
     target.add_argument("--backend")
     target.add_argument("--model")
     target.add_argument("--effort")
+
+
+def _output_arguments(target: argparse.ArgumentParser) -> None:
+    """``--json`` and ``--full`` after the verb; the root flags set the defaults."""
+    target.add_argument(
+        "--json",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="print the document instead of a table",
+    )
+    target.add_argument(
+        "--full",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="print complete run ids and commits",
+    )
+
+
+def _project_option(target: argparse.ArgumentParser) -> None:
+    target.add_argument("--project", help=PROJECT_HELP)
 
 
 def parser() -> argparse.ArgumentParser:
@@ -67,23 +109,31 @@ def parser() -> argparse.ArgumentParser:
     root.add_argument(
         "--json", action="store_true", help="print the document instead of a table"
     )
-    verbs = root.add_subparsers(dest="verb", required=True)
-    project_help = (
-        "project id or path (default: the checkout enclosing the working directory)"
+    root.add_argument(
+        "--full", action="store_true", help="print complete run ids and commits"
     )
+    verbs = root.add_subparsers(dest="verb", required=True)
 
     project = verbs.add_parser("project", help="the configured project descriptors")
     project_verbs = project.add_subparsers(dest="project_verb", required=True)
-    project_verbs.add_parser("list")
+    _output_arguments(project_verbs.add_parser("list"))
     for name in ("get", "operations"):
         one = project_verbs.add_parser(name)
-        one.add_argument("project", nargs="?", help=project_help)
+        one.add_argument("selector", nargs="?", metavar="project", help=PROJECT_HELP)
+        _project_option(one)
+        _output_arguments(one)
 
     job = verbs.add_parser("job", help="declared operations as pueue tasks")
     job_verbs = job.add_subparsers(dest="job_verb", required=True)
     start = job_verbs.add_parser("start")
-    start.add_argument("project", help="project id or path")
-    start.add_argument("operation")
+    start.add_argument(
+        "target",
+        nargs="+",
+        metavar="[project] operation [-- args]",
+        help="the operation, optionally preceded by its project; "
+        "arguments after -- are appended to the declared exec",
+    )
+    _project_option(start)
     start.add_argument(
         "--workspace",
         type=Path,
@@ -91,38 +141,45 @@ def parser() -> argparse.ArgumentParser:
     )
     start.add_argument("--wait", action="store_true")
     start.add_argument("--timeout-seconds", type=int, default=DEFAULT_WAIT_SECONDS)
-    start.add_argument(
-        "extra", nargs="*", help="arguments appended to the declared exec (after --)"
-    )
+    _output_arguments(start)
     fire = job_verbs.add_parser(
         "fire", help="a timer's launch: skipped while the operation is active"
     )
-    fire.add_argument("project")
-    fire.add_argument("operation")
+    fire.add_argument("target", nargs="+", metavar="[project] operation")
+    _project_option(fire)
+    _output_arguments(fire)
     listing = job_verbs.add_parser("list")
     listing.add_argument("--project", help="filter by project id")
     listing.add_argument("--active", action="store_true")
+    _output_arguments(listing)
     for name in ("get", "logs", "result", "cancel", "retry"):
         one = job_verbs.add_parser(name)
         one.add_argument("job_id", type=int)
+        _output_arguments(one)
     clean = job_verbs.add_parser(
         "clean", help="delete a terminal task and its artifacts (never by age)"
     )
     clean.add_argument("job_id", type=int, nargs="?")
     clean.add_argument("--all-terminal", action="store_true")
+    _output_arguments(clean)
     wait = job_verbs.add_parser("wait")
     wait.add_argument("job_id", type=int)
     wait.add_argument("--timeout-seconds", type=int, default=DEFAULT_WAIT_SECONDS)
+    _output_arguments(wait)
 
     batch_verb = verbs.add_parser(
         "batch", help="several workers on one base commit, landed as one candidate"
     )
     batch_verbs = batch_verb.add_subparsers(dest="batch_verb", required=True)
     batch_start = batch_verbs.add_parser("start")
-    batch_start.add_argument("project")
     batch_start.add_argument(
-        "bead", nargs="*", help="seed beads; each one's dispatch group is a worker"
+        "target",
+        nargs="*",
+        metavar="[project] bead",
+        help="seed beads, optionally preceded by the project; "
+        "each bead's dispatch group is a worker",
     )
+    _project_option(batch_start)
     batch_start.add_argument(
         "--worker",
         action="append",
@@ -138,28 +195,36 @@ def parser() -> argparse.ArgumentParser:
         help="queued: agentctl runs the workers; external: another harness does",
     )
     _agent_arguments(batch_start)
+    _output_arguments(batch_start)
     for name in ("land", "status"):
         one = batch_verbs.add_parser(name)
-        one.add_argument("run_id")
-        one.add_argument("--project", help=project_help)
+        one.add_argument("run_id", help="a run id or its 8-character suffix")
+        _project_option(one)
+        _output_arguments(one)
     batch_list = batch_verbs.add_parser("list")
-    batch_list.add_argument("project", nargs="?", help=project_help)
+    batch_list.add_argument("selector", nargs="?", metavar="project", help=PROJECT_HELP)
+    _project_option(batch_list)
+    _output_arguments(batch_list)
     batch_result = batch_verbs.add_parser(
         "result", help="file a worker's schema-validated result"
     )
-    batch_result.add_argument("run_id")
+    batch_result.add_argument("run_id", help="a run id or its 8-character suffix")
     batch_result.add_argument("worker_id")
     batch_result.add_argument("path", type=Path)
+    _output_arguments(batch_result)
     batch_resume = batch_verbs.add_parser(
         "resume", help="queue a fresh agent into a worker's worktree"
     )
-    batch_resume.add_argument("run_id")
+    batch_resume.add_argument("run_id", help="a run id or its 8-character suffix")
     batch_resume.add_argument("--worker", required=True, dest="worker_id")
-    batch_resume.add_argument("--project", help=project_help)
+    _project_option(batch_resume)
     _agent_arguments(batch_resume)
+    _output_arguments(batch_resume)
 
     view = verbs.add_parser("view", help="the operator screen")
-    view.add_argument("project", nargs="?", help=project_help)
+    view.add_argument("selector", nargs="?", metavar="project", help=PROJECT_HELP)
+    _project_option(view)
+    _output_arguments(view)
 
     events = verbs.add_parser(
         "events", help="the event spool: started and finished tasks, backpressure"
@@ -169,30 +234,53 @@ def parser() -> argparse.ArgumentParser:
     tail.add_argument("--lines", type=int, default=DEFAULT_EVENT_LINES)
     tail.add_argument("--follow", action="store_true")
     tail.add_argument("--project", help="filter by project id")
+    _output_arguments(tail)
 
     timers = verbs.add_parser("schedule", help="calendar timers for declared schedules")
     timers_verbs = timers.add_subparsers(dest="schedule_verb", required=True)
-    timers_verbs.add_parser("apply")
+    _output_arguments(timers_verbs.add_parser("apply"))
 
     pressure = verbs.add_parser(
         "backpressure", help="freeze or thaw the job queue against host pressure"
     )
     pressure_verbs = pressure.add_subparsers(dest="backpressure_verb", required=True)
-    pressure_verbs.add_parser("tick")
+    _output_arguments(pressure_verbs.add_parser("tick"))
     return root
 
 
 class Output:
-    def __init__(self, as_json: bool) -> None:
+    """One place that decides what stdout and stderr carry."""
+
+    def __init__(self, *, as_json: bool, full: bool) -> None:
         self.as_json = as_json
+        self.full = full
         self.now = datetime.now(UTC)
 
-    def emit(self, document: Any, text: str | None = None) -> None:
-        """The document as JSON, or the text a person reads (JSON when none)."""
+    def read(self, document: Any, text: str | None = None) -> None:
+        """A read: the table a person reads, or the document with ``--json``."""
         if self.as_json or text is None:
             print(json.dumps(document, indent=2, sort_keys=True))
         else:
             print(text)
+
+    def write(self, document: Any, summary: str) -> None:
+        """A write: the document on stdout, one summary line on stderr."""
+        print(json.dumps(document, indent=2, sort_keys=True))
+        print(summary, file=sys.stderr)
+
+    def run(self, run_id: str) -> str:
+        return run_id if self.full else batch.short_run_id(run_id)
+
+    def sha(self, value: Any) -> str:
+        text = str(value or "")
+        if not text:
+            return "-"
+        return text if self.full else text[:SHORT_SHA]
+
+    def when(self, stamp: str | None, ended: str | None = None) -> str:
+        """Local clock and age, e.g. ``14:02 3m``."""
+        until = operator_view.parse_stamp(ended) or self.now
+        return f"{local_clock(stamp)} {age(stamp, until)}"
 
     def job_line(self, job: Mapping[str, Any]) -> str:
         started = job.get("started_at") or job.get("enqueued_at")
@@ -211,7 +299,7 @@ class Output:
         if not rows:
             return "(no jobs)"
         return table(
-            ("id", "label", "phase", "started", "elapsed", "exit", "cwd"),
+            ("id", "label", "phase", "started", "age", "exit", "cwd"),
             [
                 (
                     row["job_id"],
@@ -229,24 +317,88 @@ class Output:
             ],
         )
 
+    def run_lines(self, document: Mapping[str, Any]) -> str:
+        workers = ", ".join(
+            f"{worker['id']}[{worker.get('stage') or ('task ' + str(worker.get('task_id')) if worker.get('task_id') is not None else 'external')}]"
+            for worker in document["workers"]
+        )
+        landing = document["landing"]
+        return (
+            f"run {self.run(document['run_id'])} {document['project']} {document['harness']} "
+            f"base {self.sha(document['base_commit'])} stage {document.get('stage', '-')} "
+            f"started {self.when(document.get('created_at'))}\n"
+            f"workers: {workers}\n"
+            f"landing: task {landing.get('task_id')} candidate {self.sha(landing.get('candidate_sha'))}"
+            f"{' PR #' + str(landing['pr_number']) if landing.get('pr_number') else ''}"
+            f"{' failure ' + landing['failure']['code'] if landing.get('failure') else ''}"
+        )
+
+    def runs_table(self, rows: Sequence[Mapping[str, Any]]) -> str:
+        if not rows:
+            return "(no runs)"
+        return table(
+            ("run", "harness", "stage", "started", "age", "workers", "candidate"),
+            [
+                (
+                    self.run(row["run_id"]),
+                    row["harness"],
+                    row["stage"],
+                    local_clock(row.get("created_at")),
+                    age(row.get("created_at"), self.now),
+                    " ".join(f"{w['id']}:{w['stage']}" for w in row["workers"]),
+                    self.sha(row["landing"].get("candidate_sha")),
+                )
+                for row in rows
+            ],
+        )
+
+
+def _is_project(config: Config, token: str) -> bool:
+    """A configured project id, or a directory holding a descriptor."""
+    if token in {row["id"] for row in config.catalog().list()}:
+        return True
+    return (Path(token).expanduser() / ".agentctl" / "project.toml").is_file()
+
+
+def _split_target(
+    config: Config, explicit: str | None, target: Sequence[str]
+) -> tuple[ProjectAdapter, list[str]]:
+    """The project and the remaining positionals.
+
+    ``--project`` wins; else a leading positional that names a project is the
+    project; else the checkout enclosing the working directory.
+    """
+    rest = list(target)
+    if explicit is None and rest and _is_project(config, rest[0]):
+        explicit = rest.pop(0)
+    return resolve_project(config, explicit), rest
+
+
+def _select_project(
+    config: Config, explicit: str | None, selector: str | None
+) -> ProjectAdapter:
+    return resolve_project(config, explicit or selector)
+
 
 def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
     verb = arguments.job_verb
     if verb == "start":
-        project = resolve_project(config, arguments.project)
-        operation = project.operation(arguments.operation)
+        project, rest = _split_target(config, arguments.project, arguments.target)
+        if not rest:
+            raise JobError("job start needs an operation")
+        operation = project.operation(rest[0])
         started = launch.start_operation(
             config,
             project,
             operation,
             workspace=arguments.workspace,
-            extra_argv=tuple(arguments.extra),
+            extra_argv=tuple(rest[1:]),
         )
         if arguments.wait:
             started = launch.wait(
                 started["job_id"], timeout_seconds=arguments.timeout_seconds
             )
-        out.emit(started, out.job_line(started))
+        out.write(started, out.job_line(started))
         if started.get("terminal"):
             return (
                 EXIT_OK
@@ -255,24 +407,26 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
             )
         return EXIT_OK
     if verb == "fire":
-        project = resolve_project(config, arguments.project)
-        fired = launch.fire(config, project, project.operation(arguments.operation))
+        project, rest = _split_target(config, arguments.project, arguments.target)
+        if len(rest) != 1:
+            raise JobError("job fire needs exactly one operation")
+        fired = launch.fire(config, project, project.operation(rest[0]))
         text = (
             out.job_line(fired)
             if fired.get("fired")
             else f"{fired['label']} not fired: task(s) {fired['active']} still active"
         )
-        out.emit(fired, text)
+        out.write(fired, text)
         return EXIT_OK
     if verb == "list":
         rows = launch.list_jobs(arguments.project)
         if arguments.active:
             rows = [row for row in rows if not row["terminal"]]
-        out.emit(rows, out.jobs_table(rows))
+        out.read(rows, out.jobs_table(rows))
         return EXIT_OK
     if verb == "get":
         job = launch.get_job(arguments.job_id, config)
-        out.emit(job, out.job_line(job))
+        out.read(job, out.job_line(job))
         return EXIT_OK
     if verb == "logs":
         sys.stdout.write(launch.logs(config, arguments.job_id))
@@ -289,31 +443,31 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
                 else json.dumps(value, indent=2, sort_keys=True)
             )
         )
-        out.emit(result, text)
+        out.read(result, text)
         return EXIT_OK
     if verb == "cancel":
         job = launch.cancel(config, arguments.job_id)
-        out.emit(job, f"{out.job_line(job)}; {job['state']}")
+        out.write(job, f"{out.job_line(job)}; {job['state']}")
         return EXIT_REFUSED if job["state"] == "failed" else EXIT_OK
     if verb == "clean":
         if arguments.all_terminal:
             rows = launch.clean_terminal(config)
-            out.emit(rows, "\n".join(out.job_line(row) for row in rows))
+            out.write(rows, f"cleaned {len(rows)} terminal task(s)")
             return EXIT_OK
         if arguments.job_id is None:
             raise JobError("job clean needs a job id or --all-terminal")
         job = launch.clean(config, arguments.job_id)
-        out.emit(job, out.job_line(job))
+        out.write(job, f"{out.job_line(job)}; cleaned")
         return EXIT_OK
     if verb == "retry":
         job = launch.retry(arguments.job_id)
-        out.emit(job, out.job_line(job))
+        out.write(job, out.job_line(job))
         return EXIT_OK
     if verb == "wait":
         waited = launch.wait(
             arguments.job_id, timeout_seconds=arguments.timeout_seconds
         )
-        out.emit(
+        out.read(
             waited,
             out.job_line(waited)
             + (" (wait timed out)" if waited.get("wait_timed_out") else ""),
@@ -322,26 +476,10 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
     raise AssertionError(verb)
 
 
-def _run_line(document: Mapping[str, Any]) -> str:
-    workers = ", ".join(
-        f"{worker['id']}[{worker.get('stage') or ('task ' + str(worker.get('task_id')) if worker.get('task_id') is not None else 'external')}]"
-        for worker in document["workers"]
-    )
-    landing = document["landing"]
-    return (
-        f"run {document['run_id']} {document['project']} {document['harness']} "
-        f"base {document['base_commit'][:12]} stage {document.get('stage', '-')}\n"
-        f"workers: {workers}\n"
-        f"landing: task {landing.get('task_id')} candidate {str(landing.get('candidate_sha') or '-')[:12]}"
-        f"{' PR #' + str(landing['pr_number']) if landing.get('pr_number') else ''}"
-        f"{' failure ' + landing['failure']['code'] if landing.get('failure') else ''}"
-    )
-
-
 def _batch(arguments: argparse.Namespace, config: Config, out: Output) -> int:
     verb = arguments.batch_verb
     if verb == "start":
-        project = resolve_project(config, arguments.project)
+        project, beads = _split_target(config, arguments.project, arguments.target)
         workers = [
             [item.strip() for item in group.split(",") if item.strip()]
             for group in arguments.worker
@@ -349,7 +487,7 @@ def _batch(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         started = batch.start(
             config,
             project,
-            arguments.bead,
+            beads,
             workers=workers or None,
             harness=arguments.harness,
             backend=arguments.backend,
@@ -363,18 +501,19 @@ def _batch(arguments: argparse.Namespace, config: Config, out: Output) -> int:
             if started.get("resumed")
             else "started"
         )
-        out.emit(started, f"{_run_line(started)}\n{note}")
+        out.write(started, f"{out.run_lines(started)}\n{note}")
         return EXIT_OK
     if verb == "land":
+        run_id = batch.resolve_run_id(config, arguments.run_id)
         project = resolve_project(
-            config, arguments.project or _run_project(config, arguments.run_id)
+            config, arguments.project or batch.load(config, run_id).project
         )
-        landed = batch.land(config, project, arguments.run_id)
+        landed = batch.land(config, project, run_id)
         acceptance = landed["acceptance"] or {}
         members = acceptance.get("members", {})
-        out.emit(
+        out.write(
             landed,
-            f"{_run_line(landed)}\nlanded {acceptance.get('candidate_sha', '')[:12]}: "
+            f"{out.run_lines(landed)}\nlanded {out.sha(acceptance.get('candidate_sha'))}: "
             + ", ".join(
                 f"{bead} {state['state']}" for bead, state in sorted(members.items())
             )
@@ -386,44 +525,27 @@ def _batch(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         )
         return EXIT_OK
     if verb == "status":
+        run_id = batch.resolve_run_id(config, arguments.run_id)
         project = resolve_project(
-            config, arguments.project or _run_project(config, arguments.run_id)
+            config, arguments.project or batch.load(config, run_id).project
         )
-        document = batch.status(config, arguments.run_id, project=project)
-        out.emit(document, _run_line(document))
+        document = batch.status(config, run_id, project=project)
+        out.read(document, out.run_lines(document))
         return EXIT_OK
     if verb == "list":
-        project = resolve_project(config, arguments.project)
+        project = _select_project(config, arguments.project, arguments.selector)
         rows = [
             batch.status(config, run.run_id)
             for run in batch.list_runs(config, project.project_id)
         ]
-        out.emit(
-            rows,
-            table(
-                ("run", "harness", "stage", "workers", "candidate"),
-                [
-                    (
-                        row["run_id"],
-                        row["harness"],
-                        row["stage"],
-                        " ".join(f"{w['id']}:{w['stage']}" for w in row["workers"]),
-                        str(row["landing"].get("candidate_sha") or "-")[:12],
-                    )
-                    for row in rows
-                ],
-            )
-            if rows
-            else "(no runs)",
-        )
+        out.read(rows, out.runs_table(rows))
         return EXIT_OK
     if verb == "result":
-        filed = batch.result(
-            config, arguments.run_id, arguments.worker_id, arguments.path
-        )
-        out.emit(
+        run_id = batch.resolve_run_id(config, arguments.run_id)
+        filed = batch.result(config, run_id, arguments.worker_id, arguments.path)
+        out.write(
             filed,
-            f"recorded result for {arguments.worker_id} in {arguments.run_id}"
+            f"recorded result for {arguments.worker_id} in {out.run(run_id)}"
             + (
                 " and released the landing task"
                 if filed.get("landing_released")
@@ -432,27 +554,24 @@ def _batch(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         )
         return EXIT_OK
     if verb == "resume":
+        run_id = batch.resolve_run_id(config, arguments.run_id)
         project = resolve_project(
-            config, arguments.project or _run_project(config, arguments.run_id)
+            config, arguments.project or batch.load(config, run_id).project
         )
         resumed = batch.resume(
             config,
             project,
-            arguments.run_id,
+            run_id,
             arguments.worker_id,
             backend=arguments.backend,
             model=arguments.model,
             effort=arguments.effort,
         )
-        out.emit(
+        out.write(
             resumed, f"resumed {arguments.worker_id}: {out.job_line(resumed['job'])}"
         )
         return EXIT_OK
     raise AssertionError(verb)
-
-
-def _run_project(config: Config, run_id: str) -> str:
-    return batch.load(config, run_id).project
 
 
 def _event_line(event: Mapping[str, Any]) -> str:
@@ -520,90 +639,82 @@ def _events(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         return EXIT_OK
 
 
+def _project(arguments: argparse.Namespace, config: Config, out: Output) -> int:
+    if arguments.project_verb == "list":
+        catalog = config.catalog()
+        document = {
+            "projects": catalog.list(),
+            "unavailable": [
+                {"root": root, "reason": reason}
+                for root, reason in sorted(catalog.unavailable.items())
+            ],
+        }
+        lines = [f"{row['id']:14} {row['root']}" for row in document["projects"]]
+        lines.extend(
+            f"{'(out of service)':14} {row['root']}: {row['reason']}"
+            for row in document["unavailable"]
+        )
+        out.read(document, "\n".join(lines) or "(no projects configured)")
+        return EXIT_OK
+    project = _select_project(config, arguments.project, arguments.selector)
+    if arguments.project_verb == "get":
+        out.read(project.catalog_row())
+        return EXIT_OK
+    rows = [operation.catalog_row() for operation in project.operations]
+    out.read(
+        rows,
+        table(
+            ("operation", "pool", "result", "timeout", "schedule", "description"),
+            [
+                (
+                    row["name"],
+                    row["pool"],
+                    row["result"],
+                    f"{row['timeout_seconds']}s",
+                    row["schedule"] or "-",
+                    row["description"],
+                )
+                for row in rows
+            ],
+        ),
+    )
+    return EXIT_OK
+
+
 def _dispatch(arguments: argparse.Namespace, config: Config, out: Output) -> int:
     verb = arguments.verb
     if verb == "project":
-        if arguments.project_verb == "list":
-            catalog = config.catalog()
-            document = {
-                "projects": catalog.list(),
-                "unavailable": [
-                    {"root": root, "reason": reason}
-                    for root, reason in sorted(catalog.unavailable.items())
-                ],
-            }
-            lines = [f"{row['id']:14} {row['root']}" for row in document["projects"]]
-            lines.extend(
-                f"{'(out of service)':14} {row['root']}: {row['reason']}"
-                for row in document["unavailable"]
-            )
-            out.emit(document, "\n".join(lines) or "(no projects configured)")
-            return EXIT_OK
-        project = resolve_project(config, arguments.project)
-        if arguments.project_verb == "get":
-            out.emit(project.catalog_row())
-        else:
-            rows = [operation.catalog_row() for operation in project.operations]
-            out.emit(
-                rows,
-                table(
-                    (
-                        "operation",
-                        "pool",
-                        "result",
-                        "timeout",
-                        "schedule",
-                        "description",
-                    ),
-                    [
-                        (
-                            row["name"],
-                            row["pool"],
-                            row["result"],
-                            f"{row['timeout_seconds']}s",
-                            row["schedule"] or "-",
-                            row["description"],
-                        )
-                        for row in rows
-                    ],
-                ),
-            )
-        return EXIT_OK
+        return _project(arguments, config, out)
     if verb == "job":
         return _job(arguments, config, out)
     if verb == "batch":
         return _batch(arguments, config, out)
     if verb == "view":
-        project = resolve_project(config, arguments.project)
+        project = _select_project(config, arguments.project, arguments.selector)
         snapshot = operator_view.collect(config, project, now=out.now)
-        out.emit(snapshot.to_dict(), operator_view.render(snapshot))
+        out.read(snapshot.to_dict(), operator_view.render(snapshot))
         return EXIT_OK
     if verb == "events":
         return _events(arguments, config, out)
     if verb == "schedule":
         applied = schedule.apply(config)
-        lines = [
-            f"{row['unit']}.timer {row['project']}:{row['operation']} {row['schedule']}"
-            for row in applied["timers"]
-        ]
-        lines.append(
-            f"started {len(applied['started'])}, stopped {len(applied['stopped'])}"
+        out.write(
+            applied,
+            f"{len(applied['timers'])} timer(s): started {len(applied['started'])}, "
+            f"stopped {len(applied['stopped'])}, "
+            f"{len(applied['unavailable'])} project(s) out of service",
         )
-        lines.extend(
-            f"(out of service) {row['root']}: {row['reason']}"
-            for row in applied["unavailable"]
-        )
-        out.emit(applied, "\n".join(lines))
         return EXIT_OK
     if verb == "backpressure":
-        out.emit(backpressure.tick(spool=config.event_spool))
+        decision = backpressure.tick(spool=config.event_spool)
+        out.write(decision, f"backpressure {decision.get('action')}")
         return EXIT_OK
     raise AssertionError(verb)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = parser().parse_args(argv)
-    out = Output(arguments.json)
+    out = Output(as_json=arguments.json, full=arguments.full)
     try:
         config = load_config(arguments.config)
         return _dispatch(arguments, config, out)

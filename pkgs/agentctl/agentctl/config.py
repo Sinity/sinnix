@@ -65,14 +65,14 @@ def default_state_dir() -> Path:
     return state_dir
 
 
-def _default() -> Config:
+def _default(state_dir: Path | None = None) -> Config:
     return Config(
         project_roots=(),
         agent_runner=Path(
             "/realm/project/sinnix/dots/_ai/skills/agent-runtime/scripts/run_agent_prompt.sh"
         ),
         event_spool=Path("/realm/state/agentctl/events.jsonl"),
-        state_dir=default_state_dir(),
+        state_dir=state_dir or default_state_dir(),
         agentctl_executable="/run/current-system/sw/bin/agentctl",
     )
 
@@ -94,16 +94,23 @@ def _path(value: Any, field: str, fallback: Path) -> Path:
 
 
 def load_config(path: Path | None = None) -> Config:
-    config = _default()
+    """The file's settings over the defaults; the state directory is only
+    resolved (and moved) when the file does not name one."""
     location = path or Path(os.environ.get("AGENTCTL_CONFIG") or DEFAULT_CONFIG_PATH)
     try:
         raw = json.loads(location.read_text())
     except FileNotFoundError:
-        return config
+        return _default()
     except (OSError, json.JSONDecodeError) as error:
         raise ConfigError(f"could not read {location}: {error}") from error
     if not isinstance(raw, Mapping):
         raise ConfigError(f"{location} must contain an object")
+    state_dir = raw.get("state_dir")
+    if state_dir is not None and (
+        not isinstance(state_dir, str) or not state_dir.startswith("/")
+    ):
+        raise ConfigError("state_dir must be an absolute path")
+    config = _default(Path(state_dir) if state_dir else None)
     return replace(
         config,
         project_roots=_paths(raw.get("project_roots", []), "project_roots"),
@@ -111,7 +118,6 @@ def load_config(path: Path | None = None) -> Config:
             raw.get("agent_runner"), "agent_runner", config.agent_runner
         ),
         event_spool=_path(raw.get("event_spool"), "event_spool", config.event_spool),
-        state_dir=_path(raw.get("state_dir"), "state_dir", config.state_dir),
         agentctl_executable=str(raw.get("agentctl") or config.agentctl_executable),
     )
 

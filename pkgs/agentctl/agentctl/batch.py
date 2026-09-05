@@ -41,6 +41,8 @@ from .pueue import PueueError
 from .worktrunk import WorktrunkError
 
 AGENT_GROUP = "agent"
+# Hex characters in a run id's random suffix; tables show the suffix alone.
+SHORT_RUN_ID = 8
 HARNESSES = ("queued", "external")
 REVIEW_PROFILE = "review"
 GIT_TIMEOUT_SECONDS = 60
@@ -562,7 +564,28 @@ def _base_commit(project: ProjectAdapter) -> str:
 
 def _new_run_id(project_id: str, leaders: Sequence[str]) -> str:
     stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
-    return f"{project_id}-{stamp}-{uuid.uuid4().hex[:6]}"
+    return f"{project_id}-{stamp}-{uuid.uuid4().hex[:SHORT_RUN_ID]}"
+
+
+def short_run_id(run_id: str) -> str:
+    """The run's random suffix, which every verb accepts in place of the id."""
+    return run_id.rsplit("-", 1)[-1]
+
+
+def resolve_run_id(config: Config, token: str) -> str:
+    """A full run id, or the one run whose suffix is ``token``."""
+    if manifest_path(config, token).is_file():
+        return token
+    matches = [
+        run.run_id for run in list_runs(config) if short_run_id(run.run_id) == token
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    if matches:
+        raise BatchRefusal(
+            "ambiguous_run", f"{token} names {len(matches)} runs: {', '.join(matches)}"
+        )
+    raise BatchRefusal("unknown_run", f"no run {token} under {runs_dir(config)}")
 
 
 def _set_worker(config: Config, run_id: str, index: int, **fields: Any) -> Run:
