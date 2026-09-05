@@ -98,6 +98,14 @@
           suiteDir = ../../pkgs/sinnix-census/tests;
           scripts = [ "sinnix-census" ];
         };
+        # Provably fails when: either direction of the /realm taxonomy
+        # assertion is dropped, or a retired level-1 name is readmitted to the
+        # manifest. Verified by all three mutations.
+        lake-lint-suite = mkScriptSuite {
+          name = "lake-lint";
+          suiteDir = ../../pkgs/lake-lint/tests;
+          scripts = [ "lake-lint" ];
+        };
         speaker-verify-suite = mkScriptSuite {
           name = "sinnix-speaker-verify";
           suiteDir = ../../pkgs/sinnix-speaker-verify/tests;
