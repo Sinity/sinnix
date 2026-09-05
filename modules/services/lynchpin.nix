@@ -71,113 +71,127 @@ mkServiceModule {
       localHotDirArgs = lib.concatMapStringsSep " " (
         dir: lib.escapeShellArg "${localRoot}/${dir}"
       ) localHotDirs;
-    in
-    {
-      environment.systemPackages = [
-        scriptPkgs.lynchpin-cli
-        scriptPkgs.lynchpin-python
-      ];
 
-      environment.variables = {
-        LYNCHPIN_MCP_PROVIDED = "1";
-      };
-
-      systemd.services.lynchpin-local-attrs = {
-        description = "Prepare Lynchpin local cache directories";
-        wantedBy = [ "multi-user.target" ];
-        path = [
-          pkgs.coreutils
-          pkgs.e2fsprogs
-        ];
-        serviceConfig = {
-          Type = "oneshot";
-          RemainAfterExit = true;
-        };
-        script = ''
-          install -d -m 0775 -o sinity -g users ${lib.escapeShellArg localRoot}
-          install -d -m 0775 -o sinity -g users ${lib.escapeShellArg machineTelemetryLakeRoot}
-          for dir in ${localHotDirArgs}; do
-            install -d -m 0775 -o sinity -g users "$dir"
-            chattr +C "$dir" || true
-          done
-        '';
-      };
-
-      # Optional: run the daily convergence operation to completion.
-      systemd.services.lynchpin-materialize = lib.mkIf cfg.materializationTimer.enable {
-        description = "Materialize and publish Lynchpin substrate";
-        onFailure = [ "sinnix-unit-failure-notify@%n.service" ];
-        requires = [ "lynchpin-local-attrs.service" ];
-        after = [ "lynchpin-local-attrs.service" ];
-        serviceConfig = {
-          Type = "oneshot";
-          ExecStart = "${scriptPkgs.agentctl}/bin/agentctl job start lynchpin converge --wait";
-          User = "sinity";
-          Group = "users";
-          TimeoutStartSec = "4h";
-        };
-      };
-
-      systemd.services.lynchpin-keylog-materialize = lib.mkIf cfg.materializationTimer.enable {
-        description = "Refresh Lynchpin keylog analysis";
-        onFailure = [ "sinnix-unit-failure-notify@%n.service" ];
-        requires = [ "lynchpin-local-attrs.service" ];
-        after = [ "lynchpin-local-attrs.service" ];
-        serviceConfig = {
-          Type = "oneshot";
-          ExecStart = "${scriptPkgs.agentctl}/bin/agentctl job start lynchpin refresh_keylog --wait";
-          User = "sinity";
-          Group = "users";
-          TimeoutStartSec = "10min";
-        };
-      };
-
-      # The webhistory lane belongs here, to the unit that actually fills it.
-      # It used to be declared in capture-registry.nix against a
-      # `sinnix-capture-webhistory` unit that does not exist, which is how a
-      # lane could carry a 48h staleness budget with nothing on any schedule
-      # able to keep it -- see sinnix-ksws. Registering the surface also puts
-      # this daily job in front of the health sweep, which it was not.
-      sinnix.runtime.surfaces.lynchpin-materialize = lib.mkIf cfg.materializationTimer.enable {
-        unit = "lynchpin-materialize.service";
-        resourceClass = "system";
-        observe.enable = true;
-        workload = {
-          class = "sacrificial";
+      # Both units queue one bounded lynchpin operation and differ only in
+      # operation name, deadline, cadence, and what they keep fresh. One table
+      # so a unit cannot be scheduled without the surface that gives it failure
+      # notification, resource placement, and a place in the health sweep.
+      materializeJobs = {
+        lynchpin-materialize = {
+          description = "Materialize and publish Lynchpin substrate";
+          operation = "converge";
+          timeoutStartSec = "4h";
           rationale = "Bounded daily source convergence and complete substrate publication.";
+          # The webhistory lane belongs to the unit that actually fills it. It
+          # used to be declared in capture-registry.nix against a
+          # `sinnix-capture-webhistory` unit that does not exist, which is how a
+          # lane could carry a 48h staleness budget with nothing on any schedule
+          # able to keep it -- see sinnix-ksws.
+          captures = [
+            {
+              name = "webhistory";
+              path = "${config.sinnix.paths.activityRoot}/webhistory";
+              eventDriven = true;
+              # Two days against a daily timer: one missed run is tolerable,
+              # two is worth surfacing. The hard deadline is far longer --
+              # Chrome drops visits after ~90 days -- so this is an early
+              # warning, not the edge of data loss.
+              staleAfterSeconds = 172800;
+            }
+          ];
+          timer = {
+            description = "Daily lynchpin analysis materialization";
+            inherit (cfg.materializationTimer) onCalendar;
+            randomizedDelaySec = toString cfg.materializationTimer.randomizedDelaySec;
+            persistent = true;
+          };
         };
-        captures = [
-          {
-            name = "webhistory";
-            path = "${config.sinnix.paths.activityRoot}/webhistory";
-            eventDriven = true;
-            # Two days against a daily timer: one missed run is tolerable,
-            # two is worth surfacing. The hard deadline is far longer --
-            # Chrome drops visits after ~90 days -- so this is an early
-            # warning, not the edge of data loss.
-            staleAfterSeconds = 172800;
-          }
+        lynchpin-keylog-materialize = {
+          description = "Refresh Lynchpin keylog analysis";
+          operation = "refresh_keylog";
+          timeoutStartSec = "10min";
+          rationale = "Quarter-hourly keylog analysis refresh over already-captured input.";
+          timer = {
+            description = "Quarter-hour Lynchpin keylog analysis refresh";
+            onCalendar = "*-*-* *:00/15:00";
+            randomizedDelaySec = "60s";
+            persistent = true;
+          };
+        };
+      };
+    in
+    lib.mkMerge [
+      {
+        environment.systemPackages = [
+          scriptPkgs.lynchpin-cli
+          scriptPkgs.lynchpin-python
         ];
-      };
 
-      systemd.timers.lynchpin-materialize = lib.mkIf cfg.materializationTimer.enable {
-        description = "Daily lynchpin analysis materialization";
-        wantedBy = [ "timers.target" ];
-        timerConfig = {
-          OnCalendar = cfg.materializationTimer.onCalendar;
-          RandomizedDelaySec = toString cfg.materializationTimer.randomizedDelaySec;
-          Persistent = true;
+        environment.variables = {
+          LYNCHPIN_MCP_PROVIDED = "1";
         };
-      };
 
-      systemd.timers.lynchpin-keylog-materialize = lib.mkIf cfg.materializationTimer.enable {
-        description = "Quarter-hour Lynchpin keylog analysis refresh";
-        wantedBy = [ "timers.target" ];
-        timerConfig = {
-          OnCalendar = "*-*-* *:00/15:00";
-          RandomizedDelaySec = "60s";
-          Persistent = true;
+        systemd.services.lynchpin-local-attrs = {
+          description = "Prepare Lynchpin local cache directories";
+          wantedBy = [ "multi-user.target" ];
+          path = [
+            pkgs.coreutils
+            pkgs.e2fsprogs
+          ];
+          serviceConfig = {
+            Type = "oneshot";
+            RemainAfterExit = true;
+          };
+          script = ''
+            install -d -m 0775 -o sinity -g users ${lib.escapeShellArg localRoot}
+            install -d -m 0775 -o sinity -g users ${lib.escapeShellArg machineTelemetryLakeRoot}
+            for dir in ${localHotDirArgs}; do
+              install -d -m 0775 -o sinity -g users "$dir"
+              chattr +C "$dir" || true
+            done
+          '';
         };
-      };
-    };
+      }
+
+      (lib.mkIf cfg.materializationTimer.enable (
+        lib.mkMerge (
+          [
+            {
+              sinnix.runtime.surfaces = lib.mapAttrs (unitName: job: {
+                unit = "${unitName}.service";
+                resourceClass = "system";
+                observe.enable = true;
+                workload = {
+                  class = "sacrificial";
+                  inherit (job) rationale;
+                };
+                captures = job.captures or [ ];
+              }) materializeJobs;
+            }
+          ]
+          ++ lib.mapAttrsToList (
+            unitName: job:
+            lib.sinnix.mkScheduledJob
+              {
+                inherit config unitName;
+                inherit (job) description;
+                surface = config.sinnix.runtime.surfaces.${unitName};
+              }
+              {
+                execStart = "${scriptPkgs.agentctl}/bin/agentctl job start lynchpin ${job.operation} --wait";
+                user = "sinity";
+                serviceConfig = {
+                  Group = "users";
+                  TimeoutStartSec = job.timeoutStartSec;
+                };
+                unit = {
+                  requires = [ "lynchpin-local-attrs.service" ];
+                  after = [ "lynchpin-local-attrs.service" ];
+                };
+                inherit (job) timer;
+              }
+          ) materializeJobs
+        )
+      ))
+    ];
 } args
