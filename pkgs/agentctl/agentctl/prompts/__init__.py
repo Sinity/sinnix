@@ -266,8 +266,8 @@ class PromptSnapshot:
     atlas_refs: tuple[str, ...]
     worker_contract_path: str
     prompt: str
-    # Batch facts the worker needs beyond the beads: run id, worker id, base
-    # commit, result path and schema. Empty outside a batch.
+    # Batch facts the worker needs beyond the beads: run id, base commit,
+    # worktree, result path and schema, harness. Empty outside a batch.
     batch: Mapping[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:

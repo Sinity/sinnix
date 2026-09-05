@@ -164,16 +164,23 @@ project, base_commit, created_at, harness (queued|external)
 runtime_revision  the agentctl store path that started the run
 verify_profile    the descriptor's [workspace].verify.candidate
 review_profile    "review"
-workers: [{id, beads: [...], branch, worktree, task_id|null, result|null,
-           result_path, claimed}]
-landing: {task_id|null, integration_worktree, candidate_sha|null,
-          pr_number|null, verify_run, review_verdict, failure|null,
-          refreshes, refreshed_base}
+workers: [{id, beads: [...], branch, worktree, task_id|null, task_ids,
+           result|null, result_path, result_recorded_at, claimed,
+           claimed_beads, backend, model, effort}]
+landing: {task_id|null, integration_branch, integration_worktree,
+          candidate_sha|null, pr_number|null, verify_run, review_verdict,
+          failure|null, refreshes, refreshed_base}
 acceptance: {candidate_sha, verify_run, review_verdict, published,
              beads: {<bead>: {state: closed|open, evidence}},
-             recorded_at, residual: [...]} | null
+             advisory, recorded_at, residual: [...]} | null
 prepared          every claim, worktree and task exists
 ```
+
+Record-only fields, written for the audit trail and read by no verb:
+`runtime_revision`, `review_profile`, a worker's `task_ids` and
+`result_recorded_at`, and the acceptance's `verify_run`, `review_verdict`,
+`published`, `advisory` and `recorded_at`. Everything else steers a later
+`start`, `result`, `resume`, `land` or `status`.
 
 ### Start
 
