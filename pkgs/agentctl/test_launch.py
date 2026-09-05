@@ -12,7 +12,7 @@ from agentctl import launch
 from agentctl.config import Config
 from agentctl.launch import JobError
 from agentctl.projects import load_project_adapter
-from agentctl.pueue import PueueGroupError
+from agentctl.pueue import PueueGroupError, Task
 from agentctl.run import (
     CANCELLED_EXIT_CODE,
     REFUSED_EXIT_CODE,
@@ -288,7 +288,7 @@ def test_cancel_marks_then_stops_the_unit_then_kills_the_task(
     unit = launch.unit_of(task)
     marker = cancel_marker_for(read_launch(config, task)["log_path"])
 
-    cancelled = launch.cancel(config, started["job_id"])
+    cancelled = launch.cancel(config, started["job_id"], settle_seconds=0)
 
     assert marker.exists()
     assert fake_pueue.killed == [started["job_id"]]
@@ -315,9 +315,113 @@ def test_cancel_fails_when_the_unit_is_still_active_afterwards(
     project = load_project_adapter(project_root)
     started = launch.start_operation(config, project, project.operation("check"))
 
-    cancelled = launch.cancel(config, started["job_id"])
+    cancelled = launch.cancel(config, started["job_id"], settle_seconds=0)
 
     assert cancelled["state"] == "failed"
+
+
+def test_cancel_lets_the_wrapper_record_the_outcome_before_any_kill(
+    fake_pueue: FakePueue,
+    config: Config,
+    project_root: Path,
+    recording_systemctl: Callable[[], list[list[str]]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Stopping the unit ends the wrapper's wait; it records `cancelled`,
+    consumes the marker and exits. Killing it first would lose the record."""
+    project = load_project_adapter(project_root)
+    started = launch.start_operation(config, project, project.operation("check"))
+    task_id = started["job_id"]
+    task = fake_pueue.task(task_id)
+    log = Path(read_launch(config, task)["log_path"])
+    marker = cancel_marker_for(log)
+    polls: list[int] = []
+    real_task = fake_pueue.task
+
+    def wrapper_exits_on_third_poll(asked: int) -> Task | None:
+        # Polls: the cancel's own read, one after the stop, one after a sleep.
+        polls.append(asked)
+        if len(polls) == 3:
+            assert marker.exists(), "the marker must precede the stop"
+            outcome_path_for(log).parent.mkdir(parents=True, exist_ok=True)
+            outcome_path_for(log).write_text(
+                json.dumps({"outcome": "cancelled", "exit_code": 130})
+            )
+            marker.unlink()
+            fake_pueue.fail(task_id, exit_code=CANCELLED_EXIT_CODE)
+        return real_task(asked)
+
+    monkeypatch.setattr(launch.pueue, "task", wrapper_exits_on_third_poll)
+    slept: list[float] = []
+
+    cancelled = launch.cancel(
+        config, task_id, settle_seconds=15, sleep=lambda seconds: slept.append(seconds)
+    )
+
+    assert fake_pueue.killed == []
+    assert slept == [launch.CANCEL_POLL_SECONDS]
+    assert not marker.exists()
+    assert cancelled["phase"] == "cancelled" and cancelled["state"] == "stopped"
+    assert cancelled["outcome"] == {"outcome": "cancelled", "exit_code": 130}
+    stop = ["systemctl", "--user", "stop", launch.unit_of(task)]
+    assert stop in recording_systemctl()
+
+
+def test_cancel_kills_a_wrapper_that_does_not_settle_in_time(
+    fake_pueue: FakePueue,
+    config: Config,
+    project_root: Path,
+    recording_systemctl: Callable[[], list[list[str]]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = load_project_adapter(project_root)
+    started = launch.start_operation(config, project, project.operation("check"))
+    clock = iter([0.0, 0.0, 20.0, 20.0])
+    monkeypatch.setattr(launch.time, "monotonic", lambda: next(clock))
+    slept: list[float] = []
+
+    cancelled = launch.cancel(
+        config, started["job_id"], settle_seconds=1, sleep=slept.append
+    )
+
+    assert slept == [launch.CANCEL_POLL_SECONDS]
+    assert fake_pueue.killed == [started["job_id"]]
+    assert cancelled["phase"] == "cancelled" and "outcome" not in cancelled
+
+
+def test_the_launch_input_records_the_task_id_pueue_assigned(
+    fake_pueue: FakePueue, config: Config, project_root: Path
+) -> None:
+    project = load_project_adapter(project_root)
+    started = launch.start_operation(config, project, project.operation("check"))
+    written = read_launch(config, fake_pueue.task(started["job_id"]))
+    assert written["queue_task_id"] == started["job_id"]
+
+
+def test_clean_finds_a_task_pueue_forgot_by_its_launch_input(
+    fake_pueue: FakePueue, config: Config, project_root: Path
+) -> None:
+    project = load_project_adapter(project_root)
+    started = launch.start_operation(config, project, project.operation("verify"))
+    task = fake_pueue.task(started["job_id"])
+    written = read_launch(config, task)
+    for key in ("log_path", "result_path"):
+        Path(written[key]).parent.mkdir(parents=True, exist_ok=True)
+        Path(written[key]).write_text("x")
+    input_path = launch.launch_input_path(task)
+    fake_pueue.remove([started["job_id"]])
+
+    cleaned = launch.clean(config, started["job_id"])
+
+    assert cleaned["cleaned"] and cleaned["job_id"] == started["job_id"]
+    assert set(cleaned["removed"]) == {
+        str(input_path),
+        written["log_path"],
+        written["result_path"],
+    }
+    assert not input_path.exists()
+    with pytest.raises(JobError, match="pueue has no task"):
+        launch.clean(config, started["job_id"])
 
 
 def test_clean_deletes_a_terminal_task_and_everything_it_left(
@@ -407,12 +511,18 @@ def test_cancelling_a_queued_task_drops_it_out_of_the_queue(
     started = launch.start_operation(config, project, project.operation("check"))
     fake_pueue.queue(started["job_id"])
 
+    input_path = launch.launch_input_path(fake_pueue.task(started["job_id"]))
+    assert input_path is not None and input_path.exists()
+
     cancelled = launch.cancel(config, started["job_id"])
 
     assert fake_pueue.removed == [started["job_id"]]
     assert fake_pueue.task(started["job_id"]) is None
     assert cancelled["state"] == "removed"
     assert cancelled["phase"] == "cancelled" and cancelled["terminal"] is True
+    assert cancelled["removed"] == [str(input_path)]
+    assert not input_path.exists()
+    assert list(config.inputs_dir.iterdir()) == []
 
 
 def test_a_task_whose_launch_input_agentctl_did_not_write_names_its_own_scope(
