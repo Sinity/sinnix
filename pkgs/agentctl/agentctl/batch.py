@@ -852,6 +852,11 @@ def result(config: Config, run_id: str, worker_id: str, path: Path) -> dict[str,
                 "candidate_mismatch",
                 f"result names {value['candidate_sha'][:12]} but {worktree} is at {head[:12]}",
             )
+    if value["candidate_sha"] == run.base_commit:
+        raise BatchRefusal(
+            "empty_candidate",
+            f"result names the base commit {run.base_commit[:12]}; a worker with nothing to commit is not a candidate",
+        )
     unknown = {entry["id"] for entry in value["beads"]} - set(worker["beads"])
     if unknown:
         raise BatchRefusal(
@@ -1395,6 +1400,11 @@ def land(
         base = str(run.landing.get("refreshed_base") or run.base_commit)
         while True:
             candidate = _integrate(config, project, run, base)
+            if candidate == base:
+                raise BatchRefusal(
+                    "empty_candidate",
+                    f"integration produced no change on {base[:12]}",
+                )
             run = _land_update(
                 config,
                 run_id,
