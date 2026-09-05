@@ -192,7 +192,93 @@ let
     in
     lib.concatMapStringsSep " " (pattern: "--exclude ${lib.escapeShellArg (qualify pattern)}") exclude;
 
-  mkBorgCommonScript = repo: repoPath: ''
+  # Borg records every holder of an exclusive lock as an empty file inside the
+  # lock directory, named "<hostid>.<pid>-<threadid>" (borg/locking.py,
+  # ExclusiveLock.unique_name); lock.roster repeats the same triple as JSON.
+  # That recorded pid is the identification which survives the wrapper: the
+  # wrapped binary's comm is `.borg-wrapped`, so matching a process name finds
+  # no Borg at all and breaks the lock under a live writer.
+  #
+  # Only the hostname ahead of the hostid is compared. The "@<node-id>" tail
+  # is uuid.getnode(), which differs between Borg runs here -- a repository
+  # lock held by borgbackup-job-realm recorded a random-fallback node id while
+  # Borg on the same host otherwise records the NIC MAC -- so requiring the
+  # whole hostid to match would make every holder look foreign and no stale
+  # lock could ever be broken. That instability is also why Borg's own
+  # stale-lock reaper leaves these locks behind for this function to clear.
+  #
+  # $BORG_REPO and $BORG_CACHE_DIR are the environment Borg itself reads, so
+  # the guard and the Borg it guards always look at the same repository.
+  borgStaleLockRecovery = ''
+    # Echoes the first holder of the lock directory $1 that may still be
+    # running, and nothing when the lock is provably abandoned.
+    borg_lock_live_holder() {
+      borg_holder_dir="$1"
+      borg_local_host="$(uname -n)"
+      for borg_holder_path in "$borg_holder_dir"/*; do
+        [ -e "$borg_holder_path" ] || continue
+        borg_holder="''${borg_holder_path##*/}"
+        borg_holder_host_pid="''${borg_holder%-*}"
+        borg_holder_pid="''${borg_holder_host_pid##*.}"
+        borg_holder_host="''${borg_holder_host_pid%.*}"
+        case "$borg_holder_pid" in
+          "" | *[!0-9]*)
+            printf '%s' "$borg_holder"
+            return
+            ;;
+        esac
+        case "$borg_holder_host" in
+          "$borg_local_host" | "$borg_local_host".* | "$borg_local_host"@*) ;;
+          *)
+            printf '%s' "$borg_holder"
+            return
+            ;;
+        esac
+        if [ -e /proc/"$borg_holder_pid" ]; then
+          printf '%s' "$borg_holder"
+          return
+        fi
+      done
+    }
+
+    recover_stale_borg_locks() {
+      repo="''${1-$BORG_REPO}"
+      repo_path="''${repo#file://}"
+
+      if [ ! -e "$repo_path/config" ]; then
+        return
+      fi
+
+      # `borg break-lock` clears the repository lock and this host's cache
+      # lock for that repository, so a live holder of either one forbids it,
+      # whether or not that particular lock has aged past the threshold.
+      borg_stale_locks=""
+      for borg_lock_dir in \
+        "$repo_path/lock.exclusive" \
+        "$BORG_CACHE_DIR/lock.exclusive" \
+        "$BORG_CACHE_DIR"/*/lock.exclusive; do
+        [ -d "$borg_lock_dir" ] || continue
+        borg_lock_holder="$(borg_lock_live_holder "$borg_lock_dir")"
+        if [ -n "$borg_lock_holder" ]; then
+          echo "Borg lock $borg_lock_dir for $repo is held by $borg_lock_holder; refusing break-lock" >&2
+          return
+        fi
+        borg_lock_age=$(($(date +%s) - $(stat -c %Y "$borg_lock_dir")))
+        if [ "$borg_lock_age" -gt ${toString (borgStaleLockMinutes * 60)} ]; then
+          borg_stale_locks="$borg_stale_locks $borg_lock_dir"
+        fi
+      done
+
+      if [ -z "$borg_stale_locks" ]; then
+        return
+      fi
+
+      echo "Breaking stale Borg lock for $repo:$borg_stale_locks" >&2
+      with_borg_lock borg break-lock "$repo"
+    }
+  '';
+
+  mkBorgCommonScript = repo: ''
     export BORG_REPO=${lib.escapeShellArg repo}
     export BORG_PASSCOMMAND=${lib.escapeShellArg "${pkgs.coreutils}/bin/cat ${borgPassphrasePath}"}
     export BORG_CACHE_DIR=${lib.escapeShellArg borgCacheDir}
@@ -218,33 +304,7 @@ let
       export SINNIX_BORG_GLOBAL_LOCK_HELD=1
     }
 
-    recover_stale_borg_locks() {
-      if [ ! -e ${lib.escapeShellArg "${repoPath}/config"} ]; then
-        return
-      fi
-
-      stale_lock="$(
-        find ${lib.escapeShellArg repoPath} \
-          -maxdepth 2 -type d -name lock.exclusive \
-          -mmin +${toString borgStaleLockMinutes} -print -quit 2>/dev/null || true
-      )"
-      if [ -z "$stale_lock" ]; then
-        if ! find ${lib.escapeShellArg borgCacheDir} \
-          -maxdepth 2 -type d -name lock.exclusive \
-          -mmin +${toString borgStaleLockMinutes} -print -quit 2>/dev/null | grep -q .; then
-          return
-        fi
-        stale_lock="stale Borg cache lock"
-      fi
-
-      if pgrep -x borg >/dev/null 2>&1; then
-        echo "Stale-looking Borg lock remains for ${repo}, but a Borg process is alive; refusing break-lock" >&2
-        return
-      fi
-
-      echo "Breaking stale Borg lock for ${repo}: $stale_lock" >&2
-      with_borg_lock borg break-lock ${lib.escapeShellArg repo}
-    }
+    ${borgStaleLockRecovery}
   '';
 
   mkSnapshotDrainScript =
@@ -263,7 +323,7 @@ let
       set -euo pipefail
       shopt -s nullglob
 
-      ${mkBorgCommonScript repo repoPath}
+      ${mkBorgCommonScript repo}
 
       # 0755, not 0700: the reducer health sweep runs as the operator and
       # watches the marker files here as capture lanes; timestamps are not
@@ -971,7 +1031,6 @@ in
         coreutils
         findutils
         gnugrep
-        procps
         util-linux
       ];
       script = mkSnapshotDrainScript {
@@ -1010,7 +1069,6 @@ in
         coreutils
         findutils
         gnugrep
-        procps
         util-linux
       ];
       script = mkSnapshotDrainScript {
@@ -1055,7 +1113,6 @@ in
           borgbackup
           coreutils
           gnugrep
-          procps
           util-linux
         ];
         timer = {
@@ -1065,7 +1122,7 @@ in
         };
         script = ''
           set -euo pipefail
-          ${mkBorgCommonScript borgRepoSinexBlobs borgRepoSinexBlobsPath}
+          ${mkBorgCommonScript borgRepoSinexBlobs}
 
           install -d -m 0700 -o root -g root ${lib.escapeShellArg borgRepoSinexBlobsPath}
           recover_stale_borg_locks
@@ -1179,7 +1236,6 @@ in
         borgbackup
         coreutils
         gnugrep
-        procps
         util-linux
       ];
       timer = {
@@ -1189,7 +1245,7 @@ in
       };
       script = ''
         set -euo pipefail
-        ${mkBorgCommonScript borgRepoPolylogueState borgRepoPolylogueStatePath}
+        ${mkBorgCommonScript borgRepoPolylogueState}
 
         install -d -m 0700 -o root -g root ${lib.escapeShellArg borgRepoPolylogueStatePath}
         recover_stale_borg_locks
@@ -1254,7 +1310,6 @@ in
         findutils
         gnugrep
         jq
-        procps
         util-linux
         zstd
       ];
@@ -1266,7 +1321,7 @@ in
       script = ''
         set -euo pipefail
 
-        ${mkBorgCommonScript borgRepoRealm borgRepoRealmPath}
+        ${mkBorgCommonScript borgRepoRealm}
         install -d -m 0755 -o root -g root ${lib.escapeShellArg borgDrainStateRoot}
         recover_stale_borg_locks
         if [ ! -e ${lib.escapeShellArg "${borgRepoRealmPath}/config"} ]; then
@@ -1351,13 +1406,12 @@ in
         findutils
         gnugrep
         jq
-        procps
         util-linux
       ];
       script = ''
         set -euo pipefail
 
-        ${mkBorgCommonScript borgRepoPersist borgRepoPersistPath}
+        ${mkBorgCommonScript borgRepoPersist}
         acquire_borg_global_lock_or_skip "Borg repository check"
         run_id="''${INVOCATION_ID:-borg-check-$(date +%s)}"
         write_integrity_receipt() {
@@ -1395,7 +1449,7 @@ in
         trap receipt_failure_trap EXIT
         write_integrity_receipt running
         recover_stale_borg_locks
-        ${mkBorgCommonScript borgRepoRealm borgRepoRealmPath}
+        ${mkBorgCommonScript borgRepoRealm}
         recover_stale_borg_locks
 
         # --max-duration makes the repository check INCREMENTAL: each run
@@ -1449,7 +1503,6 @@ in
         coreutils
         findutils
         gnugrep
-        procps
         util-linux
       ];
       timer = {
@@ -1483,32 +1536,7 @@ in
           export SINNIX_BORG_GLOBAL_LOCK_HELD=1
         }
 
-        recover_stale_borg_locks() {
-          repo="$1"
-          repo_path="''${repo#file://}"
-
-          stale_lock="$(
-            find "$repo_path" \
-              -maxdepth 2 -type d -name lock.exclusive \
-              -mmin +${toString borgStaleLockMinutes} -print -quit 2>/dev/null || true
-          )"
-          if [ -z "$stale_lock" ]; then
-            if ! find ${lib.escapeShellArg borgCacheDir} \
-              -maxdepth 2 -type d -name lock.exclusive \
-              -mmin +${toString borgStaleLockMinutes} -print -quit 2>/dev/null | grep -q .; then
-              return
-            fi
-            stale_lock="stale Borg cache lock"
-          fi
-
-          if pgrep -x borg >/dev/null 2>&1; then
-            echo "Stale-looking Borg lock remains for $repo, but a Borg process is alive; refusing break-lock" >&2
-            return
-          fi
-
-          echo "Breaking stale Borg lock for $repo: $stale_lock" >&2
-          with_borg_lock borg break-lock "$repo"
-        }
+        ${borgStaleLockRecovery}
 
         maintain_repo() {
           repo="$1"
@@ -1758,11 +1786,10 @@ in
         coreutils
         findutils
         gnugrep
-        procps
         util-linux
       ];
       script = ''
-        ${mkBorgCommonScript borgRepoRootSnapshots borgRepoRootSnapshotsPath}
+        ${mkBorgCommonScript borgRepoRootSnapshots}
         acquire_borg_global_lock_or_skip "root snapshot Borg drain"
         recover_stale_borg_locks
 
