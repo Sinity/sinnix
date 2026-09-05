@@ -340,11 +340,13 @@ let
     # Steering CLI: source lives in the steering workspace (a non-flake
     # git+file input), packaging lives here — the same split as lynchpin's
     # python. Runtime deps mirror the frontmatter the script carried while
-    # it lived under scripts/ (python3 claude-code libnotify).
+    # it lived under scripts/ (python3 claude-code libnotify), plus rank_core:
+    # the activity menu is ordered by the shared ranking engine, so a bare
+    # python3 here means `sinnix-steer activity menu` cannot start.
     sinnix-steer = pkgs.writeShellApplication {
       name = "sinnix-steer";
       runtimeInputs = [
-        pkgs.python3
+        (pkgs.python3.withPackages (_: [ sinnix-rank-core ]))
         pkgs.claude-code
         pkgs.libnotify
       ];
