@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Mapping
@@ -45,8 +46,18 @@ class Config:
 
 
 def default_state_dir() -> Path:
-    base = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
-    return Path(base) / "sinnixd"
+    base = Path(os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state"))
+    state_dir = base / "agentctl"
+    previous = base / "sinnixd"
+    if not state_dir.exists() and previous.is_dir():
+        try:
+            os.rename(previous, state_dir)
+        except OSError as error:
+            # A persistence bind mount cannot be renamed; the operator moves it.
+            print(f"agentctl: could not move {previous} to {state_dir}: {error}", file=sys.stderr)
+        else:
+            print(f"agentctl: moved state {previous} -> {state_dir}", file=sys.stderr)
+    return state_dir
 
 
 def _default() -> Config:

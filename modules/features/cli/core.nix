@@ -144,9 +144,9 @@ mkFeatureModule {
           '';
           systemd.user.services.pueued = {
             # The daemon is only the queue coordinator. Each task's
-            # `sinnixd-queue-run` child enters the slice named by its declared
+            # `agentctl-run` child enters the slice named by its declared
             # pool, so pool concurrency and cgroup budgets remain separate.
-            Service.Slice = "sinnixd-work.slice";
+            Service.Slice = "agentctl-work.slice";
             # state.json carries every task's full client environment; an
             # interactive `pueue add` writes the shell's API keys into it.
             Service.UMask = "0077";

@@ -157,7 +157,7 @@ rec {
     };
     developer-build = mkClass "User-initiated builds, tests, and Nix work" { };
     managed-runtime-work = mkClass "Daemon-managed transient work" {
-      Slice = "sinnixd-work.slice";
+      Slice = "agentctl-work.slice";
     };
     background-maintenance = mkClass "Bulk maintenance that should yield to interaction" {
       Nice = 10;
@@ -258,12 +258,12 @@ rec {
       # system units that participate in it. The memory ceiling stays on the
       # user side alone: their heavy phases execute as pueue tasks there, and
       # a second MemoryHigh here would double the plane's declared budget.
-      sinnixd = {
+      agentctl = {
         IOAccounting = true;
         CPUWeight = 10;
         IOWeight = 10;
       };
-      sinnixd-work = {
+      agentctl-work = {
         IOAccounting = true;
         CPUWeight = 100;
         IOWeight = 100;
@@ -284,7 +284,7 @@ rec {
         # target throttles batch whenever the desktop's own requests wait,
         # which is what swap-in feels like under six lanes.
         IODeviceLatencyTargetSec = "/dev/nvme0n1 20ms";
-        # Batch under sinnixd.slice grows into swap; the desktop's working
+        # Batch under agentctl.slice grows into swap; the desktop's working
         # set must not be what gets reclaimed to make room for it.
         MemoryLow = "6G";
       };
@@ -330,7 +330,7 @@ rec {
       };
       # Slice names encode hierarchy. This outer slice is the direct sibling
       # of app.slice and session.slice, so its weights govern host contention.
-      sinnixd = {
+      agentctl = {
         IOAccounting = true;
         CPUWeight = 10;
         IOWeight = 10;
@@ -344,7 +344,7 @@ rec {
         # die (14 GB of swap, ten-minute preflights, 2026-09-02).
         MemorySwapMax = "2G";
       };
-      sinnixd-work = {
+      agentctl-work = {
         IOAccounting = true;
         CPUWeight = 100;
         IOWeight = 100;
@@ -355,14 +355,14 @@ rec {
       # remaining job plane is admitted by pool rather than free-RAM probes.
       # Zero swap is deliberate for test/build pools: a hostile child must be
       # killed at its own MemoryMax instead of making the desktop page.
-      sinnixd-pueue-agent = {
+      agentctl-agent = {
         IOAccounting = true;
         CPUWeight = 400;
         IOWeight = 300;
         MemoryHigh = "8G";
         MemorySwapMax = "0";
       };
-      sinnixd-pueue-pytest = {
+      agentctl-pytest = {
         IOAccounting = true;
         CPUWeight = 20;
         IOWeight = 20;
@@ -373,7 +373,7 @@ rec {
         ManagedOOMMemoryPressureLimit = "50%";
         ManagedOOMMemoryPressureDurationSec = "30s";
       };
-      sinnixd-pueue-bulk = {
+      agentctl-bulk = {
         IOAccounting = true;
         CPUWeight = 20;
         IOWeight = 10;
@@ -384,7 +384,7 @@ rec {
         ManagedOOMMemoryPressureLimit = "50%";
         ManagedOOMMemoryPressureDurationSec = "30s";
       };
-      sinnixd-pueue-normal = {
+      agentctl-normal = {
         IOAccounting = true;
         CPUWeight = 50;
         IOWeight = 50;
@@ -392,7 +392,7 @@ rec {
         MemoryMax = "6G";
         MemorySwapMax = "0";
       };
-      sinnixd-pueue-interactive = {
+      agentctl-interactive = {
         IOAccounting = true;
         CPUWeight = 100;
         IOWeight = 100;
@@ -440,17 +440,17 @@ rec {
 
   # An agent CLI puts its outermost process in agent.slice unless it is
   # already inside a declared accounting boundary. These are those
-  # boundaries: agent.slice is the interactive plane, and sinnixd.slice is the
+  # boundaries: agent.slice is the interactive plane, and agentctl.slice is the
   # whole job plane — the coordinator, every pool slice, and the per-task
   # scope that carries a lane's MemoryMax and its cancellation reap. Naming
   # the outer slice rather than each pool keeps a new pool from launching an
   # agent that escapes its own budget.
   agentContainedSlices = [
     "agent.slice"
-    "sinnixd.slice"
+    "agentctl.slice"
   ];
   # Shell `case` pattern matched against /proc/self/cgroup. The separators
-  # are load-bearing: "sinnixd-pueue-agent.slice" ends in "agent.slice"
+  # are load-bearing: "agentctl-agent.slice" ends in "agent.slice"
   # without being it.
   agentContainedCasePattern = lib.concatMapStringsSep "|" (
     slice: ''*"/${slice}/"*''

@@ -46,7 +46,7 @@ CODEX_BOT_LOGINS = {
     "chatgpt-codex-connector[bot]",
 }
 _PUBLICATION_MARKER = re.compile(
-    r"<!-- sinnixd:lane-publication (?P<payload>\{.*?\}) -->"
+    r"<!-- agentctl:lane-publication (?P<payload>\{.*?\}) -->"
 )
 _CODEX_FINDING_STATES = {"CHANGES_REQUESTED", "COMMENTED"}
 _CODEX_CLEAN_MARKER = "didn't find any major issues"
@@ -177,9 +177,9 @@ def queue_agent(
     environment = project.environment.values()
     # Task-authority writes from an agent must not default to the operator.
     environment.setdefault("BEADS_ACTOR", f"agent-{bead_id}")
-    environment["SINNIXD_PRINCIPAL"] = "agent-control"
-    environment["SINNIXD_PROJECT_ID"] = project.project_id
-    environment["SINNIXD_LANE_BEAD"] = bead_id
+    environment["AGENTCTL_PRINCIPAL"] = "agent-control"
+    environment["AGENTCTL_PROJECT_ID"] = project.project_id
+    environment["AGENTCTL_LANE_BEAD"] = bead_id
     return launch.enqueue(
         config,
         project=project,
@@ -705,7 +705,7 @@ def lane_publish(
         )
         if body and not body.endswith("\n"):
             body += "\n"
-        body += f"<!-- sinnixd:lane-publication {marker} -->\n"
+        body += f"<!-- agentctl:lane-publication {marker} -->\n"
 
     push_arguments = ["push"]
     if remote_head is not None:

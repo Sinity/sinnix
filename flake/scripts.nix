@@ -121,7 +121,7 @@ let
     }
   );
   sinnixMcpPackage = pkgs.callPackage ../pkgs/sinnix-mcp/pkg.nix { };
-  sinnixdPackage = pkgs.callPackage ../pkgs/sinnixd/pkg.nix {
+  agentctlPackage = pkgs.callPackage ../pkgs/agentctl/pkg.nix {
     sinnix-mcp = sinnixMcpPackage;
     sinnix-lib = externalPackages.sinnix-lib;
     beads = externalPackages.beads;
@@ -129,7 +129,7 @@ let
   agentGatewayPackage = pkgs.callPackage ../pkgs/sinnix-agent-gateway/pkg.nix {
     sinnix-mcp = sinnixMcpPackage;
     sinnix-lib = externalPackages.sinnix-lib;
-    sinnixd = sinnixdPackage;
+    agentctl = agentctlPackage;
   };
 
   mkSanitizedPythonWrapper =
@@ -294,13 +294,13 @@ let
     };
 
     sinnix-mcp = sinnixMcpPackage;
-    sinnixd = sinnixdPackage;
+    agentctl = agentctlPackage;
     # The same tool without its test-suite check phase: environment builds
     # (dev shell, rebuild wrappers) need the binary, not the gate. The gate
-    # stays on `sinnixd` for the suite check and the deployed service; a
+    # stays on `agentctl` for the suite check and the deployed service; a
     # worktree with red work-in-progress tests must still produce a usable
     # environment or continuation lanes can never start to fix it.
-    sinnixd-tooling = sinnixdPackage.overridePythonAttrs (_: {
+    agentctl-tooling = agentctlPackage.overridePythonAttrs (_: {
       doCheck = false;
     });
     sinnix-agent-gateway = agentGatewayPackage;

@@ -4,7 +4,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from sinnixd.worktrunk import (
+from agentctl.worktrunk import (
     LIST_SCHEMA_VERSION,
     ChecksFacts,
     PullFacts,

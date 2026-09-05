@@ -168,9 +168,9 @@ mkServiceModule {
           path = "/user.slice/user-${userUid}.slice/user@${userUid}.service/agent.slice";
         }
         {
-          label = "user.sinnixd-work";
+          label = "user.agentctl-work";
           scope = "user";
-          path = "/user.slice/user-${userUid}.slice/user@${userUid}.service/sinnixd.slice";
+          path = "/user.slice/user-${userUid}.slice/user@${userUid}.service/agentctl.slice";
         }
         {
           label = "user.build";

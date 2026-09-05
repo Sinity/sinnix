@@ -83,7 +83,7 @@ mkdir -p "$(dirname "$last_file")"
 # this native backend. Expose the exact snapshot path to worker-side tools;
 # lane task can therefore print it without copying prompt content into public
 # job metadata.
-export SINNIXD_JOB_PROMPT_FILE="$prompt_file"
+export AGENTCTL_JOB_PROMPT_FILE="$prompt_file"
 
 resolve_agent_bin() {
   case "$1" in

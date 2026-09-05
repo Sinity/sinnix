@@ -7,8 +7,8 @@ from uuid import uuid4
 import pytest
 from sinnix_agent_gateway.execution import LocalJobs
 from sinnix_mcp import ErrorCode, RequestEnvelope
-from sinnixd import lanes, launch
-from sinnixd.config import Config
+from agentctl import lanes, launch
+from agentctl.config import Config
 
 DESCRIPTOR = """
 schema = 1

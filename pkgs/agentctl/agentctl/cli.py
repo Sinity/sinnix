@@ -16,7 +16,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from . import lanes, launch, operator_view, schedule
+from . import backpressure, lanes, launch, operator_view, schedule
 from .config import Config, ConfigError, load_config, resolve_project
 from .lanes import LaneError
 from .launch import JobError
@@ -159,6 +159,12 @@ def parser() -> argparse.ArgumentParser:
     timers = verbs.add_parser("schedule", help="calendar timers for declared schedules")
     timers_verbs = timers.add_subparsers(dest="schedule_verb", required=True)
     timers_verbs.add_parser("apply")
+
+    pressure = verbs.add_parser(
+        "backpressure", help="freeze or thaw the job queue against host pressure"
+    )
+    pressure_verbs = pressure.add_subparsers(dest="backpressure_verb", required=True)
+    pressure_verbs.add_parser("tick")
     return root
 
 
@@ -540,6 +546,9 @@ def _dispatch(arguments: argparse.Namespace, config: Config, out: Output) -> int
             for row in applied["unavailable"]
         )
         out.emit(applied, "\n".join(lines))
+        return EXIT_OK
+    if verb == "backpressure":
+        out.emit(backpressure.tick(spool=config.event_spool))
         return EXIT_OK
     raise AssertionError(verb)
 

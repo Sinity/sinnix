@@ -30,8 +30,8 @@ project_file() {
 }
 
 project_id() {
-  if [[ -n ${SINNIXD_PROJECT_ID:-} ]]; then
-    printf '%s\n' "$SINNIXD_PROJECT_ID"
+  if [[ -n ${AGENTCTL_PROJECT_ID:-} ]]; then
+    printf '%s\n' "$AGENTCTL_PROJECT_ID"
     return
   fi
   awk -F'"' '/^\[project\]/ { in_project = 1; next } /^\[/ { in_project = 0 } in_project && /^[[:space:]]*id[[:space:]]*=/ { print $2; exit }' "$(project_file)"
@@ -39,7 +39,7 @@ project_id() {
 
 lane_task() {
   local prompt
-  prompt=${SINNIXD_JOB_PROMPT_FILE:-$(repo_root)/.lane/prompt.md}
+  prompt=${AGENTCTL_JOB_PROMPT_FILE:-$(repo_root)/.lane/prompt.md}
   [[ -r $prompt ]] || die "dispatch prompt is unavailable: $prompt"
   cat -- "$prompt"
 }
@@ -73,7 +73,7 @@ lane_verify() {
     return 0
   fi
   command -v agentctl >/dev/null 2>&1 || die "agentctl is unavailable for managed verification"
-  if ! output=$(agentctl job start "$(project_id)" "$operation" --workspace "$(repo_root)" --wait --timeout-seconds "${SINNIXD_TIMEOUT_SECONDS:-3600}"); then
+  if ! output=$(agentctl job start "$(project_id)" "$operation" --workspace "$(repo_root)" --wait --timeout-seconds "${AGENTCTL_TIMEOUT_SECONDS:-3600}"); then
     printf '%s\n' "$output" >&2
     die "managed verification did not succeed"
   fi

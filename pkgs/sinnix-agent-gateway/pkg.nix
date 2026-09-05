@@ -11,7 +11,7 @@
   coreutils,
   sinnix-mcp,
   sinnix-lib,
-  sinnixd,
+  agentctl,
   ...
 }:
 let
@@ -123,7 +123,7 @@ python3Packages.buildPythonApplication {
     mcp-sdk
     sinnix-mcp
     sinnix-lib
-    sinnixd
+    agentctl
   ];
 
   nativeCheckInputs = [

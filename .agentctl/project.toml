@@ -104,5 +104,5 @@ generated_surfaces = ["docs/agent-environment.md", "docs/config-default-audit-fe
 [conflicts.semantic_slots]
 nixos-generation = ["flake.nix", "flake.lock", "flake/nixos.nix"]
 ports-registry = ["flake/data/ports.nix"]
-project-registry = [".agentctl/project.toml", "modules/services/sinnixd.nix"]
+project-registry = [".agentctl/project.toml", "modules/services/agentctl.nix"]
 service-registry = ["modules/services/*.nix"]

@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 from conftest import write_project
-from sinnixd.config import Config, load_config, resolve_project
-from sinnixd.projects import (
+from agentctl.config import Config, load_config, resolve_project
+from agentctl.projects import (
     ProjectCatalog,
     ProjectConfigError,
     ProjectEnvironmentError,

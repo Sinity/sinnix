@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 import pytest
-from sinnixd import queue_run
-from sinnixd.queue_run import (
+from agentctl import queue_run
+from agentctl.queue_run import (
     MAX_LOG_BYTES,
     REFUSED_EXIT_CODE,
     TIMEOUT_EXIT_CODE,
@@ -96,7 +96,7 @@ def test_worker_exports_queue_identity_to_the_child(
         argv=[
             "sh",
             "-c",
-            'printf \'%s %s %s %s\' "$SINNIXD_JOB_ID" "$SINNIXD_PROJECT_ID" "$SINNIXD_OPERATION" "$SINNIXD_QUEUE_POOL"',
+            'printf \'%s %s %s %s\' "$AGENTCTL_JOB_ID" "$AGENTCTL_PROJECT_ID" "$AGENTCTL_OPERATION" "$AGENTCTL_POOL"',
         ],
         pool="pytest",
     )
@@ -140,7 +140,7 @@ def test_a_declared_pool_runs_the_child_in_its_named_systemd_scope(
         argv=[
             "sh",
             "-c",
-            'printf "%s %s" "$SINNIXD_QUEUE_WORKER" "$SINNIXD_JOB_ID"',
+            'printf "%s %s" "$AGENTCTL_QUEUE_WORKER" "$AGENTCTL_JOB_ID"',
         ],
     )
 
@@ -150,7 +150,7 @@ def test_a_declared_pool_runs_the_child_in_its_named_systemd_scope(
     assert "--scope" in scope_argv
     assert "--collect" in scope_argv
     assert f"--unit={scope_unit_for(launch, 'pytest')}" in scope_argv
-    assert "--slice=sinnixd-pueue-pytest.slice" in scope_argv
+    assert "--slice=agentctl-pytest.slice" in scope_argv
     assert (tmp_path / "log").read_text() == "1 job-a"
 
 
@@ -189,7 +189,7 @@ def test_the_start_event_records_the_group_the_task_actually_ran_in(
     assert main([str(launch)]) == 0
 
     assert [event["pool"] for event in events(tmp_path)] == ["bulk"]
-    assert "--slice=sinnixd-pueue-bulk.slice" in recording_systemd_run()
+    assert "--slice=agentctl-bulk.slice" in recording_systemd_run()
 
 
 def test_scopes_stay_distinct_when_their_launch_inputs_share_a_name(
@@ -212,7 +212,7 @@ def test_scopes_stay_distinct_when_their_launch_inputs_share_a_name(
     }
 
     assert len(units) == 4
-    assert all(unit.startswith("sinnixd-pueue-pytest-") for unit in units)
+    assert all(unit.startswith("agentctl-pytest-") for unit in units)
     assert all(len(unit) < 256 for unit in units)
 
 
@@ -232,7 +232,7 @@ def test_a_scope_is_stopped_by_killing_its_cgroup(
     monkeypatch.setattr(queue_run, "scope_control_group", lambda unit: control_group)
     monkeypatch.setattr(queue_run.subprocess, "run", lambda *a, **k: None)
 
-    reaped = queue_run.stop_scope("sinnixd-pueue-fixture-job-0123456789ab.scope")
+    reaped = queue_run.stop_scope("agentctl-fixture-job-0123456789ab.scope")
 
     assert (control_group / "cgroup.kill").read_text() == "1"
     assert reaped["stopped"] and reaped["survivors"] == []
@@ -335,7 +335,7 @@ def test_an_oversized_log_is_truncated_with_a_marker(tmp_path: Path) -> None:
 
     log = (tmp_path / "log").read_text()
     assert len(log) <= MAX_LOG_BYTES
-    assert log.endswith("[sinnixd: output truncated]\n")
+    assert log.endswith("[agentctl: output truncated]\n")
 
 
 def test_the_environment_is_exactly_what_the_descriptor_declared(

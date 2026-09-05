@@ -8,12 +8,12 @@ from typing import Any
 
 import pytest
 from conftest import FakeBd, FakePueue, bead, read_launch
-from sinnixd import lanes, launch
-from sinnixd.config import Config
-from sinnixd.lanes import LaneError
-from sinnixd.packets import PacketError
-from sinnixd.projects import load_project_adapter
-from sinnixd.worktrunk import Worktree, WorktrunkError
+from agentctl import lanes, launch
+from agentctl.config import Config
+from agentctl.lanes import LaneError
+from agentctl.packets import PacketError
+from agentctl.projects import load_project_adapter
+from agentctl.worktrunk import Worktree, WorktrunkError
 
 
 def tree(
@@ -451,7 +451,7 @@ def test_lane_publish_pushes_opens_the_pr_under_the_bead_subject_and_arms_auto_m
     published = lanes.lane_publish(config, worktree)
 
     assert fake_pueue.added[0]["label"] == "fixture:verify_quick"
-    assert fake_pueue.added[0]["command"][0] == "sinnixd-queue-run"
+    assert fake_pueue.added[0]["command"][0] == "agentctl-run"
     assert fake_pueue.added[0]["group"] == "pytest"
     assert fake_pueue.added[0]["working_directory"] == worktree
     assert fake_pueue.waited == [1]
@@ -467,7 +467,7 @@ def test_lane_publish_pushes_opens_the_pr_under_the_bead_subject_and_arms_auto_m
     assert create[create.index("--base") + 1] == "master"
     assert create[create.index("--head") + 1] == "feature/packet/fx-1"
     assert create[create.index("--body") + 1].endswith(
-        "<!-- sinnixd:lane-publication "
+        "<!-- agentctl:lane-publication "
         '{"bead":"fx-1","branch":"feature/packet/fx-1",'
         '"head":"abc123"} -->\n'
     )
@@ -1160,7 +1160,7 @@ def test_lane_sync_does_not_close_a_bead_for_another_beads_merged_pr(
             "headRefOid": "abc123",
             "title": "fix: Second task",
             "body": (
-                "<!-- sinnixd:lane-publication "
+                "<!-- agentctl:lane-publication "
                 '{"bead":"fx-2","branch":"feature/packet/fx-1",'
                 '"head":"abc123"} -->'
             ),

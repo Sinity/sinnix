@@ -6,7 +6,7 @@ description: Work on Sinnix NixOS configuration, modules, scripts, dotfiles, age
 # Sinnix
 
 Sinnix declares the workstation, user environment, fixed services, and
-`agentctl`. Read the root `CLAUDE.md` before editing; use `docs/sinnixd.md`
+`agentctl`. Read the root `CLAUDE.md` before editing; use `docs/agentctl.md`
 and `docs/agent-gateway.md` for those contracts.
 
 ## Map
@@ -32,7 +32,7 @@ lanes use `mkCaptureLane`. A bypass needs a structural reason.
 `modules/features/dev/agents/` renders them. The bare `claude` wrapper is lean;
 the upstream installer owns `~/.local/bin/claude`.
 
-agentctl is in `pkgs/sinnixd/`; the gateway is in
+agentctl is in `pkgs/agentctl/`; the gateway is in
 `pkgs/sinnix-agent-gateway/`. Inspect `.agentctl/project.toml` and
 `agentctl project operations sinnix` rather than restating operation names.
 

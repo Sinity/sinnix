@@ -453,8 +453,8 @@ in
       description = "Run heavy non-default checks sequentially to keep evaluation memory bounded";
       script = ''
         ${resolveFlakeDir}
-        if [ "''${SINNIXD_PRINCIPAL:-}" = agent-control ] \
-          && [ "''${SINNIXD_OPERATION:-}" != check_heavy ]; then
+        if [ "''${AGENTCTL_PRINCIPAL:-}" = agent-control ] \
+          && [ "''${AGENTCTL_OPERATION:-}" != check_heavy ]; then
           exec agentctl job start sinnix check_heavy --workspace "$_flake_dir" --wait -- "$@"
         fi
         cd "$_flake_dir"
@@ -474,8 +474,8 @@ in
       description = "Run the default semantic checks, then the heavy non-default suite sequentially";
       script = ''
         ${resolveFlakeDir}
-        if [ "''${SINNIXD_PRINCIPAL:-}" = agent-control ] \
-          && [ "''${SINNIXD_OPERATION:-}" != check_all ]; then
+        if [ "''${AGENTCTL_PRINCIPAL:-}" = agent-control ] \
+          && [ "''${AGENTCTL_OPERATION:-}" != check_all ]; then
           exec agentctl job start sinnix check_all --workspace "$_flake_dir" --wait -- "$@"
         fi
         cd "$_flake_dir"
@@ -502,7 +502,7 @@ in
     test-vm = {
       description = "Build a QEMU VM from current configuration and launch it (nixos-rebuild build-vm)";
       script = ''
-        if [ "''${SINNIXD_PRINCIPAL:-}" = agent-control ]; then
+        if [ "''${AGENTCTL_PRINCIPAL:-}" = agent-control ]; then
           echo "sinnix test-vm: refused in a managed lane; declare a pueue operation and run it with agentctl" >&2
           exit 64
         fi

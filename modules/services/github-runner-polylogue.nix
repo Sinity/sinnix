@@ -136,7 +136,7 @@ mkServiceModule {
           serviceOverrides = {
             # The job plane's slice. The ceiling that matters is the one the
             # pueue task inherits; this placement governs CPU and IO weight.
-            Slice = "sinnixd-work.slice";
+            Slice = "agentctl-work.slice";
             # A selected verify opens the seeded archives of every xdist worker at
             # once; the default 1024 gave EMFILE on the first real run.
             LimitNOFILE = 524288;

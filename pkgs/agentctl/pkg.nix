@@ -7,7 +7,7 @@
   ...
 }:
 python3Packages.buildPythonApplication {
-  pname = "sinnixd";
+  pname = "agentctl";
   version = "0.1.0";
   pyproject = true;
   src = ./.;
@@ -27,7 +27,7 @@ python3Packages.buildPythonApplication {
     runHook postCheck
   '';
 
-  pythonImportsCheck = [ "sinnixd" ];
+  pythonImportsCheck = [ "agentctl" ];
 
   meta = {
     description = "agentctl: jobs over pueue, lanes over worktrunk, gh and bd";

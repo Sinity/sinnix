@@ -19,12 +19,12 @@ from sinnix_mcp import (
     RequestEnvelope,
     ResponseEnvelope,
 )
-from sinnixd import lanes, launch
-from sinnixd.config import Config, ConfigError, load_config, resolve_project
-from sinnixd.packets import PacketError
-from sinnixd.projects import ProjectConfigError
-from sinnixd.pueue import PueueError
-from sinnixd.worktrunk import WorktrunkError
+from agentctl import lanes, launch
+from agentctl.config import Config, ConfigError, load_config, resolve_project
+from agentctl.packets import PacketError
+from agentctl.projects import ProjectConfigError
+from agentctl.pueue import PueueError
+from agentctl.worktrunk import WorktrunkError
 
 OWNER = "systemd-jobs"
 JOB_LIST_ORDERING = "created_at_desc_job_id_desc"

@@ -9,12 +9,12 @@ from typing import Any
 
 import pytest
 from conftest import FakeBd, FakePueue, bead
-from sinnixd import operator_view
-from sinnixd.config import Config
-from sinnixd.lanes import LaneRow
-from sinnixd.projects import load_project_adapter
-from sinnixd.pueue import Task
-from sinnixd.worktrunk import Worktree
+from agentctl import operator_view
+from agentctl.config import Config
+from agentctl.lanes import LaneRow
+from agentctl.projects import load_project_adapter
+from agentctl.pueue import Task
+from agentctl.worktrunk import Worktree
 
 NOW = datetime(2026, 9, 3, 9, 0, tzinfo=UTC)
 
@@ -37,7 +37,7 @@ def task(
         exit_code=exit_code,
         path="/x",
         dependencies=(),
-        command="sinnixd-queue-run /s/inputs/ref.json",
+        command="agentctl-run /s/inputs/ref.json",
         enqueued_at="2026-09-03T08:00:00+00:00",
         started_at="2026-09-03T08:30:00+00:00",
         ended_at="2026-09-03T08:40:00+00:00" if status == "Done" else None,
@@ -113,7 +113,7 @@ def merged_pull(
         number,
         state="MERGED",
         head=head,
-        body=f"Landed.\n\n<!-- sinnixd:lane-publication {marker} -->\n",
+        body=f"Landed.\n\n<!-- agentctl:lane-publication {marker} -->\n",
     )
 
 

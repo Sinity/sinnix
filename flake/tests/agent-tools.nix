@@ -302,13 +302,13 @@ in
         let
           avoidPattern = runtimeDefaults.earlyoomEmergencyAvoidPattern;
           userSlices = runtimeDefaults.slices.user;
-          managedWork = userSlices.sinnixd;
+          managedWork = userSlices.agentctl;
           poolSlices = lib.genAttrs [
-            "sinnixd-pueue-agent"
-            "sinnixd-pueue-pytest"
-            "sinnixd-pueue-bulk"
-            "sinnixd-pueue-normal"
-            "sinnixd-pueue-interactive"
+            "agentctl-agent"
+            "agentctl-pytest"
+            "agentctl-bulk"
+            "agentctl-normal"
+            "agentctl-interactive"
           ] (name: userSlices.${name});
           forbiddenAvoidTokens = [
             "bash"
@@ -335,19 +335,19 @@ in
           && !(managedWork ? ManagedOOMMemoryPressure)
           && userSlices.app.MemoryLow == "6G"
           && userSlices.session.MemoryLow == "5G"
-          && !(poolSlices.sinnixd-pueue-agent ? MemoryMax)
-          && !(poolSlices.sinnixd-pueue-agent ? ManagedOOMPreference)
-          && poolSlices.sinnixd-pueue-pytest.MemoryHigh == "6G"
-          && poolSlices.sinnixd-pueue-pytest.MemoryMax == "8G"
-          && poolSlices.sinnixd-pueue-pytest.MemorySwapMax == "0"
-          && poolSlices.sinnixd-pueue-pytest.CPUWeight == 20
-          && poolSlices.sinnixd-pueue-pytest.IOWeight == 20
-          && poolSlices.sinnixd-pueue-bulk.MemoryHigh == "10G"
-          && poolSlices.sinnixd-pueue-bulk.MemoryMax == "14G"
-          && poolSlices.sinnixd-pueue-bulk.MemorySwapMax == "0"
-          && poolSlices.sinnixd-pueue-bulk.CPUWeight == 20
-          && poolSlices.sinnixd-pueue-bulk.IOWeight == 10
-        ) "sinnixd coordinator work must yield to protected interactive slices; pool slices own fixed caps";
+          && !(poolSlices.agentctl-agent ? MemoryMax)
+          && !(poolSlices.agentctl-agent ? ManagedOOMPreference)
+          && poolSlices.agentctl-pytest.MemoryHigh == "6G"
+          && poolSlices.agentctl-pytest.MemoryMax == "8G"
+          && poolSlices.agentctl-pytest.MemorySwapMax == "0"
+          && poolSlices.agentctl-pytest.CPUWeight == 20
+          && poolSlices.agentctl-pytest.IOWeight == 20
+          && poolSlices.agentctl-bulk.MemoryHigh == "10G"
+          && poolSlices.agentctl-bulk.MemoryMax == "14G"
+          && poolSlices.agentctl-bulk.MemorySwapMax == "0"
+          && poolSlices.agentctl-bulk.CPUWeight == 20
+          && poolSlices.agentctl-bulk.IOWeight == 10
+        ) "agentctl coordinator work must yield to protected interactive slices; pool slices own fixed caps";
         pkgs.runCommand "sinnix-agent-resource-policy-check" { } ''
           touch "$out"
         '';
@@ -763,12 +763,12 @@ in
             user=/user.slice/user-1000.slice/user@1000.service
 
             # A lane's queued task: the scope that owns its MemoryMax.
-            expect contained "0::$user/sinnixd.slice/sinnixd-pueue.slice/sinnixd-pueue-agent.slice/sinnixd-pueue-agent-sinnix-lane-sinnix-5ntw-9b15d371.scope"
+            expect contained "0::$user/agentctl.slice/agentctl-agent.slice/agentctl-agent-sinnix-lane-sinnix-5ntw-9b15d371.scope"
             # A pool scope systemd named, rather than one named for a launch input.
-            expect contained "0::$user/sinnixd.slice/sinnixd-pueue.slice/sinnixd-pueue-agent.slice/run-p988139-i193814380.scope"
+            expect contained "0::$user/agentctl.slice/agentctl-agent.slice/run-p988139-i193814380.scope"
             # A pool other than agent still bounds what it launches.
-            expect contained "0::$user/sinnixd.slice/sinnixd-pueue.slice/sinnixd-pueue-normal.slice/run-p491309-i193318106.scope"
-            expect contained "0::$user/sinnixd.slice/sinnixd-work.slice/pueued.service"
+            expect contained "0::$user/agentctl.slice/agentctl-normal.slice/run-p491309-i193318106.scope"
+            expect contained "0::$user/agentctl.slice/agentctl-work.slice/pueued.service"
             expect contained "0::$user/agent.slice/run-p1088598-i193914838.scope"
 
             # An interactive launch from a terminal has no boundary yet.
@@ -778,7 +778,7 @@ in
             # Separator discipline: a slice merely ending in a contained name
             # is a different slice with a different budget.
             expect reexec "0::$user/app.slice/app-agent.slice/app-agent-stub.scope"
-            expect reexec "0::$user/app.slice/app-sinnixd.slice/app-sinnixd-stub.scope"
+            expect reexec "0::$user/app.slice/app-agentctl.slice/app-agentctl-stub.scope"
 
             touch "$out"
           '';
@@ -816,15 +816,15 @@ in
             nativeBuildInputs = [ pkgs.python3 ];
           }
           ''
-            export PYTHONPATH="${scriptRegistry.packageSet.sinnixd}/${pkgs.python3.sitePackages}"
+            export PYTHONPATH="${scriptRegistry.packageSet.agentctl}/${pkgs.python3.sitePackages}"
             ${pkgs.python3}/bin/python - <<'PY'
             import json
             from pathlib import Path
             from tempfile import TemporaryDirectory
 
-            from sinnixd import launch, pueue
-            from sinnixd.config import Config
-            from sinnixd.projects import ProjectCatalog
+            from agentctl import launch, pueue
+            from agentctl.config import Config
+            from agentctl.projects import ProjectCatalog
 
             root = Path("${inputs.self}")
             project = ProjectCatalog([root]).get("sinnix")
@@ -852,7 +852,7 @@ in
             assert started["job_id"] == 7
             assert added[0]["group"] == "bulk"
             assert added[0]["label"] == "sinnix:sinex_cache_prebuild"
-            assert added[0]["command"][0] == "sinnixd-queue-run"
+            assert added[0]["command"][0] == "agentctl-run"
             assert tuple(written["argv"]) == project.environment.command_for(operation.command)
             assert written["timeout_seconds"] == 7200
             assert written["result_kind"] == "exit"

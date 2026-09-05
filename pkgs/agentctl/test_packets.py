@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 from conftest import FakeBd, bead
-from sinnixd.packets import (
+from agentctl.packets import (
     MAX_PROMPT_BYTES,
     MAX_SUBJECT_LENGTH,
     PacketConfig,

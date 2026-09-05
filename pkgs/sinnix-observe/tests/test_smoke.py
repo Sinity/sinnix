@@ -417,7 +417,7 @@ def test_cli_collect_report_offline() -> None:
 
 
 def test_agent_gateway_reads_canonical_agentctl_records(tmp_path, monkeypatch) -> None:
-    root = tmp_path / "sinnixd"
+    root = tmp_path / "agentctl"
     jobs = root / "jobs"
     jobs.mkdir(parents=True)
     job_id = "00000000-0000-4000-8000-000000000001"
@@ -425,7 +425,7 @@ def test_agent_gateway_reads_canonical_agentctl_records(tmp_path, monkeypatch) -
         json.dumps(
             {
                 "job_id": job_id,
-                "unit": f"sinnixd-job-{job_id}.service",
+                "unit": f"agentctl-job-{job_id}.service",
                 "schema_version": 4,
                 "created_at": "2026-08-23T10:00:00Z",
                 "spec": {
@@ -458,12 +458,12 @@ def test_agent_gateway_reads_canonical_agentctl_records(tmp_path, monkeypatch) -
     )
     history_db.commit()
     history_db.close()
-    monkeypatch.setenv("SINNIXD_STATE_DIR", str(root))
+    monkeypatch.setenv("AGENTCTL_STATE_DIR", str(root))
     monkeypatch.setenv("SINNIX_POLYLOGUE_INDEX_DB", str(polylogue))
     out = agent_gateway.collect_agent_gateway()
     assert out["schema"] == "sinnix-observe-agentctl-v1"
     assert out["correlations"][0]["terminal"] is True
-    assert out["correlations"][0]["unit"] == f"sinnixd-job-{job_id}.service"
+    assert out["correlations"][0]["unit"] == f"agentctl-job-{job_id}.service"
     assert out["correlations"][0]["cgroup"] == "/agent.slice/x"
     assert out["jobs"][0]["backend"] == "codex"
     assert (
@@ -472,21 +472,21 @@ def test_agent_gateway_reads_canonical_agentctl_records(tmp_path, monkeypatch) -
 
 
 def test_agent_gateway_bounds_malformed_sources(tmp_path, monkeypatch) -> None:
-    root = tmp_path / "sinnixd"
+    root = tmp_path / "agentctl"
     (root / "jobs").mkdir(parents=True)
     (root / "jobs/broken.json").write_text("{")
     (root / "jobs/declared.json").write_text(
         json.dumps(
             {
                 "job_id": "declared",
-                "unit": "sinnixd-job-declared.service",
+                "unit": "agentctl-job-declared.service",
                 "schema_version": 4,
                 "spec": {"kind": "declared-operation"},
                 "state": {"phase": "succeeded"},
             }
         )
     )
-    monkeypatch.setenv("SINNIXD_STATE_DIR", str(root))
+    monkeypatch.setenv("AGENTCTL_STATE_DIR", str(root))
     out = agent_gateway.collect_agent_gateway()
     assert out["malformed_records"] == ["broken.json"]
     assert out["jobs"] == []
@@ -498,7 +498,7 @@ def test_gateway_rows_use_agentctl_record_fields() -> None:
             "jobs": [
                 {
                     "job_id": "j",
-                    "unit": "sinnixd-job-j.service",
+                    "unit": "agentctl-job-j.service",
                     "backend": "codex",
                     "model": "fixture",
                     "effort": "high",
@@ -513,7 +513,7 @@ def test_gateway_rows_use_agentctl_record_fields() -> None:
         },
         {},
     )
-    assert rows[0]["unit"] == "sinnixd-job-j.service"
+    assert rows[0]["unit"] == "agentctl-job-j.service"
     assert rows[0]["cgroup"] == "/agent.slice/j"
     assert rows[0]["metrics"]["backend"] == "codex"
 

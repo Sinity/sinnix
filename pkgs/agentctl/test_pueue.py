@@ -19,9 +19,9 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from sinnixd import launch, pueue
-from sinnixd.config import Config
-from sinnixd.queue_run import scope_unit_for
+from agentctl import launch, pueue
+from agentctl.config import Config
+from agentctl.queue_run import scope_unit_for
 
 # Recorded from `pueue status --json` on pueue 4.0.4 after one failing task.
 LIVE_STATUS = {
@@ -137,7 +137,7 @@ def test_add_names_the_group_label_directory_and_dependencies(
     task_id = pueue.add(
         group="agent",
         label="polylogue:verify_affected:abc",
-        command=("sinnixd-queue-run", "input.json"),
+        command=("agentctl-run", "input.json"),
         working_directory=tmp_path,
         after=(3, 5),
     )
@@ -158,7 +158,7 @@ def test_add_names_the_group_label_directory_and_dependencies(
         "--after",
         "5",
         "--",
-        "sinnixd-queue-run",
+        "agentctl-run",
         "input.json",
     ]
 
@@ -380,7 +380,7 @@ def test_a_private_pueue_task_places_its_child_in_the_declared_pool_scope(
             f"PYTHONPATH={Path(__file__).parent}",
             sys.executable,
             "-m",
-            "sinnixd.queue_run",
+            "agentctl.queue_run",
             str(launch_path),
         ),
         working_directory=tmp_path,
@@ -391,7 +391,7 @@ def test_a_private_pueue_task_places_its_child_in_the_declared_pool_scope(
     assert finished.succeeded, pueue.log(task_id)
     cgroup = log_path.read_text()
     assert f"/{scope_unit_for(launch_path, 'pytest')}" in cgroup
-    assert "/sinnixd-pueue-pytest.slice/" in cgroup
+    assert "/agentctl-pytest.slice/" in cgroup
 
 
 def test_kill_reaches_the_whole_process_tree(live_pueue: str, tmp_path: Path) -> None:
@@ -427,7 +427,7 @@ def test_kill_is_not_catchable_so_a_wrapper_cannot_clean_up(
     """`pueue kill` is not catchable, which is why the wrapper records a pgid.
 
     Anti-vacuity: if pueue ever delivered a catchable signal, a wrapper could
-    clean up its own detached session and sinnixd's reaping would be dead
+    clean up its own detached session and agentctl's reaping would be dead
     weight. This turns red the day that changes.
     """
     caught = tmp_path / "caught"
@@ -484,13 +484,13 @@ def test_cancelling_a_task_reaps_every_descendant_it_started(
         script.write_text(f'#!/bin/sh\necho "$$" >> "$PIDS"\n{body}')
         script.chmod(0o755)
         scripts[name] = script
-    # The command must be a `sinnixd-queue-run` and one launch input, which is
+    # The command must be a `agentctl-run` and one launch input, which is
     # what identifies a queued task's artifacts and the scope holding its
     # workload; anything else is another program that happens to be queued.
-    wrapper = tmp_path / "sinnixd-queue-run"
+    wrapper = tmp_path / "agentctl-run"
     wrapper.write_text(
         f"#!/bin/sh\nexport PYTHONPATH={Path(__file__).parent}\n"
-        f'exec {sys.executable} -m sinnixd.queue_run "$@"\n'
+        f'exec {sys.executable} -m agentctl.queue_run "$@"\n'
     )
     wrapper.chmod(0o755)
     launch_path = tmp_path / "reaped-job.json"
