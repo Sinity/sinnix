@@ -60,6 +60,9 @@ class Reducer:
 
     def _save_sequence(self) -> None:
         if self.state_path is not None:
+            # Durability: file and directory. The sequence is what makes event
+            # ids monotonic across restarts, so a crash that loses it hands
+            # subscribers ids they have already seen.
             write_json_atomic(
                 self.state_path,
                 {"sequence": self.sequence},
@@ -122,6 +125,9 @@ class Reducer:
             else None,
             "degradation": source_health["degradation"],
         }
+        # Durability: file and directory. status.json is the hub's published
+        # view of the host, so after a crash it must resolve to the newest
+        # observation rather than to the previous cycle's.
         write_json_atomic(self.snapshot_path, snapshot, mode=0o600, fsync=True)
         self._snapshot = snapshot
         self._save_sequence()

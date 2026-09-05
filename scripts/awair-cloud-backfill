@@ -173,6 +173,9 @@ def load_checkpoint(capture_root: Path) -> dict:
 
 
 def save_checkpoint(capture_root: Path, state: dict) -> None:
+    # Durability: atomic only. After a crash the checkpoint may name an
+    # earlier frontier, which costs one re-fetched window on the next
+    # hand-run resume.
     write_json_atomic(checkpoint_path(capture_root), state)
 
 

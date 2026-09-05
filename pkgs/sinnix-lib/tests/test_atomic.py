@@ -1,4 +1,4 @@
-"""The gateway's one publish: indivisible, private, and self-cleaning."""
+"""The one publish: indivisible, private, and self-cleaning."""
 
 from __future__ import annotations
 
@@ -7,8 +7,9 @@ import stat
 from pathlib import Path
 
 import pytest
-from sinnix_agent_gateway import atomic
-from sinnix_agent_gateway.atomic import atomic_publish
+from sinnix_lib import atomic
+from sinnix_lib.atomic import atomic_publish
+from sinnix_lib.atomic_json import write_json_atomic
 
 
 def test_publish_renames_a_complete_temporary_over_the_destination(
@@ -103,3 +104,31 @@ def test_exclusive_publish_never_replaces_an_existing_destination(tmp_path):
     assert atomic_publish(destination, b"second", fsync=False, exclusive=True) is False
     assert destination.read_bytes() == b"first"
     assert [path.name for path in tmp_path.iterdir()] == ["cursor-key"]
+
+
+def test_write_json_atomic_syncs_the_file_and_its_directory_when_asked(
+    tmp_path, monkeypatch
+):
+    """The JSON encoder passes durability through, it does not reimplement it.
+
+    Mutation: hardcode ``fsync=False`` in ``write_json_atomic``'s call to
+    ``atomic_publish`` and ``synced`` stays empty, so a caller that asked for
+    a crash-durable state file would silently get an unsynced one.
+    """
+    synced: list[int] = []
+    real_fsync = os.fsync
+
+    def record(descriptor):
+        synced.append(os.fstat(descriptor).st_mode)
+        real_fsync(descriptor)
+
+    monkeypatch.setattr(atomic.os, "fsync", record)
+    write_json_atomic(tmp_path / "durable.json", {"a": 1}, fsync=True)
+
+    assert len(synced) == 2
+    assert not stat.S_ISDIR(synced[0])
+    assert stat.S_ISDIR(synced[1])
+
+    synced.clear()
+    write_json_atomic(tmp_path / "cheap.json", {"a": 1})
+    assert synced == []

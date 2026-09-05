@@ -12,8 +12,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
+from sinnix_lib.atomic import atomic_publish
+
 from .artifacts import ArtifactService
-from .atomic import atomic_publish
 from .capabilities import Capability, Principal
 from .config import GatewayConfig
 from .schemas import V2ToolEnvelope

@@ -27,6 +27,8 @@ def main() -> None:
         else normalize_cost(raw, args.source)
     )
     ledger.append_jsonl(args.raw_output, redact_json(raw))
+    # Durability: atomic only. The normalized rows are a pure function of the
+    # raw ledger line appended above, which is the durable record.
     atomic_json.write_json_atomic(
         args.output, {"schema": "sinnix-quota-v1", "rows": rows}
     )

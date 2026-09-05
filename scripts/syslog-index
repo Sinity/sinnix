@@ -109,6 +109,8 @@ def main() -> int:
     write_jsonl_atomic(metrics_path, boot_metrics, mode=OUTPUT_MODE)
     give_to_owner(metrics_path)
     manifest_path = output / "manifest.json"
+    # Durability: atomic only, as the manifest itself says -- the raw boot
+    # metric files are canonical and the index is rebuilt from them.
     write_json_atomic(
         manifest_path,
         {

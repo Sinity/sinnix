@@ -11,6 +11,7 @@ python3Packages.buildPythonPackage {
   nativeCheckInputs = [ python3Packages.pytestCheckHook ];
   pythonImportsCheck = [
     "sinnix_lib"
+    "sinnix_lib.atomic"
     "sinnix_lib.atomic_json"
     "sinnix_lib.ledger"
     "sinnix_lib.lock"
