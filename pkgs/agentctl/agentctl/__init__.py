@@ -1,4 +1,4 @@
-"""agentctl: jobs over pueue, lanes over worktrunk, gh and bd."""
+"""agentctl: jobs over pueue, batches over worktrunk, gh and bd."""
 
 from .projects import ProjectAdapter, ProjectCatalog, ProjectOperation
 
