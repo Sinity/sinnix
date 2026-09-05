@@ -1,0 +1,544 @@
+#!/usr/bin/env python3
+# @sinnix-package
+# description: Rank current Hyprland keybindings for practice — stable identities, bounded usage priors, operator comparisons, and an ordered drill manifest
+# runtimeInputs: coreutils
+# pythonPackages: @sinnix-rank-core
+# docs: docs/ranking.md
+
+"""Which keybindings are worth learning next.
+
+The declarative source is modules/features/desktop/hyprland/bindings.nix; the
+evaluated inventory is the Lua that Home Manager renders from it
+(~/.config/hypr/hyprland.lua). This reads the rendered file, never the module
+and never the compositor: the module needs a Nix evaluation to mean anything,
+and `hyprctl binds` needs a running session, so neither can answer the
+question offline. Nothing here writes to either.
+
+Three inputs, kept apart on purpose:
+
+  * the inventory -- what is bound right now, with its chord, action and
+    intent. Bindings that no longer exist are gone from the next manifest
+    whatever ranking state survives them;
+  * operator comparisons -- recorded through the shared ranking store by
+    `sinnix-rank compare keybinds`, exactly like every other domain. This
+    tool does not prompt and does not write comparisons;
+  * a usage prior -- shell-history or census counts, bounded and labelled
+    with where they came from. Usage is evidence about what gets typed, not
+    about what the operator wants to learn, so it seeds the ranking and is
+    displaced by direct comparisons once there are enough of them.
+
+Missing usage is unknown, not zero: a compositor dispatch leaves no shell
+trace, and treating that silence as "never used" would bury exactly the
+bindings worth drilling.
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import hashlib
+import json
+import math
+import os
+import re
+import sqlite3
+import sys
+from pathlib import Path
+
+from rank_core import Item, Store, fit
+
+MANIFEST_SCHEMA = "sinnix.keybind.manifest/1"
+USAGE_SCHEMA = "sinnix.keybind.usage/1"
+
+DEFAULT_INVENTORY = Path(
+    os.environ.get(
+        "SINNIX_HYPR_LUA", str(Path.home() / ".config/hypr/hyprland.lua")
+    )
+)
+CAPTURE_ROOT = Path(os.environ.get("SINNIX_RANK_ROOT", "/realm/data/activity/ranking"))
+DERIVED = Path(os.environ.get("SINNIX_DERIVED_ROOT", "/realm/data/derived"))
+ATUIN_DB = Path(
+    os.environ.get("ATUIN_DB", str(Path.home() / ".local/share/atuin/history.db"))
+)
+
+DEFAULT_DOMAIN = "keybinds"
+
+#: Comparisons needed before a binding's fitted theta fully displaces its
+#: usage prior. Four is one round-robin position in a small choice set: enough
+#: that the operator has placed the binding against several rivals, few enough
+#: that a deliberate answer is not outvoted by history for a whole session.
+EVIDENCE_THRESHOLD = 4.0
+
+#: Ceiling on how far a usage prior can move a binding, in the same log-odds
+#: units as theta. A prior that can outrun the fit is not a prior.
+USAGE_PRIOR_CAP = 1.0
+
+#: How much a binding's standard error adds to its drill priority. Practice
+#: is worth most where the ranking is least sure, but an unknown binding must
+#: not outrank a known-valuable one on ignorance alone.
+UNCERTAINTY_WEIGHT = 0.5
+
+BIND_HEADER = re.compile(r'^hl\.bind\("(?P<chord>(?:[^"\\]|\\.)*)", \((?P<action>.*)\), \{$')
+FLAG_LINE = re.compile(r'^\s*\["(?P<key>[^"]+)"\]\s*=\s*(?P<value>.*?),?$')
+EXEC_CMD = re.compile(r'^hl\.dsp\.exec_cmd\("(?P<command>(?:[^"\\]|\\.)*)"\)$')
+STORE_PATH = re.compile(r"/nix/store/[a-z0-9]{32}-")
+
+
+def now_iso() -> str:
+    return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def unquote_lua(text: str) -> str:
+    return text.replace('\\"', '"').replace("\\\\", "\\")
+
+
+# --------------------------------------------------------------- inventory
+
+
+def binding_id(chord: str, intent: str) -> str:
+    """The binding's declarative identity, hashed.
+
+    Chord plus intent, and deliberately not the action: the action carries
+    /nix/store paths that change on every unrelated rebuild, and orphaning a
+    binding's whole comparison history because a dependency was bumped would
+    make the ranking unusable. Re-chording a binding, or changing what it is
+    for, is a different binding and gets a different id.
+    """
+    digest = hashlib.sha256(f"{chord}\x00{intent}".encode()).hexdigest()
+    return f"kb-{digest[:12]}"
+
+
+def parse_inventory(path: Path) -> list[dict]:
+    """The `hl.bind` calls in a rendered Hyprland Lua config, in file order."""
+    lines = path.read_text(encoding="utf-8").splitlines()
+    bindings: list[dict] = []
+    index = 0
+    while index < len(lines):
+        header = BIND_HEADER.match(lines[index])
+        if header is None:
+            index += 1
+            continue
+        flags: dict[str, str] = {}
+        index += 1
+        while index < len(lines) and lines[index] != "})":
+            flag = FLAG_LINE.match(lines[index])
+            if flag is not None:
+                flags[flag.group("key")] = flag.group("value").strip()
+            index += 1
+        index += 1
+        chord = unquote_lua(header.group("chord"))
+        intent = unquote_lua(flags.get("description", "").strip('"'))
+        action = header.group("action")
+        bindings.append(
+            {
+                "id": binding_id(chord, intent),
+                "chord": chord,
+                "intent": intent,
+                "action": action,
+                "locked": flags.get("locked") == "true",
+                "mouse": flags.get("mouse") == "true",
+                "repeating": flags.get("repeating") == "true",
+            }
+        )
+    return bindings
+
+
+def shell_command(action: str) -> str | None:
+    """The command a binding runs, or None when it dispatches inside Hyprland."""
+    match = EXEC_CMD.match(action)
+    if match is None:
+        return None
+    return unquote_lua(match.group("command"))
+
+
+def command_head(command: str) -> str | None:
+    """The program a shell action actually runs, store paths and launcher
+    prefixes stripped, so it can be looked for in shell history."""
+    tokens = command.split()
+    while tokens and (
+        tokens[0] in ("uwsm", "app", "sudo", "exec", "--", "-n")
+        or "=" in tokens[0]
+    ):
+        tokens.pop(0)
+    if not tokens:
+        return None
+    return Path(STORE_PATH.sub("", tokens[0])).name or None
+
+
+# ------------------------------------------------------------ usage priors
+
+
+def usage_from_file(bindings: list[dict], path: Path) -> dict[str, dict]:
+    """Counts keyed by binding id or by chord, as a census export supplies."""
+    raw = json.loads(path.read_text())
+    counts = raw.get("counts", raw)
+    records: dict[str, dict] = {}
+    for entry in bindings:
+        key = None
+        if entry["id"] in counts:
+            key = entry["id"]
+        elif entry["chord"] in counts:
+            key = entry["chord"]
+        if key is None:
+            records[entry["id"]] = {
+                "state": "unavailable",
+                "source": str(path),
+                "reason": "no record for this binding in the usage file",
+            }
+            continue
+        records[entry["id"]] = {
+            "state": "measured",
+            "source": str(path),
+            "count": int(counts[key]),
+            "matched": key,
+        }
+    return records
+
+
+def usage_from_atuin(bindings: list[dict], db: Path, window_days: int) -> dict[str, dict]:
+    """How often each binding's command was typed at a shell instead.
+
+    Shell history is a prior, never a preference: it says which capabilities
+    the operator reaches for, and reaching for one by typing it is precisely
+    the case where learning its chord would pay. A binding that dispatches
+    inside the compositor leaves no trace here, and that is recorded as
+    unavailable rather than as zero.
+    """
+    records: dict[str, dict] = {}
+    heads: dict[str, str] = {}
+    for entry in bindings:
+        command = shell_command(entry["action"])
+        head = command_head(command) if command else None
+        if head is None:
+            records[entry["id"]] = {
+                "state": "unavailable",
+                "source": "atuin",
+                "reason": (
+                    "compositor dispatch, not a shell command"
+                    if command is None
+                    else "no resolvable command head"
+                ),
+            }
+            continue
+        heads[entry["id"]] = head
+
+    if not heads:
+        return records
+    if not db.is_file():
+        for item_id, head in heads.items():
+            records[item_id] = {
+                "state": "unavailable",
+                "source": "atuin",
+                "reason": f"no history database at {db}",
+                "command": head,
+            }
+        return records
+
+    cutoff_ns = int(
+        (
+            dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=window_days)
+        ).timestamp()
+        * 1_000_000_000
+    )
+    connection = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        for item_id, head in heads.items():
+            (count,) = connection.execute(
+                "select count(*) from history where deleted_at is null "
+                "and timestamp >= ? and (command = ? or command like ?)",
+                (cutoff_ns, head, f"{head} %"),
+            ).fetchone()
+            records[item_id] = {
+                "state": "measured",
+                "source": "atuin",
+                "count": int(count),
+                "command": head,
+                "window_days": window_days,
+            }
+    finally:
+        connection.close()
+    return records
+
+
+def usage_unavailable(bindings: list[dict]) -> dict[str, dict]:
+    return {
+        entry["id"]: {
+            "state": "unavailable",
+            "source": "none",
+            "reason": "no usage source requested",
+        }
+        for entry in bindings
+    }
+
+
+def prior_theta(record: dict, max_count: int, cap: float) -> float:
+    """A bounded prior in theta's own units.
+
+    Unknown usage contributes nothing -- the binding sits where the anchor
+    puts it. A measured zero is a real observation and gets the floor, which
+    is why the two states are kept distinct all the way through.
+    """
+    if record.get("state") != "measured":
+        return 0.0
+    if max_count <= 0:
+        return 0.0
+    share = math.log1p(record["count"]) / math.log1p(max_count)
+    return max(-cap, min(cap, cap * (2.0 * share - 1.0)))
+
+
+# ------------------------------------------------------------- the manifest
+
+
+def domain_dir(domain: str) -> Path:
+    return CAPTURE_ROOT / domain
+
+
+def usage_path(domain: str) -> Path:
+    return domain_dir(domain) / "usage-prior.json"
+
+
+def load_usage(domain: str) -> dict:
+    path = usage_path(domain)
+    if not path.is_file():
+        return {"schema": USAGE_SCHEMA, "source": "none", "records": {}}
+    return json.loads(path.read_text())
+
+
+def build_manifest(
+    bindings: list[dict],
+    domain: str,
+    *,
+    inventory_source: str,
+    evidence_threshold: float = EVIDENCE_THRESHOLD,
+    uncertainty_weight: float = UNCERTAINTY_WEIGHT,
+    usage_cap: float = USAGE_PRIOR_CAP,
+) -> dict:
+    store = Store(domain_dir(domain))
+    comparisons = store.load_comparisons()
+    current_ids = [entry["id"] for entry in bindings]
+    result = fit(current_ids, comparisons)
+
+    usage = load_usage(domain)
+    usage_records = usage.get("records", {})
+    measured = [
+        record["count"]
+        for record in usage_records.values()
+        if record.get("state") == "measured"
+    ]
+    max_count = max(measured) if measured else 0
+
+    rows = []
+    for entry in bindings:
+        record = result.records.get(entry["id"])
+        theta = record.theta if record else 0.0
+        se = record.se if record else float("inf")
+        matches = record.matches if record else 0.0
+        component = record.component if record else 0
+        usage_record = usage_records.get(
+            entry["id"], {"state": "unavailable", "source": usage.get("source", "none")}
+        )
+        prior = prior_theta(usage_record, max_count, usage_cap)
+        weight = min(1.0, matches / evidence_threshold) if evidence_threshold else 1.0
+        value = weight * theta + (1.0 - weight) * prior
+        if weight >= 1.0:
+            basis = "comparisons"
+        elif matches > 0:
+            basis = "blend"
+        elif usage_record.get("state") == "measured":
+            basis = "usage-prior"
+        else:
+            basis = "unmeasured"
+        rows.append(
+            {
+                **{k: entry[k] for k in ("id", "chord", "action", "intent")},
+                "locked": entry["locked"],
+                "mouse": entry["mouse"],
+                "priority": value + uncertainty_weight * se,
+                "value": value,
+                "theta": theta,
+                "uncertainty": se,
+                "matches": matches,
+                "component": component,
+                "provenance": {
+                    "basis": basis,
+                    "evidence_weight": weight,
+                    "comparisons": matches,
+                    "prior_theta": prior,
+                    "usage": usage_record,
+                },
+            }
+        )
+    rows.sort(key=lambda row: (-row["priority"], row["id"]))
+    return {
+        "schema": MANIFEST_SCHEMA,
+        "generated_at": now_iso(),
+        "inventory_source": inventory_source,
+        "domain": domain,
+        "domain_dir": str(domain_dir(domain)),
+        "evidence_threshold": evidence_threshold,
+        "uncertainty_weight": uncertainty_weight,
+        "usage_prior_cap": usage_cap,
+        "usage_source": usage.get("source", "none"),
+        "comparisons": len(comparisons),
+        "bindings": rows,
+    }
+
+
+# ---------------------------------------------------------------- commands
+
+
+def read_inventory(args: argparse.Namespace) -> list[dict]:
+    path = Path(args.inventory)
+    if not path.is_file():
+        raise SystemExit(
+            f"no rendered Hyprland config at {path} -- pass --inventory, or set "
+            f"SINNIX_HYPR_LUA"
+        )
+    bindings = parse_inventory(path)
+    if not bindings:
+        raise SystemExit(f"{path} contains no hl.bind calls")
+    return bindings
+
+
+def cmd_inventory(args: argparse.Namespace) -> int:
+    bindings = read_inventory(args)
+    if args.json:
+        print(json.dumps(bindings, indent=2))
+        return 0
+    for entry in bindings:
+        print(f"{entry['id']}  {entry['chord']:<32}  {entry['intent']}")
+    print(f"\n{len(bindings)} bindings from {args.inventory}")
+    return 0
+
+
+def cmd_sync(args: argparse.Namespace) -> int:
+    bindings = read_inventory(args)
+    store = Store(domain_dir(args.domain))
+    existing = store.load_items()
+    new_items = [
+        Item(
+            id=entry["id"],
+            label=f"{entry['chord']} — {entry['intent']}",
+            meta={
+                "chord": entry["chord"],
+                "intent": entry["intent"],
+                "action": entry["action"],
+            },
+        )
+        for entry in bindings
+        if entry["id"] not in existing
+    ]
+    store.add_items(new_items)
+    retired = sorted(set(existing) - {entry["id"] for entry in bindings})
+    print(
+        f"domain {args.domain!r}: {len(new_items)} new, "
+        f"{len(bindings) - len(new_items)} already registered, "
+        f"{len(retired)} registered item(s) no longer in the inventory"
+    )
+    print(f"compare them with: sinnix-rank compare {args.domain}")
+    return 0
+
+
+def cmd_usage(args: argparse.Namespace) -> int:
+    bindings = read_inventory(args)
+    if args.source == "file":
+        if not args.usage_file:
+            raise SystemExit("--source file needs --usage-file")
+        records = usage_from_file(bindings, Path(args.usage_file))
+        source = str(args.usage_file)
+    elif args.source == "atuin":
+        records = usage_from_atuin(bindings, Path(args.atuin_db), args.window_days)
+        source = "atuin"
+    else:
+        records = usage_unavailable(bindings)
+        source = "none"
+
+    payload = {
+        "schema": USAGE_SCHEMA,
+        "generated_at": now_iso(),
+        "source": source,
+        "window_days": args.window_days,
+        "records": records,
+    }
+    path = usage_path(args.domain)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    states: dict[str, int] = {}
+    for record in records.values():
+        states[record["state"]] = states.get(record["state"], 0) + 1
+    print(f"usage prior -> {path}")
+    print("  " + ", ".join(f"{state}: {n}" for state, n in sorted(states.items())))
+    return 0
+
+
+def cmd_manifest(args: argparse.Namespace) -> int:
+    bindings = read_inventory(args)
+    manifest = build_manifest(
+        bindings,
+        args.domain,
+        inventory_source=str(args.inventory),
+        evidence_threshold=args.evidence_threshold,
+        uncertainty_weight=args.uncertainty_weight,
+    )
+    if args.limit:
+        manifest["bindings"] = manifest["bindings"][: args.limit]
+    text = json.dumps(manifest, indent=2) + "\n"
+    if args.json:
+        print(text, end="")
+    else:
+        for i, row in enumerate(manifest["bindings"], start=1):
+            print(
+                f"{i:>3}. {row['chord']:<32} {row['intent']}\n"
+                f"     priority={row['priority']:+.3f} value={row['value']:+.3f} "
+                f"se={row['uncertainty']:.3f} basis={row['provenance']['basis']}"
+            )
+    if args.output:
+        out = Path(args.output)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(text)
+        print(f"manifest -> {out}", file=sys.stderr)
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--inventory", default=str(DEFAULT_INVENTORY))
+    parser.add_argument("--domain", default=DEFAULT_DOMAIN)
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    inventory = sub.add_parser("inventory", help="the bindings currently rendered")
+    inventory.add_argument("--json", action="store_true")
+    inventory.set_defaults(func=cmd_inventory)
+
+    sync = sub.add_parser("sync", help="register current bindings as ranking items")
+    sync.set_defaults(func=cmd_sync)
+
+    usage = sub.add_parser("usage", help="import a bounded, labelled usage prior")
+    usage.add_argument("--source", default="none", choices=["none", "atuin", "file"])
+    usage.add_argument("--usage-file", default=None)
+    usage.add_argument("--atuin-db", default=str(ATUIN_DB))
+    usage.add_argument("--window-days", type=int, default=90)
+    usage.set_defaults(func=cmd_usage)
+
+    manifest = sub.add_parser("manifest", help="the ordered drill manifest")
+    manifest.add_argument("--json", action="store_true")
+    manifest.add_argument("--limit", type=int, default=0)
+    manifest.add_argument(
+        "--output",
+        default=None,
+        help=f"write the manifest here (deck-forge default: {DERIVED / 'keybinds' / 'manifest.json'})",
+    )
+    manifest.add_argument("--evidence-threshold", type=float, default=EVIDENCE_THRESHOLD)
+    manifest.add_argument("--uncertainty-weight", type=float, default=UNCERTAINTY_WEIGHT)
+    manifest.set_defaults(func=cmd_manifest)
+
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

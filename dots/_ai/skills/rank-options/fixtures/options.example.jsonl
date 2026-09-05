@@ -1,0 +1,4 @@
+{"id": "opt-hub-page", "label": "Render the comparison as a hub page"}
+{"id": "opt-phone-deck", "label": "Ship it as a phone drill deck"}
+{"id": "opt-cli-only", "label": "Keep it a terminal-only pass"}
+{"id": "opt-nothing", "label": "Do not build a comparison surface at all"}
