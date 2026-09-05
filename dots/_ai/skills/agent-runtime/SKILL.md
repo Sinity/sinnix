@@ -83,10 +83,15 @@ replaced by ->` through `wt switch --create` (the project's `wt.toml` hooks
   it to the worktree head; the last result enqueues the landing task.
 - `agentctl batch land <run>` integrates, verifies, reviews, publishes,
   records acceptance, closes satisfied beads and removes worker worktrees.
-  It is the landing task's body and is re-run by hand after a named failure.
+  It is the landing task's body and is re-run by hand after a named failure;
+  one landing per run at a time. `--keep-integration` lands the integration
+  worktree's current HEAD without re-merging.
+- `agentctl batch abandon <run> [--reason R]` unclaims the members, removes
+  the worktrees holding no unpreserved work and marks the manifest
+  abandoned; refused while the landing task runs.
 - `agentctl batch resume <run> --worker <w>` queues a fresh agent into the
-  worker's existing worktree with the original packet. Uncommitted work
-  there belongs to the new agent.
+  worker's existing worktree with a resume packet (`.agentctl/resume-<n>.md`)
+  that carries the original. Uncommitted work there belongs to the new agent.
 - `agentctl batch status <run>`, `agentctl batch list [project]`.
 
 ## The screen
@@ -114,9 +119,10 @@ Agents have `lane` on PATH:
 - Wedged job: `job get`, `job logs`, `job cancel` once, confirm the task is
   terminal in `pueue status` before restarting.
 - Dead worker: the worktree keeps its work; commit it, then `batch resume
---worker` for a fresh agent or `wt remove` to abandon.
+--worker` for a fresh agent, or `batch abandon <run>` to release the run.
 - Failed landing: `batch status` names the code, `job logs <landing task>`
-  the cause; fix it, then `batch land <run>` again.
+  the cause; fix it, then `batch land <run>` again, or `batch land <run>
+--keep-integration` after fixing the integration worktree by hand.
 - `pueue has no group X`: the descriptor names a pool pueued does not have;
   the groups are declared with pueued in the CLI feature.
 - Environment mismatch: use the declared operation. Do not duplicate its

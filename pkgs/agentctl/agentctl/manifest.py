@@ -27,6 +27,7 @@ REVIEW_PROFILE = "review"
 # Every code a BatchRefusal may carry, with its meaning. `docs/agentctl.md`
 # renders this table; a refusal outside it is a programming error.
 REFUSALS: dict[str, str] = {
+    "abandoned": "the run was abandoned; nothing runs again",
     "already_accepted": "the run has an acceptance record; nothing runs again",
     "ambiguous_run": "the suffix names more than one run",
     "candidate_mismatch": "the result's candidate_sha is not the worktree HEAD",
@@ -37,11 +38,13 @@ REFUSALS: dict[str, str] = {
     "foreign_beads": "the result covers beads outside the worker",
     "harness": "the harness is neither `queued` nor `external`",
     "head_moved": "the PR head is no longer the verified candidate",
+    "integration_conflict_markers": "a file the candidate changes carries a conflict marker",
     "integration_dirty": "the integration agent left an unclean tree",
     "integration_failed": "the integration task did not succeed",
     "integration_incomplete": "a worker branch is not merged into the candidate",
     "integration_worktree_missing": "the integration branch is registered without a directory that could be unregistered",
     "invalid_result": "the worker result does not validate against its schema",
+    "landing_in_progress": "another landing of this run holds the landing lock or its task is running",
     "manifest": "the run manifest is unreadable or not this contract",
     "members": "a bead cannot join the batch (`refusals` names each reason)",
     "no_candidate_profile": "the descriptor declares no [workspace].verify.candidate",
@@ -98,6 +101,8 @@ class Run:
     landing: dict[str, Any]
     acceptance: dict[str, Any] | None
     prepared: bool
+    # `{reason, at, residual}` once `batch abandon` released the run.
+    abandoned: dict[str, Any] | None = None
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> Run:
@@ -117,6 +122,7 @@ class Run:
                 if value.get("acceptance")
                 else None,
                 prepared=bool(value.get("prepared")),
+                abandoned=dict(value["abandoned"]) if value.get("abandoned") else None,
             )
         except (KeyError, TypeError) as error:
             raise BatchRefusal(
@@ -137,7 +143,13 @@ class Run:
             "landing": dict(self.landing),
             "acceptance": dict(self.acceptance) if self.acceptance else None,
             "prepared": self.prepared,
+            "abandoned": dict(self.abandoned) if self.abandoned else None,
         }
+
+    @property
+    def live(self) -> bool:
+        """Whether the run still holds its members: neither landed nor abandoned."""
+        return self.acceptance is None and self.abandoned is None
 
     def worker(self, worker_id: str) -> dict[str, Any]:
         for item in self.workers:
@@ -160,6 +172,14 @@ def runs_dir(config: Config) -> Path:
     return config.state_dir / "runs"
 
 
+def _private_runs_dir(config: Config) -> Path:
+    """The runs directory, created or kept at mode 0700."""
+    directory = runs_dir(config)
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(directory, 0o700)
+    return directory
+
+
 def manifest_path(config: Config, run_id: str) -> Path:
     return runs_dir(config) / f"{run_id}.json"
 
@@ -174,14 +194,18 @@ def _dump(document: Mapping[str, Any]) -> str:
 
 def _write(path: Path, document: Mapping[str, Any]) -> None:
     temporary = path.with_suffix(".json.tmp")
-    temporary.write_text(_dump(document))
+    descriptor = os.open(
+        temporary, os.O_CREAT | os.O_TRUNC | os.O_WRONLY | os.O_NOFOLLOW, 0o600
+    )
+    with os.fdopen(descriptor, "w") as handle:
+        handle.write(_dump(document))
     os.replace(temporary, path)
 
 
 def create(config: Config, run: Run) -> None:
     """Write the manifest once; a second writer for the same id is refused."""
     path = manifest_path(config, run.run_id)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    _private_runs_dir(config)
     try:
         descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     except FileExistsError as error:
@@ -205,12 +229,21 @@ def load(config: Config, run_id: str) -> Run:
 
 
 @contextmanager
-def _flock(lock: Path) -> Iterator[None]:
-    lock.parent.mkdir(parents=True, exist_ok=True)
-    with lock.open("w") as handle:
-        fcntl.flock(handle, fcntl.LOCK_EX)
+def _flock(lock: Path, *, blocking: bool = True) -> Iterator[bool]:
+    """Hold ``lock``; yields False without holding it when non-blocking and taken."""
+    lock.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(lock.parent, 0o700)
+    descriptor = os.open(lock, os.O_CREAT | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(descriptor, "w") as handle:
         try:
-            yield
+            fcntl.flock(
+                handle, fcntl.LOCK_EX if blocking else fcntl.LOCK_EX | fcntl.LOCK_NB
+            )
+        except BlockingIOError:
+            yield False
+            return
+        try:
+            yield True
         finally:
             fcntl.flock(handle, fcntl.LOCK_UN)
 
@@ -223,9 +256,25 @@ def project_lock_path(config: Config, project_id: str) -> Path:
     return runs_dir(config) / f"{project_id}.lock"
 
 
-def project_locked(config: Config, project_id: str) -> Iterator[None]:
+def project_locked(config: Config, project_id: str) -> Iterator[bool]:
     """One worktree creation or removal per project at a time: `wt` is not reentrant."""
     return _flock(project_lock_path(config, project_id))
+
+
+def land_lock_path(config: Config, run_id: str) -> Path:
+    return runs_dir(config) / f"{run_id}.land.lock"
+
+
+@contextmanager
+def landing_locked(config: Config, run_id: str) -> Iterator[None]:
+    """Hold the run's landing lock for the caller's whole duration, or refuse."""
+    with _flock(land_lock_path(config, run_id), blocking=False) as held:
+        if not held:
+            raise BatchRefusal(
+                "landing_in_progress",
+                f"run {run_id} is being landed by another process",
+            )
+        yield
 
 
 def update(config: Config, run_id: str, fn: Callable[[dict[str, Any]], None]) -> Run:

@@ -12,6 +12,7 @@ from typing import Any
 
 import pytest
 from agentctl import batch, gitcmd, github, launch, manifest, start, worktrunk
+from agentctl import landing as landing_module
 from agentctl.batch import BatchError, BatchRefusal
 from agentctl.config import Config
 from agentctl.projects import ProjectAdapter, load_project_adapter
@@ -107,6 +108,13 @@ class FakeGit:
     # Commits that do not descend from the base commit.
     off_base: set[str] = field(default_factory=set)
     ancestry: list[tuple[str, str]] = field(default_factory=list)
+    # `git grep` hits for conflict markers, by worktree path.
+    conflict_markers: dict[str, str] = field(default_factory=dict)
+    # Worktree path -> porcelain status lines.
+    status: dict[str, str] = field(default_factory=dict)
+    # Commit -> refs holding it, for `for-each-ref --contains`.
+    holders: dict[str, list[str]] = field(default_factory=dict)
+    greps: list[tuple[str, ...]] = field(default_factory=list)
 
     def is_ancestor(self, ancestor: str, sha: str) -> bool:
         frontier = [sha]
@@ -143,6 +151,7 @@ class FakeGit:
         *arguments: str,
         timeout: float = 60,
         error: type[Exception] = BatchError,
+        ok_statuses: tuple[int, ...] = (0,),
     ) -> str:
         verb = arguments[0]
         key = str(path)
@@ -176,7 +185,12 @@ class FakeGit:
         if verb == "diff":
             return "a.py\nb.py"
         if verb == "status":
-            return ""
+            return self.status.get(key, "")
+        if verb == "grep":
+            self.greps.append(arguments)
+            return self.conflict_markers.get(key, "")
+        if verb == "for-each-ref":
+            return "\n".join(self.holders.get(self.heads.get(key, SHA), []))
         if verb == "merge-base":
             if arguments[1] == "--is-ancestor":
                 ancestor, descendant = arguments[2], arguments[3]
@@ -254,9 +268,19 @@ class Harness:
             self.config, self.project, list(seeds), reader=self.beads, **kwargs
         )
 
-    def land(self, run_id: str) -> dict[str, Any]:
+    def land(self, run_id: str, **kwargs: Any) -> dict[str, Any]:
         return batch.land(
-            self.config, self.project, run_id, beads=self.beads, sleep=lambda _s: None
+            self.config,
+            self.project,
+            run_id,
+            beads=self.beads,
+            sleep=lambda _s: None,
+            **kwargs,
+        )
+
+    def abandon(self, run_id: str, **kwargs: Any) -> dict[str, Any]:
+        return batch.abandon(
+            self.config, self.project, run_id, beads=self.beads, **kwargs
         )
 
     def file_result(
@@ -497,6 +521,9 @@ def test_two_starts_on_the_same_member_are_refused_by_the_claim(
     with pytest.raises(BatchRefusal, match="claimed by someone-else"):
         harness.start("fx-other")
     harness.beads.beads["fx-other"]["status"] = "open"
+    with pytest.raises(BatchRefusal, match="claimed by someone-else"):
+        harness.start("fx-other")
+    harness.beads.beads["fx-other"]["assignee"] = None
     original = harness.beads.claim
 
     def race(bead_id: str, *, actor: str) -> None:
@@ -663,12 +690,18 @@ def test_resume_requeues_the_worker_and_a_landing_behind_it(
     assert resumed["job"]["label"] == f"fixture:worker:{run['run_id']}:fx-lead".replace(
         "worker", "resume"
     )
-    prompt = (Path(worker["worktree"]) / ".agentctl" / "prompt.md").read_text()
+    original = (Path(worker["worktree"]) / ".agentctl" / "prompt.md").read_text()
+    assert original.startswith("# Dispatch packet")
+    prompt = (Path(worker["worktree"]) / ".agentctl" / "resume-2.md").read_text()
     assert (
         prompt.startswith("# Resume packet") and "## Original dispatch packet" in prompt
     )
+    assert worker["prompt_path"].endswith("/.agentctl/resume-2.md")
+    assert worker["result_path"].endswith("/.agentctl/resume-2.result.json")
     argv = read_launch(harness.config, harness.pueue.task(worker["task_id"]))["argv"]
     assert argv[argv.index("--reasoning-effort") + 1] == "high"
+    assert argv[argv.index("--last-file") + 1].endswith("resume-2.result.json")
+    assert argv[3].endswith(f"fx-lead {worker['result_path']}")
     assert read_launch(harness.config, harness.pueue.task(worker["task_id"]))[
         "binding"
     ] == {
@@ -1206,3 +1239,179 @@ def test_resume_replaces_a_queued_landing_so_it_waits_on_the_current_workers(
     assert sorted(landing.dependencies) == sorted(
         worker["task_id"] for worker in second["workers"]
     )
+
+
+# ---------------------------------------------------------------- lock / markers / keep / abandon
+
+
+def test_a_second_landing_of_the_same_run_is_refused_while_the_first_holds_the_lock(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Breaks if two landings can integrate, verify or publish the same run at once."""
+    run = prepared_run(harness, "fx-solo")
+    seen: list[str] = []
+    integrate = landing_module._integrate
+
+    def nested(*args: Any, **kwargs: Any) -> str:
+        with pytest.raises(BatchRefusal, match="landing_in_progress") as refused:
+            harness.land(run["run_id"])
+        seen.append(refused.value.code)
+        return integrate(*args, **kwargs)
+
+    monkeypatch.setattr(landing_module, "_integrate", nested)
+    landed = harness.land(run["run_id"])
+    assert seen == ["landing_in_progress"]
+    assert landed["acceptance"]["candidate_sha"] == SHA
+    lock = manifest.land_lock_path(harness.config, run["run_id"])
+    assert lock.is_file() and lock.stat().st_mode & 0o777 == 0o600
+    # A refused second landing records no failure on the manifest.
+    assert manifest.load(harness.config, run["run_id"]).landing["failure"] is None
+
+
+def test_a_candidate_with_conflict_markers_is_refused_after_integration(
+    harness: Harness,
+) -> None:
+    run = prepared_run(harness, "fx-lead", "fx-solo")
+    harness.git.conflict_on = {f"batch/{run['run_id']}/fx-solo"}
+    integration = str(
+        harness.project.workspace.root / f"fixture-batch-{run['run_id']}-integration"
+    )
+    harness.git.conflict_markers[integration] = "a.py:3:<<<<<<< HEAD\na.py:9:>>>>>>> x"
+
+    with pytest.raises(BatchRefusal, match="integration_conflict_markers") as refused:
+        harness.land(run["run_id"])
+
+    assert refused.value.to_dict()["markers"] == [
+        "a.py:3:<<<<<<< HEAD",
+        "a.py:9:>>>>>>> x",
+    ]
+    grep = harness.git.greps[-1]
+    assert grep[:3] == ("grep", "-nE", landing_module.CONFLICT_MARKER)
+    assert grep[-2:] == ("a.py", "b.py")
+    stored = manifest.load(harness.config, run["run_id"])
+    assert stored.landing["failure"]["code"] == "integration_conflict_markers"
+    assert harness.git.pushes == [] and harness.beads.closed == []
+
+
+def test_a_clean_merge_is_scanned_for_markers_too(harness: Harness) -> None:
+    run = prepared_run(harness, "fx-solo")
+    landed = harness.land(run["run_id"])
+    assert landed["acceptance"]["candidate_sha"] == SHA
+    assert any(call[0] == "grep" for call in harness.git.greps)
+
+
+def test_a_failing_verdict_is_recorded_and_a_hand_fix_lands_with_keep_integration(
+    harness: Harness,
+) -> None:
+    """Breaks if a rejected review leaves no verdict, or a kept head is re-merged away."""
+    run = prepared_run(harness, "fx-solo")
+    harness.verdict = verdict(verdict="fail", evidence=["off by one in a.py:3"])
+    with pytest.raises(BatchRefusal, match="review_rejected"):
+        harness.land(run["run_id"])
+    stored = manifest.load(harness.config, run["run_id"])
+    assert stored.landing["review_verdict"]["verdict"] == "fail"
+    assert stored.landing["review_verdict"]["evidence"] == ["off by one in a.py:3"]
+    assert stored.landing["review_verdict"]["candidate_sha"] == SHA
+
+    # The operator fixes the integration worktree by hand: a new commit on it.
+    integration = stored.landing["integration_worktree"]
+    fixed = "1" * 40
+    harness.git.parents[fixed] = (SHA,)
+    harness.git.heads[integration] = fixed
+    harness.git.branches[f"batch/{run['run_id']}/fx-solo"] = SHA
+    harness.verdict = verdict()
+    merges_before = list(harness.git.merges)
+
+    landed = harness.land(run["run_id"], keep_integration=True)
+
+    assert harness.git.merges == merges_before
+    assert landed["acceptance"]["candidate_sha"] == fixed
+    assert landed["landing"]["review_verdict"]["verdict"] == "pass"
+    assert harness.git.pushes[-1][-1] == f"{fixed}:refs/heads/master"
+
+
+def test_keep_integration_refuses_a_dirty_or_unmerged_worktree(
+    harness: Harness,
+) -> None:
+    run = prepared_run(harness, "fx-lead", "fx-solo")
+    with pytest.raises(BatchRefusal, match="integration_worktree_missing"):
+        harness.land(run["run_id"], keep_integration=True)
+    harness.verdict = verdict(verdict="fail")
+    with pytest.raises(BatchRefusal, match="review_rejected"):
+        harness.land(run["run_id"])
+    integration = manifest.load(harness.config, run["run_id"]).landing[
+        "integration_worktree"
+    ]
+    harness.git.status[integration] = " M a.py"
+    with pytest.raises(BatchRefusal, match="integration_dirty"):
+        harness.land(run["run_id"], keep_integration=True)
+    harness.git.status[integration] = ""
+    harness.git.heads[integration] = OTHER
+    harness.git.parents[OTHER] = (BASE,)
+    with pytest.raises(BatchRefusal, match="integration_incomplete"):
+        harness.land(run["run_id"], keep_integration=True)
+
+
+def test_abandon_releases_claims_removes_safe_worktrees_and_frees_the_members(
+    harness: Harness,
+) -> None:
+    """Breaks if an abandoned run keeps its claims, loses unpreserved work, or blocks a restart."""
+    run = harness.start("fx-lead", "fx-solo")
+    run_id = run["run_id"]
+    lead, solo = run["workers"]
+    harness.pueue.fail(lead["task_id"], exit_code=1)
+    harness.pueue.succeed(solo["task_id"])
+    harness.pueue.dependency_fail(run["landing"]["task_id"])
+    # The lead worktree carries a commit no other ref holds; solo's is merged
+    # elsewhere; the integration worktree exists at the base.
+    harness.git.heads[lead["worktree"]] = OTHER
+    harness.git.holders[SHA] = [f"refs/heads/batch/{run_id}/fx-solo", "refs/heads/keep"]
+    harness.git.holders[OTHER] = [f"refs/heads/batch/{run_id}/fx-lead"]
+
+    abandoned = harness.abandon(run_id, reason="canary failed")
+
+    record = abandoned["abandoned"]
+    assert record["reason"] == "canary failed" and record["at"]
+    assert record["residual"] == [
+        f"batch/{run_id}/fx-lead: worktree kept; commits only on batch/{run_id}/fx-lead"
+    ]
+    assert {item[0] for item in harness.beads.released} == {
+        "fx-lead",
+        "fx-member",
+        "fx-solo",
+    }
+    assert harness.beads.beads["fx-solo"]["status"] == "open"
+    assert harness.wt.removed == [f"batch/{run_id}/fx-solo"]
+    assert f"batch/{run_id}/fx-lead" in harness.wt.trees
+    stage = batch.status(harness.config, run_id)["stage"]
+    assert stage == "abandoned"
+    with pytest.raises(BatchRefusal, match="abandoned"):
+        harness.land(run_id)
+    with pytest.raises(BatchRefusal, match="abandoned"):
+        harness.abandon(run_id)
+
+    again = harness.start("fx-lead", "fx-solo")
+    assert again["run_id"] != run_id and not again["existing"]
+
+
+def test_abandon_refuses_while_the_landing_task_runs_and_drops_a_queued_one(
+    harness: Harness,
+) -> None:
+    run = harness.start("fx-solo")
+    landing_id = run["landing"]["task_id"]
+    harness.pueue.succeed(run["workers"][0]["task_id"])
+    harness.pueue.running(landing_id)
+    with pytest.raises(BatchRefusal, match="landing_in_progress"):
+        harness.abandon(run["run_id"])
+    assert harness.beads.released == []
+
+    harness.pueue.queue(landing_id)
+    harness.git.status[run["workers"][0]["worktree"]] = "?? new.py"
+    abandoned = harness.abandon(run["run_id"])
+    assert landing_id in harness.pueue.removed
+    assert abandoned["abandoned"]["residual"] == [
+        f"batch/{run['run_id']}/fx-solo: worktree kept; uncommitted changes"
+    ]
+    assert harness.wt.removed == []
+    with pytest.raises(BatchRefusal, match="abandoned"):
+        batch.resume(harness.config, harness.project, run["run_id"], "fx-solo")

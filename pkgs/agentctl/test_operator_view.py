@@ -235,7 +235,7 @@ def test_render_shows_groups_attention_jobs_runs_with_timing_and_ready() -> None
     assert "! job 3 fixture:check failed exit 2 at" in text and "(20m ago)" in text
     assert "! run run-2 landing dependency-failed: job logs 7" in text
     assert "== jobs: 5 active" in text
-    assert "== runs: 4 open, 1 landed" in text
+    assert "== runs: 4 open, 1 landed, 0 abandoned" in text
     rows = [
         line.split() for line in text.splitlines() if line.strip().startswith("run-")
     ]
@@ -251,7 +251,7 @@ def test_render_shows_groups_attention_jobs_runs_with_timing_and_ready() -> None
 def test_render_says_nothing_needs_attention_when_nothing_does() -> None:
     text = operator_view.render(snapshot(tasks=(), runs=(), ready=()))
     assert "== nothing needs attention" in text
-    assert "== runs: 0 open, 0 landed" in text
+    assert "== runs: 0 open, 0 landed, 0 abandoned" in text
 
 
 def test_age_and_local_clock_read_iso_stamps() -> None:
