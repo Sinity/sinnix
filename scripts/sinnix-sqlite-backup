@@ -256,22 +256,35 @@ def backup_database(
             raw_wal_path.unlink(missing_ok=True)
         target = sqlite3.connect(raw_path, timeout=5.0)
         target.execute("PRAGMA busy_timeout=5000")
-        page_count = target.execute("PRAGMA page_count").fetchone()[0]
-        if page_count <= FULL_INTEGRITY_PAGE_LIMIT:
-            integrity = target.execute("PRAGMA integrity_check").fetchone()
-            if integrity != ("ok",):
-                raise RuntimeError(f"SQLite integrity_check failed: {integrity!r}")
-        else:
-            # Opening the copied database and reading its schema proves the
-            # SQLite header and WAL can be consumed, which is weaker than the
-            # walk --immutable-source performs above.
-            target.execute("PRAGMA schema_version").fetchone()
+        # The copy carries any WAL sidecar, so the walk consumes both before
+        # anything is published, same as the immutable route.
+        target.execute(f"PRAGMA mmap_size={raw_path.stat().st_size}")
+        started = time.monotonic()
+        check = check_immutable_snapshot(
+            target, started + check_budget_seconds if check_budget_seconds else None
+        )
+        check_seconds = time.monotonic() - started
         target.close()
         target = None
+        compress_started = time.monotonic()
         compress(raw_path, compressed_path)
+        compress_seconds = time.monotonic() - compress_started
+        archive_bytes = compressed_path.stat().st_size
         os.chmod(compressed_path, 0o600)
         os.replace(compressed_path, output_path)
         os.chmod(output_path, 0o600)
+        print(
+            "sqlite-backup receipt:"
+            f" source={source_path}"
+            f" source_bytes={source_path.stat().st_size}"
+            f" check={check}"
+            " verdict=ok"
+            f" check_seconds={check_seconds:.1f}"
+            f" archive={output_path}"
+            f" archive_bytes={archive_bytes}"
+            " archive_check=zstd-t:ok"
+            f" compress_seconds={compress_seconds:.1f}"
+        )
     finally:
         if target is not None:
             target.close()
@@ -294,8 +307,8 @@ def main() -> int:
         type=float,
         default=0.0,
         help=(
-            "fail instead of publishing when the immutable snapshot's integrity"
-            " walk outlasts this many seconds (0 leaves it unbounded)"
+            "fail instead of publishing when the integrity walk outlasts this"
+            " many seconds (0 leaves it unbounded)"
         ),
     )
     args = parser.parse_args()

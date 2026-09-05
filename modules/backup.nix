@@ -1154,19 +1154,6 @@ in
 
           sinnix-sqlite-backup "$src" "$final"
 
-          # Retention is a judgment call, not a measurement: polylogued is
-          # parked (near-zero churn today), and the largest db (source.db,
-          # 1.8G raw) compresses to a fraction of that, so 5 generations per
-          # db is cheap. Widen once real write-rate data exists after the
-          # daemon un-parks.
-          find ${lib.escapeShellArg polylogueBackupRoot} \
-            -maxdepth 1 \
-            -type f \
-            -name "$base"'-*.db.zst' \
-            -printf '%T@ %p\n' \
-            | sort -rn \
-            | awk 'NR > 5 { print substr($0, index($0, $2)) }' \
-            | xargs -r rm -f
         done
       '';
     })
