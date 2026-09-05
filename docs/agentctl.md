@@ -247,7 +247,10 @@ follows.
 A worker exits with the JSON document `worker.schema.json` describes:
 `candidate_sha` (the worktree HEAD when filed), `beads` with each acceptance
 criterion marked `satisfied`, `unsatisfied` or `superseded` with evidence,
-`unresolved` findings, and `verification` receipts.
+`unresolved` findings, and `verification` receipts. `batch result` refuses a
+`candidate_sha` that is not the worktree head (`candidate_mismatch`), is the
+run's base commit (`empty_candidate`), does not descend from it
+(`candidate_off_base`), or covers a bead outside the worker (`foreign_beads`).
 
 ## Descriptors
 
