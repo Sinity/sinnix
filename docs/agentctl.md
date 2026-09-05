@@ -17,23 +17,23 @@ command, the run manifest of a batch, and one operator screen.
 
 ## Verbs
 
-| Verb                                                                                                      | Does                                                                                                                                                                                |
-| --------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `project list \| get [p] \| operations [p]`                                                               | the configured descriptors (`/etc/sinnix/agentctl.json` lists the roots)                                                                                                            |
-| `job start [p] <op> [--workspace <path>] [--wait] [-- args…]`                                             | `pueue add` in the operation's pool, label `<p>:<op>`, running `agentctl-run <launch.json>`; extra arguments are appended to the declared `exec`                                    |
-| `job fire [p] <op>`                                                                                       | what a schedule timer runs: `job start` on the main checkout, skipped while the same label is queued or running                                                                     |
-| `job list [--project p] [--active]`                                                                       | `pueue status --json` reduced to job rows                                                                                                                                           |
-| `job get \| logs \| result \| cancel \| retry \| wait <id>`                                               | one task by pueue id; `logs` reads the bounded log, `result` the typed artifact, `cancel` drops a queued task or stops a running task's unit, `retry` is `pueue restart --in-place` |
-| `job clean <id> \| --all-terminal \| --daemon-era`                                                        | delete a terminal task's launch input, log, result, outcome and cancel marker, then `pueue remove`; `--daemon-era` deletes the state subtrees no verb reads; never by age           |
-| `batch start [p] <bead>… [--worker a,b]… [--workers queued\|external] [--backend B --model M --effort E]` | validate the members, write the run manifest, claim the beads, create one worktree per worker, queue the workers (or write their packets) and the landing task behind them          |
-| `batch land <run>`                                                                                        | the landing task's body: integrate, verify, review, publish, record acceptance, close satisfied beads, remove worktrees; re-runnable                                                |
-| `batch status <run>` / `batch list [p]`                                                                   | the manifest joined with pueue task state and the landing PR                                                                                                                        |
-| `batch result <run> <worker> <result.json>`                                                               | file a schema-validated result for a worker another harness ran; releases the stashed landing task once every worker has one                                                        |
-| `batch resume <run> --worker <w>`                                                                         | queue a fresh agent into the worker's existing worktree with the original packet                                                                                                    |
-| `view [p]`                                                                                                | queue groups, what needs attention, active jobs, open runs with each worker's stage, ready beads                                                                                    |
-| `events tail [--lines N] [--follow] [--project p]`                                                        | the event spool (`/realm/state/agentctl/events.jsonl`)                                                                                                                              |
-| `schedule apply`                                                                                          | make the transient timer set equal the declared schedules                                                                                                                           |
-| `backpressure tick`                                                                                       | pause or resume one pool against host stall                                                                                                                                         |
+| Verb                                                                                                      | Does                                                                                                                                                                                                                                       |
+| --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `project list \| get [p] \| operations [p]`                                                               | the configured descriptors (`/etc/sinnix/agentctl.json` lists the roots)                                                                                                                                                                   |
+| `job start [p] <op> [--workspace <path>] [--wait] [-- args…]`                                             | `pueue add` in the operation's pool, label `<p>:<op>`, running `agentctl-run <launch.json>`; extra arguments are appended to the declared `exec`                                                                                           |
+| `job fire [p] <op>`                                                                                       | what a schedule timer runs: `job start` on the main checkout, skipped while the same label is queued or running                                                                                                                            |
+| `job list [--project p] [--active]`                                                                       | `pueue status --json` reduced to job rows                                                                                                                                                                                                  |
+| `job get \| logs \| result \| cancel \| retry \| wait <id>`                                               | one task by pueue id; `logs` reads the bounded log, `result` the typed artifact, `cancel` drops a queued task or stops a running task's unit, `retry` is `pueue restart --in-place`                                                        |
+| `job clean <id> \| --all-terminal \| --daemon-era`                                                        | delete a terminal task's launch input, log, result, outcome and cancel marker, then `pueue remove`; a task pueue has already forgotten is found by its launch input; `--daemon-era` deletes the state subtrees no verb reads; never by age |
+| `batch start [p] <bead>… [--worker a,b]… [--workers queued\|external] [--backend B --model M --effort E]` | validate the members, write the run manifest, claim the beads, create one worktree per worker, queue the workers (or write their packets) and the landing task behind them                                                                 |
+| `batch land <run>`                                                                                        | the landing task's body: integrate, verify, review, publish, record acceptance, close satisfied beads, remove worktrees; re-runnable                                                                                                       |
+| `batch status <run>` / `batch list [p]`                                                                   | the manifest joined with pueue task state and the landing PR                                                                                                                                                                               |
+| `batch result <run> <worker> <result.json>`                                                               | file a schema-validated result for a worker another harness ran; releases the stashed landing task once every worker has one                                                                                                               |
+| `batch resume <run> --worker <w>`                                                                         | queue a fresh agent into the worker's existing worktree with the original packet                                                                                                                                                           |
+| `view [p]`                                                                                                | queue groups, what needs attention, active jobs, open runs with each worker's stage, ready beads                                                                                                                                           |
+| `events tail [--lines N] [--follow] [--project p]`                                                        | the event spool (`/realm/state/agentctl/events.jsonl`)                                                                                                                                                                                     |
+| `schedule apply`                                                                                          | make the transient timer set equal the declared schedules                                                                                                                                                                                  |
+| `backpressure tick`                                                                                       | pause or resume one pool against host stall                                                                                                                                                                                                |
 
 The project is `--project`, a leading positional naming a configured project
 or a checkout path, or the checkout enclosing the working directory. A run
@@ -88,8 +88,7 @@ The run ends in one outcome, written to `jobs/<ref>.outcome`, carried on the
 | `vanished`      | 126  | the unit could not be observed after a failing wait        |
 | `slot_occupied` | 75   | a single-slot pool was held by another unit                |
 
-pueue's completion callback (declared by the CLI feature) appends its own
-finish event. `job logs` and `job result` read the paths the launch input
+`job logs` and `job result` read the paths the launch input
 named, which must be regular files under the task's own working directory
 or the state directory; there is no job ledger. The launch input stays so
 `pueue restart` re-runs the same command.
@@ -372,10 +371,9 @@ unattended batches declares a scheduled operation whose `exec` runs
 `agentctl`), installs `agentctl`, `wt`, `pueue` and `gh` as system
 packages, persists `~/.local/state/agentctl`, and declares the timers:
 `agentctl-backpressure` (every minute) and `agentctl-schedule` (every
-fifteen minutes, and two minutes after login). pueued itself, its groups,
-its completion callback and the `agentctl-work.slice` coordinator
-placement, the pueue pool groups, and their pool slices are declared by the
-CLI feature and runtime registry (`modules/features/cli/core.nix`,
+fifteen minutes, and two minutes after login). pueued itself, its
+`agentctl-work.slice` placement, the pueue pool groups, and their pool
+slices are declared by the CLI feature and runtime registry (`modules/features/cli/core.nix`,
 `flake/data/runtime-defaults.nix`).
 
 `nix build .#agentctl` runs the package suite, which drives a private pueued
