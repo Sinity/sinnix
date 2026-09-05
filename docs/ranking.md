@@ -11,15 +11,20 @@ comparison log.
 
 - `store` — one directory per domain: `items.jsonl` (append-only registry,
   last write per id wins) and `comparisons.jsonl` (append-only, deleted only
-  by a tombstone record, so undo and audit stay possible);
+  by a tombstone record, so undo and audit stay possible). `read_log` replays
+  any such log — the live records, every id it has ever carried, and the
+  tombstoned ones — and `append_log` writes one entry to it;
 - `fit` — Plackett-Luce top-1 MM with virtual-tie anchors, returning theta,
   standard error, comparison count, and connected component per item. A pair
   is the size-2 case of a choice set, so there is one code path;
 - `stopping` — `top_k_stability`: sample theta from its posterior repeatedly
   and report how often the top-k set comes out the same;
 - `selection` — which set to present next: uncertainty anchor plus a
-  rank-window companion, periodic random exploration, recency exclusion, and
-  deliberate cross-component bridging;
+  rank-window companion, periodic random exploration, recency exclusion, no
+  re-asking of a set already put to the operator, and cross-component bridging
+  on the first pick of a disconnected domain. Every frontend enters through
+  `build_selector(item_ids, comparisons, fit)`, so one domain state has one
+  next question whichever surface asks it;
 - `draw` — which item to hand over now: `top`, `softmax`, or Thompson
   sampling (the default).
 
@@ -78,8 +83,9 @@ sinnix elicit rank wallpaper                 # fitted order + `explain`
 sinnix elicit explain wallpaper              # which features the choices track
 ```
 
-It fits through `rank_core` and owns only its own surfaces. Two things it does
-that the engine does not:
+It fits, selects and replays its log through `rank_core`, and owns only its own
+surfaces: `ask`, `session` and `pairs` ask the same next question `sinnix-rank
+next` would. Two things it does that the engine does not:
 
 - a record naming an id that is not in `items.json` is dropped, where the
   engine would fit a comparison-only id. The roster is the operator's declared

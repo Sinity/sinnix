@@ -18,6 +18,9 @@
           name,
           suiteDir,
           scripts,
+          # Where the suite sits in the reproduced tree. A skill's tests
+          # resolve the repository root by walking up from their own file, so
+          # they only find the scripts they drive under their real path.
           # Sibling sources the suite imports directly (a collector module
           # inlined into a unit, for instance) must sit where the suite
           # expects them, next to its tests directory.
