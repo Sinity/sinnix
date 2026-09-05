@@ -47,7 +47,8 @@ from .pueue import PueueError
 
 # The bounded artifacts a queued command may leave behind. A command that
 # prints more is truncated with a marker, never allowed to fill the disk.
-MAX_LOG_BYTES = 64_000
+# `job clean` is the only retention rule.
+MAX_LOG_BYTES = 8_000_000
 MAX_RESULT_BYTES = 64_000
 OVERFLOW_MARKER = "\n[agentctl: output truncated]\n"
 

@@ -32,7 +32,8 @@ did not succeed.
   `<project>:<operation>`. The job id is the pueue task id. The descriptor
   owns environment, pool, result contract and timeout; extra arguments are
   appended to its `exec`.
-- `job list [--project p] [--active]`, `job get <id>`, `job logs <id>`,
+- `job list [--project p] [--active] [--all]` (newest first, 40 rows unless
+  `--all`), `job get <id>`, `job logs <id>` (the log is capped at 8 MB),
   `job result <id>` (the typed artifact for `json`/`pytest` results, else the
   outcome), `job wait <id>`, `job retry <id>` (`pueue restart --in-place`).
 - `job cancel <id>`: a queued task is removed; a running task's unit is
@@ -92,14 +93,17 @@ replaced by ->` through `wt switch --create` (the project's `wt.toml` hooks
 - `agentctl batch resume <run> --worker <w>` queues a fresh agent into the
   worker's existing worktree with a resume packet (`.agentctl/resume-<n>.md`)
   that carries the original. Uncommitted work there belongs to the new agent.
-- `agentctl batch status <run>`, `agentctl batch list [project]`.
+- `agentctl batch status <run>` (each worker's prompt path; for an external
+  worker without a result, the exact `batch result` line), `agentctl batch
+list [project]`.
 
 ## The screen
 
 `agentctl view <project>`: queue groups (running/queued/paused), what needs
-attention (failed jobs, failed workers, failed landings), active jobs with
-start time and elapsed, every open run with each worker's stage, since and
-job, the landing task and what follows next, and the ready beads.
+attention (failed jobs, workers and landings of the last six hours), active
+jobs with start time and elapsed, every open run with each worker's stage,
+since and job, the landing task and what follows next, and the ready beads
+(epics and decisions left out).
 `agentctl events tail [--follow] [--project p]` is the same over time.
 
 ## Worker toolbelt

@@ -57,6 +57,29 @@ def test_job_start_get_logs_and_wait_round_trip(
     assert line.startswith("job 1 fixture:check succeeded finished ")
 
 
+def test_job_list_is_newest_first_and_bounded_unless_all(
+    fake_pueue: FakePueue, cli_config: Config, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from agentctl.operator_view import DEFAULT_JOB_ROWS
+
+    for _ in range(DEFAULT_JOB_ROWS + 3):
+        assert cli.main(["job", "start", "fixture", "check"]) == 0
+        capsys.readouterr()
+    assert cli.main(["--json", "job", "list"]) == 0
+    listed = json.loads(capsys.readouterr().out)
+    assert [row["job_id"] for row in listed][:3] == [
+        DEFAULT_JOB_ROWS + 3,
+        DEFAULT_JOB_ROWS + 2,
+        DEFAULT_JOB_ROWS + 1,
+    ]
+    assert len(listed) == DEFAULT_JOB_ROWS
+    assert cli.main(["--json", "job", "list", "--all"]) == 0
+    assert len(json.loads(capsys.readouterr().out)) == DEFAULT_JOB_ROWS + 3
+    assert cli.main(["job", "list"]) == 0
+    # The fixture tasks started on 2026-09-03, which is not today: the date shows.
+    assert "09-03 " in capsys.readouterr().out
+
+
 def test_job_start_infers_the_project_from_the_working_directory(
     fake_pueue: FakePueue,
     cli_config: Config,
@@ -264,6 +287,11 @@ def test_batch_reads_accept_the_run_suffix_and_shorten_ids_unless_full(
     text = capsys.readouterr().out
     assert text.startswith("run 0123abcd fixture external base aaaaaaaa stage")
     assert "started 2026" not in text and "candidate bbbbbbbb" in text
+    assert "  w1: prompt /nowhere/.agentctl/prompt.md\n" in text
+    assert (
+        "    next: agentctl batch result fixture-20260903-080000-0123abcd w1 "
+        "/nowhere/.agentctl/prompt.result.json\n" in text
+    )
     assert cli.main(["batch", "status", "0123abcd", "--full"]) == 0
     text = capsys.readouterr().out
     assert "run fixture-20260903-080000-0123abcd" in text and "b" * 40 in text

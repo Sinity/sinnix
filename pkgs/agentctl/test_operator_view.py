@@ -27,6 +27,7 @@ def task(
     result: str | None = None,
     exit_code: int | None = None,
     group: str = "normal",
+    ended_at: str = "2026-09-03T08:40:00+00:00",
 ) -> Task:
     return Task(
         task_id=task_id,
@@ -42,7 +43,7 @@ def task(
         started_at=None
         if status in {"Queued", "Stashed"}
         else "2026-09-03T08:30:00+00:00",
-        ended_at="2026-09-03T08:40:00+00:00" if status == "Done" else None,
+        ended_at=ended_at if status == "Done" else None,
     )
 
 
@@ -248,6 +249,46 @@ def test_render_shows_groups_attention_jobs_runs_with_timing_and_ready() -> None
     assert "== ready: 1 beads" in text and "fx-9" in text
 
 
+def test_attention_is_limited_to_the_last_six_hours() -> None:
+    """Breaks if a failure from days ago keeps the screen shouting."""
+    old = "2026-09-02T08:40:00+00:00"
+    snap = snapshot(
+        tasks=(
+            task(
+                3,
+                "fixture:check",
+                status="Done",
+                result="Failed",
+                exit_code=2,
+                ended_at=old,
+            ),
+            task(
+                5,
+                "fixture:worker:run-2:fx-4",
+                status="Done",
+                result="Failed",
+                exit_code=1,
+                group="agent",
+                ended_at=old,
+            ),
+            task(
+                7,
+                "fixture:land:run-2",
+                status="Done",
+                result="DependencyFailed",
+                group="fixture-land",
+                ended_at=old,
+            ),
+        ),
+        runs=(run("run-2", [worker("fx-4", task_id=5)], landing_task=7),),
+    )
+    text = operator_view.render(snap)
+    assert "== nothing needs attention" in text
+    assert "run-2" in text
+    fresh = operator_view.render(snapshot())
+    assert "! job 3 fixture:check failed" in fresh and "! run run-2" in fresh
+
+
 def test_render_says_nothing_needs_attention_when_nothing_does() -> None:
     text = operator_view.render(snapshot(tasks=(), runs=(), ready=()))
     assert "== nothing needs attention" in text
@@ -299,7 +340,13 @@ def test_collect_reads_each_source_and_keeps_going_when_one_is_down(
     monkeypatch.setattr(
         operator_view,
         "SubprocessBdReader",
-        lambda root: FakeBd(beads={"fx-1": bead("fx-1", "One")}),
+        lambda root: FakeBd(
+            beads={
+                "fx-1": bead("fx-1", "One"),
+                "fx-epic": bead("fx-epic", "Epic", issue_type="epic"),
+                "fx-decision": bead("fx-decision", "Decide", issue_type="decision"),
+            }
+        ),
     )
 
     collected = operator_view.collect(config, project, now=NOW)

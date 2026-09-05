@@ -46,7 +46,7 @@ from .manifest import (
     load,
     resolve_run_id,
 )
-from .operator_view import Output, local_clock, table
+from .operator_view import DEFAULT_JOB_ROWS, Output, local_clock, table
 from .projects import (
     ProjectAdapter,
     ProjectConfigError,
@@ -157,9 +157,14 @@ def parser() -> argparse.ArgumentParser:
     fire.add_argument("target", nargs="+", metavar="[project] operation")
     _project_option(fire)
     _output_arguments(fire)
-    listing = job_verbs.add_parser("list")
+    listing = job_verbs.add_parser(
+        "list", help=f"the newest {DEFAULT_JOB_ROWS} tasks, newest first"
+    )
     listing.add_argument("--project", help="filter by project id")
-    listing.add_argument("--active", action="store_true")
+    listing.add_argument("--active", action="store_true", help="only unfinished tasks")
+    listing.add_argument(
+        "--all", action="store_true", help="every task, not just the newest"
+    )
     _output_arguments(listing)
     for name in ("get", "logs", "result", "cancel", "retry"):
         one = job_verbs.add_parser(name)
@@ -369,6 +374,9 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         rows = launch.list_jobs(arguments.project)
         if arguments.active:
             rows = [row for row in rows if not row["terminal"]]
+        rows.sort(key=lambda row: row["job_id"], reverse=True)
+        if not arguments.all:
+            rows = rows[:DEFAULT_JOB_ROWS]
         out.read(rows, out.jobs_table(rows))
         return EXIT_OK
     if verb == "get":
