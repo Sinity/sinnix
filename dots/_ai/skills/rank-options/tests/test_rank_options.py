@@ -88,7 +88,9 @@ class Rank:
         ).stdout.strip()
 
     def status(self, domain: str, *flags: str) -> dict:
-        return json.loads(self.ok("status", domain, "--json", "--seed", "7", *flags).stdout)
+        return json.loads(
+            self.ok("status", domain, "--json", "--seed", "7", *flags).stdout
+        )
 
     def order(self, domain: str) -> list[str]:
         return [entry["id"] for entry in self.status(domain)["items"]]
@@ -115,7 +117,9 @@ def rank(tmp_path: Path) -> Rank:
     return Rank(tmp_path / "ranking")
 
 
-def seed_round_robin(rank: Rank, domain: str, *, flip: tuple[str, str] | None = None) -> None:
+def seed_round_robin(
+    rank: Rank, domain: str, *, flip: tuple[str, str] | None = None
+) -> None:
     assert rank.add(domain, FOUR_OPTIONS).returncode == 0
     for left, right, winner in ROUND_ROBIN:
         if flip == (left, right):
@@ -211,15 +215,15 @@ def test_changed_option_under_an_existing_id_is_refused(rank: Rank):
     fresh = rank.add("revision", [("opt-hub-page-v2", "A different option entirely")])
     assert fresh.returncode == 0
     assert rank.item_ids("revision")[-1] == "opt-hub-page-v2"
-    assert rank.status("revision")["evidence"]["operator_comparisons"] == len(ROUND_ROBIN)
+    assert rank.status("revision")["evidence"]["operator_comparisons"] == len(
+        ROUND_ROBIN
+    )
 
     revised = rank.add(
         "revision", [("opt-phone-deck", "Ship it as a phone deck")], "--revise"
     )
     assert revised.returncode == 0
-    labels = {
-        entry["id"]: entry["label"] for entry in rank.status("revision")["items"]
-    }
+    labels = {entry["id"]: entry["label"] for entry in rank.status("revision")["items"]}
     assert labels["opt-phone-deck"] == "Ship it as a phone deck"
 
 
@@ -307,9 +311,7 @@ def repo_text_contains(needle: str) -> list[str]:
 
 def test_private_option_text_stays_in_local_ranking_state(rank: Rank, tmp_path: Path):
     canary = f"canary-{uuid.uuid4().hex}"
-    options = [
-        (f"opt-private-{i}", f"{canary} option {i}") for i in range(1, 5)
-    ]
+    options = [(f"opt-private-{i}", f"{canary} option {i}") for i in range(1, 5)]
     assert rank.add("private", options).returncode == 0
     rank.record("private", options[0][0], options[1][0], options[0][0])
     rank.record("private", options[1][0], options[2][0], options[1][0])

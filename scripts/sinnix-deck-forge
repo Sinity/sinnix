@@ -50,6 +50,7 @@ DERIVED = Path(os.environ.get("SINNIX_DERIVED_ROOT", "/realm/data/derived"))
 
 ATUIN_DB = Path(os.environ.get("ATUIN_DB", Path.home() / ".local/share/atuin/history.db"))
 KEYLOG = ACTIVITY / "keylog" / "logs"
+KEYBIND_MANIFEST = DERIVED / "keybinds" / "manifest.json"
 
 
 def now_iso() -> str:
@@ -457,6 +458,99 @@ def analyse_typing(days: int, max_lines: int) -> dict | None:
     }
 
 
+# ---------------------------------------------------------------- keybinds
+
+
+KEYBIND_MANIFEST_SCHEMA = "sinnix.keybind.manifest/1"
+
+
+def build_keybind_deck(manifest_path: Path, n_trials: int, rng: random.Random) -> dict | None:
+    """Recall of the chords the ranking says are worth learning next.
+
+    The forge does not decide which bindings matter: `sinnix-rank-keybinds`
+    fits that from the operator's own comparisons and a bounded usage prior
+    and hands over an ordered manifest. This consumes that order verbatim --
+    promoting the top eligible bindings, in manifest order -- so the only way
+    to change what gets drilled is to change the ranking.
+
+    Distractors are other current bindings' intents, which is what makes the
+    trial a recall question: every option is something this machine really
+    does.
+    """
+    if not manifest_path.is_file():
+        print(
+            f"forge: no keybind manifest at {manifest_path}; run "
+            f"`sinnix-rank-keybinds manifest --output {manifest_path}`",
+            file=sys.stderr,
+        )
+        return None
+    manifest = json.loads(manifest_path.read_text())
+    if manifest.get("schema") != KEYBIND_MANIFEST_SCHEMA:
+        print(
+            f"forge: {manifest_path} is not a {KEYBIND_MANIFEST_SCHEMA} manifest",
+            file=sys.stderr,
+        )
+        return None
+
+    eligible = [
+        row
+        for row in manifest.get("bindings", [])
+        if row.get("chord") and row.get("intent")
+    ]
+    intents = [row["intent"] for row in eligible]
+    if len(set(intents)) < 4:
+        print(
+            f"forge: only {len(set(intents))} distinct binding intents; "
+            f"skipping the keybind deck",
+            file=sys.stderr,
+        )
+        return None
+
+    trials: list[dict] = []
+    for row in eligible[:n_trials]:
+        pool = [intent for intent in intents if intent != row["intent"]]
+        distractors = rng.sample(pool, 3)
+        options = [*distractors, row["intent"]]
+        rng.shuffle(options)
+        trials.append(
+            {
+                "prompt": f"What does {row['chord']} do?",
+                "options": options,
+                "correct": options.index(row["intent"]),
+                "tag": (
+                    f"priority={row['priority']:.2f} "
+                    f"basis={row.get('provenance', {}).get('basis', 'unknown')}"
+                ),
+            }
+        )
+    if not trials:
+        return None
+    return deck(
+        deck_id="keybind-recall",
+        title="Keybinds worth learning",
+        engine="forced_choice",
+        trials=trials,
+        blurb="Name what the chord does. Order comes from your own comparisons.",
+        seconds=max(60, len(trials) * 6),
+        config={
+            "manifest_generated_at": manifest.get("generated_at"),
+            "ranking_domain": manifest.get("domain"),
+        },
+    )
+
+
+def cmd_keybinds(args: argparse.Namespace) -> int:
+    d = build_keybind_deck(Path(args.manifest), args.trials, random.Random(args.seed))
+    if d is None:
+        return 0
+    p = write_deck(d, dry_run=args.dry_run)
+    print(
+        f"forge: keybind deck ({len(d['trials'])} trials)" + (f" -> {p}" if p else ""),
+        file=sys.stderr if args.dry_run else sys.stdout,
+    )
+    return 0
+
+
 def cmd_typing(args: argparse.Namespace) -> int:
     """Analyse, record, and deliberately do not emit a phone deck.
 
@@ -516,6 +610,7 @@ def cmd_fermi(args: argparse.Namespace) -> int:
 def cmd_all(args: argparse.Namespace) -> int:
     cmd_shell(args)
     cmd_fermi(args)
+    cmd_keybinds(args)
     cmd_typing(args)
     return 0
 
@@ -527,11 +622,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--trials", type=int, default=20)
     p.add_argument("--days", type=int, default=2, help="keystroke day-files to analyse")
     p.add_argument("--max-lines", type=int, default=4_000_000, help="per keystroke day-file")
+    p.add_argument("--manifest", default=str(KEYBIND_MANIFEST),
+                   help="ordered keybind manifest from sinnix-rank-keybinds")
     sub = p.add_subparsers(dest="command", required=True)
 
     for name, fn, help_text in (
         ("shell", cmd_shell, "recall deck from your own shell history"),
         ("fermi", cmd_fermi, "estimation deck checkable against the lake"),
+        ("keybinds", cmd_keybinds, "recall deck for the highest-priority current keybindings"),
         ("typing", cmd_typing, "weak-digraph analysis (writes a profile, not a deck)"),
         ("all", cmd_all, "every generator"),
     ):

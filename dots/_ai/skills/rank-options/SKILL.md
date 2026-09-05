@@ -83,14 +83,14 @@ a later refit can tell one sitting from another.
 
 `status --json` returns the fitted order plus an `evidence` block. Report both.
 
-| Field | Meaning |
-| --- | --- |
-| `items[].theta` | fitted strength, higher is preferred |
-| `items[].se` | standard error; a large one means the order is guesswork |
-| `items[].component` | connected comparison component |
+| Field                | Meaning                                                   |
+| -------------------- | --------------------------------------------------------- |
+| `items[].theta`      | fitted strength, higher is preferred                      |
+| `items[].se`         | standard error; a large one means the order is guesswork  |
+| `items[].component`  | connected comparison component                            |
 | `stability.p_stable` | fraction of posterior samples whose top-k is the same set |
-| `evidence.settled` | whether the order is supported at all |
-| `evidence.reasons` | why it is not, when it is not |
+| `evidence.settled`   | whether the order is supported at all                     |
+| `evidence.reasons`   | why it is not, when it is not                             |
 
 **Never present an unsettled fit as a decision.** If `evidence.settled` is
 false, say the order is provisional and name the reason from
@@ -106,8 +106,8 @@ exists for genuinely-identical items whose distinction is in metadata; using
 it because the error was in the way is a bug you are about to record as data.
 
 **Changed option sets.** Re-running `add` with the same ids and labels is a
-no-op, so resuming is free. Re-running with the *same id and a different
-label* is refused: that is a different option wearing an old identity. Give
+no-op, so resuming is free. Re-running with the _same id and a different
+label_ is refused: that is a different option wearing an old identity. Give
 the new option a new id — `opt-hub-page-v2` — and the comparisons already
 recorded against `opt-hub-page` keep meaning what they meant. `--revise` is
 only for fixing the wording of an option that did not change.
