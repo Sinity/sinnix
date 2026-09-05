@@ -548,7 +548,6 @@ in
           sinex-runtime-timer = {
             unit = "sinex-runtime.timer";
             kind = "timer";
-            resourceClass = "capture-runtime";
           };
           sinexd = {
             unit = "sinexd.service";
@@ -581,7 +580,6 @@ in
           sinex-postgres-dump-timer = {
             unit = "sinex-postgres-dump.timer";
             kind = "timer";
-            resourceClass = "backup-maintenance";
           };
         }
         // lib.optionalAttrs activationProfile.document {

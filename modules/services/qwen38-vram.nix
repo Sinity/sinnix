@@ -26,6 +26,8 @@ mkServiceModule {
       mode = "socket-proxy";
       publicEndpoint = "127.0.0.1:${toString helpers.data.ports.qwen38Vram.public}";
       backendEndpoint = "127.0.0.1:${toString helpers.data.ports.qwen38Vram.backend}";
+      # Strict full offload: the load either fits the card or fails, so the
+      # readiness window matches muse-glimmer's rather than ollama's lazy one.
       idleTimeout = "900s";
       readinessTimeout = 600;
       exclusiveResource = "gpu-inference";

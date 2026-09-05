@@ -22,7 +22,13 @@ mkServiceModule {
       mode = "socket-proxy";
       publicEndpoint = "127.0.0.1:${toString helpers.data.ports.ollama.public}";
       backendEndpoint = "127.0.0.1:${toString helpers.data.ports.ollama.backend}";
+      # ~10x the cold-start cost of the daily-driver model (~20-23s); idling
+      # out is cheaper than a wasted reload.
       idleTimeout = "240s";
+      # Ollama is largely exempt from the cold-start-failure problem the
+      # readiness probe exists for: the daemon binds its port immediately and
+      # loads models lazily per request. 30s is ample for the daemon itself.
+      readinessTimeout = 30;
       exclusiveResource = "gpu-inference";
       dependsOn = [ "ollama-proxy" ];
       # Model pulls are exactly the long-running-consumer case the

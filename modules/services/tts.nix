@@ -16,13 +16,16 @@ mkAiService {
   description = "OpenedAI-Speech TTS bridge (Piper + XTTS, containerized)";
   docs = "docs/local-ai-activation.md";
   unit = "podman-openedai-speech.service";
-  endpoint = "127.0.0.1:${toString helpers.data.ports.tts.public}";
   backendKind = "container";
   requiresCuda = true;
   activation = {
     mode = "socket-proxy";
+    publicEndpoint = "127.0.0.1:${toString helpers.data.ports.tts.public}";
     backendEndpoint = "127.0.0.1:${toString helpers.data.ports.tts.backend}";
+    # Cold start to a 200 from /v1/audio/speech (Piper voice) is ~17s; XTTS
+    # voice cloning is heavier. 300s/60s covers headroom for both voices.
     idleTimeout = "300s";
+    readinessTimeout = 60;
     exclusiveResource = "gpu-inference";
     dependsOn = [ "tts-proxy" ];
   };
