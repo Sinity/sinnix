@@ -100,6 +100,7 @@
           name = "sinnix-census";
           suiteDir = ../../pkgs/sinnix-census/tests;
           scripts = [ "sinnix-census" ];
+          extraPythonPackages = [ (pkgs.callPackage ../../pkgs/sinnix-lib/pkg.nix { }) ];
         };
         # Provably fails when: either direction of the /realm taxonomy
         # assertion is dropped, or a retired level-1 name is readmitted to the

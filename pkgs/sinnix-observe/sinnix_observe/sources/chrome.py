@@ -7,7 +7,10 @@ import os
 from pathlib import Path
 from typing import Any
 
-from ..util import int_or_none, read_proc_cmdline, read_text, run_cmd
+from sinnix_lib.process import run
+from sinnix_lib.values import int_or_none, read_text
+
+from ..util import read_proc_cmdline
 from .proc import parse_proc_cgroup, parse_proc_io, parse_proc_status
 
 CHROME_PROFILE_GLOBS = [
@@ -74,21 +77,21 @@ def is_chrome_process(comm: str, cmdline: str) -> bool:
 def du_bytes(path: Path) -> int | None:
     if os.environ.get("SINNIX_OBSERVE_CHROME_DU", "1") == "0":
         return None
-    proc = run_cmd(["du", "-s", "-B1", str(path)], timeout=2)
-    if not proc or proc.returncode != 0:
+    result = run(["du", "-s", "-B1", str(path)], timeout=2)
+    if not result.ok:
         return None
-    first = proc.stdout.splitlines()[0] if proc.stdout.splitlines() else ""
+    first = result.stdout.splitlines()[0] if result.stdout.splitlines() else ""
     return int_or_none(first.split()[0] if first else None)
 
 
 def find_mount_for_path(path: Path) -> dict[str, Any]:
-    proc = run_cmd(
+    result = run(
         ["findmnt", "-T", str(path), "-n", "-o", "TARGET,SOURCE,FSTYPE,OPTIONS"],
         timeout=2,
     )
-    if not proc or not proc.stdout.strip():
+    if not result.stdout.strip():
         return {"unresolved": True}
-    parts = proc.stdout.strip().split(None, 3)
+    parts = result.stdout.strip().split(None, 3)
     return {
         "target": parts[0] if len(parts) > 0 else None,
         "source": parts[1] if len(parts) > 1 else None,

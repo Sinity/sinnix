@@ -2,6 +2,7 @@
 # @sinnix-package
 # description: Run a workload with an immutable machine experiment manifest
 # runtimeInputs: python3 coreutils git jq linuxPackages.nvidia_x11 pciutils systemd util-linux pueue
+# pythonPackages: @sinnix-lib
 """Run one workload as a timestamped experiment unit.
 
 This runner does not change hardware state. It records planned treatment,
@@ -24,41 +25,37 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from sinnix_lib.process import run
+from sinnix_lib.values import read_text
+
 SCHEMA = "machine-experiment-run-v1"
+
+# One budget for every state probe below: none of them is worth stalling the
+# experiment window this manifest is supposed to bracket.
+PROBE_TIMEOUT = 3.0
 
 
 def utc_now() -> str:
     return dt.datetime.now(dt.UTC).replace(microsecond=0).isoformat()
 
 
-def read_text(path: str | Path) -> str | None:
-    try:
-        return Path(path).read_text(encoding="utf-8").strip()
-    except OSError:
-        return None
-
-
-def run_stdout(args: list[str], cwd: Path | None = None, timeout: float = 3.0) -> str | None:
-    try:
-        proc = subprocess.run(args, cwd=cwd, check=False, capture_output=True, text=True, timeout=timeout)
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    if proc.returncode != 0:
-        return None
-    return proc.stdout.strip()
-
-
 def git_state(cwd: Path) -> dict[str, Any]:
-    root = run_stdout(["git", "rev-parse", "--show-toplevel"], cwd=cwd)
+    root = run(["git", "rev-parse", "--show-toplevel"], cwd=cwd, timeout=PROBE_TIMEOUT).text
     if not root:
         return {"available": False}
     root_path = Path(root)
     return {
         "available": True,
         "root": str(root_path),
-        "head": run_stdout(["git", "rev-parse", "HEAD"], cwd=root_path),
-        "branch": run_stdout(["git", "branch", "--show-current"], cwd=root_path),
-        "dirty": (run_stdout(["git", "status", "--porcelain"], cwd=root_path) or "") != "",
+        "head": run(["git", "rev-parse", "HEAD"], cwd=root_path, timeout=PROBE_TIMEOUT).text,
+        "branch": run(
+            ["git", "branch", "--show-current"], cwd=root_path, timeout=PROBE_TIMEOUT
+        ).text,
+        "dirty": (
+            run(["git", "status", "--porcelain"], cwd=root_path, timeout=PROBE_TIMEOUT).text
+            or ""
+        )
+        != "",
     }
 
 
@@ -82,11 +79,14 @@ def cpu_state() -> dict[str, Any]:
 
 
 def gpu_state() -> dict[str, Any]:
-    out = run_stdout([
-        "nvidia-smi",
-        "--query-gpu=pstate,power.draw,clocks.sm,pcie.link.gen.current,pcie.link.width.current",
-        "--format=csv,noheader,nounits",
-    ])
+    out = run(
+        [
+            "nvidia-smi",
+            "--query-gpu=pstate,power.draw,clocks.sm,pcie.link.gen.current,pcie.link.width.current",
+            "--format=csv,noheader,nounits",
+        ],
+        timeout=PROBE_TIMEOUT,
+    ).text
     if not out:
         return {"available": False}
     first = out.splitlines()[0]
@@ -134,7 +134,7 @@ def systemctl_show(unit: str, *, user: bool = False) -> str | None:
     ]
     if user:
         args.insert(1, "--user")
-    return run_stdout(args)
+    return run(args, timeout=PROBE_TIMEOUT).text
 
 
 def parse_systemctl_show(out: str) -> dict[str, str]:
@@ -213,7 +213,7 @@ def _psi_avg10(path: str, line_kind: str) -> float | None:
 
 
 def _active_agentctl_jobs() -> list[str]:
-    out = run_stdout(["pueue", "status", "--json"], timeout=5.0)
+    out = run(["pueue", "status", "--json"], timeout=5.0).text
     if out is None:
         return []
     try:
@@ -255,7 +255,7 @@ def quiet_state() -> dict[str, Any]:
     active_blocking = [
         unit
         for unit in _QUIET_BLOCKING_UNITS
-        if run_stdout(["systemctl", "is-active", unit], timeout=5.0) == "active"
+        if run(["systemctl", "is-active", unit], timeout=5.0).text == "active"
     ]
     active_agentctl_jobs = _active_agentctl_jobs()
 

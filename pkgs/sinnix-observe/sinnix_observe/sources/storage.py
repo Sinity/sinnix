@@ -7,8 +7,10 @@ import os
 from pathlib import Path
 from typing import Any
 
+from sinnix_lib.process import run
+from sinnix_lib.values import read_text
+
 from ..runtime_inventory import polylogue_archive
-from ..util import read_text, run_cmd
 from .systemd import systemctl_show
 
 
@@ -27,11 +29,12 @@ def collect_storage(offline: bool) -> dict[str, Any]:
         str(polylogue_archive().get("archiveRoot", "")),
     ]
     for path in paths:
-        proc = run_cmd(
-            ["findmnt", "-T", path, "-n", "-o", "TARGET,SOURCE,FSTYPE,OPTIONS"]
+        result = run(
+            ["findmnt", "-T", path, "-n", "-o", "TARGET,SOURCE,FSTYPE,OPTIONS"],
+            timeout=5,
         )
-        if proc and proc.stdout.strip():
-            parts = proc.stdout.strip().split(None, 3)
+        if result.stdout.strip():
+            parts = result.stdout.strip().split(None, 3)
             mounts.append(
                 {
                     "path": path,
@@ -61,8 +64,7 @@ def collect_storage(offline: bool) -> dict[str, Any]:
 
     iostat = ""
     if os.environ.get("SINNIX_OBSERVE_IOSTAT", "1") != "0":
-        proc = run_cmd(["iostat", "-xz", "1", "2"], timeout=4)
-        iostat = proc.stdout if proc else ""
+        iostat = run(["iostat", "-xz", "1", "2"], timeout=4).stdout
 
     return {
         "fstrim_timer": systemctl_show("fstrim.timer"),

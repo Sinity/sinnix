@@ -3,11 +3,12 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import uuid
 from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping
+
+from .atomic import atomic_publish
 
 
 def _canonical(value: Any) -> bytes:
@@ -62,22 +63,11 @@ class ContextSnapshotStore:
             raise ValueError("context snapshot ref does not match its content")
         destination = self.root / f"{snapshot_id}.json"
         if not destination.exists():
-            temporary = self.root / f".{snapshot_id}.{uuid.uuid4().hex}.tmp"
-            try:
-                with temporary.open("x", encoding="utf-8") as handle:
-                    json.dump(snapshot, handle, sort_keys=True, separators=(",", ":"))
-                    handle.write("\n")
-                    handle.flush()
-                    os.fsync(handle.fileno())
-                temporary.chmod(0o600)
-                os.replace(temporary, destination)
-                directory_fd = os.open(self.root, os.O_RDONLY | os.O_DIRECTORY)
-                try:
-                    os.fsync(directory_fd)
-                finally:
-                    os.close(directory_fd)
-            finally:
-                temporary.unlink(missing_ok=True)
+            # Durability: file and directory. The snapshot ref is handed back
+            # to the client as a handle it may resolve later, and eviction is
+            # this store's only legitimate way to lose one.
+            body = json.dumps(snapshot, sort_keys=True, separators=(",", ":")) + "\n"
+            atomic_publish(destination, body.encode("utf-8"), fsync=True)
         os.utime(destination, None)
         retained = sorted(
             self.root.glob("*.json"),

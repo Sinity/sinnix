@@ -7,6 +7,7 @@ import json
 import sqlite3
 
 import pytest
+from sinnix_lib.process import Result
 from sinnix_observe import cli, joins, render, runtime_inventory, util
 from sinnix_observe.sources import (
     agent_gateway,
@@ -23,9 +24,7 @@ from sinnix_observe.sources import (
 
 
 def test_util_happy_path() -> None:
-    assert util.int_or_none("12") == 12
-    assert util.int_or_none("x") is None
-    assert util.float_or_none("1.5") == 1.5
+    assert util.float_or_zero("1.5") == 1.5
     assert util.float_or_zero(None) == 0.0
     assert util.words("a b  c") == ["a", "b", "c"]
     assert util.words(None) == []
@@ -73,12 +72,8 @@ def test_systemd_offline_returns_empty() -> None:
 
 
 def test_noctalia_health_fixture(monkeypatch) -> None:
-    class Result:
-        returncode = 0
-        stdout = "Config is valid"
-        stderr = ""
-
-    monkeypatch.setattr(systemd, "run_cmd", lambda *_args, **_kwargs: Result())
+    validated = Result(("noctalia",), 0, "Config is valid", "")
+    monkeypatch.setattr(systemd, "run", lambda *_args, **_kwargs: validated)
     health = systemd.collect_noctalia_health()
     assert health == {
         "status": "healthy",
