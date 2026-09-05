@@ -84,6 +84,9 @@ mkServiceModule {
         intervalSec = cfg.intervalSec;
         accuracySec = "5min";
       };
+      # A refused token refresh writes this marker after alarming once;
+      # the login flow removes it. Until then a firing is skipped, not failed.
+      unit.unitConfig.ConditionPathExists = "!${stateDir}/credential-expired";
     };
   configFn = _: {
     # Token + write-on-change hash state. 0700: the token file is a live

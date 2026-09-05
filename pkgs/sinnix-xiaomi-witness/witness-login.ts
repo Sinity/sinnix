@@ -29,6 +29,8 @@ const token = await auth.loginQr(async (qrImageUrl, loginUrl) => {
   console.log("open LOGIN_URL in an authenticated browser and confirm (300s window)…");
 });
 auth.saveToken(TOKEN_PATH);
+const { rmSync } = await import("node:fs");
+rmSync(`${STATE_DIR}/credential-expired`, { force: true });
 console.log(`TOKEN_SAVED user_id=${token.user_id} -> ${TOKEN_PATH}`);
 
 const client = new MiHealthClient(auth, BASE);
