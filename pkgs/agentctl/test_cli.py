@@ -321,3 +321,28 @@ def test_job_clean_daemon_era_removes_only_the_listed_subtrees_and_is_idempotent
 
     assert cli.main(["job", "clean", "--daemon-era"]) == 0
     assert json.loads(capsys.readouterr().out)["removed"] == []
+
+
+def test_job_start_passes_arguments_after_a_bare_double_dash(
+    fake_pueue: FakePueue, cli_config: Config, tmp_path: Path
+) -> None:
+    workspace = cli_config.project_roots[0]
+    assert (
+        cli.main(
+            [
+                "job",
+                "start",
+                "fixture",
+                "check",
+                "--workspace",
+                str(workspace),
+                "--",
+                "x.py",
+                "-n",
+                "0",
+            ]
+        )
+        == 0
+    )
+    launch_input = json.loads(Path(fake_pueue.added[0]["command"][1]).read_text())
+    assert tuple(launch_input["argv"])[-3:] == ("x.py", "-n", "0")

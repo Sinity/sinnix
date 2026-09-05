@@ -397,7 +397,7 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
             project,
             operation,
             workspace=arguments.workspace,
-            extra_argv=tuple(rest[1:]),
+            extra_argv=(*rest[1:], *getattr(arguments, "extra", [])),
         )
         if arguments.wait:
             started = launch.wait(
@@ -725,7 +725,15 @@ def _dispatch(arguments: argparse.Namespace, config: Config, out: Output) -> int
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    arguments = parser().parse_args(argv)
+    words = list(sys.argv[1:] if argv is None else argv)
+    # Everything after a bare `--` belongs to the operation, wherever the
+    # options before it ended up.
+    extra: list[str] = []
+    if "--" in words:
+        cut = words.index("--")
+        extra, words = words[cut + 1 :], words[:cut]
+    arguments = parser().parse_args(words)
+    arguments.extra = extra
     out = Output(as_json=arguments.json, full=arguments.full)
     try:
         config = load_config(arguments.config)
