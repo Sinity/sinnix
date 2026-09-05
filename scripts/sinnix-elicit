@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # @sinnix-package
 # description: Preference elicitation over arbitrary item domains via pairwise comparison (Bradley-Terry)
-# runtimeInputs: coreutils
+# runtimeInputs: coreutils xdg-utils
 # pythonPackages: @sinnix-rank-core
 
 """Domain-general preference elicitation for the operator.
@@ -32,7 +32,10 @@ Comparison surfaces, cheapest first:
                   tree; each tap POSTs to the hub's /feedback spool, and
                   `ingest` drains the spool back into the domain. Works from
                   desktop or phone anywhere on the tailnet, needs no new
-                  service, no new port, no hub changes.
+                  service, no new port, no hub changes;
+  * `serve`    -- a loopback page for image domains: two items filling a 4K
+                  screen, one keypress per judgment, refit after every
+                  answer so the next pair follows from the last one.
 
 State lives under /realm/state/elicit/<domain>/ (mutable application state, owned
 by this tool, backed up as part of /realm/state):
@@ -50,15 +53,19 @@ import datetime as dt
 import html
 import json
 import math
+import mimetypes
 import os
 import random
 import shutil
 import subprocess
 import sys
+import threading
+import urllib.parse
 import uuid
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from rank_core import Comparison, fit
+from rank_core import Comparison, Selector, fit, top_k_stability
 
 SCHEMA = "sinnix-elicit-v1"
 BASE_DIR = Path(os.environ.get("SINNIX_ELICIT_DIR", "/realm/state/elicit"))
@@ -688,6 +695,410 @@ def cmd_domains(_domain, _args):
             print(f"{d.name}: {len(items)} items, {n} comparisons")
 
 
+# ──────────────────────────────────────────────────────────────────────────
+# serve: side-by-side comparison on a loopback page
+# ──────────────────────────────────────────────────────────────────────────
+# `session` renders a fixed pair list into a file the hub serves, so nothing
+# can refit between taps. `serve` is the same judgment against a live process:
+# it refits after every answer, so the next pair is chosen from what the
+# operator just said, and a 126-image roster is one sitting rather than rounds
+# of page, tap, drain, refit.
+#
+# It selects through `rank_core.Selector` rather than this file's `pick_pairs`
+# because a cold roster starts as one connected component per item, and only
+# the Selector deliberately bridges components -- without that, thetas across
+# the roster stay mutually meaningless however long the operator clicks.
+SERVE_PAGE = """<!doctype html>
+<meta charset="utf-8">
+<title>elicit: __DOMAIN__</title>
+<style>
+ html,body{margin:0;height:100%;background:#0b0b0b;color:#ddd;
+           font-family:system-ui,sans-serif;overflow:hidden}
+ #stage{position:absolute;inset:0 0 34px 0;display:flex;gap:6px;padding:6px}
+ .opt{flex:1;position:relative;display:flex;align-items:center;justify-content:center;
+      border:2px solid #222;border-radius:6px;overflow:hidden;background:#000;cursor:pointer}
+ .opt:hover{border-color:#4ea1ff}
+ .opt img{max-width:100%;max-height:100%;object-fit:contain}
+ .opt .cap{position:absolute;left:0;bottom:0;padding:2px 8px;font-size:12px;
+           color:#9a9a9a;background:rgba(0,0,0,.65)}
+ #bar{position:absolute;left:0;right:0;bottom:0;height:34px;display:flex;align-items:center;
+      gap:20px;padding:0 12px;font-size:13px;background:#141414;color:#8a8a8a;
+      white-space:nowrap;overflow:hidden}
+ #err{color:#e07a5f}
+ #done{position:absolute;inset:0;display:none;align-items:center;justify-content:center;
+       flex-direction:column;gap:12px;font-size:20px;text-align:center;padding:40px}
+</style>
+<div id="stage">
+ <div class="opt" id="left"></div>
+ <div class="opt" id="right"></div>
+</div>
+<div id="done"></div>
+<div id="bar">
+ <span>&larr;/&rarr; pick &middot; d draw &middot; s skip &middot; u undo &middot; q quit</span>
+ <span id="count"></span><span id="stab"></span><span id="lead"></span><span id="err"></span>
+</div>
+<script>
+const CONFIG = __CONFIG_JSON__;
+let cur = null, busy = false, over = false;
+const el = id => document.getElementById(id);
+function newId(){
+  if (self.crypto && crypto.randomUUID) return crypto.randomUUID();
+  return "c-" + Date.now() + "-" + Math.random().toString(16).slice(2);
+}
+function paint(side, item){
+  const box = el(side);
+  box.textContent = "";
+  const img = document.createElement("img");
+  img.src = item.src;
+  img.alt = item.label;
+  box.appendChild(img);
+  const cap = document.createElement("div");
+  cap.className = "cap";
+  cap.textContent = item.label;
+  box.appendChild(cap);
+  box.onclick = () => answer(side === "left" ? 1 : 0);
+}
+function status(s){
+  el("count").textContent = s.comparisons + " comparisons · " + s.judged_items + "/" +
+    s.items + " items seen · " + s.components + " groups";
+  el("stab").textContent = "top-" + s.stability.k + " stability p=" +
+    s.stability.p_stable + (s.stability.settled ? " (settled)" : "");
+  el("lead").textContent = s.top.length ? "leader: " + s.top[0].label : "";
+}
+function finish(s){
+  over = true;
+  el("stage").style.display = "none";
+  const d = el("done");
+  d.style.display = "flex";
+  d.textContent = s.recorded_this_session + " judgments recorded this run, " +
+    s.comparisons + " in the domain. The refit is saved and the server has stopped. " +
+    "Read it with: sinnix elicit rank " + CONFIG.domain;
+}
+function show(payload){
+  if (payload.status) status(payload.status);
+  if (payload.done || !payload.pair){ finish(payload.status); return; }
+  cur = payload.pair;
+  paint("left", cur.a);
+  paint("right", cur.b);
+  (payload.preload || []).forEach(url => { const im = new Image(); im.src = url; });
+}
+async function call(path, body){
+  if (busy || over) return;
+  busy = true;
+  try {
+    const opts = body ? {method: "POST", headers: {"Content-Type": "application/json"},
+                         body: JSON.stringify(body)} : {};
+    const r = await fetch(path, opts);
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    el("err").textContent = "";
+    show(await r.json());
+  } catch (e) {
+    el("err").textContent = "error: " + e.message + " (nothing recorded)";
+  } finally {
+    busy = false;
+  }
+}
+const answer = outcome => cur && call("/answer",
+  {id: newId(), a: cur.a.id, b: cur.b.id, outcome: outcome});
+const skip = () => cur && call("/skip", {a: cur.a.id, b: cur.b.id});
+document.addEventListener("keydown", e => {
+  if (e.key === "ArrowLeft" || e.key === "1") answer(1);
+  else if (e.key === "ArrowRight" || e.key === "2") answer(0);
+  else if (e.key === "d" || e.key === "t") answer(0.5);
+  else if (e.key === "s") skip();
+  else if (e.key === "u") call("/undo", {});
+  else if (e.key === "q") call("/quit", {});
+  else return;
+  e.preventDefault();
+});
+call("/next");
+</script>
+"""
+
+
+class ServeSession:
+    """The comparison loop's live state.
+
+    The append-only log is the truth and everything here is a view of it,
+    rebuilt after every judgment: a run is resumable because starting a second
+    time over the same domain reconstructs the same state.
+    """
+
+    def __init__(self, domain, top_k=10, seed=None, stability_samples=200, session=None):
+        self.domain = domain
+        self.items, self.by_id = domain.load_items()
+        self.ids = [str(i["id"]) for i in self.items]
+        self.top_k = max(1, min(top_k, len(self.ids)))
+        self.stability_samples = stability_samples
+        self.session = session or ("serve-" + dt.datetime.now().strftime("%Y%m%d-%H%M%S"))
+        self.rng = random.Random(seed)
+        self.selector = Selector(item_ids=self.ids, grid_n=2, rng=self.rng)
+        self.lock = threading.RLock()
+        self.queue = []
+        self.recorded = []
+        self.done = False
+        self.reload()
+        self.selector.seed_counts(to_comparisons(self.comparisons, set(self.ids)))
+
+    # ── state ────────────────────────────────────────────────────────────
+    def reload(self):
+        # Dedup against every id the log has ever carried, tombstones
+        # included, re-read on every judgment: a record the operator undid is
+        # still one this domain has seen, and the hub drain appends to the
+        # same log while this loop runs. Deduping against the live records
+        # instead re-appends an undone judgment on every retry.
+        seen, tombstoned = self.domain.scan_ids()
+        self.known_ids = seen | tombstoned
+        self.comparisons = self.domain.load_comparisons()
+        self.fit = fit(self.ids, to_comparisons(self.comparisons, set(self.ids)))
+        self.selector.update_fit(self.fit)
+        self.judged = {
+            frozenset((str(c.get("a")), str(c.get("b"))))
+            for c in self.comparisons
+            if c.get("a") and c.get("b")
+        }
+
+    def status(self):
+        stability = top_k_stability(
+            self.fit, k=self.top_k, samples=self.stability_samples, seed=0
+        )
+        records = self.fit.records
+        return {
+            "domain": self.domain.name,
+            "items": len(self.ids),
+            "comparisons": len(self.comparisons),
+            "recorded_this_session": len(self.recorded),
+            "judged_items": sum(1 for r in records.values() if r.matches > 0),
+            "components": len({r.component for r in records.values()}),
+            "stability": {
+                "k": stability.k,
+                "p_stable": round(stability.p_stable, 3),
+                "settled": stability.p_stable >= 0.9,
+                "top_k": list(stability.top_k),
+            },
+            "top": [
+                {
+                    "id": r.id,
+                    "label": self.by_id[r.id].get("label", r.id),
+                    "theta": round(r.theta, 3),
+                    "se": round(r.se, 3),
+                }
+                for r in self.fit.ranked()[: self.top_k]
+            ],
+        }
+
+    # ── pair supply ──────────────────────────────────────────────────────
+    def _pick(self):
+        queued = {frozenset(p) for p in self.queue}
+        chosen = None
+        for _ in range(40):
+            candidate, _strategy = self.selector.pick_set()
+            key = frozenset(candidate)
+            chosen = candidate
+            if len(key) == 2 and key not in self.judged and key not in queued:
+                return candidate
+        # Fresh pairs exhausted, or the selector keeps landing on judged ones:
+        # re-asking beats stalling the loop, and a repeated comparison is
+        # evidence about consistency rather than a duplicate record.
+        return chosen
+
+    def _fill(self):
+        while len(self.queue) < 2:
+            pair = self._pick()
+            if not pair or len(set(pair)) < 2:
+                break
+            self.queue.append(list(pair))
+
+    def _drop(self, a, b):
+        key = frozenset((a, b))
+        self.queue = [p for p in self.queue if frozenset(p) != key]
+
+    def _card(self, item_id):
+        item = self.by_id[item_id]
+        return {
+            "id": item_id,
+            "label": item.get("label", item_id),
+            "src": f"/image/{urllib.parse.quote(item_id)}",
+        }
+
+    def next_payload(self):
+        with self.lock:
+            if self.done:
+                return {"done": True, "status": self.status()}
+            self._fill()
+            if not self.queue:
+                return {"done": True, "status": self.status()}
+            a, b = self.queue[0]
+            ahead = self.queue[1] if len(self.queue) > 1 else []
+            return {
+                "pair": {"a": self._card(a), "b": self._card(b)},
+                "preload": [self._card(i)["src"] for i in ahead],
+                "status": self.status(),
+            }
+
+    # ── judgments ────────────────────────────────────────────────────────
+    def answer(self, record_id, a, b, outcome):
+        with self.lock:
+            a, b = str(a), str(b)
+            if a not in self.by_id or b not in self.by_id or a == b:
+                raise ValueError(f"not a comparable pair of roster items: {a!r}, {b!r}")
+            outcome = float(outcome)
+            if outcome not in (0.0, 0.5, 1.0):
+                raise ValueError(f"outcome must be 1 (a), 0 (b) or 0.5 (draw): {outcome!r}")
+            record_id = str(record_id or uuid.uuid4())
+            self.reload()
+            if record_id not in self.known_ids:
+                self.domain.append(
+                    {
+                        "id": record_id,
+                        "kind": "pair",
+                        "a": a,
+                        "b": b,
+                        "outcome": outcome,
+                        "session": self.session,
+                    }
+                )
+                self.recorded.append(record_id)
+                self.reload()
+            self._drop(a, b)
+            return self.next_payload()
+
+    def skip(self, a, b):
+        with self.lock:
+            self._drop(str(a), str(b))
+            return self.next_payload()
+
+    def undo(self):
+        with self.lock:
+            if self.recorded:
+                self.domain.append({"delete": self.recorded.pop()})
+                self.reload()
+            return self.next_payload()
+
+    def finish(self):
+        with self.lock:
+            self.done = True
+            fit_and_save_model(self.domain, self.items, self.comparisons)
+            return {"done": True, "status": self.status()}
+
+
+class ServeHandler(BaseHTTPRequestHandler):
+    """Loopback-only JSON/image surface for SERVE_PAGE."""
+
+    protocol_version = "HTTP/1.1"
+    server_version = "sinnix-elicit"
+    sys_version = ""
+    session_state = None
+
+    def log_message(self, fmt, *args):
+        pass
+
+    # ── plumbing ─────────────────────────────────────────────────────────
+    def _send(self, code, body, content_type, extra=None):
+        self.send_response(code)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        for key, value in (extra or {}).items():
+            self.send_header(key, value)
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _json(self, payload, code=200):
+        self._send(code, json.dumps(payload).encode(), "application/json")
+
+    def _read_body(self):
+        length = int(self.headers.get("Content-Length") or 0)
+        return json.loads(self.rfile.read(length).decode()) if length else {}
+
+    # ── routes ───────────────────────────────────────────────────────────
+    def do_GET(self):
+        state = self.session_state
+        path = urllib.parse.urlparse(self.path).path
+        if path == "/":
+            page = SERVE_PAGE.replace("__DOMAIN__", html.escape(state.domain.name)).replace(
+                "__CONFIG_JSON__", json.dumps({"domain": state.domain.name})
+            )
+            self._send(200, page.encode(), "text/html; charset=utf-8")
+        elif path == "/next":
+            self._json(state.next_payload())
+        elif path == "/status":
+            self._json(state.status())
+        elif path.startswith("/image/"):
+            self._image(urllib.parse.unquote(path[len("/image/") :]))
+        else:
+            self._json({"error": "not found"}, 404)
+
+    def _image(self, item_id):
+        # The roster is the only source of paths, so a crafted request reaches
+        # no file the operator did not put in items.json.
+        item = self.session_state.by_id.get(item_id)
+        source = Path(item["image"]) if item and item.get("image") else None
+        if source is None or not source.is_file():
+            self._json({"error": f"no image for item {item_id}"}, 404)
+            return
+        content_type = mimetypes.guess_type(source.name)[0] or "application/octet-stream"
+        self._send(200, source.read_bytes(), content_type, {"Cache-Control": "max-age=3600"})
+
+    def do_POST(self):
+        state = self.session_state
+        path = urllib.parse.urlparse(self.path).path
+        try:
+            body = self._read_body()
+            if path == "/answer":
+                self._json(
+                    state.answer(body.get("id"), body.get("a"), body.get("b"), body.get("outcome"))
+                )
+            elif path == "/skip":
+                self._json(state.skip(body.get("a"), body.get("b")))
+            elif path == "/undo":
+                self._json(state.undo())
+            elif path == "/quit":
+                self._json(state.finish())
+                threading.Thread(target=self.server.shutdown, daemon=True).start()
+            else:
+                self._json({"error": "not found"}, 404)
+        except (ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
+            self._json({"error": str(exc)}, 400)
+
+
+def build_serve_server(domain, host="127.0.0.1", port=0, top_k=10, seed=None):
+    """(bound server, session). Loopback by default; nothing here authenticates."""
+    state = ServeSession(domain, top_k=top_k, seed=seed)
+    handler = type("BoundServeHandler", (ServeHandler,), {"session_state": state})
+    return ThreadingHTTPServer((host, port), handler), state
+
+
+def cmd_serve(domain, args):
+    server, state = build_serve_server(domain, host=args.host, port=args.port, top_k=args.top_k)
+    url = f"http://{args.host}:{server.server_port}/"
+    missing = [str(i["id"]) for i in state.items if not Path(i.get("image") or "").is_file()]
+    if missing:
+        print(
+            f"{len(missing)} item(s) have no readable image, e.g. {', '.join(missing[:5])}",
+            file=sys.stderr,
+        )
+    print(f"{domain.name}: {len(state.ids)} items, {len(state.comparisons)} comparisons")
+    # Flushed: the URL is the only way in, and a redirected stdout would hold
+    # it in the buffer until the server stops.
+    print(f"serving {url}  (left/right pick, d draw, s skip, u undo, q quit)", flush=True)
+    if args.open:
+        try:
+            subprocess.Popen(
+                ["xdg-open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+        except OSError as exc:
+            print(f"could not open a browser ({exc}); the URL above still works", file=sys.stderr)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+        if not state.done:
+            fit_and_save_model(domain, state.items, state.comparisons)
+    print(f"recorded {len(state.recorded)} comparisons; model refit at {domain.model_path}")
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -720,6 +1131,15 @@ def main():
     sp.add_argument("--json", action="store_true")
     sp = add("pairs", cmd_pairs)
     sp.add_argument("-n", "--pairs", type=int, default=10)
+    sp = add("serve", cmd_serve)
+    sp.add_argument("--host", default="127.0.0.1")
+    # Ephemeral by default: this is an operator-run foreground process, not a
+    # declared service, so it must not claim a number flake/data/ports.nix
+    # arbitrates. The URL is printed, and --open follows it.
+    sp.add_argument("--port", type=int, default=0)
+    sp.add_argument("--top-k", type=int, default=10,
+                    help="how many leaders the stopping statistic must agree on")
+    sp.add_argument("--open", action="store_true", help="launch the page with xdg-open")
     add("domains", cmd_domains, needs_domain=False)
 
     args = p.parse_args()
