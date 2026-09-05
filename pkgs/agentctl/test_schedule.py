@@ -51,7 +51,9 @@ def test_apply_starts_declared_timers_that_fire_agentctl_and_stops_retired_ones(
 
     applied = schedule.apply(config)
 
-    expected = schedule.unit_for("fixture", "nightly", "*-*-* 03:17:00")
+    expected = schedule.unit_for(
+        "fixture", "nightly", "*-*-* 03:17:00", "/fixture/agentctl"
+    )
     assert applied["started"] == [expected]
     assert applied["stopped"] == ["agentctl-schedule-000000000000000000000000"]
     start = next(call for call in fake_systemd["calls"] if call[0] == "systemd-run")
@@ -72,10 +74,35 @@ def test_apply_is_idempotent(fake_systemd: dict[str, Any], config: Config) -> No
     assert again["started"] == [] and again["stopped"] == []
 
 
-def test_a_changed_expression_is_a_new_unit() -> None:
-    assert schedule.unit_for("p", "op", "hourly") != schedule.unit_for(
-        "p", "op", "daily"
+def test_a_changed_expression_or_executable_is_a_new_unit() -> None:
+    assert schedule.unit_for("p", "op", "hourly", "/a") != schedule.unit_for(
+        "p", "op", "daily", "/a"
     )
+    assert schedule.unit_for("p", "op", "hourly", "/a") != schedule.unit_for(
+        "p", "op", "hourly", "/b"
+    )
+
+
+def test_a_rebuilt_agentctl_replaces_the_timer_that_execs_the_old_path(
+    fake_systemd: dict[str, Any], config: Config
+) -> None:
+    """A timer keeps exec'ing the store path it was started with; after a
+    rebuild that path is garbage, so the timer is a new unit."""
+    from dataclasses import replace
+
+    first = schedule.apply(config)
+    rebuilt = replace(config, agentctl_executable="/nix/store/new-agentctl/bin/agentctl")
+
+    second = schedule.apply(rebuilt)
+
+    assert second["stopped"] == first["started"]
+    assert second["started"] == [
+        schedule.unit_for(
+            "fixture", "nightly", "*-*-* 03:17:00", rebuilt.agentctl_executable
+        )
+    ]
+    start = [call for call in fake_systemd["calls"] if call[0] == "systemd-run"][-1]
+    assert start[start.index("--") + 1] == rebuilt.agentctl_executable
 
 
 def test_sub_hourly_timers_do_not_catch_up() -> None:
