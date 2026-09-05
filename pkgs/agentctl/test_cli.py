@@ -147,18 +147,18 @@ def test_events_tail_prints_the_last_lines_filtered_by_project(
     cli_config: Config, capsys: pytest.CaptureFixture[str]
 ) -> None:
     cli_config.event_spool.write_text(
-        '{"kind":"queue-task","emitted_at":"2026-09-03T08:00:00+00:00","label":"fixture:check","phase":"started"}\n'
-        '{"kind":"queue-task","emitted_at":"2026-09-03T08:05:00+00:00","label":"fixture:check","result":"Failed","exit_code":"2","task_id":4}\n'
-        '{"kind":"queue-task","emitted_at":"2026-09-03T08:06:00+00:00","label":"other:check","result":"Success","exit_code":"0","task_id":5}\n'
-        '{"kind":"backpressure","emitted_at":"2026-09-03T08:07:00+00:00","action":"froze","group":"agent"}\n'
+        '{"kind":"queue-task","emitted_at":"2026-09-03T08:00:00+00:00","label":"fixture:check","phase":"started","task_id":null}\n'
+        '{"kind":"queue-task","emitted_at":"2026-09-03T08:05:00+00:00","label":"fixture:check","phase":"finished","outcome":"failed","exit_code":2,"task_id":4}\n'
+        '{"kind":"queue-task","emitted_at":"2026-09-03T08:06:00+00:00","label":"other:check","phase":"finished","outcome":"success","exit_code":0,"task_id":5}\n'
+        '{"kind":"backpressure","emitted_at":"2026-09-03T08:07:00+00:00","action":"closed","group":"agent"}\n'
     )
     assert cli.main(["events", "tail", "--project", "fixture"]) == 0
     out = capsys.readouterr().out
-    assert "fixture:check started" in out
-    assert "fixture:check finished Failed exit 2 (task 4)" in out
+    assert "fixture:check started\n" in out
+    assert "fixture:check finished failed exit 2 (task 4)" in out
     assert "other:check" not in out
     assert cli.main(["events", "tail", "--lines", "1"]) == 0
-    assert "backpressure froze agent" in capsys.readouterr().out
+    assert "backpressure closed agent" in capsys.readouterr().out
     assert cli.main(["--json", "events", "tail", "--lines", "1"]) == 0
     assert capsys.readouterr().out.strip().startswith('{"kind":"backpressure"')
 

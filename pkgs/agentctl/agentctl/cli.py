@@ -591,11 +591,12 @@ def _event_line(event: Mapping[str, Any]) -> str:
     kind = str(event.get("kind") or "")
     if kind == "queue-task":
         label = str(event.get("label") or "")
+        task = f" (task {event['task_id']})" if event.get("task_id") is not None else ""
         if event.get("phase") == "started":
-            return f"{stamp} {label} started"
-        result = str(event.get("result") or "")
+            return f"{stamp} {label} started{task}"
+        outcome = str(event.get("outcome") or "")
         exit_code = event.get("exit_code")
-        return f"{stamp} {label} finished {result}{f' exit {exit_code}' if exit_code not in (None, '', '0', 0) else ''} (task {event.get('task_id')})"
+        return f"{stamp} {label} finished {outcome}{f' exit {exit_code}' if exit_code not in (None, '', '0', 0) else ''}{task}"
     if kind == "backpressure":
         return f"{stamp} backpressure {event.get('action')} {event.get('group') or ''}".rstrip()
     detail = " ".join(
