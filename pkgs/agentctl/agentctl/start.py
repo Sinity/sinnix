@@ -156,7 +156,6 @@ def _prepare(
                 branch=branch,
                 batch={
                     "run_id": run.run_id,
-                    "worker_id": worker_id,
                     "base_commit": run.base_commit,
                     "worktree": str(path),
                     "result_path": str(result_path(path)),
