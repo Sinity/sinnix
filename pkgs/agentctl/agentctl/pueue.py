@@ -44,7 +44,7 @@ class PueueGroupError(PueueError):
 
 @dataclass(frozen=True)
 class Task:
-    """One entry of ``pueue status --json``, reduced to what sinnixd reads."""
+    """One entry of ``pueue status --json``, reduced to what agentctl reads."""
 
     task_id: int
     label: str
@@ -262,7 +262,7 @@ def kill(task_id: int) -> None:
 
 
 def restart(task_id: int) -> None:
-    """Re-run a terminal task in place: pueue's retry, so sinnixd keeps none."""
+    """Re-run a terminal task in place: pueue's retry, so agentctl keeps none."""
     _run(["restart", "--in-place", str(task_id)])
 
 

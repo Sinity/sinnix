@@ -111,7 +111,7 @@ mkServiceModule {
         after = [ "lynchpin-local-attrs.service" ];
         serviceConfig = {
           Type = "oneshot";
-          ExecStart = "${scriptPkgs.sinnixd}/bin/agentctl job start lynchpin converge --wait";
+          ExecStart = "${scriptPkgs.agentctl}/bin/agentctl job start lynchpin converge --wait";
           User = "sinity";
           Group = "users";
           TimeoutStartSec = "4h";
@@ -125,7 +125,7 @@ mkServiceModule {
         after = [ "lynchpin-local-attrs.service" ];
         serviceConfig = {
           Type = "oneshot";
-          ExecStart = "${scriptPkgs.sinnixd}/bin/agentctl job start lynchpin refresh_keylog --wait";
+          ExecStart = "${scriptPkgs.agentctl}/bin/agentctl job start lynchpin refresh_keylog --wait";
           User = "sinity";
           Group = "users";
           TimeoutStartSec = "10min";

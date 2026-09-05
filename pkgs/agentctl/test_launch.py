@@ -9,12 +9,12 @@ from typing import Callable
 
 import pytest
 from conftest import FakePueue, read_launch
-from sinnixd import launch
-from sinnixd.config import Config
-from sinnixd.launch import JobError
-from sinnixd.projects import load_project_adapter
-from sinnixd.pueue import PueueGroupError
-from sinnixd.queue_run import REFUSED_EXIT_CODE, TIMEOUT_EXIT_CODE, scope_unit_for
+from agentctl import launch
+from agentctl.config import Config
+from agentctl.launch import JobError
+from agentctl.projects import load_project_adapter
+from agentctl.pueue import PueueGroupError
+from agentctl.queue_run import REFUSED_EXIT_CODE, TIMEOUT_EXIT_CODE, scope_unit_for
 
 
 def test_start_writes_the_launch_input_and_queues_the_wrapper_in_the_pool(
@@ -28,7 +28,7 @@ def test_start_writes_the_launch_input_and_queues_the_wrapper_in_the_pool(
     added = fake_pueue.added[0]
     assert added["group"] == "pytest"
     assert added["label"] == "fixture:verify"
-    assert added["command"][0] == "sinnixd-queue-run"
+    assert added["command"][0] == "agentctl-run"
     assert added["working_directory"] == project_root
     input_path = Path(added["command"][1])
     assert input_path.stat().st_mode & 0o777 == 0o600
@@ -54,15 +54,15 @@ def test_operation_started_by_an_agent_preserves_its_routing_principal(
     project_root: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("SINNIXD_PRINCIPAL", "agent-control")
-    monkeypatch.setenv("SINNIXD_LANE_BEAD", "fx-1")
+    monkeypatch.setenv("AGENTCTL_PRINCIPAL", "agent-control")
+    monkeypatch.setenv("AGENTCTL_LANE_BEAD", "fx-1")
     project = load_project_adapter(project_root)
 
     started = launch.start_operation(config, project, project.operation("check"))
 
     written = read_launch(config, fake_pueue.task(started["job_id"]))
-    assert written["environment"]["SINNIXD_PRINCIPAL"] == "agent-control"
-    assert written["environment"]["SINNIXD_LANE_BEAD"] == "fx-1"
+    assert written["environment"]["AGENTCTL_PRINCIPAL"] == "agent-control"
+    assert written["environment"]["AGENTCTL_LANE_BEAD"] == "fx-1"
 
 
 def test_extra_argv_is_appended_after_the_declared_exec(
@@ -318,7 +318,7 @@ def test_a_task_whose_launch_input_agentctl_did_not_write_names_its_own_scope(
     task_id = fake_pueue.add(
         group="pytest",
         label="polylogue:test:42",
-        command=("/run/current-system/sw/bin/sinnixd-queue-run", str(foreign)),
+        command=("/run/current-system/sw/bin/agentctl-run", str(foreign)),
         working_directory=tmp_path / "checkout",
     )
 
@@ -348,7 +348,7 @@ def test_a_command_that_only_mentions_the_wrapper_owns_no_scope_and_no_artifacts
     task_id = fake_pueue.add(
         group="pytest",
         label="other:report:1",
-        command=("sh", "-c", f"echo sinnixd-queue-run {borrowed}"),
+        command=("sh", "-c", f"echo agentctl-run {borrowed}"),
         working_directory=tmp_path,
     )
     task = fake_pueue.task(task_id)
@@ -388,7 +388,7 @@ def test_an_artifact_outside_the_task_own_directories_is_not_published(
         name: fake_pueue.add(
             group="pytest",
             label=f"polylogue:test:{name}",
-            command=("sinnixd-queue-run", str(path)),
+            command=("agentctl-run", str(path)),
             working_directory=checkout,
         )
         for name, path in (("outside", outside), ("reachable", reachable))

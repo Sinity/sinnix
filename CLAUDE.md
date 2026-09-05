@@ -25,7 +25,7 @@ modules/
   services/             fixed system/user services
   lib/                  module factories and shared Nix helpers
 pkgs/
-  sinnixd/              agentctl: jobs over pueue, lanes over worktrunk, gh and bd
+  agentctl/             agentctl: jobs over pueue, lanes over worktrunk, gh and bd
   sinnix-agent-gateway/ typed gateway transport, policy, and action catalog
 scripts/                small independently packaged utilities
 dots/                   managed user configuration and agent instructions
@@ -74,7 +74,7 @@ Keep option ownership local:
 
 ## `agentctl` boundary
 
-`agentctl` is an in-process CLI (`docs/sinnixd.md`). A job is a pueue task in
+`agentctl` is an in-process CLI (`docs/agentctl.md`). A job is a pueue task in
 the operation's pool; a lane is a worktrunk worktree with an agent in it and a
 PR that merges itself. Verbs: `project`, `job`, `lane`, `refill`, `view`,
 `events`, `schedule`.
@@ -96,7 +96,7 @@ Do not recreate any of the retired forms:
 ## Resource policy
 
 Declared operations choose a pueue group (`interactive`, `normal`, `bulk`,
-`pytest`, `agent`). The group bounds concurrency; `sinnixd-backpressure.timer`
+`pytest`, `agent`). The group bounds concurrency; `agentctl-backpressure.timer`
 pauses groups under sustained host IO or memory stall; memory is bounded by
 the slice hierarchy, not by per-job arithmetic. Fixed runtime surfaces use the
 resource classes and slice budgets declared in
@@ -216,7 +216,7 @@ without explicit task authority and direct preservation checks.
 
 - external overview: `README.md`;
 - module/service architecture: owning module headers and `docs/`;
-- `agentctl` verbs and the project descriptor schema: `docs/sinnixd.md`;
+- `agentctl` verbs and the project descriptor schema: `docs/agentctl.md`;
 - gateway capability contract: `docs/agent-gateway.md` and its generated reference;
 - agent skills: `dots/_ai/skills/`.
 

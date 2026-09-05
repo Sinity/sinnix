@@ -15,7 +15,7 @@ from typing import Any, Sequence
 
 from .config import Config
 
-UNIT_PREFIX = "sinnixd-schedule-"
+UNIT_PREFIX = "agentctl-schedule-"
 SYSTEMCTL_TIMEOUT_SECONDS = 10
 
 

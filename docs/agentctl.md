@@ -20,7 +20,7 @@ command, and one operator screen.
 | Verb                                                          | Does                                                                                                                                                                                                                                               |
 | ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `project list \| get <p> \| operations <p>`                   | the configured descriptors (`/etc/sinnix/agentctl.json` lists the roots)                                                                                                                                                                           |
-| `job start <p> <op> [--workspace <path>] [--wait] [-- args…]` | `pueue add` in the operation's pool, label `<p>:<op>`, running `sinnixd-queue-run <launch.json>`; extra arguments are appended to the declared `exec`                                                                                              |
+| `job start <p> <op> [--workspace <path>] [--wait] [-- args…]` | `pueue add` in the operation's pool, label `<p>:<op>`, running `agentctl-run <launch.json>`; extra arguments are appended to the declared `exec`                                                                                              |
 | `job fire <p> <op>`                                           | what a schedule timer runs: `job start` on the main checkout, skipped while the same label is queued or running                                                                                                                                    |
 | `job list [--project p] [--active]`                           | `pueue status --json` reduced to job rows                                                                                                                                                                                                          |
 | `job get \| logs \| result \| cancel \| retry \| wait <id>`   | one task by pueue id; `logs` reads the bounded log, `result` the typed artifact, `cancel` kills the task and reaps its scope's whole cgroup, `retry` is `pueue restart --in-place`                                                                 |
@@ -44,12 +44,12 @@ The CLI decides nothing: it dispatches what it is told and reports; a lane's
 
 A job is a pueue task. Its id is pueue's task id, its pool is pueue's group,
 its state is pueue's state. `job start` writes a private launch input
-(`$XDG_STATE_HOME/sinnixd/inputs/<ref>.json`, mode 0600) carrying the argv
+(`$XDG_STATE_HOME/agentctl/inputs/<ref>.json`, mode 0600) carrying the argv
 inside the declared environment, the resolved environment, the working
 directory, the timeout, the result kind and the artifact paths, then runs
-`pueue add --escape -g <pool> -l <label> -- sinnixd-queue-run <input>`.
+`pueue add --escape -g <pool> -l <label> -- agentctl-run <input>`.
 
-`sinnixd-queue-run` is the command every task runs. It appends a `started`
+`agentctl-run` is the command every task runs. It appends a `started`
 event to the spool naming the group pueue ran it in, starts the workload in the
 task's transient systemd scope, runs the argv with the launch environment in
 its own session, enforces the declared timeout (exit 124), refuses a vanished
@@ -71,8 +71,8 @@ real one. Add tasks by hand with `sinnix-pueue-add`, which scrubs the same
 way.
 
 Groups admit work, and every task's workload enters a transient
-`sinnixd-pueue-<group>-<stem>-<digest of the launch input path>.scope` in the
-corresponding declarative `sinnixd-pueue-<group>.slice`: `agent:6 pytest:1
+`agentctl-<group>-<stem>-<digest of the launch input path>.scope` in the
+corresponding declarative `agentctl-<group>.slice`: `agent:6 pytest:1
 bulk:1 normal:5 interactive:4`. Every part of that name comes from `pueue
 status`, from a command that is the wrapper and one launch input and nothing
 else, so `job cancel` stops the cgroup — the one boundary a descendant cannot
@@ -81,7 +81,7 @@ clean up. Stopping it is one write to `cgroup.kill`, which the kernel applies
 to the whole subtree, and `job cancel` on a task that never started drops it
 out of the queue instead, since pueue kills processes and a queued task has
 none. The group comes from `PUEUE_GROUP`, so a repository that queues
-`sinnixd-queue-run` with its own launch input is contained and reaped
+`agentctl-run` with its own launch input is contained and reaped
 identically. `scope_properties` in a launch input are `systemd-run -p`
 settings on that scope, restricted to the ones that lower what the task may
 consume (`MemoryMax`, `MemoryHigh`, `MemorySwapMax`, `MemoryZSwapMax`,
@@ -89,7 +89,8 @@ consume (`MemoryMax`, `MemoryHigh`, `MemorySwapMax`, `MemoryZSwapMax`,
 outside the task's cgroup, where a cancel cannot reach it. The pytest and bulk
 slices have fixed memory, swap, CPU, and IO budgets; they do not choose
 capacity from instantaneous free RAM.
-`sinnixd-backpressure.timer` pauses one group per minute while the host's
+`agentctl-backpressure.timer` runs `agentctl backpressure tick`, which pauses one
+group per minute while the host's
 `full` IO or memory stall stays above threshold and resumes in reverse order
 once clear; a paused task keeps its work.
 
@@ -107,7 +108,7 @@ contract appended verbatim. It creates
 `.lane/prompt.md` (0600), and queues in group `agent`:
 
 ```text
-sinnixd-queue-run <agent-launch.json>
+agentctl-run <agent-launch.json>
 <environment.command> run_agent_prompt.sh --agent B --workdir W \
   --prompt-file W/.lane/prompt.md --last-file W/.lane/prompt.result.md \
   --model M --reasoning-effort E
@@ -198,13 +199,13 @@ Descriptor changes take effect on the next call; timers follow on the next
 ## Schedules
 
 Each declared `schedule` is one transient user timer,
-`sinnixd-schedule-<sha256(project:operation:expression)[:24]>.timer`, running
+`agentctl-schedule-<sha256(project:operation:expression)[:24]>.timer`, running
 `agentctl job fire <project> <operation>`. `schedule apply` lists the live
 timers, stops the ones no descriptor declares, and starts the missing ones;
 a changed expression is a new unit. Daily or rarer timers are `Persistent`
 (a missed firing catches up); sub-hourly ones are not.
 
-The opt-in refill timer (`sinnix.services.sinnixd.refill = { enable = true;
+The opt-in refill timer (`sinnix.services.agentctl.refill = { enable = true;
 project; limit; onCalendar; }`) runs `agentctl refill <project> --limit N`;
 it is the only timer that starts lanes.
 
@@ -234,15 +235,15 @@ it is the only timer that starts lanes.
 
 ## Host wiring
 
-`modules/services/sinnixd.nix` renders `/etc/sinnix/agentctl.json`
+`modules/services/agentctl.nix` renders `/etc/sinnix/agentctl.json`
 (`project_roots`, `agent_runner`, `event_spool`, `agentctl`), installs
 `agentctl`, `wt`, `pueue` and `gh` as system packages, persists
-`~/.local/state/sinnixd`, and declares the timers: `sinnixd-backpressure`
-(every minute), `sinnixd-schedule` (every fifteen minutes, and two minutes
-after login), and `sinnixd-refill` when the opt-in refill is enabled. pueued itself, its groups, its completion callback and the
-`sinnixd-work.slice` coordinator placement, the pueue pool groups, and their
+`~/.local/state/agentctl`, and declares the timers: `agentctl-backpressure`
+(every minute), `agentctl-schedule` (every fifteen minutes, and two minutes
+after login), and `agentctl-refill` when the opt-in refill is enabled. pueued itself, its groups, its completion callback and the
+`agentctl-work.slice` coordinator placement, the pueue pool groups, and their
 pool slices are declared by the CLI feature and runtime registry
 (`modules/features/cli/core.nix`, `flake/data/runtime-defaults.nix`).
 
-`nix build .#sinnixd` runs the package suite, which drives a private pueued
+`nix build .#agentctl` runs the package suite, which drives a private pueued
 end to end for the adapter and fakes it for the launch and lane routes.

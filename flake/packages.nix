@@ -26,7 +26,7 @@
         "sinnix-agent-environment-doc"
         "sinnix-agent-gateway"
         "sinnix-mcp"
-        "sinnixd"
+        "agentctl"
         "sinnix-deslop"
         "sinnix-lifecycle-manifest"
         "sinnix-observe"

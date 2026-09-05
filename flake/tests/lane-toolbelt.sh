@@ -87,7 +87,7 @@ esac
 EOF
 chmod +x "$bin/agentctl"
 export AGENTCTL_CALLS=$root/agentctl.calls
-verify_output=$(cd "$repo" && PATH="$bin:$PATH" SINNIXD_TIMEOUT_SECONDS=60 "$lane" verify)
+verify_output=$(cd "$repo" && PATH="$bin:$PATH" AGENTCTL_TIMEOUT_SECONDS=60 "$lane" verify)
 grep -Fq 'succeeded' <<<"$verify_output"
 grep -Fq "job start fixture verify_quick --workspace $repo --wait --timeout-seconds 60" "$AGENTCTL_CALLS"
 
@@ -99,7 +99,7 @@ printf 'launch snapshot\n' >"$repo/.lane/prompt.md"
 task_output=$(cd "$repo" && "$lane" task)
 test "$task_output" = 'launch snapshot'
 printf 'named prompt\n' >"$root/named.md"
-task_output=$(cd "$repo" && SINNIXD_JOB_PROMPT_FILE="$root/named.md" "$lane" task)
+task_output=$(cd "$repo" && AGENTCTL_JOB_PROMPT_FILE="$root/named.md" "$lane" task)
 test "$task_output" = 'named prompt'
 
 printf 'lane toolbelt fixture passed\n'

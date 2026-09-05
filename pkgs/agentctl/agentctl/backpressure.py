@@ -7,7 +7,6 @@ nothing is cancelled — a paused group's tasks keep their work and resume.
 
 from __future__ import annotations
 
-import argparse
 import json
 import time
 from pathlib import Path
@@ -168,16 +167,3 @@ def tick(*, spool: Path | None, pressure_root: Path = Path("/proc/pressure")) ->
         **pressure,
     }
 
-
-def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="sinnixd-backpressure")
-    parser.add_argument(
-        "--event-spool", type=Path, default=Path("/realm/state/agentctl/events.jsonl")
-    )
-    parsed = parser.parse_args(argv)
-    print(json.dumps(tick(spool=parsed.event_spool), sort_keys=True))
-    return 0
-
-
-if __name__ == "__main__":  # pragma: no cover - console entry point
-    raise SystemExit(main())

@@ -6,8 +6,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from sinnixd import schedule
-from sinnixd.config import Config
+from agentctl import schedule
+from agentctl.config import Config
 
 
 @pytest.fixture
@@ -47,13 +47,13 @@ def test_apply_starts_declared_timers_that_fire_agentctl_and_stops_retired_ones(
     fake_systemd: dict[str, Any], config: Config, project_root: Path
 ) -> None:
     """Breaks if a timer stops running `job fire`, or a retired one survives."""
-    fake_systemd["units"].add("sinnixd-schedule-000000000000000000000000")
+    fake_systemd["units"].add("agentctl-schedule-000000000000000000000000")
 
     applied = schedule.apply(config)
 
     expected = schedule.unit_for("fixture", "nightly", "*-*-* 03:17:00")
     assert applied["started"] == [expected]
-    assert applied["stopped"] == ["sinnixd-schedule-000000000000000000000000"]
+    assert applied["stopped"] == ["agentctl-schedule-000000000000000000000000"]
     start = next(call for call in fake_systemd["calls"] if call[0] == "systemd-run")
     assert "--on-calendar=*-*-* 03:17:00" in start
     assert "--timer-property=Persistent=true" in start

@@ -36,7 +36,7 @@ refused or failed, 2 usage, 3 the waited job did not succeed.
 - Every long launch carries an evidence-based duration expectation and a
   deadline around twice it. At the deadline, inspect progress evidence and
   cancel, repair, or extend for a stated reason.
-- Artifacts (launch input, log, result) live under `~/.local/state/sinnixd`
+- Artifacts (launch input, log, result) live under `~/.local/state/agentctl`
   or the task's own working directory, and are found by the launch input the
   task's command names.
 

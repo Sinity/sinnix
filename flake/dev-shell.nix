@@ -44,7 +44,7 @@
         name: action:
         pkgs.writeShellScriptBin name ''
           set -euo pipefail
-          if [ "''${SINNIXD_PRINCIPAL:-}" = agent-control ]; then
+          if [ "''${AGENTCTL_PRINCIPAL:-}" = agent-control ]; then
             echo "sinnix $name: refused in a managed lane; declare a pueue operation and run it with agentctl" >&2
             exit 64
           fi
@@ -82,9 +82,9 @@
         check = pkgs.writeShellScriptBin "check" ''
           set -euo pipefail
           ${resolveFlakeDir}
-          if [ "''${SINNIXD_PRINCIPAL:-}" = agent-control ] \
-            && [ "''${SINNIXD_OPERATION:-}" != check ] \
-            && [ "''${SINNIXD_OPERATION:-}" != verify_quick ]; then
+          if [ "''${AGENTCTL_PRINCIPAL:-}" = agent-control ] \
+            && [ "''${AGENTCTL_OPERATION:-}" != check ] \
+            && [ "''${AGENTCTL_OPERATION:-}" != verify_quick ]; then
             exec agentctl job start sinnix check --workspace "$_flake_dir" --wait -- "$@"
           fi
           exec 9>/tmp/sinnix-switch.lock
@@ -128,7 +128,7 @@
         # nh doesn't wrap build-vm; keep direct nixos-rebuild.
         test-vm = pkgs.writeShellScriptBin "test-vm" ''
           set -euo pipefail
-          if [ "''${SINNIXD_PRINCIPAL:-}" = agent-control ]; then
+          if [ "''${AGENTCTL_PRINCIPAL:-}" = agent-control ]; then
             echo "sinnix test-vm: refused in a managed lane; declare a pueue operation and run it with agentctl" >&2
             exit 64
           fi

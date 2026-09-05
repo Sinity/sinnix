@@ -13,7 +13,7 @@ let
   eventSpool = "${config.sinnix.paths.stateRoot}/agentctl/events.jsonl";
 in
 mkServiceModule {
-  name = "sinnixd";
+  name = "agentctl";
   description = "agentctl: jobs over pueue, lanes over worktrunk, gh and bd, and their timers";
   extraOptions.projectRoots = lib.mkOption {
     type = lib.types.nonEmptyListOf lib.types.str;
@@ -25,7 +25,7 @@ mkServiceModule {
       then
         roots
       else
-        throw "sinnix.services.sinnixd.projectRoots must contain unique absolute project roots";
+        throw "sinnix.services.agentctl.projectRoots must contain unique absolute project roots";
     description = "Explicit project roots whose .agentctl/project.toml descriptors agentctl reads; no parent directory is scanned.";
   };
   extraOptions.refill = {
@@ -52,14 +52,14 @@ mkServiceModule {
     description = "The backend adapter `agentctl lane start` queues; it turns a prompt file into one backend invocation.";
   };
   # No runtime surface: the job plane is pueued (declared by the CLI feature)
-  # inside the sinnixd slice hierarchy, and the units here are two timers.
+  # inside the agentctl slice hierarchy, and the units here are two timers.
   configFn =
     { cfg, ... }:
     lib.mkMerge [
       (lib.sinnix.mkScheduledJob
         {
           inherit config;
-          unitName = "sinnixd-backpressure";
+          unitName = "agentctl-backpressure";
           description = "Freeze the job queue while the host is stalled";
         }
         {
@@ -67,7 +67,7 @@ mkServiceModule {
           resourceClass = "background-maintenance";
           # The pass pauses and resumes pueue groups through the pueue client.
           path = [ pkgs.pueue ];
-          execStart = "${scriptPkgs.sinnixd}/bin/sinnixd-backpressure --event-spool ${lib.escapeShellArg eventSpool}";
+          execStart = "${scriptPkgs.agentctl}/bin/agentctl backpressure tick";
           serviceConfig = {
             TimeoutStartSec = "30s";
             ReadWritePaths = [ (builtins.dirOf eventSpool) ];
@@ -75,7 +75,7 @@ mkServiceModule {
           timer = {
             # Full-stall averages are 60-second means, so sampling faster reads
             # the same number twice. One group is paused or resumed per tick,
-            # with the signal-specific order defined by sinnixd-backpressure.
+            # with the signal-specific order defined by `agentctl backpressure tick`.
             onUnitActiveSec = 60;
             onBootSec = 60;
             description = "Freeze the job queue while the host is stalled";
@@ -85,7 +85,7 @@ mkServiceModule {
       (lib.sinnix.mkScheduledJob
         {
           inherit config;
-          unitName = "sinnixd-schedule";
+          unitName = "agentctl-schedule";
           description = "Reconcile the calendar timers declared by project descriptors";
         }
         {
@@ -93,7 +93,7 @@ mkServiceModule {
           resourceClass = "background-maintenance";
           # Each declared `schedule` becomes one transient timer running
           # `agentctl job fire`; a changed or removed declaration is stopped.
-          execStart = "${scriptPkgs.sinnixd}/bin/agentctl schedule apply";
+          execStart = "${scriptPkgs.agentctl}/bin/agentctl schedule apply";
           serviceConfig = {
             TimeoutStartSec = "60s";
           };
@@ -108,13 +108,13 @@ mkServiceModule {
         lib.sinnix.mkScheduledJob
           {
             inherit config;
-            unitName = "sinnixd-refill";
+            unitName = "agentctl-refill";
             description = "Start lanes for ready ${cfg.refill.project} beads";
           }
           {
             manager = "user";
             resourceClass = "background-maintenance";
-            execStart = "${scriptPkgs.sinnixd}/bin/agentctl refill ${lib.escapeShellArg cfg.refill.project} --limit ${toString cfg.refill.limit}";
+            execStart = "${scriptPkgs.agentctl}/bin/agentctl refill ${lib.escapeShellArg cfg.refill.project} --limit ${toString cfg.refill.limit}";
             serviceConfig = {
               TimeoutStartSec = "10min";
             };
@@ -129,13 +129,13 @@ mkServiceModule {
           project_roots = cfg.projectRoots;
           agent_runner = cfg.agentRunner;
           event_spool = eventSpool;
-          agentctl = "${scriptPkgs.sinnixd}/bin/agentctl";
+          agentctl = "${scriptPkgs.agentctl}/bin/agentctl";
         };
         # Queued commands and the timers run with the system PATH, not an
         # interactive profile, so the tools agentctl shells out to must be
         # system packages.
         environment.systemPackages = [
-          scriptPkgs.sinnixd
+          scriptPkgs.agentctl
           scriptPkgs.polylogue-cli
           pkgs.worktrunk
           pkgs.pueue
@@ -143,7 +143,7 @@ mkServiceModule {
         ];
         systemd.tmpfiles.rules = [ "d ${taskStateRoot} 0700 ${userName} users -" ];
         # Launch inputs, bounded logs and typed results of queued jobs.
-        sinnix.persistence.home.directories = [ ".local/state/sinnixd" ];
+        sinnix.persistence.home.directories = [ ".local/state/agentctl" ];
       }
     ];
 } args

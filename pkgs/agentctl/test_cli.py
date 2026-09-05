@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 from conftest import FakePueue
-from sinnixd import cli
-from sinnixd.config import Config
+from agentctl import cli
+from agentctl.config import Config
 
 
 @pytest.fixture
@@ -133,3 +133,39 @@ def test_view_json_is_the_snapshot(
     monkeypatch.chdir(cli_config.project_roots[0])
     assert cli.main(["view"]) == 0
     assert "== fixture at" in capsys.readouterr().out
+
+
+def test_backpressure_tick_reports_the_decision(
+    cli_config: Config, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    from agentctl import backpressure
+
+    monkeypatch.setattr(
+        backpressure,
+        "read_pressure",
+        lambda _root: {"io_full_avg60": 0.0, "memory_full_avg60": 0.0},
+    )
+    monkeypatch.setattr(backpressure.pueue, "groups_status", lambda: {"agent": "Running"})
+
+    assert cli.main(["backpressure", "tick"]) == 0
+    assert json.loads(capsys.readouterr().out)["action"] == "hold"
+
+
+def test_default_state_dir_moves_the_previous_directory_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    from agentctl.config import default_state_dir
+
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    previous = tmp_path / "sinnixd"
+    (previous / "jobs").mkdir(parents=True)
+
+    assert default_state_dir() == tmp_path / "agentctl"
+    assert (tmp_path / "agentctl" / "jobs").is_dir()
+    assert not previous.exists()
+    assert "moved state" in capsys.readouterr().err
+
+    (previous / "jobs").mkdir(parents=True)
+    assert default_state_dir() == tmp_path / "agentctl"
+    assert previous.is_dir()
+    assert capsys.readouterr().err == ""

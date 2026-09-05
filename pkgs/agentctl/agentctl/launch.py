@@ -2,7 +2,7 @@
 
 A job is a pueue task in the descriptor's pool with label
 ``<project>:<operation>``. Its id is the pueue task id; pueue's state is the
-job's state. agentctl adds only the launch input `sinnixd-queue-run` consumes
+job's state. agentctl adds only the launch input `agentctl-run` consumes
 (argv, environment, timeout, artifact paths) and reads the bounded log and
 typed result back by the launch reference embedded in the task's command.
 """
@@ -35,7 +35,7 @@ from .queue_run import (
     stop_scope,
 )
 
-QUEUE_RUN_EXECUTABLE = "sinnixd-queue-run"
+QUEUE_RUN_EXECUTABLE = "agentctl-run"
 # A launch input carries argv and a resolved environment; the largest this
 # workstation has queued is 21 KB. The bound is what keeps a task from naming
 # an arbitrarily large file and having agentctl read it.
@@ -251,7 +251,7 @@ def _start_operation(
     if not working_directory.is_dir():
         raise JobError(f"working directory does not exist: {working_directory}")
     environment = project.environment.values()
-    for key in ("SINNIXD_PRINCIPAL", "SINNIXD_LANE_BEAD"):
+    for key in ("AGENTCTL_PRINCIPAL", "AGENTCTL_LANE_BEAD"):
         if value := os.environ.get(key):
             environment[key] = value
     tree_receipt = None

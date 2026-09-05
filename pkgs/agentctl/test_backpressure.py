@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from sinnixd import backpressure
+from agentctl import backpressure
 
 
 def _tick(monkeypatch, pressure, groups):

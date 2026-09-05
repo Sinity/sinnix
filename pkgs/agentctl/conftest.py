@@ -13,10 +13,10 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 import pytest
-from sinnixd import pueue as pueue_module
-from sinnixd.config import Config
-from sinnixd.packets import PacketError
-from sinnixd.pueue import PueueError, PueueGroupError, Task
+from agentctl import pueue as pueue_module
+from agentctl.config import Config
+from agentctl.packets import PacketError
+from agentctl.pueue import PueueError, PueueGroupError, Task
 
 
 @dataclass

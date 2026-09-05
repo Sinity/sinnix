@@ -3,15 +3,14 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "sinnixd"
+name = "agentctl"
 version = "0.1.0"
 description = "agentctl: jobs over pueue, lanes over worktrunk, gh and bd"
 requires-python = ">=3.12"
 
 [project.scripts]
-agentctl = "sinnixd.cli:main"
-sinnixd-queue-run = "sinnixd.queue_run:main"
-sinnixd-backpressure = "sinnixd.backpressure:main"
+agentctl = "agentctl.cli:main"
+agentctl-run = "agentctl.queue_run:main"
 
 [tool.setuptools.packages.find]
-include = ["sinnixd*"]
+include = ["agentctl*"]

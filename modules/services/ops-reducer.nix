@@ -79,7 +79,7 @@ mkServiceModule {
           };
           Service = {
             Type = "simple";
-            ExecStart = "${reducer}/bin/sinnix-ops-reducer --runtime-dir %t --state-dir ${stateDir} --inventory /etc/sinnix/runtime-inventory.json --capability-index /etc/sinnix/capability-index.json --usage-census ${config.sinnix.paths.machineRoot}/usage-census.jsonl --clodex-usage /home/${userName}/.clodex/logs/inference-requests.jsonl --ambient-product /realm/project/sinity-lynchpin/.lynchpin/generated/analysis/ambient_intelligence.json --anchor-events %t/sinnix/afk-resume.json --hyprland-events %t/sinnix/hyprland-events --agentctl ${scriptPkgs.sinnixd}/bin/agentctl --observe-command ${observe}/bin/sinnix-observe --interval ${toString cfg.intervalSeconds} --feedback-dir ${cfg.feedbackDir}${
+            ExecStart = "${reducer}/bin/sinnix-ops-reducer --runtime-dir %t --state-dir ${stateDir} --inventory /etc/sinnix/runtime-inventory.json --capability-index /etc/sinnix/capability-index.json --usage-census ${config.sinnix.paths.machineRoot}/usage-census.jsonl --clodex-usage /home/${userName}/.clodex/logs/inference-requests.jsonl --ambient-product /realm/project/sinity-lynchpin/.lynchpin/generated/analysis/ambient_intelligence.json --anchor-events %t/sinnix/afk-resume.json --hyprland-events %t/sinnix/hyprland-events --agentctl ${scriptPkgs.agentctl}/bin/agentctl --observe-command ${observe}/bin/sinnix-observe --interval ${toString cfg.intervalSeconds} --feedback-dir ${cfg.feedbackDir}${
               lib.optionalString (cfg.hubManifest != null) " --hub-manifest ${cfg.hubManifest}"
             }${lib.optionalString (cfg.elicitCommand != null) " --elicit-command '${cfg.elicitCommand}'"}";
             # nvidia-smi, journalctl, systemctl and hyprctl are what the pages

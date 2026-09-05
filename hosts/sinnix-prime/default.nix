@@ -42,7 +42,7 @@
 
   sinnix.persistence.enable = true;
   sinnix.services = {
-    sinnixd.enable = true;
+    agentctl.enable = true;
     github-runner-polylogue.enable = true;
     agent-gateway = {
       enable = true;

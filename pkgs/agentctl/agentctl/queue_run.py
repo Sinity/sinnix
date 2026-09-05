@@ -4,14 +4,14 @@ pueue owns the queue, the process, and the terminal result. It knows nothing
 about project descriptors, result artifacts, or the event spool, so one
 wrapper carries those between agentctl and the command:
 
-    sinnixd-queue-run <private-input-path>
+    agentctl-run <private-input-path>
 
 The path is the only argument because pueue joins a task's arguments into one
 string for its shell; a single unspaced path cannot be re-split whatever the
 shell does with it.
 
 That path also names the task's containment. The workload runs in a transient
-scope called ``sinnixd-pueue-<pueue group>-<stem>-<digest of the path>.scope``,
+scope called ``agentctl-<pueue group>-<stem>-<digest of the path>.scope``,
 every part of which a reader recovers from ``pueue status`` alone, so a
 canceller reaps the whole cgroup without this wrapper's help and without the
 launch input still existing.
@@ -41,10 +41,10 @@ from typing import Any, Mapping, Sequence
 # prints more is truncated with a marker, never allowed to fill the disk.
 MAX_LOG_BYTES = 64_000
 MAX_RESULT_BYTES = 64_000
-OVERFLOW_MARKER = "\n[sinnixd: output truncated]\n"
+OVERFLOW_MARKER = "\n[agentctl: output truncated]\n"
 
 # The exit status the wrapper reports when it enforced the declared timeout.
-# 124 is what timeout(1) uses, so a reader needs no sinnixd-specific table.
+# 124 is what timeout(1) uses, so a reader needs no agentctl-specific table.
 TIMEOUT_EXIT_CODE = 124
 
 # The status for a refusal before the command ran at all: a working directory
@@ -53,7 +53,7 @@ REFUSED_EXIT_CODE = 125
 
 RESULT_KINDS = frozenset({"exit", "json", "pytest", "last-message"})
 POOL_NAME = re.compile(r"[a-z][a-z0-9-]{0,63}\Z")
-POOL_SLICE_PREFIX = "sinnixd-pueue"
+POOL_SLICE_PREFIX = "agentctl"
 
 # The transient scope settings agentctl passes through to `systemd-run -p`.
 # Each one only lowers what the workload may consume, so a launch input can
@@ -436,14 +436,14 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
     child_environment = dict(launch["environment"])
     child_environment.update(
         {
-            "SINNIXD_JOB_ID": str(launch["job_id"]),
-            "SINNIXD_PROJECT_ID": str(launch["project_id"]),
-            "SINNIXD_OPERATION": str(launch["operation"]),
-            "SINNIXD_QUEUE_WORKER": "1",
+            "AGENTCTL_JOB_ID": str(launch["job_id"]),
+            "AGENTCTL_PROJECT_ID": str(launch["project_id"]),
+            "AGENTCTL_OPERATION": str(launch["operation"]),
+            "AGENTCTL_QUEUE_WORKER": "1",
         }
     )
     if pool:
-        child_environment["SINNIXD_QUEUE_POOL"] = str(pool)
+        child_environment["AGENTCTL_POOL"] = str(pool)
     with open(log_path, "wb") as log:
         stdout: Any = log
         result_file = None
@@ -495,7 +495,7 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
 
 
 def main(arguments: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="sinnixd-queue-run")
+    parser = argparse.ArgumentParser(prog="agentctl-run")
     parser.add_argument("launch_input")
     parsed = parser.parse_args(arguments)
     try:

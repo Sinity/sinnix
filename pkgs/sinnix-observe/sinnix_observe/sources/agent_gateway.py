@@ -1,4 +1,4 @@
-"""Bounded observation of canonical Sinnixd attested-agent records."""
+"""Bounded observation of canonical agentctl attested-agent records."""
 
 from __future__ import annotations
 
@@ -105,7 +105,7 @@ def collect_agent_gateway(
 
     _ = below
     root = Path(
-        os.environ.get("SINNIXD_STATE_DIR", str(Path.home() / ".local/state/sinnixd"))
+        os.environ.get("AGENTCTL_STATE_DIR", str(Path.home() / ".local/state/agentctl"))
     )
     records_root = root / "jobs"
     malformed: list[str] = []

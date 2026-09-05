@@ -1,6 +1,6 @@
 """The worktrunk (``wt``) adapter: worktree lifecycle and its published facts.
 
-Sinnixd does not create, provision, classify, or remove worktrees. ``wt`` does,
+agentctl does not create, provision, classify, or remove worktrees. ``wt`` does,
 against the project's own ``.config/wt.toml`` hooks, and publishes the result as
 JSON. This module is the only place that shells out to it.
 """
@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 # wt list schema 2 is the contract this module parses. wt still defaults to
-# schema 1 and takes 2 only from user config, so every call pins it: sinnixd
+# schema 1 and takes 2 only from user config, so every call pins it: agentctl
 # must not read a different shape because the invoking user configured one.
 LIST_SCHEMA_VERSION = 2
 _LIST_ARGUMENTS = (
@@ -48,7 +48,7 @@ def _read_only_git_environment() -> dict[str, str]:
     `git status` refreshes the index and holds that lock. wt statuses every
     worktree including the primary checkout, and a call killed at the timeout
     below leaves the lock behind, blocking every later write in a repository
-    sinnixd does not own. Reading is all this module does.
+    agentctl does not own. Reading is all this module does.
     """
     return {**os.environ, "GIT_OPTIONAL_LOCKS": "0"}
 
@@ -108,7 +108,7 @@ def _checks_facts(value: Any) -> ChecksFacts | None:
 
 @dataclass(frozen=True)
 class Worktree:
-    """One item of ``wt list --format=json``, reduced to what sinnixd reads."""
+    """One item of ``wt list --format=json``, reduced to what agentctl reads."""
 
     # A detached worktree publishes no branch and a branch with no worktree
     # publishes no path. Both are ordinary listing entries, not read failures.
@@ -220,7 +220,7 @@ def worktrunk_create(
 
     The path is passed explicitly rather than left to the user's worktrunk
     config, because the project descriptor declares where its workspaces live and
-    sinnixd validates the result against that declaration.
+    agentctl validates the result against that declaration.
     """
     arguments = [
         "--config-set",

@@ -102,7 +102,7 @@
         # Provably fails when: the launch input stops carrying the descriptor's
         # argv, pool, label or artifact paths, or the pueue adapter misreads
         # the daemon's JSON. The suite drives a private pueued end to end.
-        sinnixd-suite = scriptRegistry.packageSet.sinnixd;
+        agentctl-suite = scriptRegistry.packageSet.agentctl;
       };
     };
 }
