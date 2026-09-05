@@ -34,7 +34,8 @@ Comparison surfaces, cheapest first:
                   desktop or phone anywhere on the tailnet, needs no new
                   service, no new port, no hub changes.
 
-State lives under /realm/data/notes/preferences/<domain>/:
+State lives under /realm/state/elicit/<domain>/ (mutable application state, owned
+by this tool, backed up as part of /realm/state):
   items.json        the item roster (id, label, optional image/description/
                     features/prior), written by `init`, editable;
   comparisons.jsonl append-only operator judgments with tombstone undo --
@@ -60,7 +61,7 @@ from pathlib import Path
 from rank_core import Comparison, fit
 
 SCHEMA = "sinnix-elicit-v1"
-BASE_DIR = Path(os.environ.get("SINNIX_ELICIT_DIR", "/realm/data/notes/preferences"))
+BASE_DIR = Path(os.environ.get("SINNIX_ELICIT_DIR", "/realm/state/elicit"))
 REPORTS_DIR = Path(os.environ.get("SINNIX_HUB_REPORTS_DIR", "/realm/data/derived/reports"))
 FEEDBACK_DIR = Path(os.environ.get("SINNIX_HUB_FEEDBACK_DIR", "/realm/data/derived/hub-feedback"))
 

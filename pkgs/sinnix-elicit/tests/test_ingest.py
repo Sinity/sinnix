@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 
 
 def write_items(domain, ids=("a", "b", "c")):
@@ -116,3 +117,14 @@ def test_records_for_another_domain_or_schema_are_left_alone(elicit_module, doma
     )
     elicit_module.cmd_ingest(domain, argparse.Namespace())
     assert raw_ids(domain) == []
+
+
+def test_the_default_state_root_is_the_owned_one(elicit_module):
+    """Instantiated from the module default, not an env override: nothing sets
+    SINNIX_ELICIT_DIR for the installed tool."""
+    assert os.environ.get("SINNIX_ELICIT_DIR") is None
+    assert str(elicit_module.BASE_DIR) == "/realm/state/elicit"
+    assert (
+        str(elicit_module.Domain("wallpaper").model_path)
+        == "/realm/state/elicit/wallpaper/model.json"
+    )

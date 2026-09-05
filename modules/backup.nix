@@ -117,6 +117,11 @@ let
     sinexBeadsDoltArchivePath
     sinexBeadsIssuesArchivePath
   ];
+  # Elicitation state (items, the append-only comparison log, the fitted
+  # model): operator judgments that cannot be recomputed from anything.
+  elicitStateArchivePath = "state/elicit";
+  # Paths under /realm no exclude pattern may cover, ancestors included.
+  protectedRealmArchivePaths = sinexBeadsArchivePaths ++ [ elicitStateArchivePath ];
   borgArchiveMaxAgeSec = 6 * 60 * 60;
   borgSnapshotQueueMaxAgeSec = 6 * 60 * 60;
   # sinex-blobs runs on its own daily timer (05:40), not the 4h-floor
@@ -538,7 +543,7 @@ let
       lib.any (candidate: builtins.match (borgGlobToRegex exclude) candidate != null) (
         protectedPathAndAncestors path
       )
-    ) sinexBeadsArchivePaths;
+    ) protectedRealmArchivePaths;
 
   mkSinexBeadsDrillScript = ''
     set -euo pipefail
@@ -1332,7 +1337,7 @@ in
         ++ [
           {
             assertion = lib.all (exclude: !realmExcludeMatchesProtectedPath exclude) realmExcludes;
-            message = "The /realm Borg backup must not exclude Sinex .beads/dolt or .beads/issues.jsonl";
+            message = "The /realm Borg backup must not exclude a protected path: ${lib.concatStringsSep ", " protectedRealmArchivePaths}";
           }
         ];
     }

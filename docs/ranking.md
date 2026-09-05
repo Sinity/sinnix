@@ -89,8 +89,12 @@ that the engine does not:
 Its domain format is its own: `items.json` (a JSON array, editable),
 `comparisons.jsonl` with `{a, b, outcome}` pairwise records, and `model.json`,
 the one cached fit in the estate — the hub serves it back mid-session at
-`GET /feedback/elicit/<domain>`. State lives at `/realm/data/notes/preferences/<domain>`;
-`SINNIX_ELICIT_DIR` moves the root for fixtures.
+`GET /feedback/elicit/<domain>`. State lives at `/realm/state/elicit/<domain>` --
+mutable application state, in the state root, not in the prose tree;
+`SINNIX_ELICIT_DIR` moves the root for fixtures. `sinnix-elicit-migrate` moves
+domains there from the retired root: it refuses to run while the drain unit is
+active, moves each domain by rename, and re-checks every file's size and
+sha256 at the destination.
 
 A tap posts to the hub's `/feedback` spool and `sinnix-elicit autoingest`
 drains it into the domain, coalesced per burst. The drain dedups against every
