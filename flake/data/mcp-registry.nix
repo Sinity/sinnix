@@ -102,28 +102,19 @@ let
       transport = "stdio";
       tier = "recall";
       command = "mcp-polylogue";
-      profiles = {
-        full.args = [
-          "--role"
-          "write"
-        ];
-        evidence.args = [
-          "--role"
-          "write"
-        ];
-        browser.args = [
-          "--role"
-          "write"
-        ];
-        antigravity.args = [
-          "--role"
-          "write"
-        ];
-        lean.args = [
-          "--role"
-          "read"
-        ];
-      };
+      # polylogue-mcp is read-only by default and has no role flag; write
+      # dispatchers are an environment opt-in.
+      profiles =
+        let
+          write.env.POLYLOGUE_MCP_WRITE_ENABLED = "1";
+        in
+        {
+          full = write;
+          evidence = write;
+          browser = write;
+          antigravity = write;
+          lean = { };
+        };
       clients = [
         "codex"
         "claude"
