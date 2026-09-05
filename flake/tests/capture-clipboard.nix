@@ -14,11 +14,14 @@ let
 in
 {
   perSystem =
-    { system, ... }:
+    {
+      system,
+      sinnixScriptRegistry,
+      ...
+    }:
     let
       pkgs = inputs.nixpkgs.legacyPackages.${system};
-      scriptRegistry = import ../scripts.nix { inherit inputs pkgs; };
-      captureCli = scriptRegistry.packageSet.sinnix-capture;
+      captureCli = sinnixScriptRegistry.packageSet.sinnix-capture;
       testLib = import ../test-lib.nix { inherit inputs lib; };
       inherit (testLib) evalTestSpec mkServiceTest;
 

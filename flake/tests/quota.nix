@@ -1,16 +1,11 @@
 # Provider quota normalization, redaction, and disagreement fixture.
-{ inputs, ... }:
-{
+_: {
   perSystem =
-    { system, ... }:
-    let
-      pkgs = inputs.nixpkgs.legacyPackages.${system};
-      scriptRegistry = import ../scripts.nix { inherit inputs pkgs; };
-    in
+    { sinnixScriptRegistry, ... }:
     {
       checks = {
-        quota = scriptRegistry.packageSet.sinnix-quota;
-        codexbar = scriptRegistry.packageSet.sinnix-quota.passthru.codexbar;
+        quota = sinnixScriptRegistry.packageSet.sinnix-quota;
+        codexbar = sinnixScriptRegistry.packageSet.sinnix-quota.passthru.codexbar;
       };
     };
 }

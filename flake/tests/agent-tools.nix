@@ -5,15 +5,18 @@ let
 in
 {
   perSystem =
-    { system, ... }:
-    let
-      pkgs = inputs.nixpkgs.legacyPackages.${system};
-      polylogueSentinelDataDir = "/tmp/sinnix-polylogue-agent-tools-sentinel";
+    {
+      system,
       # The packaged binary, not a copy of the source with a hand-patched
       # shebang: the wrapper and the withPackages interpreter that discovery
       # builds are part of what these fixtures are testing, and a fixture that
       # rebuilds them itself passes while the real command is broken.
-      scriptRegistry = import ../scripts.nix { inherit inputs pkgs; };
+      sinnixScriptRegistry,
+      ...
+    }:
+    let
+      pkgs = inputs.nixpkgs.legacyPackages.${system};
+      polylogueSentinelDataDir = "/tmp/sinnix-polylogue-agent-tools-sentinel";
       runtimeDefaults = import ../data/runtime-defaults.nix { inherit lib; };
       mcpRegistry = import ../data/mcp-registry.nix { inherit lib; };
       agentLanes = import ../data/agent-lanes.nix;
@@ -828,7 +831,7 @@ in
             nativeBuildInputs = [ pkgs.python3 ];
           }
           ''
-            export PYTHONPATH="${scriptRegistry.packageSet.agentctl}/${pkgs.python3.sitePackages}"
+            export PYTHONPATH="${sinnixScriptRegistry.packageSet.agentctl}/${pkgs.python3.sitePackages}"
             ${pkgs.python3}/bin/python - <<'PY'
             import json
             from pathlib import Path
@@ -1010,11 +1013,11 @@ in
               pkgs.coreutils
               pkgs.git
               pkgs.jq
-              scriptRegistry.packageSet.beads
+              sinnixScriptRegistry.packageSet.beads
             ];
           }
           ''
-            ${pkgs.bash}/bin/bash ${../../flake/tests/bd-dolt-authority.sh} ${scriptRegistry.packageSet.beads}/bin/bd
+            ${pkgs.bash}/bin/bash ${../../flake/tests/bd-dolt-authority.sh} ${sinnixScriptRegistry.packageSet.beads}/bin/bd
             touch "$out"
           '';
       contextHandoffFixture =
