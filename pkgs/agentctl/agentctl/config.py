@@ -42,6 +42,11 @@ class Config:
     event_spool: Path
     state_dir: Path
     agentctl_executable: str
+    # The file this configuration was read from. Every task agentctl queues
+    # carries it as AGENTCTL_CONFIG, so the agentctl calls inside a task read
+    # the same projects, state directory and event spool as the one that
+    # queued it.
+    config_path: Path | None = None
 
     @property
     def inputs_dir(self) -> Path:
@@ -110,7 +115,7 @@ def load_config(path: Path | None = None) -> Config:
     try:
         raw = json.loads(location.read_text())
     except FileNotFoundError:
-        return _default()
+        return replace(_default(), config_path=location)
     except (OSError, json.JSONDecodeError) as error:
         raise ConfigError(f"could not read {location}: {error}") from error
     if not isinstance(raw, Mapping):
@@ -123,6 +128,7 @@ def load_config(path: Path | None = None) -> Config:
     config = _default(Path(state_dir) if state_dir else None)
     return replace(
         config,
+        config_path=location,
         project_roots=_paths(raw.get("project_roots", []), "project_roots"),
         agent_runner=_path(
             raw.get("agent_runner"), "agent_runner", config.agent_runner
