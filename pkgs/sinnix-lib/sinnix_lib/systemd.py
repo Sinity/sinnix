@@ -1,4 +1,4 @@
-"""Batched systemd unit probes.
+"""Batched systemd unit probes and the sd_notify datagram.
 
 The blank-line-delimited ``systemctl show`` block parser existed in bash
 (health sentinel), in Python (hub renderer), and in sinnix-observe — three
@@ -8,11 +8,47 @@ sudo/user-bus bridge for probing another user's manager from a system unit.
 
 from __future__ import annotations
 
+import os
+import socket
 import subprocess
 from collections.abc import Sequence
 from pathlib import Path
 
 DEFAULT_PROPERTIES = ("Id", "ActiveState", "SubState", "Type", "Result", "WantedBy")
+
+
+def sd_notify(message: str) -> None:
+    """sd_notify without libsystemd: it is a datagram to $NOTIFY_SOCKET.
+
+    Silent when the variable is unset — the unit is then not ``Type=notify``
+    and there is nobody to tell. A leading ``@`` names the abstract
+    namespace, which the kernel spells as a leading NUL byte; sending to the
+    literal path instead would write nothing anyone reads.
+    """
+    address = os.environ.get("NOTIFY_SOCKET")
+    if not address:
+        return
+    if address.startswith("@"):
+        address = "\0" + address[1:]
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as sock:
+            sock.connect(address)
+            sock.sendall(message.encode())
+    except OSError:
+        return
+
+
+def watchdog_period() -> float:
+    """Half of WatchdogSec, systemd's own recommended keepalive interval.
+
+    Zero when the unit has no watchdog, which is the caller's signal to skip
+    keepalives entirely rather than to ping as fast as it can.
+    """
+    try:
+        usec = int(os.environ.get("WATCHDOG_USEC", "0"))
+    except ValueError:
+        return 0.0
+    return usec / 2_000_000 if usec > 0 else 0.0
 
 
 def _parse_blocks(text: str) -> dict[str, dict[str, str]]:
