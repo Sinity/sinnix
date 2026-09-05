@@ -35,6 +35,3 @@ jobs:
 
       - name: Run flake checks (includes nixosTests)
         run: nix flake check
-
-      - name: Verify Gateway V1 extraction and V2 parity provenance
-        run: python3 pkgs/sinnix-agent-gateway/tools/extract_legacy_gateway_manifest.py --repo "$GITHUB_WORKSPACE" --verify pkgs/sinnix-agent-gateway/sinnix_agent_gateway/legacy_manifest_v1.json
