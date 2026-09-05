@@ -58,8 +58,7 @@ def test_official_sdk_principals_expose_only_protocol_verbs(tmp_path: Path) -> N
     agent_control = anyio.run(build_manifest, cfg, "agent-control")
     operator = anyio.run(build_manifest, cfg, "operator")
     names = {row["name"] for row in operator["tools"]}
-
-    assert names == {
+    verbs = {
         "status",
         "catalog",
         "query",
@@ -71,12 +70,15 @@ def test_official_sdk_principals_expose_only_protocol_verbs(tmp_path: Path) -> N
         "operate",
         "run",
     }
-    assert {row["name"] for row in observer["tools"]} == names
-    assert {row["name"] for row in agent_control["tools"]} == names
+    typed = {name for name in names if "." in name}
+
+    assert names == verbs | typed and typed
+    assert {row["name"] for row in observer["tools"]} >= verbs
+    assert {row["name"] for row in agent_control["tools"]} >= verbs
     assert {
         row["name"]
         for row in operator["tools"]
-        if row["annotations"]
+        if row["name"] in verbs and row["annotations"]
         == {
             "readOnlyHint": True,
             "destructiveHint": False,
@@ -108,13 +110,14 @@ def test_official_sdk_principals_expose_only_protocol_verbs(tmp_path: Path) -> N
         "idempotentHint": True,
         "openWorldHint": True,
     }
-    assert {row["name"]: row["annotations"] for row in observer["tools"]} == {
-        row["name"]: row["annotations"] for row in operator["tools"]
-    }
+    assert {
+        row["name"]: row["annotations"] for row in observer["tools"] if row["name"] in verbs
+    } == {row["name"]: row["annotations"] for row in operator["tools"] if row["name"] in verbs}
     assert all(
         "inputSchema" in row and "outputSchema" in row for row in operator["tools"]
     )
-    assert observer["sha256"] == agent_control["sha256"] == operator["sha256"]
+    # Typed actions are principal-filtered, so manifests differ per principal.
+    assert observer["sha256"] != operator["sha256"]
     assert operator["measurement"] == {
         "schema": "sinnix.gateway-schema-measurement.v1",
         "canonical_bytes": operator["measurement"]["canonical_bytes"],
@@ -193,7 +196,7 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                     template_cursor = page.next_cursor
                 names = {tool.name for tool in tools.tools}
                 assert initialized.server_info.name == "sinnix-agent-gateway"
-                assert names == {
+                assert names >= {
                     "status",
                     "catalog",
                     "query",

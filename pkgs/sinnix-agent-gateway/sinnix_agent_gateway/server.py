@@ -19,6 +19,7 @@ from mcp.types import (
     ResourceTemplate,
 )
 
+from .actions import visible as visible_actions
 from .bindings import TargetToolBinding, TargetToolBindings
 from .config import GatewayConfig
 from .contracts import ActionSpec, EffectMode, OwnerRoute, VerbFamily
@@ -36,6 +37,7 @@ from .runtime import (
     v2_tool_result,
 )
 from .schemas import V2ManifestEnvelope
+from .tooling import build_tool
 from .subscriptions import (
     EVENTS_RESOURCE_URI,
     EventSpoolPublisher,
@@ -432,6 +434,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
 
     mcp = MCPServer(
         name="sinnix-agent-gateway",
+        tools=[build_tool(action, runtime) for action in visible_actions(principal_name)],
         title="Sinnix Agent Gateway",
         description="Principal-scoped project, machine, and job control plane.",
         instructions=(

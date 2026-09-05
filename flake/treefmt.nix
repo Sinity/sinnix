@@ -50,6 +50,10 @@ _: {
         # make every regeneration a several-hundred-line diff against a file
         # nobody reads by hand.
         "pkgs/sinnix-phone-app/deps.json"
+        # Gateway codegen output has exactly one correct form, checked byte
+        # for byte by `sinnix-agent-gateway-generate --check`.
+        "pkgs/sinnix-agent-gateway/fixtures/*.json"
+        "docs/generated/*"
       ];
     };
   };
