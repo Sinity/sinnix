@@ -43,24 +43,50 @@ def test_the_fixture_descriptor_loads_every_declared_field(project_root: Path) -
     ]
 
 
-def test_retired_tables_are_ignored_but_retired_operation_fields_refuse(
-    tmp_path: Path,
+@pytest.mark.parametrize(
+    ("fragment", "message"),
+    [
+        ('[conflicts]\nexact_files = ["x"]\n', "unknown tables: conflicts"),
+        ('[owner_adapters.a]\nnamespace = "a"\n', "unknown tables: owner_adapters"),
+        (
+            '[operations.check.parameters.apply]\ntype = "bool"\nflag = "--apply"\n',
+            "unknown fields: parameters",
+        ),
+        ("[packets.extra]\nx = 1\n", r"\[packets\] contains unknown fields: extra"),
+    ],
+)
+def test_a_field_agentctl_does_not_read_takes_the_project_out_of_service(
+    tmp_path: Path, fragment: str, message: str
 ) -> None:
-    """Inert tables must not take a project out of service; an operation
-    field agentctl cannot honour must, loudly."""
+    root = write_project(tmp_path / "p")
+    descriptor = root / ".agentctl" / "project.toml"
+    descriptor.write_text(descriptor.read_text() + "\n" + fragment)
+    with pytest.raises(ProjectConfigError, match=message):
+        load_project_adapter(root)
+
+
+@pytest.mark.parametrize(
+    ("table", "key"),
+    [
+        ("environment", 'preflight = ["true"]'),
+        ("environment", "preflight_timeout_seconds = 180"),
+        ("workspace", 'provider = "git-worktree"'),
+        ("workspace", 'identity_check = ["git", "diff"]'),
+        ("workspace", "checkpoint_untracked = true"),
+        ("workspace", 'verification_operations = ["check"]'),
+    ],
+)
+def test_retired_keys_in_environment_and_workspace_are_refused(
+    tmp_path: Path, table: str, key: str
+) -> None:
     root = write_project(tmp_path / "p")
     descriptor = root / ".agentctl" / "project.toml"
     descriptor.write_text(
-        descriptor.read_text()
-        + '\n[conflicts]\nexact_files = ["x"]\n\n[owner_adapters.a]\nnamespace = "a"\n'
+        descriptor.read_text().replace(f"[{table}]\n", f"[{table}]\n{key}\n")
     )
-    assert load_project_adapter(root).project_id == "fixture"
-
-    descriptor.write_text(
-        descriptor.read_text()
-        + '\n[operations.check.parameters.apply]\ntype = "bool"\nflag = "--apply"\n'
-    )
-    with pytest.raises(ProjectConfigError, match="unknown fields: parameters"):
+    with pytest.raises(
+        ProjectConfigError, match=f"\\[{table}\\] contains unknown fields"
+    ):
         load_project_adapter(root)
 
 

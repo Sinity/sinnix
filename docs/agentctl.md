@@ -372,11 +372,12 @@ launch fails the launch with its name. `[workspace]` declares `root`,
 `default_base`, `agent_memory_max` (a systemd size), `verify` (the
 `focused`, `candidate` and `corpus` operations; `candidate` may be
 `hosted:<check>` for a required PR check) and `publish` (`pr` or `master`).
-Every named operation must be declared; other `[workspace]` fields and the
-`[conflicts]` and `[owner_adapters]` tables are ignored. `[packets]`
-declares `template` (default: the `worker_contract` path in
-`agentctl.json`), `atlas_dir`, `branch_prefix` and `[packets.defaults]`
-(`backend`, `model`, `effort`).
+Every named operation must be declared. `[packets]` declares `template`
+(default: the `worker_contract` path in `agentctl.json`), `atlas_dir`,
+`branch_prefix`, `[packets.model_policy.<name>]` (`backend`, `model`) and
+`[packets.defaults]` (`backend`, `model`, `effort`). Any other table, or any
+other field in one of these tables, takes the project out of service with
+the name reported.
 
 Descriptor changes take effect on the next call; timers follow on the next
 `schedule apply` (every fifteen minutes and at login).

@@ -36,9 +36,12 @@ _ENVIRONMENT_NAME = re.compile(r"[A-Z_][A-Z0-9_]*\Z")
 MAX_OPERATION_SCHEDULE_LENGTH = 256
 CACHE_KINDS = frozenset({"none", "tree+environment"})
 
-# Retired descriptor tables still present in deployed descriptors. They are
-# inert here and ignored rather than taking the project out of service.
-_IGNORED_TABLES = frozenset({"conflicts", "owner_adapters", "packets"})
+_TABLES = frozenset(
+    {"schema", "project", "environment", "workspace", "packets", "operations"}
+)
+_ENVIRONMENT_FIELDS = frozenset(
+    {"kind", "command", "inherit", "unset", "values", "require"}
+)
 _WORKSPACE_FIELDS = frozenset(
     {
         "root",
@@ -56,15 +59,6 @@ PUBLISH_POLICIES = frozenset({"pr", "master"})
 # systemd's size grammar for MemoryMax: an integer with an optional K/M/G/T
 # suffix.
 _MEMORY_SIZE = re.compile(r"[1-9][0-9]*[KMGT]?\Z")
-_IGNORED_WORKSPACE_FIELDS = frozenset(
-    {
-        "provider",
-        "identity_check",
-        "checkpoint_untracked",
-        "provision",
-        "verification_operations",
-    }
-)
 # `[packets]`: how a worker prompt is compiled. `backend`, `model` and
 # `effort` may sit in the table or under `[packets.defaults]`.
 _PACKETS_FIELDS = frozenset(
@@ -273,6 +267,12 @@ def _environment(raw: Mapping[str, Any], descriptor: Path) -> ProjectEnvironment
     environment = raw.get("environment")
     if not isinstance(environment, Mapping):
         raise ProjectConfigError(f"{descriptor} requires an [environment] table")
+    unknown = set(environment) - _ENVIRONMENT_FIELDS
+    if unknown:
+        raise ProjectConfigError(
+            f"{descriptor} [environment] contains unknown fields: "
+            + ", ".join(sorted(unknown))
+        )
     kind = environment.get("kind")
     if not isinstance(kind, str) or not kind:
         raise ProjectConfigError(f"{descriptor} environment.kind must be non-empty")
@@ -314,9 +314,12 @@ def _workspace(raw: Mapping[str, Any], descriptor: Path) -> WorkspacePolicy | No
         return None
     if not isinstance(raw_workspace, Mapping):
         raise ProjectConfigError(f"{descriptor} [workspace] must be a table")
-    unknown = set(raw_workspace) - _WORKSPACE_FIELDS - _IGNORED_WORKSPACE_FIELDS
+    unknown = set(raw_workspace) - _WORKSPACE_FIELDS
     if unknown:
-        raise ProjectConfigError(f"{descriptor} [workspace] contains unknown fields")
+        raise ProjectConfigError(
+            f"{descriptor} [workspace] contains unknown fields: "
+            + ", ".join(sorted(unknown))
+        )
     root = raw_workspace.get("root")
     default_base = raw_workspace.get("default_base")
     if not isinstance(root, str) or not Path(root).is_absolute():
@@ -493,6 +496,12 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
         ) from error
     if raw.get("schema") != 1:
         raise ProjectConfigError(f"{descriptor} must declare schema = 1")
+    unknown_tables = set(raw) - _TABLES
+    if unknown_tables:
+        raise ProjectConfigError(
+            f"{descriptor} contains unknown tables: "
+            + ", ".join(sorted(unknown_tables))
+        )
     project = raw.get("project")
     if not isinstance(project, Mapping):
         raise ProjectConfigError(f"{descriptor} requires a [project] table")

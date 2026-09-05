@@ -8,17 +8,12 @@ root_markers = ["flake.nix", "modules", "dots"]
 [environment]
 kind = "nix-develop"
 command = ["nix", "develop", "--accept-flake-config", "--command"]
-preflight = ["true"]
-preflight_timeout_seconds = 180
 inherit = ["HOME", "USER", "LANG", "TERM", "SSH_AUTH_SOCK", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "WAYLAND_DISPLAY", "DISPLAY"]
 unset = ["PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "_PYTHON_SYSCONFIGDATA_NAME", "_PYTHON_HOST_PLATFORM", "PYTHONPYCACHEPREFIX"]
 
 [workspace]
-provider = "git-worktree"
 root = "/realm/worktrees"
 default_base = "origin/master"
-identity_check = ["git", "diff", "--quiet", "--", "flake.nix"]
-checkpoint_untracked = true
 verify = { focused = "verify_quick", candidate = "check", corpus = "check_all" }
 publish = "master"
 
@@ -97,13 +92,3 @@ exec = ["sinnix-census", "--window-days", "90"]
 pool = "normal"
 result = "exit"
 schedule = "weekly"
-
-[conflicts]
-exact_files = ["flake.lock", "flake.nix"]
-generated_surfaces = ["docs/agent-environment.md", "docs/config-default-audit-features.md"]
-
-[conflicts.semantic_slots]
-nixos-generation = ["flake.nix", "flake.lock", "flake/nixos.nix"]
-ports-registry = ["flake/data/ports.nix"]
-project-registry = [".agentctl/project.toml", "modules/services/agentctl.nix"]
-service-registry = ["modules/services/*.nix"]
