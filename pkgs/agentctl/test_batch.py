@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import json
 import os
 from dataclasses import dataclass, field, replace
@@ -22,6 +23,8 @@ BASE = "b" * 40
 SHA = "c" * 40
 MOVED = "d" * 40
 MOVED_AGAIN = "e" * 40
+# A worker commit that is not SHA: a second branch with its own head.
+OTHER = "f" * 40
 
 
 @dataclass
@@ -75,8 +78,26 @@ def beads() -> FakeBeads:
 
 @dataclass
 class FakeGit:
+    """Enough git for a landing: a commit graph, branch heads, one HEAD per path.
+
+    Worker branches point at SHA on top of BASE unless `branches` says
+    otherwise; MOVED and MOVED_AGAIN are successive moves of the remote base.
+    A merge that can fast-forward does, so a candidate built on the run's
+    base is SHA; one built on a moved base is a merge commit.
+    """
+
     heads: dict[str, str] = field(default_factory=dict)
+    parents: dict[str, tuple[str, ...]] = field(
+        default_factory=lambda: {
+            BASE: (),
+            SHA: (BASE,),
+            MOVED: (BASE,),
+            MOVED_AGAIN: (MOVED,),
+        }
+    )
+    branches: dict[str, str] = field(default_factory=dict)
     merges: list[str] = field(default_factory=list)
+    aborts: list[str] = field(default_factory=list)
     pushes: list[tuple[str, ...]] = field(default_factory=list)
     conflict_on: set[str] = field(default_factory=set)
     remote_bases: list[str] = field(default_factory=lambda: [BASE])
@@ -87,6 +108,35 @@ class FakeGit:
     off_base: set[str] = field(default_factory=set)
     ancestry: list[tuple[str, str]] = field(default_factory=list)
 
+    def is_ancestor(self, ancestor: str, sha: str) -> bool:
+        frontier = [sha]
+        seen: set[str] = set()
+        while frontier:
+            current = frontier.pop()
+            if current == ancestor:
+                return True
+            if current in seen:
+                continue
+            seen.add(current)
+            frontier.extend(self.parents.get(current, ()))
+        return False
+
+    def branch_head(self, branch: str) -> str:
+        return self.branches.setdefault(branch, SHA)
+
+    def merge(self, path: str, branch: str) -> None:
+        """Merge `branch` into HEAD at `path`: no-op, fast-forward, or a merge commit."""
+        head = self.heads.get(path, BASE)
+        other = self.branch_head(branch)
+        if self.is_ancestor(other, head):
+            return
+        if self.is_ancestor(head, other):
+            self.heads[path] = other
+            return
+        merged = hashlib.sha1(f"{head}+{other}".encode()).hexdigest()
+        self.parents[merged] = (head, other)
+        self.heads[path] = merged
+
     def __call__(
         self,
         path: Path,
@@ -95,11 +145,12 @@ class FakeGit:
         error: type[Exception] = BatchError,
     ) -> str:
         verb = arguments[0]
+        key = str(path)
         if verb == "fetch":
             return ""
         if verb == "rev-parse":
             if arguments[1] == "HEAD":
-                return self.heads.get(str(path), SHA)
+                return self.heads.get(key, SHA)
             if arguments[-1].startswith("refs/remotes/origin/"):
                 return (
                     self.remote_bases.pop(0)
@@ -108,6 +159,7 @@ class FakeGit:
                 )
             return BASE
         if verb == "merge" and arguments[1] == "--abort":
+            self.aborts.append(key)
             raise error("git merge: no merge to abort")
         if verb == "merge":
             branch = arguments[-1]
@@ -115,9 +167,11 @@ class FakeGit:
             if branch in self.conflict_on:
                 self.conflict_on.discard(branch)
                 raise error("git merge: CONFLICT (content)")
+            self.merge(key, branch)
             return ""
         if verb == "reset":
             self.resets.append(arguments[-1])
+            self.heads[key] = arguments[-1]
             return ""
         if verb == "diff":
             return "a.py\nb.py"
@@ -128,7 +182,14 @@ class FakeGit:
                 ancestor, descendant = arguments[2], arguments[3]
                 self.ancestry.append((ancestor, descendant))
                 if descendant in self.off_base:
-                    raise BatchError("merge-base: not an ancestor")
+                    raise error("git merge-base: exit status 1")
+                if ancestor in self.branches:
+                    ancestor = self.branch_head(ancestor)
+                if descendant == "HEAD":
+                    descendant = self.heads.get(key, BASE)
+                if descendant in self.parents or ancestor in self.parents:
+                    if not self.is_ancestor(ancestor, descendant):
+                        raise error("git merge-base: exit status 1")
             return ""
         if verb == "push":
             if self.push_rejects:
@@ -145,6 +206,8 @@ class FakeWorktrunk:
     removed: list[str] = field(default_factory=list)
     refuse_remove: set[str] = field(default_factory=set)
     fail_create: set[str] = field(default_factory=set)
+    # Branch -> whether `wt` reports its worktree dirty.
+    dirty: dict[str, bool] = field(default_factory=dict)
 
     def find(self, root: Path, branch: str) -> Worktree | None:
         return self.trees.get(branch)
@@ -160,7 +223,7 @@ class FakeWorktrunk:
             path=path,
             head=base or "",
             main=False,
-            dirty=False,
+            dirty=self.dirty.get(branch, False),
             state="ahead",
         )
         self.trees[branch] = tree
@@ -183,6 +246,8 @@ class Harness:
     wt: FakeWorktrunk
     verdict: dict[str, Any]
     waited: list[int] = field(default_factory=list)
+    # Whether the fake integration agent merges every worker branch.
+    integration_merges: bool = True
 
     def start(self, *seeds: str, **kwargs: Any) -> dict[str, Any]:
         return batch.start(
@@ -275,11 +340,18 @@ def harness(
             (Path(task.path) / ".agentctl" / "review.result.json").write_text(
                 json.dumps(built.verdict)
             )
+        if ":integrate:" in task.label and built.integration_merges:
+            run_id = task.label.rsplit(":", 1)[1]
+            for worker in manifest.load(built.config, run_id).workers:
+                git.merge(task.path, worker["branch"])
         fake_pueue.succeed(job_id)
         return launch.job_view(fake_pueue.task(job_id))
 
     monkeypatch.setattr(launch, "wait", wait)
     return built
+
+
+REAL_WAIT = launch.wait
 
 
 def labels(fake: FakePueue) -> list[str]:
@@ -341,7 +413,7 @@ def test_start_claims_creates_worktrees_and_queues_workers_then_the_landing(
         run["workers"][0]["task_id"],
         run["workers"][1]["task_id"],
     )
-    assert landing.status == "Running"
+    assert landing.status == "Queued"
     assert read_launch(harness.config, landing)["argv"][-3:] == [
         "batch",
         "land",
@@ -762,6 +834,88 @@ def test_a_conflict_runs_one_integration_agent_and_requires_every_branch_merged(
     assert landed["acceptance"]["candidate_sha"] == SHA
 
 
+def test_the_landing_stays_queued_until_the_workers_finish_and_land_refuses_meanwhile(
+    harness: Harness,
+) -> None:
+    """Breaks if a landing runs beside its workers, or lands a worker without a result."""
+    run = harness.start("fx-lead", "fx-solo")
+    landing = harness.pueue.task(run["landing"]["task_id"])
+    assert landing is not None and landing.status == "Queued"
+    with pytest.raises(BatchRefusal, match="worker_not_done"):
+        harness.land(run["run_id"])
+    for worker in run["workers"]:
+        harness.pueue.succeed(worker["task_id"])
+    assert harness.pueue.task(landing.task_id).status == "Queued"
+    with pytest.raises(BatchRefusal, match="worker_result_missing"):
+        harness.land(run["run_id"])
+    assert harness.git.merges == []
+    assert manifest.load(harness.config, run["run_id"]).landing["failure"] is None
+
+
+def test_an_integration_agent_leaving_a_branch_unmerged_is_integration_incomplete(
+    harness: Harness,
+) -> None:
+    run = prepared_run(harness, "fx-lead", "fx-solo")
+    solo = f"batch/{run['run_id']}/fx-solo"
+    harness.git.branches[solo] = OTHER
+    harness.git.parents[OTHER] = (BASE,)
+    harness.git.conflict_on = {solo}
+    harness.integration_merges = False
+
+    with pytest.raises(BatchRefusal, match="integration_incomplete") as refused:
+        harness.land(run["run_id"])
+
+    assert f"batch/{run['run_id']}/fx-solo is not merged" in refused.value.detail
+    stored = manifest.load(harness.config, run["run_id"])
+    assert stored.landing["failure"]["code"] == "integration_incomplete"
+    assert stored.acceptance is None and harness.git.pushes == []
+
+
+def test_a_dirty_pre_existing_integration_worktree_is_reset_and_reused(
+    harness: Harness, tmp_path: Path
+) -> None:
+    run = prepared_run(harness, "fx-solo")
+    integration = f"batch/{run['run_id']}/integration"
+    existing = tmp_path / "integration"
+    existing.mkdir()
+    harness.wt.dirty[integration] = True
+    harness.wt.trees[integration] = Worktree(
+        branch=integration,
+        path=existing,
+        head=MOVED,
+        main=False,
+        dirty=True,
+        state="ahead",
+    )
+    harness.git.heads[str(existing)] = MOVED
+
+    landed = harness.land(run["run_id"])
+
+    assert harness.git.aborts == [str(existing)]
+    assert harness.git.resets == [BASE]
+    assert landed["landing"]["integration_worktree"] == str(existing)
+    assert landed["acceptance"]["candidate_sha"] == SHA
+    assert integration in harness.wt.removed
+
+
+def test_a_verification_that_never_finishes_is_verify_failed_after_its_timeout(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Breaks if landing waits past the operation's own timeout, or lands without a verdict."""
+    monkeypatch.setattr(launch, "wait", REAL_WAIT)
+    run = prepared_run(harness, "fx-solo")
+    timeout = harness.project.operation("check").timeout_seconds
+
+    with pytest.raises(BatchRefusal, match="verify_failed") as refused:
+        harness.land(run["run_id"])
+
+    assert "running" in refused.value.detail
+    assert harness.pueue.clock == pytest.approx(timeout, abs=1)
+    stored = manifest.load(harness.config, run["run_id"])
+    assert stored.landing["failure"]["code"] == "verify_failed"
+    assert stored.landing["review_verdict"] is None and stored.acceptance is None
+
+
 def test_a_rejected_review_records_the_failure_and_closes_nothing(
     harness: Harness,
 ) -> None:
@@ -987,7 +1141,7 @@ def test_status_and_list_join_the_manifest_with_pueue(harness: Harness) -> None:
         document["workers"][0]["task"]["label"]
         == f"fixture:worker:{run['run_id']}:fx-lead"
     )
-    assert document["landing"]["task"]["phase"] == "running"
+    assert document["landing"]["task"]["phase"] == "queued"
     assert [item.run_id for item in manifest.list_runs(harness.config, "fixture")] == [
         run["run_id"]
     ]
