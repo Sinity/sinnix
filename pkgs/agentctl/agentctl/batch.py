@@ -21,4 +21,3 @@ __all__ = [
     "start",
     "status",
 ]
->>>>>>> 081232cc (refactor(agentctl): split batch.py into manifest, beads, agents, start, landing)
