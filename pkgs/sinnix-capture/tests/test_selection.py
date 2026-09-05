@@ -259,6 +259,34 @@ def test_debounce_requires_a_trigger_file(lane: Lane) -> None:
     assert lane.run("--debounce-ms", "10") == 2
 
 
+def test_types_printed_by_a_failing_list_command_still_count(
+    lane: Lane, tmp_path: Path
+) -> None:
+    lane.list_command = _fake_command(
+        tmp_path,
+        "list-fail",
+        "import sys\nsys.stdout.write('text/plain\\n')\nraise SystemExit(1)\n",
+    )
+
+    assert lane.run() == 0
+
+    assert lane.records()[0]["payload"]["mime"] == "text/plain"
+
+
+def test_a_failed_transfer_is_not_a_capture(lane: Lane, tmp_path: Path) -> None:
+    # Its output is a truncated prefix of the selection, which would land as
+    # the whole of it.
+    lane.paste_command = _fake_command(
+        tmp_path,
+        "paste-fail",
+        "import sys\nsys.stdout.write('half of the sele')\nraise SystemExit(1)\n",
+    )
+
+    assert lane.run() == 0
+
+    assert lane.records() == []
+
+
 def test_an_empty_selection_is_not_a_capture(lane: Lane) -> None:
     lane.content_file.write_bytes(b"")
 
