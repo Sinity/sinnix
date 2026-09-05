@@ -16,7 +16,11 @@ SCRIPT = Path(__file__).parents[3] / "scripts" / "sinnix-sqlite-backup"
 
 def read_receipt(stdout: str) -> dict[str, str]:
     """Parse the one line a run publishes for the journal to hold."""
-    lines = [line for line in stdout.splitlines() if line.startswith("sqlite-backup receipt:")]
+    lines = [
+        line
+        for line in stdout.splitlines()
+        if line.startswith("sqlite-backup receipt:")
+    ]
     assert len(lines) == 1, stdout
     fields = lines[0].removeprefix("sqlite-backup receipt:").split()
     return dict(field.split("=", 1) for field in fields)
@@ -386,9 +390,9 @@ def test_publication_requires_the_archive_to_decompress(tmp_path: Path) -> None:
         'out=""; prev=""\n'
         'for arg in "$@"; do\n'
         '  if [ "$prev" = "-o" ]; then out="$arg"; fi\n'
-        "  prev=\"$arg\"\n"
+        '  prev="$arg"\n'
         "done\n"
-        'printf \'\\377\' | dd of="$out" bs=1 '
+        "printf '\\377' | dd of=\"$out\" bs=1 "
         'seek="$(( $(stat -c %s "$out") / 2 ))" conv=notrunc status=none\n'
     )
     zstd.chmod(0o755)
