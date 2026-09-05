@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Callable
 
 import pytest
-from agentctl import cli
+from agentctl import batch, cli
 from agentctl.config import Config
 from conftest import FakePueue, read_launch
 
@@ -289,6 +289,32 @@ def test_batch_reads_accept_the_run_suffix_and_shorten_ids_unless_full(
     _manifest(cli_config, "fixture-20260903-090000-0123abcd")
     assert cli.main(["batch", "status", "0123abcd"]) == cli.EXIT_REFUSED
     assert "names 2 runs" in capsys.readouterr().err
+
+
+def test_batch_list_reads_each_run_pr_through_the_project(
+    fake_pueue: FakePueue,
+    cli_config: Config,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_id = "fixture-20260903-080000-0123abcd"
+    _manifest(cli_config, run_id)
+    path = batch.manifest_path(cli_config, run_id)
+    document = json.loads(path.read_text())
+    document["landing"]["pr_number"] = 41
+    path.write_text(json.dumps(document))
+    asked: list[tuple[str, int]] = []
+    monkeypatch.setattr(
+        cli.batch.github,
+        "pull_request",
+        lambda root, number: asked.append((str(root), number))
+        or {"number": number, "state": "MERGED"},
+    )
+
+    assert cli.main(["batch", "list", "fixture", "--json"]) == 0
+
+    assert asked == [(str(cli_config.project_roots[0]), 41)]
+    assert json.loads(capsys.readouterr().out)[0]["landing"]["pr"]["state"] == "MERGED"
 
 
 def test_job_clean_daemon_era_removes_only_the_listed_subtrees_and_is_idempotent(
