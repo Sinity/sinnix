@@ -35,7 +35,16 @@ names, and exits with one result document.
    workers' worktrees are inaccessible.
 5. **No scope expansion.** Discoveries go into `unresolved`, never into
    extra work.
-6. **Exit with a clean tree and the result document.** The final message is
+6. **Heavy work runs as a job, never in the agent's own process.** The
+   agent unit is capped at a small memory ceiling and shares the host with a
+   dozen siblings; anything expected to exceed 1 GB of memory, 5 minutes, or
+   a scan of the live archive runs through the project's declared scratch
+   operation: `agentctl job start <project> scratch --workspace . --wait --
+   <script> [args]` (the script lives under `/realm/tmp/work/`, reads its
+   inputs read-only, writes its output there, and prints a summary). Read
+   the result from the job log the run prints. A process that is OOM-killed
+   in the agent unit is a contract violation, not bad luck.
+7. **Exit with a clean tree and the result document.** The final message is
    the JSON below and nothing else; a worker whose result does not validate
    has failed, whatever its exit status.
 
