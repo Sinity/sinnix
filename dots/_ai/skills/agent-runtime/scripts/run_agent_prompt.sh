@@ -117,10 +117,11 @@ agent_bin="$(resolve_agent_bin "$agent")" || {
 }
 cd "$workdir"
 
-# claude --output-format json prints one envelope whose `structured_output`
+# claude --output-format json prints a result envelope whose `structured_output`
 # holds the schema-conforming object; the last file receives only that object
-# so every backend leaves the same document. Only a successful result envelope
-# may produce a result; diagnostics belong on stderr.
+# so every backend leaves the same document. stdout may carry several JSON
+# documents (a stream, a retry, an earlier envelope): the last successful
+# result envelope wins, and only when none exists does the run fail.
 unwrap_claude_json() {
   python3 -c '
 import json, sys
@@ -129,17 +130,40 @@ raw = sys.stdin.buffer.read(limit + 1)
 sys.stdout.buffer.write(raw)
 if len(raw) > limit:
     sys.exit("claude result exceeds 8 MiB")
-try:
-    document = json.loads(raw)
-except json.JSONDecodeError:
-    sys.exit("claude stdout is not one JSON envelope; inspect the captured output")
-if isinstance(document, list):
-    envelopes = [item for item in document if isinstance(item, dict) and item.get("type") == "result"]
-    if len(envelopes) != 1 or document[-1] != envelopes[0]:
-        sys.exit("claude did not return exactly one terminal result envelope")
-    document = envelopes[0]
-if not isinstance(document, dict) or document.get("type") != "result" or document.get("subtype") != "success" or document.get("is_error") is not False:
+def documents(text):
+    decoder = json.JSONDecoder()
+    position = 0
+    while True:
+        while position < len(text) and text[position].isspace():
+            position += 1
+        if position >= len(text):
+            return
+        try:
+            item, end = decoder.raw_decode(text, position)
+        except json.JSONDecodeError:
+            return
+        yield item
+        position = end
+
+def envelopes(item):
+    if isinstance(item, list):
+        for member in item:
+            yield from envelopes(member)
+    elif isinstance(item, dict):
+        yield item
+
+candidates = [
+    item
+    for document in documents(raw.decode("utf-8", "replace"))
+    for item in envelopes(document)
+    if item.get("type") == "result"
+    and item.get("subtype") == "success"
+    and item.get("is_error") is False
+    and item.get("structured_output", item.get("result")) is not None
+]
+if not candidates:
     sys.exit("claude did not return a successful result envelope")
+document = candidates[-1]
 value = document.get("structured_output", document.get("result"))
 if isinstance(value, str):
     try:

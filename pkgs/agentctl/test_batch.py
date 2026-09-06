@@ -760,21 +760,34 @@ def prepared_run(
     return manifest.load(harness.config, run["run_id"]).to_dict()
 
 
-def test_land_refuses_until_every_worker_succeeded_with_a_result(
-    harness: Harness,
-) -> None:
+def test_land_waits_for_results_not_for_task_success(harness: Harness) -> None:
+    """Breaks if a worker's task status decides the landing again: a result filed
+    before a cancel, a timeout or an OOM at the end is the evidence, the exit is not."""
     run = harness.start("fx-lead", "fx-solo")
     with pytest.raises(BatchRefusal, match="worker_not_done"):
         harness.land(run["run_id"])
     harness.pueue.fail(run["workers"][0]["task_id"], exit_code=1)
-    with pytest.raises(BatchRefusal, match="worker_failed"):
-        harness.land(run["run_id"])
-    harness.pueue.succeed(run["workers"][0]["task_id"])
     harness.pueue.succeed(run["workers"][1]["task_id"])
     with pytest.raises(BatchRefusal, match="worker_result_missing"):
         harness.land(run["run_id"])
     assert manifest.load(harness.config, run["run_id"]).landing["failure"] is None
     assert harness.git.merges == []
+    harness.file_result(run, "fx-lead")
+    harness.file_result(run, "fx-solo")
+    landed = harness.land(run["run_id"])
+    assert landed["acceptance"] is not None
+    assert harness.git.merges == [f"batch/{run['run_id']}/fx-lead", f"batch/{run['run_id']}/fx-solo"]
+
+
+def test_a_result_filed_while_the_task_still_runs_lands_once_it_ends(
+    harness: Harness,
+) -> None:
+    """Breaks if an unfinished task blocks a run whose result exists but the
+    agent is still wrapping up: the landing waits for the task, not the exit code."""
+    run = harness.start("fx-solo")
+    harness.file_result(run, "fx-solo")
+    landed = harness.land(run["run_id"])
+    assert landed["acceptance"] is not None
 
 
 def test_land_integrates_verifies_reviews_publishes_and_closes_satisfied_members(
@@ -1343,12 +1356,47 @@ def test_a_result_must_name_a_commit_that_descends_from_the_run_base(
 
     harness.git.heads[worker["worktree"]] = BASE
     with pytest.raises(BatchRefusal, match="empty_candidate"):
-        harness.file_result(run, "fx-solo", sha=BASE)
+        harness.file_result(run, "fx-solo", sha=BASE, unsatisfied={"fx-solo"})
 
     harness.git.heads[worker["worktree"]] = MOVED
     harness.git.off_base.add(MOVED)
     with pytest.raises(BatchRefusal, match="candidate_off_base"):
         harness.file_result(run, "fx-solo", sha=MOVED)
+
+
+def test_a_verified_result_on_the_base_lands_without_a_candidate(
+    harness: Harness,
+) -> None:
+    """Breaks if a worker that proves its bead already holds is refused again:
+    the evidence is the deliverable, and the batch closes the bead from it."""
+    run = harness.start("fx-solo")
+    worker = run["workers"][0]
+    harness.git.heads[worker["worktree"]] = BASE
+    harness.pueue.succeed(worker["task_id"])
+    filed = harness.file_result(run, "fx-solo", sha=BASE)
+    assert filed["result"]["kind"] == "verified"
+    landed = harness.land(run["run_id"])
+    assert landed["acceptance"]["published"]["kind"] == "verified"
+    assert landed["acceptance"]["beads"]["fx-solo"]["state"] == "closed"
+    assert harness.git.merges == [] and harness.git.pushes == []
+    assert [item[0] for item in harness.beads.closed] == ["fx-solo"]
+
+
+def test_a_head_that_descends_from_the_filed_candidate_rebinds_the_result(
+    harness: Harness,
+) -> None:
+    """Breaks if one more commit after writing the result costs a re-file: a
+    clean head descending from the filed sha is the same worker's work."""
+    run = harness.start("fx-solo")
+    worker = run["workers"][0]
+    harness.git.parents[MOVED_AGAIN] = (SHA,)
+    harness.git.heads[worker["worktree"]] = MOVED_AGAIN
+    filed = harness.file_result(run, "fx-solo", sha=SHA)
+    assert filed["result"]["candidate_sha"] == MOVED_AGAIN
+    harness.git.status[worker["worktree"]] = " M a.py"
+    harness.git.heads[worker["worktree"]] = MOVED_AGAIN
+    with pytest.raises(BatchRefusal, match="candidate_mismatch"):
+        harness.file_result(run, "fx-solo", sha=SHA)
 
 
 def test_resume_replaces_a_queued_landing_so_it_waits_on_the_current_workers(

@@ -74,15 +74,12 @@ def _refuse_unless_workers_done(run: Run) -> None:
                 raise BatchRefusal(
                     "worker_not_done", f"worker {worker['id']} has no task"
                 )
-            if not task.terminal:
+            # The result document is the evidence; how the task ended after
+            # writing it (cancelled, timed out, killed) is not.
+            if not task.terminal and not worker.get("result"):
                 raise BatchRefusal(
                     "worker_not_done",
                     f"worker {worker['id']} task {task_id} is {task.status.lower()}",
-                )
-            if not task.succeeded:
-                raise BatchRefusal(
-                    "worker_failed",
-                    f"worker {worker['id']} task {task_id} {task.result}",
                 )
         if not worker.get("result"):
             raise BatchRefusal(
@@ -145,10 +142,23 @@ def _landing_inputs(
             project.root, "rev-parse", "--verify", f"{worker['branch']}^{{commit}}"
         )
         if head != worker["result"]["candidate_sha"]:
-            raise BatchRefusal(
-                "candidate_mismatch",
-                f"worker {worker['id']} changed after filing its result",
-            )
+            filed = worker["result"]["candidate_sha"]
+            try:
+                _git(project.root, "merge-base", "--is-ancestor", filed, head)
+            except BatchError as error:
+                raise BatchRefusal(
+                    "candidate_mismatch",
+                    f"worker {worker['id']} branch moved to {head[:12]}, which does not descend from its filed {filed[:12]}",
+                ) from error
+            worker_id = worker["id"]
+
+            def rebind(document: dict[str, Any], *, worker_id: str = worker_id, head: str = head) -> None:
+                for entry in document["workers"]:
+                    if entry["id"] == worker_id and entry.get("result"):
+                        entry["result"]["candidate_sha"] = head
+
+            run = update(config, run.run_id, rebind)
+            worker = run.worker(worker_id)
         workers.append(
             {"branch": worker["branch"], "head": head, "result": worker["result"]}
         )
@@ -750,6 +760,12 @@ def _accept(
                 beads.comment(bead_id, residual, actor=run.actor)
             except BatchError as error:
                 residual += f" (comment failed: {error})"
+            # The batch is over; a claim it leaves behind only hides the bead
+            # from the next dispatch.
+            try:
+                beads.unclaim(bead_id, actor=run.actor)
+            except BatchError as error:
+                residual += f" (unclaim failed: {error})"
             beads_state[bead_id] = {"state": "open", "evidence": residual}
     acceptance = {
         "candidate_sha": candidate,
@@ -884,6 +900,23 @@ def _land_locked(
     try:
         _refuse_unless_workers_done(run)
         base = str(run.landing.get("refreshed_base") or run.base_commit)
+        if all(
+            (worker.get("result") or {}).get("kind") == "verified"
+            for worker in run.workers
+        ):
+            # Every worker proved its beads already hold on the base: there is
+            # no candidate, so acceptance closes them from the evidence.
+            run = _accept(
+                config,
+                project,
+                run,
+                beads,
+                candidate=base,
+                verify_run={"kind": "verified", "candidate_sha": base},
+                review_verdict={"verdict": "pass", "policy": "verified", "candidate_sha": base},
+                published={"kind": "verified", "candidate_sha": base, "base_commit": base, "merge_commit": None},
+            )
+            return run.to_dict()
         merged = _merged_earlier(project, run)
         if merged is not None:
             run = _accept(
@@ -901,6 +934,8 @@ def _land_locked(
             base = _remote_base(project)
         while True:
             inputs = _landing_inputs(config, project, run, base, beads)
+            # A worker branch may have been rebound to its head above.
+            run = load(config, run_id)
             reuse = inputs == run.landing.get("inputs_digest")
             candidate = (
                 _kept_integration(config, run, base)
@@ -988,7 +1023,6 @@ def _land_locked(
             "abandoned",
             "already_accepted",
             "worker_not_done",
-            "worker_failed",
             "worker_result_missing",
         }:
             land_update(config, run_id, failure=refusal.to_dict())
