@@ -484,6 +484,14 @@ in
             chmod 644 "$HOME/.codex/browser.config.toml"
             chmod 644 "$HOME/.codex/deepseek.config.toml"
             chmod 644 "$HOME/.codex/local.config.toml"
+            ${pkgs.python3}/bin/python - <<'PY'
+            import tomllib
+            from pathlib import Path
+
+            config = tomllib.loads(Path.home().joinpath(".codex/config.toml").read_text())
+            assert "model_catalog_json" not in config
+            assert config["features"]["multi_agent_v2"] is True
+            PY
             chmod 644 "$HOME/.codex/hooks.json"
           '';
           script = ''

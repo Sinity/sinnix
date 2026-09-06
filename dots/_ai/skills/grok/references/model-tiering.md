@@ -28,15 +28,11 @@ backend.
 
 ### Confirm the model slug is real before a batch
 
-Don't trust a remembered or guessed model name — verify against the live
-catalog first:
+Don't trust a remembered or guessed model name. Start an interactive Codex
+session and use `/model` to verify the live catalog before dispatching a batch.
+Use the exact slug shown there.
 
-```bash
-grep -o '"gpt-5[^"]*"' ~/.codex/models-v1.json | sort -u
-```
-
-A near-miss slug (e.g. guessing "code-spark" instead of the real
-"codex-spark") fails or silently falls back; always confirm.
+A near-miss slug can fail or silently fall back; always confirm.
 
 ### Run without the global instructions file
 
@@ -48,8 +44,7 @@ instructions file omitted:
 
 ```bash
 mkdir -p "$SCRATCH/codex-home-noagents"
-cp ~/.codex/auth.json ~/.codex/config.toml ~/.codex/models-v1.json \
-   "$SCRATCH/codex-home-noagents/"
+cp ~/.codex/auth.json ~/.codex/config.toml "$SCRATCH/codex-home-noagents/"
 # deliberately do NOT copy ~/.codex/AGENTS.md (or its symlink target)
 ```
 
