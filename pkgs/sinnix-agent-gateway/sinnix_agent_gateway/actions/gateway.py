@@ -160,7 +160,11 @@ async def _catalog(runtime: Runtime, inp: CatalogInput) -> Catalog:
     resources = search_rows(resources, inp.query, ("kind", "owner", "actions"))
     mcp_tools: list[dict[str, Any]] = []
     unavailable: list[str] = []
-    if inp.include_mcp_tools and Capability.MCP_READ in runtime.principal.capabilities:
+    if (
+        inp.include_mcp_tools
+        and (inp.query or "").strip()
+        and Capability.MCP_READ in runtime.principal.capabilities
+    ):
         try:
             broker = await runtime.mcp_broker.catalog()
         except Exception as exc:  # broker failures are catalog gaps, not errors
@@ -185,8 +189,6 @@ async def _catalog(runtime: Runtime, inp: CatalogInput) -> Catalog:
                     }
                 )
         mcp_tools = search_rows(mcp_tools, inp.query, ("server", "name", "description"))
-        if inp.query is None:
-            mcp_tools = []
     total = len(selected) + len(resources) + len(mcp_tools)
     return Catalog(
         revision=action_set.REVISION,
