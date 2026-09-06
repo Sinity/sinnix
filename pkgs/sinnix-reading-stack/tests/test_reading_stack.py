@@ -1,38 +1,10 @@
 from __future__ import annotations
 
-import importlib.util
 import json
-import sys
-import types
-from importlib.machinery import SourceFileLoader
-from pathlib import Path
 
+from conftest import load_script
 
-def _load_script(name: str):
-    script = Path(__file__).resolve().parents[3] / "scripts" / name
-    loader = SourceFileLoader(name.replace("-", "_"), str(script))
-    spec = importlib.util.spec_from_loader(loader.name, loader)
-    assert spec is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[loader.name] = module
-    loader.exec_module(module)
-    return module
-
-
-atomic_json = types.ModuleType("sinnix_lib.atomic_json")
-atomic_json.read_json = lambda path, default: (
-    json.loads(path.read_text()) if path.exists() else default
-)
-atomic_json.write_json_atomic = lambda path, value: (
-    path.parent.mkdir(parents=True, exist_ok=True),
-    path.write_text(json.dumps(value)),
-)
-sinnix_lib = types.ModuleType("sinnix_lib")
-sinnix_lib.atomic_json = atomic_json
-sys.modules["sinnix_lib"] = sinnix_lib
-sys.modules["sinnix_lib.atomic_json"] = atomic_json
-
-reading_stack = _load_script("sinnix-reading-stack")
+reading_stack = load_script("sinnix-reading-stack")
 
 
 def configure_state(monkeypatch, tmp_path):

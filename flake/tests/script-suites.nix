@@ -143,6 +143,10 @@
             "sinnix-reading-stack"
             "sinnix-nav-capture-daemon"
           ];
+          # The stack's state file is published through sinnix_lib.atomic_json;
+          # the suite drives the real publish rather than a stub, so a change
+          # to the atomic write reaches these assertions.
+          extraPythonPackages = [ (pkgs.callPackage ../../pkgs/sinnix-lib/pkg.nix { }) ];
         };
         picker-suite = mkScriptSuite {
           name = "sinnix-picker";
