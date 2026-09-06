@@ -100,7 +100,7 @@ let
     (simple "SUPER + SHIFT + 8" "Move the window to workspace 8" (moveWorkspace 8))
     (simple "SUPER + SHIFT + 9" "Move the window to workspace 9" (moveWorkspace 9))
     (simple "SUPER + SHIFT + 0" "Move the window to workspace 10" (moveWorkspace 10))
-    (run "SUPER + V" "Browse clipboard history" "uwsm app -- kitty --class clipse -e clipse")
+    (run "SUPER + V" "Browse clipboard history" "noctalia msg panel-toggle clipboard")
     (run "Print" "Screenshot a region" "noctalia msg screenshot-region")
     (run "SUPER + Print" "Screenshot the whole screen" "noctalia msg screenshot-fullscreen")
     (run "F3" "Pulse the OLED panel to clear burn-in dimming"

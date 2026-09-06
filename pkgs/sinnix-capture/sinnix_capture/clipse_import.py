@@ -92,7 +92,9 @@ def import_clipse(
             digest = hashlib.sha256(content).hexdigest()
             raw_ref = str(store_blob(lane_dir, content, digest))
             writer.write(
-                _image_payload(content, digest, pinned=pinned, original_path=str(image)),
+                _image_payload(
+                    content, digest, pinned=pinned, original_path=str(image)
+                ),
                 raw_ref=raw_ref,
                 ts=ts,
             )

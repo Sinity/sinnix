@@ -29,22 +29,57 @@ def test_import_clipse_text_images_and_orphans(tmp_path: Path) -> None:
     (tmp_files / "2-2.png").write_bytes(orphan)
     os.utime(tmp_files / "2-2.png", (1_700_000_000, 1_700_000_000))
     history = tmp_path / "clipboard_history.json"
-    history.write_text(json.dumps({"clipboardHistory": [
-        {"value": "newer", "recorded": "2026-09-06 20:35:08.131643087", "filePath": "null", "pinned": False},
-        {"value": "\U0001f4f7 1-1.png", "recorded": "2026-09-04 10:15:20.211316017",
-         "filePath": str(tmp_files / "1-1.png"), "pinned": True},
-        {"value": "older", "recorded": "2026-02-01 20:32:19.722087027", "filePath": "null", "pinned": False},
-    ]}))
+    history.write_text(
+        json.dumps(
+            {
+                "clipboardHistory": [
+                    {
+                        "value": "newer",
+                        "recorded": "2026-09-06 20:35:08.131643087",
+                        "filePath": "null",
+                        "pinned": False,
+                    },
+                    {
+                        "value": "\U0001f4f7 1-1.png",
+                        "recorded": "2026-09-04 10:15:20.211316017",
+                        "filePath": str(tmp_files / "1-1.png"),
+                        "pinned": True,
+                    },
+                    {
+                        "value": "older",
+                        "recorded": "2026-02-01 20:32:19.722087027",
+                        "filePath": "null",
+                        "pinned": False,
+                    },
+                ]
+            }
+        )
+    )
     root = tmp_path / "root"
 
-    assert main([
-        "import-clipse", "--capture-root", str(root), "--lane", "clipboard",
-        "--history", str(history), "--tmp-files", str(tmp_files),
-    ]) == 0
+    assert (
+        main(
+            [
+                "import-clipse",
+                "--capture-root",
+                str(root),
+                "--lane",
+                "clipboard",
+                "--history",
+                str(history),
+                "--tmp-files",
+                str(tmp_files),
+            ]
+        )
+        == 0
+    )
 
     rows = _records(root, "clipboard")
     assert [r["payload"].get("text", r["payload"]["category"]) for r in rows] == [
-        "older", "binary", "newer", "binary",
+        "older",
+        "binary",
+        "newer",
+        "binary",
     ]
     assert all(r["payload"]["source"] == "clipse-import" for r in rows)
     assert rows[0]["ts"] < rows[1]["ts"] < rows[2]["ts"]
@@ -57,5 +92,10 @@ def test_import_clipse_text_images_and_orphans(tmp_path: Path) -> None:
     assert Path(rows[3]["raw_ref"]).read_bytes() == orphan
     # Records are filed under their recorded day, not the import day.
     assert (root / "clipboard" / "clipboard-20260201.jsonl").exists()
-    index = [json.loads(l) for l in (root / "clipboard" / "clipboard-index.jsonl").read_text().splitlines()]
+    index = [
+        json.loads(line)
+        for line in (root / "clipboard" / "clipboard-index.jsonl")
+        .read_text()
+        .splitlines()
+    ]
     assert [e["seq"] for e in index] == [1, 2, 3, 4]
