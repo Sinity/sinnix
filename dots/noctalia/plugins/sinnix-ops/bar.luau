@@ -18,7 +18,7 @@ end
 local function render()
   local color = view.status == "connected" and "primary" or (view.status == "stale" and "error" or "secondary")
   barWidget.render(ui.row({ gap = 5, align = "center" }, {
-    ui.glyph({ name = "monitor_heart", size = 14, color = color }),
+    ui.glyph({ name = "heartbeat", size = 14, color = color }),
     ui.label({ text = label(), color = color, fontWeight = "bold" }),
   }))
 end

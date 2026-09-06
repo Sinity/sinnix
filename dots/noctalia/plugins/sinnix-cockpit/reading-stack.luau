@@ -41,7 +41,7 @@ local function render()
   elseif known and stack.total > 0 then
     color = "on_surface"
   end
-  local children = { ui.glyph({ name = "menu_book", size = 14, color = color }) }
+  local children = { ui.glyph({ name = "book", size = 14, color = color }) }
   if known and stack.total > 0 then
     table.insert(children, ui.label({ text = tostring(stack.total), color = color }))
   end

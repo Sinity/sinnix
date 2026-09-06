@@ -5,7 +5,7 @@ plugin_api = 9
 author = "Sinity"
 license = "MIT"
 tags = ["bar", "panel", "system", "observability"]
-icon = "monitor_heart"
+icon = "heartbeat"
 description = "Current state, workload policy, and typed action receipts from the Sinnix operations reducer."
 
 [[service]]

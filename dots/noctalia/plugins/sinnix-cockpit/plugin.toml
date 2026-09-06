@@ -6,7 +6,7 @@ author = "Sinity"
 license = "MIT"
 dependencies = ["hyprctl"]
 tags = ["bar", "system", "utility", "hyprland"]
-icon = "space_dashboard"
+icon = "layout-dashboard"
 description = "Visible bar affordances for the drilled capture verbs, the capability index and the reading stack."
 
 [[service]]
