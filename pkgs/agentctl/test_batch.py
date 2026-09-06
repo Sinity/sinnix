@@ -776,7 +776,10 @@ def test_land_waits_for_results_not_for_task_success(harness: Harness) -> None:
     harness.file_result(run, "fx-solo")
     landed = harness.land(run["run_id"])
     assert landed["acceptance"] is not None
-    assert harness.git.merges == [f"batch/{run['run_id']}/fx-lead", f"batch/{run['run_id']}/fx-solo"]
+    assert harness.git.merges == [
+        f"batch/{run['run_id']}/fx-lead",
+        f"batch/{run['run_id']}/fx-solo",
+    ]
 
 
 def test_a_result_filed_while_the_task_still_runs_lands_once_it_ends(

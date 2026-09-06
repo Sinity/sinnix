@@ -98,7 +98,7 @@ def test_unknown_packet_and_operation_fields_warn_and_load(
     descriptor = root / ".agentctl" / "project.toml"
     descriptor.write_text(
         descriptor.read_text()
-        + '[packets.extra]\nx = 1\n'
+        + "[packets.extra]\nx = 1\n"
         + '[operations.check.parameters.apply]\ntype = "bool"\nflag = "--apply"\n'
     )
     load_project_adapter(root)
