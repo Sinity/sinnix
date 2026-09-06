@@ -248,6 +248,7 @@ def _integrate(
             worktree=path,
             prompt=prompt,
             prompt_name="integrate.md",
+            priority=LANDING_AGENT_PRIORITY,
             **_review_agent(project, run),
             binding=binding(run, None),
             inaccessible=other_worktrees(project, run, None),
@@ -525,6 +526,25 @@ def _verify(
     return run, receipt
 
 
+# Landing-owned agents outrank workers queued in the same pool: a finished
+# batch must not wait behind work that lands hours later.
+LANDING_AGENT_PRIORITY = 10
+
+
+def _review_by_policy(
+    run: Run, verify_run: Mapping[str, Any], candidate: str
+) -> dict[str, Any]:
+    """The `review = "none"` policy: the candidate verification stands as the
+    review record. The verdict says so, so acceptance never reads as reviewed."""
+    return {
+        "verdict": "pass",
+        "policy": "none",
+        "candidate_sha": candidate,
+        "verification": dict(verify_run),
+        "summary": "review policy none: landed on candidate verification alone",
+    }
+
+
 def _review(
     config: Config,
     project: ProjectAdapter,
@@ -550,6 +570,7 @@ def _review(
         worktree=path,
         prompt=prompt,
         prompt_name="review.md",
+        priority=LANDING_AGENT_PRIORITY,
         **_review_agent(project, run),
         schema="judge",
         binding=binding(run, None),
@@ -922,8 +943,10 @@ def _land_locked(
                 review_verdict.get("candidate_sha") != candidate
                 or review_verdict.get("verdict") != "pass"
             ):
-                review_verdict = _review(
-                    config, project, run, path, base, candidate, beads
+                review_verdict = (
+                    _review_by_policy(run, verify_run, candidate)
+                    if project.workspace.review == "none"
+                    else _review(config, project, run, path, base, candidate, beads)
                 )
             run = land_update(config, run_id, review_verdict=review_verdict)
             published = _publish(

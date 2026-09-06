@@ -1956,3 +1956,33 @@ def test_manifests_and_the_runs_directory_are_private(harness: Harness) -> None:
     assert path.parent.stat().st_mode & 0o777 == 0o700
     manifest.land_update(harness.config, run["run_id"], refreshes=1)
     assert path.stat().st_mode & 0o777 == 0o600
+
+
+def test_landing_agents_outrank_queued_workers(harness: Harness) -> None:
+    """Breaks if the reviewer is queued at worker priority and waits behind them."""
+    run = prepared_run(harness, "fx-lead", "fx-solo", unsatisfied={"fx-member"})
+    landed = harness.land(run["run_id"])
+    review = landed["landing"]["review_verdict"]
+    added = {entry["task_id"]: entry for entry in harness.pueue.added}
+    assert added[review["job_id"]]["priority"] == 10
+    worker_priorities = {
+        entry["priority"] for entry in harness.pueue.added if ":worker:" in entry["label"]
+    }
+    assert worker_priorities == {0}
+
+
+def test_review_policy_none_lands_on_verification_and_says_so(harness: Harness) -> None:
+    """Breaks if `review = "none"` still queues a reviewer, or hides that none ran."""
+    descriptor = harness.project.descriptor
+    descriptor.write_text(descriptor.read_text() + '\n[workspace.extra]\n')
+    text = descriptor.read_text().replace('\n[workspace.extra]\n', '\n')
+    text = text.replace('publish = "master"', 'publish = "master"\nreview = "none"', 1)
+    descriptor.write_text(text)
+    harness.project = load_project_adapter(harness.project.root)
+    run = prepared_run(harness, "fx-lead", "fx-solo", unsatisfied={"fx-member"})
+    landed = harness.land(run["run_id"])
+    review = landed["landing"]["review_verdict"]
+    assert review["verdict"] == "pass" and review["policy"] == "none"
+    assert review["candidate_sha"] == SHA
+    assert review["verification"]["candidate_sha"] == SHA
+    assert not any(":review:" in entry["label"] for entry in harness.pueue.added)

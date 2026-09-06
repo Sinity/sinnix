@@ -521,7 +521,10 @@ with the field named. `[environment]` declares `kind`, `command`,
 launch fails the launch with its name. `[workspace]` declares `root`,
 `default_base`, `agent_memory_max` (a systemd size), `verify` (the
 `focused`, `candidate` and `corpus` operations; `candidate` may be
-`hosted:<check>` for a required PR check) and `publish` (`pr` or `master`).
+`hosted:<check>` for a required PR check), `publish` (`pr` or `master`) and
+`review` (`agent`, the default, queues one reviewer per landing; `none` lands
+on the candidate verification alone and records that no review ran). Landing
+agents queue at pueue priority 10 so they start ahead of workers.
 Every named operation must be declared. `[packets]` declares `template`
 (default: the `worker_contract` path in `agentctl.json`), `atlas_dir`,
 `branch_prefix`, `[packets.model_policy.<name>]` (`backend`, `model`),

@@ -69,6 +69,7 @@ class FakePueue:
         working_directory: Path,
         after: Sequence[int] = (),
         stashed: bool = False,
+        priority: int = 0,
     ) -> int:
         if self.fail_add:
             raise PueueError("fixture pueue add failed")
@@ -97,6 +98,7 @@ class FakePueue:
                 "task_id": task_id,
                 "group": group,
                 "label": label,
+                "priority": priority,
                 "command": tuple(command),
                 "working_directory": working_directory,
                 "after": tuple(after),
