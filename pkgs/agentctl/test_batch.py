@@ -1346,6 +1346,45 @@ def test_resume_replaces_a_queued_landing_so_it_waits_on_the_current_workers(
     )
 
 
+def test_resume_replaces_its_own_landing_after_the_queue_was_reordered(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Anti-vacuity: by stored id, the resume removes the stranger's task.
+
+    `pueue switch` puts an unrelated queued job at the landing's recorded id,
+    and a resume that drops that id deletes a job no part of this run owns.
+    """
+    run = harness.start("fx-lead", "fx-solo")
+    monkeypatch.setattr(start, "SubprocessBeads", lambda root: harness.beads)
+    harness.pueue.fail(run["workers"][0]["task_id"], exit_code=1)
+    harness.pueue.fail(run["workers"][1]["task_id"], exit_code=1)
+    queued_landing_at = run["landing"]["task_id"]
+    harness.pueue.queue(queued_landing_at)
+    queued_stranger_at = harness.pueue.add(
+        group="normal",
+        label="other:check",
+        command=("agentctl-run", "/tmp/other.json"),
+        working_directory=harness.project.root,
+    )
+    harness.pueue.queue(queued_stranger_at)
+    # The two exchange ids: the landing is at the stranger's id and vice versa.
+    harness.pueue.switch(queued_landing_at, queued_stranger_at)
+
+    resumed = batch.resume(harness.config, harness.project, run["run_id"], "fx-lead")
+
+    assert harness.pueue.removed == [queued_stranger_at], (
+        "the resume dropped the id the landing was queued at, where the "
+        "switch had left an unrelated job"
+    )
+    assert launch.launch_reference(harness.pueue.task(queued_landing_at)) == "other", (
+        "the unrelated job no longer holds the id the switch gave it"
+    )
+    landing = harness.pueue.task(resumed["landing"]["task_id"])
+    assert sorted(landing.dependencies) == sorted(
+        worker["task_id"] for worker in resumed["workers"]
+    )
+
+
 # ---------------------------------------------------------------- lock / markers / keep / abandon
 
 
