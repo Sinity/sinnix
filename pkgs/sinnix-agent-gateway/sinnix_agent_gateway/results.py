@@ -10,33 +10,18 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, get_args
 
 from sinnix_lib.atomic import atomic_publish
 
 from .artifacts import ArtifactService
 from .capabilities import Capability, Principal
 from .config import GatewayConfig
-from .schemas import V2ToolEnvelope
+from .schemas import StableErrorCode, V2ToolEnvelope
 
-EXPECTED_ERROR_CODES = frozenset(
-    {
-        "invalid_request",
-        "not_found",
-        "unavailable",
-        "precondition_failed",
-        "stale_cursor",
-        "source_changed",
-        "conflict",
-        "partial_completion",
-        "deadline",
-        "response_bound",
-        "owner_failed",
-        "policy_denied",
-        "idempotency_conflict",
-        "unsupported_capability",
-    }
-)
+# `StableErrorCode` types `V2Error.code`, so it is the enum the published
+# envelope schema renders: a code the gateway may raise is a code it may send.
+EXPECTED_ERROR_CODES = frozenset(get_args(StableErrorCode))
 
 
 class ProtocolError(ValueError):
