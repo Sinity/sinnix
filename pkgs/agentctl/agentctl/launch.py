@@ -507,6 +507,23 @@ def list_jobs(project_id: str | None = None) -> list[dict[str, Any]]:
     return rows
 
 
+def attach_bindings(
+    config: Config, rows: Sequence[Mapping[str, Any]]
+) -> list[dict[str, Any]]:
+    """Each row with the binding recorded in the launch input its task names.
+
+    One queue read for the whole page, so a caller pages first and pays for
+    the launch inputs of the rows it returns.
+    """
+    tasks = pueue.tasks()
+    attached = []
+    for row in rows:
+        task = tasks.get(row.get("job_id"))
+        binding = (_launch_input(config, task) or {}).get("binding") if task else None
+        attached.append({**row, "binding": binding} if binding else dict(row))
+    return attached
+
+
 def _task(task_id: int) -> Task:
     task = pueue.task(task_id)
     if task is None:

@@ -97,6 +97,13 @@ def build_registry() -> ResourceRegistry:
             False,
         ),
         ResourceSpec(
+            "run",
+            RefTemplate("run", "sinnix://projects/{project_id}/runs/{run_id}"),
+            "batches",
+            ("summary",),
+            True,
+        ),
+        ResourceSpec(
             "job",
             RefTemplate("job", "sinnix://jobs/{job_id}"),
             "jobs",

@@ -5,7 +5,7 @@ description: Use when invoking, inspecting, or documenting Sinnix Agent Gateway 
 
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: 23ea3f1e63bf903ef81fcbbace343a31149631e79960da38391e8c396ab32af1 -->
+<!-- gateway-catalog-sha256: 81898909c68ccc146c6d7ed192711bcbc7d6a1431018ea4f90fa4f7f384c92f2 -->
 
 # Agent Gateway
 
@@ -51,6 +51,7 @@ Effectful actions (families change, operate, run) require `idempotency_key`; rep
 - `projects.search` — Search project file contents with ripgrep.
 - `beads.query` — limit is passed to the owner so at most limit rows per project are read; page.next_cursor continues the same snapshot.
 - `jobs.list` — List queued jobs (pueue tasks) newest first, optionally for one project.
+- `batches.list` — List batch runs newest first, with each worker's stage and task.
 - `desktop.screenshot` — full captures the focused output through the HDR-aware screenshot owner; window/rect/monitor targets capture with grim. On HDR outputs a corrected SDR variant is produced and preferred for the image block.
 - `desktop.tree` — Fails unavailable when the pyatspi bindings are absent from the gateway environment; Chromium apps expose a tree only when launched with accessibility forced on.
 - `terminals.screen` — The visible screen text of one terminal.
@@ -76,6 +77,7 @@ Effectful actions (families change, operate, run) require `idempotency_key`; rep
 - `beads.get` — Read one bead by ref, id or title fragment, with optional comments, history, dependencies or graph.
 - `jobs.get` — One job's state and bead binding, with its log range or typed result on request.
 - `jobs.logs` — A byte range of a job's bounded log (workload output, then the wrapper's stderr).
+- `batches.status` — Every id is a pueue task id: pass worker or landing job_id straight to jobs.logs, jobs.wait or jobs.cancel.
 - `terminals.get` — Resolve one terminal by ref, kitty id, title, cwd, pid or focus.
 - `browser.page` — Element refs (g<generation>e<n>) are attached to the DOM for this snapshot; a later snapshot or reload replaces them, and a stale ref fails not_found.
 - `machine.units.get` — Describe one unit via systemctl show: states, main pid, cgroup, restarts, timestamps.
@@ -114,6 +116,7 @@ Effectful actions (families change, operate, run) require `idempotency_key`; rep
 - `beads.operate` — Beads maintenance: publish the export snapshot, push or pull sync, create, list or restore backups.
 - `jobs.cancel` — Pass expected_phase to refuse when the job already moved on. Survivors lists PIDs that outlived the reap.
 - `jobs.retry` — Re-run a terminal job in place with the same launch input and id (pueue restart).
+- `jobs.clean` — Refused while the job is still queued or running; cancel it first.
 - `desktop.operate` — Pointer clicks, drags and scrolls need a virtual pointer tool (ydotool) on the host and fail unavailable without one; cursor moves always work. Window targets are natural locators; ambiguity returns candidates.
 - `terminals.send` — Send text (optionally with Enter or bracketed paste) or key presses to one terminal.
 - `terminals.focus` — Focus one kitty window.
@@ -127,9 +130,11 @@ Effectful actions (families change, operate, run) require `idempotency_key`; rep
 
 - `operations.run` — Queue one project-declared operation in its declared pool on the root or a worktree.
 - `shell.run` — cwd is confined to the checkout; the job's log carries the output.
-- `agent.for_bead` — backend, model and effort default to the bead's model policy. Refused when a member is claimed or already in a run.
+- `batches.start` — backend, model and effort default to the project descriptor's packet defaults. Refused when a bead is claimed or already in a live run. The landing task is queued behind the workers and runs itself.
+- `batches.land` — batches.start already queues the first landing behind the workers; this re-queues one after a landing failed. The landing runs as a job, so wait on landing_job_id rather than on this call.
+- `batches.resume` — backend, model and effort default to the worker's own. Refused while the worker's task is still queued or running.
 - `terminals.run` — Completion and output rely on kitty shell integration (at_prompt, last_cmd_output). exit_status is reported only with capture_exit_status, which appends a visible marker to the command line.
 
 The complete schemas and examples are in `docs/generated/agent-gateway-reference.md`.
 
-Catalog revision: `v3-typed-actions`. Catalog SHA-256: `23ea3f1e63bf903ef81fcbbace343a31149631e79960da38391e8c396ab32af1`.
+Catalog revision: `v3-typed-actions`. Catalog SHA-256: `81898909c68ccc146c6d7ed192711bcbc7d6a1431018ea4f90fa4f7f384c92f2`.

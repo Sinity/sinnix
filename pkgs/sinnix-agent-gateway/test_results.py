@@ -322,15 +322,15 @@ def test_declared_deadline_and_idempotency_failures_persist_bounded_envelopes(
     tmp_path,
 ) -> None:
     runtime = Runtime.create(config(tmp_path), "operator")
-    action = ACTIONS["agent.for_bead"]
+    action = ACTIONS["batches.start"]
     request = {
-        "ref": "sinnix://projects/fixture/beads/fixture-1",
-        "checkout_id": "default",
+        "project": {"project": "fixture"},
+        "beads": ["fixture-1"],
         "backend": "codex",
         "model": "gpt-5.6-terra",
-        "reasoning_effort": "high",
+        "effort": "high",
         "request_id": "2e46daf5-e9b1-4c6e-b99d-bcd46631730b",
-        "idempotency_key": "agent-failure-fixture",
+        "idempotency_key": "batch-failure-fixture",
     }
 
     deadline = runtime.execute_v2(

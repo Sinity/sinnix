@@ -39,7 +39,7 @@ def test_project_orientation_composes_and_persists_a_snapshot(
     assert all(
         row["snapshot_ref"] == data["snapshot_ref"] for row in data["components"]
     )
-    assert "agent.for_bead" in data["affordances"]
+    assert "batches.start" in data["affordances"]
     snapshot_id = data["snapshot_ref"].rsplit("/", 1)[1]
     assert runtime.context_snapshots is not None
     assert runtime.context_snapshots.get(snapshot_id)["intent"] == "project.orientation"

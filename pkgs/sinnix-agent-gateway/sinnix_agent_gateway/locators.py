@@ -108,6 +108,7 @@ class FileLocator(GatewayModel):
 PROJECT_REF = re.compile(r"^sinnix://projects/([^/]+)$")
 CHECKOUT_REF = re.compile(r"^sinnix://projects/([^/]+)/checkouts/([^/]+)$")
 BEAD_REF = re.compile(r"^sinnix://projects/([^/]+)/beads/([^/]+)$")
+RUN_REF = re.compile(r"^sinnix://projects/([^/]+)/runs/([^/]+)$")
 
 
 def project_ref(project_id: str) -> str:
@@ -120,6 +121,10 @@ def checkout_ref(project_id: str, checkout_id: str) -> str:
 
 def bead_ref(project_id: str, bead_id: str) -> str:
     return f"{project_ref(project_id)}/beads/{quote(bead_id, safe='')}"
+
+
+def run_ref(project_id: str, run_id: str) -> str:
+    return f"{project_ref(project_id)}/runs/{quote(run_id, safe='')}"
 
 
 def _configured_project(runtime: Any, project_id: str) -> str:
@@ -338,6 +343,42 @@ class BeadLocator(GatewayModel):
                 ],
             )
         return project_id, rows[0]["id"], rows[0]["ref"]
+
+
+class RunLocator(GatewayModel):
+    """A batch run by canonical ref, full run id, or the suffix agentctl accepts."""
+
+    ref: str | None = Field(
+        default=None, pattern=r"^sinnix://projects/[^/]+/runs/[^/]+$"
+    )
+    run_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=128,
+        description="Full run id, or its 8-character suffix as `agentctl batch` accepts it.",
+    )
+
+    @model_validator(mode="after")
+    def exactly_one(self) -> RunLocator:
+        if (self.ref is None) == (self.run_id is None):
+            raise ValueError("give exactly one of ref or run_id")
+        return self
+
+    def resolve(self) -> dict[str, str]:
+        """Owner arguments: the run token, and the project when the ref names one.
+
+        The manifest owns the pairing, so a ref that names another project's
+        run is refused by the owner rather than guessed at here.
+        """
+        if self.ref is not None:
+            match = RUN_REF.match(self.ref)
+            assert match is not None
+            return {
+                "project_id": unquote(match.group(1)),
+                "run_id": unquote(match.group(2)),
+            }
+        assert self.run_id is not None
+        return {"run_id": self.run_id}
 
 
 # ------------------------------------------------------------ desktop windows
