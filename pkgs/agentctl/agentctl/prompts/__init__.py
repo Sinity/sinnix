@@ -487,17 +487,9 @@ def validate_members(
                     Refusal("blocked", bead_id, "blocked by " + ", ".join(blockers))
                 )
                 continue
-            scopes.extend((index, bead_id, glob) for glob in write_scope(bead))
-    for position, (index, bead_id, glob) in enumerate(scopes):
-        for other_index, other_bead, other_glob in scopes[position + 1 :]:
-            if other_index != index and _scopes_overlap(glob, other_glob):
-                refusals.append(
-                    Refusal(
-                        "write_scope",
-                        bead_id,
-                        f"{glob!r} overlaps {other_bead}'s {other_glob!r}",
-                    )
-                )
+    # Declared scopes are estimates used for grouping, not admission: two
+    # workers whose estimates overlap may still merge cleanly, and when they
+    # do not the landing merge says so.
     return refusals
 
 

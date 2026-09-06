@@ -239,8 +239,9 @@ Record-only fields, written for the audit trail and read by no verb:
 `batch start` resolves each seed bead's open dispatch group into one worker
 (`--worker a,b` names one explicitly; the first bead leads) and validates
 every member: it exists, is open or in progress, has no open external
-blocker, has no assignee, is not in a live run, and no two workers share a
-write scope; a closed leader is skipped. It then writes the manifest, claims each
+blocker, has no assignee, and is not in a live run; a closed leader is
+skipped. Declared write scopes group beads into workers and are not
+admission: the landing merge detects a real conflict. It then writes the manifest, claims each
 member with `bd update --claim` as actor `agentctl-batch-<run>`, creates
 one worktree per worker on branch `batch/<run>/<worker>` from `base_commit`
 at `<workspace.root>/<repo>-<branch with / replaced by ->` through `wt switch
@@ -424,7 +425,6 @@ check failing). The codes:
 | `review_invalid`               | the verdict does not validate against the judge schema                              |
 | `review_rejected`              | the verdict is not `pass`                                                           |
 | `runner`                       | the agent runner is missing or not executable                                       |
-| `scope_violation`              | the candidate changes paths outside the worker's declared write scope               |
 | `target_moved_twice`           | the default branch moved again after one refresh                                    |
 | `unknown_run`                  | no run has this id or suffix                                                        |
 | `verify_failed`                | candidate verification failed, or did not finish (`timed_out`)                      |
@@ -447,9 +447,10 @@ run's base commit (`empty_candidate`), does not descend from it
 It then reads `git diff --name-only <base>..<candidate>`: when the worker's
 beads declare `write_scope` (metadata; a list of globs or a `;`-separated
 string), the launch stores their sorted union and each glob's authorizing
-beads. Every changed path must be one of the globs, under a directory glob,
-or an `fnmatch` match of one, else `scope_violation` names the paths; the
-worker row records `scope: declared` or `scope: undeclared` and
+beads. A changed path is inside the scope when it is one of the globs, under
+a directory glob, or an `fnmatch` match of one; the rest are recorded as
+`outside_scope` for the reviewer, never refused. The worker row records
+`scope: declared` or `scope: undeclared` and
 `changed_paths` either way. `batch scope-correct` is the explicit recovery
 route for an already-started run with malformed scope metadata. It requires
 the current candidate commit and records the old scope, corrected scope,
