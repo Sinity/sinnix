@@ -26,10 +26,19 @@ def test_history_failure_preserves_confirmed_mutation(
 
     assert result["mode"] == "apply"
     assert result["after"]["id"] == "fixture-1"
-    assert result["owner_history_ref"] == "sinnix://projects/fixture/beads/fixture-1/history"
+    assert (
+        result["owner_history_ref"]
+        == "sinnix://projects/fixture/beads/fixture-1/history"
+    )
     assert result["owner_history"]["status"] == "unavailable"
     assert result["owner_history"]["error"]["code"] == code
-    assert sum("update" in command and "--readonly" not in command for command in commands(log)) == 1
+    assert (
+        sum(
+            "update" in command and "--readonly" not in command
+            for command in commands(log)
+        )
+        == 1
+    )
 
 
 def test_native_mutation_failure_is_not_laundered_as_success(
