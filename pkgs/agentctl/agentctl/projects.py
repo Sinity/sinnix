@@ -8,10 +8,9 @@ tasks) belongs to pueue, worktrunk, GitHub and Beads.
 
 from __future__ import annotations
 
-import sys
-
 import hashlib
 import re
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
@@ -74,6 +73,8 @@ def _warn_unknown(descriptor: Path, table: str, unknown: set[str]) -> None:
             + ", ".join(sorted(unknown)),
             file=sys.stderr,
         )
+
+
 # Whether a landing runs a separate review agent on the candidate (`agent`)
 # or records the candidate verification as the review (`none`).
 REVIEW_POLICIES = frozenset({"agent", "none"})

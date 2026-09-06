@@ -152,7 +152,12 @@ def _landing_inputs(
                 ) from error
             worker_id = worker["id"]
 
-            def rebind(document: dict[str, Any], *, worker_id: str = worker_id, head: str = head) -> None:
+            def rebind(
+                document: dict[str, Any],
+                *,
+                worker_id: str = worker_id,
+                head: str = head,
+            ) -> None:
                 for entry in document["workers"]:
                     if entry["id"] == worker_id and entry.get("result"):
                         entry["result"]["candidate_sha"] = head
@@ -913,8 +918,17 @@ def _land_locked(
                 beads,
                 candidate=base,
                 verify_run={"kind": "verified", "candidate_sha": base},
-                review_verdict={"verdict": "pass", "policy": "verified", "candidate_sha": base},
-                published={"kind": "verified", "candidate_sha": base, "base_commit": base, "merge_commit": None},
+                review_verdict={
+                    "verdict": "pass",
+                    "policy": "verified",
+                    "candidate_sha": base,
+                },
+                published={
+                    "kind": "verified",
+                    "candidate_sha": base,
+                    "base_commit": base,
+                    "merge_commit": None,
+                },
             )
             return run.to_dict()
         merged = _merged_earlier(project, run)
