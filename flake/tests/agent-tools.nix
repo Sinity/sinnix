@@ -856,8 +856,8 @@ in
 
             added = []
 
-            def add(*, group, label, command, working_directory, after=(), stashed=False):
-                added.append({"group": group, "label": label, "command": command})
+            def add(*, group, label, command, working_directory, after=(), stashed=False, priority=0):
+                added.append({"group": group, "label": label, "command": command, "priority": priority})
                 return 7
 
             pueue.add = add
@@ -876,6 +876,7 @@ in
             assert started["job_id"] == 7
             assert added[0]["group"] == "bulk"
             assert added[0]["label"] == "sinnix:sinex_cache_prebuild"
+            assert added[0]["priority"] == 0
             assert added[0]["command"][0] == "agentctl-run"
             assert tuple(written["argv"]) == project.environment.command_for(operation.command)
             assert written["timeout_seconds"] == 7200
