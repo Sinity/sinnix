@@ -1142,7 +1142,10 @@ in
           {
             inherit sharedSkillFarm;
             nativeBuildInputs = [
-              (pkgs.python3.withPackages (ps: [ ps.pytest ]))
+              (pkgs.python3.withPackages (ps: [
+                ps.pytest
+                sinnixScriptRegistry.packageSet.sinnix-lib
+              ]))
               pkgs.coreutils
             ];
           }
