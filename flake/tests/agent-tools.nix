@@ -309,6 +309,7 @@ in
           poolSlices = lib.genAttrs [
             "agentctl-agent"
             "agentctl-pytest"
+            "agentctl-pytest-quick"
             "agentctl-bulk"
             "agentctl-normal"
             "agentctl-interactive"

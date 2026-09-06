@@ -41,6 +41,7 @@ mkServiceModule {
     default = {
       agent = 8;
       pytest = 1;
+      pytest-quick = 2;
       bulk = 1;
       normal = 2;
       interactive = 4;
