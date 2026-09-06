@@ -80,6 +80,8 @@
               pkgs.bash
               pkgs.coreutils
               pkgs.gawk
+              pkgs.python3
+              pkgs.util-linux
             ];
           }
           ''
@@ -104,6 +106,9 @@
               { previous = $0 }
               END { exit !found }
             ' "$CODEX_ARGS"
+            AGENT_RUNNER_PATH=${../../dots/_ai/skills/agent-runtime/scripts/run_agent_prompt.sh} \
+              AGENT_BOOTSTRAP_PATH=${../../scripts/sinnix-agent-npm-bootstrap} \
+              python3 ${../../scripts/tests/test_agent_output.py}
             touch "$out"
           '';
     in

@@ -119,20 +119,27 @@ cd "$workdir"
 
 # claude --output-format json prints one envelope whose `structured_output`
 # holds the schema-conforming object; the last file receives only that object
-# so every backend leaves the same document. Empty stdin is claude's failure
-# to report, not this function's: it exits 0 so the pipeline status is
-# claude's own.
+# so every backend leaves the same document. Only a successful result envelope
+# may produce a result; diagnostics belong on stderr.
 unwrap_claude_json() {
   python3 -c '
 import json, sys
-raw = sys.stdin.read()
-sys.stdout.write(raw)
-if not raw.strip():
-    print("claude printed no result", file=sys.stderr)
-    sys.exit(0)
-document = json.loads(raw)
+limit = 8 * 1024 * 1024
+raw = sys.stdin.buffer.read(limit + 1)
+sys.stdout.buffer.write(raw)
+if len(raw) > limit:
+    sys.exit("claude result exceeds 8 MiB")
+try:
+    document = json.loads(raw)
+except json.JSONDecodeError:
+    sys.exit("claude stdout is not one JSON envelope; inspect the captured output")
 if isinstance(document, list):
-    document = next((item for item in document if item.get("type") == "result"), document[-1])
+    envelopes = [item for item in document if isinstance(item, dict) and item.get("type") == "result"]
+    if len(envelopes) != 1 or document[-1] != envelopes[0]:
+        sys.exit("claude did not return exactly one terminal result envelope")
+    document = envelopes[0]
+if not isinstance(document, dict) or document.get("type") != "result" or document.get("subtype") != "success" or document.get("is_error") is not False:
+    sys.exit("claude did not return a successful result envelope")
 value = document.get("structured_output", document.get("result"))
 if isinstance(value, str):
     try:
@@ -140,9 +147,11 @@ if isinstance(value, str):
     except json.JSONDecodeError:
         print("claude result is not JSON: " + value[:200], file=sys.stderr)
         sys.exit(1)
+if not isinstance(value, dict):
+    sys.exit("claude structured result is not an object")
 with open(sys.argv[1], "w") as handle:
     json.dump(value, handle, indent=2)
-' "$last_file"
+' "$structured_file"
 }
 
 # Run a pipeline and exit with the producer's status when it failed, else
@@ -186,15 +195,20 @@ claude)
   fi
   set +e
   if [[ -n $output_schema ]]; then
+    structured_file="$(mktemp "${last_file}.XXXXXX")" || exit 1
+    trap 'rm -f -- "$structured_file"' EXIT
     "${claude_cmd[@]}" "${claude_args[@]}" | unwrap_claude_json
   else
     "${claude_cmd[@]}" "${claude_args[@]}" | tee "$last_file"
   fi
   statuses=("${PIPESTATUS[@]}")
   set -e
-  if [[ -n $output_schema && ${statuses[0]} -eq 0 && ! -s $last_file ]]; then
-    echo "claude exited 0 without a structured result" >&2
-    exit 1
+  if [[ -n $output_schema && ${statuses[0]} -eq 0 && ${statuses[1]} -eq 0 ]]; then
+    if [[ ! -s $structured_file ]]; then
+      echo "claude exited 0 without a structured result" >&2
+      exit 1
+    fi
+    mv -f -- "$structured_file" "$last_file"
   fi
   pipeline_status "${statuses[0]}" "${statuses[1]}"
   ;;
