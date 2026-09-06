@@ -528,18 +528,14 @@ def test_a_landing_queued_behind_a_worker_is_cancelled_by_its_own_reference(
         ["pueue", "switch", str(worker["job_id"]), str(landing["job_id"])], check=True
     )
 
-    cancelled = launch.cancel(
-        config, landing["job_id"], reference=landing["reference"]
-    )
+    cancelled = launch.cancel(config, landing["job_id"], reference=landing["reference"])
 
     assert cancelled["reference"] == landing["reference"]
     assert cancelled["job_id"] == worker["job_id"], (
         "the landing did not follow the switch to the worker's old id"
     )
     assert not (config.inputs_dir / f"{landing['reference']}.json").exists()
-    survivor = launch.get_job(
-        landing["job_id"], config, reference=worker["reference"]
-    )
+    survivor = launch.get_job(landing["job_id"], config, reference=worker["reference"])
     assert not survivor["terminal"], "the cancel reached the worker, not the landing"
     assert (config.inputs_dir / f"{worker['reference']}.json").exists()
 

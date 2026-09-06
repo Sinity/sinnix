@@ -377,8 +377,7 @@ def test_clean_and_cancel_address_the_job_the_reference_names(
     assert (cancelled["job_id"], cancelled["ref"]) == (44, "sinnix://jobs/44")
     assert cancelled["job"]["launch_reference"] == reference
     assert all(
-        request.arguments.get("launch_reference") == reference
-        for request in fake.calls
+        request.arguments.get("launch_reference") == reference for request in fake.calls
     )
 
     cleaned = call(
