@@ -479,6 +479,25 @@ def correct_scope(
     return update(config, run_id, record).worker(worker_id)
 
 
+def _rebind_candidate(worktree: Path, *, filed: str, head: str) -> str:
+    dirty = gitcmd.git(worktree, "status", "--porcelain", error=BatchError).strip()
+    if dirty:
+        raise BatchRefusal(
+            "candidate_mismatch",
+            f"result names {filed[:12]} but {worktree} is at {head[:12]} with uncommitted changes",
+        )
+    try:
+        gitcmd.git(
+            worktree, "merge-base", "--is-ancestor", filed, head, error=BatchError
+        )
+    except BatchError as error:
+        raise BatchRefusal(
+            "candidate_mismatch",
+            f"result names {filed[:12]} but {worktree} is at {head[:12]}, which does not descend from it",
+        ) from error
+    return head
+
+
 def result(
     config: Config,
     run_id: str,
@@ -500,15 +519,24 @@ def result(
     if worktree:
         head = gitcmd.git(Path(worktree), "rev-parse", "HEAD", error=BatchError)
         if head != value["candidate_sha"]:
-            raise BatchRefusal(
-                "candidate_mismatch",
-                f"result names {value['candidate_sha'][:12]} but {worktree} is at {head[:12]}",
+            # A worker that committed once more after writing its result is
+            # still the same worker: take the head when the tree is clean and
+            # the head descends from what was filed.
+            value["candidate_sha"] = _rebind_candidate(
+                Path(worktree), filed=value["candidate_sha"], head=head
             )
     if value["candidate_sha"] == run.base_commit:
-        raise BatchRefusal(
-            "empty_candidate",
-            f"result names the base commit {run.base_commit[:12]}; a worker with nothing to commit is not a candidate",
-        )
+        verdicts = results.satisfied_beads([value])
+        if all(verdicts.get(bead_id) for bead_id in worker["beads"]):
+            # Nothing to commit because the wanted state already holds: the
+            # evidence is the deliverable and lands without a candidate.
+            value["kind"] = "verified"
+        else:
+            raise BatchRefusal(
+                "empty_candidate",
+                f"result names the base commit {run.base_commit[:12]} without "
+                "every criterion satisfied; nothing to land and nothing proven",
+            )
     if worktree:
         # Landing merges every worker branch onto the run's base; a candidate
         # that does not descend from it carries work from somewhere else.

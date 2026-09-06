@@ -26,7 +26,7 @@ command, the run manifest of a batch, and one operator screen.
 | `job get \| logs \| result \| cancel \| retry \| wait <id>`                                               | one task by pueue id; `logs` reads the bounded log, `result` the typed artifact, `cancel` drops a queued task or stops a running task's unit, `retry` is `pueue restart --in-place`                                                        |
 | `job clean <id> \| --all-terminal \| --daemon-era`                                                        | delete a terminal task's launch input, log, result, outcome and cancel marker, then `pueue remove`; a task pueue has already forgotten is found by its launch input; `--daemon-era` deletes the state subtrees no verb reads; never by age |
 | `batch start [p] <bead>… [--worker a,b]… [--workers queued\|external] [--backend B --model M --effort E]` | validate the members, write the run manifest, claim the beads, create one worktree per worker, queue the workers (or write their packets) and the landing task behind them                                                                 |
-| `batch land <run>`                                                                                        | the landing task's body: integrate, verify, review, publish, record acceptance, close satisfied beads, remove worktrees; re-runnable                                                                                                       |
+| `batch land <run>`                                                                                        | the landing task's body: integrate, verify, review, publish, record acceptance, close satisfied beads and release the claim on the rest, remove worktrees; re-runnable                                                                     |
 | `batch status <run>` / `batch list [p]`                                                                   | the manifest joined with pueue task state and the landing PR; `status` prints each worker's prompt path and, for an external worker without a result, the exact `batch result` line to run                                                 |
 | `batch result <run> <worker> <result.json>`                                                               | file a schema-validated result for a worker another harness ran; releases the stashed landing task once every worker has one                                                                                                               |
 | `batch scope-correct <run> <worker> <candidate> --authorize <bead>=<glob>…`                               | replace a malformed stored worker scope with candidate-bound, per-bead authority while retaining the correction history                                                                                                                    |
@@ -262,11 +262,12 @@ agentctl-run <agent-launch.json>
 followed, in the same task, by `agentctl batch result <run> <w>
 W/.agentctl/prompt.result.json`, which validates the last file against
 `dots/claude/agents/schemas/worker.schema.json` and binds it to the
-worktree head; a zero exit with no valid result is a failed worker, so the
-landing task's dependency does not release. Backend, model and effort come from the flags,
+worktree head; a worker whose result validates is done whatever its task's
+exit, and a zero exit with no valid result is a failed worker. Backend, model and effort come from the flags,
 the bead's `model_policy` metadata, or the descriptor's `[packets.defaults]`.
 The environment carries `BEADS_ACTOR` set to the task label with `:`
-replaced by `-`; agent jobs cap at four hours.
+replaced by `-`; an agent runs until it finishes (the unit watchdog is a
+week), and a coordinator cancels it by hand.
 
 Worker, resume and review units cannot publish or mutate tasks: their
 environment sets `remote.origin.pushurl=/nonexistent` and an empty
@@ -400,10 +401,10 @@ check failing). The codes:
 | `abandoned`                    | the run was abandoned; nothing runs again                                           |
 | `already_accepted`             | the run has an acceptance record; nothing runs again                                |
 | `ambiguous_run`                | the suffix names more than one run                                                  |
-| `candidate_mismatch`           | the result's candidate_sha is not the worktree HEAD                                 |
+| `candidate_mismatch`           | the worktree HEAD does not descend from the filed candidate, or the tree is dirty   |
 | `check_missing`                | a required PR check was not reported within ten minutes                             |
 | `checks_failed`                | a required PR check failed, or did not finish (`timed_out`)                         |
-| `empty_candidate`              | the candidate equals the base commit: nothing to land                               |
+| `empty_candidate`              | the candidate equals the base commit and not every criterion is satisfied           |
 | `candidate_off_base`           | the candidate does not descend from the run base                                    |
 | `exists`                       | a manifest with this run id already exists                                          |
 | `foreign_beads`                | the result covers beads outside the worker                                          |
@@ -429,7 +430,6 @@ check failing). The codes:
 | `unknown_run`                  | no run has this id or suffix                                                        |
 | `verify_failed`                | candidate verification failed, or did not finish (`timed_out`)                      |
 | `worker_active`                | the worker's task is still queued or running                                        |
-| `worker_failed`                | the worker's task ended without success                                             |
 | `worker_missing`               | the run has no such worker, or the worker has no worktree                           |
 | `worker_not_done`              | a worker's task has not finished                                                    |
 | `worker_result_missing`        | a worker filed no valid result                                                      |
@@ -440,10 +440,14 @@ check failing). The codes:
 A worker exits with the JSON document `worker.schema.json` describes:
 `candidate_sha` (the worktree HEAD when filed), `beads` with each acceptance
 criterion marked `satisfied`, `unsatisfied` or `superseded` with evidence,
-`unresolved` findings, and `verification` receipts. `batch result` refuses a
-`candidate_sha` that is not the worktree head (`candidate_mismatch`), is the
-run's base commit (`empty_candidate`), does not descend from it
-(`candidate_off_base`), or covers a bead outside the worker (`foreign_beads`).
+`unresolved` findings, and `verification` receipts. A worktree head that
+descends from the filed `candidate_sha` with a clean tree rebinds the result
+to the head; a dirty tree or an unrelated head is `candidate_mismatch`. A
+`candidate_sha` equal to the run's base commit is a verified result when
+every criterion is satisfied (the bead closes from the evidence and a batch of
+only such results lands with no PR), else `empty_candidate`. A candidate that
+does not descend from the base is `candidate_off_base`; one covering a bead
+outside the worker is `foreign_beads`.
 It then reads `git diff --name-only <base>..<candidate>`: when the worker's
 beads declare `write_scope` (metadata; a list of globs or a `;`-separated
 string), the launch stores their sorted union and each glob's authorizing
@@ -516,8 +520,8 @@ pueue group), `result` (`exit`, `json`, `pytest`), `timeout_seconds` (1 to
 run only on the main checkout), `schedule` (an `OnCalendar` expression),
 `cache` (`none` or `tree+environment`), `scratch` (`none`, `tmpfs` or
 `nvme`) and `dependencies` (declared operation names). Dependencies are
-queued before their operation and cannot contain cycles. Any other operation field takes the project out of service
-with the field named. `[environment]` declares `kind`, `command`,
+queued before their operation and cannot contain cycles. Any other operation
+field is ignored with a warning on stderr. `[environment]` declares `kind`, `command`,
 `inherit`, `unset`, `values` and `require`; a required variable missing at
 launch fails the launch with its name. `[workspace]` declares `root`,
 `default_base`, `agent_memory_max` (a systemd size), `verify` (the
@@ -531,8 +535,10 @@ Every named operation must be declared. `[packets]` declares `template`
 `branch_prefix`, `[packets.model_policy.<name>]` (`backend`, `model`),
 `[packets.defaults]` (`backend`, `model`, `effort`) and `[packets.review]`
 (`backend`, `model`, `effort`, all three, for the reviewer and integration
-agents). Any other table, or any other field in one of these tables, takes
-the project out of service with the name reported.
+agents). Any other table takes the project out of service with the name
+reported; an unknown field inside one of these tables is ignored with a
+warning, so a descriptor written for a newer agentctl keeps the older one
+running.
 
 Descriptor changes take effect on the next call; timers follow on the next
 `schedule apply` (every fifteen minutes and at login).

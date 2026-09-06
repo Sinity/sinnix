@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 DEFAULT_TIMEOUT_SECONDS = 3_600
-# An implementation agent routinely needs more than an hour.
-MAX_AGENT_TIMEOUT_SECONDS = 14_400
+# Agents run until they finish; a coordinator cancels by hand. The value is
+# the unit's watchdog, not a budget: a week, so a stuck agent is still
+# reaped eventually.
+MAX_AGENT_TIMEOUT_SECONDS = 7 * 24 * 3_600
 MAX_DECLARED_OPERATION_TIMEOUT_SECONDS = 28_800
 # Hard ceiling on one agent's unit; the job plane's MemoryHigh is 20G.
 AGENT_MEMORY_MAX = "4G"

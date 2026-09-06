@@ -8,6 +8,8 @@ tasks) belongs to pueue, worktrunk, GitHub and Beads.
 
 from __future__ import annotations
 
+import sys
+
 import hashlib
 import re
 from dataclasses import dataclass, field
@@ -60,6 +62,18 @@ _WORKSPACE_FIELDS = frozenset(
 # PR check.
 _VERIFY_PROFILES = frozenset({"focused", "candidate", "corpus"})
 PUBLISH_POLICIES = frozenset({"pr", "master"})
+
+
+def _warn_unknown(descriptor: Path, table: str, unknown: set[str]) -> None:
+    """A field this agentctl does not read is ignored, never a reason to take
+    the project out of service: a descriptor written for a newer agentctl
+    must keep the older one's landings running."""
+    if unknown:
+        print(
+            f"agentctl: {descriptor} {table} ignores unknown fields: "
+            + ", ".join(sorted(unknown)),
+            file=sys.stderr,
+        )
 # Whether a landing runs a separate review agent on the candidate (`agent`)
 # or records the candidate verification as the review (`none`).
 REVIEW_POLICIES = frozenset({"agent", "none"})
@@ -290,12 +304,7 @@ def _environment(raw: Mapping[str, Any], descriptor: Path) -> ProjectEnvironment
     environment = raw.get("environment")
     if not isinstance(environment, Mapping):
         raise ProjectConfigError(f"{descriptor} requires an [environment] table")
-    unknown = set(environment) - _ENVIRONMENT_FIELDS
-    if unknown:
-        raise ProjectConfigError(
-            f"{descriptor} [environment] contains unknown fields: "
-            + ", ".join(sorted(unknown))
-        )
+    _warn_unknown(descriptor, "[environment]", set(environment) - _ENVIRONMENT_FIELDS)
     kind = environment.get("kind")
     if not isinstance(kind, str) or not kind:
         raise ProjectConfigError(f"{descriptor} environment.kind must be non-empty")
@@ -337,12 +346,7 @@ def _workspace(raw: Mapping[str, Any], descriptor: Path) -> WorkspacePolicy | No
         return None
     if not isinstance(raw_workspace, Mapping):
         raise ProjectConfigError(f"{descriptor} [workspace] must be a table")
-    unknown = set(raw_workspace) - _WORKSPACE_FIELDS
-    if unknown:
-        raise ProjectConfigError(
-            f"{descriptor} [workspace] contains unknown fields: "
-            + ", ".join(sorted(unknown))
-        )
+    _warn_unknown(descriptor, "[workspace]", set(raw_workspace) - _WORKSPACE_FIELDS)
     root = raw_workspace.get("root")
     default_base = raw_workspace.get("default_base")
     if not isinstance(root, str) or not Path(root).is_absolute():
@@ -396,12 +400,7 @@ def _packets(raw: Mapping[str, Any], root: Path, descriptor: Path) -> PacketsPol
     packets = raw.get("packets", {})
     if not isinstance(packets, Mapping):
         raise ProjectConfigError(f"{descriptor} [packets] must be a table")
-    unknown = set(packets) - _PACKETS_FIELDS
-    if unknown:
-        raise ProjectConfigError(
-            f"{descriptor} [packets] contains unknown fields: "
-            + ", ".join(sorted(unknown))
-        )
+    _warn_unknown(descriptor, "[packets]", set(packets) - _PACKETS_FIELDS)
     defaults = packets.get("defaults", {})
     if not isinstance(defaults, Mapping) or set(defaults) - set(_PACKETS_DEFAULTS):
         raise ProjectConfigError(
@@ -461,12 +460,7 @@ def _operation(name: str, definition: Any, descriptor: Path) -> ProjectOperation
         raise ProjectConfigError(
             f"{descriptor} contains an invalid operation declaration: {name}"
         )
-    unknown = set(definition) - _OPERATION_FIELDS
-    if unknown:
-        raise ProjectConfigError(
-            f"{descriptor} operation {name} contains unknown fields: "
-            + ", ".join(sorted(unknown))
-        )
+    _warn_unknown(descriptor, f"operation {name}", set(definition) - _OPERATION_FIELDS)
     description = definition.get("description")
     if not isinstance(description, str) or not description:
         raise ProjectConfigError(f"{descriptor} operation {name} requires description")

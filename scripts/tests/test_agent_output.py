@@ -92,7 +92,6 @@ class NativeOutputTest(unittest.TestCase):
             self.envelope(is_error=True),
             self.envelope(subtype="error_max_turns"),
             {"structured_output": {"answer": "fiction"}},
-            [self.envelope(), self.envelope()],
             self.envelope(structured_output=None),
         ):
             with self.subTest(payload=payload):
@@ -106,6 +105,23 @@ class NativeOutputTest(unittest.TestCase):
         )
         self.assertNotEqual(outcome.returncode, 0)
         self.assertFalse(self.result.exists())
+
+    def test_the_last_successful_envelope_among_several_wins(self):
+        """Breaks if a second envelope on stdout (a stream, a retry) loses a
+        finished worker's result again."""
+        first = self.envelope(structured_output={"answer": "stale"})
+        for payload in (
+            json.dumps([first, self.envelope()]),
+            json.dumps(first) + "\n" + json.dumps(self.envelope()),
+            json.dumps(self.envelope(is_error=True)) + json.dumps(self.envelope()),
+        ):
+            with self.subTest(payload=payload):
+                self.result.unlink(missing_ok=True)
+                outcome = self.run_claude(payload)
+                self.assertEqual(outcome.returncode, 0, outcome.stderr)
+                self.assertEqual(
+                    json.loads(self.result.read_text()), {"answer": "fixture"}
+                )
 
     def test_empty_retry_does_not_accept_a_previous_result(self):
         self.result.write_text('{"previous":"evidence"}')

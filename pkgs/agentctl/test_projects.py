@@ -51,14 +51,9 @@ def test_the_fixture_descriptor_loads_every_declared_field(project_root: Path) -
     [
         ('[conflicts]\nexact_files = ["x"]\n', "unknown tables: conflicts"),
         ('[owner_adapters.a]\nnamespace = "a"\n', "unknown tables: owner_adapters"),
-        (
-            '[operations.check.parameters.apply]\ntype = "bool"\nflag = "--apply"\n',
-            "unknown fields: parameters",
-        ),
-        ("[packets.extra]\nx = 1\n", r"\[packets\] contains unknown fields: extra"),
     ],
 )
-def test_a_field_agentctl_does_not_read_takes_the_project_out_of_service(
+def test_a_table_agentctl_does_not_read_takes_the_project_out_of_service(
     tmp_path: Path, fragment: str, message: str
 ) -> None:
     root = write_project(tmp_path / "p")
@@ -79,18 +74,37 @@ def test_a_field_agentctl_does_not_read_takes_the_project_out_of_service(
         ("workspace", 'verification_operations = ["check"]'),
     ],
 )
-def test_retired_keys_in_environment_and_workspace_are_refused(
-    tmp_path: Path, table: str, key: str
+def test_unknown_or_retired_fields_warn_and_load(
+    tmp_path: Path, table: str, key: str, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    """Breaks if an unknown field takes the project out of service again: a
+    descriptor written for a newer agentctl would stop every landing on the
+    older one until the deploy finishes."""
     root = write_project(tmp_path / "p")
     descriptor = root / ".agentctl" / "project.toml"
     descriptor.write_text(
         descriptor.read_text().replace(f"[{table}]\n", f"[{table}]\n{key}\n")
     )
-    with pytest.raises(
-        ProjectConfigError, match=f"\\[{table}\\] contains unknown fields"
-    ):
-        load_project_adapter(root)
+    project = load_project_adapter(root)
+    assert project.project_id == "fixture"
+    name = key.split(" =", 1)[0]
+    assert f"[{table}] ignores unknown fields: {name}" in capsys.readouterr().err
+
+
+def test_unknown_packet_and_operation_fields_warn_and_load(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = write_project(tmp_path / "p")
+    descriptor = root / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text()
+        + '[packets.extra]\nx = 1\n'
+        + '[operations.check.parameters.apply]\ntype = "bool"\nflag = "--apply"\n'
+    )
+    load_project_adapter(root)
+    err = capsys.readouterr().err
+    assert "[packets] ignores unknown fields: extra" in err
+    assert "operation check ignores unknown fields: parameters" in err
 
 
 @pytest.mark.parametrize(

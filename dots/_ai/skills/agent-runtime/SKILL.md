@@ -50,7 +50,8 @@ did not succeed.
   the state subtrees no verb reads. Never by age.
 - **Never poll.** Every task's start and finish reaches
   `/realm/state/agentctl/events.jsonl`; watch `agentctl events tail --follow`.
-- Declared operations may run for up to eight hours; agents cap at four.
+- Declared operations may run for up to eight hours; agents run until they
+  finish and are cancelled by hand.
 - Every long launch carries an evidence-based duration expectation and a
   deadline around twice it. At the deadline, inspect progress evidence and
   cancel, repair, or extend for a stated reason.
