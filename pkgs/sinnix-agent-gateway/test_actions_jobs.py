@@ -9,7 +9,7 @@ from typing import Any
 
 import anyio
 import pytest
-from mcp.types import CallToolResult
+from conftest import call
 from sinnix_agent_gateway import server as server_module
 from sinnix_agent_gateway.actions import contexts, jobs, waits
 from sinnix_agent_gateway.app import Runtime, create_server
@@ -100,17 +100,6 @@ def make_server(
         lambda name: tuple(action for action in OWNED if name in action.principals),
     )
     return create_server(config, principal), runtime, fake
-
-
-def call(server: Any, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-    async def invoke() -> Any:
-        return await server.call_tool(name, arguments)
-
-    result = anyio.run(invoke)
-    if isinstance(result, CallToolResult):
-        assert result.structured_content is not None
-        return result.structured_content
-    return result
 
 
 RUNNING = {

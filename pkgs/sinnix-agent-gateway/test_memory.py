@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from conftest import assert_unavailable_upstreams
 from sinnix_agent_gateway.capabilities import PolicyError, Principal
 from sinnix_agent_gateway.config import GatewayConfig
 from sinnix_agent_gateway.memory import MemoryError, MemoryService
@@ -41,23 +42,7 @@ def test_memory_search_preserves_raw_source_provenance_and_unavailability(
         match["authority"] == "authoritative-local-session-jsonl"
         for match in result["matches"]
     )
-    unavailable = {
-        row["source"]: row
-        for row in result["sources"]
-        if row["availability"] == "unavailable"
-    }
-    assert (
-        unavailable["polylogue"]["reason"]
-        == "upstream is intentionally unavailable on this host"
-    )
-    assert (
-        unavailable["sinex"]["reason"]
-        == "upstream is intentionally unavailable on this host"
-    )
-    assert (
-        unavailable["lynchpin"]["reason"]
-        == "no gateway semantic adapter is registered yet"
-    )
+    assert_unavailable_upstreams(result["sources"])
 
 
 def test_memory_get_returns_bounded_source_object(tmp_path: Path) -> None:
