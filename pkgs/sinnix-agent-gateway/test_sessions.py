@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -51,7 +52,7 @@ def test_session_list_read_and_search_preserve_provider_reference(
     listed = service.list("claude-code")
     reference = listed["sessions"][0]["reference"]
     read = service.read(reference, max_bytes=32)
-    search = service.search("claude-code", "demonstration")
+    search = service.search("claude-code", "demonstration", max_results=1)
 
     assert reference == "claude-code:project/session.jsonl"
     assert read["reference"] == reference
@@ -97,3 +98,75 @@ def test_session_search_declares_prefix_bound(tmp_path: Path) -> None:
     assert result["matches"] == []
     assert result["truncated"] is True
     assert result["scanned_bytes"] == 64_000
+
+
+def test_newest_sessions_are_selected_across_the_entire_tree(tmp_path: Path) -> None:
+    service, root = session_service(tmp_path)
+    for name, modified in (("old/a", 1), ("old/b", 2), ("new/c", 9)):
+        path = root / f"{name}.jsonl"
+        path.parent.mkdir(exist_ok=True)
+        path.write_text("{}\n")
+        os.utime(path, ns=(modified, modified))
+
+    result = service.list("claude-code", limit=1)
+
+    assert result["sessions"][0]["reference"] == "claude-code:new/c.jsonl"
+    assert result["truncated"] is True
+
+
+def test_timeline_filters_before_discovery_limit_and_reports_exact_end(
+    tmp_path: Path,
+) -> None:
+    service, root = session_service(tmp_path)
+    for index in range(1_002):
+        path = root / f"{index:04}.jsonl"
+        path.write_text("{}\n")
+        os.utime(path, ns=(index + 1, index + 1))
+
+    result = service.timeline("claude-code", 1, 1, None, 1)
+
+    assert [row["reference"] for row in result["entries"]] == ["claude-code:0000.jsonl"]
+    assert result["truncated"] is False
+
+
+def test_session_discovery_cannot_search_symlinked_external_content(
+    tmp_path: Path,
+) -> None:
+    service, root = session_service(tmp_path)
+    outside = tmp_path / "outside.jsonl"
+    outside.write_text('{"text":"external needle"}\n')
+    (root / "linked.jsonl").symlink_to(outside)
+
+    assert service.list("claude-code")["sessions"] == []
+    assert service.search("claude-code", "needle")["matches"] == []
+
+
+def test_search_hit_contains_query_and_a_readable_byte_offset(tmp_path: Path) -> None:
+    service, root = session_service(tmp_path)
+    path = root / "long.jsonl"
+    path.write_text('{"text":"' + "é" * 3_000 + 'needle"}\n')
+
+    match = service.search("claude-code", "needle")["matches"][0]
+
+    assert "needle" in match["text"]
+    assert (
+        "needle" in service.read(match["reference"], match["offset"], 2_000)["content"]
+    )
+
+
+def test_missing_session_source_is_unavailable(tmp_path: Path) -> None:
+    service, root = session_service(tmp_path)
+    root.rmdir()
+    with pytest.raises(SessionError, match="unavailable"):
+        service.list("claude-code")
+
+
+def test_read_preserves_raw_offsets_and_replaces_malformed_utf8(tmp_path: Path) -> None:
+    service, root = session_service(tmp_path)
+    (root / "bytes.jsonl").write_bytes("é".encode("utf-8") + b"\xff\xe2\x82")
+
+    read = service.read("claude-code:bytes.jsonl", offset=1)
+
+    assert read["offset"] == 1 and read["bytes"] == 4
+    assert read["content"] == "\ufffd\ufffd\ufffd"
+    assert read["next_offset"] is None

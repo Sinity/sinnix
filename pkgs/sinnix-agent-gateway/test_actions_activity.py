@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 
+import pytest
 from sinnix_agent_gateway.actions import activity
 from sinnix_agent_gateway.config import GatewayConfig
 from sinnix_agent_gateway.runtime import Runtime
@@ -207,6 +209,22 @@ def test_sessions_memory_timeline(tmp_path: Path) -> None:
         BY_NAME,
     )["data"]
     assert read["content"] == '{"text":"g' and read["truncated"]
+    continued = call(
+        rt,
+        "sessions.query",
+        {
+            "request": {
+                "operation": "read",
+                "reference": read["reference"],
+                "offset": read["next_offset"],
+            }
+        },
+        BY_NAME,
+    )["data"]
+    assert read["content"] + continued["content"] == (
+        '{"text":"gateway demonstration"}\n{"text":"second"}\n'
+    )
+    assert continued["next_offset"] is None
     found = call(
         rt,
         "sessions.query",
@@ -266,3 +284,139 @@ def test_agent_control_cannot_read_sessions(tmp_path: Path) -> None:
         BY_NAME,
     )
     assert denied["error"]["code"] == "policy_denied"
+
+
+def test_session_listing_pages_a_snapshot_without_rescanning(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    rt, _ = runtime(tmp_path)
+    root = rt.sessions.sources[0].root
+    original = root / "proj" / "s1.jsonl"
+    os.utime(original, ns=(1, 1))
+    recent = root / "s2.jsonl"
+    recent.write_text("{}\n")
+    os.utime(recent, ns=(2, 2))
+    request = {"operation": "list", "provider": "claude-code", "limit": 1}
+    first = call(rt, "sessions.query", {"request": request}, BY_NAME)
+    assert first["data"]["sessions"][0]["reference"] == "claude-code:s2.jsonl"
+    assert first["page"]["total"] == 2
+    assert rt.results.read(first["result"]["result_id"])["page"] == first["page"]
+    cursor = first["page"]["next_cursor"]
+
+    newest = root / "s3.jsonl"
+    newest.write_text("{}\n")
+    os.utime(newest, ns=(3, 3))
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            rt.sessions, "inventory", lambda _: pytest.fail("continuation rescanned")
+        )
+        second = call(
+            rt, "sessions.query", {"request": {**request, "cursor": cursor}}, BY_NAME
+        )
+    assert second["data"]["sessions"][0]["reference"] == "claude-code:proj/s1.jsonl"
+    assert second["page"]["next_cursor"] is None
+    assert second["page"]["snapshot_ref"] == first["page"]["snapshot_ref"]
+    fresh = call(rt, "sessions.query", {"request": request}, BY_NAME)
+    assert fresh["data"]["sessions"][0]["reference"] == "claude-code:s3.jsonl"
+
+    wrong_scope = call(
+        rt,
+        "sessions.query",
+        {
+            "request": {
+                **request,
+                "provider": "codex",
+                "cursor": cursor,
+            }
+        },
+        BY_NAME,
+    )
+    assert wrong_scope["error"]["code"] == "stale_cursor"
+
+
+def test_missing_session_provider_returns_typed_unavailable(tmp_path: Path) -> None:
+    rt, _ = runtime(tmp_path)
+    result = call(
+        rt,
+        "sessions.query",
+        {
+            "request": {
+                "operation": "list",
+                "provider": "codex",
+            }
+        },
+        BY_NAME,
+    )
+    assert result["error"]["code"] == "unavailable"
+
+
+@pytest.mark.parametrize("max_bytes", [4, 11, 13])
+def test_session_read_continuation_preserves_utf8(
+    tmp_path: Path, max_bytes: int
+) -> None:
+    rt, _ = runtime(tmp_path)
+    text = '{"text":"aé😀z"}\n'
+    (rt.sessions.sources[0].root / "proj" / "s1.jsonl").write_text(text)
+    offset = 0
+    pieces = []
+    for _ in range(len(text.encode("utf-8"))):
+        response = call(
+            rt,
+            "sessions.query",
+            {
+                "request": {
+                    "operation": "read",
+                    "reference": "claude-code:proj/s1.jsonl",
+                    "offset": offset,
+                    "max_bytes": max_bytes,
+                }
+            },
+            BY_NAME,
+        )
+        assert response["result"]["outcome"] == "ok", response
+        data = response["data"]
+        pieces.append(data["content"])
+        assert 0 < data["bytes"] <= max_bytes
+        if data["next_offset"] is None:
+            break
+        assert data["next_offset"] == offset + data["bytes"]
+        offset = data["next_offset"]
+    else:
+        pytest.fail("session continuation did not terminate")
+    assert "".join(pieces) == text
+
+
+def test_session_read_refuses_a_budget_that_cannot_fit_one_character(
+    tmp_path: Path,
+) -> None:
+    rt, _ = runtime(tmp_path)
+    (rt.sessions.sources[0].root / "proj" / "s1.jsonl").write_text("😀x")
+    request = {"operation": "read", "reference": "claude-code:proj/s1.jsonl"}
+
+    too_small = call(
+        rt,
+        "sessions.query",
+        {
+            "request": {
+                **request,
+                "max_bytes": 1,
+            }
+        },
+        BY_NAME,
+    )
+    assert too_small["error"]["code"] == "invalid_request"
+    assert "max_bytes" in too_small["error"]["message"]
+
+    readable = call(
+        rt,
+        "sessions.query",
+        {
+            "request": {
+                **request,
+                "max_bytes": 4,
+            }
+        },
+        BY_NAME,
+    )["data"]
+    assert readable["content"] == "😀" and readable["next_offset"] == 4

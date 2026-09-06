@@ -82,6 +82,7 @@ def build_tool(action: Action, runtime: Runtime) -> Tool:
         blocks: list[Any] = []
 
         async def callback() -> Any:
+            page = None
             if action.is_async:
                 raw = await action.handler(runtime, request_input)
             else:
@@ -90,9 +91,8 @@ def build_tool(action: Action, runtime: Runtime) -> Tool:
                 )
             if isinstance(raw, ActionResult):
                 blocks.extend(raw.blocks)
+                page = raw.page
                 raw = raw.data
-            if isinstance(raw, action.Output):
-                return raw.model_dump(mode="json", by_alias=True)
             try:
                 validated = action.Output.model_validate(raw)
             except ValidationError as exc:
@@ -101,7 +101,8 @@ def build_tool(action: Action, runtime: Runtime) -> Tool:
                     "owner result does not match the declared output",
                     details={"problems": exc.errors(include_url=False)[:8]},
                 ) from exc
-            return validated.model_dump(mode="json", by_alias=True)
+            data = validated.model_dump(mode="json", by_alias=True)
+            return ActionResult(data, page=page) if page is not None else data
 
         response = await runtime.execute_v2_async(action, callback, request)
         return _project(response, blocks)

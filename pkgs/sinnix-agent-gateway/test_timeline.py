@@ -98,3 +98,18 @@ def test_timeline_query_requires_session_authority(tmp_path: Path) -> None:
 
     with pytest.raises(PolicyError, match="session.read"):
         timeline.query()
+
+
+def test_timeline_global_limit_can_be_filled_by_one_provider(tmp_path: Path) -> None:
+    timeline = timeline_service(tmp_path, "observer")
+    newest = tmp_path / "codex" / "newest.jsonl"
+    newest.write_text("{}\n")
+    os.utime(newest, ns=(1_700_000_200_000_000_000,) * 2)
+
+    result = timeline.query(providers=["claude-code", "codex"], limit=2)
+
+    assert [entry["object_reference"] for entry in result["entries"]] == [
+        "codex:newest.jsonl",
+        "codex:fixture.jsonl",
+    ]
+    assert result["truncated"] is True
