@@ -302,3 +302,65 @@ def test_batch_verbs_refuse_a_run_that_belongs_to_another_project(
     assert refused.error is not None
     assert refused.error.code is ErrorCode.INVALID_ARGUMENT
     assert "belongs to other" in refused.error.message
+
+
+def test_job_operations_pass_the_launch_reference_through_to_agentctl(
+    adapter: LocalJobs, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The gateway's stable job identity is agentctl's launch reference.
+
+    Red if an operation drops it, which leaves the call addressing a queue
+    position that a reorder may have given to another job.
+    """
+    reference = "fixture-verify-3f9a21c8"
+    moved = {**JOB_ROW, "job_id": 44, "reference": reference}
+    seen: dict[str, Any] = {}
+
+    def record(name: str, value: Any = moved) -> Any:
+        def call(*args: Any, **kwargs: Any) -> Any:
+            seen[name] = (args, kwargs)
+            return value
+
+        return call
+
+    monkeypatch.setattr(launch, "wait", record("wait"))
+    monkeypatch.setattr(launch, "get_job", record("get"))
+    monkeypatch.setattr(launch, "cancel", record("cancel"))
+    monkeypatch.setattr(launch, "retry", record("retry"))
+    monkeypatch.setattr(
+        launch, "clean", record("clean", {**moved, "cleaned": True, "removed": []})
+    )
+    monkeypatch.setattr(
+        launch, "result", record("result", {**moved, "kind": "exit", "value": None})
+    )
+
+    for operation, arguments in (
+        ("job.wait", {"timeout_seconds": 5}),
+        ("job.get", {}),
+        ("job.cancel", {}),
+        ("job.retry", {}),
+        ("job.clean", {}),
+        ("job.result", {}),
+    ):
+        answer = adapter.dispatch(
+            _request(
+                operation,
+                {"job_id": 41, "launch_reference": reference, **arguments},
+            )
+        )
+        assert answer.error is None, (operation, answer.error)
+        assert answer.payload.inline["launch_reference"] == reference
+        assert answer.payload.inline["job_id"] == "44"
+
+    for name in ("wait", "get", "cancel", "retry", "clean", "result"):
+        args, kwargs = seen[name]
+        assert reference in (*args, *kwargs.values()), name
+
+
+def test_a_launch_reference_that_is_a_path_is_refused(adapter: LocalJobs) -> None:
+    """It names one file under the state directory; a path would leave it."""
+    refused = adapter.dispatch(
+        _request("job.get", {"job_id": 41, "launch_reference": "../../etc/passwd"})
+    )
+    assert refused.error is not None
+    assert refused.error.code is ErrorCode.INVALID_ARGUMENT

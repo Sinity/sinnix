@@ -10,6 +10,7 @@ from typing import Any
 import anyio
 import pytest
 from conftest import call
+from pydantic import ValidationError
 from sinnix_agent_gateway import server as server_module
 from sinnix_agent_gateway.actions import contexts, jobs, waits
 from sinnix_agent_gateway.app import Runtime, create_server
@@ -122,11 +123,23 @@ RUNNING = {
 DONE = {**RUNNING, "state": {"phase": "succeeded", "terminal": True, "exit_code": 0}}
 
 
-def test_job_locator_accepts_ref_or_id() -> None:
-    assert JobLocator(job_id=41).resolve() == (41, "sinnix://jobs/41")
-    assert JobLocator(ref="sinnix://jobs/41").resolve() == (41, "sinnix://jobs/41")
+def test_job_locator_accepts_ref_or_id_and_carries_the_launch_reference() -> None:
+    assert JobLocator(job_id=41).resolve() == (41, "sinnix://jobs/41", None)
+    assert JobLocator(ref="sinnix://jobs/41").resolve() == (
+        41,
+        "sinnix://jobs/41",
+        None,
+    )
+    assert JobLocator(job_id=41, launch_reference="fixture-check-abc").resolve() == (
+        41,
+        "sinnix://jobs/41",
+        "fixture-check-abc",
+    )
     with pytest.raises(ValueError, match="exactly one"):
         JobLocator()
+    # A reference names one file under the state directory, never a path.
+    with pytest.raises(ValidationError):
+        JobLocator(job_id=41, launch_reference="../../etc/passwd")
 
 
 def test_list_pages_with_refs_and_forwards_the_project_filter(
@@ -258,6 +271,125 @@ def test_wait_reports_terminal_or_timeout_from_the_queue(
     fake.responses["job.wait"] = DONE
     done = call(server, "jobs.wait", {"target": {"job_id": 41}})["data"]
     assert done["outcome"] == "terminal" and done["job"]["state"]["terminal"] is True
+
+
+MOVED = {
+    **DONE,
+    "job_id": "44",
+    "launch_reference": "fixture-worker-abcd1234",
+}
+
+
+def test_a_wait_carrying_a_launch_reference_follows_its_job_to_another_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The owner answers about the job, wherever a reorder put it.
+
+    Anti-vacuity: a wait that proved identity by the id it sent would refuse
+    its own answer, and one that never sent the reference would be told about
+    whatever task the switch moved to that id.
+    """
+    server, _, fake = make_server(tmp_path, "observer", monkeypatch)
+    fake.responses["job.wait"] = MOVED
+
+    waited = call(
+        server,
+        "jobs.wait",
+        {
+            "target": {"job_id": 41, "launch_reference": "fixture-worker-abcd1234"},
+            "timeout_seconds": 5,
+        },
+    )["data"]
+
+    assert fake.calls[-1].arguments == {
+        "job_id": 41,
+        "launch_reference": "fixture-worker-abcd1234",
+        "timeout_seconds": 5,
+    }
+    assert waited["outcome"] == "terminal"
+    assert (waited["job_id"], waited["ref"]) == (44, "sinnix://jobs/44")
+    assert waited["job"]["launch_reference"] == "fixture-worker-abcd1234"
+
+
+def test_an_answer_about_another_job_is_refused_whichever_identity_was_sent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Identity is proven against what the call addressed, and always proven."""
+    server, _, fake = make_server(tmp_path, "observer", monkeypatch)
+
+    fake.responses["job.wait"] = MOVED
+    by_id = call(server, "jobs.wait", {"target": {"job_id": 41}})
+    assert by_id["error"]["code"] == "owner_failed"
+
+    fake.responses["job.wait"] = {**DONE, "launch_reference": "fixture-check-9999"}
+    by_reference = call(
+        server,
+        "jobs.wait",
+        {"target": {"job_id": 41, "launch_reference": "fixture-worker-abcd1234"}},
+    )
+    assert by_reference["error"]["code"] == "owner_failed"
+
+
+def test_a_job_view_returns_the_reference_a_later_call_addresses_it_by(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    server, _, fake = make_server(tmp_path, "operator", monkeypatch)
+    fake.responses["job.start"] = {**RUNNING, "launch_reference": "fixture-check-abcd"}
+
+    started = call(
+        server,
+        "operations.run",
+        {
+            "checkout": {"project": "fixture"},
+            "operation": "check",
+            "idempotency_key": "run-1",
+        },
+    )["data"]
+
+    assert started["launch_reference"] == "fixture-check-abcd"
+
+
+def test_clean_and_cancel_address_the_job_the_reference_names(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    server, _, fake = make_server(tmp_path, "operator", monkeypatch)
+    reference = "fixture-worker-abcd1234"
+    fake.responses["job.get"] = MOVED
+    fake.responses["job.cancel"] = {
+        **MOVED,
+        "cancel_requested": True,
+        "already_terminal": True,
+    }
+    fake.responses["job.clean"] = {
+        **MOVED,
+        "cleaned": True,
+        "removed": ["/state/inputs/fixture-worker-abcd1234.json"],
+    }
+
+    cancelled = call(
+        server,
+        "jobs.cancel",
+        {
+            "target": {"job_id": 41, "launch_reference": reference},
+            "idempotency_key": "cancel-1",
+        },
+    )["data"]
+    assert (cancelled["job_id"], cancelled["ref"]) == (44, "sinnix://jobs/44")
+    assert cancelled["job"]["launch_reference"] == reference
+    assert all(
+        request.arguments.get("launch_reference") == reference
+        for request in fake.calls
+    )
+
+    cleaned = call(
+        server,
+        "jobs.clean",
+        {
+            "target": {"job_id": 41, "launch_reference": reference},
+            "idempotency_key": "clean-1",
+        },
+    )["data"]
+    assert cleaned["removed"] == ["/state/inputs/fixture-worker-abcd1234.json"]
 
 
 def test_cancel_checks_the_phase_and_surfaces_reap_survivors(

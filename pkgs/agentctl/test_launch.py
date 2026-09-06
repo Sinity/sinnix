@@ -425,6 +425,114 @@ def test_clean_finds_a_task_pueue_forgot_by_its_launch_input(
         launch.clean(config, started["job_id"])
 
 
+def test_clean_leaves_the_launch_input_of_a_job_the_queue_moved(
+    fake_pueue: FakePueue, config: Config, project_root: Path
+) -> None:
+    """A vacant id is no evidence that the job written there is gone.
+
+    Anti-vacuity: selecting the input by the id it recorded deletes a queued
+    job's own launch input, and that job then fails with an unusable launch
+    file when the queue reaches it.
+    """
+    project = load_project_adapter(project_root)
+    survivor = launch.start_operation(config, project, project.operation("verify"))
+    doomed = launch.start_operation(config, project, project.operation("verify"))
+    fake_pueue.queue(survivor["job_id"])
+    fake_pueue.queue(doomed["job_id"])
+    written = read_launch(config, fake_pueue.task(survivor["job_id"]))
+    assert written["queue_task_id"] == survivor["job_id"]
+    survivor_input = config.inputs_dir / f"{survivor['reference']}.json"
+
+    # The operator prioritises the queue, then drops the other job, leaving
+    # the id the survivor recorded vacant while the survivor is still queued.
+    fake_pueue.switch(survivor["job_id"], doomed["job_id"])
+    vacated = survivor["job_id"]
+    fake_pueue.remove([vacated])
+
+    with pytest.raises(JobError, match="pueue has no task"):
+        launch.clean(config, vacated)
+
+    assert survivor_input.exists(), "the queued job lost its own launch input"
+    assert launch.get_job(doomed["job_id"])["reference"] == survivor["reference"]
+
+
+def test_clean_by_reference_deletes_the_job_it_names_and_no_other(
+    fake_pueue: FakePueue, config: Config, project_root: Path
+) -> None:
+    """A reference names one job's artifacts wherever the queue put the job."""
+    project = load_project_adapter(project_root)
+    first = launch.start_operation(config, project, project.operation("verify"))
+    second = launch.start_operation(config, project, project.operation("verify"))
+    fake_pueue.queue(first["job_id"])
+    fake_pueue.queue(second["job_id"])
+    fake_pueue.switch(first["job_id"], second["job_id"])
+    fake_pueue.succeed(second["job_id"])
+
+    cleaned = launch.clean(config, first["job_id"], first["reference"])
+
+    assert cleaned["reference"] == first["reference"]
+    assert not (config.inputs_dir / f"{first['reference']}.json").exists()
+    assert (config.inputs_dir / f"{second['reference']}.json").exists()
+    assert fake_pueue.removed == [second["job_id"]]
+
+
+def test_clean_refuses_a_reference_that_is_not_one(
+    fake_pueue: FakePueue, config: Config, project_root: Path
+) -> None:
+    """The reference names a file under inputs/, so it is never a path."""
+    with pytest.raises(JobError, match="is not a launch reference"):
+        launch.clean(config, 1, "../../etc/passwd")
+
+
+def test_a_read_by_reference_answers_about_that_job_after_a_reorder(
+    fake_pueue: FakePueue, config: Config, project_root: Path
+) -> None:
+    """Status, result, log and cancellation follow the job, not the position.
+
+    Anti-vacuity: the same calls without the reference answer about whatever
+    the switch moved to that id, which the sibling test pins.
+    """
+    project = load_project_adapter(project_root)
+    first = launch.start_operation(config, project, project.operation("verify"))
+    second = launch.start_operation(config, project, project.operation("verify"))
+    fake_pueue.queue(first["job_id"])
+    fake_pueue.queue(second["job_id"])
+    config.jobs_dir.mkdir(parents=True, exist_ok=True)
+    for job, ran in ((first, "first"), (second, "second")):
+        (config.jobs_dir / f"{job['reference']}.log").write_text(f"{ran} log\n")
+        (config.jobs_dir / f"{job['reference']}.result").write_text(
+            json.dumps({"ran": ran})
+        )
+
+    fake_pueue.switch(first["job_id"], second["job_id"])
+
+    asked = first["job_id"]
+    reference = first["reference"]
+    moved = launch.get_job(asked, config, reference)
+    assert (moved["reference"], moved["job_id"]) == (reference, second["job_id"])
+    assert launch.result(config, asked, reference)["value"] == {"ran": "first"}
+    assert launch.logs(config, asked, reference).strip() == "first log"
+
+    cancelled = launch.cancel(config, asked, reference=reference)
+
+    assert cancelled["reference"] == reference
+    assert fake_pueue.removed == [second["job_id"]], (
+        "the cancel dropped the task at the id it was handed, not its own job"
+    )
+    assert (config.jobs_dir / f"{second['reference']}.log").exists()
+
+
+def test_a_reference_the_queue_no_longer_carries_is_refused(
+    fake_pueue: FakePueue, config: Config, project_root: Path
+) -> None:
+    project = load_project_adapter(project_root)
+    started = launch.start_operation(config, project, project.operation("check"))
+    fake_pueue.remove([started["job_id"]])
+
+    with pytest.raises(JobError, match="pueue has no task for job"):
+        launch.get_job(started["job_id"], config, started["reference"])
+
+
 def test_clean_deletes_a_terminal_task_and_everything_it_left(
     fake_pueue: FakePueue, config: Config, project_root: Path
 ) -> None:
