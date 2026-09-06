@@ -29,6 +29,7 @@ command, the run manifest of a batch, and one operator screen.
 | `batch land <run>`                                                                                        | the landing task's body: integrate, verify, review, publish, record acceptance, close satisfied beads, remove worktrees; re-runnable                                                                                                       |
 | `batch status <run>` / `batch list [p]`                                                                   | the manifest joined with pueue task state and the landing PR; `status` prints each worker's prompt path and, for an external worker without a result, the exact `batch result` line to run                                                 |
 | `batch result <run> <worker> <result.json>`                                                               | file a schema-validated result for a worker another harness ran; releases the stashed landing task once every worker has one                                                                                                               |
+| `batch scope-correct <run> <worker> <candidate> --authorize <bead>=<glob>…`                               | replace a malformed stored worker scope with candidate-bound, per-bead authority while retaining the correction history                                                                                                                   |
 | `batch resume <run> --worker <w>`                                                                         | queue a fresh agent into the worker's existing worktree with a resume packet (`.agentctl/resume-<n>.md`) carrying the original                                                                                                             |
 | `view [p]`                                                                                                | queue groups, what needs attention (failures of the last six hours), active jobs, open runs with each worker's stage, ready beads (epics and decisions left out)                                                                           |
 | `events tail [--lines N] [--follow] [--project p]`                                                        | the event spool (`/realm/state/agentctl/events.jsonl`)                                                                                                                                                                                     |
@@ -198,6 +199,7 @@ runtime_revision  the agentctl store path that started the run
 verify_profile    the descriptor's [workspace].verify.candidate
 review_profile    "review"
 workers: [{id, beads: [...], branch, worktree, task_id|null, task_ids,
+           write_scope, scope_authority, scope_corrections,
            result|null, result_path, result_recorded_at, claimed,
            claimed_beads, backend, model, effort}]
 landing: {task_id|null, integration_branch, integration_worktree,
@@ -415,10 +417,14 @@ run's base commit (`empty_candidate`), does not descend from it
 (`candidate_off_base`), or covers a bead outside the worker (`foreign_beads`).
 It then reads `git diff --name-only <base>..<candidate>`: when the worker's
 beads declare `write_scope` (metadata; a list of globs or a `;`-separated
-string), every changed path must be one of the globs, under a directory glob,
+string), the launch stores their sorted union and each glob's authorizing
+beads. Every changed path must be one of the globs, under a directory glob,
 or an `fnmatch` match of one, else `scope_violation` names the paths; the
 worker row records `scope: declared` or `scope: undeclared` and
-`changed_paths` either way.
+`changed_paths` either way. `batch scope-correct` is the explicit recovery
+route for an already-started run with malformed scope metadata. It requires
+the current candidate commit and records the old scope, corrected scope,
+per-bead authority, timestamp, and candidate before result validation retries.
 
 ## Descriptors
 

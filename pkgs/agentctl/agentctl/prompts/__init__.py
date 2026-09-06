@@ -379,6 +379,18 @@ def write_scope(bead: Mapping[str, Any]) -> tuple[str, ...]:
     return ()
 
 
+def scope_authority(beads: Sequence[Mapping[str, Any]]) -> tuple[dict[str, Any], ...]:
+    """Normalized worker globs with the assigned beads that authorize each one."""
+    owners: dict[str, set[str]] = {}
+    for bead in beads:
+        bead_id = str(bead.get("id") or "")
+        for glob in write_scope(bead):
+            owners.setdefault(glob, set()).add(bead_id)
+    return tuple(
+        {"glob": glob, "beads": sorted(owners[glob])} for glob in sorted(owners)
+    )
+
+
 def in_scope(path: str, globs: Sequence[str]) -> bool:
     """Whether ``path`` is one of the globs, under a directory glob, or matches one."""
     for glob in globs:
@@ -737,9 +749,7 @@ def compile_worker_prompt(
         worker_contract_path=contract_path,
         prompt="",
         batch=dict(batch or {}),
-        write_scope=tuple(
-            dict.fromkeys(glob for bead in ordered for glob in write_scope(bead))
-        ),
+        write_scope=tuple(row["glob"] for row in scope_authority(ordered)),
     )
     return PromptSnapshot(
         **{**snapshot.__dict__, "prompt": _render_prompt(snapshot, template)}
