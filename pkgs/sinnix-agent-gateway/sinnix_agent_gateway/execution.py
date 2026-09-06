@@ -363,7 +363,7 @@ class LocalJobs:
         offset = int(arguments.get("offset") or 0)
         max_bytes = int(arguments.get("max_bytes") or MAX_LOG_BYTES)
         task = launch.addressed(job_id, reference)
-        raw = launch.logs(self.config, task.task_id).encode()
+        raw = launch.task_logs(self.config, task).encode()
         window = raw[offset : offset + max_bytes]
         return {
             "job_id": str(task.task_id),
@@ -385,9 +385,7 @@ class LocalJobs:
 
     def _cancel(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         job_id = _require_int(arguments, "job_id")
-        job = launch.cancel(
-            self.config, job_id, reference=_launch_reference(arguments)
-        )
+        job = launch.cancel(self.config, job_id, reference=_launch_reference(arguments))
         return {
             **job_payload(job),
             "cancel_requested": True,

@@ -571,9 +571,13 @@ def _artifact(config: Config, task: Task, suffix: str) -> Path | None:
     return config.jobs_dir / f"{reference}{suffix}" if reference else None
 
 
-def logs(config: Config, task_id: int, reference: str | None = None) -> str:
-    """The command's bounded log; pueue's own capture holds the wrapper's stderr."""
-    task = addressed(task_id, reference)
+def task_logs(config: Config, task: Task) -> str:
+    """The command's bounded log; pueue's own capture holds the wrapper's stderr.
+
+    Takes the resolved task so a caller that already addressed its job reads
+    that job's log: re-resolving by id would answer about whatever the queue
+    keeps at that position now.
+    """
     path = _artifact(config, task, ".log")
     raw = read_bounded(path, MAX_LOG_BYTES) if path is not None else None
     text = raw.decode("utf-8", "replace") if raw else ""
@@ -581,6 +585,10 @@ def logs(config: Config, task_id: int, reference: str | None = None) -> str:
     if wrapper.strip():
         text = f"{text}\n[wrapper]\n{wrapper}" if text else wrapper
     return text
+
+
+def logs(config: Config, task_id: int, reference: str | None = None) -> str:
+    return task_logs(config, addressed(task_id, reference))
 
 
 def result(
@@ -731,9 +739,7 @@ def _own_artifacts(config: Config, task: Task) -> list[Path]:
     return paths
 
 
-def clean(
-    config: Config, task_id: int, reference: str | None = None
-) -> dict[str, Any]:
+def clean(config: Config, task_id: int, reference: str | None = None) -> dict[str, Any]:
     """Delete a terminal task and its artifacts. Ownership, never age.
 
     A task pueue no longer knows is cleaned by the artifacts its launch

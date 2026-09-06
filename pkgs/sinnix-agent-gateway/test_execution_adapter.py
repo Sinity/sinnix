@@ -5,7 +5,7 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
-from agentctl import batch, launch
+from agentctl import batch, launch, pueue
 from agentctl.config import Config
 from sinnix_agent_gateway.execution import LocalJobs
 from sinnix_mcp import ErrorCode, RequestEnvelope
@@ -369,3 +369,48 @@ def test_a_launch_reference_that_is_a_path_is_refused(adapter: LocalJobs) -> Non
     )
     assert refused.error is not None
     assert refused.error.code is ErrorCode.INVALID_ARGUMENT
+
+
+def test_job_logs_reads_the_log_of_the_job_the_reference_addresses(
+    adapter: LocalJobs, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The reference is resolved once and the log comes from that task.
+
+    Red if the read re-addresses the answering id without the reference: a
+    `pueue switch` between the two reads hands back another job's log under
+    this job's launch reference.
+    """
+    reference = "fixture-verify-3f9a21c8"
+    jobs_dir = adapter.config.jobs_dir
+    jobs_dir.mkdir(parents=True, exist_ok=True)
+
+    def task(task_id: int, name: str) -> pueue.Task:
+        (jobs_dir / f"{name}.log").write_text(f"log of {name}")
+        return pueue.Task(
+            task_id=task_id,
+            label="fixture:verify",
+            group="normal",
+            status="Done",
+            result="Success",
+            exit_code=0,
+            path=str(jobs_dir),
+            dependencies=(),
+            command=f"agentctl-run {jobs_dir / f'{name}.json'}",
+        )
+
+    mine = task(44, reference)
+    occupant = task(44, "fixture-other-0badc0de")
+
+    def addressed(task_id: int, ref: str | None = None) -> pueue.Task:
+        return mine if ref == reference else occupant
+
+    monkeypatch.setattr(launch, "addressed", addressed)
+    monkeypatch.setattr(launch.pueue, "log", lambda _task_id: "")
+
+    answer = adapter.dispatch(
+        _request("job.logs", {"job_id": 41, "launch_reference": reference})
+    )
+    assert answer.error is None, answer.error
+    assert answer.payload.inline["launch_reference"] == reference
+    assert answer.payload.inline["job_id"] == "44"
+    assert answer.payload.inline["content"] == f"log of {reference}"
