@@ -207,7 +207,9 @@ claude)
   if [[ -n $resume_session_id ]]; then
     resume_args=(--resume "$resume_session_id")
   fi
-  claude_args=("${resume_args[@]}" --print -p "$(<"$prompt_file")" --model "$model" --effort "$reasoning_effort")
+  # The prompt goes in on stdin: one argv string is capped at 128 KiB by the
+  # kernel and a resume packet with the bead bodies exceeds it.
+  claude_args=("${resume_args[@]}" --print --model "$model" --effort "$reasoning_effort")
   if [[ -n $output_schema ]]; then
     # --json-schema takes the schema text, not a path.
     claude_args+=(--output-format json --json-schema "$(<"$output_schema")")
@@ -221,9 +223,9 @@ claude)
   if [[ -n $output_schema ]]; then
     structured_file="$(mktemp "${last_file}.XXXXXX")" || exit 1
     trap 'rm -f -- "$structured_file"' EXIT
-    "${claude_cmd[@]}" "${claude_args[@]}" | unwrap_claude_json
+    "${claude_cmd[@]}" "${claude_args[@]}" <"$prompt_file" | unwrap_claude_json
   else
-    "${claude_cmd[@]}" "${claude_args[@]}" | tee "$last_file"
+    "${claude_cmd[@]}" "${claude_args[@]}" <"$prompt_file" | tee "$last_file"
   fi
   statuses=("${PIPESTATUS[@]}")
   set -e
