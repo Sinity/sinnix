@@ -179,6 +179,7 @@ RUN_DOCUMENT = {
             "model": "policy",
             "effort": "medium",
             "task_id": 41,
+            "task_reference": "fixture-worker-abcd1234",
             "task_ids": [41],
             "result": None,
             "stage": "running",
@@ -187,6 +188,7 @@ RUN_DOCUMENT = {
     ],
     "landing": {
         "task_id": 42,
+        "task_reference": "fixture-integrate-9f10",
         "integration_branch": "batch/fixture-run/integration",
         "candidate_sha": None,
         "pr_number": None,
@@ -239,9 +241,12 @@ def test_batch_start_hands_the_beads_to_agentctl_and_answers_from_the_manifest(
     assert worker["worker_id"] == "fixture-1"
     assert worker["beads"] == ["fixture-1", "fixture-2"]
     assert worker["job_id"] == "41" and worker["job_ids"] == ["41"]
+    # The manifest's stable reference for each job, which jobs.* addresses by.
+    assert worker["job_launch_reference"] == "fixture-worker-abcd1234"
     assert worker["state"] == {"phase": "running", "terminal": False, "exit_code": None}
     assert worker["result_filed"] is False
     assert payload["landing"]["job_id"] == "42"
+    assert payload["landing"]["job_launch_reference"] == "fixture-integrate-9f10"
     assert payload["landing"]["state"]["phase"] == "queued"
 
     def refuse(config, project, seeds, **_kwargs):
