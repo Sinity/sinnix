@@ -1,11 +1,11 @@
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: 23ea3f1e63bf903ef81fcbbace343a31149631e79960da38391e8c396ab32af1 -->
+<!-- gateway-catalog-sha256: 81898909c68ccc146c6d7ed192711bcbc7d6a1431018ea4f90fa4f7f384c92f2 -->
 # Sinnix Agent Gateway reference
 
 Generated from `sinnix_agent_gateway.actions`. Every action is one MCP tool whose `tools/list` input schema is the one below; the catalog hash changes when an action, schema, principal set, example or affordance changes.
 
-Revision: `v3-typed-actions`. Catalog SHA-256: `23ea3f1e63bf903ef81fcbbace343a31149631e79960da38391e8c396ab32af1`.
+Revision: `v3-typed-actions`. Catalog SHA-256: `81898909c68ccc146c6d7ed192711bcbc7d6a1431018ea4f90fa4f7f384c92f2`.
 
 ## Invocation
 
@@ -13,28 +13,29 @@ MCP: call the tool named after the action. CLI: `sinnix-agent-gateway call <acti
 
 ## Resources
 
-| Resource            | Owner              | Canonical reference                                      | Actions                                                                                                                                                                                                                                                                                            |
-| ------------------- | ------------------ | -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `project`           | `projects`         | `sinnix://projects/{project_id}`                         | `agent.for_bead`, `beads.change`, `beads.changeset`, `beads.operate`, `beads.query`, `context.compose`, `events.tail`, `operations.run`, `projects.change`, `projects.context`, `projects.diff`, `projects.get`, `projects.list`, `projects.read`, `projects.search`, `projects.tree`, `shell.run` |
-| `checkout`          | `projects`         | `sinnix://projects/{project_id}/checkouts/{checkout_id}` | `context.compose`, `operations.run`, `projects.change`, `projects.diff`, `projects.get`, `projects.read`, `projects.search`, `projects.tree`, `shell.run`                                                                                                                                          |
-| `bead`              | `beads`            | `sinnix://projects/{project_id}/beads/{bead_id}`         | `agent.for_bead`, `beads.change`, `beads.changeset`, `beads.get`, `beads.query`, `wait.for`                                                                                                                                                                                                        |
-| `task_authority`    | `beads`            | `sinnix://projects/{project_id}/task-authority`          | `beads.change`, `beads.changeset`, `beads.operate`, `beads.query`                                                                                                                                                                                                                                  |
-| `job`               | `jobs`             | `sinnix://jobs/{job_id}`                                 | `agent.for_bead`, `context.compose`, `events.tail`, `jobs.cancel`, `jobs.get`, `jobs.list`, `jobs.logs`, `jobs.retry`, `jobs.wait`, `machine.operate`, `operations.run`, `shell.run`, `wait.for`                                                                                                   |
-| `artifact`          | `artifacts`        | `sinnix://artifacts/{artifact_id}`                       | `artifacts.get`, `artifacts.list`, `artifacts.read`, `browser.screenshot`, `desktop.screenshot`                                                                                                                                                                                                    |
-| `receipt`           | `audit`            | `sinnix://receipts/{receipt_id}`                         | `audit.receipt`, `audit.verify`, `events.tail`, `wait.for`                                                                                                                                                                                                                                         |
-| `result`            | `results`          | `sinnix://results/{result_id}`                           | `results.get`                                                                                                                                                                                                                                                                                      |
-| `machine_unit`      | `machine`          | `sinnix://machine/units/{manager}/{unit}`                | `machine.operate`, `machine.query`, `machine.snapshot`, `machine.units.get`, `machine.units.list`, `machine.units.logs`, `machine.units.operate`, `wait.for`                                                                                                                                       |
-| `browser_page`      | `browser`          | `sinnix://browser/pages/{page_id}`                       | `browser.operate`, `browser.page`, `browser.pages`, `browser.screenshot`                                                                                                                                                                                                                           |
-| `browser_workspace` | `browser`          | `sinnix://browser/agent-workspace`                       | `browser.operate`, `browser.pages`                                                                                                                                                                                                                                                                 |
-| `process`           | `machine`          | `sinnix://processes/{pid}/{start_ticks}`                 | `machine.operate`, `machine.query`, `processes.get`, `processes.list`, `processes.signal`, `processes.tree`, `processes.wait`                                                                                                                                                                      |
-| `terminal`          | `terminals`        | `sinnix://terminals/{terminal_id}`                       | `terminals.focus`, `terminals.get`, `terminals.list`, `terminals.open`, `terminals.processes`, `terminals.run`, `terminals.screen`, `terminals.scrollback`, `terminals.send`, `terminals.wait`, `wait.for`                                                                                         |
-| `desktop`           | `desktop`          | `sinnix://desktop/current`                               | `desktop.operate`, `desktop.screenshot`, `desktop.snapshot`, `desktop.tree`                                                                                                                                                                                                                        |
-| `host_file`         | `files`            | `sinnix://files/{file_token}`                            | `files.change`, `files.list`, `files.patch`, `files.read`, `files.search`, `files.stat`, `wait.for`                                                                                                                                                                                                |
-| `mcp_tool`          | `mcp-broker`       | `sinnix://mcp/{server}/tools/{tool}`                     | `mcp.call`, `mcp.change`, `mcp.servers`, `mcp.tools`                                                                                                                                                                                                                                               |
-| `capture_lane`      | `captures`         | `sinnix://captures/{lane}`                               | `activity.query`, `captures.query`, `wait.for`                                                                                                                                                                                                                                                     |
-| `capability`        | `capability-index` | `sinnix://capabilities/{name}`                           | `capabilities.query`                                                                                                                                                                                                                                                                               |
-| `session`           | `sessions`         | `sinnix://sessions/{provider}/{session_id}`              | `memory.query`, `sessions.query`, `timeline.query`                                                                                                                                                                                                                                                 |
-| `context_snapshot`  | `context`          | `sinnix://contexts/{snapshot_id}`                        | `context.compose`                                                                                                                                                                                                                                                                                  |
+| Resource            | Owner              | Canonical reference                                      | Actions                                                                                                                                                                                                                                                                                                           |
+| ------------------- | ------------------ | -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `project`           | `projects`         | `sinnix://projects/{project_id}`                         | `batches.list`, `batches.start`, `beads.change`, `beads.changeset`, `beads.operate`, `beads.query`, `context.compose`, `events.tail`, `operations.run`, `projects.change`, `projects.context`, `projects.diff`, `projects.get`, `projects.list`, `projects.read`, `projects.search`, `projects.tree`, `shell.run` |
+| `checkout`          | `projects`         | `sinnix://projects/{project_id}/checkouts/{checkout_id}` | `context.compose`, `operations.run`, `projects.change`, `projects.diff`, `projects.get`, `projects.read`, `projects.search`, `projects.tree`, `shell.run`                                                                                                                                                         |
+| `bead`              | `beads`            | `sinnix://projects/{project_id}/beads/{bead_id}`         | `batches.start`, `batches.status`, `beads.change`, `beads.changeset`, `beads.get`, `beads.query`, `wait.for`                                                                                                                                                                                                      |
+| `task_authority`    | `beads`            | `sinnix://projects/{project_id}/task-authority`          | `beads.change`, `beads.changeset`, `beads.operate`, `beads.query`                                                                                                                                                                                                                                                 |
+| `run`               | `batches`          | `sinnix://projects/{project_id}/runs/{run_id}`           | `batches.land`, `batches.list`, `batches.resume`, `batches.start`, `batches.status`                                                                                                                                                                                                                               |
+| `job`               | `jobs`             | `sinnix://jobs/{job_id}`                                 | `batches.land`, `batches.list`, `batches.resume`, `batches.start`, `batches.status`, `context.compose`, `events.tail`, `jobs.cancel`, `jobs.clean`, `jobs.get`, `jobs.list`, `jobs.logs`, `jobs.retry`, `jobs.wait`, `machine.operate`, `operations.run`, `shell.run`, `wait.for`                                 |
+| `artifact`          | `artifacts`        | `sinnix://artifacts/{artifact_id}`                       | `artifacts.get`, `artifacts.list`, `artifacts.read`, `browser.screenshot`, `desktop.screenshot`                                                                                                                                                                                                                   |
+| `receipt`           | `audit`            | `sinnix://receipts/{receipt_id}`                         | `audit.receipt`, `audit.verify`, `events.tail`, `wait.for`                                                                                                                                                                                                                                                        |
+| `result`            | `results`          | `sinnix://results/{result_id}`                           | `results.get`                                                                                                                                                                                                                                                                                                     |
+| `machine_unit`      | `machine`          | `sinnix://machine/units/{manager}/{unit}`                | `machine.operate`, `machine.query`, `machine.snapshot`, `machine.units.get`, `machine.units.list`, `machine.units.logs`, `machine.units.operate`, `wait.for`                                                                                                                                                      |
+| `browser_page`      | `browser`          | `sinnix://browser/pages/{page_id}`                       | `browser.operate`, `browser.page`, `browser.pages`, `browser.screenshot`                                                                                                                                                                                                                                          |
+| `browser_workspace` | `browser`          | `sinnix://browser/agent-workspace`                       | `browser.operate`, `browser.pages`                                                                                                                                                                                                                                                                                |
+| `process`           | `machine`          | `sinnix://processes/{pid}/{start_ticks}`                 | `machine.operate`, `machine.query`, `processes.get`, `processes.list`, `processes.signal`, `processes.tree`, `processes.wait`                                                                                                                                                                                     |
+| `terminal`          | `terminals`        | `sinnix://terminals/{terminal_id}`                       | `terminals.focus`, `terminals.get`, `terminals.list`, `terminals.open`, `terminals.processes`, `terminals.run`, `terminals.screen`, `terminals.scrollback`, `terminals.send`, `terminals.wait`, `wait.for`                                                                                                        |
+| `desktop`           | `desktop`          | `sinnix://desktop/current`                               | `desktop.operate`, `desktop.screenshot`, `desktop.snapshot`, `desktop.tree`                                                                                                                                                                                                                                       |
+| `host_file`         | `files`            | `sinnix://files/{file_token}`                            | `files.change`, `files.list`, `files.patch`, `files.read`, `files.search`, `files.stat`, `wait.for`                                                                                                                                                                                                               |
+| `mcp_tool`          | `mcp-broker`       | `sinnix://mcp/{server}/tools/{tool}`                     | `mcp.call`, `mcp.change`, `mcp.servers`, `mcp.tools`                                                                                                                                                                                                                                                              |
+| `capture_lane`      | `captures`         | `sinnix://captures/{lane}`                               | `activity.query`, `captures.query`, `wait.for`                                                                                                                                                                                                                                                                    |
+| `capability`        | `capability-index` | `sinnix://capabilities/{name}`                           | `capabilities.query`                                                                                                                                                                                                                                                                                              |
+| `session`           | `sessions`         | `sinnix://sessions/{provider}/{session_id}`              | `memory.query`, `sessions.query`, `timeline.query`                                                                                                                                                                                                                                                                |
+| `context_snapshot`  | `context`          | `sinnix://contexts/{snapshot_id}`                        | `context.compose`                                                                                                                                                                                                                                                                                                 |
 
 ## Actions
 
@@ -67,9 +68,14 @@ MCP: call the tool named after the action. CLI: `sinnix-agent-gateway call <acti
 | `jobs.wait`             | `wait`    | `systemd-jobs`     | `agent-control, observer, operator` | The wait runs in a worker thread; cancelling the MCP request abandons it without stopping the job.                                                                                                                 |
 | `jobs.cancel`           | `operate` | `systemd-jobs`     | `agent-control, operator`           | Pass expected_phase to refuse when the job already moved on. Survivors lists PIDs that outlived the reap.                                                                                                          |
 | `jobs.retry`            | `operate` | `systemd-jobs`     | `agent-control, operator`           | Re-run a terminal job in place with the same launch input and id (pueue restart).                                                                                                                                  |
+| `jobs.clean`            | `operate` | `systemd-jobs`     | `agent-control, operator`           | Refused while the job is still queued or running; cancel it first.                                                                                                                                                 |
 | `operations.run`        | `run`     | `systemd-jobs`     | `agent-control, operator`           | Queue one project-declared operation in its declared pool on the root or a worktree.                                                                                                                               |
 | `shell.run`             | `run`     | `systemd-jobs`     | `operator`                          | cwd is confined to the checkout; the job's log carries the output.                                                                                                                                                 |
-| `agent.for_bead`        | `run`     | `systemd-jobs`     | `agent-control, operator`           | backend, model and effort default to the bead's model policy. Refused when a member is claimed or already in a run.                                                                                                |
+| `batches.list`          | `query`   | `systemd-jobs`     | `agent-control, observer, operator` | List batch runs newest first, with each worker's stage and task.                                                                                                                                                   |
+| `batches.status`        | `get`     | `systemd-jobs`     | `agent-control, observer, operator` | Every id is a pueue task id: pass worker or landing job_id straight to jobs.logs, jobs.wait or jobs.cancel.                                                                                                        |
+| `batches.start`         | `run`     | `systemd-jobs`     | `agent-control, operator`           | backend, model and effort default to the project descriptor's packet defaults. Refused when a bead is claimed or already in a live run. The landing task is queued behind the workers and runs itself.             |
+| `batches.land`          | `run`     | `systemd-jobs`     | `agent-control, operator`           | batches.start already queues the first landing behind the workers; this re-queues one after a landing failed. The landing runs as a job, so wait on landing_job_id rather than on this call.                       |
+| `batches.resume`        | `run`     | `systemd-jobs`     | `agent-control, operator`           | backend, model and effort default to the worker's own. Refused while the worker's task is still queued or running.                                                                                                 |
 | `wait.for`              | `wait`    | `waits`            | `agent-control, observer, operator` | Conditions: job_terminal, bead_status, bead_revision, unit_state, file_hash, file_exists, capture_freshness, receipt_appearance, terminal_output. A timeout returns the current evidence and a continuation token. |
 | `events.tail`           | `events`  | `events`           | `agent-control, observer, operator` | Pass next_cursor back to continue; a cursor from another principal or project scope fails stale_cursor.                                                                                                            |
 | `context.compose`       | `context` | `context`          | `agent-control, observer, operator` | Each component is budgeted and isolated: an unavailable owner marks its component unavailable with a reason instead of failing the call. The snapshot is persisted under snapshot_ref.                             |
@@ -7171,6 +7177,154 @@ Retry job 41:
 }
 ```
 
+### `jobs.clean`
+
+Refused while the job is still queued or running; cancel it first.
+
+Family: `operate`. Owner: `systemd-jobs`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+
+Aliases: remove job, forget, delete job, prune.
+
+Follow-up actions: `jobs.list`.
+
+Input schema:
+
+```json
+{
+  "$defs": {
+    "JobLocator": {
+      "additionalProperties": false,
+      "description": "A queued job by canonical ref or pueue task id.",
+      "properties": {
+        "job_id": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "pueue task id, as `agentctl job list` shows it."
+        },
+        "ref": {
+          "anyOf": [
+            {
+              "pattern": "^sinnix://jobs/\\d+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Canonical job ref returned by a run or list."
+        }
+      },
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "deadline_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Unix timestamp after which the call is refused."
+    },
+    "idempotency_key": {
+      "description": "Replaying the same key with the same request returns the stored response.",
+      "maxLength": 256,
+      "minLength": 1,
+      "type": "string"
+    },
+    "preconditions": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Owner-checked preconditions; a mismatch fails with precondition_failed."
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Caller-chosen correlation id."
+    },
+    "target": {
+      "$ref": "#/$defs/JobLocator"
+    }
+  },
+  "required": [
+    "idempotency_key",
+    "target"
+  ],
+  "type": "object"
+}
+```
+
+Output: the response envelope's `data` field is `CleanResult`; the full envelope schema is the `sinnix://gateway/v2/actions/jobs.clean` resource and `sinnix-agent-gateway catalog jobs.clean --schema`.
+
+Examples:
+
+Clean job 41:
+
+```json
+{
+  "idempotency_key": "clean-41",
+  "target": {
+    "job_id": 41
+  }
+}
+```
+
 ### `operations.run`
 
 Queue one project-declared operation in its declared pool on the root or a worktree.
@@ -7572,29 +7726,29 @@ git status in sinnix:
 }
 ```
 
-### `agent.for_bead`
+### `batches.list`
 
-backend, model and effort default to the bead's model policy. Refused when a member is claimed or already in a run.
+List batch runs newest first, with each worker's stage and task.
 
-Family: `run`. Owner: `systemd-jobs`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `systemd-jobs`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
-Aliases: dispatch, agentctl batch start, work on bead.
+Aliases: runs, agentctl batch list, which batches, active runs.
 
-Follow-up actions: `jobs.wait`, `jobs.logs`, `jobs.cancel`.
+Follow-up actions: `batches.status`, `jobs.logs`, `jobs.wait`.
 
 Input schema:
 
 ```json
 {
   "$defs": {
-    "BeadLocator": {
+    "ProjectLocator": {
       "additionalProperties": false,
-      "description": "A Beads task by canonical ref, id, or a title fragment within a project.",
+      "description": "A configured project by canonical ref, project id, or a path inside it.",
       "properties": {
-        "id": {
+        "path": {
           "anyOf": [
             {
-              "maxLength": 128,
+              "maxLength": 4096,
               "minLength": 1,
               "type": "string"
             },
@@ -7603,7 +7757,7 @@ Input schema:
             }
           ],
           "default": null,
-          "description": "Bead id such as sinnix-abc1; the project is inferred from the prefix unless given."
+          "description": "Absolute host path inside a project checkout."
         },
         "project": {
           "anyOf": [
@@ -7616,12 +7770,147 @@ Input schema:
               "type": "null"
             }
           ],
-          "default": null
+          "default": null,
+          "description": "Project id."
         },
         "ref": {
           "anyOf": [
             {
-              "pattern": "^sinnix://projects/[^/]+/beads/[^/]+$",
+              "pattern": "^sinnix://projects/[^/]+(?:/checkouts/[^/]+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Canonical project or checkout ref."
+        }
+      },
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "deadline_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Unix timestamp after which the call is refused."
+    },
+    "limit": {
+      "default": 25,
+      "maximum": 200,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "project": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ProjectLocator"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Only runs of this project."
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Caller-chosen correlation id."
+    }
+  },
+  "type": "object"
+}
+```
+
+Output: the response envelope's `data` field is `RunPage`; the full envelope schema is the `sinnix://gateway/v2/actions/batches.list` resource and `sinnix-agent-gateway catalog batches.list --schema`.
+
+Examples:
+
+Recent runs:
+
+```json
+{
+  "limit": 10
+}
+```
+
+One project's runs:
+
+```json
+{
+  "project": {
+    "project": "sinnix"
+  }
+}
+```
+
+### `batches.status`
+
+Every id is a pueue task id: pass worker or landing job_id straight to jobs.logs, jobs.wait or jobs.cancel.
+
+Family: `get`. Owner: `systemd-jobs`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+
+Aliases: batch status, run status, how is the batch, agentctl batch status.
+
+Follow-up actions: `jobs.logs`, `jobs.wait`, `batches.land`, `batches.resume`.
+
+Input schema:
+
+```json
+{
+  "$defs": {
+    "RunLocator": {
+      "additionalProperties": false,
+      "description": "A batch run by canonical ref, full run id, or the suffix agentctl accepts.",
+      "properties": {
+        "ref": {
+          "anyOf": [
+            {
+              "pattern": "^sinnix://projects/[^/]+/runs/[^/]+$",
               "type": "string"
             },
             {
@@ -7630,10 +7919,10 @@ Input schema:
           ],
           "default": null
         },
-        "title_contains": {
+        "run_id": {
           "anyOf": [
             {
-              "maxLength": 512,
+              "maxLength": 128,
               "minLength": 1,
               "type": "string"
             },
@@ -7642,7 +7931,159 @@ Input schema:
             }
           ],
           "default": null,
-          "description": "Case-insensitive title fragment; requires project and must match exactly one bead."
+          "description": "Full run id, or its 8-character suffix as `agentctl batch` accepts it."
+        }
+      },
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "deadline_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Unix timestamp after which the call is refused."
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Caller-chosen correlation id."
+    },
+    "target": {
+      "$ref": "#/$defs/RunLocator"
+    }
+  },
+  "required": [
+    "target"
+  ],
+  "type": "object"
+}
+```
+
+Output: the response envelope's `data` field is `RunView`; the full envelope schema is the `sinnix://gateway/v2/actions/batches.status` resource and `sinnix-agent-gateway catalog batches.status --schema`.
+
+Examples:
+
+By run suffix:
+
+```json
+{
+  "target": {
+    "run_id": "a2c81926"
+  }
+}
+```
+
+By canonical ref:
+
+```json
+{
+  "target": {
+    "ref": "sinnix://projects/sinnix/runs/sinnix-20260906-012123-a2c81926"
+  }
+}
+```
+
+### `batches.start`
+
+backend, model and effort default to the project descriptor's packet defaults. Refused when a bead is claimed or already in a live run. The landing task is queued behind the workers and runs itself.
+
+Family: `run`. Owner: `systemd-jobs`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+
+Aliases: dispatch, agentctl batch start, work on bead, start agents.
+
+Follow-up actions: `batches.status`, `jobs.wait`, `jobs.logs`, `jobs.cancel`.
+
+Input schema:
+
+```json
+{
+  "$defs": {
+    "ProjectLocator": {
+      "additionalProperties": false,
+      "description": "A configured project by canonical ref, project id, or a path inside it.",
+      "properties": {
+        "path": {
+          "anyOf": [
+            {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Absolute host path inside a project checkout."
+        },
+        "project": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Project id."
+        },
+        "ref": {
+          "anyOf": [
+            {
+              "pattern": "^sinnix://projects/[^/]+(?:/checkouts/[^/]+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Canonical project or checkout ref."
         }
       },
       "type": "object"
@@ -7680,10 +8121,408 @@ Input schema:
         }
       ],
       "default": null,
-      "description": "Defaults to the bead's model policy."
+      "description": "Defaults to the project descriptor's packet default."
     },
-    "bead": {
-      "$ref": "#/$defs/BeadLocator"
+    "beads": {
+      "description": "The bead ids to work; each becomes its own worker unless workers groups them.",
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 16,
+      "minItems": 1,
+      "type": "array"
+    },
+    "deadline_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Unix timestamp after which the call is refused."
+    },
+    "effort": {
+      "anyOf": [
+        {
+          "maxLength": 32,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "idempotency_key": {
+      "description": "Replaying the same key with the same request returns the stored response.",
+      "maxLength": 256,
+      "minLength": 1,
+      "type": "string"
+    },
+    "model": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "preconditions": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Owner-checked preconditions; a mismatch fails with precondition_failed."
+    },
+    "project": {
+      "$ref": "#/$defs/ProjectLocator"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Caller-chosen correlation id."
+    },
+    "workers": {
+      "anyOf": [
+        {
+          "items": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "maxItems": 16,
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Group the beads into workers; every bead must appear in exactly one group."
+    }
+  },
+  "required": [
+    "idempotency_key",
+    "project",
+    "beads"
+  ],
+  "type": "object"
+}
+```
+
+Output: the response envelope's `data` field is `RunStarted`; the full envelope schema is the `sinnix://gateway/v2/actions/batches.start` resource and `sinnix-agent-gateway catalog batches.start --schema`.
+
+Examples:
+
+One bead, one worker:
+
+```json
+{
+  "beads": [
+    "sinnix-abc1"
+  ],
+  "idempotency_key": "batch-sinnix-abc1",
+  "project": {
+    "project": "sinnix"
+  }
+}
+```
+
+Two workers, pinned agent:
+
+```json
+{
+  "backend": "codex",
+  "beads": [
+    "sinnix-abc1",
+    "sinnix-abc2",
+    "sinnix-abc3"
+  ],
+  "effort": "high",
+  "idempotency_key": "batch-sinnix-abc1-3",
+  "model": "gpt-5.6-terra",
+  "project": {
+    "project": "sinnix"
+  },
+  "workers": [
+    [
+      "sinnix-abc1",
+      "sinnix-abc2"
+    ],
+    [
+      "sinnix-abc3"
+    ]
+  ]
+}
+```
+
+### `batches.land`
+
+batches.start already queues the first landing behind the workers; this re-queues one after a landing failed. The landing runs as a job, so wait on landing_job_id rather than on this call.
+
+Family: `run`. Owner: `systemd-jobs`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+
+Aliases: land, agentctl batch land, publish the batch, merge the run.
+
+Follow-up actions: `jobs.wait`, `jobs.logs`, `batches.status`.
+
+Input schema:
+
+```json
+{
+  "$defs": {
+    "RunLocator": {
+      "additionalProperties": false,
+      "description": "A batch run by canonical ref, full run id, or the suffix agentctl accepts.",
+      "properties": {
+        "ref": {
+          "anyOf": [
+            {
+              "pattern": "^sinnix://projects/[^/]+/runs/[^/]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Full run id, or its 8-character suffix as `agentctl batch` accepts it."
+        }
+      },
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "deadline_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Unix timestamp after which the call is refused."
+    },
+    "idempotency_key": {
+      "description": "Replaying the same key with the same request returns the stored response.",
+      "maxLength": 256,
+      "minLength": 1,
+      "type": "string"
+    },
+    "preconditions": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Owner-checked preconditions; a mismatch fails with precondition_failed."
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Caller-chosen correlation id."
+    },
+    "target": {
+      "$ref": "#/$defs/RunLocator"
+    }
+  },
+  "required": [
+    "idempotency_key",
+    "target"
+  ],
+  "type": "object"
+}
+```
+
+Output: the response envelope's `data` field is `LandQueued`; the full envelope schema is the `sinnix://gateway/v2/actions/batches.land` resource and `sinnix-agent-gateway catalog batches.land --schema`.
+
+Examples:
+
+Re-run a failed landing:
+
+```json
+{
+  "idempotency_key": "land-a2c81926",
+  "target": {
+    "run_id": "a2c81926"
+  }
+}
+```
+
+### `batches.resume`
+
+backend, model and effort default to the worker's own. Refused while the worker's task is still queued or running.
+
+Family: `run`. Owner: `systemd-jobs`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+
+Aliases: resume worker, agentctl batch resume, retry the agent.
+
+Follow-up actions: `jobs.wait`, `jobs.logs`, `batches.status`.
+
+Input schema:
+
+```json
+{
+  "$defs": {
+    "RunLocator": {
+      "additionalProperties": false,
+      "description": "A batch run by canonical ref, full run id, or the suffix agentctl accepts.",
+      "properties": {
+        "ref": {
+          "anyOf": [
+            {
+              "pattern": "^sinnix://projects/[^/]+/runs/[^/]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Full run id, or its 8-character suffix as `agentctl batch` accepts it."
+        }
+      },
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "backend": {
+      "anyOf": [
+        {
+          "enum": [
+            "claude",
+            "codex",
+            "gemini",
+            "grok",
+            "antigravity"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Defaults to the project descriptor's packet default."
     },
     "deadline_at": {
       "anyOf": [
@@ -7767,42 +8606,39 @@ Input schema:
       ],
       "default": null,
       "description": "Caller-chosen correlation id."
+    },
+    "target": {
+      "$ref": "#/$defs/RunLocator"
+    },
+    "worker": {
+      "description": "The worker id, as batches.status names it.",
+      "maxLength": 128,
+      "minLength": 1,
+      "type": "string"
     }
   },
   "required": [
     "idempotency_key",
-    "bead"
+    "target",
+    "worker"
   ],
   "type": "object"
 }
 ```
 
-Output: the response envelope's `data` field is `LaneStarted`; the full envelope schema is the `sinnix://gateway/v2/actions/agent.for_bead` resource and `sinnix-agent-gateway catalog agent.for_bead --schema`.
+Output: the response envelope's `data` field is `ResumeQueued`; the full envelope schema is the `sinnix://gateway/v2/actions/batches.resume` resource and `sinnix-agent-gateway catalog batches.resume --schema`.
 
 Examples:
 
-Start a worker:
+Resume one worker:
 
 ```json
 {
-  "bead": {
-    "id": "sinnix-abc1"
+  "idempotency_key": "resume-a2c81926-sinnix-abc1",
+  "target": {
+    "run_id": "a2c81926"
   },
-  "idempotency_key": "lane-sinnix-abc1"
-}
-```
-
-Pin the agent:
-
-```json
-{
-  "backend": "codex",
-  "bead": {
-    "ref": "sinnix://projects/sinnix/beads/sinnix-abc1"
-  },
-  "effort": "high",
-  "idempotency_key": "lane-sinnix-abc1-codex",
-  "model": "gpt-5.6-terra"
+  "worker": "sinnix-abc1"
 }
 ```
 
@@ -8541,7 +9377,7 @@ Family: `context`. Owner: `context`. Principals: `agent-control, observer, opera
 
 Aliases: orient, overview, situation, what is going on, triage, review job, incident.
 
-Follow-up actions: `jobs.list`, `jobs.logs`, `agent.for_bead`, `events.tail`, `wait.for`.
+Follow-up actions: `jobs.list`, `jobs.logs`, `batches.start`, `events.tail`, `wait.for`.
 
 Input schema:
 
