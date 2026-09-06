@@ -77,7 +77,8 @@ Keep option ownership local:
 `agentctl` is an in-process CLI (`docs/agentctl.md`). A job is a pueue task in
 the operation's pool; a batch is several workers, each in a worktrunk
 worktree, landed as one candidate by a task queued behind them. Verbs:
-`project`, `job`, `batch`, `view`, `events`, `schedule`, `backpressure`.
+`project`, `job`, `batch`, `view`, `events`, `schedule`, `pools`,
+`backpressure`.
 
 It does not own product-domain concurrency. For example, Sinex work-item byte,
 rate, and destructive-operation budgets remain inside Sinex.
@@ -87,9 +88,12 @@ Host execution goes through declared agentctl operations.
 ## Resource policy
 
 Declared operations choose a pueue group (`interactive`, `normal`, `bulk`,
-`pytest`, `agent`). The group bounds concurrency; `agentctl-backpressure.timer`
-pauses groups under sustained host IO or memory stall; memory is bounded by
-the slice hierarchy, not by per-job arithmetic. Fixed runtime surfaces use the
+`pytest`, `agent`). Each group's width is declared by
+`sinnix.services.agentctl.pools` and written into the running daemon by
+`agentctl pools apply`, never by restarting pueued. The group bounds
+concurrency; `agentctl-backpressure.timer` pauses groups under sustained
+host IO or memory stall; memory is bounded by the slice hierarchy, not by
+per-job arithmetic. Fixed runtime surfaces use the
 resource classes and slice budgets declared in
 `flake/data/runtime-defaults.nix`; do not restate those values here.
 

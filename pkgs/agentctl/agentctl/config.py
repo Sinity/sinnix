@@ -10,10 +10,11 @@ from __future__ import annotations
 import json
 import os
 import sys
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Mapping
 
+from .launch_input import POOL_NAME
 from .projects import (
     ProjectAdapter,
     ProjectCatalog,
@@ -42,6 +43,10 @@ class Config:
     event_spool: Path
     state_dir: Path
     agentctl_executable: str
+    # How many tasks each pueue group admits at once. pueued keeps its groups
+    # in its own state, so this declaration is what `pools apply` writes into
+    # the running daemon.
+    pools: Mapping[str, int] = field(default_factory=dict)
     # The file this configuration was read from. Every task agentctl queues
     # carries it as AGENTCTL_CONFIG, so the agentctl calls inside a task read
     # the same projects, state directory and event spool as the one that
@@ -100,6 +105,21 @@ def _paths(value: Any, field: str) -> tuple[Path, ...]:
     return tuple(Path(item) for item in value)
 
 
+def _pools(value: Any) -> dict[str, int]:
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise ConfigError("pools must map a pueue group name to its parallelism")
+    parsed: dict[str, int] = {}
+    for name, slots in value.items():
+        if not isinstance(name, str) or POOL_NAME.fullmatch(name) is None:
+            raise ConfigError(f"pools has an invalid pueue group name: {name!r}")
+        if not isinstance(slots, int) or isinstance(slots, bool) or slots < 1:
+            raise ConfigError(f"pools.{name} must run at least one task at a time")
+        parsed[name] = slots
+    return parsed
+
+
 def _path(value: Any, field: str, fallback: Path) -> Path:
     if value is None:
         return fallback
@@ -138,6 +158,7 @@ def load_config(path: Path | None = None) -> Config:
         ),
         event_spool=_path(raw.get("event_spool"), "event_spool", config.event_spool),
         agentctl_executable=str(raw.get("agentctl") or config.agentctl_executable),
+        pools=_pools(raw.get("pools")),
     )
 
 
