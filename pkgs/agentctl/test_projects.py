@@ -255,7 +255,9 @@ def test_a_required_variable_missing_at_launch_fails_loudly(
         project.environment.values()
 
     monkeypatch.setenv("FIXTURE_TOKEN", "t")
-    assert project.environment.values()["FIXTURE_TOKEN"] == "t"
+    values = project.environment.values()
+    assert values["FIXTURE_TOKEN"] == "t"
+    assert values["GIT_OPTIONAL_LOCKS"] == "0"
 
 
 def test_a_tolerant_catalog_reports_a_broken_root_without_hiding_the_others(
