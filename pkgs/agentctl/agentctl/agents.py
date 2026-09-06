@@ -158,8 +158,10 @@ def queue_agent(
     timeout_seconds: int = MAX_AGENT_TIMEOUT_SECONDS,
     binding: Mapping[str, Any] | None = None,
     inaccessible: Sequence[Path] = (),
+    priority: int = 0,
 ) -> dict[str, Any]:
     """Queue one agent in the agent group; ``then`` runs after a successful agent.
+    A landing-owned agent passes a ``priority`` so it starts ahead of workers.
 
     With ``schema`` the backend must answer with a conforming JSON document,
     written beside the prompt as ``<prompt stem>.result.json``. ``binding``
@@ -221,6 +223,7 @@ def queue_agent(
         environment=environment,
         kind="attested-agent",
         after=after,
+        priority=priority,
         unit_properties=(
             f"MemoryMax={workspace.agent_memory_max}",
             *path_properties(project, inaccessible=inaccessible),

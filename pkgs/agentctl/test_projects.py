@@ -28,6 +28,7 @@ def test_the_fixture_descriptor_loads_every_declared_field(project_root: Path) -
         "candidate": "check",
         "corpus": "verify",
     }
+    assert project.workspace.review == "agent"
     nightly = project.operation("nightly")
     assert nightly.schedule == "*-*-* 03:17:00"
     assert nightly.checkout == "default"

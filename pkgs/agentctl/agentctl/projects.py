@@ -52,6 +52,7 @@ _WORKSPACE_FIELDS = frozenset(
         "agent_memory_max",
         "verify",
         "publish",
+        "review",
     }
 )
 # `[workspace].verify` names one operation per profile; `candidate` may be
@@ -59,6 +60,9 @@ _WORKSPACE_FIELDS = frozenset(
 # PR check.
 _VERIFY_PROFILES = frozenset({"focused", "candidate", "corpus"})
 PUBLISH_POLICIES = frozenset({"pr", "master"})
+# Whether a landing runs a separate review agent on the candidate (`agent`)
+# or records the candidate verification as the review (`none`).
+REVIEW_POLICIES = frozenset({"agent", "none"})
 # systemd's size grammar for MemoryMax: an integer with an optional K/M/G/T
 # suffix.
 _MEMORY_SIZE = re.compile(r"[1-9][0-9]*[KMGT]?\Z")
@@ -157,6 +161,8 @@ class WorkspacePolicy:
     # How a landed candidate reaches the default branch: a squash-merged PR
     # or a fast-forward push.
     publish: str = "pr"
+    # `agent` queues a reviewer per landing; `none` lands on verification alone.
+    review: str = "agent"
 
     @property
     def base_branch(self) -> str:
@@ -170,6 +176,7 @@ class WorkspacePolicy:
             "agent_memory_max": self.agent_memory_max,
             "verify": dict(self.verify),
             "publish": self.publish,
+            "review": self.review,
         }
 
 
@@ -376,6 +383,12 @@ def _workspace(raw: Mapping[str, Any], descriptor: Path) -> WorkspacePolicy | No
                 f"{descriptor} workspace.publish must be one of {sorted(PUBLISH_POLICIES)}"
             )
         fields["publish"] = raw_workspace["publish"]
+    if "review" in raw_workspace:
+        if raw_workspace["review"] not in REVIEW_POLICIES:
+            raise ProjectConfigError(
+                f"{descriptor} workspace.review must be one of {sorted(REVIEW_POLICIES)}"
+            )
+        fields["review"] = raw_workspace["review"]
     return WorkspacePolicy(root=Path(root), default_base=default_base, **fields)
 
 
