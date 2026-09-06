@@ -42,7 +42,7 @@ def collect_below(
         except OSError:
             cgroup_text = ""
     else:
-        result = run(
+        dump = run(
             [
                 "below",
                 "dump",
@@ -60,7 +60,7 @@ def collect_below(
             ],
             timeout=10,
         )
-        cgroup_text = result.stdout if result.ok else ""
+        cgroup_text = dump.stdout if dump.ok else ""
 
     cgroup_by_path: dict[str, dict[str, Any]] = {}
     for row in parse_below_tsv(cgroup_text):
@@ -96,7 +96,7 @@ def collect_below(
         except OSError:
             process_text = ""
     else:
-        result = run(
+        dump = run(
             [
                 "below",
                 "dump",
@@ -114,7 +114,7 @@ def collect_below(
             ],
             timeout=10,
         )
-        process_text = result.stdout if result.ok else ""
+        process_text = dump.stdout if dump.ok else ""
 
     process_by_pid: dict[str, dict[str, Any]] = {}
     for row in parse_below_tsv(process_text):
