@@ -60,6 +60,11 @@ class JobBinding(GatewayModel):
 class JobView(GatewayModel):
     ref: str
     job_id: int
+    launch_reference: str | None = Field(
+        default=None,
+        description="The job's own name. Pass it back in a target locator to "
+        "address this job after the queue has been reordered.",
+    )
     label: str | None = None
     kind: str | None = None
     project_id: str | None = None
@@ -108,9 +113,11 @@ def _job_view(payload: Mapping[str, Any]) -> JobView:
     affordances.append("jobs.retry" if terminal else "jobs.wait")
     if not terminal:
         affordances.append("jobs.cancel")
+    launch_reference = payload.get("launch_reference")
     return JobView(
         ref=job_ref(job_id),
         job_id=job_id,
+        launch_reference=str(launch_reference) if launch_reference else None,
         label=payload.get("label"),
         kind=payload.get("kind"),
         project_id=project_id,
@@ -133,11 +140,31 @@ def _job_view(payload: Mapping[str, Any]) -> JobView:
 
 
 def _job(
-    runtime: Runtime, operation: str, job_id: int, **arguments: Any
+    runtime: Runtime,
+    operation: str,
+    job_id: int,
+    launch_reference: str | None = None,
+    **arguments: Any,
 ) -> dict[str, Any]:
-    """One LocalJobs operation on a job, proving the answer names that job."""
-    result = runtime._job(operation, {"job_id": job_id, **arguments})
-    if str(result.get("job_id")) != str(job_id):
+    """One LocalJobs operation on a job, proving the answer names that job.
+
+    Which identity the answer must match is the identity the call addressed:
+    a launch reference names the job wherever the queue moved it, so its
+    answer is expected to carry another task id, while an id alone names only
+    the position and its answer must still be about that position.
+    """
+    if launch_reference is None:
+        result = runtime._job(operation, {"job_id": job_id, **arguments})
+        if str(result.get("job_id")) != str(job_id):
+            raise ProtocolError(
+                "owner_failed", f"job owner {operation} response names another job"
+            )
+        return result
+    result = runtime._job(
+        operation,
+        {"job_id": job_id, "launch_reference": launch_reference, **arguments},
+    )
+    if str(result.get("launch_reference") or "") != launch_reference:
         raise ProtocolError(
             "owner_failed", f"job owner {operation} response names another job"
         )
@@ -268,11 +295,26 @@ class JobDetail(JobView):
     result: JobResult | None = None
 
 
-def _log(runtime: Runtime, job_id: int, offset: int, max_bytes: int) -> JobLog:
-    raw = _job(runtime, "job.logs", job_id, offset=offset, max_bytes=max_bytes)
+def _log(
+    runtime: Runtime,
+    job_id: int,
+    offset: int,
+    max_bytes: int,
+    launch_reference: str | None = None,
+) -> JobLog:
+    raw = _job(
+        runtime,
+        "job.logs",
+        job_id,
+        launch_reference,
+        offset=offset,
+        max_bytes=max_bytes,
+    )
     content = str(raw.get("content") or "")
     truncated = bool(raw.get("truncated"))
     returned = len(content.encode())
+    # A reference-addressed read answers about whatever id the job is at now.
+    job_id = int(raw.get("job_id", job_id))
     return JobLog(
         ref=job_ref(job_id),
         job_id=job_id,
@@ -288,13 +330,13 @@ def _log(runtime: Runtime, job_id: int, offset: int, max_bytes: int) -> JobLog:
 
 def _get(runtime: Runtime, inp: GetInput) -> JobDetail:
     runtime.principal.require(Capability.JOB_READ)
-    job_id, _ = inp.target.resolve()
-    view = _job_view(_job(runtime, "job.get", job_id))
+    job_id, _, reference = inp.target.resolve()
+    view = _job_view(_job(runtime, "job.get", job_id, reference))
     detail = JobDetail(**view.model_dump(), projection=inp.projection)
     if inp.projection == "log":
-        detail.log = _log(runtime, job_id, inp.offset, inp.max_bytes)
+        detail.log = _log(runtime, job_id, inp.offset, inp.max_bytes, reference)
     elif inp.projection == "result":
-        raw = _job(runtime, "job.result", job_id, max_bytes=inp.max_bytes)
+        raw = _job(runtime, "job.result", job_id, reference, max_bytes=inp.max_bytes)
         detail.result = JobResult(kind=raw.get("kind"), value=raw.get("value"))
     return detail
 
@@ -307,8 +349,8 @@ class LogsInput(RequestControls):
 
 def _logs(runtime: Runtime, inp: LogsInput) -> JobLog:
     runtime.principal.require(Capability.JOB_READ)
-    job_id, _ = inp.target.resolve()
-    return _log(runtime, job_id, inp.offset, inp.max_bytes)
+    job_id, _, reference = inp.target.resolve()
+    return _log(runtime, job_id, inp.offset, inp.max_bytes, reference)
 
 
 # ------------------------------------------------------------------ wait
@@ -332,16 +374,23 @@ class JobWait(GatewayModel):
 async def _wait(runtime: Runtime, inp: JobWaitInput) -> JobWait:
     """Block on pueue in a worker thread; a cancelled MCP request abandons it."""
     runtime.principal.require(Capability.JOB_READ)
-    job_id, ref = inp.target.resolve()
+    job_id, _, reference = inp.target.resolve()
     raw = await anyio.to_thread.run_sync(
-        lambda: _job(runtime, "job.wait", job_id, timeout_seconds=inp.timeout_seconds),
+        lambda: _job(
+            runtime,
+            "job.wait",
+            job_id,
+            reference,
+            timeout_seconds=inp.timeout_seconds,
+        ),
         abandon_on_cancel=True,
     )
     timed_out = bool(raw.get("timed_out"))
     view = _job_view(raw)
+    # Where the job is now, which a reorder may have moved since it started.
     return JobWait(
-        ref=ref,
-        job_id=job_id,
+        ref=view.ref,
+        job_id=view.job_id,
         outcome="timeout" if timed_out else "terminal",
         timed_out=timed_out,
         job=view,
@@ -387,7 +436,7 @@ class CancelResult(GatewayModel):
 
 def _cancel(runtime: Runtime, inp: CancelInput) -> CancelResult:
     runtime.principal.require(Capability.JOB_CANCEL)
-    job_id, ref = inp.target.resolve()
+    job_id, ref, reference = inp.target.resolve()
     expected = inp.expected_phase
     if inp.preconditions:
         if set(inp.preconditions) - {"expected_phase"}:
@@ -395,7 +444,7 @@ def _cancel(runtime: Runtime, inp: CancelInput) -> CancelResult:
                 "invalid_request", "job preconditions are not recognized"
             )
         expected = expected or inp.preconditions.get("expected_phase")
-    before = _job_view(_job(runtime, "job.get", job_id))
+    before = _job_view(_job(runtime, "job.get", job_id, reference))
     if expected is not None and before.state.phase != expected:
         raise ProtocolError(
             "precondition_failed",
@@ -406,7 +455,7 @@ def _cancel(runtime: Runtime, inp: CancelInput) -> CancelResult:
                 "phase": before.state.phase,
             },
         )
-    raw = _job(runtime, "job.cancel", job_id)
+    raw = _job(runtime, "job.cancel", job_id, reference)
     if not isinstance(raw.get("cancel_requested"), bool):
         raise ProtocolError(
             "owner_failed",
@@ -420,11 +469,12 @@ def _cancel(runtime: Runtime, inp: CancelInput) -> CancelResult:
         if survivors
         else []
     )
+    cancelled_view = _job_view(raw)
     return CancelResult(
-        ref=ref,
-        job_id=job_id,
+        ref=cancelled_view.ref,
+        job_id=cancelled_view.job_id,
         previous_phase=before.state.phase,
-        job=_job_view(raw),
+        job=cancelled_view,
         cancel_requested=raw["cancel_requested"],
         already_terminal=bool(raw.get("already_terminal")),
         cancelled=raw.get("cancelled"),
@@ -442,8 +492,8 @@ class RetryInput(MutationControls):
 
 def _retry(runtime: Runtime, inp: RetryInput) -> JobView:
     runtime.principal.require(Capability.JOB_START)
-    job_id, _ = inp.target.resolve()
-    return _job_view(_job(runtime, "job.retry", job_id))
+    job_id, _, reference = inp.target.resolve()
+    return _job_view(_job(runtime, "job.retry", job_id, reference))
 
 
 class CleanInput(MutationControls):
@@ -462,11 +512,13 @@ class CleanResult(GatewayModel):
 
 def _clean(runtime: Runtime, inp: CleanInput) -> CleanResult:
     runtime.principal.require(Capability.JOB_CANCEL)
-    job_id, ref = inp.target.resolve()
-    raw = _job(runtime, "job.clean", job_id)
+    job_id, _, reference = inp.target.resolve()
+    raw = _job(runtime, "job.clean", job_id, reference)
+    # The id the owner cleaned, which a reorder may have moved the job to.
+    cleaned_id = int(raw.get("job_id", job_id))
     return CleanResult(
-        ref=ref,
-        job_id=job_id,
+        ref=job_ref(cleaned_id),
+        job_id=cleaned_id,
         cleaned=bool(raw.get("cleaned")),
         removed=[str(path) for path in raw.get("removed") or []],
         affordances=["jobs.list"],
@@ -603,11 +655,21 @@ ACTIONS: tuple[Action, ...] = (
         resource_kinds=("job",),
         affordances=("jobs.get", "jobs.logs", "jobs.cancel"),
         aliases=("wait for job", "block", "until done"),
-        documentation="The wait runs in a worker thread; cancelling the MCP request abandons it without stopping the job.",
+        documentation="The wait runs in a worker thread; cancelling the MCP request abandons it without stopping the job. A task id is a queue position: pass the launch_reference the start returned and the wait follows its job across a reorder, answering with the id it is at now.",
         examples=(
             Example(
                 title="Wait a minute",
                 input={"target": {"job_id": 41}, "timeout_seconds": 60},
+            ),
+            Example(
+                title="Wait on the job, not the queue position",
+                input={
+                    "target": {
+                        "job_id": 41,
+                        "launch_reference": "sinnix-check-3f9a21c8",
+                    },
+                    "timeout_seconds": 60,
+                },
             ),
         ),
     ),

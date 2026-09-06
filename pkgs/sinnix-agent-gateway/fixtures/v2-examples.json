@@ -1,5 +1,5 @@
 {
-  "action_catalog_hash": "81898909c68ccc146c6d7ed192711bcbc7d6a1431018ea4f90fa4f7f384c92f2",
+  "action_catalog_hash": "e3b859338889b0226e62045dfe2d5301b3beecf11576b68561fb6b715d0cf639",
   "examples": [
     {
       "action": "gateway.status",
@@ -575,6 +575,18 @@
         "timeout_seconds": 60
       },
       "title": "Wait a minute"
+    },
+    {
+      "action": "jobs.wait",
+      "family": "wait",
+      "input": {
+        "target": {
+          "job_id": 41,
+          "launch_reference": "sinnix-check-3f9a21c8"
+        },
+        "timeout_seconds": 60
+      },
+      "title": "Wait on the job, not the queue position"
     },
     {
       "action": "jobs.cancel",

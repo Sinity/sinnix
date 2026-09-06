@@ -5,7 +5,7 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
-from agentctl import batch, launch
+from agentctl import batch, launch, pueue
 from agentctl.config import Config
 from sinnix_agent_gateway.execution import LocalJobs
 from sinnix_mcp import ErrorCode, RequestEnvelope
@@ -179,6 +179,7 @@ RUN_DOCUMENT = {
             "model": "policy",
             "effort": "medium",
             "task_id": 41,
+            "task_reference": "fixture-worker-abcd1234",
             "task_ids": [41],
             "result": None,
             "stage": "running",
@@ -187,6 +188,7 @@ RUN_DOCUMENT = {
     ],
     "landing": {
         "task_id": 42,
+        "task_reference": "fixture-integrate-9f10",
         "integration_branch": "batch/fixture-run/integration",
         "candidate_sha": None,
         "pr_number": None,
@@ -239,9 +241,12 @@ def test_batch_start_hands_the_beads_to_agentctl_and_answers_from_the_manifest(
     assert worker["worker_id"] == "fixture-1"
     assert worker["beads"] == ["fixture-1", "fixture-2"]
     assert worker["job_id"] == "41" and worker["job_ids"] == ["41"]
+    # The manifest's stable reference for each job, which jobs.* addresses by.
+    assert worker["job_launch_reference"] == "fixture-worker-abcd1234"
     assert worker["state"] == {"phase": "running", "terminal": False, "exit_code": None}
     assert worker["result_filed"] is False
     assert payload["landing"]["job_id"] == "42"
+    assert payload["landing"]["job_launch_reference"] == "fixture-integrate-9f10"
     assert payload["landing"]["state"]["phase"] == "queued"
 
     def refuse(config, project, seeds, **_kwargs):
@@ -302,3 +307,110 @@ def test_batch_verbs_refuse_a_run_that_belongs_to_another_project(
     assert refused.error is not None
     assert refused.error.code is ErrorCode.INVALID_ARGUMENT
     assert "belongs to other" in refused.error.message
+
+
+def test_job_operations_pass_the_launch_reference_through_to_agentctl(
+    adapter: LocalJobs, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The gateway's stable job identity is agentctl's launch reference.
+
+    Red if an operation drops it, which leaves the call addressing a queue
+    position that a reorder may have given to another job.
+    """
+    reference = "fixture-verify-3f9a21c8"
+    moved = {**JOB_ROW, "job_id": 44, "reference": reference}
+    seen: dict[str, Any] = {}
+
+    def record(name: str, value: Any = moved) -> Any:
+        def call(*args: Any, **kwargs: Any) -> Any:
+            seen[name] = (args, kwargs)
+            return value
+
+        return call
+
+    monkeypatch.setattr(launch, "wait", record("wait"))
+    monkeypatch.setattr(launch, "get_job", record("get"))
+    monkeypatch.setattr(launch, "cancel", record("cancel"))
+    monkeypatch.setattr(launch, "retry", record("retry"))
+    monkeypatch.setattr(
+        launch, "clean", record("clean", {**moved, "cleaned": True, "removed": []})
+    )
+    monkeypatch.setattr(
+        launch, "result", record("result", {**moved, "kind": "exit", "value": None})
+    )
+
+    for operation, arguments in (
+        ("job.wait", {"timeout_seconds": 5}),
+        ("job.get", {}),
+        ("job.cancel", {}),
+        ("job.retry", {}),
+        ("job.clean", {}),
+        ("job.result", {}),
+    ):
+        answer = adapter.dispatch(
+            _request(
+                operation,
+                {"job_id": 41, "launch_reference": reference, **arguments},
+            )
+        )
+        assert answer.error is None, (operation, answer.error)
+        assert answer.payload.inline["launch_reference"] == reference
+        assert answer.payload.inline["job_id"] == "44"
+
+    for name in ("wait", "get", "cancel", "retry", "clean", "result"):
+        args, kwargs = seen[name]
+        assert reference in (*args, *kwargs.values()), name
+
+
+def test_a_launch_reference_that_is_a_path_is_refused(adapter: LocalJobs) -> None:
+    """It names one file under the state directory; a path would leave it."""
+    refused = adapter.dispatch(
+        _request("job.get", {"job_id": 41, "launch_reference": "../../etc/passwd"})
+    )
+    assert refused.error is not None
+    assert refused.error.code is ErrorCode.INVALID_ARGUMENT
+
+
+def test_job_logs_reads_the_log_of_the_job_the_reference_addresses(
+    adapter: LocalJobs, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The reference is resolved once and the log comes from that task.
+
+    Red if the read re-addresses the answering id without the reference: a
+    `pueue switch` between the two reads hands back another job's log under
+    this job's launch reference.
+    """
+    reference = "fixture-verify-3f9a21c8"
+    jobs_dir = adapter.config.jobs_dir
+    jobs_dir.mkdir(parents=True, exist_ok=True)
+
+    def task(task_id: int, name: str) -> pueue.Task:
+        (jobs_dir / f"{name}.log").write_text(f"log of {name}")
+        return pueue.Task(
+            task_id=task_id,
+            label="fixture:verify",
+            group="normal",
+            status="Done",
+            result="Success",
+            exit_code=0,
+            path=str(jobs_dir),
+            dependencies=(),
+            command=f"agentctl-run {jobs_dir / f'{name}.json'}",
+        )
+
+    mine = task(44, reference)
+    occupant = task(44, "fixture-other-0badc0de")
+
+    def addressed(task_id: int, ref: str | None = None) -> pueue.Task:
+        return mine if ref == reference else occupant
+
+    monkeypatch.setattr(launch, "addressed", addressed)
+    monkeypatch.setattr(launch.pueue, "log", lambda _task_id: "")
+
+    answer = adapter.dispatch(
+        _request("job.logs", {"job_id": 41, "launch_reference": reference})
+    )
+    assert answer.error is None, answer.error
+    assert answer.payload.inline["launch_reference"] == reference
+    assert answer.payload.inline["job_id"] == "44"
+    assert answer.payload.inline["content"] == f"log of {reference}"

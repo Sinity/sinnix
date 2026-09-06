@@ -44,6 +44,41 @@ def test_wait_for_job_terminal_uses_the_queue_wait(
     assert late["continuation"] and late["job"]["state"]["phase"] == "running"
 
 
+def test_wait_for_job_terminal_carries_the_launch_reference_to_the_queue(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The same stable identity jobs.wait uses, through the condition locator.
+
+    Anti-vacuity: without it the queue wait is handed the task id the ref
+    encodes, and answers about whatever a reorder moved there.
+    """
+    server, _, fake = make_server(tmp_path, "observer", monkeypatch)
+    reference = "fixture-worker-abcd1234"
+    fake.responses["job.wait"] = {**DONE, "job_id": "44", "launch_reference": reference}
+
+    satisfied = call(
+        server,
+        "wait.for",
+        {
+            "condition": {
+                "kind": "job_terminal",
+                "target": {"job_id": 41, "launch_reference": reference},
+            },
+            "timeout_seconds": 3,
+        },
+    )["data"]
+
+    assert fake.calls[-1].arguments == {
+        "job_id": "41",
+        "launch_reference": reference,
+        "timeout_seconds": 3,
+    }
+    assert satisfied["outcome"] == "satisfied"
+    # The job's current position, not the one the caller addressed.
+    assert satisfied["ref"] == "sinnix://jobs/44"
+    assert satisfied["job"]["launch_reference"] == reference
+
+
 def test_wait_for_file_exists_polls_until_the_deadline(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

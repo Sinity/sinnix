@@ -6,6 +6,7 @@ import base64
 import json
 import struct
 import zlib
+from dataclasses import replace
 from pathlib import Path
 
 import anyio
@@ -562,3 +563,82 @@ def test_gateway_status_and_catalog_are_typed(tmp_path: Path) -> None:
 
     by_family = structured(call(server, "gateway.catalog", {"family": "change"}))
     assert {row["family"] for row in by_family["data"]["actions"]} == {"change"}
+
+
+@pytest.mark.parametrize("arguments", [{}, {"query": ""}, {"query": " \t\n"}])
+def test_catalog_without_search_terms_does_not_probe_upstreams(
+    tmp_path: Path, monkeypatch, arguments: dict
+) -> None:
+    server = create_server(
+        replace(config(tmp_path), mcp_broker_servers={"first": {}, "second": {}}),
+        "operator",
+    )
+    broker = server._sinnix_revision_publisher.runtime.mcp_broker
+    probes = []
+
+    async def probe(name, _configuration):
+        probes.append(name)
+        return {
+            "name": name,
+            "availability": "available",
+            "tools": [{"name": "upstream", "effect": "read"}],
+        }
+
+    monkeypatch.setattr(broker, "_catalog_server", probe)
+    response = structured(call(server, "gateway.catalog", arguments))
+
+    assert response["result"]["outcome"] == "ok"
+    assert response["data"]["actions"] and response["data"]["resources"]
+    assert response["data"]["mcp_tools"] == []
+    assert response["data"]["mcp_unavailable"] == []
+    assert probes == []
+
+
+def test_catalog_search_probes_brokers_and_preserves_filtering_and_effects(
+    tmp_path: Path, monkeypatch
+) -> None:
+    server = create_server(
+        replace(config(tmp_path), mcp_broker_servers={"fixture": {}, "offline": {}}),
+        "operator",
+    )
+    broker = server._sinnix_revision_publisher.runtime.mcp_broker
+    probes = []
+
+    async def probe(name, _configuration):
+        probes.append(name)
+        if name == "offline":
+            return {"name": name, "availability": "unavailable"}
+        return {
+            "name": name,
+            "availability": "available",
+            "tools": [
+                {"name": "lookup", "description": "Read evidence", "effect": "read"},
+                {"name": "record", "description": "Save evidence", "effect": "change"},
+                {"name": "unrelated", "description": "Other", "effect": "read"},
+            ],
+        }
+
+    monkeypatch.setattr(broker, "_catalog_server", probe)
+    response = structured(call(server, "gateway.catalog", {"query": " EVIDENCE "}))
+
+    assert response["result"]["outcome"] == "ok"
+    assert probes == ["fixture", "offline"]
+    assert {row["name"]: row["invoke"] for row in response["data"]["mcp_tools"]} == {
+        "lookup": "mcp.call",
+        "record": "mcp.change",
+    }
+    assert response["data"]["mcp_unavailable"] == ["mcp.offline"]
+
+    probes.clear()
+    without_broker = structured(
+        call(
+            server,
+            "gateway.catalog",
+            {
+                "query": "evidence",
+                "include_mcp_tools": False,
+            },
+        )
+    )
+    assert without_broker["data"]["mcp_tools"] == []
+    assert probes == []

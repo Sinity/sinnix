@@ -5,7 +5,7 @@ description: Use when invoking, inspecting, or documenting Sinnix Agent Gateway 
 
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: 81898909c68ccc146c6d7ed192711bcbc7d6a1431018ea4f90fa4f7f384c92f2 -->
+<!-- gateway-catalog-sha256: e3b859338889b0226e62045dfe2d5301b3beecf11576b68561fb6b715d0cf639 -->
 
 # Agent Gateway
 
@@ -67,7 +67,7 @@ Effectful actions (families change, operate, run) require `idempotency_key`; rep
 - `artifacts.read` — Read an artifact: text inline with offsets, images as an image block, other binary as a resource block.
 - `captures.query` — List runtime-declared capture lanes, describe one, or read per-lane record deltas since a time.
 - `activity.query` — Reads sinnix-capture-v1 envelope files under each lane path within the time window; coverage lists which lanes contributed and which have no envelope files.
-- `sessions.query` — List, read or search local coding-session JSONL files per provider.
+- `sessions.query` — page.next_cursor continues a newest-first snapshot for one hour; omit cursor to refresh. Reads return next_offset. Search hits carry byte offsets and matching snippets; truncated marks incomplete coverage.
 - `memory.query` — Search session-derived memory across providers or fetch one object by reference, with source provenance.
 - `timeline.query` — Session evidence ordered by file mtime within an RFC 3339 window, per provider, without claiming unavailable upstreams.
 
@@ -77,7 +77,7 @@ Effectful actions (families change, operate, run) require `idempotency_key`; rep
 - `beads.get` — Read one bead by ref, id or title fragment, with optional comments, history, dependencies or graph.
 - `jobs.get` — One job's state and bead binding, with its log range or typed result on request.
 - `jobs.logs` — A byte range of a job's bounded log (workload output, then the wrapper's stderr).
-- `batches.status` — Every id is a pueue task id: pass worker or landing job_id straight to jobs.logs, jobs.wait or jobs.cancel.
+- `batches.status` — Every id is a pueue task id: pass a worker's or the landing's job_id to jobs.logs, jobs.wait or jobs.cancel, with its job_launch_reference so the call survives a reorder.
 - `terminals.get` — Resolve one terminal by ref, kitty id, title, cwd, pid or focus.
 - `browser.page` — Element refs (g<generation>e<n>) are attached to the DOM for this snapshot; a later snapshot or reload replaces them, and a stale ref fails not_found.
 - `machine.units.get` — Describe one unit via systemctl show: states, main pid, cgroup, restarts, timestamps.
@@ -97,7 +97,7 @@ Effectful actions (families change, operate, run) require `idempotency_key`; rep
 
 ### wait
 
-- `jobs.wait` — The wait runs in a worker thread; cancelling the MCP request abandons it without stopping the job.
+- `jobs.wait` — The wait runs in a worker thread; cancelling the MCP request abandons it without stopping the job. A task id is a queue position: pass the launch_reference the start returned and the wait follows its job across a reorder, answering with the id it is at now.
 - `wait.for` — Conditions: job_terminal, bead_status, bead_revision, unit_state, file_hash, file_exists, capture_freshness, receipt_appearance, terminal_output. A timeout returns the current evidence and a continuation token.
 - `terminals.wait` — Wait until a terminal is at its prompt, shows a regex, finishes a process, or changes title.
 - `processes.wait` — Wait until a process (same pid and start ticks) exits, or the bounded timeout elapses.
@@ -137,4 +137,4 @@ Effectful actions (families change, operate, run) require `idempotency_key`; rep
 
 The complete schemas and examples are in `docs/generated/agent-gateway-reference.md`.
 
-Catalog revision: `v3-typed-actions`. Catalog SHA-256: `81898909c68ccc146c6d7ed192711bcbc7d6a1431018ea4f90fa4f7f384c92f2`.
+Catalog revision: `v3-typed-actions`. Catalog SHA-256: `e3b859338889b0226e62045dfe2d5301b3beecf11576b68561fb6b715d0cf639`.

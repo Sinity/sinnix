@@ -3,9 +3,8 @@
 Both walk the same requested-source list: an upstream this host does not serve
 is reported unavailable with its standing reason, a session provider is fetched
 through `SessionLogService`, and every source yields exactly one provenance
-row. The per-source limit divides the caller's limit across the session
-providers alone, so naming an unavailable upstream never shrinks what a live
-provider may return.
+row. Each provider may contribute up to the caller's limit; callers apply
+the global limit after merging so one provider can fill the result.
 
 Row mapping and error translation stay with the caller: memory rows and
 timeline entries have different shapes, and each service raises its own error
@@ -57,10 +56,6 @@ def fetch_each_source(
     `fetch(provider, per_source_limit)` is the session-service call the caller
     wants; its payload must carry `scanned_bytes` and `truncated`.
     """
-    session_providers = [
-        provider for provider in providers if provider in RAW_PROVIDERS
-    ]
-    per_source_limit = max(1, -(-limit // max(1, len(session_providers))))
     sources: list[dict[str, Any]] = []
     fetched: list[tuple[str, dict[str, Any]]] = []
     for provider in providers:
@@ -89,7 +84,7 @@ def fetch_each_source(
                 }
             )
             continue
-        result = fetch(provider, per_source_limit)
+        result = fetch(provider, limit)
         sources.append(
             {
                 "source": provider,
