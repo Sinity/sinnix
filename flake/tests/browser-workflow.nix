@@ -51,8 +51,10 @@ in
               message = "The browser provenance receiver must be supervised by the user manager.";
             }
             {
-              assertion = builtins.hasAttr "sinnix-reading-stack-widget" hm.systemd.user.services;
-              message = "The visible reading stack must be started with the graphical session.";
+              assertion = lib.hasInfix "sinnix-cockpit:reading-stack" (
+                builtins.readFile ../../dots/noctalia/config.toml
+              );
+              message = "The reading stack must stay visible on the Noctalia bar.";
             }
             {
               assertion = lib.hasInfix "sinnix-nav-capture-daemon" (
@@ -77,7 +79,6 @@ in
             {
               assertion =
                 builtins.hasAttr "sinnix-nav-capture" inventory.surfaces
-                && builtins.hasAttr "sinnix-reading-stack-widget" inventory.surfaces
                 && builtins.any (capture: capture.name == "browser-nav-edges") inventory.captures
                 && builtins.any (capture: capture.name == "reading-stack") inventory.captures;
               message = "The runtime inventory must declare the browser services and their capture lanes.";

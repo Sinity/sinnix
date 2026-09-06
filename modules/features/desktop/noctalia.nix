@@ -14,6 +14,7 @@
   mkFeatureModule,
   pkgs,
   inputs,
+  helpers,
   ...
 }@args:
 mkFeatureModule {
@@ -66,6 +67,7 @@ mkFeatureModule {
         }:
         let
           mkDotsFile = mkDotsFileFor config;
+          scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
           noctalia = inputs.noctalia.packages.${pkgs.stdenv.hostPlatform.system}.default.overrideAttrs (old: {
             patches = (old.patches or [ ]) ++ [ ./noctalia-notification-prewarm.patch ];
           });
@@ -107,6 +109,8 @@ mkFeatureModule {
             mkDotsFile "/noctalia/plugins/sinnix-ops";
           home.file.".local/share/noctalia/local/sinnix-cockpit".source =
             mkDotsFile "/noctalia/plugins/sinnix-cockpit";
+          # The cockpit reading-stack widget dispatches the picker by a stable path.
+          home.file.".local/bin/sinnix-picker".source = "${scriptPkgs.sinnix-picker}/bin/sinnix-picker";
 
           home.packages = with pkgs; [
             nvibrant # digital vibrance (nvibrant plugin)

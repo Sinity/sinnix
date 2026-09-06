@@ -18,8 +18,8 @@ point was to read it. The fix implemented here is NOT "same behavior,
 different database" (that repeats the failure with extra steps): it is
 (1) a HARD, VISIBLE bound -- this is not allowed to become an unlimited
 backlog, unlike the old tab pile or the Raindrop graveyard, and (2) genuine
-standing visibility via a companion small pinned window
-(sinnix-reading-stack-widget) so the stack has the same "there, in view,
+standing visibility on the Noctalia bar (the sinnix-cockpit reading-stack
+widget reads the state file) so the stack has the same "there, in view,
 demanding nothing but present" quality an open tab had, without being an
 actual browser tab.
 

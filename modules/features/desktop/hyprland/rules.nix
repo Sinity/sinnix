@@ -75,21 +75,6 @@ let
         inactive = 0.82;
       };
     })
-    (mkRule "reading-stack-widget" {
-      class = "^(reading-stack-widget)$";
-      float = true;
-      pin = true;
-      noBlur = true;
-      size = {
-        w = 420;
-        h = 260;
-      };
-      move = {
-        x = "(monitor_w-440)";
-        y = "(monitor_h-280)";
-      };
-      opacity = 0.9;
-    })
     (mkRule "steam-games" {
       class = "^(steam_app_.*)$";
       workspace = "5";

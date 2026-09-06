@@ -86,6 +86,7 @@ center = ["tray", "notifications", "clock", "workspaces"]
 end = [
   "sinity/sinnix-cockpit:capture-strip",
   "sinity/sinnix-cockpit:capabilities",
+  "sinity/sinnix-cockpit:reading-stack",
   "sinity/sinnix-ops:capsule",
   "sysmon",
 ]

@@ -7,7 +7,7 @@ license = "MIT"
 dependencies = ["hyprctl"]
 tags = ["bar", "system", "utility", "hyprland"]
 icon = "space_dashboard"
-description = "Visible bar affordances for the drilled capture verbs and the capability index."
+description = "Visible bar affordances for the drilled capture verbs, the capability index and the reading stack."
 
 [[service]]
 id = "probe"
@@ -34,3 +34,7 @@ entry = "capture-strip.luau"
 [[widget]]
 id = "capabilities"
 entry = "capabilities.luau"
+
+[[widget]]
+id = "reading-stack"
+entry = "reading-stack.luau"
