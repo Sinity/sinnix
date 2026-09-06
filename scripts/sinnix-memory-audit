@@ -1,7 +1,7 @@
+#!/usr/bin/env bash
 # @sinnix-package
 # description: Produce a read-only proposal report for stale agent memory entries
 # runtimeInputs: bash coreutils findutils gawk gnugrep jq
-#!/usr/bin/env bash
 set -euo pipefail
 
 report_dir="${SINNIX_MEMORY_AUDIT_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/sinnix/memory-audit}"

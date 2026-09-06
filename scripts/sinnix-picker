@@ -1,9 +1,11 @@
+#!/usr/bin/env python3
 # @sinnix-package
 # description: Unified fuzzy picker over the reading stack, history, bookmarks, clipboard, and recent project dirs
-# runtimeInputs: bash python3 fuzzel kitty zoxide wl-clipboard @sinnix-browser-app @sinnix-reading-stack
-#!/usr/bin/env python3
+# runtimeInputs: bash python3 noctalia kitty zoxide wl-clipboard @sinnix-browser-app @sinnix-reading-stack
 """sinnix-picker: one fuzzy-search surface over heterogeneous "things I might
-want to jump to" sources, feeding fuzzel's --dmenu protocol.
+want to jump to" sources, presented by the Noctalia launcher through
+`noctalia dmenu` (candidates on stdin, the chosen line on stdout, exit 1 on
+cancel).
 
 DESIGN DECISION (unified, not split): sinnix-r4u8 explicitly left the
 unified-vs-split call to the builder. Chose ONE surface, category-prefixed
@@ -314,7 +316,7 @@ def main() -> int:
     menu_input = "\n".join(menu_lines)
 
     result = subprocess.run(
-        ["fuzzel", "--dmenu", "--prompt", "> "],
+        ["noctalia", "dmenu", "-p", "> "],
         input=menu_input,
         capture_output=True,
         text=True,

@@ -232,6 +232,19 @@ let
             ];
           }
           ''
+            # The kernel only honors an interpreter line at byte 0 and
+            # patchShebangs only rewrites one there; a script whose first
+            # line is frontmatter runs under /bin/sh whatever it was written
+            # in.
+            if [ "$(head -c 2 ${
+              builtins.path {
+                path = filePath;
+                name = "${name}-source";
+              }
+            })" != "#!" ]; then
+              echo "scripts/${name}: the shebang must be line 1 (frontmatter goes below it)" >&2
+              exit 1
+            fi
             install -Dm755 ${
               # A bare ${filePath} references the file INSIDE the whole
               # flake-source store copy, so the derivation hash was a

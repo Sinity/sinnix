@@ -1,8 +1,8 @@
+#!/usr/bin/env python3
 # @sinnix-package
 # description: Bounded, visible reading-stack -- push/pop/list/peek over a small JSON state file, durable copy via sinnix-capture
 # runtimeInputs: python3 @sinnix-capture @sinnix-browser-app
 # pythonPackages: @sinnix-lib
-#!/usr/bin/env python3
 """sinnix-reading-stack: the replacement for "middle-click dumps a link into
 an ever-growing pile of background tabs."
 
