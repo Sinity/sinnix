@@ -5,9 +5,8 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-import anyio
 import pytest
-from mcp.types import CallToolResult
+from conftest import call, error, ok
 from sinnix_agent_gateway import server as server_module
 from sinnix_agent_gateway.action import MutationControls, validate_actions
 from sinnix_agent_gateway.actions import files, projects
@@ -70,29 +69,6 @@ def fixture(
         approved_manifest_hash="approved-fixture-hash",
     )
     return config, project, linked
-
-
-def call(server, name: str, arguments: dict) -> dict:
-    async def invoke():
-        return await server.call_tool(name, arguments)
-
-    result = anyio.run(invoke)
-    if isinstance(result, CallToolResult):
-        assert result.structured_content is not None
-        return result.structured_content
-    return result
-
-
-def ok(server, name: str, arguments: dict) -> dict:
-    response = call(server, name, arguments)
-    assert response["result"]["outcome"] == "ok", response
-    return response["data"]
-
-
-def error(server, name: str, arguments: dict) -> str:
-    response = call(server, name, arguments)
-    assert response["result"]["outcome"] != "ok", response
-    return response["error"]["code"]
 
 
 def test_actions_publish_honest_schemas(tmp_path: Path) -> None:

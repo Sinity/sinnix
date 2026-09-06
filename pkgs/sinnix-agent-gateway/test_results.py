@@ -23,7 +23,7 @@ from sinnix_agent_gateway.results import (
     ResultError,
     ResultService,
 )
-from sinnix_agent_gateway.schemas import GatewayModel
+from sinnix_agent_gateway.schemas import GatewayModel, V2ToolEnvelope
 from sinnix_mcp.execution import ExecutionProfile, OwnerRoute
 
 
@@ -174,6 +174,23 @@ def test_runtime_v2_replaces_an_oversized_owner_payload_with_an_artifact(
     assert response["data"]["artifact"]["ref"].startswith("sinnix://artifacts/")
     assert response["meta"]["artifact_refs"] == [response["data"]["artifact"]["ref"]]
     assert response["receipt"]["ref"].startswith("sinnix://receipts/")
+
+
+def test_accepted_failure_classes_are_exactly_the_rendered_envelope_enum() -> None:
+    # The enum below is what a caller reads off the published envelope schema;
+    # `EXPECTED_ERROR_CODES` is what `ProtocolError` may raise. They are one
+    # definition, so a code the gateway can raise is always a code it can send.
+    rendered = set(
+        V2ToolEnvelope.model_json_schema()["$defs"]["V2Error"]["properties"]["code"][
+            "enum"
+        ]
+    )
+
+    assert rendered == set(EXPECTED_ERROR_CODES)
+    for code in sorted(rendered):
+        assert ProtocolError(code, "safe failure").code == code
+    with pytest.raises(ValueError, match="unknown protocol error code"):
+        ProtocolError("retired_code", "safe failure")
 
 
 def test_runtime_v2_keeps_each_expected_failure_in_a_typed_envelope(tmp_path) -> None:
