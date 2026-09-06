@@ -588,3 +588,20 @@ def test_report_header_stamps_one_utc_grammar_through_the_shared_helper(
 
     monkeypatch.setattr(cli, "utc_ts", lambda: "SENTINEL-UTC-TS")
     assert cli._report_header(args)["generated_at"] == "SENTINEL-UTC-TS"
+
+
+def test_below_live_path_returns_the_report_dict(monkeypatch) -> None:
+    """The live path must not lose the report to the subprocess result.
+    Mutation: assigning `run(...)` to `result` fails this with TypeError."""
+    from sinnix_observe.sources import below as below_module
+
+    class Dump:
+        ok = True
+        stdout = "2026-09-06 00:00:00\tname\t/sys/fs/cgroup/x.slice\t1\t2\t3\t4\t5\n"
+
+    monkeypatch.delenv("SINNIX_OBSERVE_BELOW_CGROUP_TSV", raising=False)
+    monkeypatch.delenv("SINNIX_OBSERVE_BELOW_PROCESS_TSV", raising=False)
+    monkeypatch.setattr(below_module, "run", lambda *a, **k: Dump())
+    out = below_module.collect_below("10 min ago", "10 min", 10, offline=False)
+    assert out["available"] is True
+    assert out["cgroup_peaks"][0]["cgroup"] == "/sys/fs/cgroup/x.slice"
