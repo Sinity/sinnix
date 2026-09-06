@@ -252,20 +252,31 @@ async def _wait_for(runtime: Runtime, inp: WaitInput) -> WaitResult:
     if isinstance(condition, TerminalOutput):
         return await _poll(runtime, inp, f"sinnix://terminals/{condition.match}")
     ref, expected = _legacy_target(runtime, condition)
+    launch_reference = (
+        condition.target.resolve()[2] if isinstance(condition, JobTerminal) else None
+    )
     raw = await runtime.v2_wait_async(
-        ref, inp.timeout_seconds, condition.kind, expected, inp.poll_seconds
+        ref,
+        inp.timeout_seconds,
+        condition.kind,
+        expected,
+        inp.poll_seconds,
+        launch_reference=launch_reference,
     )
     if isinstance(condition, JobTerminal) and "outcome" not in raw:
         view = _job_view(raw)
         timed_out = bool(raw.get("timed_out"))
+        # A reorder may have moved the job since the caller addressed it.
         return WaitResult(
             kind=condition.kind,
-            ref=ref,
+            ref=view.ref,
             outcome="timeout" if timed_out else "satisfied",
             timed_out=timed_out,
             evidence=view.state.model_dump(),
             source_revision=source_revision(view.state.model_dump()),
-            continuation=source_revision({"ref": ref, "state": view.state.model_dump()})
+            continuation=source_revision(
+                {"ref": view.ref, "state": view.state.model_dump()}
+            )
             if timed_out
             else None,
             job=view,

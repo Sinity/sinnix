@@ -636,7 +636,13 @@ def job_ref(job_id: int | str) -> str:
 
 
 class JobLocator(GatewayModel):
-    """A queued job by canonical ref or pueue task id."""
+    """A queued job by canonical ref or pueue task id, and the job's own name.
+
+    A task id is a position in the queue: `pueue switch` exchanges the ids of
+    two queued tasks, so an id addresses whatever the queue keeps there. The
+    launch reference every job response carries addresses the job itself, and
+    a locator that includes one follows its job across a reorder.
+    """
 
     ref: str | None = Field(
         default=None,
@@ -648,6 +654,14 @@ class JobLocator(GatewayModel):
         ge=0,
         description="pueue task id, as `agentctl job list` shows it.",
     )
+    launch_reference: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=512,
+        pattern=r"^[A-Za-z0-9._-]+$",
+        description="The job's launch reference, as every job response returns "
+        "it. Include it so the call follows this job if the queue is reordered.",
+    )
 
     @model_validator(mode="after")
     def exactly_one(self) -> JobLocator:
@@ -655,14 +669,14 @@ class JobLocator(GatewayModel):
             raise ValueError("give exactly one of ref or job_id")
         return self
 
-    def resolve(self) -> tuple[int, str]:
-        """Return ``(pueue task id, canonical ref)`` without touching the queue."""
+    def resolve(self) -> tuple[int, str, str | None]:
+        """``(pueue task id, canonical ref, launch reference)``, no queue read."""
         if self.ref is not None:
             match = JOB_REF.match(self.ref)
             assert match is not None
-            return int(match.group(1)), self.ref
+            return int(match.group(1)), self.ref, self.launch_reference
         assert self.job_id is not None
-        return self.job_id, job_ref(self.job_id)
+        return self.job_id, job_ref(self.job_id), self.launch_reference
 
 
 # ------------------------------------------------------------------ machine

@@ -68,6 +68,11 @@ def label_for(project_id: str, operation: str) -> str:
     return f"{project_id}:{operation}"
 
 
+# A reference names one file under inputs/, so it is a single path component
+# in the characters a sanitised label leaves.
+REFERENCE = re.compile(r"^[A-Za-z0-9._-]+$")
+
+
 def _reference(label: str) -> str:
     safe = re.sub(r"[^A-Za-z0-9._-]+", "-", label).strip("-") or "job"
     return f"{safe}-{uuid.uuid4().hex[:SHORT_ID]}"
@@ -534,8 +539,10 @@ def _task(task_id: int) -> Task:
     return task
 
 
-def get_job(task_id: int, config: Config | None = None) -> dict[str, Any]:
-    task = _task(task_id)
+def get_job(
+    task_id: int, config: Config | None = None, reference: str | None = None
+) -> dict[str, Any]:
+    task = addressed(task_id, reference)
     view = job_view(task)
     if config is None:
         return view
@@ -564,21 +571,23 @@ def _artifact(config: Config, task: Task, suffix: str) -> Path | None:
     return config.jobs_dir / f"{reference}{suffix}" if reference else None
 
 
-def logs(config: Config, task_id: int) -> str:
+def logs(config: Config, task_id: int, reference: str | None = None) -> str:
     """The command's bounded log; pueue's own capture holds the wrapper's stderr."""
-    task = _task(task_id)
+    task = addressed(task_id, reference)
     path = _artifact(config, task, ".log")
     raw = read_bounded(path, MAX_LOG_BYTES) if path is not None else None
     text = raw.decode("utf-8", "replace") if raw else ""
-    wrapper = pueue.log(task_id)
+    wrapper = pueue.log(task.task_id)
     if wrapper.strip():
         text = f"{text}\n[wrapper]\n{wrapper}" if text else wrapper
     return text
 
 
-def result(config: Config, task_id: int) -> dict[str, Any]:
+def result(
+    config: Config, task_id: int, reference: str | None = None
+) -> dict[str, Any]:
     """The typed result artifact, or the exit status when the operation declares none."""
-    task = _task(task_id)
+    task = addressed(task_id, reference)
     view = job_view(task)
     path = _artifact(config, task, ".result")
     raw = read_bounded(path, MAX_RESULT_BYTES + 1) if path is not None else None
@@ -586,7 +595,7 @@ def result(config: Config, task_id: int) -> dict[str, Any]:
         return {**view, "kind": "exit", "value": None}
     if len(raw) > MAX_RESULT_BYTES:
         raise JobError(
-            f"result artifact for task {task_id} exceeds {MAX_RESULT_BYTES} bytes"
+            f"result artifact for task {task.task_id} exceeds {MAX_RESULT_BYTES} bytes"
         )
     text = raw.decode("utf-8", "replace")
     try:
@@ -625,6 +634,7 @@ def cancel(
     config: Config,
     task_id: int,
     *,
+    reference: str | None = None,
     settle_seconds: float | None = None,
     sleep: Callable[[float], None] = time.sleep,
 ) -> dict[str, Any]:
@@ -640,7 +650,8 @@ def cancel(
     """
     if settle_seconds is None:
         settle_seconds = CANCEL_SETTLE_SECONDS
-    task = _task(task_id)
+    task = addressed(task_id, reference)
+    task_id = task.task_id
     view = job_view(task)
     if task.terminal:
         return {**view, "state": "terminal", "unit": None}
@@ -720,38 +731,70 @@ def _own_artifacts(config: Config, task: Task) -> list[Path]:
     return paths
 
 
-def clean(config: Config, task_id: int) -> dict[str, Any]:
+def clean(
+    config: Config, task_id: int, reference: str | None = None
+) -> dict[str, Any]:
     """Delete a terminal task and its artifacts. Ownership, never age.
 
     A task pueue no longer knows is cleaned by the artifacts its launch
     input under the state directory still names.
     """
-    task = pueue.task(task_id)
+    if reference is not None and not REFERENCE.match(reference):
+        raise JobError(f"{reference!r} is not a launch reference")
+    tasks = pueue.tasks()
+    task = find_task(tasks, task_id, reference)
     if task is None:
-        removed = _unlink_all(_orphaned_artifacts(config, task_id))
+        removed = _unlink_all(_orphaned_artifacts(config, tasks, task_id, reference))
         if not removed:
-            raise JobError(f"pueue has no task {task_id}")
-        return {"job_id": task_id, "cleaned": True, "removed": removed}
+            raise JobError(f"pueue has no task {reference or task_id}")
+        return {
+            "job_id": task_id,
+            "reference": reference,
+            "cleaned": True,
+            "removed": removed,
+        }
     if not task.terminal:
         raise JobError(
-            f"task {task_id} is still {task.status.lower()}; cancel it first"
+            f"task {task.task_id} is still {task.status.lower()}; cancel it first"
         )
     removed = _unlink_all(_own_artifacts(config, task))
-    pueue.remove([task_id])
+    pueue.remove([task.task_id])
     return {**job_view(task), "cleaned": True, "removed": removed}
 
 
-def _orphaned_artifacts(config: Config, task_id: int) -> list[Path]:
-    """The artifacts of the launch input under inputs/ that names ``task_id``."""
+def _orphaned_artifacts(
+    config: Config,
+    tasks: Mapping[int, Task],
+    task_id: int,
+    reference: str | None = None,
+) -> list[Path]:
+    """The artifacts of a launch input no task in the queue still carries.
+
+    An input records the id its job was queued at, and `pueue switch` moves
+    the job to another id afterwards, so a vacant id is no evidence that the
+    job written there is gone. A reference the queue still carries is that
+    evidence: the input it names belongs to a live task and no clean removes
+    it, whatever id either was written with.
+    """
     if not config.inputs_dir.is_dir():
         return []
-    for input_path in sorted(config.inputs_dir.glob("*.json")):
+    live = {launch_reference(task) for task in tasks.values()}
+    candidates = (
+        [config.inputs_dir / f"{reference}.json"]
+        if reference is not None
+        else sorted(config.inputs_dir.glob("*.json"))
+    )
+    for input_path in candidates:
+        if input_path.stem in live:
+            continue
         raw = read_bounded(input_path, MAX_LAUNCH_INPUT_BYTES)
         try:
             value = json.loads(raw.decode("utf-8")) if raw else None
         except (UnicodeDecodeError, json.JSONDecodeError):
             continue
-        if not isinstance(value, dict) or value.get("queue_task_id") != task_id:
+        if not isinstance(value, dict):
+            continue
+        if reference is None and value.get("queue_task_id") != task_id:
             continue
         paths = [input_path]
         for key in ("log_path", "result_path"):
@@ -770,7 +813,7 @@ def _orphaned_artifacts(config: Config, task_id: int) -> list[Path]:
 def clean_terminal(config: Config) -> list[dict[str, Any]]:
     """`clean` for every terminal task that ran the wrapper."""
     return [
-        clean(config, task.task_id)
+        clean(config, task.task_id, launch_reference(task))
         for task in sorted(pueue.tasks().values(), key=lambda item: item.task_id)
         if task.terminal and launch_input_path(task) is not None
     ]
@@ -823,13 +866,13 @@ def clean_daemon_era(config: Config) -> dict[str, Any]:
     return {"state_dir": str(root), "removed": removed}
 
 
-def retry(task_id: int) -> dict[str, Any]:
+def retry(task_id: int, reference: str | None = None) -> dict[str, Any]:
     """pueue's in-place restart: the same launch input runs again under the same id."""
-    task = _task(task_id)
+    task = addressed(task_id, reference)
     if not task.terminal:
-        raise JobError(f"task {task_id} is still {task.status.lower()}")
-    pueue.restart(task_id)
-    return get_job(task_id)
+        raise JobError(f"task {task.task_id} is still {task.status.lower()}")
+    pueue.restart(task.task_id)
+    return get_job(task.task_id)
 
 
 def find_task(
@@ -844,22 +887,22 @@ def find_task(
     return tasks.get(task_id) if isinstance(task_id, int) else None
 
 
-def _following(reference: str | None, task_id: int) -> Task:
+def addressed(task_id: int, reference: str | None = None) -> Task:
     """The task carrying this job now, whatever id the queue moved it to.
 
     `pueue switch` exchanges the ids of two queued tasks, so an id names a
     position in the queue and not a job. The launch reference does name one:
     pueue carries a task's command wherever it moves the task, and the
-    reference is the launch input path inside that command.
+    reference is the launch input path inside that command. A caller that
+    holds a reference addresses its own job; one that holds only an id
+    addresses whatever the queue keeps at that position, which one read of
+    that position answers.
     """
-    tasks = pueue.tasks()
-    task = find_task(tasks, task_id, reference)
-    if reference is not None:
-        if task is not None:
-            return task
-        raise JobError(f"pueue has no task for job {reference}")
+    if reference is None:
+        return _task(task_id)
+    task = find_task(pueue.tasks(), task_id, reference)
     if task is None:
-        raise JobError(f"pueue has no task {task_id}")
+        raise JobError(f"pueue has no task for job {reference}")
     return task
 
 
@@ -891,7 +934,7 @@ def wait(
     deadline = time.monotonic() + timeout_seconds
     if reference is None:
         reference = launch_reference(_task(task_id))
-    task = _following(reference, task_id)
+    task = addressed(task_id, reference)
     detail: str | None = None
     while True:
         if task.terminal:
@@ -910,4 +953,4 @@ def wait(
                 return {**job_view(task), "wait_timed_out": True}
         except PueueError as error:
             detail = str(error)
-        task = _following(reference, task_id)
+        task = addressed(task_id, reference)

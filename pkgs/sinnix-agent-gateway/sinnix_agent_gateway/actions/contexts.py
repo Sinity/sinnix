@@ -82,7 +82,7 @@ _AFFORDANCES: dict[str, list[str]] = {
 
 def _compose(runtime: Runtime, inp: ComposeInput) -> ComposedContext:
     if inp.job is not None:
-        _, ref = inp.job.resolve()
+        _, ref, _ = inp.job.resolve()
     else:
         assert inp.project is not None
         ref = project_ref(inp.project.resolve(runtime))

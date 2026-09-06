@@ -64,10 +64,18 @@ directory, the timeout, the result kind and the artifact paths, then runs
 
 A task id is a queue position: `pueue switch` exchanges the ids of two
 queued tasks. The durable name of a job is the launch reference inside the
-task's command, so a wait re-reads which id holds its job while the job can
-still move, and returns the terminal state of the job it started at
-whatever id that is. Every other read answers about the job the queue holds
-at the id it is given.
+task's command, which every job response returns. Every verb that takes a
+job id also takes that reference as `--reference`, and addresses the job
+wherever the queue has moved it; without one it addresses whatever the queue
+holds at the id it is given. A wait also re-reads which id holds its job
+while the job can still move. Batch manifests store each worker's and the
+landing's reference, so view, resume, cancellation and cleanup address the
+job the run queued.
+
+Cleanup is bound to the same name. A launch input records the id its job was
+queued at, so a vacant id is no evidence that the job written there is gone;
+an input whose reference a queued or running task still carries belongs to
+that task and no clean removes it.
 
 `agentctl-run` is the command every task runs. It appends a `started`
 event to the spool naming the group pueue ran it in, then runs the argv as a

@@ -1068,7 +1068,14 @@ class Runtime:
         expected: Mapping[str, Any] | None = None,
         poll_seconds: float = 0.25,
         cancelled: Callable[[], bool] | None = None,
+        launch_reference: str | None = None,
     ) -> dict[str, Any]:
+        """``reference`` is the canonical ref of the waited resource.
+
+        ``launch_reference`` is a job's own name, and a job wait that has one
+        follows its job across a queue reorder instead of the task id the ref
+        encodes.
+        """
         if not isinstance(reference, str) or not 1 <= len(reference) <= 2_048:
             raise ProtocolError("invalid_request", "wait ref is malformed")
         try:
@@ -1095,11 +1102,17 @@ class Runtime:
                     "source_revision": "cancelled",
                     "continuation": source_revision({"ref": reference}),
                 }
+            wait_arguments: dict[str, Any] = {
+                "job_id": values["job_id"],
+                "timeout_seconds": timeout_seconds,
+            }
+            if launch_reference is not None:
+                wait_arguments["launch_reference"] = launch_reference
             if cancelled is None:
                 result = await anyio.to_thread.run_sync(
                     self._job,
                     "job.wait",
-                    {"job_id": values["job_id"], "timeout_seconds": timeout_seconds},
+                    wait_arguments,
                     abandon_on_cancel=True,
                 )
             else:
@@ -1110,10 +1123,7 @@ class Runtime:
                     result_box["result"] = await anyio.to_thread.run_sync(
                         self._job,
                         "job.wait",
-                        {
-                            "job_id": values["job_id"],
-                            "timeout_seconds": timeout_seconds,
-                        },
+                        wait_arguments,
                         abandon_on_cancel=True,
                     )
                     task_group.cancel_scope.cancel()
@@ -1156,14 +1166,23 @@ class Runtime:
                         {"ref": reference, "evidence": evidence}
                     ),
                 }
-            if result.get("job_id") != values["job_id"]:
+            # The answer must name the identity the wait addressed. A launch
+            # reference names the job wherever the queue moved it, so its
+            # answer carries the id the job is at now; an id alone names only
+            # the position, and its answer must still be about that position.
+            answered = (
+                result.get("launch_reference")
+                if launch_reference is not None
+                else result.get("job_id")
+            )
+            if answered != (launch_reference or values["job_id"]):
                 raise ProtocolError(
                     "owner_failed",
                     "job owner wait response does not match the requested job",
                 )
             return {
                 **result,
-                "ref": REGISTRY.reference("job", {"job_id": values["job_id"]}),
+                "ref": REGISTRY.reference("job", {"job_id": result["job_id"]}),
                 "target": wait_target.value,
             }
         if self.waits is None:

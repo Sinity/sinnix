@@ -95,6 +95,10 @@ class WorkerView(GatewayModel):
     )
     job_id: int | None = None
     job_ref: str | None = None
+    job_launch_reference: str | None = Field(
+        default=None,
+        description="This worker's job as jobs.* addresses it across a reorder.",
+    )
     job_ids: list[int] = Field(
         default_factory=list,
         description="Every task this worker has had, oldest first.",
@@ -109,6 +113,10 @@ class WorkerView(GatewayModel):
 class LandingView(GatewayModel):
     job_id: int | None = None
     job_ref: str | None = None
+    job_launch_reference: str | None = Field(
+        default=None,
+        description="The landing job as jobs.* addresses it across a reorder.",
+    )
     state: JobState | None = None
     integration_branch: str | None = None
     candidate_sha: str | None = None
@@ -148,6 +156,10 @@ def _state(raw: Any) -> JobState | None:
     )
 
 
+def _reference(raw: Any) -> str | None:
+    return str(raw) if isinstance(raw, str) and raw else None
+
+
 def _job_id(raw: Any) -> int | None:
     try:
         return int(raw)
@@ -169,6 +181,7 @@ def _worker_view(project_id: str, payload: Mapping[str, Any]) -> WorkerView:
         stage=payload.get("stage"),
         job_id=job_id,
         job_ref=job_ref(job_id) if job_id is not None else None,
+        job_launch_reference=_reference(payload.get("job_launch_reference")),
         job_ids=[
             value
             for value in (_job_id(item) for item in payload.get("job_ids") or [])
@@ -220,6 +233,7 @@ def _run_view(payload: Mapping[str, Any]) -> RunView:
         landing=LandingView(
             job_id=landing_job,
             job_ref=job_ref(landing_job) if landing_job is not None else None,
+            job_launch_reference=_reference(landing.get("job_launch_reference")),
             state=_state(landing.get("state")),
             integration_branch=landing.get("integration_branch"),
             candidate_sha=landing.get("candidate_sha"),
@@ -439,7 +453,7 @@ ACTIONS: tuple[Action, ...] = (
             "how is the batch",
             "agentctl batch status",
         ),
-        documentation="Every id is a pueue task id: pass worker or landing job_id straight to jobs.logs, jobs.wait or jobs.cancel.",
+        documentation="Every id is a pueue task id: pass a worker's or the landing's job_id to jobs.logs, jobs.wait or jobs.cancel, with its job_launch_reference so the call survives a reorder.",
         examples=(
             Example(title="By run suffix", input={"target": _SUFFIX}),
             Example(title="By canonical ref", input={"target": {"ref": _RUN}}),

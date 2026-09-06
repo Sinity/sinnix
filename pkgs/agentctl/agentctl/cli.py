@@ -107,6 +107,14 @@ def _project_option(target: argparse.ArgumentParser) -> None:
     target.add_argument("--project", help=PROJECT_HELP)
 
 
+def _reference_option(target: argparse.ArgumentParser) -> None:
+    target.add_argument(
+        "--reference",
+        help="the job's launch reference; addresses the job itself rather "
+        "than whatever task id the queue currently keeps it at",
+    )
+
+
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(
         prog="agentctl",
@@ -169,11 +177,13 @@ def parser() -> argparse.ArgumentParser:
     for name in ("get", "logs", "result", "cancel", "retry"):
         one = job_verbs.add_parser(name)
         one.add_argument("job_id", type=int)
+        _reference_option(one)
         _output_arguments(one)
     clean = job_verbs.add_parser(
         "clean", help="delete a terminal task and its artifacts (never by age)"
     )
     clean.add_argument("job_id", type=int, nargs="?")
+    _reference_option(clean)
     clean.add_argument("--all-terminal", action="store_true")
     clean.add_argument(
         "--daemon-era",
@@ -183,6 +193,7 @@ def parser() -> argparse.ArgumentParser:
     _output_arguments(clean)
     wait = job_verbs.add_parser("wait")
     wait.add_argument("job_id", type=int)
+    _reference_option(wait)
     wait.add_argument("--timeout-seconds", type=int, default=DEFAULT_WAIT_SECONDS)
     _output_arguments(wait)
 
@@ -398,14 +409,14 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         out.read(rows, out.jobs_table(rows))
         return EXIT_OK
     if verb == "get":
-        job = launch.get_job(arguments.job_id, config)
+        job = launch.get_job(arguments.job_id, config, arguments.reference)
         out.read(job, out.job_line(job))
         return EXIT_OK
     if verb == "logs":
-        sys.stdout.write(launch.logs(config, arguments.job_id))
+        sys.stdout.write(launch.logs(config, arguments.job_id, arguments.reference))
         return EXIT_OK
     if verb == "result":
-        result = launch.result(config, arguments.job_id)
+        result = launch.result(config, arguments.job_id, arguments.reference)
         value = result.get("value")
         text = (
             out.job_line(result)
@@ -419,7 +430,7 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         out.read(result, text)
         return EXIT_OK
     if verb == "cancel":
-        job = launch.cancel(config, arguments.job_id)
+        job = launch.cancel(config, arguments.job_id, reference=arguments.reference)
         out.write(job, f"{out.job_line(job)}; {job['state']}")
         return EXIT_REFUSED if job["state"] == "failed" else EXIT_OK
     if verb == "clean":
@@ -436,16 +447,18 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
             return EXIT_OK
         if arguments.job_id is None:
             raise JobError("job clean needs a job id, --all-terminal or --daemon-era")
-        job = launch.clean(config, arguments.job_id)
+        job = launch.clean(config, arguments.job_id, arguments.reference)
         out.write(job, f"{out.job_line(job)}; cleaned")
         return EXIT_OK
     if verb == "retry":
-        job = launch.retry(arguments.job_id)
+        job = launch.retry(arguments.job_id, arguments.reference)
         out.write(job, out.job_line(job))
         return EXIT_OK
     if verb == "wait":
         waited = launch.wait(
-            arguments.job_id, timeout_seconds=arguments.timeout_seconds
+            arguments.job_id,
+            timeout_seconds=arguments.timeout_seconds,
+            reference=arguments.reference,
         )
         out.read(
             waited,
