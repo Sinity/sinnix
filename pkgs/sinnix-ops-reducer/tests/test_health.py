@@ -598,3 +598,57 @@ def test_newest_mtime_handles_file_lane_paths(tmp_path):
     lane_file.write_text("ok\n")
     assert newest_mtime(lane_file) == lane_file.stat().st_mtime
     assert newest_mtime(tmp_path / "absent.jsonl") is None
+
+
+def test_newest_mtime_is_bounded_and_finds_newest_partition_first(tmp_path):
+    """A wide time-partitioned tree must not be walked exhaustively: the
+    newest file sits under the newest subdirectory and must be found within
+    the stat budget. Mutation: restoring os.walk fails the call-count bound."""
+    import os
+
+    from sinnix_ops_reducer import health
+
+    for day in range(50):
+        sub = tmp_path / f"2026-01-{day + 1:02d}"
+        sub.mkdir()
+        for i in range(40):
+            f = sub / f"{i}.jsonl"
+            f.write_text("x")
+            os.utime(f, (1_000_000 + day * 100 + i,) * 2)
+        os.utime(sub, (1_000_000 + day * 100,) * 2)
+    newest_file = tmp_path / "2026-01-50" / "39.jsonl"
+    stats: list[str] = []
+    real_scandir = os.scandir
+
+    class CountingEntry:
+        def __init__(self, entry):
+            self._entry = entry
+            self.path = entry.path
+
+        def stat(self, follow_symlinks=True):
+            stats.append(self.path)
+            return self._entry.stat(follow_symlinks=follow_symlinks)
+
+        def is_file(self, follow_symlinks=True):
+            return self._entry.is_file(follow_symlinks=follow_symlinks)
+
+        def is_dir(self, follow_symlinks=True):
+            return self._entry.is_dir(follow_symlinks=follow_symlinks)
+
+    class CountingScandir:
+        def __init__(self, directory):
+            self._it = real_scandir(directory)
+
+        def __enter__(self):
+            return (CountingEntry(e) for e in self._it)
+
+        def __exit__(self, *exc):
+            self._it.close()
+
+    health.os.scandir = CountingScandir
+    try:
+        assert health.newest_mtime(tmp_path, budget=200) == newest_file.stat().st_mtime
+    finally:
+        health.os.scandir = real_scandir
+    assert len(stats) <= 200
+    assert len(stats) < 2000  # 50 dirs * 40 files: an exhaustive walk stats them all
