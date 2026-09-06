@@ -1,23 +1,8 @@
 from __future__ import annotations
 
-import importlib.util
-import sys
-from importlib.machinery import SourceFileLoader
-from pathlib import Path
+from conftest import load_script
 
-
-def _load_script(name: str):
-    script = Path(__file__).resolve().parents[3] / "scripts" / name
-    loader = SourceFileLoader(name.replace("-", "_"), str(script))
-    spec = importlib.util.spec_from_loader(loader.name, loader)
-    assert spec is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[loader.name] = module
-    loader.exec_module(module)
-    return module
-
-
-daemon = _load_script("sinnix-nav-capture-daemon")
+daemon = load_script("sinnix-nav-capture-daemon")
 
 
 def test_reading_stack_push_passes_provenance_and_note(monkeypatch):

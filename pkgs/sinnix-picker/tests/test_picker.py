@@ -1,24 +1,10 @@
 from __future__ import annotations
 
-import importlib.util
 import subprocess
-import sys
-from importlib.machinery import SourceFileLoader
-from pathlib import Path
 
+from conftest import load_script
 
-def _load_script(name: str):
-    script = Path(__file__).resolve().parents[3] / "scripts" / name
-    loader = SourceFileLoader(name.replace("-", "_"), str(script))
-    spec = importlib.util.spec_from_loader(loader.name, loader)
-    assert spec is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[loader.name] = module
-    loader.exec_module(module)
-    return module
-
-
-picker = _load_script("sinnix-picker")
+picker = load_script("sinnix-picker")
 
 
 def test_duplicate_labels_select_the_chosen_row(monkeypatch):
