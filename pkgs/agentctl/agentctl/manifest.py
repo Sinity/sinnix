@@ -291,15 +291,29 @@ def update(config: Config, run_id: str, fn: Callable[[dict[str, Any]], None]) ->
     return updated
 
 
-def list_runs(config: Config, project_id: str | None = None) -> list[Run]:
+def list_runs(
+    config: Config, project_id: str | None = None, *, strict: bool = False
+) -> list[Run]:
     directory = runs_dir(config)
-    if not directory.is_dir():
+    try:
+        paths = sorted(path for path in directory.iterdir() if path.suffix == ".json")
+    except FileNotFoundError:
+        return []
+    except OSError as error:
+        if strict:
+            raise BatchRefusal(
+                "manifest", f"cannot inventory {directory}: {error}"
+            ) from error
         return []
     runs = []
-    for path in sorted(directory.glob("*.json")):
+    for path in paths:
         try:
             run = Run.from_dict(json.loads(path.read_text()))
-        except (OSError, json.JSONDecodeError, BatchRefusal):
+        except (OSError, json.JSONDecodeError, BatchRefusal) as error:
+            if strict:
+                raise BatchRefusal(
+                    "manifest", f"cannot read {path}: {error}"
+                ) from error
             continue
         if project_id is None or run.project == project_id:
             runs.append(run)
