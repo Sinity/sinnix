@@ -49,6 +49,7 @@ RUN = {
             "worktree": f"/realm/worktrees/fixture-batch-{RUN_ID}-fixture-7",
             "stage": "running",
             "job_id": "41",
+            "job_launch_reference": "fixture-worker-abcd1234",
             "job_ids": ["41"],
             "backend": "claude",
             "model": "claude-opus-5",
@@ -59,6 +60,7 @@ RUN = {
     ],
     "landing": {
         "job_id": "42",
+        "job_launch_reference": "fixture-integrate-9f10",
         "integration_branch": f"batch/{RUN_ID}/integration",
         "candidate_sha": None,
         "pr_number": None,
@@ -149,10 +151,13 @@ def test_status_names_every_worker_bead_and_the_pueue_ids_jobs_actions_take(
         "sinnix://projects/fixture/beads/fixture-8",
     ]
     assert worker["job_id"] == 41 and worker["job_ref"] == "sinnix://jobs/41"
+    # The stable identity a jobs.* call takes so a reorder cannot redirect it.
+    assert worker["job_launch_reference"] == "fixture-worker-abcd1234"
     assert worker["job_ids"] == [41]
     assert worker["state"]["phase"] == "running"
     assert data["landing"]["job_id"] == 42
     assert data["landing"]["job_ref"] == "sinnix://jobs/42"
+    assert data["landing"]["job_launch_reference"] == "fixture-integrate-9f10"
     assert data["affordances"] == ["batches.status", "jobs.wait", "jobs.logs"]
     assert fake.calls[-1].arguments == {"run_id": "a2c81926"}
 
