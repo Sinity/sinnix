@@ -93,9 +93,9 @@ Declared operations choose a pueue group (`interactive`, `normal`, `bulk`,
 `agentctl pools apply`, never by restarting pueued. The group bounds
 concurrency; `agentctl-backpressure.timer` pauses groups under sustained
 host IO or memory stall; memory is bounded by the slice hierarchy, not by
-per-job arithmetic. Fixed runtime surfaces use the
-resource classes and slice budgets declared in
-`flake/data/runtime-defaults.nix`; do not restate those values here.
+per-job arithmetic. Fixed runtime surfaces use the resource classes and
+slice budgets declared in `flake/data/runtime-defaults.nix`; do not restate
+those values here.
 
 Hard `MemoryMax` is reserved for explicit safety boundaries (a batch worker's
 unit). Environment construction, scratch ownership, logging, timeout,
