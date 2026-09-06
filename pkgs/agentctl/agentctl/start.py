@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from . import gitcmd, pueue, results, worktrunk
+from . import gitcmd, launch, pueue, results, worktrunk
 from .agents import (
     PUSH_TIMEOUT_SECONDS,
     WORKTREE_STATE_DIR,
@@ -217,7 +217,13 @@ def _prepare(
                 binding=binding(run, worker_id),
                 inaccessible=other_worktrees(project, run, worker_id),
             )
-            run = set_worker(config, run.run_id, index, task_id=job["job_id"])
+            run = set_worker(
+                config,
+                run.run_id,
+                index,
+                task_id=job["job_id"],
+                task_reference=job.get("reference"),
+            )
     if run.landing.get("task_id") is None:
         after = [
             worker["task_id"]
@@ -227,7 +233,15 @@ def _prepare(
         landing_id = queue_landing(
             config, project, run, after=after, stashed=run.harness == "external"
         )
-        run = land_update(config, run.run_id, task_id=landing_id)
+        landing_task = pueue.task(landing_id)
+        run = land_update(
+            config,
+            run.run_id,
+            task_id=landing_id,
+            task_reference=launch.launch_reference(landing_task)
+            if landing_task is not None
+            else None,
+        )
 
     def mark_prepared(document: dict[str, Any]) -> None:
         document["prepared"] = True
@@ -485,9 +499,11 @@ def result(
         and isinstance(landing_id, int)
         and all(item.get("result") for item in run.workers)
     ):
-        task = pueue.task(landing_id)
+        task = launch.find_task(
+            pueue.tasks(), landing_id, run.landing.get("task_reference")
+        )
         if task is not None and task.status == "Stashed":
-            pueue.enqueue(landing_id)
+            pueue.enqueue(task.task_id)
             released = True
     return {
         **run.worker(worker_id),
@@ -520,8 +536,8 @@ def resume(
             f"worker {worker_id} has no worktree; start the batch instead",
         )
     tasks = pueue.tasks()
-    current = (
-        tasks.get(worker["task_id"]) if isinstance(worker.get("task_id"), int) else None
+    current = launch.find_task(
+        tasks, worker.get("task_id"), worker.get("task_reference")
     )
     if current is not None and not current.terminal:
         raise BatchRefusal(
@@ -568,6 +584,7 @@ def resume(
             if entry["id"] == worker_id:
                 entry["task_id"] = task_id
                 entry["task_ids"] = [*entry.get("task_ids", []), task_id]
+                entry["task_reference"] = job.get("reference")
                 entry["result"] = None
                 entry["result_path"] = str(resume_result)
                 entry["prompt_path"] = str(
@@ -581,15 +598,23 @@ def resume(
         # A landing task waits on the worker tasks it was queued behind; the
         # new worker task is not among them, so any landing that has not
         # started is replaced by one queued behind every current worker task.
-        old = tasks.get(landing_id) if isinstance(landing_id, int) else None
+        old = launch.find_task(tasks, landing_id, run.landing.get("task_reference"))
         replace = old is None or old.status != "Running"
         if old is not None and replace:
-            pueue.remove([landing_id])
+            pueue.remove([old.task_id])
         if replace:
+            current_tasks = pueue.tasks()
             after = [
-                item["task_id"]
+                task.task_id
                 for item in run.workers
-                if isinstance(item.get("task_id"), int)
+                if (
+                    task := launch.find_task(
+                        current_tasks,
+                        item.get("task_id"),
+                        item.get("task_reference"),
+                    )
+                )
+                is not None
             ]
             new_landing = queue_landing(
                 config, project, run, after=after, stashed=False
@@ -597,6 +622,10 @@ def resume(
 
             def relink(document: dict[str, Any]) -> None:
                 document["landing"]["task_id"] = new_landing
+                task = pueue.task(new_landing)
+                document["landing"]["task_reference"] = (
+                    launch.launch_reference(task) if task is not None else None
+                )
 
             run = update(config, run_id, relink)
     return {**run.to_dict(), "job": job, "worker": worker_id}
