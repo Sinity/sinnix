@@ -8,16 +8,12 @@ post-switch coordinator check.
 from __future__ import annotations
 
 import json
-import threading
 import urllib.error
 import urllib.request
-from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
 from sinnix_ops_reducer import terminals
-from sinnix_ops_reducer.reducer import Reducer
-from sinnix_ops_reducer.server import Handler
 
 
 def test_named_keys_reject_anything_not_in_the_quick_action_set() -> None:
@@ -111,70 +107,45 @@ def test_is_terminal_route_does_not_capture_the_estate_root() -> None:
 
 
 @pytest.fixture
-def hub_server(tmp_path: Path):
-    reducer = Reducer(tmp_path / "status.json", tmp_path / "token", lambda: {})
-    reducer.refresh()
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    server.reducer = reducer
-    server.token = "fixture-token"
-    server.is_unix = True
-    server.hub_manifest = None
-    server.inventory_path = tmp_path / "missing-inventory.json"
-    server.feedback = None
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        yield f"http://127.0.0.1:{server.server_address[1]}"
-    finally:
-        server.shutdown()
-        server.server_close()
-
-
-def get(url: str) -> tuple[int, str, str]:
-    try:
-        with urllib.request.urlopen(url, timeout=10) as response:
-            return (
-                response.status,
-                response.headers["Content-Type"],
-                response.read().decode(),
-            )
-    except urllib.error.HTTPError as error:
-        return error.code, error.headers["Content-Type"], error.read().decode()
+def hub_server(hub_server_factory) -> str:
+    return hub_server_factory()
 
 
 def test_the_terminal_index_page_is_reachable_over_the_shared_listener(
-    hub_server: str,
+    hub_server: str, http_get
 ) -> None:
-    status, content_type, body = get(hub_server + "/terminals/")
+    status, content_type, body = http_get(hub_server + "/terminals/")
     assert status == 200
     assert content_type.startswith("text/html")
     assert "sinnix terminals" in body
     # Without the trailing slash too -- the client-side JS hardcodes
     # /terminals/v1/... paths regardless of which alias loaded the page.
-    assert get(hub_server + "/terminals")[0] == 200
+    assert http_get(hub_server + "/terminals")[0] == 200
 
 
 def test_windows_list_is_json_on_the_shared_listener(
-    hub_server: str, monkeypatch
+    hub_server: str, http_get, monkeypatch
 ) -> None:
     monkeypatch.setattr(terminals, "list_windows", lambda: [{"kitty_pid": 1}])
-    status, content_type, body = get(hub_server + "/terminals/v1/windows")
+    status, content_type, body = http_get(hub_server + "/terminals/v1/windows")
     assert status == 200
     assert content_type == "application/json"
     assert json.loads(body) == [{"kitty_pid": 1}]
 
 
-def test_an_unknown_terminal_path_is_a_json_404(hub_server: str) -> None:
-    status, content_type, body = get(hub_server + "/terminals/v1/nope")
+def test_an_unknown_terminal_path_is_a_json_404(hub_server: str, http_get) -> None:
+    status, content_type, body = http_get(hub_server + "/terminals/v1/nope")
     assert status == 404
     assert content_type == "application/json"
     assert json.loads(body)["error"] == "not_found"
 
 
-def test_the_ops_json_api_still_answers_alongside_terminals(hub_server: str) -> None:
+def test_the_ops_json_api_still_answers_alongside_terminals(
+    hub_server: str, http_get
+) -> None:
     # The route merge must not shadow the pre-existing /v1/* namespace: proof
     # that /terminals and /v1/health are dispatched by disjoint branches.
-    status, content_type, body = get(hub_server + "/v1/health")
+    status, content_type, body = http_get(hub_server + "/v1/health")
     assert status == 200
     assert content_type == "application/json"
     assert json.loads(body)["schema"] == "sinnix-ops-v1"
