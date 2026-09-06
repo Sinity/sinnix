@@ -7,8 +7,10 @@
 #
 # Provably fails when: a `polylogue-hook <Event>` lane present in Claude's
 # settings is dropped from the generated Codex hooks, when a writer bakes a
-# sidecar path, when generated archive.root stops following dataDir, or when
-# either client loses the pre-compaction handoff or shared hook coverage.
+# sidecar path, when generated archive.root stops following dataDir, when a
+# hook invocation stops leaving a pending envelope naming its provider and
+# event, or when either client loses the pre-compaction handoff or shared
+# hook coverage.
 { inputs, ... }:
 let
   inherit (inputs.nixpkgs) lib;
@@ -104,7 +106,10 @@ in
               fi
             }
 
-            test -x "$polylogueHook/bin/polylogue-hook"
+            test -x "$polylogueHook/bin/polylogue-hook" || {
+              echo "upstream polylogue-hook is not an executable in $polylogueHook" >&2
+              exit 1
+            }
 
             # The evidence lanes: every lifecycle event on which a client
             # ships a session to Polylogue. Codex must cover at least what
@@ -124,7 +129,10 @@ in
             }
             lanes "$claudeHooks" > claude-lanes
             lanes "$codexHooks" > codex-lanes
-            test -s claude-lanes
+            test -s claude-lanes || {
+              echo "Claude settings declare no polylogue-hook capture lane at all" >&2
+              exit 1
+            }
             missing="$(comm -23 claude-lanes codex-lanes)"
             if [ -n "$missing" ]; then
               echo "Codex hooks are missing Polylogue capture lanes Claude has: $missing" >&2
@@ -147,8 +155,14 @@ in
             }
             writer_rows "$claudeHooks" | sort > claude-writers
             writer_rows "$codexHooks" | sort > codex-writers
-            test -s claude-writers
-            test -s codex-writers
+            test -s claude-writers || {
+              echo "Claude settings declare no polylogue-hook writer row" >&2
+              exit 1
+            }
+            test -s codex-writers || {
+              echo "generated Codex hooks declare no polylogue-hook writer row" >&2
+              exit 1
+            }
             cut -f1 claude-writers > claude-writer-lanes
             cut -f1 codex-writers > codex-writer-lanes
             diff -u claude-writer-lanes codex-writer-lanes
@@ -234,13 +248,26 @@ in
                 strace -f -e trace=file -o "$smoke_root/claude.trace" \
                 "$polylogueHook/bin/polylogue-hook" Stop \
                   --provider claude-code
-            test -n "$(find "$primary" -type f -name 'codex-*.jsonl' -print -quit)"
-            test -n "$(find "$primary" -type f -name 'claude-code-*.jsonl' -print -quit)"
-            require_text UserPromptSubmit "$trace" codex-event
-            require_text --provider "$trace" provider-flag
-            require_text codex "$trace" codex-provider
-            require_text Stop "$smoke_root/claude.trace" claude-event
-            require_text claude-code "$smoke_root/claude.trace" claude-provider
+            # The hook's observable output is the day-sharded pending spool
+            # under the configured root: one envelope per invocation, carrying
+            # the provider and event it was invoked with. Assert the envelope
+            # bodies rather than file names, which encode neither.
+            envelopes="$(find "$primary/pending" -type f -name '*.json' 2>/dev/null)"
+            require_envelope() {
+              provider="$1"
+              event="$2"
+              session="$3"
+              if [ -z "$envelopes" ] || ! jq -se \
+                --arg p "$provider" --arg e "$event" --arg s "$session" \
+                'any(.[]; .provider == $p and .event_type == $e and .session_id == $s)' \
+                $envelopes >/dev/null; then
+                echo "no pending hook envelope for $provider/$event/$session under $primary/pending" >&2
+                find "$primary" -type f -print -exec cat {} \; >&2
+                exit 1
+              fi
+            }
+            require_envelope codex UserPromptSubmit parity-codex
+            require_envelope claude-code Stop parity-claude
             test -z "$(find "$archive_decoy" "$smoke_root/home" "$smoke_root/xdg-data" "$smoke_root/xdg-state" -mindepth 1 -print -quit)" \
               || { echo 'isolated Polylogue hook smoke wrote a decoy root' >&2; exit 1; }
             reject_text '/realm/state/polylogue' "$trace" live-hook-root
