@@ -33,10 +33,10 @@ RESUME_BELOW = 10.0
 # Conversations stay admissible under both signals. Their fixed six-slot cap
 # and cgroup limits bound them; pressure gates the heavy work they can launch.
 CLOSE_ORDER = {
-    "io": ("pytest", "bulk"),
-    "memory": ("pytest", "normal", "bulk"),
+    "io": ("pytest", "bulk", "pytest-quick"),
+    "memory": ("pytest", "normal", "bulk", "pytest-quick"),
 }
-MANAGED_GROUPS = ("agent", "pytest", "normal", "bulk")
+MANAGED_GROUPS = ("agent", "pytest", "pytest-quick", "normal", "bulk")
 
 # Every pause this module records names itself, and `tick` reopens only a
 # group whose most recent pause event is its own and that has not run since:
