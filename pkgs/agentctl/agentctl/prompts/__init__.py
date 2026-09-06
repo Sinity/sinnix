@@ -406,17 +406,6 @@ def scope_violations(paths: Sequence[str], globs: Sequence[str]) -> list[str]:
     return [path for path in paths if not in_scope(path, globs)]
 
 
-def _scopes_overlap(left: str, right: str) -> bool:
-    """Identical globs, one a directory prefix of the other, or one matching the other."""
-    if left == right:
-        return True
-    left_dir = left.rstrip("/") + "/"
-    right_dir = right.rstrip("/") + "/"
-    if left.startswith(right_dir) or right.startswith(left_dir):
-        return True
-    return fnmatch.fnmatchcase(left, right) or fnmatch.fnmatchcase(right, left)
-
-
 def _open_external_blockers(
     bead: Mapping[str, Any], members: set[str], reader: BdReader
 ) -> list[str]:
@@ -453,13 +442,12 @@ def validate_members(
     ``workers`` groups member ids per worker; ``claimed`` holds ids already in
     another run. A member is executable when it exists, is open or in
     progress, has no open ``blocks`` dependency outside the member set, has
-    no assignee, belongs to one worker only, and its write scope is disjoint
-    from every other worker's.
+    no assignee, and belongs to one worker only. Declared write scopes are
+    grouping estimates, not admission: overlapping ones do not refuse.
     """
     refusals: list[Refusal] = []
     members = {item for worker in workers for item in worker}
     seen: dict[str, int] = {}
-    scopes: list[tuple[int, str, str]] = []
     for index, worker in enumerate(workers):
         for bead_id in worker:
             if bead_id in seen and seen[bead_id] != index:
@@ -487,9 +475,6 @@ def validate_members(
                     Refusal("blocked", bead_id, "blocked by " + ", ".join(blockers))
                 )
                 continue
-    # Declared scopes are estimates used for grouping, not admission: two
-    # workers whose estimates overlap may still merge cleanly, and when they
-    # do not the landing merge says so.
     return refusals
 
 
