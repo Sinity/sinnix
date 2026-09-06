@@ -1,20 +1,9 @@
 import random
 from collections import Counter
 
+from conftest import make_pair
 from rank_core.draw import draw_thompson, draw_top
 from rank_core.fit import fit
-from rank_core.store import Comparison
-
-
-def make_pair(id_, a, b, winner):
-    return Comparison(
-        id=id_,
-        at="2026-08-18T00:00:00Z",
-        kind="pair",
-        set=[a, b],
-        winner=winner,
-        weight=1.0,
-    )
 
 
 def _fit_with_uncertainty():
