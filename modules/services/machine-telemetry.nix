@@ -234,7 +234,15 @@ mkServiceModule {
             final=${lib.escapeShellArg backupRoot}/telemetry-"$stamp".sqlite.zst
 
             snapshot="${backupSnapshotRoot}/telemetry-$stamp"
+            writer_was_active=0
+            resume_writer() {
+              if [ "$writer_was_active" -eq 1 ]; then
+                writer_was_active=0
+                systemctl start machine-telemetry.service
+              fi
+            }
             cleanup() {
+              resume_writer
               if [ -d "$snapshot" ]; then
                 btrfs subvolume delete "$snapshot" >/dev/null
               fi
@@ -248,12 +256,17 @@ mkServiceModule {
             # The database is NOCOW, so cloning its file is not a reliable
             # constant-time operation. A read-only subvolume snapshot freezes
             # the checkpointed input; the helper then compresses it directly.
+            if systemctl is-active --quiet machine-telemetry.service; then
+              writer_was_active=1
+              systemctl stop machine-telemetry.service
+            fi
             sqlite3 ${lib.escapeShellArg dbPath} 'PRAGMA wal_checkpoint(TRUNCATE);'
             if [ -s ${lib.escapeShellArg "${dbPath}-wal"} ]; then
               echo "machine telemetry WAL remained after checkpoint" >&2
               exit 1
             fi
             btrfs subvolume snapshot -r ${lib.escapeShellArg dbRoot} "$snapshot"
+            resume_writer
             sinnix-sqlite-backup \
               --immutable-source \
               --check-budget-seconds ${toString integrityBudgetSeconds} \
