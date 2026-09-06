@@ -60,10 +60,8 @@ five means the change should be split).
   commit. From a linked worktree, use `git -C /abs/path`.
 - A green hosted check is not test evidence where CI skips the heavy suite
   (recorded polylogue gotcha) — verify locally with the focused selector
-  and say which tier ran. `devtools verify` selects from the checkout's one
-  testmon datafile and writes back; `--all` runs everything; a corrupt or
-  foreign datafile stops with `graph_unusable` (delete it and rerun). A
-  selected green proves the selected scope only.
+  and say which tier ran. Read the candidate's receipt and the project's
+  verification contract; a selected green proves only the recorded scope.
 - Land everything in progress, then run the corpus once at the master
   boundary through the descriptor's `corpus` operation. Never a corpus run
   per worker; excisions land as whole merges.

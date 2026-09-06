@@ -21,10 +21,11 @@ names, and exits with one result document.
    `batch result` refuses the candidate otherwise. A needed change outside
    it goes into `unresolved`.
 3. **Verify the candidate.** Run the snapshot's `verification_commands` and
-   `batch.focused_verification` (the project's focused checks, as one
-   `agentctl job start … --wait` line) in the foreground. Bug fixes show red
-   before green. A selected green proves the selected scope only; say which
-   selection ran. Piped exit codes lie (`cmd | tail`); capture the status.
+   `batch.focused_verification` (the descriptor's argumentless check) in the
+   foreground. Exact test selectors belong in `verification_commands`;
+   `affected_paths` describes code scope. A quick/static green is not test
+   evidence. Bug fixes show red before green. Record the actual selection and
+   receipt; a selected green proves that scope only. Capture the exit status.
 4. **Do not publish, do not claim beads.** No push, no PR, no merge, no
    rebase onto a newer base, no rebuild of the host. No `bd update`,
    `claim`, `close` or `comment`: `batch start` claimed the beads and
@@ -68,3 +69,6 @@ Validated against `dots/claude/agents/schemas/worker.schema.json`:
   is closed at landing only when all its criteria are `satisfied` or
   `superseded`; anything else leaves it open with the residual as a comment.
 - Refuting a criterion or a finding needs evidence, not a claim.
+- When the declared delivery is code-only, mark operational criteria
+  `unsatisfied` with the remaining action in `evidence` and `unresolved`.
+  Correct partial delivery can publish while those criteria keep the bead open.
