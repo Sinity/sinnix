@@ -126,6 +126,10 @@ class ProjectEnvironment:
                 + ", ".join(missing)
                 + " (declare a value under [environment.values] or export them)"
             )
+        # Git status and similar reads must not refresh the index. A killed
+        # read therefore cannot strand an index.lock in a shared checkout;
+        # required locks for Git mutations remain unaffected.
+        environment["GIT_OPTIONAL_LOCKS"] = "0"
         return environment
 
     def command_for(self, payload: Sequence[str]) -> tuple[str, ...]:

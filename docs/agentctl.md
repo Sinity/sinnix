@@ -162,7 +162,9 @@ force removal returns while its own Git cleanup is still running, and the
 lock it leaves behind blocks the next writer in a checkout agentctl does not
 own. A lock that was already there when the mutation started belongs to
 another process; it is neither waited for nor removed. Listing takes no lock
-and runs with `GIT_OPTIONAL_LOCKS=0`.
+and runs with `GIT_OPTIONAL_LOCKS=0`. Agentctl's other Git reads and every
+queued project or agent command receive the same setting, so a timeout cannot
+leave a read-created index lock in a shared checkout.
 
 ## Batches
 
