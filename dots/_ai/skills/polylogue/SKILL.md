@@ -42,12 +42,21 @@ devtools why
 devtools render all --check
 ```
 
-Plain verification uses a compatible testmon graph or refuses. Lanes run
-selected verification from the seed inherited off the main checkout — false
-negatives there are accepted; only `--all` proves the full corpus, at
-merge/master boundaries. Per-PR CI runs the quick gate, so local verification
-is still required. Do not scrape `.cache/verify` as an inter-project
-contract; publish stable evidence through an explicit export surface.
+`devtools verify` selects from and updates the checkout's corpus testmon
+graph. A usable local graph survives newer primary files; a compatible seed
+replaces an absent, unusable, or environment-incompatible copy when it would
+select better. Without a usable seed, verification records a full seed run.
+Package or interpreter changes can also require full execution. `devtools
+why` and the run receipt explain the actual selection; graph usability alone
+does not establish corpus coverage.
+
+`devtools test <selector>` traces a run-local scratch graph, preserving the
+corpus graph. Keep exact selectors in `verification_commands`; the generic
+focused operation is `verify_quick`, which runs static checks only. The
+candidate's hosted `verify` check runs affected verification; only `--all`
+proves the corpus, at the master boundary. Read command, selection counts and
+outcomes before claiming test coverage. Use existing receipt references;
+do not infer success from a process exit or an empty selection.
 
 Product work uses feature branches and squash-merged PRs. Generic lane,
 job, and task lifecycle belongs to `agentctl` and the shared runtime skills, not

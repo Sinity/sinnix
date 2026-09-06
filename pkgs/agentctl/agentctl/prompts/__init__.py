@@ -803,29 +803,16 @@ def landing_template(name: str) -> str:
     return resources.files(__package__).joinpath(f"{name}.md").read_text()
 
 
-# Free text a landing agent sees from a worker result is cut here; the
-# reviewer reads the diff, not the worker's prose.
+# Display text in PR titles and criterion summaries.
 RESULT_TEXT_CHARS = 200
+LANDING_RECORD_CHARS = 12_000
 
 
-def reviewer_view_of_result(result: Mapping[str, Any]) -> dict[str, Any]:
-    """A worker result reduced to ids, candidate and criteria text with status."""
-    return {
-        "candidate_sha": result.get("candidate_sha"),
-        "beads": [
-            {
-                "id": entry.get("id"),
-                "criteria": [
-                    {
-                        "text": str(item.get("text") or "")[:RESULT_TEXT_CHARS],
-                        "status": item.get("status"),
-                    }
-                    for item in entry.get("criteria") or ()
-                ],
-            }
-            for entry in result.get("beads") or ()
-        ],
-    }
+def landing_record_view(record: Mapping[str, Any]) -> dict[str, Any]:
+    """Exact small records; an explicit inspection request for larger records."""
+    if len(json.dumps(record)) <= LANDING_RECORD_CHARS:
+        return dict(record)
+    return {"inline_omitted": True, "reason": "read this record at source[index]"}
 
 
 def member_view(bead: Mapping[str, Any]) -> dict[str, Any]:
@@ -834,6 +821,9 @@ def member_view(bead: Mapping[str, Any]) -> dict[str, Any]:
         "id": bead.get("id"),
         "title": str(bead.get("title") or "")[:RESULT_TEXT_CHARS],
         "acceptance_criteria": str(bead.get("acceptance_criteria") or ""),
+        "description": str(bead.get("description") or ""),
+        "design": str(bead.get("design") or ""),
+        "packet_intent": (bead.get("metadata") or {}).get("packet_intent"),
         "write_scope": list(write_scope(bead)),
     }
 

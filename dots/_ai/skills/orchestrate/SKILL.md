@@ -105,16 +105,11 @@ worker prompt, and the result schema), `references/coordinator-contract.md`
 
 ## Verification
 
-- `devtools verify` selects from the checkout's one testmon datafile
-  (`.cache/testmon/testmondata`) and writes back. `--all` runs every test and
-  still updates fingerprints. `--quick` is the static gates alone.
-- A corrupt or foreign-format datafile stops the run with `graph_unusable`:
-  delete the datafile and rerun.
-- Wrongly skipped tests are acceptable; a refusal is not. A stale graph means
-  run everything and say so.
-- A package or interpreter change invalidates selection: report a full run.
-- A selected green proves the selected scope only. Never launder it into a
-  whole-suite claim.
+The descriptor's `focused` operation runs without extra arguments. Use an
+argumentless check such as `verify_quick`; put exact test selectors in the
+beads' `verification_commands`. Static checks, selected tests and a full
+corpus prove different scopes; retain the command and receipt for each.
+For Polylogue's graph and selection behavior, use the `polylogue` skill.
 
 ## Structural review
 

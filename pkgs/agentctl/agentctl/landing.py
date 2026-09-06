@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 from pathlib import Path
@@ -17,6 +18,7 @@ from .agents import (
     queue_landing,
     workspace_of,
     worktree_path,
+    write_prompt,
 )
 from .beads import Beads, SubprocessBeads
 from .config import Config
@@ -96,14 +98,27 @@ def _agent_json(value: Any) -> str:
     return json.dumps(value, indent=2, sort_keys=True)
 
 
-def _results_for_agents(run: Run) -> str:
+def _handoff(path: Path, name: str, records: Sequence[Mapping[str, Any]]) -> str:
+    """Bound inline context; keep exact evidence beside the prompt for inspection."""
+    source = write_prompt(path, name, _agent_json(records))
     return _agent_json(
-        [prompts.reviewer_view_of_result(r) for r in _worker_results(run)]
+        [
+            {
+                **prompts.landing_record_view(record),
+                "source": str(source),
+                "index": index,
+            }
+            for index, record in enumerate(records)
+        ]
     )
 
 
-def _members_for_agents(run: Run, beads: Beads) -> str:
-    return _agent_json(prompts.landing_members(run.workers, beads))
+def _results_for_agents(run: Run, path: Path) -> str:
+    return _handoff(path, "worker-results.json", _worker_results(run))
+
+
+def _members_for_agents(run: Run, beads: Beads, path: Path) -> str:
+    return _handoff(path, "members.json", prompts.landing_members(run.workers, beads))
 
 
 def _review_agent(project: ProjectAdapter, run: Run) -> dict[str, str]:
@@ -118,6 +133,45 @@ def _review_agent(project: ProjectAdapter, run: Run) -> dict[str, str]:
         "model": str(worker.get("model") or ""),
         "effort": str(worker.get("effort") or ""),
     }
+
+
+def _landing_inputs(
+    config: Config, project: ProjectAdapter, run: Run, base: str, beads: Beads
+) -> str:
+    """Bind reuse to declared inputs, including the evidence the reviewer sees."""
+    workers = []
+    for worker in run.workers:
+        head = _git(
+            project.root, "rev-parse", "--verify", f"{worker['branch']}^{{commit}}"
+        )
+        if head != worker["result"]["candidate_sha"]:
+            raise BatchRefusal(
+                "candidate_mismatch",
+                f"worker {worker['id']} changed after filing its result",
+            )
+        workers.append(
+            {"branch": worker["branch"], "head": head, "result": worker["result"]}
+        )
+    try:
+        runner = config.agent_runner.read_bytes()
+    except OSError as error:
+        raise BatchRefusal(
+            "runner", f"cannot read {config.agent_runner}: {error}"
+        ) from error
+    contract = {
+        "base": base,
+        "workers": workers,
+        "members": prompts.landing_members(run.workers, beads),
+        "descriptor": project.digest,
+        "verify_profile": run.verify_profile,
+        "review_agent": _review_agent(project, run),
+        "templates": {
+            name: prompts.landing_template(name) for name in ("integrate", "review")
+        },
+        "schemas": results.SCHEMAS,
+        "runner": hashlib.sha256(runner).hexdigest(),
+    }
+    return hashlib.sha256(_agent_json(contract).encode()).hexdigest()
 
 
 def _integrate(
@@ -140,6 +194,20 @@ def _integrate(
         existing = None
     if existing is not None and existing.path is not None:
         path = existing.path
+        dirty = _dirty_paths(path)
+        if dirty:
+            land_update(config, run.run_id, integration_worktree=str(path))
+            raise BatchRefusal(
+                "integration_dirty",
+                f"integration worktree {path} has uncommitted changes: "
+                + ", ".join(dirty),
+            )
+        recorded = run.landing.get("candidate_sha")
+        if recorded and _git(path, "rev-parse", "HEAD") != recorded:
+            raise BatchRefusal(
+                "integration_incomplete",
+                f"{path} has a different HEAD; inspect it and use --keep-integration to preserve a manual fix",
+            )
         try:
             _git(path, "merge", "--abort")
         except BatchError:
@@ -152,7 +220,9 @@ def _integrate(
         if created.path is None:
             raise WorktrunkError(f"wt created {branch} without a path")
         path = created.path
-    run = land_update(config, run.run_id, integration_worktree=str(path))
+    run = land_update(
+        config, run.run_id, integration_worktree=str(path), refreshed_base=base
+    )
     branches = [worker["branch"] for worker in run.workers]
     for position, worker_branch in enumerate(branches):
         try:
@@ -168,8 +238,8 @@ def _integrate(
             or "- (see git status)",
             remaining="\n".join(f"- {name}" for name in branches[position + 1 :])
             or "- (none)",
-            members=_members_for_agents(run, beads),
-            results=_results_for_agents(run),
+            members=_members_for_agents(run, beads, path),
+            results=_results_for_agents(run, path),
         )
         job = queue_agent(
             config,
@@ -406,6 +476,11 @@ def _verify(
                         "pr": number,
                         "candidate_sha": candidate,
                         "phase": "succeeded",
+                        "checks": [
+                            entry
+                            for entry in pull.get("statusCheckRollup") or ()
+                            if entry.get("name", entry.get("context")) == check
+                        ],
                     }
                     return run, receipt
                 if state == "failure":
@@ -432,13 +507,22 @@ def _verify(
         raise BatchRefusal(
             "verify_failed", f"{profile} task {waited['job_id']} {waited.get('phase')}"
         )
-    return run, {
+    receipt = {
         "kind": "operation",
         "operation": profile,
         "job_id": waited["job_id"],
         "candidate_sha": candidate,
         "phase": "succeeded",
+        "reference": started.get("reference"),
+        "command": list(operation.command),
     }
+    task = launch.find_task(pueue.tasks(), waited["job_id"], started.get("reference"))
+    if task is not None:
+        for key, suffix in (("log_path", ".log"), ("result_path", ".result")):
+            artifact = launch._artifact(config, task, suffix)
+            if artifact is not None and (suffix == ".log" or artifact.is_file()):
+                receipt[key] = str(artifact)
+    return run, receipt
 
 
 def _review(
@@ -453,8 +537,11 @@ def _review(
     prompt = prompts.landing_template("review").format(
         candidate=candidate,
         base=base,
-        members=_members_for_agents(run, beads),
-        results=_results_for_agents(run),
+        members=_members_for_agents(run, beads, path),
+        results=_results_for_agents(run, path),
+        verification=_handoff(
+            path, "candidate-verification.json", [run.landing.get("verify_run") or {}]
+        ),
     )
     job = queue_agent(
         config,
@@ -482,7 +569,12 @@ def _review(
     )
     if errors:
         raise BatchRefusal("review_invalid", "; ".join(errors[:6]))
-    record = {**verdict, "candidate_sha": candidate, "job_id": waited["job_id"]}
+    record = {
+        **verdict,
+        "candidate_sha": candidate,
+        "job_id": waited["job_id"],
+        "reference": job.get("reference"),
+    }
     land_update(config, run.run_id, review_verdict=record)
     if verdict["verdict"] != "pass":
         raise BatchRefusal(
@@ -784,12 +876,23 @@ def _land_locked(
                 published={**merged, "base_commit": base},
             )
             return run.to_dict()
+        if not keep_integration:
+            base = _remote_base(project)
         while True:
+            inputs = _landing_inputs(config, project, run, base, beads)
+            reuse = inputs == run.landing.get("inputs_digest")
             candidate = (
                 _kept_integration(config, run, base)
-                if keep_integration
+                if keep_integration or reuse
                 else _integrate(config, project, run, base, beads)
             )
+            if reuse and candidate != run.landing.get("candidate_sha"):
+                if not keep_integration:
+                    raise BatchRefusal(
+                        "integration_incomplete",
+                        "integration HEAD changed; inspect it and use --keep-integration to preserve a manual fix",
+                    )
+                reuse = False
             if candidate == base:
                 raise BatchRefusal(
                     "empty_candidate",
@@ -799,16 +902,29 @@ def _land_locked(
                 config,
                 run_id,
                 candidate_sha=candidate,
-                verify_run=None,
-                review_verdict=None,
+                inputs_digest=inputs,
+                verify_run=run.landing.get("verify_run") if reuse else None,
+                review_verdict=run.landing.get("review_verdict") if reuse else None,
                 failure=None,
             )
             path = Path(run.landing["integration_worktree"])
-            run, verify_run = _verify(
-                config, project, run, path, candidate, sleep, beads
-            )
+            verify_run = run.landing.get("verify_run") or {}
+            if (
+                verify_run.get("candidate_sha") != candidate
+                or verify_run.get("phase") != "succeeded"
+            ):
+                run, verify_run = _verify(
+                    config, project, run, path, candidate, sleep, beads
+                )
             run = land_update(config, run_id, verify_run=verify_run)
-            review_verdict = _review(config, project, run, path, base, candidate, beads)
+            review_verdict = run.landing.get("review_verdict") or {}
+            if (
+                review_verdict.get("candidate_sha") != candidate
+                or review_verdict.get("verdict") != "pass"
+            ):
+                review_verdict = _review(
+                    config, project, run, path, base, candidate, beads
+                )
             run = land_update(config, run_id, review_verdict=review_verdict)
             published = _publish(
                 config, project, run, path, base, candidate, sleep, beads
@@ -831,8 +947,6 @@ def _land_locked(
                 config,
                 run_id,
                 refreshes=int(run.landing.get("refreshes") or 0) + 1,
-                refreshed_base=base,
-                candidate_sha=None,
                 verify_run=None,
                 review_verdict=None,
             )
