@@ -140,6 +140,14 @@ def _integrate(
         existing = None
     if existing is not None and existing.path is not None:
         path = existing.path
+        dirty = _dirty_paths(path)
+        if dirty:
+            land_update(config, run.run_id, integration_worktree=str(path))
+            raise BatchRefusal(
+                "integration_dirty",
+                f"integration worktree {path} has uncommitted changes: "
+                + ", ".join(dirty),
+            )
         try:
             _git(path, "merge", "--abort")
         except BatchError:
@@ -152,7 +160,9 @@ def _integrate(
         if created.path is None:
             raise WorktrunkError(f"wt created {branch} without a path")
         path = created.path
-    run = land_update(config, run.run_id, integration_worktree=str(path))
+    run = land_update(
+        config, run.run_id, integration_worktree=str(path), refreshed_base=base
+    )
     branches = [worker["branch"] for worker in run.workers]
     for position, worker_branch in enumerate(branches):
         try:
@@ -784,6 +794,8 @@ def _land_locked(
                 published={**merged, "base_commit": base},
             )
             return run.to_dict()
+        if not keep_integration:
+            base = _remote_base(project)
         while True:
             candidate = (
                 _kept_integration(config, run, base)
@@ -831,7 +843,6 @@ def _land_locked(
                 config,
                 run_id,
                 refreshes=int(run.landing.get("refreshes") or 0) + 1,
-                refreshed_base=base,
                 candidate_sha=None,
                 verify_run=None,
                 review_verdict=None,

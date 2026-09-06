@@ -22,7 +22,7 @@ import uuid
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Mapping, Sequence
 
-from . import gitcmd, pueue
+from . import gitcmd, manifest, pueue
 from .config import Config
 from .launch_input import scratch_path, write_input
 from .limits import CALL_TIMEOUT_SECONDS, SHORT_ID, SYSTEMCTL_TIMEOUT_SECONDS
@@ -767,12 +767,57 @@ def _orphaned_artifacts(config: Config, task_id: int) -> list[Path]:
     return []
 
 
+def _live_run_jobs(config: Config, tasks: Mapping[int, Task]) -> set[int]:
+    """Jobs a live batch still needs, including attempts predating stable references."""
+    runs = [run for run in manifest.list_runs(config) if run.live]
+    run_ids = {run.run_id for run in runs}
+    worktrees: set[str] = set()
+    retained: set[int] = set()
+    for run in runs:
+        records = [*run.workers, run.landing]
+        records.extend(
+            record
+            for key in ("verify_run", "review_verdict")
+            if isinstance(record := run.landing.get(key), dict)
+        )
+        for record in records:
+            reference = record.get("task_reference") or record.get("reference")
+            task_id = record.get("task_id", record.get("job_id"))
+            task = find_task(tasks, task_id, reference)
+            if task is not None:
+                retained.add(task.task_id)
+            retained.update(
+                value
+                for value in (record.get("task_ids") or [])
+                if isinstance(value, int)
+            )
+            for key in ("worktree", "integration_worktree"):
+                if isinstance(path := record.get(key), str):
+                    worktrees.add(path)
+    for task in tasks.values():
+        written = _launch_input(config, task) or {}
+        binding = written.get("binding") or {}
+        label = task.label.split(":")
+        batch_label = (
+            len(label) >= 3
+            and label[1] in AGENT_OPERATIONS | {"land"}
+            and label[2] in run_ids
+        )
+        if task.path in worktrees or binding.get("run_id") in run_ids or batch_label:
+            retained.add(task.task_id)
+    return retained
+
+
 def clean_terminal(config: Config) -> list[dict[str, Any]]:
-    """`clean` for every terminal task that ran the wrapper."""
+    """Clean terminal wrapper jobs except those still needed by a live batch."""
+    tasks = pueue.tasks()
+    retained = _live_run_jobs(config, tasks)
     return [
         clean(config, task.task_id)
-        for task in sorted(pueue.tasks().values(), key=lambda item: item.task_id)
-        if task.terminal and launch_input_path(task) is not None
+        for task in sorted(tasks.values(), key=lambda item: item.task_id)
+        if task.terminal
+        and task.task_id not in retained
+        and launch_input_path(task) is not None
     ]
 
 

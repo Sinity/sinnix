@@ -29,7 +29,7 @@ command, the run manifest of a batch, and one operator screen.
 | `batch land <run>`                                                                                        | the landing task's body: integrate, verify, review, publish, record acceptance, close satisfied beads, remove worktrees; re-runnable                                                                                                       |
 | `batch status <run>` / `batch list [p]`                                                                   | the manifest joined with pueue task state and the landing PR; `status` prints each worker's prompt path and, for an external worker without a result, the exact `batch result` line to run                                                 |
 | `batch result <run> <worker> <result.json>`                                                               | file a schema-validated result for a worker another harness ran; releases the stashed landing task once every worker has one                                                                                                               |
-| `batch scope-correct <run> <worker> <candidate> --authorize <bead>=<glob>…`                               | replace a malformed stored worker scope with candidate-bound, per-bead authority while retaining the correction history                                                                                                                   |
+| `batch scope-correct <run> <worker> <candidate> --authorize <bead>=<glob>…`                               | replace a malformed stored worker scope with candidate-bound, per-bead authority while retaining the correction history                                                                                                                    |
 | `batch resume <run> --worker <w>`                                                                         | queue a fresh agent into the worker's existing worktree with a resume packet (`.agentctl/resume-<n>.md`) carrying the original                                                                                                             |
 | `view [p]`                                                                                                | queue groups, what needs attention (failures of the last six hours), active jobs, open runs with each worker's stage, ready beads (epics and decisions left out)                                                                           |
 | `events tail [--lines N] [--follow] [--project p]`                                                        | the event spool (`/realm/state/agentctl/events.jsonl`)                                                                                                                                                                                     |
@@ -81,8 +81,9 @@ descendant that outlives the command's leader still holds the task and its
 pool slot. stdout and stderr go to `jobs/<ref>.log`, bounded at 8,000,000
 bytes — for `json`/`pytest` results stdout alone goes to `jobs/<ref>.result`,
 bounded at 64,000 bytes — each cut with an overflow marker. `job clean` is
-the only retention rule: nothing is deleted by age. A vanished working
-directory or an unresolvable command is refused before anything starts
+the only retention rule: nothing is deleted by age. `--all-terminal` retains
+jobs and artifacts referenced by a live batch until acceptance or abandonment.
+A vanished working directory or an unresolvable command is refused before anything starts
 (exit 125).
 
 ### Executor outcomes
@@ -297,13 +298,15 @@ queued or running.
 
 1. Refuse unless every worker task succeeded with a valid result, and
    refuse a run that already has an acceptance record or was abandoned.
-2. Create a fresh integration worktree from `base_commit` and merge the
-   worker branches in manifest order with `git merge --no-ff`. A conflict
+2. Fetch the current publication base and prepare the integration worktree
+   from it. Record `refreshed_base` and merge the worker branches in manifest
+   order with `git merge --no-ff`. A conflict
    queues one integration agent (label `<p>:integrate:<run>`) with the
    conflicts and the remaining branches; the merged head is
    `candidate_sha`. The files the candidate changes are scanned for a line
    starting with `<<<<<<<`, `=======` or `>>>>>>>`; a hit is
-   `integration_conflict_markers`. With `--keep-integration` the
+   `integration_conflict_markers`. An existing dirty integration worktree
+   is preserved with `integration_dirty`. With `--keep-integration` the
    integration worktree's current HEAD is the candidate instead: it must be
    clean, contain every worker branch and descend from the base, and a
    moved default branch is `publish_rejected` rather than refreshed.
