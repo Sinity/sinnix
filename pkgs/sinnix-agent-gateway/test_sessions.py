@@ -159,3 +159,14 @@ def test_missing_session_source_is_unavailable(tmp_path: Path) -> None:
     root.rmdir()
     with pytest.raises(SessionError, match="unavailable"):
         service.list("claude-code")
+
+
+def test_read_preserves_raw_offsets_and_replaces_malformed_utf8(tmp_path: Path) -> None:
+    service, root = session_service(tmp_path)
+    (root / "bytes.jsonl").write_bytes("é".encode("utf-8") + b"\xff\xe2\x82")
+
+    read = service.read("claude-code:bytes.jsonl", offset=1)
+
+    assert read["offset"] == 1 and read["bytes"] == 4
+    assert read["content"] == "\ufffd\ufffd\ufffd"
+    assert read["next_offset"] is None

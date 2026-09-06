@@ -349,3 +349,74 @@ def test_missing_session_provider_returns_typed_unavailable(tmp_path: Path) -> N
         BY_NAME,
     )
     assert result["error"]["code"] == "unavailable"
+
+
+@pytest.mark.parametrize("max_bytes", [4, 11, 13])
+def test_session_read_continuation_preserves_utf8(
+    tmp_path: Path, max_bytes: int
+) -> None:
+    rt, _ = runtime(tmp_path)
+    text = '{"text":"aé😀z"}\n'
+    (rt.sessions.sources[0].root / "proj" / "s1.jsonl").write_text(text)
+    offset = 0
+    pieces = []
+    for _ in range(len(text.encode("utf-8"))):
+        response = call(
+            rt,
+            "sessions.query",
+            {
+                "request": {
+                    "operation": "read",
+                    "reference": "claude-code:proj/s1.jsonl",
+                    "offset": offset,
+                    "max_bytes": max_bytes,
+                }
+            },
+            BY_NAME,
+        )
+        assert response["result"]["outcome"] == "ok", response
+        data = response["data"]
+        pieces.append(data["content"])
+        assert 0 < data["bytes"] <= max_bytes
+        if data["next_offset"] is None:
+            break
+        assert data["next_offset"] == offset + data["bytes"]
+        offset = data["next_offset"]
+    else:
+        pytest.fail("session continuation did not terminate")
+    assert "".join(pieces) == text
+
+
+def test_session_read_refuses_a_budget_that_cannot_fit_one_character(
+    tmp_path: Path,
+) -> None:
+    rt, _ = runtime(tmp_path)
+    (rt.sessions.sources[0].root / "proj" / "s1.jsonl").write_text("😀x")
+    request = {"operation": "read", "reference": "claude-code:proj/s1.jsonl"}
+
+    too_small = call(
+        rt,
+        "sessions.query",
+        {
+            "request": {
+                **request,
+                "max_bytes": 1,
+            }
+        },
+        BY_NAME,
+    )
+    assert too_small["error"]["code"] == "invalid_request"
+    assert "max_bytes" in too_small["error"]["message"]
+
+    readable = call(
+        rt,
+        "sessions.query",
+        {
+            "request": {
+                **request,
+                "max_bytes": 4,
+            }
+        },
+        BY_NAME,
+    )["data"]
+    assert readable["content"] == "😀" and readable["next_offset"] == 4

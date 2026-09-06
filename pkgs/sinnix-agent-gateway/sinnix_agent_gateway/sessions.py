@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import codecs
 import os
 import stat
 from dataclasses import dataclass
@@ -129,14 +130,22 @@ class SessionLogService:
             data = handle.read(max_bytes + 1)
         truncated = len(data) > max_bytes
         data = data[:max_bytes]
+        decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        content = decoder.decode(data, final=not truncated)
+        consumed = len(data) - len(decoder.getstate()[0])
+        if truncated and consumed == 0:
+            raise SessionError(
+                "max_bytes is too small to decode the next UTF-8 sequence; "
+                "retry with at least 4"
+            )
         return {
             "provider": source.provider,
             "reference": self._reference(source, path),
             "offset": offset,
-            "bytes": len(data),
-            "next_offset": offset + len(data) if truncated else None,
+            "bytes": consumed,
+            "next_offset": offset + consumed if truncated else None,
             "truncated": truncated,
-            "content": data.decode("utf-8", errors="replace"),
+            "content": content,
         }
 
     def search(
