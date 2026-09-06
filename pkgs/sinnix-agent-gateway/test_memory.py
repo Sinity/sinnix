@@ -70,3 +70,14 @@ def test_memory_search_rejects_unknown_source_and_denied_principal(
     denied = memory_service(tmp_path / "denied", "agent-control")
     with pytest.raises(PolicyError, match="session.read"):
         denied.search("needle")
+
+
+def test_memory_limit_can_be_filled_by_one_matching_provider(tmp_path: Path) -> None:
+    memory = memory_service(tmp_path, "observer")
+    (tmp_path / "claude" / "second.jsonl").write_text('{"text":"memory needle"}\n')
+    (tmp_path / "codex" / "fixture.jsonl").write_text("{}\n")
+
+    result = memory.search("needle", providers=["claude-code", "codex"], limit=2)
+
+    assert len(result["matches"]) == 2
+    assert {match["source"] for match in result["matches"]} == {"claude-code"}

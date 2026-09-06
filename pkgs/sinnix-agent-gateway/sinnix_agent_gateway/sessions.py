@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -71,39 +72,49 @@ class SessionLogService:
         return source, path
 
     @staticmethod
-    def _files(source: SessionSource, limit: int) -> tuple[list[Path], bool]:
+    def _files(source: SessionSource) -> list[tuple[Path, os.stat_result]]:
         if not source.root.is_dir():
-            return [], False
-        files: list[Path] = []
-        exhausted = False
-        for directory, _, names in os.walk(source.root):
+            raise SessionError("session source directory is unavailable")
+        files: list[tuple[Path, os.stat_result]] = []
+
+        def unavailable(exc: OSError) -> None:
+            raise SessionError("session source directory is unavailable") from exc
+
+        for directory, _, names in os.walk(source.root, onerror=unavailable):
             for name in names:
                 if not name.endswith(".jsonl"):
                     continue
-                files.append(Path(directory) / name)
-                if len(files) > limit:
-                    exhausted = True
-                    break
-            if exhausted:
-                break
-        files.sort(key=lambda path: path.stat().st_mtime_ns, reverse=True)
-        return files[:limit], exhausted
+                path = Path(directory) / name
+                try:
+                    info = path.stat(follow_symlinks=False)
+                except FileNotFoundError:
+                    continue
+                except OSError as exc:
+                    unavailable(exc)
+                if stat.S_ISREG(info.st_mode):
+                    files.append((path, info))
+        files.sort(key=lambda row: (-row[1].st_mtime_ns, str(row[0])))
+        return files
+
+    def inventory(self, provider: str) -> list[dict[str, Any]]:
+        """Observe metadata once, newest first; transcript bytes remain live."""
+        source = self._source(provider)
+        return [
+            {
+                "reference": self._reference(source, path),
+                "bytes": info.st_size,
+                "mtime_ns": info.st_mtime_ns,
+            }
+            for path, info in self._files(source)
+        ]
 
     def list(self, provider: str, limit: int = 100) -> dict[str, Any]:
-        source = self._source(provider)
         limit = max(1, min(limit, 500))
-        files, truncated = self._files(source, limit)
+        rows = self.inventory(provider)
         return {
             "provider": provider,
-            "sessions": [
-                {
-                    "reference": self._reference(source, path),
-                    "bytes": path.stat().st_size,
-                    "mtime_ns": path.stat().st_mtime_ns,
-                }
-                for path in files
-            ],
-            "truncated": truncated,
+            "sessions": rows[:limit],
+            "truncated": len(rows) > limit,
         }
 
     def read(
@@ -123,6 +134,7 @@ class SessionLogService:
             "reference": self._reference(source, path),
             "offset": offset,
             "bytes": len(data),
+            "next_offset": offset + len(data) if truncated else None,
             "truncated": truncated,
             "content": data.decode("utf-8", errors="replace"),
         }
@@ -134,34 +146,42 @@ class SessionLogService:
         if not query or len(query) > 1_000:
             raise SessionError("query must contain 1-1000 characters")
         max_results = max(1, min(max_results, 500))
-        files, source_truncated = self._files(source, 1_000)
+        files = self._files(source)
+        source_truncated = len(files) > 1_000
         scanned_bytes = 0
         matches: list[dict[str, Any]] = []
         scan_limit = 8 * 1_024 * 1_024
-        for path in files:
+        for path, info in files[:1_000]:
             if scanned_bytes >= scan_limit:
                 source_truncated = True
                 break
             with path.open("rb") as handle:
                 data = handle.read(min(64_000, scan_limit - scanned_bytes))
-            if len(data) < path.stat().st_size:
+            if len(data) < info.st_size:
                 source_truncated = True
             scanned_bytes += len(data)
-            text = data.decode("utf-8", errors="replace")
-            for line_number, line in enumerate(text.splitlines(), 1):
-                if query not in line:
+            offset = 0
+            for line_number, raw in enumerate(data.splitlines(keepends=True), 1):
+                line_offset = offset
+                offset += len(raw)
+                match_offset = raw.find(query.encode("utf-8"))
+                if match_offset < 0:
                     continue
+                start = max(0, match_offset - 200)
                 matches.append(
                     {
                         "reference": self._reference(source, path),
                         "line": line_number,
-                        "text": line[:2_000],
+                        "offset": line_offset + start,
+                        "text": raw[start:]
+                        .decode("utf-8", errors="replace")
+                        .rstrip("\r\n")[:2_000],
                     }
                 )
-                if len(matches) >= max_results:
+                if len(matches) > max_results:
                     return {
                         "provider": provider,
-                        "matches": matches,
+                        "matches": matches[:max_results],
                         "scanned_bytes": scanned_bytes,
                         "truncated": True,
                     }
@@ -190,20 +210,21 @@ class SessionLogService:
         if query is not None and (not query or len(query) > 1_000):
             raise SessionError("query must contain 1-1000 characters")
         max_results = max(1, min(max_results, 500))
-        files, source_truncated = self._files(source, 1_000)
+        files = [
+            (path, info)
+            for path, info in self._files(source)
+            if (start_ns is None or info.st_mtime_ns >= start_ns)
+            and (end_ns is None or info.st_mtime_ns <= end_ns)
+        ]
+        source_truncated = False
         scanned_bytes = 0
         scan_limit = 8 * 1_024 * 1_024
         entries: list[dict[str, Any]] = []
-        for path in files:
-            stat = path.stat()
-            if start_ns is not None and stat.st_mtime_ns < start_ns:
-                continue
-            if end_ns is not None and stat.st_mtime_ns > end_ns:
-                continue
+        for path, info in files:
             entry = {
                 "reference": self._reference(source, path),
-                "bytes": stat.st_size,
-                "mtime_ns": stat.st_mtime_ns,
+                "bytes": info.st_size,
+                "mtime_ns": info.st_mtime_ns,
             }
             if query is not None:
                 if scanned_bytes >= scan_limit:
@@ -218,19 +239,20 @@ class SessionLogService:
                     None,
                 )
                 if matching_line is None:
-                    if len(data) < stat.st_size:
+                    if len(data) < info.st_size:
                         source_truncated = True
                     continue
-                entry["snippet"] = matching_line[:2_000]
-                if len(data) < stat.st_size:
+                start = max(0, matching_line.index(query) - 200)
+                entry["snippet"] = matching_line[start : start + 2_000]
+                if len(data) < info.st_size:
                     source_truncated = True
             entries.append(entry)
-            if len(entries) >= max_results:
+            if len(entries) > max_results:
                 source_truncated = True
                 break
         return {
             "provider": provider,
-            "entries": entries,
+            "entries": entries[:max_results],
             "scanned_bytes": scanned_bytes,
             "truncated": source_truncated,
         }

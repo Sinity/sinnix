@@ -5,7 +5,7 @@ description: Use when invoking, inspecting, or documenting Sinnix Agent Gateway 
 
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: 81898909c68ccc146c6d7ed192711bcbc7d6a1431018ea4f90fa4f7f384c92f2 -->
+<!-- gateway-catalog-sha256: 062f09c2d413942d8dc280b06247216ff7f846d4a454041d301f6ab753126078 -->
 
 # Agent Gateway
 
@@ -67,7 +67,7 @@ Effectful actions (families change, operate, run) require `idempotency_key`; rep
 - `artifacts.read` — Read an artifact: text inline with offsets, images as an image block, other binary as a resource block.
 - `captures.query` — List runtime-declared capture lanes, describe one, or read per-lane record deltas since a time.
 - `activity.query` — Reads sinnix-capture-v1 envelope files under each lane path within the time window; coverage lists which lanes contributed and which have no envelope files.
-- `sessions.query` — List, read or search local coding-session JSONL files per provider.
+- `sessions.query` — page.next_cursor continues a newest-first snapshot for one hour; omit cursor to refresh. Reads return next_offset. Search hits carry byte offsets and matching snippets; truncated marks incomplete coverage.
 - `memory.query` — Search session-derived memory across providers or fetch one object by reference, with source provenance.
 - `timeline.query` — Session evidence ordered by file mtime within an RFC 3339 window, per provider, without claiming unavailable upstreams.
 
@@ -137,4 +137,4 @@ Effectful actions (families change, operate, run) require `idempotency_key`; rep
 
 The complete schemas and examples are in `docs/generated/agent-gateway-reference.md`.
 
-Catalog revision: `v3-typed-actions`. Catalog SHA-256: `81898909c68ccc146c6d7ed192711bcbc7d6a1431018ea4f90fa4f7f384c92f2`.
+Catalog revision: `v3-typed-actions`. Catalog SHA-256: `062f09c2d413942d8dc280b06247216ff7f846d4a454041d301f6ab753126078`.

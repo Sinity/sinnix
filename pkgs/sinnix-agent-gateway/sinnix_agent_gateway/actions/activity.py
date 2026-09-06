@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 from datetime import datetime, timezone
@@ -10,7 +11,14 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import Field
 
-from ..action import ALL_PRINCIPALS, OBSERVER_OPERATOR, Action, Example, RequestControls
+from ..action import (
+    ALL_PRINCIPALS,
+    OBSERVER_OPERATOR,
+    Action,
+    ActionResult,
+    Example,
+    RequestControls,
+)
 from ..capabilities import Capability, PolicyError
 from ..captures import CaptureLane
 from ..catalog import search_rows
@@ -385,6 +393,11 @@ class SessionsListOp(GatewayModel):
     operation: Literal["list"] = "list"
     provider: Provider
     limit: int = Field(default=100, ge=1, le=500)
+    cursor: str | None = Field(
+        default=None,
+        max_length=8_192,
+        description="page.next_cursor from this provider and limit. Omit to observe current files.",
+    )
 
 
 class SessionsReadOp(GatewayModel):
@@ -401,7 +414,11 @@ class SessionsReadOp(GatewayModel):
 class SessionsSearchOp(GatewayModel):
     operation: Literal["search"] = "search"
     provider: Provider
-    query: str = Field(min_length=1, max_length=1_000)
+    query: str = Field(
+        min_length=1,
+        max_length=1_000,
+        description="Literal text. Searches the first 64 KB of the newest 1000 files within an 8 MiB total budget.",
+    )
     max_results: int = Field(default=100, ge=1, le=500)
 
 
@@ -411,35 +428,97 @@ class SessionsInput(RequestControls):
     )
 
 
+class SessionRow(GatewayModel):
+    reference: str
+    bytes: int
+    mtime_ns: int = Field(description="File modification time in Unix nanoseconds.")
+
+
+class SessionMatch(GatewayModel):
+    reference: str
+    line: int
+    offset: int = Field(description="Byte offset accepted by the read operation.")
+    text: str
+
+
 class SessionsResult(GatewayModel):
     operation: Literal["list", "read", "search"]
     provider: str
-    sessions: list[dict[str, Any]] | None = None
-    matches: list[dict[str, Any]] | None = None
+    sessions: list[SessionRow] | None = None
+    matches: list[SessionMatch] | None = None
     reference: str | None = None
     offset: int | None = None
     bytes: int | None = None
+    next_offset: int | None = None
     content: str | None = None
     scanned_bytes: int | None = None
     truncated: bool
     affordances: list[str] = Field(default_factory=list)
 
 
-def _sessions(runtime: Runtime, inp: SessionsInput) -> SessionsResult:
+def _session_list(
+    runtime: Runtime, op: SessionsListOp
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    runtime.principal.require(Capability.SESSION_READ)
+    query_sha256 = hashlib.sha256(
+        json.dumps(
+            {"action": "sessions.query", **op.model_dump(exclude={"cursor"})},
+            sort_keys=True,
+        ).encode()
+    ).hexdigest()
+    if op.cursor:
+        snapshot = runtime.results.continue_snapshot(
+            op.cursor, query_sha256=query_sha256
+        )
+    else:
+        rows = runtime.sessions.inventory(op.provider)
+        revision = hashlib.sha256(json.dumps(rows, sort_keys=True).encode()).hexdigest()
+        writer = runtime.results.start_snapshot(
+            query_sha256=query_sha256, source_revision=revision, page_size=op.limit
+        )
+        try:
+            for row in rows:
+                writer.append(row)
+            snapshot = runtime.results.finish_snapshot(writer)
+        except Exception:
+            writer.abort()
+            raise
+    return (
+        {
+            "provider": op.provider,
+            "sessions": snapshot["rows"],
+            "truncated": snapshot["next_cursor"] is not None,
+        },
+        {
+            "kind": "snapshot",
+            "cursor": snapshot["cursor"],
+            "next_cursor": snapshot["next_cursor"],
+            "total": snapshot["row_count"],
+            "expires_at": snapshot["expires_at"],
+            "snapshot_ref": snapshot["snapshot_ref"],
+        },
+    )
+
+
+def _sessions(runtime: Runtime, inp: SessionsInput) -> ActionResult:
     op = inp.request
+    page = None
     try:
         if isinstance(op, SessionsListOp):
-            payload = runtime.sessions.list(op.provider, op.limit)
+            payload, page = _session_list(runtime, op)
         elif isinstance(op, SessionsReadOp):
             payload = runtime.sessions.read(op.reference, op.offset, op.max_bytes)
         else:
             payload = runtime.sessions.search(op.provider, op.query, op.max_results)
     except (SessionError, PolicyError) as exc:
         raise _owner_error(exc) from exc
-    return SessionsResult(
-        operation=op.operation,
-        **payload,
-        affordances=["sessions.query", "memory.query", "timeline.query"],
+    return ActionResult(
+        SessionsResult(
+            operation=op.operation,
+            **payload,
+            affordances=["sessions.query", "memory.query", "timeline.query"],
+        ),
+        page=page,
     )
 
 
@@ -597,14 +676,21 @@ ACTIONS: tuple[Action, ...] = (
         name="sessions.query",
         family=VerbFamily.QUERY,
         owner="sessions",
-        summary="List, read or search local coding-session JSONL files per provider.",
+        summary="Find recent coding sessions, read transcripts or search local session JSONL files per provider.",
         Input=SessionsInput,
         Output=SessionsResult,
         handler=_sessions,
         principals=OBSERVER_OPERATOR,
         resource_kinds=("session",),
         affordances=("sessions.query", "memory.query", "timeline.query"),
-        aliases=("claude sessions", "codex sessions", "transcript", "session log"),
+        aliases=(
+            "claude sessions",
+            "codex sessions",
+            "transcript",
+            "session log",
+            "recent work",
+        ),
+        documentation="page.next_cursor continues a newest-first snapshot for one hour; omit cursor to refresh. Reads return next_offset. Search hits carry byte offsets and matching snippets; truncated marks incomplete coverage.",
         examples=(
             Example(
                 title="Recent Claude Code sessions",
