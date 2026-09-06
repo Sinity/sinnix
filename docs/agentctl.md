@@ -33,6 +33,7 @@ command, the run manifest of a batch, and one operator screen.
 | `view [p]`                                                                                                | queue groups, what needs attention (failures of the last six hours), active jobs, open runs with each worker's stage, ready beads (epics and decisions left out)                                                                           |
 | `events tail [--lines N] [--follow] [--project p]`                                                        | the event spool (`/realm/state/agentctl/events.jsonl`)                                                                                                                                                                                     |
 | `schedule apply`                                                                                          | make the transient timer set equal the declared schedules                                                                                                                                                                                  |
+| `pools apply`                                                                                             | write the declared parallelism of every pueue group into the running daemon                                                                                                                                                                |
 | `backpressure tick`                                                                                       | pause or resume one pool against host stall                                                                                                                                                                                                |
 
 The project is `--project`, a leading positional naming a configured project
@@ -123,9 +124,15 @@ read, so the agentctl calls inside a task (`batch result`, `batch land`) see
 the same projects, state directory and event spool.
 
 Groups admit work: `agent:8 pytest:1 bulk:1 normal:2 interactive:4`, plus
-`<project>-land` of parallelism 1 for sinnix, polylogue, sinex and lynchpin
-(`modules/features/cli/core.nix`). Every part of a unit name comes from `pueue status`, from a command
-that is the wrapper and one launch input and nothing else.
+`<project>-land` of parallelism 1 per configured project, declared by
+`sinnix.services.agentctl.pools` and carried in `/etc/sinnix/agentctl.json`.
+pueued keeps its groups in its own state, so `agentctl pools apply` writes
+that declaration into the daemon that is already running: it creates a
+missing group, resizes a drifted one, leaves a group nothing declares alone
+(reported as `undeclared`), and keeps every task and every pause. Restarting
+pueued instead would mark every running task Killed. Every part of a unit
+name comes from `pueue status`, from a command that is the wrapper and one
+launch input and nothing else.
 
 `job cancel` drops a queued task out of the queue (`removed`); for a running
 task it writes the cancel marker, runs `systemctl --user stop <unit>`, then
@@ -531,13 +538,17 @@ unattended batches declares a scheduled operation whose `exec` runs
 
 `modules/services/agentctl.nix` renders `/etc/sinnix/agentctl.json`
 (`project_roots`, `agent_runner`, `worker_contract`, `event_spool`,
-`agentctl`), installs `agentctl`, `wt`, `pueue` and `gh` as system
+`agentctl`, `pools`), installs `agentctl`, `wt`, `pueue` and `gh` as system
 packages, persists `~/.local/state/agentctl`, and declares the timers:
 `agentctl-backpressure` (every minute) and `agentctl-schedule` (every
-fifteen minutes, and two minutes after login). pueued itself, its
-`agentctl-work.slice` placement, the pueue pool groups, and their pool
-slices are declared by the CLI feature and runtime registry (`modules/features/cli/core.nix`,
-`flake/data/runtime-defaults.nix`).
+fifteen minutes, and two minutes after login). `agentctl-pools.service`
+carries the group declaration into the daemon; it is wanted by
+`default.target`, ordered after and `PartOf=` pueued so a daemon start
+re-applies it, and names the rendered configuration file in
+`X-Restart-Triggers` so a switch that changed the declaration runs it again.
+pueued itself, its `agentctl-work.slice` placement and the pool slices are
+declared by the CLI feature and runtime registry
+(`modules/features/cli/core.nix`, `flake/data/runtime-defaults.nix`).
 
 `nix build .#agentctl` runs the package suite, which drives a private pueued
 end to end for the adapter and fakes it for the launch and batch routes.

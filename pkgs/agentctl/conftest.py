@@ -1,13 +1,19 @@
 """Shared fakes: an in-memory pueue and a Beads reader over fixture beads.
 
 Tests drive job execution by mutating task state directly instead of
-shelling out to a real pueued.
+shelling out to a real pueued. The `live_pueue` fixture is the exception:
+contracts that only a real daemon can settle run against a private one.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import shutil
+import subprocess
+import tempfile
+import time
+from collections.abc import Iterator
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
@@ -30,6 +36,7 @@ class FakePueue:
     killed: list[int] = field(default_factory=list)
     restarted: list[int] = field(default_factory=list)
     removed: list[int] = field(default_factory=list)
+    resized: list[tuple[str, int, int]] = field(default_factory=list)
     waited: list[int] = field(default_factory=list)
     enqueued: list[int] = field(default_factory=list)
     _logs: dict[int, str] = field(default_factory=dict)
@@ -106,6 +113,10 @@ class FakePueue:
 
     def group_add(self, name: str, parallel: int) -> None:
         self.groups.setdefault(name, parallel)
+
+    def set_parallel(self, group: str, parallel: int) -> None:
+        self.resized.append((group, self.groups[group], parallel))
+        self.groups[group] = parallel
 
     def tasks(self) -> dict[int, Task]:
         if self.fail_tasks:
@@ -211,6 +222,71 @@ class FakePueue:
 
 
 @pytest.fixture
+def live_pueue(monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
+    """A private pueued: the adapter's parsing proven against the real daemon.
+
+    The runtime directory is overridden so this daemon never touches the
+    operator's socket or pid file, and it lives under the shortest available
+    temporary root because a Unix socket path over SUN_LEN cannot be bound.
+    """
+    root = Path(tempfile.mkdtemp(prefix="pq", dir=tempfile.gettempdir()))
+    home = root / "h"
+    (home / ".config" / "pueue").mkdir(parents=True)
+    (home / ".config" / "pueue" / "pueue.yml").write_text(
+        "shared:\n"
+        f"  pueue_directory: {root / 'd'}\n"
+        f"  runtime_directory: {root / 'r'}\n"
+        "  use_unix_socket: true\n"
+        "daemon:\n"
+        "  default_parallel_tasks: 2\n"
+    )
+    (root / "d").mkdir()
+    (root / "r").mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
+    monkeypatch.delenv("XDG_DATA_HOME", raising=False)
+    environment = {"HOME": str(home), "PATH": os.environ["PATH"]}
+    # Every call below must reach this daemon and no other. A config or runtime
+    # directory inherited from the invoking user resolves to the operator's
+    # live socket, where `shutdown` stops the machine's real queue.
+    resolved = subprocess.run(
+        ["pueue", "status", "--json"], env=environment, capture_output=True, text=True
+    )
+    assert resolved.returncode != 0, (
+        "a daemon answered before this fixture started one: the environment "
+        "still points at someone else's pueued"
+    )
+    # pueued daemonises but its child inherits the parent's stdio; capturing
+    # into a pipe would block until that child exits, which is never.
+    with open(root / "daemon.log", "w") as daemon_log:
+        subprocess.run(
+            ["pueued", "-d"],
+            env=environment,
+            check=True,
+            stdout=daemon_log,
+            stderr=subprocess.STDOUT,
+        )
+    deadline = time.monotonic() + 30
+    while True:
+        probe = subprocess.run(
+            ["pueue", "status", "--json"], env=environment, capture_output=True
+        )
+        if probe.returncode == 0:
+            break
+        if time.monotonic() > deadline:
+            raise AssertionError(f"pueued did not start: {probe.stderr!r}")
+        time.sleep(0.1)
+    try:
+        yield str(home)
+    finally:
+        subprocess.run(
+            ["pueue", "shutdown"], env=environment, capture_output=True, timeout=30
+        )
+        shutil.rmtree(root, ignore_errors=True)
+
+
+@pytest.fixture
 def fake_pueue(monkeypatch: pytest.MonkeyPatch) -> FakePueue:
     fake = FakePueue()
     for name in (
@@ -224,6 +300,7 @@ def fake_pueue(monkeypatch: pytest.MonkeyPatch) -> FakePueue:
         "groups_status",
         "enqueue",
         "group_add",
+        "set_parallel",
         "pause",
         "resume",
         "log",

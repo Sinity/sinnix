@@ -7,10 +7,10 @@ Output: a read verb (``project``, ``job list|get|logs|result|wait``,
 ``batch status|list``, ``view``, ``events tail``) prints a table in local
 time with an age column, or the document with ``--json``. A write verb
 (``job start|fire|cancel|retry|clean``, ``batch start|land|abandon|result|resume``,
-``schedule apply``, ``backpressure tick``) prints the document as JSON on
-stdout and one summary line on stderr. Tables show a run's 8-character
-suffix and 8 characters of a commit; ``--full`` prints them whole, and every
-verb that takes a run accepts either form.
+``schedule apply``, ``pools apply``, ``backpressure tick``) prints the
+document as JSON on stdout and one summary line on stderr. Tables show a
+run's 8-character suffix and 8 characters of a commit; ``--full`` prints
+them whole, and every verb that takes a run accepts either form.
 
 The project is ``--project``, a leading positional that names a configured
 project or a checkout path, or else the checkout enclosing the working
@@ -34,7 +34,7 @@ import time
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from . import backpressure, batch, launch, operator_view, schedule
+from . import backpressure, batch, launch, operator_view, pools, schedule
 from .config import Config, ConfigError, load_config, resolve_project
 from .github import GithubError
 from .launch import JobError
@@ -289,6 +289,12 @@ def parser() -> argparse.ArgumentParser:
     timers = verbs.add_parser("schedule", help="calendar timers for declared schedules")
     timers_verbs = timers.add_subparsers(dest="schedule_verb", required=True)
     _output_arguments(timers_verbs.add_parser("apply"))
+
+    admission = verbs.add_parser(
+        "pools", help="the declared parallelism of every pueue group"
+    )
+    admission_verbs = admission.add_subparsers(dest="pools_verb", required=True)
+    _output_arguments(admission_verbs.add_parser("apply"))
 
     pressure = verbs.add_parser(
         "backpressure", help="freeze or thaw the job queue against host pressure"
@@ -686,6 +692,17 @@ def _dispatch(arguments: argparse.Namespace, config: Config, out: Output) -> int
             f"{len(applied['timers'])} timer(s): started {len(applied['started'])}, "
             f"stopped {len(applied['stopped'])}, "
             f"{len(applied['unavailable'])} project(s) out of service",
+        )
+        return EXIT_OK
+    if verb == "pools":
+        if not config.pools:
+            raise ConfigError(f"{config.config_path} declares no pools")
+        applied = pools.apply(config.pools)
+        out.write(
+            applied,
+            f"pools: created {len(applied['created'])}, "
+            f"resized {len(applied['resized'])}, "
+            f"unchanged {len(applied['unchanged'])}",
         )
         return EXIT_OK
     if verb == "backpressure":
