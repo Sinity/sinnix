@@ -12,6 +12,7 @@ import os
 import stat
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -381,6 +382,58 @@ def test_a_private_pueue_task_places_its_child_in_the_declared_pool_scope(
     cgroup = log_path.read_text()
     assert f"/{unit_for(launch_path, 'pytest')}" in cgroup
     assert "/agentctl-pytest.slice/" in cgroup
+
+
+def test_a_waiting_caller_keeps_its_job_when_the_operator_reorders_the_queue(
+    live_pueue: str, tmp_path: Path
+) -> None:
+    """`pueue switch` exchanges two queued task ids under a blocked waiter.
+
+    Anti-vacuity: only the real daemon reorders a queue. A wait bound to the
+    id it was handed sleeps until the stranger the switch moved there
+    finishes, and then reports that stranger's result as its own.
+    """
+    runner = tmp_path / "bin" / "agentctl-run"
+    runner.parent.mkdir()
+    # The queued command carries the wrapper's shape -- its name and one
+    # launch input path -- because that path is what names the job.
+    runner.write_text('#!/bin/sh\ncase "$1" in *other*) sleep 8 ;; esac\n')
+    runner.chmod(0o755)
+    pueue.group_add("reorder", 1)
+    pueue.pause("reorder")
+    other = pueue.add(
+        group="reorder",
+        label="fixture:check:other",
+        command=(str(runner), str(tmp_path / "other.json")),
+        working_directory=tmp_path,
+    )
+    own = pueue.add(
+        group="reorder",
+        label="fixture:check:own",
+        command=(str(runner), str(tmp_path / "own.json")),
+        working_directory=tmp_path,
+    )
+
+    def reorder() -> None:
+        """The operator's own prioritisation, while the caller is blocked."""
+        time.sleep(1.0)
+        subprocess.run(["pueue", "switch", str(other), str(own)], check=True)
+        pueue.resume("reorder")
+
+    operator = threading.Thread(target=reorder)
+    operator.start()
+    try:
+        waited = launch.wait(own, timeout_seconds=60)
+    finally:
+        operator.join()
+
+    assert waited["reference"] == "own"
+    # The switch put this job at the other's id, and the wait returns it there.
+    assert (waited["job_id"], waited["phase"]) == (other, "succeeded")
+    stranger = pueue.task(own)
+    assert stranger is not None and not stranger.terminal, (
+        "the wait consumed the job the switch moved to its id"
+    )
 
 
 def test_kill_reaches_the_whole_process_tree(live_pueue: str, tmp_path: Path) -> None:
