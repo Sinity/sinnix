@@ -60,7 +60,7 @@ flock 9
 if [ ! -x "$STATE/npm/bin/$binary_name" ]; then
   cleanup_stale_reify_entries
   echo "$binary_name: bootstrapping (npm install -g $npm_package)..." >&2
-  npm install -g "$npm_package"
+  npm install -g "$npm_package" >&2
 fi
 
 # launch.sh is regenerated unconditionally and callers execve() it
