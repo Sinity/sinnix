@@ -1,21 +1,28 @@
-# Noctalia shell configuration.
+# Noctalia shell configuration: the declared layer.
 #
-# Writable + live-editable: this file is symlinked out-of-store into
-# ~/.config/noctalia/config.toml (see modules/features/desktop/noctalia.nix),
-# so edits here apply on the next reload with no rebuild.
-#
-# It is the BASE layer, not the only one. Noctalia merges this with
-# ~/.local/state/noctalia/settings.toml, and the state file WINS. That is where
-# the Settings GUI persists — despite this file being writable, the GUI does
-# not write back to it. So a value set in the GUI silently overrides whatever
-# is written here, and the two can disagree indefinitely without any symptom:
-# the bar sat at position="top" in this file while running at the bottom for
-# however long, because the state layer said bottom (noticed 2026-08-14).
-#
-# Practical rule: treat this file as the declared intent and check
-# `noctalia config export merged` for what is actually in force. When they
-# disagree and this file is the one that is wrong, fix it here rather than
-# leaving the repo describing a desktop that does not exist.
+# Symlinked out-of-store into ~/.config/noctalia/config.toml, so edits apply
+# on the next reload with no rebuild. Noctalia merges it with the GUI-owned
+# ~/.local/state/noctalia/settings.toml, and the state file wins. Stable
+# intent lives here; wallpaper favorites, last wallpaper, lockscreen widget
+# geometry and other genuinely mutable state stay in the state file. The
+# config-drift lane compares this file with `noctalia config export merged`
+# for the critical keys, so a GUI override of one is reported, not silent.
+
+[accessibility]
+ui_scale = 1.5
+
+[shell]
+font_family = "SauceCodePro Nerd Font"
+time_format = "{:%T}"
+polkit_agent = true
+clipboard_enabled = true
+clipboard_history_max_entries = 2000
+
+[shell.animation]
+speed = 1.5
+
+[shell.panel]
+transparency_mode = "glass"
 
 [shell.screenshot]
 save_to_file = true
@@ -32,18 +39,8 @@ wallpaper_scheme = "vibrant"
 
 [theme.templates]
 enable_builtin_templates = true
-# hyprland is enabled because the native template writes the wallpaper-derived
-# palette to ~/.config/hypr/noctalia.lua and applies it from hyprland.lua. The
-# template detects the active config provider, so it remains aligned with the
-# Lua migration instead of creating a legacy hyprland.conf fragment.
-#
-# NOTE, learned the hard way within an hour of writing the layer warning at
-# the top of this file: adding it HERE is not enough. The state layer carries
-# its own builtin_ids and wins, so the template kept not running until
-# "hyprland" was added to ~/.local/state/noctalia/settings.toml as well. That
-# file is the GUI's and is not tracked here, so this entry records the intent
-# and survives a state reset -- it does not by itself make the template run.
-# Check `noctalia config export merged`, not this file, to see what is live.
+# hyprland: the native template writes the wallpaper palette to
+# ~/.config/hypr/noctalia.lua and hyprland.lua applies it.
 builtin_ids = ["gtk3", "gtk4", "hyprland", "kitty", "qt"]
 enable_community_templates = true
 community_ids = ["zed", "yazi"]
@@ -51,54 +48,85 @@ community_ids = ["zed", "yazi"]
 [wallpaper]
 enabled = true
 directory = "/home/sinity/wallpaper"
-# directory_dark/directory_light are real v5 keys (accepted by the installed
-# binary's own `noctalia config validate`). They point at STABLE paths --
-# ~/wallpaper/{dark,light} are
-# symlinks retargeted by the time-of-day timer in
-# modules/features/desktop/wallpaper.nix, so this file never needs to
-# change when the active time-of-day set rotates.
+# ~/wallpaper/{dark,light} are symlinks retargeted by the time-of-day timer
+# (modules/features/desktop/wallpaper.nix), so these paths are stable.
 directory_dark = "/home/sinity/wallpaper/dark"
 directory_light = "/home/sinity/wallpaper/light"
 per_monitor_directories = false
+transition_on_startup = true
 
 [wallpaper.automation]
 enabled = true
-interval_seconds = 120
+# Every change rewrites settings.toml (wallpaper.last) and triggers a full
+# config reload, so the interval is also the reload cadence.
+interval_seconds = 1800
 order = "random"
 recursive = true
 
-# Bars are defined as [bar.<name>] tables (the default bar is "default").
-# thickness is the bar height in px; Noctalia's default is 34, which is tiny on
-# the 48" 4K panel at scale 1. Raise it here or in Settings -> Bar (which
-# persists to the state layer described at the top of this file, not here).
+[location]
+auto_locate = true
+
+[weather]
+refresh_minutes = 5
+
+# Bars are [bar.<name>] tables; "default" is the only bar. The panel is a
+# 48-inch 3840x2160 at compositor scale 1, hence the bar scale.
 [bar.default]
-# Bottom, matching both the operator's intent and what has actually been
-# running; this file said "top" and was simply overridden and never noticed.
 position = "bottom"
 thickness = 56
-# Cockpit widgets at the end of the bar: capture-verb strip (F8/F6/F7 as
-# buttons) and the capability-index entry point,
-# ahead of the sysmon the live state already carries. NOTE the layer trap
-# documented at the top of this file: the state layer defines its own
-# [bar.default] end array and WINS, so this line is declared intent — the
-# widgets appear only once the same list is set in Settings -> Bar (or in
-# ~/.local/state/noctalia/settings.toml) as well.
+scale = 2.0
+padding = 15
+margin_edge = 5
+margin_ends = 75
+radius = 10
+font_weight = 300
+widget_spacing = 15
+start = ["session", "wallpaper", "control-center", "volume", "audio_visualizer", "media", "launcher"]
+center = ["tray", "notifications", "clock", "workspaces"]
 end = [
   "sinity/sinnix-cockpit:capture-strip",
   "sinity/sinnix-cockpit:capabilities",
+  "sinity/sinnix-ops:capsule",
   "sysmon",
 ]
+
+[widget.brightness]
+scale = 1.15
+
+[widget.launcher]
+scale = 0.95
+
+[widget.sysmon]
+highlight_color = "on_error"
+stat = "ram_used"
+
+[[control_center.shortcuts]]
+type = "wifi"
+
+[[control_center.shortcuts]]
+type = "bluetooth"
+
+[[control_center.shortcuts]]
+type = "caffeine"
+
+[[control_center.shortcuts]]
+type = "nightlight"
+
+[[control_center.shortcuts]]
+type = "notification"
+
+[[control_center.shortcuts]]
+type = "session"
 
 [notification]
 enable_daemon = true
 blacklist = []
 blacklist_allow_critical = true
 collapse_on_dismiss = true
-# The native v5 renderer keeps one full-height toast surface alive while a
-# notification is visible. Our package patch prevents that surface from
-# requesting the compositor background-effect protocol; layer choice only
-# controls stacking and cannot constrain the effect to a notification card.
-# Keep toasts above ordinary windows without granting overlay-level authority.
+# The toast surface spans the output height; the package patch keeps it from
+# requesting the compositor background effect, which Hyprland would apply to
+# the whole surface. "top" keeps toasts above windows without overlay
+# authority.
 layer = "top"
 monitors = []
 position = "top-right"
@@ -106,3 +134,9 @@ scale = 1.0
 show_actions = true
 show_app_name = true
 background_opacity = 0.96
+
+# Notes are plain Markdown in the data lake, one capture lane like the rest
+# of activity/; the plugin is a view over them, not their store.
+[plugin_settings."noctalia/notes"]
+notes_dir = "/realm/data/activity/notes"
+extension = "md"

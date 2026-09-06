@@ -1,5 +1,6 @@
 --!nonstrict
--- Compact read-only capsule. It only consumes shared bridge state.
+-- Compact read-only capsule. It only consumes shared bridge state; a click
+-- opens the panel.
 
 local view = noctalia.state.get("sinity-ops.view") or { status = "disconnected" }
 
@@ -26,6 +27,10 @@ noctalia.state.watch("sinity-ops.view", function(value)
   view = type(value) == "table" and value or { status = "disconnected" }
   render()
 end)
+
+function onClick()
+  noctalia.togglePanel("sinity/sinnix-ops:now")
+end
 
 function update()
   render()

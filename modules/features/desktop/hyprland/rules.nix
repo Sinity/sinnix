@@ -10,6 +10,7 @@ let
   rulesDsl = import ../../../lib/hyprland-rules.nix { inherit lib; };
   inherit (rulesDsl)
     mkRule
+    mkLayerRule
     mkScratchpad
     mkDialog
     mkIdleInhibit
@@ -89,15 +90,6 @@ let
       };
       opacity = 0.9;
     })
-    (mkRule "clipse-manager" {
-      class = "^(clipse)$";
-      float = true;
-      center = true;
-      size = {
-        w = 2000;
-        h = 1000;
-      };
-    })
     (mkRule "steam-games" {
       class = "^(steam_app_.*)$";
       workspace = "5";
@@ -139,5 +131,14 @@ let
 in
 {
   windowRules = dialogs ++ [ pip ] ++ scratchpads ++ applications ++ idle;
-  layerRules = [ ];
+  # Noctalia's own guidance for Hyprland: blur its shell surfaces behind
+  # translucent regions only, and skip layer animations it animates itself.
+  layerRules = [
+    (mkLayerRule "noctalia" {
+      namespace = "^noctalia-(bar-.+|notification|dock|panel|attached-panel|osd|window-switcher)$";
+      blur = true;
+      ignoreAlpha = 0.5;
+      noAnim = true;
+    })
+  ];
 }

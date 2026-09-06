@@ -1,8 +1,8 @@
 # Curated Noctalia v5 plugin sources and enabled entries.
 # Source locations are stable home paths backed by immutable Nix sources.
 [plugins]
-auto_update = false
-enabled = ["noctalia/timer", "kenn/keybind-cheatsheet", "sinity/sinnix-ops", "sinity/sinnix-cockpit"]
+auto_update = "none"
+enabled = ["noctalia/timer", "noctalia/notes", "kenn/keybind-cheatsheet", "sinity/sinnix-ops", "sinity/sinnix-cockpit"]
 
 [[plugins.source]]
 name = "official"

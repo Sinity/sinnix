@@ -534,7 +534,16 @@ in
         surface = config.sinnix.runtime.surfaces.config-drift;
       }
       {
-        execStart = "${scriptPkgs.sinnix-config-drift}/bin/sinnix-config-drift --manifest /etc/sinnix/config.json --output ${cfg.paths.machineRoot}/config-drift.jsonl";
+        execStart = lib.concatStringsSep " " [
+          "${scriptPkgs.sinnix-config-drift}/bin/sinnix-config-drift"
+          "--manifest /etc/sinnix/config.json"
+          "--output ${cfg.paths.machineRoot}/config-drift.jsonl"
+          # The user profile's noctalia, so the merged export uses the same
+          # binary and schema the running shell does.
+          "--noctalia /etc/profiles/per-user/${cfg.user.name}/bin/noctalia"
+          "--noctalia-config-home /home/${cfg.user.name}/.config/noctalia"
+          "--noctalia-state-home /home/${cfg.user.name}/.local/state/noctalia"
+        ];
         unit = {
           after = [ "local-fs.target" ];
           wants = [ "local-fs.target" ];
