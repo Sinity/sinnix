@@ -11,7 +11,7 @@ GitHub owns review, required checks and merge; Beads owns tasks and claims;
 systemd owns only calendar wake-ups. Do not add a parallel ledger for any of
 them. `docs/agentctl.md` in sinnix is the reference.
 
-Verbs: `project`, `job`, `batch`, `view`, `events`, `schedule`,
+Verbs: `project`, `job`, `batch`, `view`, `events`, `schedule`, `pools`,
 `backpressure`. `agentctl <verb> --help` is the surface. Reads print tables
 in local time; `--json` (before or after the verb) prints the document;
 writes print JSON on stdout and one summary line on stderr. `--project` is

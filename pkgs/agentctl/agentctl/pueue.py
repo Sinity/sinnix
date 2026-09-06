@@ -244,6 +244,15 @@ def group_add(name: str, parallel: int) -> None:
     _run(["group", "add", "--parallel", str(parallel), name])
 
 
+def set_parallel(group: str, parallel: int) -> None:
+    """Change how many tasks a group admits at once, in the running daemon.
+
+    The group keeps its queued and running tasks and its paused or running
+    state; only the width changes.
+    """
+    _run(["parallel", "--group", group, str(parallel)])
+
+
 def groups() -> dict[str, int]:
     """Every group's configured parallelism: the whole of the admission policy."""
     document = _decode(_run(["group", "--json"]), "group")
