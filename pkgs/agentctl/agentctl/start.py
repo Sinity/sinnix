@@ -49,6 +49,7 @@ from .prompts import (
     compile_worker_prompt,
     resolve_group,
     resume_prompt,
+    scope_authority,
     scope_violations,
     validate_effort,
     validate_members,
@@ -198,6 +199,8 @@ def _prepare(
                 backend=snapshot.dimensions.backend,
                 model=snapshot.dimensions.model,
                 effort=snapshot.dimensions.effort,
+                write_scope=list(snapshot.write_scope),
+                scope_authority=list(scope_authority(snapshot.beads)),
             )
             worker = run.workers[index]
         if run.harness == "queued" and worker.get("task_id") is None:
@@ -403,12 +406,14 @@ def _scope_check(
         f"{run.base_commit}..{candidate}",
         error=BatchError,
     ).splitlines()
-    globs: list[str] = []
-    for bead_id in worker["beads"]:
-        try:
-            globs.extend(write_scope(reader.show(bead_id)))
-        except PromptError:
-            continue
+    stored_scope = worker.get("write_scope")
+    globs = list(stored_scope) if isinstance(stored_scope, list) else []
+    if not globs:
+        for bead_id in worker["beads"]:
+            try:
+                globs.extend(write_scope(reader.show(bead_id)))
+            except PromptError:
+                continue
     if not globs:
         return {"scope": "undeclared", "changed_paths": changed}
     outside = scope_violations(changed, globs)
@@ -420,7 +425,62 @@ def _scope_check(
             paths=outside,
             write_scope=globs,
         )
-    return {"scope": "declared", "changed_paths": changed}
+    return {
+        "scope": "declared",
+        "changed_paths": changed,
+        "write_scope": globs,
+        "scope_authority": worker.get("scope_authority", []),
+    }
+
+
+def correct_scope(
+    config: Config,
+    run_id: str,
+    worker_id: str,
+    candidate: str,
+    authorizations: Sequence[str],
+) -> dict[str, Any]:
+    """Record a coordinator-authorized scope correction for an existing worker."""
+    run = load(config, run_id)
+    worker = run.worker(worker_id)
+    worktree = Path(str(worker.get("worktree") or ""))
+    head = gitcmd.git(worktree, "rev-parse", "HEAD", error=BatchError)
+    if candidate != head:
+        raise BatchRefusal(
+            "candidate_mismatch",
+            f"scope correction names {candidate[:12]} but {worktree} is at {head[:12]}",
+        )
+    assigned = set(worker["beads"])
+    parsed: dict[str, set[str]] = {}
+    for item in authorizations:
+        bead_id, separator, glob = item.partition("=")
+        if not separator or bead_id not in assigned or not glob:
+            raise BatchRefusal("members", f"invalid scope authorization {item!r}")
+        parsed.setdefault(glob, set()).add(bead_id)
+    authority = [
+        {"glob": glob, "beads": sorted(parsed[glob])} for glob in sorted(parsed)
+    ]
+    corrected = [row["glob"] for row in authority]
+
+    def record(document: dict[str, Any]) -> None:
+        for entry in document["workers"]:
+            if entry["id"] != worker_id:
+                continue
+            history = list(entry.get("scope_corrections") or [])
+            history.append(
+                {
+                    "at": now(),
+                    "candidate_sha": candidate,
+                    "old_scope": list(entry.get("write_scope") or []),
+                    "corrected_scope": corrected,
+                    "authority": authority,
+                }
+            )
+            entry["write_scope"] = corrected
+            entry["scope_authority"] = authority
+            entry["scope_corrections"] = history
+
+    return update(config, run_id, record).worker(worker_id)
 
 
 def result(

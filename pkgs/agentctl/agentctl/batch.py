@@ -11,12 +11,13 @@ from __future__ import annotations
 from .landing import abandon, land, queue
 from .manifest import BatchError, BatchRefusal, list_runs, load, resolve_run_id
 from .operator_view import status
-from .start import result, resume, start
+from .start import correct_scope, result, resume, start
 
 __all__ = [
     "BatchError",
     "BatchRefusal",
     "abandon",
+    "correct_scope",
     "land",
     "list_runs",
     "load",

@@ -1534,13 +1534,68 @@ def test_a_result_outside_the_declared_write_scope_is_refused(harness: Harness) 
     assert refused.value.to_dict()["paths"] == ["a.py", "b.py"]
     assert manifest.load(harness.config, run["run_id"]).workers[0]["result"] is None
 
-    harness.beads.beads["fx-solo"]["metadata"]["write_scope"] = ["a.py", "b.py"]
+    batch.correct_scope(
+        harness.config,
+        run["run_id"],
+        "fx-solo",
+        SHA,
+        ["fx-solo=a.py", "fx-solo=b.py"],
+    )
     filed = harness.file_result(run, "fx-solo")
     assert filed["scope"] == "declared" and filed["changed_paths"] == ["a.py", "b.py"]
 
     other = harness.start("fx-other")
     filed = harness.file_result(other, "fx-other")
     assert filed["scope"] == "undeclared" and filed["changed_paths"] == ["a.py", "b.py"]
+
+
+def test_a_multi_bead_worker_uses_the_union_with_per_bead_authority(
+    harness: Harness,
+) -> None:
+    harness.beads.beads["fx-lead"]["metadata"]["write_scope"] = ["a.py"]
+    harness.beads.beads["fx-member"]["metadata"]["write_scope"] = ["b.py", "a.py"]
+
+    run = harness.start("fx-lead")
+    worker = manifest.load(harness.config, run["run_id"]).workers[0]
+
+    assert worker["write_scope"] == ["a.py", "b.py"]
+    assert worker["scope_authority"] == [
+        {"glob": "a.py", "beads": ["fx-lead", "fx-member"]},
+        {"glob": "b.py", "beads": ["fx-member"]},
+    ]
+    filed = harness.file_result(run, "fx-lead")
+    assert filed["changed_paths"] == ["a.py", "b.py"]
+
+
+def test_scope_correction_is_candidate_bound_and_audited(harness: Harness) -> None:
+    harness.beads.beads["fx-lead"]["metadata"]["write_scope"] = ["a.py"]
+    run = harness.start("fx-lead")
+    with pytest.raises(BatchRefusal, match="candidate_mismatch"):
+        batch.correct_scope(
+            harness.config, run["run_id"], "fx-lead", MOVED, ["fx-member=b.py"]
+        )
+
+    corrected = batch.correct_scope(
+        harness.config,
+        run["run_id"],
+        "fx-lead",
+        SHA,
+        ["fx-member=b.py", "fx-lead=a.py"],
+    )
+
+    assert corrected["write_scope"] == ["a.py", "b.py"]
+    assert corrected["scope_corrections"][-1] == {
+        "at": corrected["scope_corrections"][-1]["at"],
+        "candidate_sha": SHA,
+        "old_scope": ["a.py"],
+        "corrected_scope": ["a.py", "b.py"],
+        "authority": [
+            {"glob": "a.py", "beads": ["fx-lead"]},
+            {"glob": "b.py", "beads": ["fx-member"]},
+        ],
+    }
+    filed = harness.file_result(run, "fx-lead")
+    assert filed["changed_paths"] == ["a.py", "b.py"]
 
 
 def test_landing_agents_get_members_scopes_and_reduced_results(
