@@ -832,6 +832,18 @@ def retry(task_id: int) -> dict[str, Any]:
     return get_job(task_id)
 
 
+def find_task(
+    tasks: Mapping[int, Task], task_id: object, reference: object = None
+) -> Task | None:
+    """Resolve a stored job identity after pueue may have reassigned its id."""
+    if isinstance(reference, str):
+        return next(
+            (task for task in tasks.values() if launch_reference(task) == reference),
+            None,
+        )
+    return tasks.get(task_id) if isinstance(task_id, int) else None
+
+
 def _following(reference: str | None, task_id: int) -> Task:
     """The task carrying this job now, whatever id the queue moved it to.
 
@@ -841,12 +853,11 @@ def _following(reference: str | None, task_id: int) -> Task:
     reference is the launch input path inside that command.
     """
     tasks = pueue.tasks()
+    task = find_task(tasks, task_id, reference)
     if reference is not None:
-        for task in sorted(tasks.values(), key=lambda item: item.task_id):
-            if launch_reference(task) == reference:
-                return task
+        if task is not None:
+            return task
         raise JobError(f"pueue has no task for job {reference}")
-    task = tasks.get(task_id)
     if task is None:
         raise JobError(f"pueue has no task {task_id}")
     return task
