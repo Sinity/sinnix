@@ -445,25 +445,55 @@ class Emitter:
 # --------------------------------------------------------------------------
 
 
-def newest_mtime(path: Path) -> float | None:
-    """Newest write under *path*, which may be a single file: five of the
-    borg lanes point at marker/ledger FILES, and os.walk over a file yields
-    nothing -- the bash sentinel's `find` handled both shapes, and losing
-    that silently read every file lane as stale (caught live 2026-08-18)."""
+PROBE_STAT_BUDGET = 512
+
+
+def newest_mtime(path: Path, budget: int = PROBE_STAT_BUDGET) -> float | None:
+    """Newest write under *path*, found by descending newest-entry-first and
+    stopping after *budget* stats.
+
+    Lane roots are time-partitioned trees with hundreds of thousands of
+    files; an exhaustive walk ran past the service watchdog. Visiting the
+    most recently modified entry of each directory first reaches the newest
+    file within a handful of stats, and the budget bounds the cost when a
+    tree is not partitioned that way. *path* may be a single file: marker
+    and ledger lanes point at files.
+    """
     try:
         if path.is_file():
             return path.stat().st_mtime
     except OSError:
         return None
     newest: float | None = None
-    for root, _directories, files in os.walk(path):
-        for name in files:
-            try:
-                stamp = os.stat(Path(root) / name).st_mtime
-            except OSError:
-                continue
-            if newest is None or stamp > newest:
+    remaining = budget
+    stack = [path]
+    while stack and remaining > 0:
+        directory = stack.pop()
+        entries: list[tuple[float, os.DirEntry[str]]] = []
+        try:
+            with os.scandir(directory) as it:
+                for entry in it:
+                    if remaining <= 0:
+                        break
+                    remaining -= 1
+                    try:
+                        entries.append(
+                            (entry.stat(follow_symlinks=False).st_mtime, entry)
+                        )
+                    except OSError:
+                        continue
+        except OSError:
+            continue
+        entries.sort(key=lambda item: item[0])
+        for stamp, entry in entries:
+            if entry.is_file(follow_symlinks=False) and (
+                newest is None or stamp > newest
+            ):
                 newest = stamp
+        # Newest subdirectory is pushed last so it is descended first.
+        for _stamp, entry in entries:
+            if entry.is_dir(follow_symlinks=False):
+                stack.append(Path(entry.path))
     return newest
 
 
