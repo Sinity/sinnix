@@ -49,6 +49,7 @@ def test_start_writes_the_launch_input_and_queues_the_wrapper_in_the_pool(
     assert written["result_kind"] == "json"
     assert written["result_path"].endswith(".result")
     assert written["event_spool_path"] == str(config.event_spool)
+    assert written["environment"]["GIT_OPTIONAL_LOCKS"] == "0"
     assert "PATH" in written["environment"]
     assert started["job_id"] == 1
     assert started["phase"] == "running"

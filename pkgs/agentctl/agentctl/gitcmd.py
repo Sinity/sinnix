@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 from typing import Sequence
@@ -23,6 +24,7 @@ def git(
             capture_output=True,
             text=True,
             timeout=timeout,
+            env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"},
         )
     except (OSError, subprocess.TimeoutExpired) as failure:
         raise error(f"git {arguments[0]} failed in {path}: {failure}") from failure
