@@ -27,7 +27,7 @@ from .config import Config
 from .launch_input import scratch_path, write_input
 from .limits import CALL_TIMEOUT_SECONDS, SHORT_ID, SYSTEMCTL_TIMEOUT_SECONDS
 from .projects import ProjectAdapter, ProjectOperation
-from .pueue import PueueError, Task
+from .pueue import PueueError, PueueTimeout, Task
 from .run import (
     CANCELLED_EXIT_CODE,
     MAX_LOG_BYTES,
@@ -51,6 +51,9 @@ QUEUE_RUN_EXECUTABLE = "agentctl-run"
 MAX_LAUNCH_INPUT_BYTES = 1_048_576
 # The label kinds under which a batch queues agents rather than declared operations.
 AGENT_OPERATIONS = frozenset({"worker", "resume", "integrate", "review"})
+# How long a wait blocks on one task id before re-reading which id the job
+# it waits for is at.
+WAIT_SLICE_SECONDS = 5.0
 # How long a cancel waits for the wrapper to record `cancelled` after its
 # unit is stopped before pueue kills the wrapper outright.
 CANCEL_SETTLE_SECONDS = 15.0
@@ -829,17 +832,71 @@ def retry(task_id: int) -> dict[str, Any]:
     return get_job(task_id)
 
 
-def wait(task_id: int, *, timeout_seconds: float) -> dict[str, Any]:
+def _following(reference: str | None, task_id: int) -> Task:
+    """The task carrying this job now, whatever id the queue moved it to.
+
+    `pueue switch` exchanges the ids of two queued tasks, so an id names a
+    position in the queue and not a job. The launch reference does name one:
+    pueue carries a task's command wherever it moves the task, and the
+    reference is the launch input path inside that command.
+    """
+    tasks = pueue.tasks()
+    if reference is not None:
+        for task in sorted(tasks.values(), key=lambda item: item.task_id):
+            if launch_reference(task) == reference:
+                return task
+        raise JobError(f"pueue has no task for job {reference}")
+    task = tasks.get(task_id)
+    if task is None:
+        raise JobError(f"pueue has no task {task_id}")
+    return task
+
+
+def _wait_slice(task: Task, remaining: float) -> float:
+    """How long to block on one task id before proving the job still has it.
+
+    `pueue switch` moves only a queued or stashed task, so a running task
+    keeps its id until it is terminal and the whole remaining wait blocks on
+    it; anything else is re-read often enough to notice the queue reordering.
+    """
+    if task.status == "Running":
+        return max(remaining, 1.0)
+    return max(min(remaining, WAIT_SLICE_SECONDS), 1.0)
+
+
+def wait(
+    task_id: int,
+    *,
+    timeout_seconds: float,
+    reference: str | None = None,
+) -> dict[str, Any]:
+    """Block until the job is terminal, following it across queue task ids.
+
+    ``reference`` is the launch reference the caller started; without one the
+    job is the one the queue holds at ``task_id`` when the wait begins. A
+    caller that followed the id alone would wake on a stranger's task, or
+    sleep past the end of its own.
+    """
     deadline = time.monotonic() + timeout_seconds
-    task = _task(task_id)
-    if task.terminal:
-        return job_view(task)
-    remaining = max(deadline - time.monotonic(), 1.0)
-    try:
-        final = pueue.wait(task_id, timeout_seconds=remaining)
-    except PueueError as error:
-        current = pueue.task(task_id)
-        if current is None:
-            raise
-        return {**job_view(current), "wait_timed_out": True, "detail": str(error)}
-    return job_view(final)
+    if reference is None:
+        reference = launch_reference(_task(task_id))
+    task = _following(reference, task_id)
+    detail: str | None = None
+    while True:
+        if task.terminal:
+            return job_view(task)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0 or detail is not None:
+            view = {**job_view(task), "wait_timed_out": True}
+            return view if detail is None else {**view, "detail": detail}
+        blocking = _wait_slice(task, remaining)
+        try:
+            pueue.wait(task.task_id, timeout_seconds=blocking)
+        except PueueTimeout:
+            # A slice covering the whole remaining wait is the caller's own
+            # timeout; a shorter one expired only to re-read the queue.
+            if blocking >= remaining:
+                return {**job_view(task), "wait_timed_out": True}
+        except PueueError as error:
+            detail = str(error)
+        task = _following(reference, task_id)

@@ -725,6 +725,91 @@ def test_wait_returns_the_terminal_view_and_reports_a_timeout_as_such(
     assert timed_out["phase"] == "running"
 
 
+def test_a_wait_follows_its_job_when_the_queue_reorders_beneath_it(
+    fake_pueue: FakePueue, config: Config, project_root: Path
+) -> None:
+    """`pueue switch` exchanges two task ids, and a wait must follow its job.
+
+    Anti-vacuity: a wait bound to the id blocks on whatever the switch moved
+    there, and reports that stranger's outcome as its own.
+    """
+    project = load_project_adapter(project_root)
+    other = launch.start_operation(config, project, project.operation("check"))
+    own = launch.start_operation(config, project, project.operation("check"))
+    fake_pueue.queue(other["job_id"])
+    fake_pueue.queue(own["job_id"])
+
+    def reorder(fake: FakePueue) -> None:
+        """The operator reorders the queue while the caller is blocked."""
+        fake.switch(other["job_id"], own["job_id"])
+        # The waited job is at the other's id now, and finishes there.
+        fake.succeed(other["job_id"])
+
+    fake_pueue.finish_when_waited(own["job_id"], reorder)
+
+    waited = launch.wait(own["job_id"], timeout_seconds=30, reference=own["reference"])
+
+    assert waited["reference"] == own["reference"]
+    assert (waited["job_id"], waited["phase"]) == (other["job_id"], "succeeded")
+    # Blocked once on the id it started with, never on the task moved there.
+    assert fake_pueue.waited == [own["job_id"]]
+    assert launch.get_job(own["job_id"])["reference"] == other["reference"]
+
+
+def test_a_wait_finds_the_job_the_queue_moved_before_the_wait_began(
+    fake_pueue: FakePueue, config: Config, project_root: Path
+) -> None:
+    """The reference the caller started with names its job; the id may not.
+
+    Anti-vacuity: reading the job out of the id at entry waits for the task
+    the switch left there, which is never this caller's.
+    """
+    project = load_project_adapter(project_root)
+    other = launch.start_operation(config, project, project.operation("check"))
+    own = launch.start_operation(config, project, project.operation("check"))
+    fake_pueue.queue(other["job_id"])
+    fake_pueue.queue(own["job_id"])
+    fake_pueue.switch(other["job_id"], own["job_id"])
+    fake_pueue.succeed(other["job_id"])
+
+    waited = launch.wait(own["job_id"], timeout_seconds=30, reference=own["reference"])
+
+    assert (waited["reference"], waited["phase"]) == (own["reference"], "succeeded")
+    assert fake_pueue.waited == []
+
+
+def test_every_read_by_task_id_answers_about_the_job_that_id_now_holds(
+    fake_pueue: FakePueue, config: Config, project_root: Path
+) -> None:
+    """Status, result, log and cancellation move with the queue, together."""
+    project = load_project_adapter(project_root)
+    first = launch.start_operation(config, project, project.operation("verify"))
+    second = launch.start_operation(config, project, project.operation("verify"))
+    fake_pueue.queue(first["job_id"])
+    fake_pueue.queue(second["job_id"])
+    config.jobs_dir.mkdir(parents=True, exist_ok=True)
+    for job, ran in ((first, "first"), (second, "second")):
+        (config.jobs_dir / f"{job['reference']}.log").write_text(f"{ran} log\n")
+        (config.jobs_dir / f"{job['reference']}.result").write_text(
+            json.dumps({"ran": ran})
+        )
+
+    fake_pueue.switch(first["job_id"], second["job_id"])
+
+    moved = first["job_id"]
+    assert launch.get_job(moved, config)["reference"] == second["reference"]
+    assert launch.result(config, moved)["value"] == {"ran": "second"}
+    assert launch.logs(config, moved).strip() == "second log"
+    cancelled = launch.cancel(config, moved)
+    assert cancelled["reference"] == second["reference"]
+    assert cancelled["removed"] == [
+        str(config.jobs_dir / f"{second['reference']}.log"),
+        str(config.jobs_dir / f"{second['reference']}.result"),
+        str(config.inputs_dir / f"{second['reference']}.json"),
+    ]
+    assert (config.jobs_dir / f"{first['reference']}.log").exists()
+
+
 def test_list_filters_by_project_prefix(
     fake_pueue: FakePueue, config: Config, project_root: Path
 ) -> None:
