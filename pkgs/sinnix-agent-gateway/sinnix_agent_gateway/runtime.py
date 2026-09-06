@@ -13,7 +13,8 @@ from mcp.types import CallToolResult, TextContent
 from sinnix_mcp import ErrorCode, RequestEnvelope
 from sinnix_mcp.execution import ExecutionProfile, OwnerDiagnosticError, OwnerExecution
 
-from .action import Action
+from .action import Action, ActionResult
+from .actions import BY_NAME as ACTIONS_BY_NAME
 from .actions import REVISION as ACTION_REVISION
 from .artifacts import ArtifactService
 from .audit import AuditService
@@ -63,6 +64,45 @@ DAEMON_ERROR_CLASSES = {
     ErrorCode.RESOURCE_EXHAUSTED: "response_bound",
     ErrorCode.OPERATION_FAILED: "owner_failed",
     ErrorCode.RESULT_INVALID: "owner_failed",
+}
+
+
+def _by_ref(field: str) -> Callable[[str, Mapping[str, str]], dict[str, Any]]:
+    return lambda reference, _values: {field: {"ref": reference}}
+
+
+# One canonical reader per resource kind: a `resources/read` of a canonical ref
+# is a projection of the action that owns the kind, so a ref and a call answer
+# with the same data. A kind absent here has no single-ref reader and its
+# template is not published.
+RESOURCE_READERS: dict[
+    str, tuple[str, Callable[[str, Mapping[str, str]], dict[str, Any]]]
+] = {
+    "project": ("projects.get", _by_ref("target")),
+    "checkout": ("projects.get", _by_ref("target")),
+    "task_authority": (
+        "projects.get",
+        lambda _reference, values: {
+            "target": {"project": values["project_id"]},
+            "projection": "authority",
+        },
+    ),
+    "bead": ("beads.get", _by_ref("target")),
+    "run": ("batches.status", _by_ref("target")),
+    "job": ("jobs.get", _by_ref("target")),
+    "artifact": ("artifacts.get", _by_ref("target")),
+    "machine_unit": ("machine.units.get", _by_ref("target")),
+    "process": ("processes.get", _by_ref("target")),
+    "terminal": ("terminals.get", _by_ref("target")),
+    "browser_page": ("browser.page", _by_ref("target")),
+    "host_file": ("files.stat", _by_ref("target")),
+    "desktop": ("desktop.snapshot", lambda _reference, _values: {}),
+    "capability": (
+        "capabilities.query",
+        lambda _reference, values: {
+            "request": {"operation": "describe", "name": values["name"]}
+        },
+    ),
 }
 
 TOKEN_ESTIMATE_BYTES_PER_TOKEN = 4
@@ -647,50 +687,45 @@ class Runtime:
         self.context_snapshots.put(context)
         return {"ref": target_ref, **context}
 
-    def v2_run_for_bead(
-        self,
-        *,
-        reference: str | None,
-        backend: str | None,
-        model: str | None,
-        reasoning_effort: str | None,
-    ) -> dict[str, Any]:
-        """A batch of one worker for one bead: agentctl compiles the packet, creates the worktree, queues the agent."""
-        self.principal.require(Capability.JOB_START)
-        _resource, values, bead_ref = self._resource_reference(
-            reference or "", {"bead"}, "a worker requires a canonical Beads reference"
-        )
-        for name, value in (
-            ("backend", backend),
-            ("model", model),
-            ("reasoning_effort", reasoning_effort),
-        ):
-            if value is not None and (
-                not isinstance(value, str) or not 1 <= len(value) <= 256
-            ):
-                raise ProtocolError("invalid_request", f"{name} is malformed")
-        result = self._job(
-            "job.agent.start",
-            {
-                "project_id": values["project_id"],
-                "bead_id": values["bead_id"],
-                "backend": backend,
-                "model": model,
-                "effort": reasoning_effort,
-            },
-        )
-        job_id = result.get("job_id")
-        if not isinstance(job_id, str) or not job_id:
+    async def v2_get(self, reference: str) -> dict[str, Any]:
+        """Read one canonical resource through the action that owns its kind."""
+        try:
+            resource, values = REGISTRY.resolve(reference)
+        except RegistryError as exc:
             raise ProtocolError(
-                "owner_failed", "agent.for_bead response omitted the job ID"
+                "not_found", "canonical resource was not found"
+            ) from exc
+        canonical_ref = str(resource.ref_template.format(values))
+        reader = RESOURCE_READERS.get(resource.kind)
+        if reader is None:
+            raise ProtocolError(
+                "invalid_request",
+                f"{resource.kind} resources have no single-ref reader; "
+                "call one of the actions the catalog lists for the kind",
             )
+        if self.principal_name not in resource.principals:
+            raise PolicyError(
+                f"principal {self.principal_name} cannot read {resource.kind} resources"
+            )
+        name, arguments = reader
+        action = ACTIONS_BY_NAME[name]
+        if self.principal_name not in action.principals:
+            raise PolicyError(
+                f"principal {self.principal_name} cannot read {resource.kind} resources"
+            )
+        request = action.Input.model_validate(arguments(canonical_ref, values))
+        data = (
+            await action.handler(self, request)
+            if action.is_async
+            else await anyio.to_thread.run_sync(action.handler, self, request)
+        )
+        if isinstance(data, ActionResult):
+            data = data.data
         return {
-            **result,
-            "ref": REGISTRY.reference("job", {"job_id": job_id}),
-            "bead_ref": bead_ref,
-            "project_ref": REGISTRY.reference(
-                "project", {"project_id": values["project_id"]}
-            ),
+            "ref": canonical_ref,
+            "kind": resource.kind,
+            "action": name,
+            "data": action.Output.model_validate(data).model_dump(mode="json"),
         }
 
     def v2_events(
@@ -823,18 +858,6 @@ class Runtime:
                 "job owner declared-operation start response omitted the job ID",
             )
         return {**result, "ref": REGISTRY.reference("job", {"job_id": job_id})}
-
-    @staticmethod
-    def _resource_reference(
-        reference: str, allowed: set[str], message: str
-    ) -> tuple[Any, dict[str, str], str]:
-        try:
-            resource, values = REGISTRY.resolve(reference)
-        except RegistryError as exc:
-            raise ProtocolError("not_found", message) from exc
-        if resource.kind not in allowed:
-            raise ProtocolError("invalid_request", message)
-        return resource, values, str(resource.ref_template.format(values))
 
     @staticmethod
     def _required_preconditions(

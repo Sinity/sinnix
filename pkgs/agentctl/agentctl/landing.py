@@ -14,6 +14,7 @@ from .agents import (
     binding,
     other_worktrees,
     queue_agent,
+    queue_landing,
     workspace_of,
     worktree_path,
 )
@@ -683,6 +684,31 @@ def _advisory(
         return github.pull_request_advisory(project.root, number)
     except GithubError:
         return []
+
+
+def queue(config: Config, project: ProjectAdapter, run_id: str) -> dict[str, Any]:
+    """Queue a fresh landing task for a run whose landing is not already running.
+
+    `batch start` queues the first landing behind the workers; this re-queues
+    one after a landing failed, so a caller that cannot hold a process for the
+    whole landing still drives it through pueue.
+    """
+    run = load(config, run_id)
+    if run.project != project.project_id:
+        raise BatchRefusal("project", f"run {run_id} belongs to {run.project}")
+    _refuse_unless_live(run)
+    task_id = run.landing.get("task_id")
+    current = pueue.tasks().get(task_id) if isinstance(task_id, int) else None
+    if current is not None and not current.terminal:
+        raise BatchRefusal(
+            "landing_in_progress",
+            f"landing task {task_id} is {current.status.lower()}",
+        )
+    queued = queue_landing(config, project, run, after=(), stashed=False)
+    return {
+        **land_update(config, run_id, task_id=queued, failure=None).to_dict(),
+        "landing_task_id": queued,
+    }
 
 
 def land(

@@ -20,15 +20,27 @@ if TYPE_CHECKING:
     from .runtime import Runtime
 
 
-def _validation_error(exc: ValidationError) -> ProtocolError:
+def _validation_error(exc: ValidationError, action: Action) -> ProtocolError:
+    """A schema failure that carries the shape the caller should have sent.
+
+    A cold client that nests the request under `parameters`, or sends a
+    locator's own fields at the top level, learns the accepted envelope from
+    the refusal instead of guessing again.
+    """
     problems = []
     for error in exc.errors(include_url=False):
         location = ".".join(str(part) for part in error.get("loc", ()))
         problems.append({"field": location, "problem": error.get("msg", "")})
+    details: dict[str, Any] = {
+        "problems": problems[:32],
+        "accepted_fields": sorted(action.Input.model_fields),
+    }
+    if action.examples:
+        details["example"] = action.examples[0].input
     return ProtocolError(
         "invalid_request",
-        "request does not match the action schema",
-        details={"problems": problems[:32]},
+        f"request does not match the {action.name} schema",
+        details=details,
     )
 
 
@@ -57,7 +69,7 @@ def build_tool(action: Action, runtime: Runtime) -> Tool:
                 {key: value for key, value in kwargs.items() if value is not None}
             )
         except ValidationError as exc:
-            failure = _validation_error(exc)
+            failure = _validation_error(exc, action)
 
             async def failing() -> Any:
                 raise failure

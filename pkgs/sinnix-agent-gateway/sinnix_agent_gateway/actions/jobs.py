@@ -2,7 +2,7 @@
 
 A job is a pueue task; ``runtime.jobs`` (``LocalJobs``) answers every job
 operation. Responses carry every identity the caller needs next: project,
-bead, checkout, pueue task id, and a typed next action on refusal.
+beads, checkout, pueue task id, and a typed next action on refusal.
 """
 
 from __future__ import annotations
@@ -25,7 +25,6 @@ from ..action import (
 from ..capabilities import Capability
 from ..contracts import VerbFamily
 from ..locators import (
-    BeadLocator,
     CheckoutLocator,
     JobLocator,
     ProjectLocator,
@@ -40,9 +39,6 @@ from ..schemas import GatewayModel
 if TYPE_CHECKING:
     from ..runtime import Runtime
 
-Backend = Literal["claude", "codex", "gemini", "grok", "antigravity"]
-Phase = str
-
 # ------------------------------------------------------------------ views
 
 
@@ -52,14 +48,13 @@ class JobState(GatewayModel):
     exit_code: int | None = None
 
 
-class LaneBinding(GatewayModel):
-    """The bead, branch and worktree an agent task was queued for."""
+class JobBinding(GatewayModel):
+    """The beads, run and worker a task was queued for, from its launch input."""
 
-    bead: str | None = None
-    bead_ref: str | None = None
-    branch: str | None = None
-    worktree: str | None = None
-    worktree_ref: str | None = None
+    beads: list[str] = Field(default_factory=list)
+    bead_refs: list[str] = Field(default_factory=list)
+    run_id: str | None = None
+    worker_id: str | None = None
 
 
 class JobView(GatewayModel):
@@ -77,38 +72,23 @@ class JobView(GatewayModel):
     enqueued_at: str | None = None
     started_at: str | None = None
     ended_at: str | None = None
-    lane: LaneBinding | None = None
+    binding: JobBinding | None = None
     affordances: list[str] = Field(default_factory=list)
 
 
-def _lane_binding(payload: Mapping[str, Any]) -> LaneBinding | None:
-    """The bead an agent task serves, from what the job owner carries today.
-
-    An agent label is ``<project>:lane:<bead>`` or ``<project>:rebase:<bead>``
-    and its working directory is the lane worktree. TODO(xteo.19): read the
-    bead, branch and worktree from the launch input once ``job get`` exposes
-    the binding fields; the branch is not derivable here.
-    """
-    raw = payload.get("lane") if isinstance(payload.get("lane"), Mapping) else {}
-    label = str(payload.get("label") or "")
-    parts = label.split(":", 2)
-    from_label = (
-        parts[2] if len(parts) == 3 and parts[1] in {"lane", "rebase"} else None
-    )
-    bead = raw.get("bead") or from_label
-    if not bead:
+def _binding(payload: Mapping[str, Any]) -> JobBinding | None:
+    """What the task was queued for, as agentctl recorded it in the launch input."""
+    raw = payload.get("binding") if isinstance(payload.get("binding"), Mapping) else {}
+    beads = [str(bead) for bead in raw.get("beads") or []]
+    run_id = raw.get("run_id")
+    if not beads and not run_id:
         return None
-    project_id = payload.get("project_id") or parts[0]
-    checkout = (
-        payload.get("checkout") if isinstance(payload.get("checkout"), Mapping) else {}
-    )
-    worktree = raw.get("worktree") or checkout.get("path") or None
-    return LaneBinding(
-        bead=bead,
-        bead_ref=bead_ref(project_id, bead) if project_id else None,
-        branch=raw.get("branch"),
-        worktree=worktree,
-        worktree_ref=encode_file_ref(worktree) if worktree else None,
+    project_id = payload.get("project_id")
+    return JobBinding(
+        beads=beads,
+        bead_refs=[bead_ref(project_id, bead) for bead in beads] if project_id else [],
+        run_id=str(run_id) if run_id else None,
+        worker_id=str(raw["worker"]) if raw.get("worker") else None,
     )
 
 
@@ -147,7 +127,7 @@ def _job_view(payload: Mapping[str, Any]) -> JobView:
         enqueued_at=payload.get("enqueued_at"),
         started_at=payload.get("started_at"),
         ended_at=payload.get("ended_at"),
-        lane=_lane_binding(payload),
+        binding=_binding(payload),
         affordances=affordances,
     )
 
@@ -168,8 +148,6 @@ def _job(
 
 
 _NEXT_ACTIONS: tuple[tuple[str, str, str], ...] = (
-    ("already has a worktree", "conflict", "agent.for_bead"),
-    ("has no worktree", "not_found", "agent.for_bead"),
     ("not a configured project", "not_found", "projects.list"),
 )
 
@@ -468,6 +446,33 @@ def _retry(runtime: Runtime, inp: RetryInput) -> JobView:
     return _job_view(_job(runtime, "job.retry", job_id))
 
 
+class CleanInput(MutationControls):
+    target: JobLocator
+
+
+class CleanResult(GatewayModel):
+    ref: str
+    job_id: int
+    cleaned: bool
+    removed: list[str] = Field(
+        default_factory=list, description="Artifact paths the clean deleted."
+    )
+    affordances: list[str] = Field(default_factory=list)
+
+
+def _clean(runtime: Runtime, inp: CleanInput) -> CleanResult:
+    runtime.principal.require(Capability.JOB_CANCEL)
+    job_id, ref = inp.target.resolve()
+    raw = _job(runtime, "job.clean", job_id)
+    return CleanResult(
+        ref=ref,
+        job_id=job_id,
+        cleaned=bool(raw.get("cleaned")),
+        removed=[str(path) for path in raw.get("removed") or []],
+        affordances=["jobs.list"],
+    )
+
+
 # ------------------------------------------------------------------- run
 
 
@@ -519,75 +524,6 @@ def _run_shell(runtime: Runtime, inp: ShellRunInput) -> JobView:
         timeout_seconds=inp.timeout_seconds,
     )
     return _job_view(result)
-
-
-# ---------------------------------------------------------------- workers
-
-
-class LaneStarted(GatewayModel):
-    ref: str = Field(description="The agent job's canonical ref.")
-    job: JobView
-    project_id: str
-    project_ref: str
-    bead: str
-    bead_ref: str
-    beads: list[str] = Field(default_factory=list)
-    branch: str | None = None
-    worktree: str | None = None
-    worktree_ref: str | None = None
-    backend: str | None = None
-    model: str | None = None
-    effort: str | None = None
-    affordances: list[str] = Field(default_factory=list)
-
-
-def _lane_started(
-    project_id: str, bead: str, lane: Mapping[str, Any], job: Mapping[str, Any]
-) -> LaneStarted:
-    view = _job_view(job)
-    worktree = lane.get("worktree")
-    return LaneStarted(
-        ref=view.ref,
-        job=view,
-        project_id=project_id,
-        project_ref=project_ref(project_id),
-        bead=bead,
-        bead_ref=bead_ref(project_id, bead),
-        beads=[str(item) for item in lane.get("beads") or [bead]],
-        branch=lane.get("branch"),
-        worktree=worktree,
-        worktree_ref=encode_file_ref(worktree) if worktree else None,
-        backend=lane.get("backend"),
-        model=lane.get("model"),
-        effort=lane.get("effort"),
-        affordances=["jobs.wait", "jobs.logs", "jobs.cancel"],
-    )
-
-
-class AgentChoice(MutationControls):
-    backend: Backend | None = Field(
-        default=None, description="Defaults to the bead's model policy."
-    )
-    model: str | None = Field(default=None, min_length=1, max_length=256)
-    effort: str | None = Field(default=None, min_length=1, max_length=32)
-
-
-class LaneStartInput(AgentChoice):
-    bead: BeadLocator
-
-
-def _lane_start(runtime: Runtime, inp: LaneStartInput) -> LaneStarted:
-    project_id, bead_id, ref = inp.bead.resolve(runtime)
-    result = _owner_call(
-        runtime.v2_run_for_bead,
-        {"project": project_id, "bead": bead_id, "bead_ref": ref},
-        reference=ref,
-        backend=inp.backend,
-        model=inp.model,
-        reasoning_effort=inp.effort,
-    )
-    lane = result.get("lane") if isinstance(result.get("lane"), Mapping) else {}
-    return _lane_started(project_id, str(lane.get("bead") or bead_id), lane, result)
 
 
 # --------------------------------------------------------------- actions
@@ -720,6 +656,26 @@ ACTIONS: tuple[Action, ...] = (
         ),
     ),
     Action(
+        name="jobs.clean",
+        family=VerbFamily.OPERATE,
+        owner="systemd-jobs",
+        summary="Delete one terminal job and the log, result and launch input it owns.",
+        Input=CleanInput,
+        Output=CleanResult,
+        handler=_clean,
+        principals=CONTROL_OPERATOR,
+        resource_kinds=("job",),
+        affordances=("jobs.list",),
+        aliases=("remove job", "forget", "delete job", "prune"),
+        documentation="Refused while the job is still queued or running; cancel it first.",
+        examples=(
+            Example(
+                title="Clean job 41",
+                input={"target": {"job_id": 41}, "idempotency_key": "clean-41"},
+            ),
+        ),
+    ),
+    Action(
         name="operations.run",
         family=VerbFamily.RUN,
         owner="systemd-jobs",
@@ -771,39 +727,6 @@ ACTIONS: tuple[Action, ...] = (
                     "argv": ["git", "status", "--short"],
                     "timeout_seconds": 300,
                     "idempotency_key": "status-1",
-                },
-            ),
-        ),
-    ),
-    Action(
-        name="agent.for_bead",
-        family=VerbFamily.RUN,
-        owner="systemd-jobs",
-        summary="Start a batch of one worker for one bead: compile the packet, create the worktree, queue the agent.",
-        Input=LaneStartInput,
-        Output=LaneStarted,
-        handler=_lane_start,
-        principals=CONTROL_OPERATOR,
-        resource_kinds=("project", "bead", "job"),
-        affordances=("jobs.wait", "jobs.logs", "jobs.cancel"),
-        aliases=("dispatch", "agentctl batch start", "work on bead"),
-        documentation="backend, model and effort default to the bead's model policy. Refused when a member is claimed or already in a run.",
-        examples=(
-            Example(
-                title="Start a worker",
-                input={
-                    "bead": {"id": "sinnix-abc1"},
-                    "idempotency_key": "lane-sinnix-abc1",
-                },
-            ),
-            Example(
-                title="Pin the agent",
-                input={
-                    "bead": {"ref": "sinnix://projects/sinnix/beads/sinnix-abc1"},
-                    "backend": "codex",
-                    "model": "gpt-5.6-terra",
-                    "effort": "high",
-                    "idempotency_key": "lane-sinnix-abc1-codex",
                 },
             ),
         ),

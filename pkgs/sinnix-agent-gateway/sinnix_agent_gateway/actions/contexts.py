@@ -73,8 +73,8 @@ class ComposedContext(GatewayModel):
 
 
 _AFFORDANCES: dict[str, list[str]] = {
-    "project.orientation": ["agent.for_bead", "jobs.list", "events.tail"],
-    "project.triage": ["agent.for_bead", "jobs.list", "events.tail"],
+    "project.orientation": ["batches.start", "jobs.list", "events.tail"],
+    "project.triage": ["batches.start", "jobs.list", "events.tail"],
     "job.review": ["jobs.logs", "jobs.retry", "jobs.cancel"],
     "incident": ["events.tail", "jobs.list", "wait.for"],
 }
@@ -131,7 +131,7 @@ ACTIONS: tuple[Action, ...] = (
         affordances=(
             "jobs.list",
             "jobs.logs",
-            "agent.for_bead",
+            "batches.start",
             "events.tail",
             "wait.for",
         ),
