@@ -407,8 +407,15 @@ class SessionsReadOp(GatewayModel):
         max_length=8_192,
         description="provider:relative/path.jsonl from a list or search row.",
     )
-    offset: int = Field(default=0, ge=0)
-    max_bytes: int = Field(default=64_000, ge=1, le=262_144)
+    offset: int = Field(
+        default=0, ge=0, description="Raw byte offset; use next_offset to continue."
+    )
+    max_bytes: int = Field(
+        default=64_000,
+        ge=1,
+        le=262_144,
+        description="Source byte limit; pages stop at UTF-8 boundaries. If a character cannot fit, increase this limit. Malformed bytes are replaced with U+FFFD.",
+    )
 
 
 class SessionsSearchOp(GatewayModel):

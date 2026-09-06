@@ -103,7 +103,7 @@ Every enabled endpoint receives its own generated config, MCP wrapper, approval 
 
 ## Generated reference
 
-This section is generated from the action set. Revision `v3-typed-actions`, catalog SHA-256 `062f09c2d413942d8dc280b06247216ff7f846d4a454041d301f6ab753126078`.
+This section is generated from the action set. Revision `v3-typed-actions`, catalog SHA-256 `e72b1af530dc5affebd8055a827d658c34c56072c1ff1f84af7bf3d331583562`.
 
 The full schemas and examples are in [the generated gateway reference](generated/agent-gateway-reference.md). The matching agent skill is [agent-gateway](../dots/_ai/skills/agent-gateway/SKILL.md).
 
