@@ -143,7 +143,7 @@ let
   enabledProxies = lib.filterAttrs (name: _: config.sinnix.services.${name}.enable) proxies;
 
   # Every rendered fragment is gated on its own backend's enable flag alone.
-  forEachProxy = render: lib.mkMerge (lib.mapAttrsToList (_: proxy: render proxy) enabledProxies);
+  forEachProxy = render: lib.mkMerge (lib.mapAttrsToList (_: render) enabledProxies);
 
   # ── Exclusive-resource admission mesh ────────────────────────────────────
   # Backends whose surface names the same `exclusiveResource` hold it alone:
