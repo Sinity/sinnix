@@ -1,13 +1,14 @@
 """Landing and cleanup preserve a live batch's inputs and recovery work."""
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from agentctl import launch, manifest
-from agentctl.batch import BatchRefusal
+from agentctl import launch, manifest, prompts
+from agentctl.batch import BatchError, BatchRefusal
 from conftest import read_launch
-from test_batch import BASE, MOVED, Harness, labels, prepared_run, verdict
+from test_batch import BASE, MOVED, SHA, Harness, labels, prepared_run, verdict
 from test_batch import harness as harness
 
 
@@ -158,3 +159,209 @@ def test_terminal_cleanup_retains_a_legacy_landing_after_reorder(
 
     assert launch.clean_terminal(harness.config) == []
     assert harness.pueue.task(other["job_id"]).label == landing.label
+
+
+def failed_publication(harness: Harness) -> dict:
+    run = prepared_run(harness, "fx-solo")
+    harness.git.push_rejects = 1
+    harness.git.push_rejection = "permission denied"
+    with pytest.raises(BatchError, match="permission denied"):
+        harness.land(run["run_id"])
+    return manifest.load(harness.config, run["run_id"]).to_dict()
+
+
+def test_transient_publication_retry_reuses_the_exact_candidate(
+    harness: Harness,
+) -> None:
+    """A lost publication attempt must not queue a second check or reviewer."""
+    run = failed_publication(harness)
+    merges = list(harness.git.merges)
+    landed = harness.land(run["run_id"])
+    assert landed["acceptance"]["candidate_sha"] == run["landing"]["candidate_sha"]
+    assert landed["acceptance"]["verify_run"] == run["landing"]["verify_run"]
+    assert landed["acceptance"]["review_verdict"] == run["landing"]["review_verdict"]
+    assert harness.git.merges == merges and harness.git.resets == []
+    assert labels(harness.pueue).count("fixture:check") == 1
+    assert labels(harness.pueue).count(f"fixture:review:{run['run_id']}") == 1
+
+
+@pytest.mark.parametrize(
+    "changed", ["base", "descriptor", "template", "result", "bead"]
+)
+def test_changed_landing_inputs_invalidate_reuse(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch, changed: str
+) -> None:
+    """The same Git head cannot authorize evidence from a different contract."""
+    run = failed_publication(harness)
+    if changed == "base":
+        harness.git.remote_bases = [MOVED]
+    elif changed == "descriptor":
+        harness.project = replace(harness.project, digest="new-descriptor")
+    elif changed == "template":
+        original = prompts.landing_template
+        monkeypatch.setattr(
+            prompts,
+            "landing_template",
+            lambda name: original(name) + "\nUpdated review rule.\n",
+        )
+    elif changed == "result":
+        manifest.update(
+            harness.config,
+            run["run_id"],
+            lambda doc: doc["workers"][0]["result"]["unresolved"].append(
+                "Live rehearsal remains open"
+            ),
+        )
+    else:
+        harness.beads.beads["fx-solo"]["acceptance_criteria"] = "changed criterion"
+    harness.land(run["run_id"])
+    assert labels(harness.pueue).count("fixture:check") == 2
+    assert labels(harness.pueue).count(f"fixture:review:{run['run_id']}") == 2
+
+
+def test_failed_review_retries_only_review(harness: Harness) -> None:
+    run = prepared_run(harness, "fx-solo")
+    harness.verdict = verdict(verdict="unsupported")
+    with pytest.raises(BatchRefusal, match="review_rejected"):
+        harness.land(run["run_id"])
+    harness.verdict = verdict()
+    harness.land(run["run_id"])
+    assert labels(harness.pueue).count("fixture:check") == 1
+    assert labels(harness.pueue).count(f"fixture:review:{run['run_id']}") == 2
+    assert harness.git.resets == []
+
+
+def test_manual_integration_commit_requires_keep_and_new_evidence(
+    harness: Harness,
+) -> None:
+    run = failed_publication(harness)
+    path = run["landing"]["integration_worktree"]
+    manual = "a" * 40
+    harness.git.parents[manual] = (SHA,)
+    harness.git.heads[path] = manual
+    with pytest.raises(BatchRefusal, match="integration_incomplete"):
+        harness.land(run["run_id"])
+    assert harness.git.heads[path] == manual and harness.git.resets == []
+    landed = harness.land(run["run_id"], keep_integration=True)
+    assert landed["acceptance"]["candidate_sha"] == manual
+    assert labels(harness.pueue).count("fixture:check") == 2
+
+
+def test_bulk_cleanup_refuses_unreadable_manifest_authority(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A transient read failure cannot turn a live run into permission to delete."""
+    run = prepared_run(harness, "fx-solo")
+    target = manifest.manifest_path(harness.config, run["run_id"])
+    original = Path.read_text
+
+    def read(path: Path, *args, **kwargs):
+        if path == target:
+            raise PermissionError("manifest temporarily unreadable")
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read)
+    with pytest.raises(BatchRefusal, match="manifest"):
+        launch.clean_terminal(harness.config)
+    assert harness.pueue.task(run["workers"][0]["task_id"]) is not None
+
+
+def test_failed_verification_is_retried_on_the_same_candidate(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = prepared_run(harness, "fx-solo")
+    original = launch.wait
+
+    def fail(job_id, **kwargs):
+        harness.pueue.fail(job_id, exit_code=1)
+        return launch.job_view(harness.pueue.task(job_id))
+
+    monkeypatch.setattr(launch, "wait", fail)
+    with pytest.raises(BatchRefusal, match="verify_failed"):
+        harness.land(run["run_id"])
+    monkeypatch.setattr(launch, "wait", original)
+    harness.land(run["run_id"])
+    assert labels(harness.pueue).count("fixture:check") == 2
+    assert labels(harness.pueue).count(f"fixture:review:{run['run_id']}") == 1
+    assert harness.git.resets == []
+
+
+def test_large_review_evidence_is_exact_and_locally_readable(harness: Harness) -> None:
+    run = prepared_run(harness, "fx-solo", unsatisfied={"fx-solo"})
+    harness.beads.beads["fx-solo"]["design"] = (
+        "Publish code now; live rehearsal follows and keeps this bead open."
+    )
+    evidence = "tests/test_fixture.py::test_delivery: passed; " * 600
+
+    def evidence_result(doc):
+        result = doc["workers"][0]["result"]
+        result["beads"][0]["criteria"][0]["evidence"] = evidence
+        result["unresolved"] = ["Run live rehearsal after publication"]
+
+    manifest.update(harness.config, run["run_id"], evidence_result)
+    landed = harness.land(run["run_id"])
+    task = next(t for t in harness.pueue.tasks().values() if ":review:" in t.label)
+    path = Path(task.path)
+    prompt = (path / ".agentctl/review.md").read_text()
+    blocks = [
+        json.loads(block.split("\n```", 1)[0])
+        for block in prompt.split("```json\n")[1:]
+    ]
+    members, worker_results, verification = blocks
+    assert members[0]["beads"][0]["design"] == harness.beads.beads["fx-solo"]["design"]
+    entry = worker_results[0]
+    assert entry["inline_omitted"] is True
+    exact = json.loads(Path(entry["source"]).read_text())[entry["index"]]
+    assert exact["beads"][0]["criteria"][0]["evidence"] == evidence
+    assert exact["unresolved"] == ["Run live rehearsal after publication"]
+    assert Path(entry["source"]).parent == path / ".agentctl"
+    assert verification[0]["candidate_sha"] == landed["acceptance"]["candidate_sha"]
+    assert landed["acceptance"]["beads"]["fx-solo"]["state"] == "open"
+    assert len(prompt) < 10_000
+
+
+def test_generic_check_keeps_explicit_test_selection_separate(harness: Harness) -> None:
+    metadata = harness.beads.beads["fx-solo"]["metadata"]
+    metadata["affected_paths"] = ["storage internals and deleted paths"]
+    commands = ["devtools test tests/unit/storage/test_fixture.py -k roundtrip"]
+    metadata["verification_commands"] = commands
+    run = harness.start("fx-solo")
+    worker = run["workers"][0]
+    prompt = Path(worker["prompt_path"]).read_text()
+    snapshot = json.loads(prompt.split("```json\n", 1)[1].split("\n```", 1)[0])
+    assert (
+        snapshot["batch"]["focused_verification"]
+        == f"/fixture/agentctl job start fixture verify_quick --workspace {worker['worktree']} --wait"
+    )
+    assert snapshot["dimensions"]["verification_commands"] == commands
+
+
+def test_a_worker_changed_after_filing_is_not_merged(harness: Harness) -> None:
+    run = failed_publication(harness)
+    branch = run["workers"][0]["branch"]
+    harness.git.branches[branch] = MOVED
+    merges = list(harness.git.merges)
+    with pytest.raises(BatchRefusal, match="candidate_mismatch"):
+        harness.land(run["run_id"])
+    assert harness.git.merges == merges and harness.git.resets == []
+
+
+@pytest.mark.parametrize("failure", ["directory_unreadable", "incomplete_json"])
+def test_bulk_cleanup_requires_a_complete_run_inventory(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    run = prepared_run(harness, "fx-solo")
+    if failure == "incomplete_json":
+        manifest.manifest_path(harness.config, run["run_id"]).write_text('{"run_id":')
+    else:
+        original = Path.iterdir
+
+        def inventory(path: Path):
+            if path == manifest.runs_dir(harness.config):
+                raise PermissionError("run directory temporarily unreadable")
+            return original(path)
+
+        monkeypatch.setattr(Path, "iterdir", inventory)
+    with pytest.raises(BatchRefusal, match="manifest"):
+        launch.clean_terminal(harness.config)
+    assert harness.pueue.removed == []

@@ -45,7 +45,8 @@ did not succeed.
   failing wait), `slot_occupied` (75, a single-slot pool was held).
 - `job clean <id>` deletes a terminal task's launch input, log, result,
   outcome and cancel marker, then removes the task from pueue;
-  `--all-terminal` does it for every terminal task; `--daemon-era` deletes
+  `--all-terminal` retains jobs referenced by live batches and refuses if run
+  manifests cannot be read; `--daemon-era` deletes
   the state subtrees no verb reads. Never by age.
 - **Never poll.** Every task's start and finish reaches
   `/realm/state/agentctl/events.jsonl`; watch `agentctl events tail --follow`.
@@ -127,6 +128,8 @@ Agents have `lane` on PATH:
 - Failed landing: `batch status` names the code, `job logs <landing task>`
   the cause; fix it, then `batch land <run>` again, or `batch land <run>
 --keep-integration` after fixing the integration worktree by hand.
+  An unchanged candidate reuses successful verification and review only while
+  its base, worker inputs and verification/review contracts still match.
 - `pueue has no group X`: the descriptor names a pool pueued does not have;
   the groups are declared with pueued in the CLI feature.
 - Environment mismatch: use the declared operation. Do not duplicate its
