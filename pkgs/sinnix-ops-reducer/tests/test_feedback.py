@@ -23,7 +23,7 @@ from sinnix_ops_reducer.feedback import (
     is_elicit,
     resolve_elicit_model,
 )
-from sinnix_ops_reducer.server import Handler, serve
+from sinnix_ops_reducer.server import serve
 
 
 def test_spool_line_carries_the_v1_envelope(tmp_path: Path) -> None:
