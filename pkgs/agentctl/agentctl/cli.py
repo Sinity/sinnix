@@ -262,6 +262,16 @@ def parser() -> argparse.ArgumentParser:
     batch_result.add_argument("path", type=Path)
     _project_option(batch_result)
     _output_arguments(batch_result)
+    batch_scope = batch_verbs.add_parser(
+        "scope-correct", help="record corrected write authority for an existing worker"
+    )
+    batch_scope.add_argument("run_id", help="a run id or its 8-character suffix")
+    batch_scope.add_argument("worker_id")
+    batch_scope.add_argument("candidate")
+    batch_scope.add_argument(
+        "--authorize", action="append", required=True, metavar="BEAD=GLOB"
+    )
+    _output_arguments(batch_scope)
     batch_resume = batch_verbs.add_parser(
         "resume", help="queue a fresh agent into a worker's worktree"
     )
@@ -559,6 +569,19 @@ def _batch(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         )
         out.write(
             resumed, f"resumed {arguments.worker_id}: {out.job_line(resumed['job'])}"
+        )
+        return EXIT_OK
+    if verb == "scope-correct":
+        run_id = resolve_run_id(config, arguments.run_id)
+        corrected = batch.correct_scope(
+            config,
+            run_id,
+            arguments.worker_id,
+            arguments.candidate,
+            arguments.authorize,
+        )
+        out.write(
+            corrected, f"corrected scope for {arguments.worker_id} in {out.run(run_id)}"
         )
         return EXIT_OK
     raise AssertionError(verb)
