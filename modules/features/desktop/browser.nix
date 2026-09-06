@@ -133,8 +133,6 @@ mkFeatureModule {
           chromeUserDataDir = "${config.home.homeDirectory}/.config/chrome-ws";
           chromeArgs = lib.concatStringsSep " " [
             "--disable-features=WaylandWpColorManagerV1"
-            # Vulkan ANGLE: the default GL path renders NVIDIA VA-API 10-bit AV1 frames black
-            "--use-angle=vulkan"
             "--remote-debugging-port=9222"
             "--remote-debugging-address=127.0.0.1"
             "--user-data-dir=${chromeUserDataDir}"
