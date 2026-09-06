@@ -112,7 +112,9 @@ def test_member_validation_names_every_refusal() -> None:
     assert validate_members(beads, [["fx-lead", "fx-internal"]], claimed=set()) == []
 
 
-def test_write_scopes_must_be_disjoint_across_workers() -> None:
+def test_overlapping_write_scopes_do_not_refuse_a_batch() -> None:
+    """Breaks if declared scopes become admission again: they are grouping estimates,
+    and the landing merge is what detects a real conflict."""
     beads = reader()
     beads.beads["fx-lead"]["metadata"]["write_scope"] = ["core/", "docs/*.md"]
     beads.beads["fx-solo"]["metadata"]["write_scope"] = "core/x.py;other/"
@@ -120,14 +122,7 @@ def test_write_scopes_must_be_disjoint_across_workers() -> None:
     refusals = validate_members(
         beads, [["fx-lead"], ["fx-solo"], ["fx-member"]], claimed=set()
     )
-    assert {(item.code, item.bead) for item in refusals} == {("write_scope", "fx-lead")}
-    assert any("core/x.py" in item.detail for item in refusals)
-    assert any("docs/atlas.md" in item.detail for item in refusals)
-    # The same scopes inside one worker are fine.
-    assert (
-        validate_members(beads, [["fx-lead", "fx-solo", "fx-member"]], claimed=set())
-        == []
-    )
+    assert refusals == []
 
 
 def test_snapshot_carries_beads_dimensions_branch_atlas_and_the_contract(

@@ -16,10 +16,11 @@ names, and exits with one result document.
 2. **Stay in the worktree and the write scope.** Commit by path on the
    worker branch; never write to another checkout, `$HOME` outside the
    workspace, or live services. `.agentctl/` holds the prompt, schema and
-   result and is never committed. When the snapshot's `write_scope` is
-   non-empty, every changed path must fall under one of its globs;
-   `batch result` refuses the candidate otherwise. A needed change outside
-   it goes into `unresolved`.
+   result and is never committed. The snapshot's `write_scope` is the
+   bead's estimate of where the change lands, not a fence: edit what the
+   fix needs, and name any file outside it in the result so the reviewer
+   sees it. Other workers' branches merge at landing; a real conflict is
+   found there.
 3. **Verify the candidate.** Run the snapshot's `verification_commands` and
    `batch.focused_verification` (the descriptor's argumentless check) in the
    foreground. Exact test selectors belong in `verification_commands`;

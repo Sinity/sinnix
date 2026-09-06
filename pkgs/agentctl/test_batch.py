@@ -1588,24 +1588,18 @@ def test_abandon_refuses_while_the_landing_task_runs_and_drops_a_queued_one(
 # ---------------------------------------------------------------- scope / landing packets
 
 
-def test_a_result_outside_the_declared_write_scope_is_refused(harness: Harness) -> None:
-    """Breaks if a worker may land paths its beads never claimed."""
+def test_a_result_outside_the_declared_write_scope_is_recorded_not_refused(
+    harness: Harness,
+) -> None:
+    """Breaks if the declared scope becomes a fence again: a finished worker whose fix
+    reached a file its bead never estimated would lose its result."""
     harness.beads.beads["fx-solo"]["metadata"]["write_scope"] = ["src/", "docs/*.md"]
     run = harness.start("fx-solo")
-    with pytest.raises(BatchRefusal, match="scope_violation") as refused:
-        harness.file_result(run, "fx-solo")
-    assert refused.value.to_dict()["paths"] == ["a.py", "b.py"]
-    assert manifest.load(harness.config, run["run_id"]).workers[0]["result"] is None
-
-    batch.correct_scope(
-        harness.config,
-        run["run_id"],
-        "fx-solo",
-        SHA,
-        ["fx-solo=a.py", "fx-solo=b.py"],
-    )
     filed = harness.file_result(run, "fx-solo")
-    assert filed["scope"] == "declared" and filed["changed_paths"] == ["a.py", "b.py"]
+    assert filed["scope"] == "declared"
+    assert filed["changed_paths"] == ["a.py", "b.py"]
+    assert filed["outside_scope"] == ["a.py", "b.py"]
+    assert manifest.load(harness.config, run["run_id"]).workers[0]["result"] is not None
 
     other = harness.start("fx-other")
     filed = harness.file_result(other, "fx-other")

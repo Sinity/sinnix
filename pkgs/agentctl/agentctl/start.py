@@ -416,19 +416,15 @@ def _scope_check(
                 continue
     if not globs:
         return {"scope": "undeclared", "changed_paths": changed}
+    # The declared scope is a planning estimate, never a fence: a fix's real
+    # footprint is known only once it exists. Paths outside it are recorded
+    # for the reviewer; the landing merge is what detects a real conflict.
     outside = scope_violations(changed, globs)
-    if outside:
-        raise BatchRefusal(
-            "scope_violation",
-            f"{worker['id']} changed paths outside its write scope: "
-            + ", ".join(outside),
-            paths=outside,
-            write_scope=globs,
-        )
     return {
         "scope": "declared",
         "changed_paths": changed,
         "write_scope": globs,
+        "outside_scope": outside,
         "scope_authority": worker.get("scope_authority", []),
     }
 
