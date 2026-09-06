@@ -354,7 +354,9 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         )
         if arguments.wait:
             started = launch.wait(
-                started["job_id"], timeout_seconds=arguments.timeout_seconds
+                started["job_id"],
+                timeout_seconds=arguments.timeout_seconds,
+                reference=started.get("reference"),
             )
         out.write(started, out.job_line(started))
         if started.get("terminal"):

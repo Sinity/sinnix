@@ -67,7 +67,7 @@ def _refuse_unless_workers_done(run: Run) -> None:
     for worker in run.workers:
         if run.harness == "queued":
             task_id = worker.get("task_id")
-            task = tasks.get(task_id) if isinstance(task_id, int) else None
+            task = launch.find_task(tasks, task_id, worker.get("task_reference"))
             if task is None:
                 raise BatchRefusal(
                     "worker_not_done", f"worker {worker['id']} has no task"
@@ -182,11 +182,15 @@ def _integrate(
             binding=binding(run, None),
             inaccessible=other_worktrees(project, run, None),
         )
-        waited = launch.wait(job["job_id"], timeout_seconds=MAX_AGENT_TIMEOUT_SECONDS)
+        waited = launch.wait(
+            job["job_id"],
+            timeout_seconds=MAX_AGENT_TIMEOUT_SECONDS,
+            reference=job.get("reference"),
+        )
         if waited.get("phase") != "succeeded":
             raise BatchRefusal(
                 "integration_failed",
-                f"integration task {job['job_id']} {waited.get('phase')}",
+                f"integration task {waited['job_id']} {waited.get('phase')}",
             )
         _refuse_unless_integrated(path, branches, who="integration agent")
         break
@@ -419,15 +423,19 @@ def _verify(
     job_id = started.get("job_id")
     if not isinstance(job_id, int):
         raise JobError(f"verification {profile} returned no task id")
-    waited = launch.wait(job_id, timeout_seconds=operation.timeout_seconds)
+    waited = launch.wait(
+        job_id,
+        timeout_seconds=operation.timeout_seconds,
+        reference=started.get("reference"),
+    )
     if waited.get("phase") != "succeeded":
         raise BatchRefusal(
-            "verify_failed", f"{profile} task {job_id} {waited.get('phase')}"
+            "verify_failed", f"{profile} task {waited['job_id']} {waited.get('phase')}"
         )
     return run, {
         "kind": "operation",
         "operation": profile,
-        "job_id": job_id,
+        "job_id": waited["job_id"],
         "candidate_sha": candidate,
         "phase": "succeeded",
     }
@@ -460,17 +468,21 @@ def _review(
         binding=binding(run, None),
         inaccessible=other_worktrees(project, run, None),
     )
-    waited = launch.wait(job["job_id"], timeout_seconds=MAX_AGENT_TIMEOUT_SECONDS)
+    waited = launch.wait(
+        job["job_id"],
+        timeout_seconds=MAX_AGENT_TIMEOUT_SECONDS,
+        reference=job.get("reference"),
+    )
     if waited.get("phase") != "succeeded":
         raise BatchRefusal(
-            "review_failed", f"review task {job['job_id']} {waited.get('phase')}"
+            "review_failed", f"review task {waited['job_id']} {waited.get('phase')}"
         )
     verdict, errors = results.load_result(
         path / WORKTREE_STATE_DIR / "review.result.json", kind="judge"
     )
     if errors:
         raise BatchRefusal("review_invalid", "; ".join(errors[:6]))
-    record = {**verdict, "candidate_sha": candidate, "job_id": job["job_id"]}
+    record = {**verdict, "candidate_sha": candidate, "job_id": waited["job_id"]}
     land_update(config, run.run_id, review_verdict=record)
     if verdict["verdict"] != "pass":
         raise BatchRefusal(
@@ -698,15 +710,26 @@ def queue(config: Config, project: ProjectAdapter, run_id: str) -> dict[str, Any
         raise BatchRefusal("project", f"run {run_id} belongs to {run.project}")
     _refuse_unless_live(run)
     task_id = run.landing.get("task_id")
-    current = pueue.tasks().get(task_id) if isinstance(task_id, int) else None
+    current = launch.find_task(
+        pueue.tasks(), task_id, run.landing.get("task_reference")
+    )
     if current is not None and not current.terminal:
         raise BatchRefusal(
             "landing_in_progress",
             f"landing task {task_id} is {current.status.lower()}",
         )
     queued = queue_landing(config, project, run, after=(), stashed=False)
+    queued_task = pueue.task(queued)
     return {
-        **land_update(config, run_id, task_id=queued, failure=None).to_dict(),
+        **land_update(
+            config,
+            run_id,
+            task_id=queued,
+            task_reference=launch.launch_reference(queued_task)
+            if queued_task is not None
+            else None,
+            failure=None,
+        ).to_dict(),
         "landing_task_id": queued,
     }
 
@@ -879,7 +902,9 @@ def abandon(
     _refuse_unless_live(run)
     beads = beads or SubprocessBeads(project.root)
     landing_id = run.landing.get("task_id")
-    landing_task = pueue.task(landing_id) if isinstance(landing_id, int) else None
+    landing_task = launch.find_task(
+        pueue.tasks(), landing_id, run.landing.get("task_reference")
+    )
     if landing_task is not None and landing_task.status == "Running":
         raise BatchRefusal(
             "landing_in_progress", f"landing task {landing_id} is running"
@@ -888,11 +913,13 @@ def abandon(
         residual: list[str] = []
         for worker in run.workers:
             task_id = worker.get("task_id")
-            task = pueue.task(task_id) if isinstance(task_id, int) else None
+            task = launch.find_task(
+                pueue.tasks(), task_id, worker.get("task_reference")
+            )
             if task is not None and not task.terminal:
-                launch.cancel(config, task_id)
+                launch.cancel(config, task.task_id)
         if landing_task is not None and not landing_task.terminal:
-            launch.cancel(config, landing_id)
+            launch.cancel(config, landing_task.task_id)
         for bead_id in run.beads:
             try:
                 beads.unclaim(bead_id, actor=run.actor)

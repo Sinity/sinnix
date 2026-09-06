@@ -31,6 +31,14 @@ class PueueError(RuntimeError):
     """pueue refused a request or published output this module cannot read."""
 
 
+class PueueTimeout(PueueError):
+    """A pueue call did not return within the deadline the caller allowed.
+
+    Only `wait` blocks by design, and a caller that slices its wait tells this
+    apart from a refusal: the slice ended, the request did not fail.
+    """
+
+
 class PueueGroupError(PueueError):
     """The named group does not exist. A configuration defect, never transient."""
 
@@ -150,7 +158,7 @@ def _run(arguments: Sequence[str], *, timeout: float = CALL_TIMEOUT_SECONDS) -> 
     except FileNotFoundError as error:
         raise PueueError("pueue is not installed") from error
     except subprocess.TimeoutExpired as error:
-        raise PueueError(f"pueue {arguments[0]} timed out") from error
+        raise PueueTimeout(f"pueue {arguments[0]} timed out") from error
     if completed.returncode != 0:
         detail = completed.stderr.strip() or completed.stdout.strip()
         raise PueueError(detail or f"pueue {arguments[0]} failed")

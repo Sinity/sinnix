@@ -23,7 +23,7 @@ from agentctl import launch as launch_module
 from agentctl import pueue as pueue_module
 from agentctl.config import Config
 from agentctl.prompts import PromptError
-from agentctl.pueue import PueueError, PueueGroupError, Task
+from agentctl.pueue import PueueError, PueueGroupError, PueueTimeout, Task
 
 
 @dataclass
@@ -151,7 +151,12 @@ class FakePueue:
         self.removed.extend(task_ids)
 
     def wait(self, task_id: int, *, timeout_seconds: float) -> Task:
-        """The registered transition runs, else the whole timeout elapses."""
+        """The registered transition runs, else the whole timeout elapses.
+
+        A caller slices its wait, so a task left unfinished here is waited
+        for again: a test whose task never finishes keeps it `Running`, where
+        one slice covers the whole deadline.
+        """
         self.waited.append(task_id)
         transition = self._on_wait.pop(task_id, None)
         if transition is not None:
@@ -159,8 +164,20 @@ class FakePueue:
         task = self._tasks.get(task_id)
         if task is None or not task.terminal:
             self.clock += timeout_seconds
-            raise PueueError(f"fixture task {task_id} did not finish in time")
+            raise PueueTimeout(f"fixture task {task_id} did not finish in time")
         return task
+
+    def switch(self, first: int, second: int) -> None:
+        """`pueue switch`: two queued tasks exchange their ids, as 4.0.4 does.
+
+        The daemon refuses any other state, so a test cannot move a task the
+        real queue would have left where it was.
+        """
+        one, other = self._tasks[first], self._tasks[second]
+        if not {one.status, other.status} <= {"Queued", "Stashed"}:
+            raise PueueError("Tasks have to be either queued or stashed.")
+        self._tasks[first] = replace(other, task_id=first)
+        self._tasks[second] = replace(one, task_id=second)
 
     def finish_when_waited(
         self, task_id: int, transition: Callable[["FakePueue"], None]

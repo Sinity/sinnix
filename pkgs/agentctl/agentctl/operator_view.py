@@ -81,18 +81,22 @@ def status(
     tasks = pueue.tasks()
     document = run.to_dict()
     for worker in document["workers"]:
-        task_id = worker.get("task_id")
-        task = tasks.get(task_id) if isinstance(task_id, int) else None
+        task = launch.find_task(
+            tasks, worker.get("task_id"), worker.get("task_reference")
+        )
         worker["task"] = job_view(task) if task else None
         worker["stage"] = worker_stage(worker, task)
-    landing_id = document["landing"].get("task_id")
-    landing_task = tasks.get(landing_id) if isinstance(landing_id, int) else None
+    landing_task = launch.find_task(
+        tasks,
+        document["landing"].get("task_id"),
+        document["landing"].get("task_reference"),
+    )
     document["landing"]["task"] = job_view(landing_task) if landing_task else None
     document["stage"] = run_stage(
         run,
         landing_task,
         [
-            tasks.get(w["task_id"]) if isinstance(w.get("task_id"), int) else None
+            launch.find_task(tasks, w.get("task_id"), w.get("task_reference"))
             for w in run.workers
         ],
     )
