@@ -98,17 +98,8 @@ mkFeatureModule {
                 "target_url"
               ];
             }
-          ];
-        };
-        sinnix-reading-stack-widget = {
-          unit = "sinnix-reading-stack-widget.service";
-          manager = "user";
-          resourceClass = "desktop-shell";
-          observe = {
-            enable = true;
-            restartable = true;
-          };
-          captures = [
+            # Written by the sinnix-reading-stack CLI on every push and pop;
+            # the bar shows the stack through the sinnix-cockpit plugin.
             {
               name = "reading-stack";
               path = "${activityRoot}/reading-stack";
@@ -264,18 +255,6 @@ mkFeatureModule {
                   "SINNIX_NAV_CAPTURE_PORT=${toString navigationPort}"
                   "SINNIX_CAPTURE_ROOT=${activityRoot}"
                 ];
-                Restart = "on-failure";
-              };
-              Install.WantedBy = [ "graphical-session.target" ];
-            };
-            sinnix-reading-stack-widget = {
-              Unit = {
-                Description = "Visible Sinnix reading stack";
-                After = [ "graphical-session.target" ];
-                PartOf = [ "graphical-session.target" ];
-              };
-              Service = {
-                ExecStart = "${pkgs.uwsm}/bin/uwsm app -- ${pkgs.kitty}/bin/kitty --class reading-stack-widget --title reading-stack ${scriptPkgs.sinnix-reading-stack-widget}/bin/sinnix-reading-stack-widget";
                 Restart = "on-failure";
               };
               Install.WantedBy = [ "graphical-session.target" ];

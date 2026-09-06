@@ -5,6 +5,8 @@
 -- timer unit — this runs inside the shell the widgets already live in.
 
 local INDEX_PATH = noctalia.getConfig("index_path") or "/etc/sinnix/capability-index.json"
+-- The reading stack's working state, written atomically by sinnix-reading-stack.
+local STACK_PATH = noctalia.expandPath("~/.local/state/sinnix/reading-stack.json")
 
 -- Surface name -> the workspace its verb toggles. These mirror the F8/F6/F7
 -- binds: two special scratchpads and the ordinary named agent-browser workspace.
@@ -71,11 +73,41 @@ local function readIndex()
   })
 end
 
+local stackMtime = nil
+
+local function readStack()
+  local info = noctalia.fileInfo(STACK_PATH)
+  local mtime = type(info) == "table" and info.mtime or nil
+  if mtime ~= nil and mtime == stackMtime then return end
+  stackMtime = mtime
+  local raw = noctalia.readFile(STACK_PATH)
+  if raw == nil then
+    -- No file yet means nothing was ever pushed: an empty stack, not an error.
+    noctalia.state.set("sinnix-cockpit.reading-stack", { total = 0, items = {} })
+    return
+  end
+  local items = noctalia.json.decode(raw)
+  if type(items) ~= "table" then
+    noctalia.state.set("sinnix-cockpit.reading-stack", nil)
+    return
+  end
+  local head = {}
+  for index, item in ipairs(items) do
+    if index > 12 then break end
+    if type(item) == "table" then
+      table.insert(head, { title = item.title, url = item.url })
+    end
+  end
+  noctalia.state.set("sinnix-cockpit.reading-stack", { total = #items, items = head })
+end
+
 noctalia.setUpdateInterval(5000)
 pollScratchpads()
 readIndex()
+readStack()
 
 function update()
   pollScratchpads()
   readIndex()
+  readStack()
 end
