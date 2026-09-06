@@ -74,6 +74,20 @@ def _optional_str(arguments: Mapping[str, Any], name: str) -> str | None:
     return value
 
 
+def _launch_reference(arguments: Mapping[str, Any]) -> str | None:
+    """The job's own name, when the caller kept the one its start returned.
+
+    It becomes a filename under the state directory, so it is one path
+    component here and not a path.
+    """
+    reference = _optional_str(arguments, "launch_reference")
+    if reference is not None and not launch.REFERENCE.match(reference):
+        raise _Refusal(
+            ErrorCode.INVALID_ARGUMENT, "launch_reference must be a launch reference"
+        )
+    return reference
+
+
 def _sort_key(job: Mapping[str, Any]) -> tuple[str, str]:
     return (str(job.get("enqueued_at") or ""), str(job.get("job_id")))
 
@@ -107,6 +121,7 @@ def job_payload(job: Mapping[str, Any]) -> dict[str, Any]:
     """
     return {
         "job_id": str(job.get("job_id")),
+        "launch_reference": job.get("reference"),
         "binding": job.get("binding"),
         "label": job.get("label"),
         "kind": job.get("kind"),
@@ -145,6 +160,7 @@ def worker_payload(worker: Mapping[str, Any]) -> dict[str, Any]:
         "worktree": worker.get("worktree"),
         "stage": worker.get("stage"),
         "job_id": str(task_id) if isinstance(task_id, int) else None,
+        "job_launch_reference": worker.get("task_reference"),
         "job_ids": [str(item) for item in worker.get("task_ids") or []],
         "backend": worker.get("backend"),
         "model": worker.get("model"),
@@ -184,6 +200,7 @@ def run_payload(document: Mapping[str, Any]) -> dict[str, Any]:
         ],
         "landing": {
             "job_id": str(task_id) if isinstance(task_id, int) else None,
+            "job_launch_reference": landing.get("task_reference"),
             "integration_branch": landing.get("integration_branch"),
             "candidate_sha": landing.get("candidate_sha"),
             "pr_number": landing.get("pr_number"),
@@ -323,23 +340,34 @@ class LocalJobs:
 
     def _get(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         return job_payload(
-            launch.get_job(_require_int(arguments, "job_id"), self.config)
+            launch.get_job(
+                _require_int(arguments, "job_id"),
+                self.config,
+                _launch_reference(arguments),
+            )
         )
 
     def _wait(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         job_id = _require_int(arguments, "job_id")
         timeout_seconds = _require_int(arguments, "timeout_seconds")
-        job = launch.wait(job_id, timeout_seconds=float(timeout_seconds))
+        job = launch.wait(
+            job_id,
+            timeout_seconds=float(timeout_seconds),
+            reference=_launch_reference(arguments),
+        )
         return {**job_payload(job), "timed_out": bool(job.get("wait_timed_out"))}
 
     def _logs(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         job_id = _require_int(arguments, "job_id")
+        reference = _launch_reference(arguments)
         offset = int(arguments.get("offset") or 0)
         max_bytes = int(arguments.get("max_bytes") or MAX_LOG_BYTES)
-        raw = launch.logs(self.config, job_id).encode()
+        task = launch.addressed(job_id, reference)
+        raw = launch.logs(self.config, task.task_id).encode()
         window = raw[offset : offset + max_bytes]
         return {
-            "job_id": str(job_id),
+            "job_id": str(task.task_id),
+            "launch_reference": launch.launch_reference(task),
             "content": window.decode("utf-8", "replace"),
             "offset": offset,
             "max_bytes": max_bytes,
@@ -348,7 +376,7 @@ class LocalJobs:
 
     def _result(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         job_id = _require_int(arguments, "job_id")
-        observed = launch.result(self.config, job_id)
+        observed = launch.result(self.config, job_id, _launch_reference(arguments))
         return {
             **job_payload(observed),
             "kind": observed.get("kind"),
@@ -357,7 +385,9 @@ class LocalJobs:
 
     def _cancel(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         job_id = _require_int(arguments, "job_id")
-        job = launch.cancel(self.config, job_id)
+        job = launch.cancel(
+            self.config, job_id, reference=_launch_reference(arguments)
+        )
         return {
             **job_payload(job),
             "cancel_requested": True,
@@ -390,11 +420,15 @@ class LocalJobs:
         }
 
     def _retry(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
-        return job_payload(launch.retry(_require_int(arguments, "job_id")))
+        return job_payload(
+            launch.retry(
+                _require_int(arguments, "job_id"), _launch_reference(arguments)
+            )
+        )
 
     def _clean(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         job_id = _require_int(arguments, "job_id")
-        cleaned = launch.clean(self.config, job_id)
+        cleaned = launch.clean(self.config, job_id, _launch_reference(arguments))
         return {
             **job_payload(cleaned),
             "cleaned": bool(cleaned.get("cleaned")),

@@ -19,6 +19,8 @@ from pathlib import Path
 import pytest
 from agentctl import launch, pueue
 from agentctl.config import Config
+from agentctl.launch import JobError
+from agentctl.projects import load_project_adapter
 from agentctl.run import unit_for
 
 # Recorded from `pueue status --json` on pueue 4.0.4 after one failing task.
@@ -434,6 +436,112 @@ def test_a_waiting_caller_keeps_its_job_when_the_operator_reorders_the_queue(
     assert stranger is not None and not stranger.terminal, (
         "the wait consumed the job the switch moved to its id"
     )
+
+
+def test_cleanup_after_a_real_reorder_spares_the_queued_job_that_moved(
+    live_pueue: str, config: Config, project_root: Path
+) -> None:
+    """A real `pueue switch` vacates the id a queued job's launch input records.
+
+    Anti-vacuity: selecting the input by that recorded id deletes the launch
+    input of a job the daemon still has queued, and that job then fails
+    before its command with an unusable launch file.
+    """
+    project = load_project_adapter(project_root)
+    pueue.group_add("reorder", 1)
+    pueue.pause("reorder")
+    queued = [
+        launch.enqueue(
+            config,
+            project=project,
+            operation="check",
+            label=f"fixture:check:{name}",
+            group="reorder",
+            argv=["true"],
+            working_directory=project_root,
+            timeout_seconds=60,
+            result_kind="exit",
+            environment={},
+        )
+        for name in ("survivor", "dropped")
+    ]
+    survivor, dropped = queued
+    survivor_input = config.inputs_dir / f"{survivor['reference']}.json"
+    assert json.loads(survivor_input.read_text())["queue_task_id"] == survivor["job_id"]
+
+    subprocess.run(
+        ["pueue", "switch", str(survivor["job_id"]), str(dropped["job_id"])],
+        check=True,
+    )
+    pueue.remove([survivor["job_id"]])
+    vacated = survivor["job_id"]
+
+    with pytest.raises(JobError, match="pueue has no task"):
+        launch.clean(config, vacated)
+
+    assert survivor_input.exists(), "the queued job lost its own launch input"
+    moved = launch.get_job(vacated, config, survivor["reference"])
+    assert (moved["job_id"], moved["reference"]) == (
+        dropped["job_id"],
+        survivor["reference"],
+    )
+
+
+def test_a_landing_queued_behind_a_worker_is_cancelled_by_its_own_reference(
+    live_pueue: str, config: Config, project_root: Path
+) -> None:
+    """A batch's worker and landing exchange ids; each cancel reaches its own.
+
+    Anti-vacuity: cancelling by the id the manifest stored kills the other
+    task of the pair, which is the whole run either way.
+    """
+    project = load_project_adapter(project_root)
+    pueue.group_add("batchish", 1)
+    pueue.pause("batchish")
+    worker = launch.enqueue(
+        config,
+        project=project,
+        operation="worker",
+        label="fixture:worker:run:w1",
+        group="batchish",
+        argv=["true"],
+        working_directory=project_root,
+        timeout_seconds=60,
+        result_kind="exit",
+        environment={},
+    )
+    landing = launch.enqueue(
+        config,
+        project=project,
+        operation="integrate",
+        label="fixture:integrate:run",
+        group="batchish",
+        argv=["true"],
+        working_directory=project_root,
+        timeout_seconds=60,
+        result_kind="exit",
+        environment={},
+        after=[worker["job_id"]],
+    )
+
+    subprocess.run(
+        ["pueue", "switch", str(worker["job_id"]), str(landing["job_id"])], check=True
+    )
+
+    cancelled = launch.cancel(
+        config, landing["job_id"], reference=landing["reference"]
+    )
+
+    assert cancelled["reference"] == landing["reference"]
+    assert cancelled["job_id"] == worker["job_id"], (
+        "the landing did not follow the switch to the worker's old id"
+    )
+    assert not (config.inputs_dir / f"{landing['reference']}.json").exists()
+    survivor = launch.get_job(
+        landing["job_id"], config, reference=worker["reference"]
+    )
+    assert not survivor["terminal"], "the cancel reached the worker, not the landing"
+    assert (config.inputs_dir / f"{worker['reference']}.json").exists()
 
 
 def test_kill_reaches_the_whole_process_tree(live_pueue: str, tmp_path: Path) -> None:
