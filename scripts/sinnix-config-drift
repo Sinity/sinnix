@@ -10,6 +10,7 @@ import json
 import os
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -258,6 +259,70 @@ def compare_generation(manifest: dict[str, Any], args: argparse.Namespace) -> li
     return rows
 
 
+# Noctalia merges the repository's config.toml with the GUI-owned
+# settings.toml, and the state file wins. These keys carry declared intent
+# that a GUI edit must not silently override.
+NOCTALIA_CRITICAL_KEYS = (
+    "accessibility.ui_scale",
+    "bar.default.position",
+    "bar.default.thickness",
+    "bar.default.scale",
+    "bar.default.start",
+    "bar.default.center",
+    "bar.default.end",
+    "shell.clipboard_enabled",
+    "shell.clipboard_history_max_entries",
+    "wallpaper.automation.interval_seconds",
+    "wallpaper.automation.enabled",
+    "theme.source",
+    "theme.mode",
+)
+
+
+def dotted(table: dict[str, Any], key: str) -> Any:
+    value: Any = table
+    for part in key.split("."):
+        if not isinstance(value, dict) or part not in value:
+            return None
+        value = value[part]
+    return value
+
+
+def compare_noctalia(args: argparse.Namespace) -> list[dict[str, Any]]:
+    """Declared config.toml vs the merged config Noctalia actually runs."""
+    if not args.noctalia_config_home:
+        return []
+    config_home = Path(args.noctalia_config_home)
+    try:
+        declared = tomllib.loads((config_home / "config.toml").read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError) as error:
+        return [unavailable("noctalia", None, f"declared config unreadable: {error}")]
+    env = dict(os.environ, NOCTALIA_CONFIG_HOME=str(config_home))
+    if args.noctalia_state_home:
+        env["NOCTALIA_STATE_HOME"] = args.noctalia_state_home
+    try:
+        proc = subprocess.run(
+            [args.noctalia, "config", "export", "merged"],
+            capture_output=True, text=True, timeout=10, check=False, env=env,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return [unavailable("noctalia", None, f"noctalia config export unavailable: {error}")]
+    if proc.returncode != 0:
+        return [unavailable("noctalia", None, f"noctalia config export failed: {proc.stderr.strip()[:200]}")]
+    try:
+        merged = tomllib.loads(proc.stdout)
+    except tomllib.TOMLDecodeError as error:
+        return [unavailable("noctalia", None, f"merged export is not TOML: {error}")]
+    rows = []
+    for key in NOCTALIA_CRITICAL_KEYS:
+        intended = dotted(declared, key)
+        if intended is None:
+            continue
+        live = dotted(merged, key)
+        rows.append(result(f"noctalia:{key}", intended, live, intended == live, evidence="noctalia config export merged"))
+    return rows
+
+
 def collect(manifest: dict[str, Any], args: argparse.Namespace) -> list[dict[str, Any]]:
     proc_root = Path(args.proc_root)
     rows = compare_sysctls(manifest, proc_root)
@@ -301,6 +366,7 @@ def collect(manifest: dict[str, Any], args: argparse.Namespace) -> list[dict[str
     else:
         rows.append(result("earlyoom", earlyoom_expected, cmdline, all(token in cmdline for token in expected_tokens), evidence=f"/proc/{pid}/cmdline"))
     rows += compare_generation(manifest, args)
+    rows += compare_noctalia(args)
     return rows
 
 
@@ -313,6 +379,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--current-system", default="/run/current-system")
     parser.add_argument("--booted-system", default="/run/booted-system")
     parser.add_argument("--nvidia-version-file", default="/proc/driver/nvidia/version")
+    parser.add_argument("--noctalia", default="noctalia", help="Noctalia binary used for the merged-config export")
+    parser.add_argument("--noctalia-config-home", default=None, help="Directory holding the declared config.toml; omit to skip the Noctalia check")
+    parser.add_argument("--noctalia-state-home", default=None, help="Directory holding the GUI-owned settings.toml")
     return parser.parse_args(argv)
 
 

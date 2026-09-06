@@ -14,6 +14,7 @@ def run(
     systemctl_output="",
     current_revision="fixture",
     booted_revision="older",
+    extra_args=None,
 ):
     proc_root = tmp_path / "root"
     for relative, value in (proc_files or {}).items():
@@ -50,6 +51,7 @@ def run(
             str(booted),
             "--output",
             str(output),
+            *(extra_args or []),
         ],
         check=True,
     )
@@ -119,3 +121,44 @@ def test_slice_and_generation_mismatch_require_reboot(tmp_path):
     assert by_check["generation:current"]["match"] is True
     assert by_check["generation:booted"]["match"] is False
     assert by_check["generation:booted"]["reboot_required"] is True
+
+
+def test_noctalia_state_override_of_a_declared_key_drifts(tmp_path):
+    """A settings.toml value that overrides a declared critical key is a
+    drift row; a fake noctalia reproduces the merge (state wins)."""
+    config_home = tmp_path / "noctalia-config"
+    config_home.mkdir()
+    (config_home / "config.toml").write_text(
+        '[accessibility]\nui_scale = 1.5\n[bar.default]\nposition = "bottom"\nend = ["a", "b"]\n'
+    )
+    fake = tmp_path / "noctalia"
+    fake.write_text(
+        "#!/bin/sh\n"
+        "printf '%s\\n' '[accessibility]' 'ui_scale = 1.5' '[bar.default]' "
+        '\'position = "top"\' \'end = ["a", "b"]\'\n'
+    )
+    fake.chmod(0o755)
+    rows = run(
+        tmp_path,
+        {
+            "sysctls": {},
+            "slices": {},
+            "swap": [],
+            "generation": {"revision": "fixture"},
+        },
+        proc_files={"proc/swaps": "Filename\ttype\tsize\tused\tpriority\n"},
+        extra_args=[
+            "--noctalia",
+            str(fake),
+            "--noctalia-config-home",
+            str(config_home),
+        ],
+    )
+    by_check = {row["check"]: row for row in rows}
+    assert by_check["noctalia:bar.default.position"]["status"] == "drifted"
+    assert by_check["noctalia:bar.default.position"]["live"] == "top"
+    assert by_check["noctalia:accessibility.ui_scale"]["status"] == "matched"
+    assert by_check["noctalia:bar.default.end"]["status"] == "matched"
+    assert (
+        "noctalia:bar.default.thickness" not in by_check
+    )  # undeclared keys are not checked
