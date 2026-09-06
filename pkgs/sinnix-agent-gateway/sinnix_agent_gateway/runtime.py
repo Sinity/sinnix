@@ -1446,6 +1446,10 @@ class Runtime:
     def _v2_success(
         self, action: Action, result: Any, context: RequestContext
     ) -> dict[str, Any]:
+        page = None
+        if isinstance(result, ActionResult):
+            page = result.page
+            result = result.data
         receipt = self._record_v2_receipt(action, "ok", context, result=result)
         return self.results.record(
             action=action.name,
@@ -1455,6 +1459,7 @@ class Runtime:
             payload=result,
             receipt=receipt,
             request=context,
+            page=page,
             meta={"resource_refs": self._resource_refs(result)},
         )
 

@@ -544,16 +544,8 @@ class ResultService:
         atomic_publish(self._path(result_id), encoded, fsync=True)
         return envelope
 
-    def record_snapshot(
-        self,
-        *,
-        action: str,
-        owner: str,
-        route: str,
-        writer: ResultSnapshotWriter,
-        receipt: Mapping[str, Any],
-        request: RequestContext,
-    ) -> dict[str, Any]:
+    def finish_snapshot(self, writer: ResultSnapshotWriter) -> dict[str, Any]:
+        """Publish an initial page; continue_snapshot reads subsequent pages."""
         metadata = writer.finish()
         initial_cursor = self._cursor(
             {
@@ -569,26 +561,48 @@ class ResultService:
         next_cursor = (
             initial_cursor if metadata["row_count"] > writer.page_size else None
         )
+        return {
+            "rows": writer.first_page,
+            "row_count": metadata["row_count"],
+            "offset": 0,
+            "next_offset": writer.page_size if next_cursor else None,
+            "cursor": None,
+            "next_cursor": next_cursor,
+            "expires_at": metadata["expires_at"],
+            "snapshot_ref": f"sinnix://results/{metadata['snapshot_id']}",
+        }
+
+    def record_snapshot(
+        self,
+        *,
+        action: str,
+        owner: str,
+        route: str,
+        writer: ResultSnapshotWriter,
+        receipt: Mapping[str, Any],
+        request: RequestContext,
+    ) -> dict[str, Any]:
+        page = self.finish_snapshot(writer)
         return self.record(
             action=action,
             owner=owner,
             route=route,
             outcome="ok",
-            payload={"rows": writer.first_page, "row_count": metadata["row_count"]},
+            payload={"rows": page["rows"], "row_count": page["row_count"]},
             receipt=receipt,
             request=request,
             page={
                 "kind": "snapshot",
                 "cursor": None,
-                "next_cursor": next_cursor,
-                "total": metadata["row_count"],
-                "expires_at": metadata["expires_at"],
-                "snapshot_ref": f"sinnix://results/{metadata['snapshot_id']}",
+                "next_cursor": page["next_cursor"],
+                "total": page["row_count"],
+                "expires_at": page["expires_at"],
+                "snapshot_ref": page["snapshot_ref"],
             },
             meta={
                 "source": {"owner": owner, "route": route},
-                "source_revisions": {"owner": metadata["source_revision"]},
-                "artifact_refs": [f"sinnix://results/{metadata['snapshot_id']}"],
+                "source_revisions": {"owner": writer.source_revision},
+                "artifact_refs": [page["snapshot_ref"]],
             },
         )
 

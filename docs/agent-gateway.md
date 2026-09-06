@@ -103,7 +103,7 @@ Every enabled endpoint receives its own generated config, MCP wrapper, approval 
 
 ## Generated reference
 
-This section is generated from the action set. Revision `v3-typed-actions`, catalog SHA-256 `81898909c68ccc146c6d7ed192711bcbc7d6a1431018ea4f90fa4f7f384c92f2`.
+This section is generated from the action set. Revision `v3-typed-actions`, catalog SHA-256 `062f09c2d413942d8dc280b06247216ff7f846d4a454041d301f6ab753126078`.
 
 The full schemas and examples are in [the generated gateway reference](generated/agent-gateway-reference.md). The matching agent skill is [agent-gateway](../dots/_ai/skills/agent-gateway/SKILL.md).
 
@@ -186,7 +186,7 @@ The full schemas and examples are in [the generated gateway reference](generated
 | `artifacts.read`        | `query`   | `artifacts`        | `agent-control, observer, operator` | Read an artifact: text inline with offsets, images as an image block, other binary as a resource block.                                                                                                            |
 | `captures.query`        | `query`   | `captures`         | `agent-control, observer, operator` | List runtime-declared capture lanes, describe one, or read per-lane record deltas since a time.                                                                                                                    |
 | `activity.query`        | `query`   | `captures`         | `agent-control, observer, operator` | Reads sinnix-capture-v1 envelope files under each lane path within the time window; coverage lists which lanes contributed and which have no envelope files.                                                       |
-| `sessions.query`        | `query`   | `sessions`         | `observer, operator`                | List, read or search local coding-session JSONL files per provider.                                                                                                                                                |
+| `sessions.query`        | `query`   | `sessions`         | `observer, operator`                | page.next_cursor continues a newest-first snapshot for one hour; omit cursor to refresh. Reads return next_offset. Search hits carry byte offsets and matching snippets; truncated marks incomplete coverage.      |
 | `memory.query`          | `query`   | `memory`           | `observer, operator`                | Search session-derived memory across providers or fetch one object by reference, with source provenance.                                                                                                           |
 | `timeline.query`        | `query`   | `timeline`         | `observer, operator`                | Session evidence ordered by file mtime within an RFC 3339 window, per provider, without claiming unavailable upstreams.                                                                                            |
 | `audit.verify`          | `status`  | `audit`            | `agent-control, observer, operator` | Verify the tamper-evident audit hash chain end to end.                                                                                                                                                             |

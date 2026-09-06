@@ -1,11 +1,11 @@
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: 81898909c68ccc146c6d7ed192711bcbc7d6a1431018ea4f90fa4f7f384c92f2 -->
+<!-- gateway-catalog-sha256: 062f09c2d413942d8dc280b06247216ff7f846d4a454041d301f6ab753126078 -->
 # Sinnix Agent Gateway reference
 
 Generated from `sinnix_agent_gateway.actions`. Every action is one MCP tool whose `tools/list` input schema is the one below; the catalog hash changes when an action, schema, principal set, example or affordance changes.
 
-Revision: `v3-typed-actions`. Catalog SHA-256: `81898909c68ccc146c6d7ed192711bcbc7d6a1431018ea4f90fa4f7f384c92f2`.
+Revision: `v3-typed-actions`. Catalog SHA-256: `062f09c2d413942d8dc280b06247216ff7f846d4a454041d301f6ab753126078`.
 
 ## Invocation
 
@@ -118,7 +118,7 @@ MCP: call the tool named after the action. CLI: `sinnix-agent-gateway call <acti
 | `artifacts.read`        | `query`   | `artifacts`        | `agent-control, observer, operator` | Read an artifact: text inline with offsets, images as an image block, other binary as a resource block.                                                                                                            |
 | `captures.query`        | `query`   | `captures`         | `agent-control, observer, operator` | List runtime-declared capture lanes, describe one, or read per-lane record deltas since a time.                                                                                                                    |
 | `activity.query`        | `query`   | `captures`         | `agent-control, observer, operator` | Reads sinnix-capture-v1 envelope files under each lane path within the time window; coverage lists which lanes contributed and which have no envelope files.                                                       |
-| `sessions.query`        | `query`   | `sessions`         | `observer, operator`                | List, read or search local coding-session JSONL files per provider.                                                                                                                                                |
+| `sessions.query`        | `query`   | `sessions`         | `observer, operator`                | page.next_cursor continues a newest-first snapshot for one hour; omit cursor to refresh. Reads return next_offset. Search hits carry byte offsets and matching snippets; truncated marks incomplete coverage.      |
 | `memory.query`          | `query`   | `memory`           | `observer, operator`                | Search session-derived memory across providers or fetch one object by reference, with source provenance.                                                                                                           |
 | `timeline.query`        | `query`   | `timeline`         | `observer, operator`                | Session evidence ordered by file mtime within an RFC 3339 window, per provider, without claiming unavailable upstreams.                                                                                            |
 | `audit.verify`          | `status`  | `audit`            | `agent-control, observer, operator` | Verify the tamper-evident audit hash chain end to end.                                                                                                                                                             |
@@ -17861,11 +17861,11 @@ Last hour of clipboard and notifications:
 
 ### `sessions.query`
 
-List, read or search local coding-session JSONL files per provider.
+page.next_cursor continues a newest-first snapshot for one hour; omit cursor to refresh. Reads return next_offset. Search hits carry byte offsets and matching snippets; truncated marks incomplete coverage.
 
 Family: `query`. Owner: `sessions`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
-Aliases: claude sessions, codex sessions, transcript, session log.
+Aliases: claude sessions, codex sessions, transcript, session log, recent work.
 
 Follow-up actions: `sessions.query`, `memory.query`, `timeline.query`.
 
@@ -17877,6 +17877,19 @@ Input schema:
     "SessionsListOp": {
       "additionalProperties": false,
       "properties": {
+        "cursor": {
+          "anyOf": [
+            {
+              "maxLength": 8192,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "page.next_cursor from this provider and limit. Omit to observe current files."
+        },
         "limit": {
           "default": 100,
           "maximum": 500,
@@ -17954,6 +17967,7 @@ Input schema:
           "type": "string"
         },
         "query": {
+          "description": "Literal text. Searches the first 64 KB of the newest 1000 files within an 8 MiB total budget.",
           "maxLength": 1000,
           "minLength": 1,
           "type": "string"
