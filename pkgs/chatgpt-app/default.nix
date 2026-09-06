@@ -46,14 +46,14 @@
 
 stdenv.mkDerivation rec {
   pname = "chatgpt";
-  version = "26.901.41123";
+  version = "26.901.51231";
 
   # This is the official OpenAI Linux x86_64 download. The upstream endpoint
   # is intentionally pinned by hash; update both when OpenAI publishes a new
   # desktop release.
   src = fetchurl {
     url = "https://persistent.oaistatic.com/codex-app-prod/linux/deb/latest/chatgpt_amd64.deb";
-    hash = "sha256-C/eEeNVLDNDgsEy5yMabKyMbvAwm7Cgrylg2Qw2a1fY=";
+    hash = "sha256-YlgBiNh8PTqTadq3xztCqKMlGNTfii1brmRm3erFwF4=";
   };
 
   nativeBuildInputs = [
