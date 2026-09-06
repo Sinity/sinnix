@@ -13,7 +13,6 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
@@ -24,7 +23,6 @@ from sinnix_ops_reducer.feedback import (
     is_elicit,
     resolve_elicit_model,
 )
-from sinnix_ops_reducer.reducer import Reducer
 from sinnix_ops_reducer.server import Handler, serve
 
 
@@ -123,24 +121,12 @@ def test_the_elicit_model_root_default_is_the_owned_state_root() -> None:
 
 
 @pytest.fixture
-def hub_server(tmp_path: Path):
-    reducer = Reducer(tmp_path / "status.json", tmp_path / "token", lambda: {})
-    reducer.refresh()
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    server.reducer = reducer
-    server.token = "fixture-token"
-    server.is_unix = True
-    server.hub_manifest = None
-    server.inventory_path = tmp_path / "missing-inventory.json"
-    server.feedback = FeedbackSpool(tmp_path / "spool")
-    server.elicit_model_dir = tmp_path / "preferences"
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        yield f"http://127.0.0.1:{server.server_address[1]}", tmp_path / "spool"
-    finally:
-        server.shutdown()
-        server.server_close()
+def hub_server(hub_server_factory, tmp_path: Path) -> tuple[str, Path]:
+    spool = tmp_path / "spool"
+    base = hub_server_factory(
+        feedback=FeedbackSpool(spool), elicit_model_dir=tmp_path / "preferences"
+    )
+    return base, spool
 
 
 def test_post_feedback_spools_and_answers_with_cors(hub_server) -> None:
