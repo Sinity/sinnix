@@ -24,7 +24,7 @@ from .config import GatewayConfig
 from .prompts import PROMPT_SPECS, PromptGenerator
 from .registry import REGISTRY
 from .results import ProtocolError, derive_cursor_key
-from .runtime import Runtime, canonical_manifest
+from .runtime import RESOURCE_READERS, Runtime, canonical_manifest
 from .subscriptions import (
     EVENTS_RESOURCE_URI,
     EventSpoolPublisher,
@@ -176,12 +176,16 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
         )
 
     def register_canonical_templates() -> None:
-        """Register only principal-visible canonical owner templates."""
+        """Publish the principal-visible templates that have a reader.
+
+        `result` and `receipt` are registered above; every other kind is read
+        through the action `RESOURCE_READERS` names, so a kind without one is
+        not published rather than published and refused.
+        """
         for resource in REGISTRY.resources:
-            if principal_name not in resource.principals or resource.kind in {
-                "result",
-                "receipt",
-            }:
+            if principal_name not in resource.principals or (
+                resource.kind not in RESOURCE_READERS and resource.kind != "mcp_tool"
+            ):
                 continue
             variables = resource.ref_template.variables
 
@@ -206,7 +210,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                         )
                     payload = {"ref": reference, "kind": "mcp_tool", "tool": match}
                 else:
-                    payload = runtime.v2_get(reference)
+                    payload = await runtime.v2_get(reference)
                 return _bounded_resource_json(runtime, payload, _resource.kind)
 
             # MCPServer validates template parameters with inspect.signature.

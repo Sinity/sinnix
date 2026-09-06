@@ -274,7 +274,10 @@ graph.
 step is recorded in `landing` before the next starts, and a repeat run
 resumes from the manifest. The whole landing holds
 `runs/<run>.land.lock`; a second landing of the same run is refused with
-`landing_in_progress`.
+`landing_in_progress`. `batch.queue` re-queues the landing task instead of
+running it, for a caller that cannot hold a process for the whole landing;
+it refuses `landing_in_progress` while the recorded landing task is still
+queued or running.
 
 1. Refuse unless every worker task succeeded with a valid result, and
    refuse a run that already has an acceptance record or was abandoned.

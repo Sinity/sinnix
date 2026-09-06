@@ -1,8 +1,8 @@
 """The gateway's job owner: agentctl's launch and batch routes, called in process.
 
-A job is a pueue task. Every operation answers with a ResponseEnvelope; a
-refusal is an ErrorEnvelope whose code the gateway's own error classes cover,
-never an exception.
+A job is a pueue task and a batch is a run manifest. Every operation answers
+with a ResponseEnvelope; a refusal is an ErrorEnvelope whose code the gateway's
+own error classes cover, never an exception.
 """
 
 from __future__ import annotations
@@ -99,9 +99,15 @@ def _decode_cursor(cursor: str) -> tuple[str, str]:
 
 
 def job_payload(job: Mapping[str, Any]) -> dict[str, Any]:
-    """The job as the gateway reads it: a string id and a nested state."""
+    """The job as the gateway reads it: a string id and a nested state.
+
+    ``binding`` is what the task was queued for — its beads, run and worker —
+    read back from the launch input, so bead membership never depends on
+    parsing a pueue label.
+    """
     return {
         "job_id": str(job.get("job_id")),
+        "binding": job.get("binding"),
         "label": job.get("label"),
         "kind": job.get("kind"),
         "project_id": job.get("project"),
@@ -116,6 +122,80 @@ def job_payload(job: Mapping[str, Any]) -> dict[str, Any]:
         "enqueued_at": job.get("enqueued_at"),
         "started_at": job.get("started_at"),
         "ended_at": job.get("ended_at"),
+    }
+
+
+# A refusal the caller fixes by sending different arguments; every other
+# refusal is a state agentctl observed, not a malformed request. The code
+# itself travels in the error details, where the batch actions map it to a
+# typed failure and the action that follows.
+ARGUMENT_REFUSALS = frozenset(
+    {"ambiguous_run", "harness", "project", "unknown_run", "worker_missing"}
+)
+
+
+def worker_payload(worker: Mapping[str, Any]) -> dict[str, Any]:
+    """One worker of a run: its beads, its worktree and its current task."""
+    task = worker.get("task") if isinstance(worker.get("task"), Mapping) else {}
+    task_id = worker.get("task_id")
+    return {
+        "worker_id": worker.get("id"),
+        "beads": [str(bead) for bead in worker.get("beads") or []],
+        "branch": worker.get("branch"),
+        "worktree": worker.get("worktree"),
+        "stage": worker.get("stage"),
+        "job_id": str(task_id) if isinstance(task_id, int) else None,
+        "job_ids": [str(item) for item in worker.get("task_ids") or []],
+        "backend": worker.get("backend"),
+        "model": worker.get("model"),
+        "effort": worker.get("effort"),
+        "result_filed": bool(worker.get("result")),
+        "state": {
+            "phase": task.get("phase"),
+            "terminal": task.get("terminal"),
+            "exit_code": task.get("exit_code"),
+        }
+        if task
+        else None,
+    }
+
+
+def run_payload(document: Mapping[str, Any]) -> dict[str, Any]:
+    """The run manifest as the gateway reads it, with pueue's view of each task."""
+    raw = document.get("landing")
+    landing = raw if isinstance(raw, Mapping) else {}
+    task = landing.get("task") if isinstance(landing.get("task"), Mapping) else {}
+    task_id = landing.get("task_id")
+    return {
+        "run_id": document.get("run_id"),
+        "project_id": document.get("project"),
+        "base_commit": document.get("base_commit"),
+        "created_at": document.get("created_at"),
+        "harness": document.get("harness"),
+        "stage": document.get("stage"),
+        "prepared": bool(document.get("prepared")),
+        "accepted": document.get("acceptance") is not None,
+        "acceptance": document.get("acceptance"),
+        "abandoned": document.get("abandoned"),
+        "workers": [
+            worker_payload(worker)
+            for worker in document.get("workers") or []
+            if isinstance(worker, Mapping)
+        ],
+        "landing": {
+            "job_id": str(task_id) if isinstance(task_id, int) else None,
+            "integration_branch": landing.get("integration_branch"),
+            "candidate_sha": landing.get("candidate_sha"),
+            "pr_number": landing.get("pr_number"),
+            "failure": landing.get("failure"),
+            "state": {
+                "phase": task.get("phase"),
+                "terminal": task.get("terminal"),
+                "exit_code": task.get("exit_code"),
+            }
+            if task
+            else None,
+        },
     }
 
 
@@ -143,11 +223,19 @@ class LocalJobs:
             payload = handler(request.arguments)
         except _Refusal as refusal:
             return self._error(request, refusal.code, str(refusal))
+        except batch.BatchRefusal as refusal:
+            return self._error(
+                request,
+                ErrorCode.INVALID_ARGUMENT
+                if refusal.code in ARGUMENT_REFUSALS
+                else ErrorCode.OPERATION_FAILED,
+                str(refusal),
+                {"refusal": refusal.code},
+            )
         except PueueError as error:
             return self._error(request, ErrorCode.OWNER_UNAVAILABLE, str(error))
         except (
             launch.JobError,
-            batch.BatchRefusal,
             batch.BatchError,
             WorktrunkError,
             ConfigError,
@@ -173,19 +261,30 @@ class LocalJobs:
             "job.result": self._result,
             "job.cancel": self._cancel,
             "job.list": self._list,
-            "job.agent.start": self._agent_start,
+            "job.retry": self._retry,
+            "job.clean": self._clean,
             "job.shell.start": self._shell_start,
+            "batch.list": self._batch_list,
+            "batch.start": self._batch_start,
+            "batch.status": self._batch_status,
+            "batch.land": self._batch_land,
+            "batch.resume": self._batch_resume,
         }
 
     @staticmethod
     def _error(
-        request: RequestEnvelope, code: ErrorCode, message: str
+        request: RequestEnvelope,
+        code: ErrorCode,
+        message: str,
+        details: Mapping[str, Any] | None = None,
     ) -> ResponseEnvelope:
         return ResponseEnvelope(
             request_id=request.request_id,
             correlation_id=request.correlation_id,
             owner=OWNER,
-            error=ErrorEnvelope(code, message, OpaquePayload.bounded({})),
+            error=ErrorEnvelope(
+                code, message, OpaquePayload.bounded(dict(details or {}))
+            ),
         )
 
     def _project(self, project_id: str) -> Any:
@@ -223,7 +322,9 @@ class LocalJobs:
         return job_payload(job)
 
     def _get(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
-        return job_payload(launch.get_job(_require_int(arguments, "job_id")))
+        return job_payload(
+            launch.get_job(_require_int(arguments, "job_id"), self.config)
+        )
 
     def _wait(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         job_id = _require_int(arguments, "job_id")
@@ -276,7 +377,7 @@ class LocalJobs:
         if isinstance(cursor, str) and cursor:
             after = _decode_cursor(cursor)
             rows = [row for row in rows if _sort_key(row) < after]
-        page = rows[:limit]
+        page = launch.attach_bindings(self.config, rows[:limit])
         truncated = len(rows) > len(page)
         return {
             "jobs": [job_payload(row) for row in page],
@@ -288,35 +389,122 @@ class LocalJobs:
             "snapshot": {"ordering": JOB_LIST_ORDERING, "ceiling": ceiling},
         }
 
-    def _agent_start(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
-        """A batch of one seed: agentctl validates, claims, creates the worktree, queues the worker."""
+    def _retry(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        return job_payload(launch.retry(_require_int(arguments, "job_id")))
+
+    def _clean(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        job_id = _require_int(arguments, "job_id")
+        cleaned = launch.clean(self.config, job_id)
+        return {
+            **job_payload(cleaned),
+            "cleaned": bool(cleaned.get("cleaned")),
+            "removed": [str(path) for path in cleaned.get("removed") or []],
+        }
+
+    # ----------------------------------------------------------- batches
+
+    def _run_id(self, arguments: Mapping[str, Any]) -> str:
+        """A run id or the suffix every agentctl verb also accepts."""
+        return batch.resolve_run_id(self.config, _require_str(arguments, "run_id"))
+
+    def _run_project(self, run_id: str, arguments: Mapping[str, Any]) -> Any:
+        """The run's own project; an explicit project_id must agree with it."""
+        declared = _optional_str(arguments, "project_id")
+        owner = batch.load(self.config, run_id).project
+        if declared is not None and declared != owner:
+            raise batch.BatchRefusal(
+                "project", f"run {run_id} belongs to {owner}, not {declared}"
+            )
+        return self._project(owner)
+
+    def _status(self, run_id: str, project: Any) -> dict[str, Any]:
+        return run_payload(batch.status(self.config, run_id, project=project))
+
+    def _batch_list(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        project_id = _optional_str(arguments, "project_id")
+        if project_id is not None:
+            self._project(project_id)
+        runs = batch.list_runs(self.config, project_id)
+        limit = int(arguments.get("limit") or 50)
+        page = sorted(runs, key=lambda run: run.created_at, reverse=True)[:limit]
+        # No project: `batch status` reads the landing PR from GitHub when it
+        # has one, and a list must not make one network call per run.
+        return {
+            "runs": [self._status(run.run_id, None) for run in page],
+            "total": len(runs),
+            "truncated": len(runs) > len(page),
+        }
+
+    def _batch_start(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        """agentctl validates the members, claims them, creates the worktrees, queues the workers and the landing."""
         project = self._project(_require_str(arguments, "project_id"))
+        beads = arguments.get("beads")
+        if (
+            not isinstance(beads, list)
+            or not beads
+            or any(not isinstance(item, str) or not item for item in beads)
+        ):
+            raise _Refusal(
+                ErrorCode.INVALID_ARGUMENT, "beads must be a non-empty list of bead ids"
+            )
+        workers = arguments.get("workers")
+        if workers is not None and (
+            not isinstance(workers, list)
+            or not all(
+                isinstance(group, list)
+                and group
+                and all(isinstance(item, str) and item for item in group)
+                for group in workers
+            )
+        ):
+            raise _Refusal(
+                ErrorCode.INVALID_ARGUMENT,
+                "workers must be a list of non-empty bead id lists",
+            )
         run = batch.start(
             self.config,
             project,
-            [_require_str(arguments, "bead_id")],
+            beads,
+            workers=workers,
             backend=_optional_str(arguments, "backend"),
             model=_optional_str(arguments, "model"),
             effort=_optional_str(arguments, "effort"),
         )
-        worker = run["workers"][0]
-        task = (
-            launch.get_job(worker["task_id"])
-            if worker.get("task_id") is not None
-            else None
+        return {
+            **self._status(str(run["run_id"]), project),
+            "existing": bool(run.get("existing")),
+            "resumed": bool(run.get("resumed")),
+        }
+
+    def _batch_status(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        run_id = self._run_id(arguments)
+        return self._status(run_id, self._run_project(run_id, arguments))
+
+    def _batch_land(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        """Queue a landing task; pueue runs the landing, which can take hours."""
+        run_id = self._run_id(arguments)
+        project = self._run_project(run_id, arguments)
+        queued = batch.queue(self.config, project, run_id)
+        return {
+            **self._status(run_id, project),
+            "landing_job_id": str(queued["landing_task_id"]),
+        }
+
+    def _batch_resume(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        run_id = self._run_id(arguments)
+        project = self._run_project(run_id, arguments)
+        resumed = batch.resume(
+            self.config,
+            project,
+            run_id,
+            _require_str(arguments, "worker_id"),
+            backend=_optional_str(arguments, "backend"),
+            model=_optional_str(arguments, "model"),
+            effort=_optional_str(arguments, "effort"),
         )
         return {
-            **(job_payload(task) if task else {}),
-            "run_id": run["run_id"],
-            "lane": {
-                "bead": worker["id"],
-                "beads": list(worker["beads"]),
-                "branch": worker["branch"],
-                "worktree": worker.get("worktree"),
-                "backend": worker.get("backend"),
-                "model": worker.get("model"),
-                "effort": worker.get("effort"),
-            },
+            **self._status(run_id, project),
+            "resumed_job_id": str(resumed["job"]["job_id"]),
         }
 
     def _shell_start(self, arguments: Mapping[str, Any]) -> dict[str, Any]:

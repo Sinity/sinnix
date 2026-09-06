@@ -1,5 +1,5 @@
 {
-  "action_catalog_hash": "23ea3f1e63bf903ef81fcbbace343a31149631e79960da38391e8c396ab32af1",
+  "action_catalog_hash": "81898909c68ccc146c6d7ed192711bcbc7d6a1431018ea4f90fa4f7f384c92f2",
   "examples": [
     {
       "action": "gateway.status",
@@ -600,6 +600,17 @@
       "title": "Retry job 41"
     },
     {
+      "action": "jobs.clean",
+      "family": "operate",
+      "input": {
+        "idempotency_key": "clean-41",
+        "target": {
+          "job_id": 41
+        }
+      },
+      "title": "Clean job 41"
+    },
+    {
       "action": "operations.run",
       "family": "run",
       "input": {
@@ -641,29 +652,107 @@
       "title": "git status in sinnix"
     },
     {
-      "action": "agent.for_bead",
-      "family": "run",
+      "action": "batches.list",
+      "family": "query",
       "input": {
-        "bead": {
-          "id": "sinnix-abc1"
-        },
-        "idempotency_key": "lane-sinnix-abc1"
+        "limit": 10
       },
-      "title": "Start a worker"
+      "title": "Recent runs"
     },
     {
-      "action": "agent.for_bead",
+      "action": "batches.list",
+      "family": "query",
+      "input": {
+        "project": {
+          "project": "sinnix"
+        }
+      },
+      "title": "One project's runs"
+    },
+    {
+      "action": "batches.status",
+      "family": "get",
+      "input": {
+        "target": {
+          "run_id": "a2c81926"
+        }
+      },
+      "title": "By run suffix"
+    },
+    {
+      "action": "batches.status",
+      "family": "get",
+      "input": {
+        "target": {
+          "ref": "sinnix://projects/sinnix/runs/sinnix-20260906-012123-a2c81926"
+        }
+      },
+      "title": "By canonical ref"
+    },
+    {
+      "action": "batches.start",
+      "family": "run",
+      "input": {
+        "beads": [
+          "sinnix-abc1"
+        ],
+        "idempotency_key": "batch-sinnix-abc1",
+        "project": {
+          "project": "sinnix"
+        }
+      },
+      "title": "One bead, one worker"
+    },
+    {
+      "action": "batches.start",
       "family": "run",
       "input": {
         "backend": "codex",
-        "bead": {
-          "ref": "sinnix://projects/sinnix/beads/sinnix-abc1"
-        },
+        "beads": [
+          "sinnix-abc1",
+          "sinnix-abc2",
+          "sinnix-abc3"
+        ],
         "effort": "high",
-        "idempotency_key": "lane-sinnix-abc1-codex",
-        "model": "gpt-5.6-terra"
+        "idempotency_key": "batch-sinnix-abc1-3",
+        "model": "gpt-5.6-terra",
+        "project": {
+          "project": "sinnix"
+        },
+        "workers": [
+          [
+            "sinnix-abc1",
+            "sinnix-abc2"
+          ],
+          [
+            "sinnix-abc3"
+          ]
+        ]
       },
-      "title": "Pin the agent"
+      "title": "Two workers, pinned agent"
+    },
+    {
+      "action": "batches.land",
+      "family": "run",
+      "input": {
+        "idempotency_key": "land-a2c81926",
+        "target": {
+          "run_id": "a2c81926"
+        }
+      },
+      "title": "Re-run a failed landing"
+    },
+    {
+      "action": "batches.resume",
+      "family": "run",
+      "input": {
+        "idempotency_key": "resume-a2c81926-sinnix-abc1",
+        "target": {
+          "run_id": "a2c81926"
+        },
+        "worker": "sinnix-abc1"
+      },
+      "title": "Resume one worker"
     },
     {
       "action": "wait.for",

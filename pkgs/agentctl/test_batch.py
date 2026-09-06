@@ -1212,6 +1212,58 @@ def test_status_and_list_join_the_manifest_with_pueue(harness: Harness) -> None:
     assert manifest.list_runs(harness.config, "other") == []
 
 
+def test_queue_relaunches_the_landing_only_when_the_last_one_is_terminal(
+    harness: Harness,
+) -> None:
+    """Breaks if a caller can stack two landings of one run on the queue."""
+    run = prepared_run(harness, "fx-lead")
+    run_id = run["run_id"]
+    first = manifest.load(harness.config, run_id).landing["task_id"]
+
+    with pytest.raises(BatchRefusal, match="landing_in_progress"):
+        batch.queue(harness.config, harness.project, run_id)
+
+    harness.pueue.fail(first, exit_code=1)
+    queued = batch.queue(harness.config, harness.project, run_id)
+    second = queued["landing_task_id"]
+
+    assert second != first
+    assert manifest.load(harness.config, run_id).landing["task_id"] == second
+    task = harness.pueue.task(second)
+    assert task.label == f"fixture:land:{run_id}" and task.dependencies == ()
+    assert read_launch(harness.config, task)["argv"][-3:] == ["batch", "land", run_id]
+
+
+def test_queue_refuses_a_run_that_is_landed_abandoned_or_another_project(
+    harness: Harness,
+) -> None:
+    run = harness.start("fx-solo")
+    run_id = run["run_id"]
+    other = replace(harness.project, project_id="other")
+    with pytest.raises(BatchRefusal, match="project"):
+        batch.queue(harness.config, other, run_id)
+    harness.pueue.fail(run["workers"][0]["task_id"], exit_code=1)
+    harness.pueue.dependency_fail(run["landing"]["task_id"])
+    harness.abandon(run_id)
+    with pytest.raises(BatchRefusal, match="abandoned"):
+        batch.queue(harness.config, harness.project, run_id)
+
+
+def test_attach_bindings_reads_each_row_binding_from_its_launch_input(
+    harness: Harness,
+) -> None:
+    """Breaks if bead membership has to be parsed out of a pueue label."""
+    run = harness.start("fx-lead", "fx-solo")
+    rows = launch.attach_bindings(harness.config, launch.list_jobs("fixture"))
+    by_label = {row["label"]: row for row in rows}
+    assert by_label[f"fixture:worker:{run['run_id']}:fx-lead"]["binding"] == {
+        "beads": ["fx-lead", "fx-member"],
+        "run_id": run["run_id"],
+        "worker": "fx-lead",
+    }
+    assert "binding" not in by_label[f"fixture:land:{run['run_id']}"]
+
+
 def test_manifest_is_written_once_and_updated_under_the_lock(harness: Harness) -> None:
     run = manifest.Run.from_dict(
         {

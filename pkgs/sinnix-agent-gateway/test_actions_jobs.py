@@ -14,7 +14,7 @@ from sinnix_agent_gateway import server as server_module
 from sinnix_agent_gateway.actions import contexts, jobs, waits
 from sinnix_agent_gateway.app import Runtime, create_server
 from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
-from sinnix_agent_gateway.locators import JobLocator, encode_file_ref
+from sinnix_agent_gateway.locators import JobLocator
 from sinnix_mcp import (
     ErrorCode,
     ErrorEnvelope,
@@ -113,12 +113,18 @@ def call(server: Any, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+RUN_ID = "fixture-20260906-012123-a2c81926"
 RUNNING = {
     "job_id": "41",
-    "label": "fixture:lane:fixture-7",
+    "label": f"fixture:worker:{RUN_ID}:fixture-7",
     "kind": "attested-agent",
     "project_id": "fixture",
-    "operation": "lane:fixture-7",
+    "operation": f"worker:{RUN_ID}:fixture-7",
+    "binding": {
+        "beads": ["fixture-7", "fixture-8"],
+        "run_id": RUN_ID,
+        "worker": "fixture-7",
+    },
     "group": "agent",
     "checkout": {"path": "/realm/worktrees/fixture-feature-packet-fixture-7"},
     "state": {"phase": "running", "terminal": False, "exit_code": None},
@@ -146,6 +152,7 @@ def test_list_pages_with_refs_and_forwards_the_project_filter(
                 "job_id": "40",
                 "label": "fixture:check",
                 "kind": "declared-operation",
+                "binding": None,
             },
         ],
         "total": 2,
@@ -161,11 +168,14 @@ def test_list_pages_with_refs_and_forwards_the_project_filter(
         "sinnix://jobs/40",
     ]
     assert data["next_cursor"] == "c2" and data["truncated"] is True
-    lane = data["jobs"][0]["lane"]
-    assert lane["bead"] == "fixture-7"
-    assert lane["bead_ref"] == "sinnix://projects/fixture/beads/fixture-7"
-    assert lane["worktree_ref"] == encode_file_ref(RUNNING["checkout"]["path"])
-    assert data["jobs"][1]["lane"] is None
+    binding = data["jobs"][0]["binding"]
+    assert binding["beads"] == ["fixture-7", "fixture-8"]
+    assert binding["bead_refs"] == [
+        "sinnix://projects/fixture/beads/fixture-7",
+        "sinnix://projects/fixture/beads/fixture-8",
+    ]
+    assert binding["run_id"] == RUN_ID and binding["worker_id"] == "fixture-7"
+    assert data["jobs"][1]["binding"] is None
     assert "jobs.cancel" in data["jobs"][0]["affordances"]
     assert "jobs.retry" in data["jobs"][1]["affordances"]
     assert fake.calls[0].arguments == {"limit": 2, "project_id": "fixture"}
@@ -194,7 +204,7 @@ def test_get_returns_summary_log_range_and_result(
         and summary["state"]["phase"] == "succeeded"
     )
     assert summary["log"] is None and summary["result"] is None
-    assert summary["lane"]["bead"] == "fixture-7"
+    assert summary["binding"]["beads"] == ["fixture-7", "fixture-8"]
 
     logged = call(
         server,
@@ -334,7 +344,7 @@ def test_cancel_and_retry_are_not_offered_to_observers(
         "context.compose",
     } <= visible
     assert visible.isdisjoint(
-        {"jobs.cancel", "jobs.retry", "operations.run", "shell.run", "agent.for_bead"}
+        {"jobs.cancel", "jobs.retry", "jobs.clean", "operations.run", "shell.run"}
     )
 
 
@@ -452,59 +462,3 @@ def test_shell_run_is_operator_only_and_keeps_cwd_inside_the_checkout(
         },
     )
     assert escaped["error"]["code"] == "policy_denied"
-
-
-def test_agent_for_bead_starts_a_lane_and_maps_a_taken_bead_to_conflict(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    server, _, fake = make_server(tmp_path, "operator", monkeypatch)
-    fake.responses["job.agent.start"] = {
-        **RUNNING,
-        "lane": {
-            "bead": "fixture-7",
-            "beads": ["fixture-7", "fixture-8"],
-            "branch": "feature/packet/fixture-7",
-            "worktree": "/realm/worktrees/fixture-feature-packet-fixture-7",
-            "backend": "codex",
-            "model": "gpt-5.6-terra",
-            "effort": "high",
-        },
-    }
-    started = call(
-        server,
-        "agent.for_bead",
-        {
-            "bead": {"id": "fixture-7"},
-            "backend": "codex",
-            "model": "gpt-5.6-terra",
-            "effort": "high",
-            "idempotency_key": "lane-1",
-        },
-    )
-    assert started["result"]["outcome"] == "ok", started
-    data = started["data"]
-    assert data["ref"] == "sinnix://jobs/41" and data["job"]["job_id"] == 41
-    assert data["bead_ref"] == "sinnix://projects/fixture/beads/fixture-7"
-    assert data["beads"] == ["fixture-7", "fixture-8"]
-    assert data["branch"] == "feature/packet/fixture-7"
-    assert data["worktree_ref"] == encode_file_ref(data["worktree"])
-    assert fake.calls[-1].arguments == {
-        "project_id": "fixture",
-        "bead_id": "fixture-7",
-        "backend": "codex",
-        "model": "gpt-5.6-terra",
-        "effort": "high",
-    }
-
-    fake.errors["job.agent.start"] = (
-        ErrorCode.OPERATION_FAILED,
-        "feature/packet/fixture-7 already has a worktree at /realm/worktrees/x",
-    )
-    taken = call(
-        server,
-        "agent.for_bead",
-        {"bead": {"id": "fixture-7"}, "idempotency_key": "lane-2"},
-    )
-    assert taken["error"]["code"] == "conflict"
-    assert taken["error"]["details"]["bead"] == "fixture-7"
-    assert taken["error"]["details"]["next_action"] == "agent.for_bead"

@@ -159,62 +159,146 @@ def test_shell_start_queues_the_argv_inside_the_checkout(
     assert len(seen) == 9
 
 
-def test_agent_start_is_a_batch_of_one_seed(
+RUN_DOCUMENT = {
+    "run_id": "fixture-20260906-012123-a2c81926",
+    "project": "fixture",
+    "base_commit": "b" * 40,
+    "created_at": "2026-09-06T01:21:23+00:00",
+    "harness": "queued",
+    "stage": "working",
+    "prepared": True,
+    "acceptance": None,
+    "abandoned": None,
+    "workers": [
+        {
+            "id": "fixture-1",
+            "beads": ["fixture-1", "fixture-2"],
+            "branch": "batch/fixture-run/fixture-1",
+            "worktree": "/realm/worktrees/fixture-batch-fixture-run-fixture-1",
+            "backend": "claude",
+            "model": "policy",
+            "effort": "medium",
+            "task_id": 41,
+            "task_ids": [41],
+            "result": None,
+            "stage": "running",
+            "task": {"phase": "running", "terminal": False, "exit_code": None},
+        }
+    ],
+    "landing": {
+        "task_id": 42,
+        "integration_branch": "batch/fixture-run/integration",
+        "candidate_sha": None,
+        "pr_number": None,
+        "failure": None,
+        "task": {"phase": "queued", "terminal": False, "exit_code": None},
+    },
+}
+
+
+def test_batch_start_hands_the_beads_to_agentctl_and_answers_from_the_manifest(
     adapter: LocalJobs, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Red if the gateway compiles its own prompt or worktree instead of
-    handing the bead to agentctl's batch route."""
+    handing the beads to agentctl's batch route."""
     seen: dict[str, Any] = {}
 
-    def fake_start(config, project, seeds, *, backend, model, effort, **_kwargs):
-        seen.update(project=project.project_id, seeds=list(seeds), backend=backend)
-        return {
-            "run_id": "fixture-run",
-            "workers": [
-                {
-                    "id": seeds[0],
-                    "beads": list(seeds),
-                    "branch": f"batch/fixture-run/{seeds[0]}",
-                    "worktree": f"/realm/worktrees/fixture-batch-fixture-run-{seeds[0]}",
-                    "backend": backend or "codex",
-                    "model": model or "policy",
-                    "effort": effort or "medium",
-                    "task_id": JOB_ROW["job_id"],
-                }
-            ],
-        }
+    def fake_start(config, project, seeds, *, workers, backend, model, effort, **_kw):
+        seen.update(
+            project=project.project_id,
+            seeds=list(seeds),
+            workers=workers,
+            backend=backend,
+        )
+        return {"run_id": RUN_DOCUMENT["run_id"], "existing": False, "resumed": False}
 
     monkeypatch.setattr(batch, "start", fake_start)
-    monkeypatch.setattr(
-        launch,
-        "get_job",
-        lambda task_id: {
-            **JOB_ROW,
-            "label": "fixture:worker:fixture-run:fixture-1",
-            "group": "agent",
-        },
-    )
+    monkeypatch.setattr(batch, "status", lambda *_a, **_k: RUN_DOCUMENT)
     response = adapter.dispatch(
         _request(
-            "job.agent.start",
-            {"project_id": "fixture", "bead_id": "fixture-1", "backend": "claude"},
+            "batch.start",
+            {
+                "project_id": "fixture",
+                "beads": ["fixture-1", "fixture-2"],
+                "workers": [["fixture-1", "fixture-2"]],
+                "backend": "claude",
+            },
         )
     )
     assert response.error is None, response.error
     payload = response.payload.inline
-    assert seen == {"project": "fixture", "seeds": ["fixture-1"], "backend": "claude"}
-    assert payload["group"] == "agent"
-    assert payload["run_id"] == "fixture-run"
-    assert payload["lane"]["branch"] == "batch/fixture-run/fixture-1"
-    assert payload["lane"]["model"] == "policy"
+    assert seen == {
+        "project": "fixture",
+        "seeds": ["fixture-1", "fixture-2"],
+        "workers": [["fixture-1", "fixture-2"]],
+        "backend": "claude",
+    }
+    assert payload["run_id"] == RUN_DOCUMENT["run_id"]
+    assert payload["stage"] == "working" and payload["accepted"] is False
+    worker = payload["workers"][0]
+    assert worker["worker_id"] == "fixture-1"
+    assert worker["beads"] == ["fixture-1", "fixture-2"]
+    assert worker["job_id"] == "41" and worker["job_ids"] == ["41"]
+    assert worker["state"] == {"phase": "running", "terminal": False, "exit_code": None}
+    assert worker["result_filed"] is False
+    assert payload["landing"]["job_id"] == "42"
+    assert payload["landing"]["state"]["phase"] == "queued"
 
     def refuse(config, project, seeds, **_kwargs):
         raise batch.BatchRefusal("members", "fixture-1: claimed by agent-x")
 
     monkeypatch.setattr(batch, "start", refuse)
     refused = adapter.dispatch(
-        _request("job.agent.start", {"project_id": "fixture", "bead_id": "fixture-1"})
+        _request("batch.start", {"project_id": "fixture", "beads": ["fixture-1"]})
     )
     assert refused.error is not None
     assert refused.error.code is ErrorCode.OPERATION_FAILED
+    assert refused.error.details.inline == {"refusal": "members"}
     assert "claimed by agent-x" in refused.error.message
+
+
+def test_batch_land_queues_a_landing_task_and_reports_the_refusal_class(
+    adapter: LocalJobs, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Red if landing runs inside the request instead of on the queue."""
+    monkeypatch.setattr(
+        batch, "resolve_run_id", lambda _c, token: RUN_DOCUMENT["run_id"]
+    )
+    monkeypatch.setattr(
+        batch, "load", lambda *_a: type("R", (), {"project": "fixture"})()
+    )
+    monkeypatch.setattr(batch, "status", lambda *_a, **_k: RUN_DOCUMENT)
+    monkeypatch.setattr(batch, "queue", lambda *_a: {"landing_task_id": 77})
+    monkeypatch.setattr(
+        batch, "land", lambda *_a, **_k: pytest.fail("landing ran in the request")
+    )
+
+    response = adapter.dispatch(_request("batch.land", {"run_id": "a2c81926"}))
+    assert response.error is None, response.error
+    assert response.payload.inline["landing_job_id"] == "77"
+
+    def refuse(*_args):
+        raise batch.BatchRefusal("landing_in_progress", "landing task 42 is queued")
+
+    monkeypatch.setattr(batch, "queue", refuse)
+    refused = adapter.dispatch(_request("batch.land", {"run_id": "a2c81926"}))
+    assert refused.error is not None
+    assert refused.error.code is ErrorCode.OPERATION_FAILED
+    assert refused.error.details.inline == {"refusal": "landing_in_progress"}
+
+
+def test_batch_verbs_refuse_a_run_that_belongs_to_another_project(
+    adapter: LocalJobs, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        batch, "resolve_run_id", lambda _c, token: RUN_DOCUMENT["run_id"]
+    )
+    monkeypatch.setattr(
+        batch, "load", lambda *_a: type("R", (), {"project": "other"})()
+    )
+    refused = adapter.dispatch(
+        _request("batch.status", {"run_id": "a2c81926", "project_id": "fixture"})
+    )
+    assert refused.error is not None
+    assert refused.error.code is ErrorCode.INVALID_ARGUMENT
+    assert "belongs to other" in refused.error.message
