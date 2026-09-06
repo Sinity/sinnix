@@ -359,7 +359,9 @@ def harness(
         verdict=verdict(),
     )
 
-    def wait(job_id: int, *, timeout_seconds: float) -> dict[str, Any]:
+    def wait(
+        job_id: int, *, timeout_seconds: float, reference: str | None = None
+    ) -> dict[str, Any]:
         """Every waited task succeeds; a review task also leaves its verdict."""
         built.waited.append(job_id)
         task = fake_pueue.task(job_id)
@@ -456,6 +458,10 @@ def test_start_claims_creates_worktrees_and_queues_workers_then_the_landing(
         manifest.manifest_path(harness.config, run["run_id"]).read_text()
     )
     assert stored["workers"][0]["task_id"] == lead["task_id"]
+    assert stored["workers"][0]["task_reference"] == launch.launch_reference(
+        worker_task
+    )
+    assert stored["landing"]["task_reference"] == launch.launch_reference(landing)
     assert stored["workers"][0]["claimed_beads"] == ["fx-lead", "fx-member"]
     assert launch.get_job(lead["task_id"], harness.config)["binding"] == {
         "beads": ["fx-lead", "fx-member"],
@@ -1210,6 +1216,22 @@ def test_status_and_list_join_the_manifest_with_pueue(harness: Harness) -> None:
         run["run_id"]
     ]
     assert manifest.list_runs(harness.config, "other") == []
+
+
+def test_status_follows_manifest_jobs_across_queue_reordering(harness: Harness) -> None:
+    """Anti-vacuity: resolving stored task ids would exchange worker and landing."""
+    run = harness.start("fx-lead")
+    worker_id = run["workers"][0]["task_id"]
+    landing_id = run["landing"]["task_id"]
+    harness.pueue.queue(worker_id)
+    harness.pueue.switch(worker_id, landing_id)
+
+    document = batch.status(harness.config, run["run_id"])
+
+    assert document["workers"][0]["task"]["job_id"] == landing_id
+    assert document["workers"][0]["task"]["label"].startswith("fixture:worker:")
+    assert document["landing"]["task"]["job_id"] == worker_id
+    assert document["landing"]["task"]["label"].startswith("fixture:land:")
 
 
 def test_queue_relaunches_the_landing_only_when_the_last_one_is_terminal(
