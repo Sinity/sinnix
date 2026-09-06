@@ -1,4 +1,4 @@
-# Noctalia — Quickshell/Qt Wayland desktop shell.
+# Noctalia — native Wayland desktop shell (no Qt/GTK; Luau plugins).
 #
 # Single shell surface that owns the bar, launcher, notifications, lock, OSD,
 # and wallpaper, and acts as the live Material-You color authority (wallpaper
