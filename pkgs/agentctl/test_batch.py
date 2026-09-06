@@ -1966,7 +1966,9 @@ def test_landing_agents_outrank_queued_workers(harness: Harness) -> None:
     added = {entry["task_id"]: entry for entry in harness.pueue.added}
     assert added[review["job_id"]]["priority"] == 10
     worker_priorities = {
-        entry["priority"] for entry in harness.pueue.added if ":worker:" in entry["label"]
+        entry["priority"]
+        for entry in harness.pueue.added
+        if ":worker:" in entry["label"]
     }
     assert worker_priorities == {0}
 
@@ -1974,8 +1976,8 @@ def test_landing_agents_outrank_queued_workers(harness: Harness) -> None:
 def test_review_policy_none_lands_on_verification_and_says_so(harness: Harness) -> None:
     """Breaks if `review = "none"` still queues a reviewer, or hides that none ran."""
     descriptor = harness.project.descriptor
-    descriptor.write_text(descriptor.read_text() + '\n[workspace.extra]\n')
-    text = descriptor.read_text().replace('\n[workspace.extra]\n', '\n')
+    descriptor.write_text(descriptor.read_text() + "\n[workspace.extra]\n")
+    text = descriptor.read_text().replace("\n[workspace.extra]\n", "\n")
     text = text.replace('publish = "master"', 'publish = "master"\nreview = "none"', 1)
     descriptor.write_text(text)
     harness.project = load_project_adapter(harness.project.root)
