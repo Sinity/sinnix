@@ -1,7 +1,7 @@
+#!/usr/bin/env python3
 # @sinnix-package
 # description: Local HTTP receiver for browser provenance and reading-stack pushes
 # runtimeInputs: python3 @sinnix-capture @sinnix-reading-stack
-#!/usr/bin/env python3
 """sinnix-nav-capture-daemon: the local endpoint the nav-capture WebExtension
 POSTs to. Two routes:
 

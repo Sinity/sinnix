@@ -1,7 +1,7 @@
+#!/usr/bin/env bash
 # @sinnix-package
 # description: Terminal-based ambient viewer for the reading stack -- run inside a pinned kitty window
 # runtimeInputs: bash @sinnix-reading-stack
-#!/usr/bin/env bash
 # The "standing visibility" mechanism for the reading stack (see
 # sinnix-reading-stack's own docstring for the reasoning). A plain terminal
 # loop, not a Waybar/eww module: Noctalia (this host's shell) exposes no
