@@ -179,7 +179,6 @@ in
       ".local/share/nix" # trusted-settings.json (cachix substituters)
 
       # UX state
-      ".config/clipse" # clipboard history
       ".config/yazi" # file manager config (not HM managed)
       ".local/share/zoxide" # jump database
       ".local/share/direnv" # allowlist + env cache

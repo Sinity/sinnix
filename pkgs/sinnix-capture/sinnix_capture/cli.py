@@ -57,6 +57,19 @@ def _cmd_selection(args: argparse.Namespace) -> int:
         return 2
 
 
+def _cmd_import_clipse(args: argparse.Namespace) -> int:
+    from .clipse_import import import_clipse
+
+    report = import_clipse(
+        capture_root=args.capture_root,
+        lane=args.lane,
+        history_path=args.history,
+        tmp_files=args.tmp_files,
+    )
+    print(json.dumps(report.__dict__, sort_keys=True))
+    return 0
+
+
 def _cmd_query(args: argparse.Namespace) -> int:
     results = query_lanes(args.capture_root, args.since, args.lanes)
     print(json.dumps(results, sort_keys=True))
@@ -133,6 +146,21 @@ def main(argv: list[str] | None = None) -> int:
         help="Trigger file the debounce window arbitrates on",
     )
     selection_p.set_defaults(func=_cmd_selection)
+
+    import_p = sub.add_parser(
+        "import-clipse",
+        help="Import a clipse clipboard_history.json (and its tmp_files images) into a lane",
+    )
+    import_p.add_argument("--capture-root", required=True, type=Path)
+    import_p.add_argument("--lane", default="clipboard")
+    import_p.add_argument("--history", required=True, type=Path)
+    import_p.add_argument(
+        "--tmp-files",
+        default=None,
+        type=Path,
+        help="clipse image directory; unreferenced files are imported as orphans",
+    )
+    import_p.set_defaults(func=_cmd_import_clipse)
 
     query_p = sub.add_parser("query", help="Per-lane record deltas since a timestamp")
     query_p.add_argument("--capture-root", required=True, type=Path)
