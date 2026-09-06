@@ -105,14 +105,15 @@ if command -v atuin >/dev/null 2>&1; then
   atuin search --after "$SINCE_ISO" "" >"$BUNDLE/atuin-tail.txt" 2>/dev/null || true
 fi
 
-# Polylogue hook-spool deltas. mtime selects candidate files; the per-record
-# timestamp then selects the rows actually in-window (mtime alone over-read
-# this ~33x). Uncapped -- the model reads by offset, so a wide window costs
-# turns rather than truncated evidence.
+# Polylogue hook-spool deltas. The spool is one JSON envelope per file under
+# day-sharded pending/acknowledged directories. mtime selects candidate files;
+# the per-record timestamp then selects the rows actually in-window (mtime
+# alone over-read this ~33x). Uncapped -- the model reads by offset, so a wide
+# window costs turns rather than truncated evidence.
 POLYLOGUE_HOOKS_DIR="${POLYLOGUE_ARCHIVE_ROOT}/hooks"
 if [[ -d "$POLYLOGUE_HOOKS_DIR" ]]; then
   : >"$BUNDLE/polylogue-hooks.jsonl"
-  find "$POLYLOGUE_HOOKS_DIR" -name '*.jsonl' -newermt "$SINCE_ISO" -exec cat {} + 2>/dev/null \
+  find "$POLYLOGUE_HOOKS_DIR" -name '*.json' -newermt "$SINCE_ISO" -exec cat {} + 2>/dev/null \
     | jq -c --arg s "$SINCE_ISO" 'select((.timestamp // "") >= $s)' 2>/dev/null \
       >>"$BUNDLE/polylogue-hooks.jsonl" || true
 fi
