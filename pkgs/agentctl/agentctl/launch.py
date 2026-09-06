@@ -769,7 +769,7 @@ def _orphaned_artifacts(config: Config, task_id: int) -> list[Path]:
 
 def _live_run_jobs(config: Config, tasks: Mapping[int, Task]) -> set[int]:
     """Jobs a live batch still needs, including attempts predating stable references."""
-    runs = [run for run in manifest.list_runs(config) if run.live]
+    runs = [run for run in manifest.list_runs(config, strict=True) if run.live]
     run_ids = {run.run_id for run in runs}
     worktrees: set[str] = set()
     retained: set[int] = set()
