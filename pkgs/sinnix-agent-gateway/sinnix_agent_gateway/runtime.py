@@ -474,7 +474,9 @@ class Runtime:
             },
         }
 
-    def compose_context(self, reference: str, intent: str) -> dict[str, Any]:
+    def compose_context(
+        self, reference: str, intent: str, *, launch_reference: str | None = None
+    ) -> dict[str, Any]:
         if intent == "project":
             intent = "project.orientation"
         if intent not in CONTEXT_INTENTS:
@@ -597,19 +599,30 @@ class Runtime:
             job_id = values["job_id"]
             job_observation: dict[str, Any] | None = None
 
+            def read_job(operation: str, **arguments: Any) -> dict[str, Any]:
+                identity = {"job_id": job_id}
+                if launch_reference is not None:
+                    identity["launch_reference"] = launch_reference
+                value = self._job(operation, {**identity, **arguments})
+                key = "launch_reference" if launch_reference is not None else "job_id"
+                if str(value.get(key)) != str(identity[key]):
+                    raise ProtocolError(
+                        "owner_failed",
+                        f"job owner {operation} response names another job",
+                    )
+                return value
+
             def job_value() -> dict[str, Any]:
                 nonlocal job_observation
                 if job_observation is None:
-                    job_observation = self._job("job.get", {"job_id": job_id})
+                    job_observation = read_job("job.get")
                 return job_observation
 
             components = [
                 component("job", job_value, target_ref),
                 component(
                     "result",
-                    lambda: self._job(
-                        "job.result", {"job_id": job_id, "max_bytes": 64_000}
-                    ),
+                    lambda: read_job("job.result", max_bytes=64_000),
                     target_ref,
                 ),
                 component(
@@ -640,6 +653,15 @@ class Runtime:
             ]
         context = self.context_composer.compose(intent, target_ref, components)
         by_name = {row["name"]: row for row in context["components"]}
+        if intent == "job.review":
+            for name in ("job", "result"):
+                row = by_name[name]
+                if row["status"] == "available":
+                    row["source_ref"] = REGISTRY.reference(
+                        "job", {"job_id": str(row["data"]["job_id"])}
+                    )
+                    if name == "job":
+                        context["ref"] = context["target_ref"] = row["source_ref"]
         compatibility: dict[str, Any] = {}
         if intent == "project.orientation" and all(
             by_name.get(name, {}).get("status") == "available"

@@ -87,3 +87,72 @@ def test_job_review_reads_the_job_owner_and_incident_reads_the_machine(
         jobs["status"] == "available"
         and jobs["data"]["jobs"][0]["ref"] == "sinnix://jobs/41"
     )
+
+
+@pytest.mark.parametrize("target", [{"job_id": 41}, {"ref": "sinnix://jobs/41"}])
+def test_job_review_follows_launch_identity_across_reorders(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, target: dict
+) -> None:
+    """Dropping the locator reference returns the replacement queue occupant."""
+    server, runtime, fake = make_server(tmp_path, "operator", monkeypatch)
+    reference = "fixture-worker-original"
+
+    def observe(arguments: dict, job_id: str) -> dict:
+        if arguments.get("launch_reference") != reference:
+            return {**DONE, "launch_reference": "fixture-worker-replacement"}
+        return {**DONE, "job_id": job_id, "launch_reference": reference}
+
+    fake.responses["job.get"] = lambda args: observe(args, "42")
+    fake.responses["job.result"] = lambda args: {
+        **observe(args, "43"),
+        "kind": "exit",
+        "value": "original output",
+    }
+    response = call(
+        server,
+        "context.compose",
+        {"intent": "job.review", "job": {**target, "launch_reference": reference}},
+    )
+    assert response["result"]["outcome"] == "ok", response
+    data = response["data"]
+    components = {row["name"]: row for row in data["components"]}
+    assert components["job"]["data"]["launch_reference"] == reference
+    assert components["result"]["data"]["launch_reference"] == reference
+    assert (
+        components["job"]["source_ref"]
+        == data["target_ref"]
+        == data["ref"]
+        == "sinnix://jobs/42"
+    )
+    assert components["result"]["source_ref"] == "sinnix://jobs/43"
+    assert components["result"]["data"]["value"] == "original output"
+    assert (
+        runtime.context_snapshots.get(data["snapshot_ref"].rsplit("/", 1)[1])[
+            "target_ref"
+        ]
+        == data["target_ref"]
+    )
+
+
+def test_job_review_does_not_expose_a_result_for_another_launch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    server, _, fake = make_server(tmp_path, "operator", monkeypatch)
+    reference = "fixture-worker-original"
+    fake.responses["job.get"] = {**DONE, "launch_reference": reference}
+    fake.responses["job.result"] = {
+        **DONE,
+        "launch_reference": "fixture-worker-replacement",
+        "value": "wrong output",
+    }
+    response = call(
+        server,
+        "context.compose",
+        {"intent": "job.review", "job": {"job_id": 41, "launch_reference": reference}},
+    )
+    assert response["result"]["outcome"] == "ok", response
+    result = next(
+        row for row in response["data"]["components"] if row["name"] == "result"
+    )
+    assert result["status"] == "unavailable"
+    assert result.get("data") is None

@@ -81,12 +81,15 @@ _AFFORDANCES: dict[str, list[str]] = {
 
 
 def _compose(runtime: Runtime, inp: ComposeInput) -> ComposedContext:
+    launch_reference = None
     if inp.job is not None:
-        _, ref, _ = inp.job.resolve()
+        _, ref, launch_reference = inp.job.resolve()
     else:
         assert inp.project is not None
         ref = project_ref(inp.project.resolve(runtime))
-    context = runtime.compose_context(ref, inp.intent)
+    context = runtime.compose_context(
+        ref, inp.intent, launch_reference=launch_reference
+    )
     return ComposedContext(
         ref=context["ref"],
         intent=context["intent"],
