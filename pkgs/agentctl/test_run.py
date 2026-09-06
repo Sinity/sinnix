@@ -839,6 +839,41 @@ def test_a_killed_waiter_leaves_its_unit_which_the_next_run_settles_or_yields_to
             waiter.kill()
 
 
+def test_a_reordered_task_spools_the_id_the_queue_moved_it_to(
+    tmp_path: Path, fake_systemd: FakeSystemd, fake_pueue: FakePueue
+) -> None:
+    """`pueue switch` exchanges two queued task ids before either runs.
+
+    Anti-vacuity: the spool is how a reader finds the queue task behind a
+    job, so a finish event naming the id the task was enqueued with sends
+    that reader to another job's log.
+    """
+    launch = write_launch(tmp_path, pool="pytest", argv=["true"])
+    task_id = fake_pueue.add(
+        group="pytest",
+        label="fixture:check",
+        command=("agentctl-run", str(launch)),
+        working_directory=tmp_path,
+    )
+    other = fake_pueue.add(
+        group="pytest",
+        label="fixture:check",
+        command=("agentctl-run", str(tmp_path / "other.json")),
+        working_directory=tmp_path,
+    )
+    fake_pueue.queue(task_id)
+    fake_pueue.queue(other)
+    fake_pueue.switch(task_id, other)
+    fake_pueue.running(other)
+    fake_systemd.terminal()
+
+    assert main([str(launch)]) == 0
+
+    spooled = events(tmp_path)
+    assert {e["task_id"] for e in spooled if e["phase"] == "finished"} == {other}
+    assert {e["job_id"] for e in spooled} == {"job-a"}
+
+
 def test_a_restarted_task_accounts_its_outcome_again(
     tmp_path: Path, fake_systemd: FakeSystemd, fake_pueue: FakePueue
 ) -> None:

@@ -359,7 +359,9 @@ def harness(
         verdict=verdict(),
     )
 
-    def wait(job_id: int, *, timeout_seconds: float) -> dict[str, Any]:
+    def wait(
+        job_id: int, *, timeout_seconds: float, reference: str | None = None
+    ) -> dict[str, Any]:
         """Every waited task succeeds; a review task also leaves its verdict."""
         built.waited.append(job_id)
         task = fake_pueue.task(job_id)

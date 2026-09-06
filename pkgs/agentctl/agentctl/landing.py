@@ -182,11 +182,15 @@ def _integrate(
             binding=binding(run, None),
             inaccessible=other_worktrees(project, run, None),
         )
-        waited = launch.wait(job["job_id"], timeout_seconds=MAX_AGENT_TIMEOUT_SECONDS)
+        waited = launch.wait(
+            job["job_id"],
+            timeout_seconds=MAX_AGENT_TIMEOUT_SECONDS,
+            reference=job.get("reference"),
+        )
         if waited.get("phase") != "succeeded":
             raise BatchRefusal(
                 "integration_failed",
-                f"integration task {job['job_id']} {waited.get('phase')}",
+                f"integration task {waited['job_id']} {waited.get('phase')}",
             )
         _refuse_unless_integrated(path, branches, who="integration agent")
         break
@@ -419,15 +423,19 @@ def _verify(
     job_id = started.get("job_id")
     if not isinstance(job_id, int):
         raise JobError(f"verification {profile} returned no task id")
-    waited = launch.wait(job_id, timeout_seconds=operation.timeout_seconds)
+    waited = launch.wait(
+        job_id,
+        timeout_seconds=operation.timeout_seconds,
+        reference=started.get("reference"),
+    )
     if waited.get("phase") != "succeeded":
         raise BatchRefusal(
-            "verify_failed", f"{profile} task {job_id} {waited.get('phase')}"
+            "verify_failed", f"{profile} task {waited['job_id']} {waited.get('phase')}"
         )
     return run, {
         "kind": "operation",
         "operation": profile,
-        "job_id": job_id,
+        "job_id": waited["job_id"],
         "candidate_sha": candidate,
         "phase": "succeeded",
     }
@@ -460,17 +468,21 @@ def _review(
         binding=binding(run, None),
         inaccessible=other_worktrees(project, run, None),
     )
-    waited = launch.wait(job["job_id"], timeout_seconds=MAX_AGENT_TIMEOUT_SECONDS)
+    waited = launch.wait(
+        job["job_id"],
+        timeout_seconds=MAX_AGENT_TIMEOUT_SECONDS,
+        reference=job.get("reference"),
+    )
     if waited.get("phase") != "succeeded":
         raise BatchRefusal(
-            "review_failed", f"review task {job['job_id']} {waited.get('phase')}"
+            "review_failed", f"review task {waited['job_id']} {waited.get('phase')}"
         )
     verdict, errors = results.load_result(
         path / WORKTREE_STATE_DIR / "review.result.json", kind="judge"
     )
     if errors:
         raise BatchRefusal("review_invalid", "; ".join(errors[:6]))
-    record = {**verdict, "candidate_sha": candidate, "job_id": job["job_id"]}
+    record = {**verdict, "candidate_sha": candidate, "job_id": waited["job_id"]}
     land_update(config, run.run_id, review_verdict=record)
     if verdict["verdict"] != "pass":
         raise BatchRefusal(

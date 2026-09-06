@@ -61,6 +61,13 @@ inside the declared environment, the resolved environment, the working
 directory, the timeout, the result kind and the artifact paths, then runs
 `pueue add --escape -g <pool> -l <label> -- agentctl-run <input>`.
 
+A task id is a queue position: `pueue switch` exchanges the ids of two
+queued tasks. The durable name of a job is the launch reference inside the
+task's command, so a wait re-reads which id holds its job while the job can
+still move, and returns the terminal state of the job it started at
+whatever id that is. Every other read answers about the job the queue holds
+at the id it is given.
+
 `agentctl-run` is the command every task runs. It appends a `started`
 event to the spool naming the group pueue ran it in, then runs the argv as a
 transient service `agentctl-<group>-<stem>-<digest of the launch input
@@ -515,6 +522,7 @@ unattended batches declares a scheduled operation whose `exec` runs
 | `limits.SHORT_ID` (8)                                        | arbitrary bound                                                           | hex characters shown of a run id's suffix, a commit, a reference     |
 | `worktrunk.LIST_SCHEMA_VERSION` (2)                          | external tool's contract                                                  | the `wt list` JSON schema this module parses                         |
 | `worktrunk.GIT_SETTLE_SECONDS` (30)                          | arbitrary bound                                                           | how long a mutation waits for Git to release the repository index    |
+| `launch.WAIT_SLICE_SECONDS` (5)                              | arbitrary bound                                                           | how long a wait blocks on one task id before re-reading the queue    |
 | `run.MAX_LOG_BYTES` / `MAX_RESULT_BYTES` (64,000)            | arbitrary bound                                                           | caps on the captured log and typed result                            |
 | `run.MAX_SCRATCH_ENTRIES` (100,000)                          | arbitrary bound                                                           | files counted before a scratch footprint reports a lower bound       |
 | `run.TIMEOUT_EXIT_CODE` (124)                                | external tool's contract (`timeout(1)`)                                   | the unit's `RuntimeMaxSec` expired                                   |
