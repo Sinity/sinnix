@@ -41,7 +41,9 @@ def test_slashless_alias_renders_the_same_page(hub_server: str, http_get) -> Non
     assert http_get(hub_server + "/work")[0] == 200
 
 
-def test_the_json_api_is_untouched_by_the_page_routes(hub_server: str, http_get) -> None:
+def test_the_json_api_is_untouched_by_the_page_routes(
+    hub_server: str, http_get
+) -> None:
     status, content_type, body = http_get(hub_server + "/v1/health")
     assert status == 200
     assert content_type == "application/json"
