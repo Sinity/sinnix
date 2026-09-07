@@ -39,17 +39,21 @@ mkServiceModule {
   extraOptions.pools = lib.mkOption {
     type = lib.types.attrsOf lib.types.ints.positive;
     default = {
-      agent = 8;
+      agent = 12;
       # The agents a landing owns (integration, review): a pool of their own so
       # a paused `agent` pool holds back new workers without stalling landings.
       land-agent = 2;
-      pytest = 1;
+      pytest = 2;
       pytest-quick = 2;
-      bulk = 1;
+      bulk = 2;
       normal = 2;
       interactive = 4;
     }
-    // landPools;
+    // landPools
+    // {
+      # Polylogue lands several runs at once; each run still lands one at a time.
+      polylogue-land = 3;
+    };
     description = "How many tasks each pueue group admits at once; `agentctl pools apply` writes this into the running daemon.";
   };
   extraOptions.workerContract = lib.mkOption {
