@@ -97,6 +97,86 @@ def focused_verification(
     )
 
 
+def _latest_attempt_selection(worker: Mapping[str, Any]) -> tuple[str, str, str] | None:
+    """The last complete selection recorded at launch time, if there is one.
+
+    Attempt records are the audit authority for a resumed worker.  A manifest
+    written before they existed has no such authority, so its historical
+    selection remains unknown rather than being reconstructed from its current
+    fields.
+    """
+    attempts = worker.get("attempts")
+    if not isinstance(attempts, list):
+        return None
+    for attempt in reversed(attempts):
+        if not isinstance(attempt, Mapping):
+            continue
+        backend, model, effort = (
+            attempt.get("backend"),
+            attempt.get("model"),
+            attempt.get("effort"),
+        )
+        if all(isinstance(value, str) and value for value in (backend, model, effort)):
+            return backend, model, effort
+    return None
+
+
+def _worker_selection_value(worker: Mapping[str, Any], key: str) -> str | None:
+    value = worker.get(key)
+    return value if isinstance(value, str) and value else None
+
+
+def _effective_selection(
+    worker: Mapping[str, Any],
+    packets: PromptConfig,
+    *,
+    backend: str | None,
+    model: str | None,
+    effort: str | None,
+) -> tuple[str, str, str]:
+    """Resolve one validated selection for both dispatch and the manifest."""
+    recorded = _latest_attempt_selection(worker)
+    previous_backend = (
+        recorded[0] if recorded else _worker_selection_value(worker, "backend")
+    )
+    previous_model = (
+        recorded[1] if recorded else _worker_selection_value(worker, "model")
+    )
+    previous_effort = (
+        recorded[2] if recorded else _worker_selection_value(worker, "effort")
+    )
+    effective_backend = backend or previous_backend or packets.default_backend
+    effective_model = packets.resolve_model(
+        effective_backend, model or previous_model or packets.default_model
+    )
+    effective_effort = validate_effort(
+        effort or previous_effort or packets.default_effort
+    )
+    return effective_backend, effective_model, effective_effort
+
+
+def _attempt(
+    *,
+    task_id: int,
+    task_reference: Any,
+    prompt_path: Path,
+    result_path: Path,
+    backend: str,
+    model: str,
+    effort: str,
+) -> dict[str, Any]:
+    """The immutable facts agentctl knows for one worker launch."""
+    return {
+        "task_id": task_id,
+        "task_reference": task_reference,
+        "prompt_path": str(prompt_path),
+        "result_path": str(result_path),
+        "backend": backend,
+        "model": model,
+        "effort": effort,
+    }
+
+
 def _base_commit(project: ProjectAdapter) -> str:
     base = workspace_of(project).default_base
     if base.startswith("origin/"):
@@ -231,6 +311,17 @@ def _prepare(
                 index,
                 task_id=job["job_id"],
                 task_reference=job.get("reference"),
+                attempts=[
+                    _attempt(
+                        task_id=job["job_id"],
+                        task_reference=job.get("reference"),
+                        prompt_path=path / WORKTREE_STATE_DIR / "prompt.md",
+                        result_path=result_path(path),
+                        backend=worker["backend"],
+                        model=worker["model"],
+                        effort=worker["effort"],
+                    )
+                ],
             )
     if run.landing.get("task_id") is None:
         after = [
@@ -651,18 +742,24 @@ def resume(
     while (path / WORKTREE_STATE_DIR / f"resume-{attempt}.md").exists():
         attempt += 1
     resume_result = path / WORKTREE_STATE_DIR / f"resume-{attempt}.result.json"
+    prompt_name = f"resume-{attempt}.md"
+    effective_backend, effective_model, effective_effort = _effective_selection(
+        worker,
+        packets,
+        backend=backend,
+        model=model,
+        effort=effort,
+    )
     job = queue_agent(
         config,
         project,
         label=f"{project.project_id}:resume:{run_id}:{worker_id}",
         worktree=path,
         prompt=prompt,
-        prompt_name=f"resume-{attempt}.md",
-        backend=backend or worker.get("backend") or packets.default_backend,
-        model=model or worker.get("model") or packets.default_model,
-        effort=validate_effort(
-            effort or worker.get("effort") or packets.default_effort
-        ),
+        prompt_name=prompt_name,
+        backend=effective_backend,
+        model=effective_model,
+        effort=effective_effort,
         schema="worker",
         then=worker_then(config, run_id, worker_id, resume_result),
         binding=binding(run, worker_id),
@@ -676,11 +773,29 @@ def resume(
                 entry["task_id"] = task_id
                 entry["task_ids"] = [*entry.get("task_ids", []), task_id]
                 entry["task_reference"] = job.get("reference")
+                entry["backend"] = effective_backend
+                entry["model"] = effective_model
+                entry["effort"] = effective_effort
                 entry["result"] = None
                 entry["result_path"] = str(resume_result)
-                entry["prompt_path"] = str(
-                    path / WORKTREE_STATE_DIR / f"resume-{attempt}.md"
-                )
+                prompt_path = path / WORKTREE_STATE_DIR / prompt_name
+                entry["prompt_path"] = str(prompt_path)
+                entry["attempts"] = [
+                    *(
+                        entry.get("attempts")
+                        if isinstance(entry.get("attempts"), list)
+                        else []
+                    ),
+                    _attempt(
+                        task_id=task_id,
+                        task_reference=job.get("reference"),
+                        prompt_path=prompt_path,
+                        result_path=resume_result,
+                        backend=effective_backend,
+                        model=effective_model,
+                        effort=effective_effort,
+                    ),
+                ]
         document["landing"]["failure"] = None
 
     run = update(config, run_id, record)
