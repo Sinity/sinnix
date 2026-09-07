@@ -23,9 +23,6 @@ mkFeatureModule {
       user,
       ...
     }:
-    let
-      graphicalTarget = "graphical-session.target";
-    in
     {
       home-manager.users.${user} = {
         home.packages = with pkgs; [

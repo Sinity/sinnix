@@ -163,7 +163,6 @@ def enqueue(
     scratch: str = "none",
     after: Sequence[int] = (),
     stashed: bool = False,
-    priority: int = 0,
     unit_properties: Sequence[str] = (),
     tree_receipt: Mapping[str, Any] | None = None,
     environment_receipt: Mapping[str, str] | None = None,
@@ -221,7 +220,6 @@ def enqueue(
             working_directory=working_directory,
             after=after,
             stashed=stashed,
-            priority=priority,
         )
     except PueueError:
         input_path.unlink(missing_ok=True)

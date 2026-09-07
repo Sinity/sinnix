@@ -15,6 +15,14 @@ from .projects import ProjectAdapter, WorkspacePolicy
 from .pueue import PueueError
 
 AGENT_GROUP = "agent"
+# The pool carrying the agents a landing owns (integration, review). It is
+# not the `agent` pool, which backpressure and the operator pause to hold
+# back new worker dispatch, and not `<project>-land`, whose single slot the
+# landing task itself occupies while it waits.
+LANDING_AGENT_GROUP = "land-agent"
+# Two, so landings of different projects do not serialize behind each
+# other; a landing waits for one agent at a time, so this never deadlocks.
+LANDING_AGENT_PARALLELISM = 2
 # The directory inside a worktree holding what agentctl writes for its agent:
 # the prompt, the result schema and the result. Never committed.
 WORKTREE_STATE_DIR = ".agentctl"
@@ -158,10 +166,9 @@ def queue_agent(
     timeout_seconds: int = MAX_AGENT_TIMEOUT_SECONDS,
     binding: Mapping[str, Any] | None = None,
     inaccessible: Sequence[Path] = (),
-    priority: int = 0,
+    group: str = AGENT_GROUP,
 ) -> dict[str, Any]:
-    """Queue one agent in the agent group; ``then`` runs after a successful agent.
-    A landing-owned agent passes a ``priority`` so it starts ahead of workers.
+    """Queue one agent in ``group``; ``then`` runs after a successful agent.
 
     With ``schema`` the backend must answer with a conforming JSON document,
     written beside the prompt as ``<prompt stem>.result.json``. ``binding``
@@ -215,7 +222,7 @@ def queue_agent(
         project=project,
         operation=operation,
         label=label,
-        group=AGENT_GROUP,
+        group=group,
         argv=project.environment.command_for(payload),
         working_directory=worktree,
         timeout_seconds=timeout_seconds,
@@ -223,7 +230,6 @@ def queue_agent(
         environment=environment,
         kind="attested-agent",
         after=after,
-        priority=priority,
         unit_properties=(
             f"MemoryMax={workspace.agent_memory_max}",
             *path_properties(project, inaccessible=inaccessible),

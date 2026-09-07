@@ -10,6 +10,7 @@ from typing import Any, Callable, Mapping, Sequence
 
 from . import gitcmd, github, launch, prompts, pueue, results, worktrunk
 from .agents import (
+    LANDING_AGENT_GROUP,
     PUSH_TIMEOUT_SECONDS,
     WORKTREE_STATE_DIR,
     binding,
@@ -91,6 +92,21 @@ def _worker_results(run: Run) -> list[dict[str, Any]]:
     return [dict(worker["result"]) for worker in run.workers if worker.get("result")]
 
 
+# A result filed on the run's base commit carries no branch to integrate: the
+# worker either proved its beads already hold (`verified`) or found nothing to
+# do (`no_op`). Its evidence still reaches the reviewer and acceptance.
+NO_CANDIDATE_KINDS = frozenset({"verified", "no_op"})
+
+
+def _landable(run: Run) -> list[dict[str, Any]]:
+    """The workers whose branch carries a commit for the candidate."""
+    return [
+        worker
+        for worker in run.workers
+        if (worker.get("result") or {}).get("kind") not in NO_CANDIDATE_KINDS
+    ]
+
+
 def _agent_json(value: Any) -> str:
     return json.dumps(value, indent=2, sort_keys=True)
 
@@ -161,6 +177,10 @@ def _landing_inputs(
                 for entry in document["workers"]:
                     if entry["id"] == worker_id and entry.get("result"):
                         entry["result"]["candidate_sha"] = head
+                        # The branch carries a commit the result was filed
+                        # without, so it is no longer a result with nothing
+                        # to integrate.
+                        entry["result"].pop("kind", None)
 
             run = update(config, run.run_id, rebind)
             worker = run.worker(worker_id)
@@ -238,7 +258,7 @@ def _integrate(
     run = land_update(
         config, run.run_id, integration_worktree=str(path), refreshed_base=base
     )
-    branches = [worker["branch"] for worker in run.workers]
+    branches = [worker["branch"] for worker in _landable(run)]
     for position, worker_branch in enumerate(branches):
         try:
             _git(path, "merge", "--no-ff", "--no-edit", worker_branch)
@@ -263,7 +283,7 @@ def _integrate(
             worktree=path,
             prompt=prompt,
             prompt_name="integrate.md",
-            priority=LANDING_AGENT_PRIORITY,
+            group=LANDING_AGENT_GROUP,
             **_review_agent(project, run),
             binding=binding(run, None),
             inaccessible=other_worktrees(project, run, None),
@@ -340,7 +360,7 @@ def _kept_integration(config: Config, run: Run, base: str) -> str:
         )
     path = Path(worktree)
     _refuse_unless_integrated(
-        path, [worker["branch"] for worker in run.workers], who="the kept worktree"
+        path, [worker["branch"] for worker in _landable(run)], who="the kept worktree"
     )
     candidate = _git(path, "rev-parse", "HEAD")
     try:
@@ -459,6 +479,15 @@ def _refuse_missing_checks(
         )
 
 
+def _required_checks(project: ProjectAdapter, run: Run) -> tuple[str, ...]:
+    """The checks a landing waits for: the one the descriptor declares as its
+    candidate verification, and nothing else. Branch protection is GitHub's to
+    enforce at the merge; a context it lists that no workflow reports is not
+    this landing's evidence and must not stop it."""
+    profile = run.verify_profile or workspace_of(project).verify.get("candidate") or ""
+    return (profile.removeprefix("hosted:"),) if profile.startswith("hosted:") else ()
+
+
 def _verify(
     config: Config,
     project: ProjectAdapter,
@@ -483,6 +512,19 @@ def _verify(
         while True:
             pull = github.pull_request(project.root, number) or {}
             if pull.get("headRefOid") == candidate:
+                merged = github.merge_commit(pull)
+                if merged is not None:
+                    # The repository merged this exact candidate: its own gates
+                    # let it through, and that is the acceptance the landing
+                    # records instead of waiting for a check to report.
+                    return run, {
+                        "kind": "merged",
+                        "check": check,
+                        "pr": number,
+                        "candidate_sha": candidate,
+                        "phase": "succeeded",
+                        "merge_commit": merged,
+                    }
                 _refuse_missing_checks(pull, (check,), started, number)
                 state = github.hosted_check_state(pull, check)
                 if state == "success":
@@ -541,11 +583,6 @@ def _verify(
     return run, receipt
 
 
-# Landing-owned agents outrank workers queued in the same pool: a finished
-# batch must not wait behind work that lands hours later.
-LANDING_AGENT_PRIORITY = 10
-
-
 def _review_by_policy(
     run: Run, verify_run: Mapping[str, Any], candidate: str
 ) -> dict[str, Any]:
@@ -585,7 +622,7 @@ def _review(
         worktree=path,
         prompt=prompt,
         prompt_name="review.md",
-        priority=LANDING_AGENT_PRIORITY,
+        group=LANDING_AGENT_GROUP,
         **_review_agent(project, run),
         schema="judge",
         binding=binding(run, None),
@@ -674,7 +711,7 @@ def _publish(
         return {"policy": "master", "candidate_sha": candidate, "base_commit": base}
     number = _ensure_pr(project, run, path, candidate, beads)
     run = land_update(config, run.run_id, pr_number=number)
-    required = github.required_checks(project.root, workspace.base_branch)
+    required = _required_checks(project, run)
     started = time.monotonic()
     deadline = started + HOSTED_CHECK_TIMEOUT_SECONDS
     while True:
@@ -905,26 +942,32 @@ def _land_locked(
     try:
         _refuse_unless_workers_done(run)
         base = str(run.landing.get("refreshed_base") or run.base_commit)
-        if all(
-            (worker.get("result") or {}).get("kind") == "verified"
-            for worker in run.workers
-        ):
-            # Every worker proved its beads already hold on the base: there is
-            # no candidate, so acceptance closes them from the evidence.
+        if not _landable(run):
+            # No worker committed anything, so there is no candidate to
+            # integrate, verify or publish. Acceptance closes the beads whose
+            # criteria the evidence satisfies and leaves the rest open.
+            kind = (
+                "verified"
+                if all(
+                    (worker.get("result") or {}).get("kind") == "verified"
+                    for worker in run.workers
+                )
+                else "no_op"
+            )
             run = _accept(
                 config,
                 project,
                 run,
                 beads,
                 candidate=base,
-                verify_run={"kind": "verified", "candidate_sha": base},
+                verify_run={"kind": kind, "candidate_sha": base},
                 review_verdict={
                     "verdict": "pass",
-                    "policy": "verified",
+                    "policy": kind,
                     "candidate_sha": base,
                 },
                 published={
-                    "kind": "verified",
+                    "kind": kind,
                     "candidate_sha": base,
                     "base_commit": base,
                     "merge_commit": None,

@@ -364,6 +364,16 @@ rec {
         MemoryHigh = "8G";
         MemorySwapMax = "0";
       };
+      # The agents a landing owns. Same envelope as the agent pool: they are
+      # the same kind of process, held apart only so the queue can pause new
+      # worker dispatch without stalling a landing.
+      agentctl-land-agent = {
+        IOAccounting = true;
+        CPUWeight = 400;
+        IOWeight = 300;
+        MemoryHigh = "4G";
+        MemorySwapMax = "0";
+      };
       agentctl-pytest = {
         IOAccounting = true;
         CPUWeight = 20;
