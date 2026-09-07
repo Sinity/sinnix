@@ -1,12 +1,18 @@
-"""The worktrunk (``wt``) adapter: worktree lifecycle and its published facts.
+"""The worktree adapter: ``wt`` mutates, Git's own registry reports.
 
-agentctl does not create, provision, classify, or remove worktrees. ``wt`` does,
-against the project's own ``.config/wt.toml`` hooks, and publishes the result as
-JSON. This module is the only place that shells out to it.
+agentctl does not create, provision, classify, or remove worktrees. ``wt``
+does, against the project's ``.config/wt.toml`` hooks, and this module is the
+only place that shells out to it.
 
-Listing is a read and runs whenever it is asked. Creation and removal write
-the repository's shared Git state: they hold one lock per repository and
-return only once Git has released that repository's index.
+Reading is `git worktree list`, which publishes every worktree's path and
+branch from the registry without entering a working tree. A listing that
+statuses each worktree instead costs the whole content of every worktree on
+every call, and agentctl looks a branch up on each batch start, land, status
+and abandon.
+
+Creation and removal write the repository's shared Git state: they hold one
+lock per repository and return only once Git has released that repository's
+index.
 """
 
 from __future__ import annotations
@@ -23,30 +29,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator, Mapping, Sequence
 
+from . import gitcmd
 from .limits import CALL_TIMEOUT_SECONDS
-
-# wt list schema 2 is the contract this module parses. wt still defaults to
-# schema 1 and takes 2 only from user config, so every call pins it: agentctl
-# must not read a different shape because the invoking user configured one.
-LIST_SCHEMA_VERSION = 2
-_LIST_ARGUMENTS = (
-    "--config-set",
-    f"list.json-schema={LIST_SCHEMA_VERSION}",
-    "list",
-    "--format=json",
-)
-# --full adds the per-item `pr` and `checks` fields, at the cost of a forge
-# round trip per worktree; only callers that read PR state pay for it.
-_LIST_FULL_ARGUMENTS = (*_LIST_ARGUMENTS, "--full")
-
-# wt's own six-check verdict that a branch's content is present on the default
-# branch, squash-merge patch-id included. It replaces every local reimplementation
-# of "has this landed".
-INTEGRATED_STATE = "integrated"
 
 # Removal is asynchronous by default; a caller that drops a workspace and then
 # reports it gone must observe the removal, so every call passes --foreground.
 _REMOVE_ARGUMENTS = ("--reap", "--foreground", "-y", "--format", "json")
+
+# `--porcelain -z` terminates every attribute with a NUL and every worktree
+# with an empty one, so a path is read exactly as Git holds it.
+_REGISTRY_ARGUMENTS = ("worktree", "list", "--porcelain", "-z")
 
 # A mutation returns while the Git process it started may still hold the
 # repository index. The next writer then finds an `index.lock` no process
@@ -57,118 +49,30 @@ _SETTLE_POLL_SECONDS = 0.05
 
 
 def _read_only_git_environment() -> dict[str, str]:
-    """Git that reports without taking `.git/index.lock`.
+    """`wt` that reports without taking `.git/index.lock`.
 
-    `git status` refreshes the index and holds that lock. wt statuses every
-    worktree including the primary checkout, and a call killed at the timeout
-    below leaves the lock behind, blocking every later write in a repository
-    agentctl does not own. Reading is all this module does.
+    `wt` refreshes the index of the worktrees it inspects, and a call killed at
+    the timeout below leaves the lock behind, blocking every later write in a
+    repository agentctl does not own.
     """
     return {**os.environ, "GIT_OPTIONAL_LOCKS": "0"}
 
 
 class WorktrunkError(RuntimeError):
-    """``wt`` refused a request or published output this module cannot read."""
-
-
-@dataclass(frozen=True)
-class PullFacts:
-    """A worktree item's ``pr`` field, published only with ``--full``."""
-
-    number: int
-    url: str
-    mergeable: bool | None
-    repo: str | None
-
-
-@dataclass(frozen=True)
-class ChecksFacts:
-    """A worktree item's ``checks`` field, published only with ``--full``."""
-
-    status: str | None
-    source: str | None
-    stale: bool | None
-
-
-def _pull_facts(value: Any) -> PullFacts | None:
-    if not isinstance(value, Mapping):
-        return None
-    number = value.get("number")
-    url = value.get("url")
-    if not isinstance(number, int) or not isinstance(url, str):
-        return None
-    mergeable = value.get("mergeable")
-    repo = value.get("repo")
-    return PullFacts(
-        number=number,
-        url=url,
-        mergeable=mergeable if isinstance(mergeable, bool) else None,
-        repo=repo if isinstance(repo, str) else None,
-    )
-
-
-def _checks_facts(value: Any) -> ChecksFacts | None:
-    if not isinstance(value, Mapping):
-        return None
-    status = value.get("status")
-    source = value.get("source")
-    stale = value.get("stale")
-    return ChecksFacts(
-        status=status if isinstance(status, str) else None,
-        source=source if isinstance(source, str) else None,
-        stale=stale if isinstance(stale, bool) else None,
-    )
+    """``wt`` refused a request or Git published a registry this module cannot read."""
 
 
 @dataclass(frozen=True)
 class Worktree:
-    """One item of ``wt list --format=json``, reduced to what agentctl reads."""
+    """One entry of the repository's worktree registry.
 
-    # A detached worktree publishes no branch and a branch with no worktree
-    # publishes no path. Both are ordinary listing entries, not read failures.
+    A detached worktree publishes no branch and a branch with no worktree
+    publishes no path. Both are ordinary entries, not read failures.
+    """
+
     branch: str | None
     path: Path | None
-    head: str
-    main: bool
-    dirty: bool
-    state: str
-    # Present only when the caller asked for ``--full``; absent otherwise or
-    # when the item carries no open PR.
-    pr: PullFacts | None = None
-    checks: ChecksFacts | None = None
-
-    @property
-    def integrated(self) -> bool:
-        return self.state == INTEGRATED_STATE
-
-    @classmethod
-    def from_item(cls, item: Mapping[str, Any]) -> Worktree:
-        worktree = item.get("worktree") or {}
-        path = worktree.get("path")
-        branch = item.get("branch")
-        if not isinstance(path, str) and not isinstance(branch, str):
-            raise WorktrunkError("wt list item has neither a branch nor a path")
-        changes = worktree.get("changes") or {}
-        return cls(
-            branch=branch if isinstance(branch, str) else None,
-            path=Path(path) if isinstance(path, str) else None,
-            head=str((item.get("head") or {}).get("sha") or ""),
-            main=bool(worktree.get("main")),
-            dirty=any(
-                bool(changes.get(field))
-                for field in (
-                    "staged",
-                    "modified",
-                    "untracked",
-                    "renamed",
-                    "deleted",
-                    "conflicted",
-                )
-            ),
-            state=str((item.get("display") or {}).get("state") or ""),
-            pr=_pull_facts(item.get("pr")),
-            checks=_checks_facts(item.get("checks")),
-        )
+    main: bool = False
 
 
 def _run(root: Path, arguments: Sequence[str]) -> str:
@@ -197,25 +101,15 @@ def _common_git_directory(root: Path) -> Path | None:
     so it names both the lock and the index they contend for.
     """
     try:
-        completed = subprocess.run(
-            [
-                "git",
-                "-C",
-                str(root),
-                "rev-parse",
-                "--path-format=absolute",
-                "--git-common-dir",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=CALL_TIMEOUT_SECONDS,
-            env=_read_only_git_environment(),
+        directory = gitcmd.git(
+            root,
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir",
+            error=WorktrunkError,
         )
-    except (OSError, subprocess.SubprocessError):
+    except WorktrunkError:
         return None
-    if completed.returncode != 0:
-        return None
-    directory = completed.stdout.strip()
     return Path(directory) if directory else None
 
 
@@ -296,29 +190,56 @@ def _decode(payload: str, what: str) -> Any:
     raise WorktrunkError(f"wt {what} did not print a JSON document")
 
 
-def worktrunk_list(root: Path, *, full: bool = False) -> tuple[Worktree, ...]:
-    """Every worktree of the repository at ``root``, with wt's own state verdict.
-
-    ``full=True`` also asks the forge for each item's PR and checks state.
-    """
-    document = _decode(
-        _run(root, _LIST_FULL_ARGUMENTS if full else _LIST_ARGUMENTS), "list"
+def _entry(fields: Mapping[str, str], *, main: bool) -> Worktree:
+    branch = fields.get("branch")
+    path = fields.get("worktree")
+    return Worktree(
+        branch=branch.removeprefix("refs/heads/") if branch else None,
+        path=Path(path) if path else None,
+        main=main,
     )
-    if not isinstance(document, Mapping):
-        raise WorktrunkError("wt list did not print an object")
-    schema = document.get("schema")
-    if schema != LIST_SCHEMA_VERSION:
-        raise WorktrunkError(
-            f"wt list schema {schema!r} is not the supported {LIST_SCHEMA_VERSION}"
-        )
-    items = document.get("items")
-    if not isinstance(items, Sequence):
-        raise WorktrunkError("wt list published no items")
-    return tuple(Worktree.from_item(item) for item in items)
+
+
+def worktrunk_list(root: Path) -> tuple[Worktree, ...]:
+    """Every worktree Git has registered for the repository at ``root``.
+
+    Git lists its own checkout first, so that entry is the main worktree.
+    """
+    payload = gitcmd.git(root, *_REGISTRY_ARGUMENTS, error=WorktrunkError)
+    trees: list[Worktree] = []
+    fields: dict[str, str] = {}
+    for record in payload.split("\0"):
+        if not record:
+            if fields:
+                trees.append(_entry(fields, main=not trees))
+                fields = {}
+            continue
+        key, _separator, value = record.partition(" ")
+        fields[key] = value
+    if fields:
+        trees.append(_entry(fields, main=not trees))
+    return tuple(trees)
 
 
 def worktrunk_find(root: Path, branch: str) -> Worktree | None:
-    return next((tree for tree in worktrunk_list(root) if tree.branch == branch), None)
+    """``branch``'s worktree, or the branch alone when it has no worktree.
+
+    A branch that exists without a worktree is published with no path: a
+    caller about to create one must tell it from a branch that does not exist.
+    """
+    for tree in worktrunk_list(root):
+        if tree.branch == branch:
+            return tree
+    reference = gitcmd.git(
+        root,
+        "rev-parse",
+        "--verify",
+        "--quiet",
+        f"refs/heads/{branch}",
+        ok_statuses=(0, 1),
+        error=WorktrunkError,
+    )
+    return Worktree(branch=branch, path=None) if reference else None
 
 
 def worktrunk_create(

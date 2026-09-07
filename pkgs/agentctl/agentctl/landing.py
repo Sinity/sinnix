@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import time
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
@@ -32,6 +33,7 @@ from .manifest import (
     Run,
     land_update,
     landing_locked,
+    list_runs,
     load,
     now,
     project_locked,
@@ -862,28 +864,7 @@ def _accept(
         document["landing"]["failure"] = None
 
     run = update(config, run.run_id, record)
-    residual: list[str] = []
-    # A worker's worktree is removed only once every bead it carried is
-    # closed; the integration worktree is published and always goes.
-    removable = [run.landing["integration_branch"]]
-    for worker in run.workers:
-        still_open = [
-            bead_id
-            for bead_id in worker["beads"]
-            if beads_state[bead_id]["state"] != "closed"
-        ]
-        if still_open:
-            residual.append(
-                f"{worker['branch']}: worktree kept; {', '.join(still_open)} still open"
-            )
-        else:
-            removable.append(worker["branch"])
-    with project_locked(config, project.project_id):
-        for branch in removable:
-            try:
-                worktrunk.worktrunk_remove(project.root, branch, force=True)
-            except WorktrunkError as error:
-                residual.append(f"{branch}: {error}")
+    residual = _drop_worktrees(config, project, run, published=candidate)
     if residual:
 
         def note(document: dict[str, Any]) -> None:
@@ -1134,17 +1115,105 @@ def _land_locked(
     return run.to_dict()
 
 
-def _unpreserved(path: Path, *, base: str, branch: str) -> str | None:
+def _drop_branch(
+    project: ProjectAdapter,
+    branch: str,
+    *,
+    base: str,
+    recorded_path: Path | None = None,
+) -> str | None:
+    """Remove ``branch``'s worktree unless work would go with it.
+
+    Returns why it was kept, or None once it is gone.
+    """
+    tree = worktrunk.worktrunk_find(project.root, branch)
+    if tree is None:
+        return None
+    removal_target = branch
+    path = tree.path
+    if path is None and recorded_path is not None:
+        # A detached worktree has no branch for `worktree_find` to return. Use
+        # the manifest's exact path only when Git still registers that path.
+        path = next(
+            (
+                candidate.path
+                for candidate in worktrunk.worktrunk_list(project.root)
+                if not candidate.main and candidate.path == recorded_path
+            ),
+            None,
+        )
+        if path is not None:
+            removal_target = str(path)
+    try:
+        keep = _unpreserved(path, root=project.root, base=base, branch=branch)
+    except BatchError as error:
+        keep = str(error)
+    if keep:
+        return f"worktree kept; {keep}"
+    try:
+        worktrunk.worktrunk_remove(project.root, removal_target, force=True)
+        if removal_target != branch:
+            # Removing by path handles the detached registry entry; the
+            # recorded branch still needs its ordinary branch cleanup.
+            worktrunk.worktrunk_remove(project.root, branch, force=True)
+    except WorktrunkError as error:
+        return str(error)
+    return None
+
+
+def _drop_worktrees(
+    config: Config, project: ProjectAdapter, run: Run, *, published: str | None = None
+) -> list[str]:
+    """Drop the run's worker and integration worktrees; name the ones kept.
+
+    ``published`` is the candidate a landing published. The integration
+    worktree is measured against it rather than against the run's base: its
+    commits are out, so only uncommitted changes in it are still work.
+    """
+    branches = [
+        (
+            worker["branch"],
+            run.base_commit,
+            Path(worker["worktree"]) if worker.get("worktree") else None,
+        )
+        for worker in run.workers
+    ]
+    branches.append(
+        (
+            run.landing["integration_branch"],
+            published or run.base_commit,
+            (
+                Path(run.landing["integration_worktree"])
+                if run.landing.get("integration_worktree")
+                else None
+            ),
+        )
+    )
+    residual: list[str] = []
+    with project_locked(config, project.project_id):
+        for branch, base, recorded_path in branches:
+            kept = _drop_branch(project, branch, base=base, recorded_path=recorded_path)
+            if kept:
+                residual.append(f"{branch}: {kept}")
+    return residual
+
+
+def _unpreserved(
+    path: Path | None, *, root: Path, base: str, branch: str
+) -> str | None:
     """Why removing this worktree would lose work, or None when nothing would."""
-    if _dirty_paths(path):
-        return "uncommitted changes"
-    head = _git(path, "rev-parse", "HEAD")
+    if path is not None and path.is_dir():
+        if _dirty_paths(path):
+            return "uncommitted changes"
+        head = _git(path, "rev-parse", "HEAD")
+    else:
+        head = _git(root, "rev-parse", "--verify", f"refs/heads/{branch}^{{commit}}")
     if head == base:
         return None
     holders = [
         ref
         for ref in _git(
-            path, "for-each-ref", "--format=%(refname)", "--contains", head
+            root, "for-each-ref", "--format=%(refname)", "--contains", head
         ).split()
         if ref != f"refs/heads/{branch}"
     ]
@@ -1190,30 +1259,61 @@ def abandon(
                 beads.unclaim(bead_id, actor=run.actor)
             except BatchError as error:
                 residual.append(f"{bead_id}: unclaim failed: {error}")
-        branches = [worker["branch"] for worker in run.workers]
-        branches.append(run.landing["integration_branch"])
-        with project_locked(config, project.project_id):
-            for branch in branches:
-                tree = worktrunk.worktrunk_find(project.root, branch)
-                if tree is None:
-                    continue
-                if tree.path is not None and tree.path.is_dir():
-                    try:
-                        keep = _unpreserved(
-                            tree.path, base=run.base_commit, branch=branch
-                        )
-                    except BatchError as error:
-                        keep = str(error)
-                    if keep:
-                        residual.append(f"{branch}: worktree kept; {keep}")
-                        continue
-                try:
-                    worktrunk.worktrunk_remove(project.root, branch, force=True)
-                except WorktrunkError as error:
-                    residual.append(f"{branch}: {error}")
+        residual.extend(_drop_worktrees(config, project, run))
         record = {"reason": reason, "at": now(), "residual": residual}
 
         def mark(document: dict[str, Any]) -> None:
             document["abandoned"] = record
 
         return update(config, run_id, mark).to_dict()
+
+
+# A batch's own worktree branches: `batch/<run id>/<worker id or integration>`.
+_BATCH_BRANCH = re.compile(r"^batch/(?P<run>[^/]+)/[^/]+$")
+
+
+def clean(config: Config, project: ProjectAdapter) -> dict[str, Any]:
+    """Remove the worktrees of runs that are over. Run state, never age.
+
+    A worktree is a candidate only when its branch names a batch run of this
+    project that no longer holds its beads: landed, abandoned, or with no
+    manifest left at all. It is removed only when nothing would be lost with
+    it, and one that is kept is named with the reason.
+    """
+    runs = {
+        run.run_id: run for run in list_runs(config, project.project_id, strict=True)
+    }
+    try:
+        default_base = _git(
+            project.root,
+            "rev-parse",
+            "--verify",
+            f"{workspace_of(project).default_base}^{{commit}}",
+        )
+    except (BatchError, BatchRefusal):
+        # Without a base every commit is judged by the refs that hold it,
+        # which is the check that decides preservation anyway.
+        default_base = ""
+    removed: list[str] = []
+    kept: list[dict[str, str]] = []
+    with project_locked(config, project.project_id):
+        for tree in worktrunk.worktrunk_list(project.root):
+            match = _BATCH_BRANCH.match(tree.branch or "")
+            if tree.main or match is None:
+                continue
+            owner = runs.get(match.group("run"))
+            if owner is not None and owner.live:
+                continue
+            if owner is None and not match.group("run").startswith(
+                f"{project.project_id}-"
+            ):
+                continue
+            branch = str(tree.branch)
+            reason = _drop_branch(
+                project, branch, base=owner.base_commit if owner else default_base
+            )
+            if reason:
+                kept.append({"branch": branch, "reason": reason})
+            else:
+                removed.append(branch)
+    return {"project": project.project_id, "removed": removed, "kept": kept}

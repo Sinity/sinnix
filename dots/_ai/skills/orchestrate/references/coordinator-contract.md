@@ -11,7 +11,8 @@ get|logs|result <id>` is one job. Job ids are pueue task ids; a run id is
   `<project>-<stamp>-<8 hex>` and its suffix is accepted everywhere.
 - **Manifests**: `~/.local/state/agentctl/runs/<run>.json` — inputs, worker
   results, landing state, acceptance record.
-- **Worktrees**: `wt list` in the project, or the manifest's worker rows.
+- **Worktrees**: `git worktree list` in the project, or the manifest's
+  worker rows.
 - **Task authority**: external Beads per project. `bd` resolves its database
   from the working directory, so mind your cwd.
 - **Events**: one persistent watch on `agentctl events tail --follow
@@ -49,6 +50,7 @@ Look for the verb before writing any procedure: `agentctl <verb> --help`.
 | land a run by hand after resolving its failure | `agentctl batch land <run>`                                                         |
 | land a hand fix made on the integration tree  | `agentctl batch land <run> --keep-integration`                                        |
 | release a run that will not land              | `agentctl batch abandon <run> [--reason R]`                                           |
+| drop the worktrees of finished runs           | `agentctl batch clean <p>`                                                            |
 | one run, every run                            | `agentctl batch status <run>`, `agentctl batch list <p>`                              |
 | re-queue an agent into a worker's worktree    | `agentctl batch resume <run> --worker <w> [--backend B --model M --effort E]`         |
 | run a declared operation                      | `agentctl job start <p> <operation> [--workspace <path>] [--wait]`                    |
@@ -75,8 +77,8 @@ candidate. Hosted review comments are handled as `docs/agentctl.md` states.
 
 ## The operating loop
 
-1. Inventory: `agentctl view <p>`, open manifests, `wt list`, `bd ready`,
-   the project's rules.
+1. Inventory: `agentctl view <p>`, open manifests, `git worktree list`,
+   `bd ready`, the project's rules.
 2. Start one coherent set as a batch, two to four workers: `agentctl batch
 start <p> <bead>…`. Each seed bead's open dispatch group is one worker;
    `--worker a,b` names one explicitly.
