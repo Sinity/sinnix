@@ -45,6 +45,35 @@ def test_project_orientation_composes_and_persists_a_snapshot(
     assert runtime.context_snapshots.get(snapshot_id)["intent"] == "project.orientation"
 
 
+def test_project_orientation_reuses_revision_checked_project_payload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    server, runtime, _ = make_server(tmp_path, "observer", monkeypatch, with_git=True)
+    original = runtime.projects.summary
+    calls = 0
+
+    def counted(project_id: str):
+        nonlocal calls
+        calls += 1
+        return original(project_id)
+
+    monkeypatch.setattr(runtime.projects, "summary", counted)
+    monkeypatch.setattr(runtime.projects, "summary_revision", lambda _project: "rev-a")
+
+    for _ in range(2):
+        response = call(
+            server,
+            "context.compose",
+            {"intent": "project.orientation", "project": {"project": "fixture"}},
+        )
+        assert response["result"]["outcome"] == "ok", response
+
+    # The authority view shares the project payload with the orientation
+    # component, while the revision hook skips the payload probe on the second
+    # composition.
+    assert calls == 2
+
+
 def test_job_review_reads_the_job_owner_and_incident_reads_the_machine(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

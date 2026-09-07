@@ -276,6 +276,7 @@ class DiffInput(RequestControls):
 class Diff(Identity):
     git_ref: str | None
     diff: str
+    truncated: bool
 
 
 def _diff(runtime: Runtime, inp: DiffInput) -> Diff:
@@ -283,7 +284,12 @@ def _diff(runtime: Runtime, inp: DiffInput) -> Diff:
     result = owner(
         runtime.projects.diff, resolved.project_id, inp.git_ref, resolved.checkout_id
     )
-    return Diff(**_identity(resolved), git_ref=inp.git_ref, diff=result["diff"])
+    return Diff(
+        **_identity(resolved),
+        git_ref=inp.git_ref,
+        diff=result["diff"],
+        truncated=result["truncated"],
+    )
 
 
 # --------------------------------------------------------------------- search

@@ -133,12 +133,31 @@ def validate_request(action: Action, payload: Mapping[str, Any]) -> None:
         raise CliInputError(f"{location}: {first.get('msg')}") from exc
 
 
+def _json_content_block(block: Any) -> Any:
+    """Project one MCP content block into the CLI's JSON representation."""
+    model_dump = getattr(block, "model_dump", None)
+    if callable(model_dump):
+        return model_dump(mode="json", by_alias=True, exclude_none=True)
+    if isinstance(block, Mapping):
+        return dict(block)
+    raise RuntimeError("gateway MCP call returned an unsupported content block")
+
+
 def _structured_response(response: Any) -> dict[str, Any]:
+    """Return the typed envelope and JSON-encoded MCP content blocks.
+
+    The optional ``content`` member uses MCP's wire field aliases; image
+    ``data`` and embedded resource ``blob`` values remain base64 strings.
+    """
     if isinstance(response, Mapping):
         return dict(response)
     structured = getattr(response, "structured_content", None)
     if isinstance(structured, Mapping):
-        return dict(structured)
+        projected = dict(structured)
+        content = getattr(response, "content", None)
+        if content:
+            projected["content"] = [_json_content_block(block) for block in content]
+        return projected
     raise RuntimeError("gateway MCP call returned no structured envelope")
 
 

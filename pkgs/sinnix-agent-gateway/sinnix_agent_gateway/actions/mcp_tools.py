@@ -21,7 +21,12 @@ from ..capabilities import Capability
 from ..catalog import search_rows
 from ..contracts import VerbFamily
 from ..locators import ARTIFACT_REF_PREFIX, McpToolLocator
-from ..mcp_broker import McpBrokerError, McpEnvironmentError
+from ..mcp_broker import (
+    McpBrokerDeadlineError,
+    McpBrokerError,
+    McpBrokerTimeoutError,
+    McpEnvironmentError,
+)
 from ..results import ProtocolError
 from ..schemas import GatewayModel
 
@@ -232,7 +237,12 @@ class CallResult(GatewayModel):
 
 
 async def _invoke(
-    runtime: Runtime, target: McpToolLocator, arguments: dict[str, Any], *, write: bool
+    runtime: Runtime,
+    target: McpToolLocator,
+    arguments: dict[str, Any],
+    *,
+    write: bool,
+    deadline_at: float | None = None,
 ) -> CallResult:
     server, tool, ref = target.resolve()
     if server not in runtime.config.mcp_broker_servers:
@@ -241,9 +251,13 @@ async def _invoke(
         )
     try:
         result = await runtime.mcp_broker.call(
-            server, tool, dict(arguments), write=write
+            server, tool, dict(arguments), write=write, deadline_at=deadline_at
         )
     except McpEnvironmentError as exc:
+        raise ProtocolError("unavailable", str(exc)) from exc
+    except McpBrokerDeadlineError as exc:
+        raise ProtocolError("deadline", str(exc)) from exc
+    except McpBrokerTimeoutError as exc:
         raise ProtocolError("unavailable", str(exc)) from exc
     except McpBrokerError as exc:
         message = str(exc)
@@ -262,11 +276,23 @@ async def _invoke(
 
 
 async def _call(runtime: Runtime, inp: CallInput) -> CallResult:
-    return await _invoke(runtime, inp.target, inp.arguments, write=False)
+    return await _invoke(
+        runtime,
+        inp.target,
+        inp.arguments,
+        write=False,
+        deadline_at=inp.deadline_at,
+    )
 
 
 async def _change(runtime: Runtime, inp: ChangeInput) -> CallResult:
-    return await _invoke(runtime, inp.target, inp.arguments, write=True)
+    return await _invoke(
+        runtime,
+        inp.target,
+        inp.arguments,
+        write=True,
+        deadline_at=inp.deadline_at,
+    )
 
 
 ACTIONS: tuple[Action, ...] = (

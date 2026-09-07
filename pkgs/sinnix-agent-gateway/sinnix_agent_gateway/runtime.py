@@ -4,14 +4,11 @@ import hashlib
 import json
 import time
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any, Awaitable, Callable, Mapping
-from uuid import uuid4
 
 import anyio
-from mcp.types import CallToolResult, TextContent
-from sinnix_mcp import ErrorCode, RequestEnvelope
-from sinnix_mcp.execution import ExecutionProfile, OwnerDiagnosticError, OwnerExecution
+from sinnix_mcp import ErrorCode
+from sinnix_mcp.execution import OwnerDiagnosticError
 
 from .action import Action, ActionResult
 from .actions import BY_NAME as ACTIONS_BY_NAME
@@ -35,20 +32,18 @@ from .contexts import (
 from .contracts import EffectMode
 from .desktop import DesktopService
 from .events import EventCursorError, NormalizedEventService
-from .execution import LocalJobs
+from .execution import JobOwnerError, LocalJobs
 from .files import HostFileService
 from .locators import decode_file_ref
 from .machine_actions import MachineActionService
 from .mcp_broker import McpBrokerService
 from .memory import MemoryService
 from .observe import ObserveService
-from .project_context import ProjectContextService
 from .projects import ProjectService
 from .redaction import public_error
 from .registry import REGISTRY, RegistryError
 from .results import ProtocolError, RequestContext, ResultError, ResultService
 from .route_preflight import GatewayRoutePreflight
-from .schemas import V2ToolEnvelope
 from .sessions import SessionLogService
 from .terminals import TerminalService
 from .timeline import TimelineService
@@ -181,31 +176,12 @@ def manifest_measurement(manifest: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def v2_tool_result(envelope: Mapping[str, Any]) -> dict[str, Any] | CallToolResult:
-    """Render one validated V2 object as structured MCP content and compatible text."""
-    typed = V2ToolEnvelope.model_validate(envelope)
-    if typed.result.outcome == "ok":
-        return typed.model_dump(mode="json", by_alias=True)
-    serialized = typed.model_dump(mode="json", by_alias=True)
-    return CallToolResult(
-        content=[
-            TextContent(
-                type="text",
-                text=json.dumps(serialized, sort_keys=True, separators=(",", ":")),
-            )
-        ],
-        structured_content=serialized,
-        is_error=True,
-    )
-
-
 @dataclass
 class Runtime:
     principal_name: str
     principal: Principal
     config: GatewayConfig
     projects: ProjectService
-    project_context: ProjectContextService
     artifacts: ArtifactService
     audit: AuditService
     results: ResultService
@@ -245,7 +221,6 @@ class Runtime:
             principal=principal,
             config=config,
             projects=projects,
-            project_context=ProjectContextService(principal, projects, beads),
             artifacts=artifacts,
             audit=AuditService(config, principal),
             results=ResultService(config, principal, artifacts),
@@ -355,7 +330,12 @@ class Runtime:
         status["route_preflight"] = preflight
         return status
 
-    def project_authority(self, project_id: str) -> dict[str, Any]:
+    def project_authority(
+        self,
+        project_id: str,
+        *,
+        project_summary: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         checkouts = self.projects.checkouts(project_id)["checkouts"]
         for checkout in checkouts:
             checkout["ref"] = REGISTRY.reference(
@@ -394,7 +374,11 @@ class Runtime:
             ).encode()
         ).hexdigest()
         return {
-            "project": self.projects.summary(project_id),
+            "project": (
+                project_summary
+                if project_summary is not None
+                else self.projects.summary(project_id)
+            ),
             "canonical_checkout_ref": canonical_checkout["ref"],
             "code_revision": code_revision,
             "checkouts": checkouts,
@@ -430,49 +414,43 @@ class Runtime:
         *,
         principal: str | None = None,
     ) -> dict[str, Any]:
-        request = RequestEnvelope(
-            request_id=str(uuid4()),
-            correlation_id=str(uuid4()),
-            operation=operation,
-            owner="systemd-jobs",
-            principal=principal or self.principal.name,
-            arguments=dict(arguments),
-        )
-        response = self.jobs.dispatch(request)
-        if response.owner != "systemd-jobs":
-            raise ProtocolError(
-                "owner_failed", "job owner response violates its contract"
-            )
-        if response.error is not None:
-            details = response.error.details.inline
-            raise ProtocolError(
-                DAEMON_ERROR_CLASSES[response.error.code],
-                response.error.message,
-                details=details if isinstance(details, Mapping) else {},
-            )
-        if response.payload is None or not isinstance(response.payload.inline, Mapping):
-            raise ProtocolError(
-                "owner_failed", "job owner response must contain an inline object"
-            )
-        return dict(response.payload.inline)
-
-    def _bounded_project_context(self, project_id: str) -> dict[str, Any]:
-        context = self.project_context.context(project_id)
-        authority = self.project_authority(project_id)
-        response = {**context, "authority": authority}
-        if (
-            len(json.dumps(response, sort_keys=True, separators=(",", ":")).encode())
-            <= self.config.max_result_bytes
-        ):
-            return response
-        return {
-            **context,
-            "authority": {
-                "availability": "unavailable",
-                "reason": "project authority exceeded project context response bound",
-                "ref": REGISTRY.reference("project", {"project_id": project_id}),
-            },
+        handlers = {
+            operation_name: getattr(self.jobs, method_name, None)
+            for operation_name, method_name in {
+                "job.start": "start",
+                "job.get": "get",
+                "job.wait": "wait",
+                "job.logs": "logs",
+                "job.result": "result",
+                "job.cancel": "cancel",
+                "job.list": "list",
+                "job.retry": "retry",
+                "job.clean": "clean",
+                "job.shell.start": "shell_start",
+                "batch.list": "batch_list",
+                "batch.start": "batch_start",
+                "batch.status": "batch_status",
+                "batch.land": "batch_land",
+                "batch.resume": "batch_resume",
+            }.items()
         }
+        handler = handlers.get(operation)
+        if handler is None:
+            raise ProtocolError(
+                "invalid_request", f"unknown job operation: {operation}"
+            )
+        call_arguments = dict(arguments)
+        try:
+            result = handler(**call_arguments)
+        except JobOwnerError as error:
+            raise ProtocolError(
+                DAEMON_ERROR_CLASSES[error.code],
+                str(error),
+                details=error.details,
+            ) from error
+        if not isinstance(result, Mapping):
+            raise ProtocolError("owner_failed", "job owner response must be an object")
+        return dict(result)
 
     def compose_context(
         self, reference: str, intent: str, *, launch_reference: str | None = None
@@ -501,7 +479,10 @@ class Runtime:
         declared = dict(CONTEXT_INTENTS[intent].components)
 
         def component(
-            name: str, fn: Callable[[], Any], source_ref: str | None = None
+            name: str,
+            fn: Callable[[], Any],
+            source_ref: str | None = None,
+            revision: Callable[[], str] | None = None,
         ) -> ComponentSpec:
             def probe() -> ComponentResult:
                 try:
@@ -533,7 +514,13 @@ class Runtime:
                     source_ref=source_ref,
                 )
 
-            return ComponentSpec(name, declared[name], probe)
+            return ComponentSpec(
+                name,
+                declared[name],
+                probe,
+                revision=revision,
+                cache_source_ref=source_ref,
+            )
 
         project_ref = (
             REGISTRY.reference("project", {"project_id": project_id})
@@ -543,9 +530,20 @@ class Runtime:
         components: list[ComponentSpec] = []
         if intent == "project.orientation":
             assert project_id is not None
+            project_summary: dict[str, Any] | None = None
+
+            def read_project_summary() -> dict[str, Any]:
+                nonlocal project_summary
+                if project_summary is None:
+                    project_summary = self.projects.summary(project_id)
+                return project_summary
+
             components = [
                 component(
-                    "project", lambda: self.projects.summary(project_id), project_ref
+                    "project",
+                    read_project_summary,
+                    project_ref,
+                    lambda: self.projects.summary_revision(project_id),
                 ),
                 component(
                     "checkout",
@@ -565,7 +563,9 @@ class Runtime:
                 ),
                 component(
                     "authority",
-                    lambda: self.project_authority(project_id),
+                    lambda: self.project_authority(
+                        project_id, project_summary=read_project_summary()
+                    ),
                     f"{project_ref}/task-authority",
                 ),
             ]
@@ -1282,14 +1282,29 @@ class Runtime:
                     "capture waits require a canonical capture lane reference"
                 )
             lane = self.captures.lane(values["lane"])
-            path = Path(str(lane["path"]))
-            mtime = path.stat().st_mtime if path.exists() else 0.0
-            age = max(0.0, time.time() - mtime) if mtime else None
+            progress = self.captures.freshness(values["lane"])
             max_age = float(expected.get("max_age_seconds", 0))
+            if not progress.get("available"):
+                evidence = {"lane": lane, **progress, "age_seconds": None}
+                return WaitEvidence(
+                    False,
+                    evidence,
+                    source_revision(evidence),
+                )
+            mtime = progress["mtime"]
+            age = max(0.0, time.time() - mtime)
+            evidence = {"lane": lane, **progress, "age_seconds": age}
             return WaitEvidence(
-                age is not None and age <= max_age,
-                {"mtime": mtime, "age_seconds": age, "lane": lane},
-                source_revision({"mtime": mtime, "lane": lane.get("name")}),
+                age <= max_age,
+                evidence,
+                source_revision(
+                    {
+                        "lane": lane.get("name"),
+                        "progress_path": progress.get("progress_path"),
+                        "mtime_ns": progress.get("mtime_ns"),
+                        "size": progress.get("size"),
+                    }
+                ),
             )
         if request.target is WaitTarget.RECEIPT_APPEARANCE:
             if resource.kind != "receipt":
@@ -1627,39 +1642,6 @@ class Runtime:
                 response,
             )
 
-    def execute_v2(
-        self,
-        action: Action,
-        callback: Callable[[], Any],
-        request: Mapping[str, Any],
-    ) -> dict[str, Any]:
-        context = RequestContext.create(hashlib.sha256(b"{}").hexdigest())
-        reserved = False
-        try:
-            context = self._request_context(request)
-            if self.principal_name not in action.principals:
-                raise PolicyError(
-                    f"principal {self.principal_name!r} cannot invoke action {action.name!r}"
-                )
-            if context.preconditions and not action.supports_precondition:
-                raise ProtocolError(
-                    "invalid_request", "action does not support preconditions"
-                )
-            if context.deadline_at is not None and time.time() >= context.deadline_at:
-                raise ProtocolError(
-                    "deadline", "request deadline elapsed before execution"
-                )
-            replay = self._claim_v2_idempotency(action, context)
-            if replay is not None:
-                return replay
-            reserved = action.effect is not EffectMode.READ
-            response = self._v2_success(action, callback(), context)
-        except Exception as exc:
-            response = self._v2_failure(action, exc, context)
-        if reserved:
-            self._complete_v2_idempotency(action, context, response)
-        return response
-
     async def execute_v2_async(
         self,
         action: Action,
@@ -1692,60 +1674,6 @@ class Runtime:
         if reserved:
             self._complete_v2_idempotency(action, context, response)
         return response
-
-    def execute_v2_jsonl(
-        self,
-        action: Action,
-        command: list[str],
-        profile: ExecutionProfile,
-        request: Mapping[str, Any],
-        *,
-        source_revision: str,
-        page_size: int = 100,
-        execution: OwnerExecution | None = None,
-    ) -> dict[str, Any]:
-        """Run a JSONL owner through the shared kernel into an immutable snapshot."""
-        context = RequestContext.create(hashlib.sha256(b"{}").hexdigest())
-        writer = None
-        try:
-            context = self._request_context(request)
-            if context.deadline_at is not None and time.time() >= context.deadline_at:
-                raise ProtocolError(
-                    "deadline", "request deadline elapsed before execution"
-                )
-            writer = self.results.start_snapshot(
-                query_sha256=context.request_sha256,
-                source_revision=source_revision,
-                page_size=page_size,
-            )
-            result = (execution or OwnerExecution()).run_jsonl(
-                command, profile, writer.append
-            )
-            if not result.available:
-                writer.abort()
-                writer = None
-                raise OwnerDiagnosticError(
-                    self.artifacts.record_owner_diagnostic(action.route, result)
-                )
-            receipt = self._record_v2_receipt(action, "ok", context)
-            return self.results.record_snapshot(
-                action=action.name,
-                owner=action.owner,
-                route=action.route,
-                writer=writer,
-                receipt=receipt,
-                request=context,
-            )
-        except (
-            OwnerDiagnosticError,
-            ProtocolError,
-            ResultError,
-            PolicyError,
-            ValueError,
-        ) as exc:
-            if writer is not None:
-                writer.abort()
-            return self._v2_failure(action, exc, context)
 
 
 def _principal_contract(principal_name: str) -> str:

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import shutil
+import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -18,7 +20,11 @@ from sinnix_mcp.execution import (
 
 from .artifacts import ArtifactService
 from .capabilities import Capability, Principal
-from .config import GatewayConfig
+from .config import (
+    DEFAULT_MCP_CALL_TIMEOUT_SECONDS,
+    GatewayConfig,
+    validate_mcp_call_timeout,
+)
 
 
 class McpBrokerError(ValueError):
@@ -26,6 +32,14 @@ class McpBrokerError(ValueError):
 
 
 class McpEnvironmentError(McpBrokerError):
+    pass
+
+
+class McpBrokerTimeoutError(McpBrokerError):
+    pass
+
+
+class McpBrokerDeadlineError(McpBrokerError):
     pass
 
 
@@ -166,7 +180,9 @@ class McpBrokerService:
         self, server: dict[str, Any], server_name: str, environment: dict[str, str]
     ) -> dict[str, Any]:
         """Prove one upstream can initialize and disclose its live tools."""
-        parameters, observer_unit = self._parameters(server, environment)
+        parameters, observer_unit = self._parameters(
+            server, environment, runtime_max_seconds=5
+        )
         stderr_directory = self.config.state_dir / "captures" / uuid.uuid4().hex
         stderr_directory.mkdir(mode=0o700, parents=True)
         stderr_path = stderr_directory / "stderr.log"
@@ -315,7 +331,11 @@ class McpBrokerService:
         raise McpBrokerError("MCP server returned an unsupported tool result")
 
     def _parameters(
-        self, server: dict[str, Any], environment: dict[str, str]
+        self,
+        server: dict[str, Any],
+        environment: dict[str, str],
+        *,
+        runtime_max_seconds: int = DEFAULT_MCP_CALL_TIMEOUT_SECONDS,
     ) -> tuple[StdioServerParameters, str | None]:
         if self.principal.name != "observer":
             return (
@@ -343,7 +363,7 @@ class McpBrokerService:
                     f"--unit={unit}",
                     *unit_environment,
                     *writable_paths,
-                    "--property=RuntimeMaxSec=30",
+                    f"--property=RuntimeMaxSec={runtime_max_seconds}",
                     "--property=ReadOnlyPaths=/",
                     "--property=PrivateTmp=true",
                     "--property=NoNewPrivileges=true",
@@ -358,6 +378,14 @@ class McpBrokerService:
             ),
             unit,
         )
+
+    @staticmethod
+    def _call_timeout(server: dict[str, Any]) -> int:
+        timeout = server.get("callTimeoutSeconds", DEFAULT_MCP_CALL_TIMEOUT_SECONDS)
+        try:
+            return validate_mcp_call_timeout(timeout)
+        except ValueError as exc:
+            raise McpBrokerError(str(exc)) from exc
 
     @staticmethod
     def _observer_writable_path(path: str, environment: dict[str, str]) -> str:
@@ -453,6 +481,7 @@ class McpBrokerService:
         arguments: dict[str, Any],
         *,
         write: bool,
+        deadline_at: float | None = None,
     ) -> dict[str, Any]:
         self.principal.require(Capability.MCP_WRITE if write else Capability.MCP_READ)
         server_name = self._string(server_name, "server", 128)
@@ -460,7 +489,26 @@ class McpBrokerService:
         if not isinstance(arguments, dict):
             raise McpBrokerError("arguments must be an object")
         server = self._server(server_name)
-        parameters, observer_unit = self._parameters(server, self._environment(server))
+        call_timeout = self._call_timeout(server)
+        timeout = call_timeout
+        if deadline_at is not None and (
+            not isinstance(deadline_at, (int, float))
+            or isinstance(deadline_at, bool)
+            or not math.isfinite(deadline_at)
+        ):
+            raise McpBrokerError("deadline_at must be a finite Unix timestamp")
+        if deadline_at is not None:
+            remaining = deadline_at - time.time()
+            if remaining <= 0:
+                raise McpBrokerDeadlineError(
+                    f"MCP request deadline elapsed before calling {server_name}"
+                )
+            timeout = min(timeout, remaining)
+        parameters, observer_unit = self._parameters(
+            server,
+            self._environment(server),
+            runtime_max_seconds=call_timeout,
+        )
         stderr_directory = self.config.state_dir / "captures" / uuid.uuid4().hex
         stderr_directory.mkdir(mode=0o700, parents=True)
         stderr_path = stderr_directory / "stderr.log"
@@ -505,7 +553,22 @@ class McpBrokerService:
             return self._response_payload(response)
 
         try:
-            response = await asyncio.wait_for(invoke(), timeout=30)
+            response = await asyncio.wait_for(invoke(), timeout=timeout)
+        except asyncio.TimeoutError as exc:
+            if observer_unit is not None:
+                self._stop(observer_unit)
+            artifact_id = self._store_upstream_stderr(
+                stderr_directory, server_name, tool_name
+            )
+            diagnostic = f"; diagnostic artifact {artifact_id}" if artifact_id else ""
+            if deadline_at is not None and time.time() >= deadline_at:
+                raise McpBrokerDeadlineError(
+                    f"MCP request deadline elapsed while calling {server_name}"
+                    f"{diagnostic}"
+                ) from exc
+            raise McpBrokerTimeoutError(
+                f"MCP upstream {server_name} timed out after {timeout:g}s{diagnostic}"
+            ) from exc
         except McpBrokerError:
             if observer_unit is not None:
                 self._stop(observer_unit)

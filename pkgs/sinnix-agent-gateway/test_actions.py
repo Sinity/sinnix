@@ -237,6 +237,34 @@ def test_image_read_returns_an_image_block(tmp_path: Path) -> None:
     assert "�" not in encoded
 
 
+def test_unknown_input_field_is_typed_before_file_mutation(tmp_path: Path) -> None:
+    server = create_server(config(tmp_path), "operator")
+    target = tmp_path / "protected.txt"
+    target.write_text("before\n")
+
+    result = structured(
+        call(
+            server,
+            "files.patch",
+            {
+                "target": {"path": str(target)},
+                "edit": {
+                    "mode": "range",
+                    "start_line": 1,
+                    "end_line": 1,
+                    "replacement": "after",
+                },
+                "dryrun": True,
+                "idempotency_key": "unknown-field",
+            },
+        )
+    )
+
+    assert result["result"]["outcome"] == "error"
+    assert result["error"]["code"] == "invalid_request"
+    assert target.read_text() == "before\n"
+
+
 def test_observer_sees_read_actions_only() -> None:
     assert all(action.principals >= {"operator"} for action in ALL_ACTIONS)
     assert {a.name for a in visible("observer")} >= {"files.read"}

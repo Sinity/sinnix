@@ -83,6 +83,7 @@ let
       description = "Personal analysis hub: cross-source timelines, correlations, and materialized products";
       transport = "stdio";
       tier = "deep-evidence";
+      callTimeoutSeconds = 300;
       command = "mcp-lynchpin";
       env = {
         LYNCHPIN_REPO_ROOT = "/realm/project/sinity-lynchpin";

@@ -250,11 +250,15 @@ def test_v2_events_are_principal_scoped_and_receipted(tmp_path: Path) -> None:
     observer.audit.append("observer_event", "ok")
     operator.audit.append("operator_event", "ok")
 
-    response = observer.execute_v2(
-        action_set.BY_NAME["events.tail"],
-        lambda: observer.v2_events(100),
-        {"limit": 100},
-    )
+    async def invoke():
+        async def callback():
+            return observer.v2_events(100)
+
+        return await observer.execute_v2_async(
+            action_set.BY_NAME["events.tail"], callback, {"limit": 100}
+        )
+
+    response = anyio.run(invoke)
 
     events = response["data"]["events"]
     assert {event["principal"] for event in events} == {"observer"}
@@ -342,6 +346,31 @@ def test_gateway_status_reports_distinct_manifest_provenance(tmp_path: Path) -> 
         "live_to_chatgpt_observed": "mismatch",
         "nix_approved_to_chatgpt_observed": "mismatch",
     }
+
+
+@pytest.mark.parametrize("malformed", ([], "snapshot", None))
+def test_gateway_status_keeps_local_evidence_when_connector_snapshot_is_not_an_object(
+    tmp_path: Path, malformed: object
+) -> None:
+    cfg = config(tmp_path)
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    (cfg.state_dir / "connector-snapshot.json").write_text(json.dumps(malformed))
+    runtime = Runtime.create(cfg, "observer")
+
+    status = runtime.observe.gateway_status(
+        "observer",
+        "capability-hash",
+        "live-manifest-hash",
+        "catalog-hash",
+        "v2-test",
+    )
+
+    assert status["status"] == "ready"
+    assert status["principal"] == "observer"
+    assert status["manifests"]["live_server"]["sha256"] == "live-manifest-hash"
+    assert (
+        status["manifests"]["comparisons"]["live_to_chatgpt_observed"] == "unobserved"
+    )
 
 
 def test_gateway_status_reports_broker_route_evidence(

@@ -166,6 +166,11 @@ class ComponentSpec:
     name: str
     budget_bytes: int
     probe: Callable[[], ComponentResult]
+    # An authoritative revision lets the composer consult the cache before
+    # running the expensive payload probe.  Callers without such a revision
+    # source must leave this unset so context data stays fresh.
+    revision: Callable[[], str] | None = None
+    cache_source_ref: str | None = None
 
     def __post_init__(self) -> None:
         if not self.name or self.budget_bytes < 128:
@@ -228,17 +233,19 @@ class RevisionReuseCache:
             raise ValueError("context cache bounds must be positive")
         self.max_entries = max_entries
         self.max_bytes = max_bytes
-        self._values: OrderedDict[tuple[str, str], tuple[ComponentResult, int]] = (
-            OrderedDict()
-        )
+        self._values: OrderedDict[
+            tuple[str, str, str | None], tuple[ComponentResult, int]
+        ] = OrderedDict()
         self._bytes = 0
 
     @staticmethod
     def _size(result: ComponentResult) -> int:
         return len(_canonical(result.as_dict("sinnix://context/cache")))
 
-    def get(self, component: str, revision: str) -> ComponentResult | None:
-        key = (component, revision)
+    def get(
+        self, component: str, revision: str, *, source_ref: str | None = None
+    ) -> ComponentResult | None:
+        key = (component, revision, source_ref)
         value = self._values.get(key)
         if value is None:
             return None
@@ -247,7 +254,7 @@ class RevisionReuseCache:
 
     def put(self, result: ComponentResult) -> ComponentResult:
         if result.status == "available" and result.source_revision is not None:
-            key = (result.name, result.source_revision)
+            key = (result.name, result.source_revision, result.source_ref)
             size = self._size(result)
             if size > self.max_bytes:
                 return result
@@ -261,8 +268,10 @@ class RevisionReuseCache:
                 self._bytes -= evicted_size
         return result
 
-    def clear_revision(self, component: str, revision: str) -> None:
-        value = self._values.pop((component, revision), None)
+    def clear_revision(
+        self, component: str, revision: str, *, source_ref: str | None = None
+    ) -> None:
+        value = self._values.pop((component, revision, source_ref), None)
         if value is not None:
             self._bytes -= value[1]
 
@@ -322,6 +331,27 @@ class ContextComposer:
                     ComponentResult.unavailable(name, "component plan was not supplied")
                 )
                 continue
+            preflight_revision: str | None = None
+            if component.revision is not None:
+                try:
+                    revision = component.revision()
+                except Exception:
+                    revision = None
+                if isinstance(revision, str) and revision:
+                    preflight_revision = revision
+                    cached = self.cache.get(
+                        component.name,
+                        revision,
+                        source_ref=component.cache_source_ref,
+                    )
+                    if cached is not None:
+                        rows.append(
+                            self._bound_component(
+                                cached,
+                                min(component.budget_bytes, budgets[component.name]),
+                            )
+                        )
+                        continue
             try:
                 result = component.probe()
                 if not isinstance(result, ComponentResult):
@@ -330,8 +360,19 @@ class ContextComposer:
                 result = ComponentResult.unavailable(
                     component.name, str(exc) or "owner unavailable"
                 )
+            if result.status == "available" and preflight_revision is not None:
+                result = ComponentResult.available(
+                    result.name,
+                    result.data,
+                    revision=preflight_revision,
+                    source_ref=result.source_ref,
+                )
             if result.status == "available" and result.source_revision is not None:
-                cached = self.cache.get(result.name, result.source_revision)
+                cached = self.cache.get(
+                    result.name,
+                    result.source_revision,
+                    source_ref=result.source_ref,
+                )
                 result = cached if cached is not None else self.cache.put(result)
             rows.append(
                 self._bound_component(

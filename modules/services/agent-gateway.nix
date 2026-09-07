@@ -44,6 +44,7 @@ let
     {
       inherit (server) description transport tier;
       inherit brokered;
+      callTimeoutSeconds = server.callTimeoutSeconds or 30;
     }
     // lib.optionalAttrs brokered {
       command = mcpBrokerCommands.${name};

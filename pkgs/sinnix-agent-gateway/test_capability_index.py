@@ -121,6 +121,22 @@ def test_search_shrinks_page_to_response_bound(tmp_path: Path) -> None:
     assert result["next_cursor"] == 1
 
 
+def test_search_filters_before_the_response_bound(tmp_path: Path) -> None:
+    capability_index = service(
+        tmp_path,
+        [
+            {"kind": "script", "name": "unrelated", "description": "x" * 10_000},
+            {"kind": "script", "name": "needle", "description": "small"},
+        ],
+        max_result_bytes=4_096,
+    )
+
+    result = capability_index.search("needle")
+
+    assert result["available"] is True
+    assert [row["name"] for row in result["rows"]] == ["needle"]
+
+
 def test_search_returns_empty_page_for_no_match(tmp_path: Path) -> None:
     capability_index = service(
         tmp_path,

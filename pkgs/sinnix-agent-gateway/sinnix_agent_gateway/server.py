@@ -27,6 +27,7 @@ from .results import ProtocolError, derive_cursor_key
 from .runtime import RESOURCE_READERS, Runtime, canonical_manifest
 from .subscriptions import (
     EVENTS_RESOURCE_URI,
+    DemandAwareSubscriptionBus,
     EventSpoolPublisher,
     OwnerRevisionPublisher,
 )
@@ -64,7 +65,7 @@ def _bounded_resource_json(runtime: Runtime, payload: Any, kind: str) -> str:
 
 def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
     runtime = Runtime.create(config, principal_name)
-    subscription_bus = InMemorySubscriptionBus()
+    subscription_bus = DemandAwareSubscriptionBus(InMemorySubscriptionBus())
     revision_publisher = OwnerRevisionPublisher(runtime, subscription_bus)
     event_publisher = EventSpoolPublisher(config.event_spool, subscription_bus)
 

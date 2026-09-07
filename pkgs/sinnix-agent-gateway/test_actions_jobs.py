@@ -3,57 +3,24 @@
 from __future__ import annotations
 
 import subprocess
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import anyio
 import pytest
-from conftest import call
+from conftest import DirectJobs, call
 from pydantic import ValidationError
 from sinnix_agent_gateway import server as server_module
 from sinnix_agent_gateway.actions import contexts, jobs, waits
 from sinnix_agent_gateway.app import Runtime, create_server
 from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
 from sinnix_agent_gateway.locators import JobLocator
-from sinnix_mcp import (
-    ErrorCode,
-    ErrorEnvelope,
-    OpaquePayload,
-    RequestEnvelope,
-    ResponseEnvelope,
-)
+from sinnix_mcp import ErrorCode
 
 OWNED = (*jobs.ACTIONS, *waits.ACTIONS, *contexts.ACTIONS)
 
 
-@dataclass
-class FakeJobs:
-    """Stands in for LocalJobs: records every request, answers from a table."""
-
-    calls: list[RequestEnvelope] = field(default_factory=list)
-    responses: dict[str, Any] = field(default_factory=dict)
-    errors: dict[str, tuple[ErrorCode, str]] = field(default_factory=dict)
-
-    def dispatch(self, request: RequestEnvelope) -> ResponseEnvelope:
-        self.calls.append(request)
-        error = self.errors.get(request.operation)
-        if error is not None:
-            return ResponseEnvelope(
-                request_id=request.request_id,
-                correlation_id=request.correlation_id,
-                owner="systemd-jobs",
-                error=ErrorEnvelope(error[0], error[1], OpaquePayload.bounded({})),
-            )
-        answer = self.responses.get(request.operation, {"job_id": "41"})
-        if callable(answer):
-            answer = answer(request.arguments)
-        return ResponseEnvelope(
-            request_id=request.request_id,
-            correlation_id=request.correlation_id,
-            owner="systemd-jobs",
-            payload=OpaquePayload.bounded(answer),
-        )
+FakeJobs = DirectJobs
 
 
 def git(path: Path, *args: str) -> None:

@@ -214,6 +214,8 @@ def main() -> None:
         except (CliInputError, ValueError, RuntimeError) as error:
             raise SystemExit(str(error)) from error
         print(json.dumps(response, indent=2, sort_keys=True))
+        if response.get("result", {}).get("outcome") == "error":
+            raise SystemExit(1)
 
 
 if __name__ == "__main__":

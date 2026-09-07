@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import anyio
 from mcp.shared.subscriptions import ResourceUpdated
 from sinnix_agent_gateway.subscriptions import (
     EVENTS_RESOURCE_URI,
+    DemandAwareSubscriptionBus,
     EventSpoolPublisher,
     OwnerRevisionPublisher,
 )
@@ -12,19 +15,34 @@ from sinnix_agent_gateway.subscriptions import (
 class Bus:
     def __init__(self) -> None:
         self.updates: list[ResourceUpdated] = []
+        self.listeners = []
 
     async def publish(self, update: ResourceUpdated) -> None:
         self.updates.append(update)
 
+    def subscribe(self, listener) -> Callable[[], None]:
+        self.listeners.append(listener)
+        active = True
+
+        def remove() -> None:
+            nonlocal active
+            if active:
+                active = False
+                self.listeners.remove(listener)
+
+        return remove
+
 
 class Runtime:
     def __init__(self) -> None:
+        self.observation_calls = 0
         self.revisions = {
             "sinnix://projects/fixture": "commit-a",
             "sinnix://projects/fixture/task-authority": "beads-a",
         }
 
     def owner_revision_observations(self) -> dict[str, str]:
+        self.observation_calls += 1
         return dict(self.revisions)
 
 
@@ -43,6 +61,37 @@ def test_idle_owner_revision_changes_publish_the_changed_component() -> None:
         assert len(bus.updates) == 1
 
     anyio.run(scenario)
+
+
+def test_owner_observation_is_demand_driven_and_reconnects_cleanly() -> None:
+    runtime = Runtime()
+    bus = Bus()
+    publisher = OwnerRevisionPublisher(runtime, bus, should_poll=lambda: False)
+
+    async def scenario() -> None:
+        await publisher.poll_once()
+        assert runtime.observation_calls == 0
+
+    anyio.run(scenario)
+
+
+def test_demand_aware_bus_tracks_cancellation_and_reconnection() -> None:
+    delegate = Bus()
+    bus = DemandAwareSubscriptionBus(delegate)
+    listeners = []
+
+    def listener(event) -> None:
+        listeners.append(event)
+
+    remove = bus.subscribe(listener)
+    assert bus.has_subscribers()
+    remove()
+    remove()
+    assert not bus.has_subscribers()
+    remove_again = bus.subscribe(listener)
+    assert bus.has_subscribers()
+    remove_again()
+    assert not bus.has_subscribers()
 
 
 def test_event_spool_publishes_once_per_complete_record_and_waits_for_partial_line(
@@ -79,5 +128,33 @@ def test_event_spool_cursor_restarts_after_rotation(tmp_path) -> None:
         spool.write_text('{"job_id":"after"}\n')
         assert await publisher.poll_once() == 1
         assert len(bus.updates) == 2
+
+    anyio.run(scenario)
+
+
+def test_event_spool_demand_edges_skip_unobserved_backlog(tmp_path) -> None:
+    spool = tmp_path / "events.jsonl"
+    spool.write_text('{"job_id":"old"}\n')
+    bus = Bus()
+    demand = False
+    publisher = EventSpoolPublisher(spool, bus, should_poll=lambda: demand)
+
+    async def scenario() -> None:
+        nonlocal demand
+        assert await publisher.poll_once() == 0
+        demand = True
+        assert await publisher.poll_once() == 0
+        with spool.open("a") as handle:
+            handle.write('{"job_id":"new"}\n')
+        assert await publisher.poll_once() == 1
+        demand = False
+        assert await publisher.poll_once() == 0
+        with spool.open("a") as handle:
+            handle.write('{"job_id":"while-away"}\n')
+        demand = True
+        assert await publisher.poll_once() == 0
+        with spool.open("a") as handle:
+            handle.write('{"job_id":"after-reconnect"}\n')
+        assert await publisher.poll_once() == 1
 
     anyio.run(scenario)

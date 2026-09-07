@@ -1,8 +1,7 @@
 """The gateway's job owner: agentctl's launch and batch routes, called in process.
 
-A job is a pueue task and a batch is a run manifest. Every operation answers
-with a ResponseEnvelope; a refusal is an ErrorEnvelope whose code the gateway's
-own error classes cover, never an exception.
+A job is a pueue task and a batch is a run manifest. Direct adapter calls
+return bounded mappings and raise typed owner errors.
 """
 
 from __future__ import annotations
@@ -18,13 +17,7 @@ from agentctl.projects import ProjectConfigError
 from agentctl.prompts import PromptError
 from agentctl.pueue import PueueError
 from agentctl.worktrunk import WorktrunkError
-from sinnix_mcp import (
-    ErrorCode,
-    ErrorEnvelope,
-    OpaquePayload,
-    RequestEnvelope,
-    ResponseEnvelope,
-)
+from sinnix_mcp import ErrorCode
 
 OWNER = "systemd-jobs"
 JOB_LIST_ORDERING = "created_at_desc_job_id_desc"
@@ -40,6 +33,20 @@ class _Refusal(Exception):
     def __init__(self, code: ErrorCode, message: str) -> None:
         super().__init__(message)
         self.code = code
+
+
+class JobOwnerError(Exception):
+    """A bounded, typed refusal from the in-process agentctl adapter."""
+
+    def __init__(
+        self,
+        code: ErrorCode,
+        message: str,
+        details: Mapping[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.details = dict(details or {})
 
 
 def _require_int(arguments: Mapping[str, Any], name: str) -> int:
@@ -92,24 +99,33 @@ def _sort_key(job: Mapping[str, Any]) -> tuple[str, str]:
     return (str(job.get("enqueued_at") or ""), str(job.get("job_id")))
 
 
-def _encode_cursor(key: tuple[str, str]) -> str:
-    return base64.urlsafe_b64encode(json.dumps(list(key)).encode()).decode()
+def _encode_cursor(key: tuple[str, str], project_id: str | None = None) -> str:
+    return base64.urlsafe_b64encode(
+        json.dumps(
+            {"key": list(key), "project_id": project_id}, separators=(",", ":")
+        ).encode()
+    ).decode()
 
 
-def _decode_cursor(cursor: str) -> tuple[str, str]:
+def _decode_cursor(cursor: str) -> tuple[tuple[str, str], str | None]:
     try:
         value = json.loads(base64.urlsafe_b64decode(cursor.encode()).decode())
     except (ValueError, json.JSONDecodeError) as error:
         raise _Refusal(
             ErrorCode.STALE_CURSOR, "job list cursor is unreadable"
         ) from error
+    if not isinstance(value, dict):
+        raise _Refusal(ErrorCode.STALE_CURSOR, "job list cursor is unreadable")
+    key = value.get("key")
+    project_id = value.get("project_id")
     if (
-        not isinstance(value, list)
-        or len(value) != 2
-        or any(not isinstance(item, str) for item in value)
+        not isinstance(key, list)
+        or len(key) != 2
+        or any(not isinstance(item, str) for item in key)
+        or (project_id is not None and not isinstance(project_id, str))
     ):
         raise _Refusal(ErrorCode.STALE_CURSOR, "job list cursor is unreadable")
-    return (value[0], value[1])
+    return (key[0], key[1]), project_id
 
 
 def job_payload(job: Mapping[str, Any]) -> dict[str, Any]:
@@ -217,7 +233,12 @@ def run_payload(document: Mapping[str, Any]) -> dict[str, Any]:
 
 
 class LocalJobs:
-    """Dispatches the gateway's job operations onto agentctl in this process."""
+    """Calls agentctl's job and batch routes directly in this process.
+
+    The adapter exposes one method per owner operation.  Runtime translates
+    the gateway operation name to one of these methods, so no protocol
+    envelope or second serialization boundary is involved.
+    """
 
     def __init__(self, config: Config | None = None) -> None:
         self._config = config
@@ -228,29 +249,25 @@ class LocalJobs:
             self._config = load_config()
         return self._config
 
-    def dispatch(self, request: RequestEnvelope) -> ResponseEnvelope:
-        handler = self._handlers().get(request.operation)
-        if handler is None:
-            return self._error(
-                request,
-                ErrorCode.INVALID_ARGUMENT,
-                f"unknown job operation: {request.operation}",
-            )
+    def _call(
+        self,
+        handler: Callable[[Mapping[str, Any]], dict[str, Any]],
+        arguments: Mapping[str, Any],
+    ) -> dict[str, Any]:
         try:
-            payload = handler(request.arguments)
+            payload = handler(arguments)
         except _Refusal as refusal:
-            return self._error(request, refusal.code, str(refusal))
+            raise JobOwnerError(refusal.code, str(refusal)) from refusal
         except batch.BatchRefusal as refusal:
-            return self._error(
-                request,
+            raise JobOwnerError(
                 ErrorCode.INVALID_ARGUMENT
                 if refusal.code in ARGUMENT_REFUSALS
                 else ErrorCode.OPERATION_FAILED,
                 str(refusal),
                 {"refusal": refusal.code},
-            )
+            ) from refusal
         except PueueError as error:
-            return self._error(request, ErrorCode.OWNER_UNAVAILABLE, str(error))
+            raise JobOwnerError(ErrorCode.OWNER_UNAVAILABLE, str(error)) from error
         except (
             launch.JobError,
             batch.BatchError,
@@ -261,48 +278,71 @@ class LocalJobs:
             KeyError,
             OSError,
         ) as error:
-            return self._error(request, ErrorCode.OPERATION_FAILED, str(error))
-        return ResponseEnvelope(
-            request_id=request.request_id,
-            correlation_id=request.correlation_id,
-            owner=OWNER,
-            payload=OpaquePayload.bounded(payload),
-        )
+            raise JobOwnerError(ErrorCode.OPERATION_FAILED, str(error)) from error
+        except ValueError as error:
+            raise JobOwnerError(ErrorCode.INVALID_ARGUMENT, str(error)) from error
+        try:
+            encoded = json.dumps(
+                payload, sort_keys=True, separators=(",", ":")
+            ).encode()
+        except (TypeError, ValueError) as error:
+            raise JobOwnerError(
+                ErrorCode.RESULT_INVALID, "job owner response is not JSON serializable"
+            ) from error
+        if len(encoded) > 262_144:
+            raise JobOwnerError(
+                ErrorCode.RESOURCE_EXHAUSTED, "job owner response exceeded its bound"
+            )
+        return payload
 
-    def _handlers(self) -> dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]]:
-        return {
-            "job.start": self._start,
-            "job.get": self._get,
-            "job.wait": self._wait,
-            "job.logs": self._logs,
-            "job.result": self._result,
-            "job.cancel": self._cancel,
-            "job.list": self._list,
-            "job.retry": self._retry,
-            "job.clean": self._clean,
-            "job.shell.start": self._shell_start,
-            "batch.list": self._batch_list,
-            "batch.start": self._batch_start,
-            "batch.status": self._batch_status,
-            "batch.land": self._batch_land,
-            "batch.resume": self._batch_resume,
-        }
+    # These methods deliberately accept keyword arguments so Runtime can pass
+    # a typed operation's fields without constructing an envelope.
+    def start(self, **arguments: Any) -> dict[str, Any]:
+        return self._call(self._start, arguments)
 
-    @staticmethod
-    def _error(
-        request: RequestEnvelope,
-        code: ErrorCode,
-        message: str,
-        details: Mapping[str, Any] | None = None,
-    ) -> ResponseEnvelope:
-        return ResponseEnvelope(
-            request_id=request.request_id,
-            correlation_id=request.correlation_id,
-            owner=OWNER,
-            error=ErrorEnvelope(
-                code, message, OpaquePayload.bounded(dict(details or {}))
-            ),
-        )
+    def get(self, **arguments: Any) -> dict[str, Any]:
+        return self._call(self._get, arguments)
+
+    def wait(self, **arguments: Any) -> dict[str, Any]:
+        return self._call(self._wait, arguments)
+
+    def logs(self, **arguments: Any) -> dict[str, Any]:
+        return self._call(self._logs, arguments)
+
+    def result(self, **arguments: Any) -> dict[str, Any]:
+        return self._call(self._result, arguments)
+
+    def cancel(self, **arguments: Any) -> dict[str, Any]:
+        return self._call(self._cancel, arguments)
+
+    def list(self, **arguments: Any) -> dict[str, Any]:
+        return self._call(self._list, arguments)
+
+    def retry(self, **arguments: Any) -> dict[str, Any]:
+        return self._call(self._retry, arguments)
+
+    def clean(self, **arguments: Any) -> dict[str, Any]:
+        return self._call(self._clean, arguments)
+
+    def shell_start(self, **arguments: Any) -> dict[str, Any]:
+        arguments.pop("principal", None)
+        arguments.pop("result", None)
+        return self._call(self._shell_start, arguments)
+
+    def batch_list(self, **arguments: Any) -> dict[str, Any]:
+        return self._call(self._batch_list, arguments)
+
+    def batch_start(self, **arguments: Any) -> dict[str, Any]:
+        return self._call(self._batch_start, arguments)
+
+    def batch_status(self, **arguments: Any) -> dict[str, Any]:
+        return self._call(self._batch_status, arguments)
+
+    def batch_land(self, **arguments: Any) -> dict[str, Any]:
+        return self._call(self._batch_land, arguments)
+
+    def batch_resume(self, **arguments: Any) -> dict[str, Any]:
+        return self._call(self._batch_resume, arguments)
 
     def _project(self, project_id: str) -> Any:
         try:
@@ -403,7 +443,12 @@ class LocalJobs:
         ceiling = list(_sort_key(rows[0])) if rows else ["", ""]
         cursor = arguments.get("cursor")
         if isinstance(cursor, str) and cursor:
-            after = _decode_cursor(cursor)
+            after, cursor_project_id = _decode_cursor(cursor)
+            if cursor_project_id != project_id:
+                raise _Refusal(
+                    ErrorCode.STALE_CURSOR,
+                    "job list cursor does not match the project filter",
+                )
             rows = [row for row in rows if _sort_key(row) < after]
         page = launch.attach_bindings(self.config, rows[:limit])
         truncated = len(rows) > len(page)
@@ -411,7 +456,7 @@ class LocalJobs:
             "jobs": [job_payload(row) for row in page],
             "total": len(rows),
             "truncated": truncated,
-            "next_cursor": _encode_cursor(_sort_key(page[-1]))
+            "next_cursor": _encode_cursor(_sort_key(page[-1]), project_id)
             if truncated and page
             else None,
             "snapshot": {"ordering": JOB_LIST_ORDERING, "ceiling": ceiling},

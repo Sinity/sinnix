@@ -8,7 +8,9 @@ from .config import GatewayConfig
 
 
 class CapabilityIndexError(ValueError):
-    pass
+    def __init__(self, message: str, code: str = "invalid_request") -> None:
+        super().__init__(message)
+        self.code = code
 
 
 class CapabilityIndexService:
@@ -112,7 +114,9 @@ class CapabilityIndexService:
             row for row in index["rows"] if self._matches(row, terms, kind, enabled)
         ]
         if cursor >= len(rows) and cursor != 0:
-            raise CapabilityIndexError("cursor is beyond matching capability rows")
+            raise CapabilityIndexError(
+                "cursor is beyond matching capability rows", "stale_cursor"
+            )
         selected = rows[cursor : cursor + limit]
         while selected or not rows:
             next_cursor = cursor + len(selected)

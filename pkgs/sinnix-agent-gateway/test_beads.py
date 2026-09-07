@@ -113,6 +113,52 @@ def test_query_normalizes_project_qualified_resources_and_snapshot_pages(
     assert any("--parse-only" in command for command in commands(log))
 
 
+def test_snapshot_cursor_rejects_negative_and_out_of_range_offsets(
+    tmp_path: Path,
+) -> None:
+    beads, _log = beads_service(tmp_path, "observer")
+    first = beads.query(project_ids=["fixture"], view="open", limit=1)
+    cursor = first["page"]["next_cursor"]
+    assert isinstance(cursor, str)
+    token = cursor.rsplit(".", 1)[0]
+
+    for offset in ("-1", "99"):
+        with pytest.raises(BeadsError) as failure:
+            beads.query(
+                project_ids=["fixture"],
+                view="open",
+                limit=1,
+                cursor=f"{token}.{offset}",
+            )
+        assert failure.value.code == "stale_cursor"
+
+
+def test_stale_days_is_rejected_by_views_without_owner_support(
+    tmp_path: Path,
+) -> None:
+    beads, _log = beads_service(tmp_path, "observer")
+    with pytest.raises(BeadsError) as failure:
+        beads.query(
+            project_ids=["fixture"],
+            view="open",
+            native_filters={"stale_days": 30},
+        )
+    assert failure.value.code == "unsupported_capability"
+
+
+def test_stale_claims_forwards_stale_days_to_the_owner(tmp_path: Path) -> None:
+    beads, log = beads_service(tmp_path, "observer")
+
+    beads.query(
+        project_ids=["fixture"],
+        view="stale_claims",
+        native_filters={"stale_days": 30},
+    )
+
+    command = next(command for command in commands(log) if "stale" in command)
+    assert command[command.index("--days") + 1] == "30"
+
+
 def test_query_compiles_native_list_filters_and_records_parse_parity(
     tmp_path: Path,
 ) -> None:

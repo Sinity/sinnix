@@ -88,7 +88,8 @@ def render_reference() -> str:
         "",
         "Generated from `sinnix_agent_gateway.actions`. Every action is one MCP tool "
         "whose `tools/list` input schema is the one below; the catalog hash changes "
-        "when an action, schema, principal set, example or affordance changes.",
+        "when any principal-visible action catalog row changes, including its "
+        "schema, principal set, example or affordance.",
         "",
         f"Revision: `{catalog['revision']}`. Catalog SHA-256: `{catalog['action_catalog_hash']}`.",
         "",

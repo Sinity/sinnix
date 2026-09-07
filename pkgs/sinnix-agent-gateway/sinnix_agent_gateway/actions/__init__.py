@@ -60,16 +60,15 @@ def visible(principal: str) -> tuple[Action, ...]:
 
 
 def catalog_hash(principal: str) -> str:
-    """Digest of the principal-visible action contract: names and schemas."""
-    rows = [
-        {
-            "name": action.name,
-            "family": action.family.value,
-            "input": action.input_schema(),
-            "output": action.output_schema(),
-        }
-        for action in visible(principal)
-    ]
+    """Digest of every principal-visible catalog row field.
+
+    The generated contract promises that examples, affordances and principal
+    sets participate in this digest alongside names and schemas. Hashing the
+    complete catalog row keeps that promise true when another documented
+    action field is added later.
+    """
+    rows = [action.catalog_row() for action in visible(principal)]
+    rows.sort(key=lambda row: row["name"])
     encoded = json.dumps(rows, sort_keys=True, separators=(",", ":")).encode()
     return hashlib.sha256(encoded).hexdigest()
 

@@ -529,7 +529,7 @@ class ProjectService:
         if not query or len(query) > 1000:
             raise ProjectError("query must contain 1-1000 characters")
         max_matches = max(1, min(max_matches, 1000))
-        output = self._run_bounded(
+        output, output_truncated = self._run_bounded_result(
             ["rg", "--json", "--hidden", "--glob", "!.git/**", "--", query, "."],
             project.path,
         )
@@ -552,9 +552,10 @@ class ProjectService:
                     "text": data["lines"]["text"].rstrip("\n"),
                 }
             )
-            if len(matches) >= max_matches:
-                break
-        return {"matches": matches, "truncated": len(matches) >= max_matches}
+        return {
+            "matches": matches[:max_matches],
+            "truncated": output_truncated or len(matches) > max_matches,
+        }
 
     def diff(
         self, project_id: str, ref: str | None = None, checkout_id: str | None = None
@@ -582,9 +583,11 @@ class ProjectService:
         if resolved_ref is not None:
             command.append(resolved_ref)
         command.append("--")
+        output, output_truncated = self._run_bounded_result(command, project.path)
         return {
             "project_id": project_id,
-            "diff": self._run_bounded(command, project.path),
+            "diff": output,
+            "truncated": output_truncated,
         }
 
     def commit_range(
@@ -698,6 +701,28 @@ class ProjectService:
             "changes": changes,
             "latest_commit": commit,
         }
+
+    def summary_revision(self, project_id: str) -> str:
+        """Return the semantic inputs that determine ``summary``."""
+        project = self._project(project_id)
+        status = self._run_bounded(
+            ["git", "status", "--porcelain=v2", "--branch"], project.path
+        )
+        head = next(
+            (
+                line.removeprefix("# branch.oid ")
+                for line in status.splitlines()
+                if line.startswith("# branch.oid ")
+            ),
+            "",
+        )
+        return hashlib.sha256(
+            json.dumps(
+                {"head": head, "status": status},
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
 
     def write(
         self,
