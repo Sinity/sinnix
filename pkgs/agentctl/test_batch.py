@@ -1962,6 +1962,69 @@ def test_a_merged_pr_is_the_acceptance_when_its_check_never_reports(
     assert landed["acceptance"]["beads"]["fx-solo"]["state"] == "closed"
 
 
+def test_a_merge_the_branch_policy_refuses_is_armed_as_auto_merge_and_awaited(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Breaks if a protected-branch refusal for a check the landing does not
+    wait on fails the landing instead of letting GitHub merge the head."""
+    pr_project(harness)
+    clock = [0.0]
+    monkeypatch.setattr(landing_module.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(github, "push_branch", lambda *a, **k: None)
+    monkeypatch.setattr(github, "remote_head", lambda root, branch: None)
+    calls: list[tuple[str, Any]] = []
+
+    def pull(root: Path, number: int) -> dict[str, Any]:
+        calls.append(("pull", number))
+        merged = ("arm", number, SHA) in calls and calls.count(("pull", number)) > 3
+        return {
+            "number": number,
+            "state": "MERGED" if merged else "OPEN",
+            "headRefOid": SHA,
+            "statusCheckRollup": [],
+            "mergeCommit": {"oid": MERGED} if merged else None,
+        }
+
+    def refused(root: Path, number: int, sha: str) -> None:
+        calls.append(("merge", number, sha))
+        raise github.MergeBlocked(
+            'GraphQL: Required status check "quick-gate" is expected.'
+        )
+
+    monkeypatch.setattr(github, "pull_request", pull)
+    monkeypatch.setattr(github, "pull_request_for_branch", lambda root, branch: None)
+    monkeypatch.setattr(github, "create_pull_request", lambda root, **kw: 7)
+    monkeypatch.setattr(github, "pull_request_advisory", lambda root, number: [])
+    monkeypatch.setattr(github, "delete_remote_branch", lambda root, branch: None)
+    monkeypatch.setattr(github, "hosted_check_state", lambda pull, name: "success")
+    monkeypatch.setattr(github, "check_rollup", lambda pull, required=(): "ready")
+    monkeypatch.setattr(github, "merge_pr", refused)
+    monkeypatch.setattr(
+        github,
+        "arm_auto_merge",
+        lambda root, number, sha: calls.append(("arm", number, sha)),
+    )
+    run = prepared_run(harness, "fx-solo")
+
+    def sleep(seconds: float) -> None:
+        clock[0] += seconds
+
+    landed = batch.land(
+        harness.config,
+        harness.project,
+        run["run_id"],
+        beads=harness.beads,
+        sleep=sleep,
+    )
+
+    assert [call for call in calls if call[0] in {"merge", "arm"}] == [
+        ("merge", 7, SHA),
+        ("arm", 7, SHA),
+    ]
+    assert landed["acceptance"]["published"]["merge_commit"] == MERGED
+    assert landed["acceptance"]["beads"]["fx-solo"]["state"] == "closed"
+
+
 def test_the_checks_a_landing_waits_for_come_from_the_descriptor(
     harness: Harness,
 ) -> None:
