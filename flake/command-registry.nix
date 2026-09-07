@@ -681,6 +681,11 @@ in
       description = "Run deadnix/statix/shellcheck and the /realm taxonomy assertion";
     }
     {
+      name = "check-heavy";
+      category = "Validate";
+      description = "Heavy semantic check tier";
+    }
+    {
       name = "check-all";
       category = "Validate";
       description = "Default + heavy semantic check tiers";

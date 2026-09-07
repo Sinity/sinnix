@@ -153,6 +153,7 @@
               "''${nix_override_args[@]}"
         '';
         lint = pkgs.writeShellScriptBin "lint" ''exec ${nix} run .#lint -- "$@"'';
+        check-heavy = pkgs.writeShellScriptBin "check-heavy" ''exec ${nix} run .#check-heavy -- "$@"'';
         check-all = pkgs.writeShellScriptBin "check-all" ''exec ${nix} run .#check-all -- "$@"'';
         update = pkgs.writeShellScriptBin "update" ''
           set -euo pipefail
