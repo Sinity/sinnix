@@ -67,6 +67,8 @@ every worker prompt), [coordinator contract](references/coordinator-contract.md)
 - Continue or unblock a worker: `agentctl batch resume <run> --worker <w>`
   queues a fresh agent into the existing worktree; uncommitted work there is
   the new agent's.
+- Resume a completed session agent with `followup_task`; `send_message`
+  delivers context only and does not start a turn.
 - Landing (`batch land`) integrates the worker branches, runs the candidate
   verification once, runs one reviewer on the candidate diff, publishes by
   the descriptor's policy, records acceptance and closes the beads whose

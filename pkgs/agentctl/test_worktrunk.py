@@ -6,6 +6,9 @@ import threading
 from pathlib import Path
 
 import pytest
+from agentctl import landing
+from agentctl.config import Config
+from agentctl.projects import load_project_adapter
 from agentctl.worktrunk import (
     Worktree,
     WorktrunkError,
@@ -14,6 +17,7 @@ from agentctl.worktrunk import (
     worktrunk_list,
     worktrunk_remove,
 )
+from conftest import write_project
 
 
 def _repository(root: Path) -> Path:
@@ -79,6 +83,140 @@ def test_create_places_the_worktree_at_the_requested_path_and_remove_reverses_it
 
     assert not target.exists()
     assert worktrunk_find(root, "feature/lane") is None
+
+
+def test_terminal_release_keeps_the_exact_branch_head(tmp_path: Path) -> None:
+    """Anti-vacuity: branch deletion would make this worker commit unreachable."""
+    root = _repository(tmp_path / "repo")
+    target = tmp_path / "worktrees" / "lane"
+    worktrunk_create(root, "batch/run/worker", path=target, base="master")
+    (target / "worker.txt").write_text("candidate\n")
+    subprocess.run(["git", "-C", str(target), "add", "worker.txt"], check=True)
+    _commit(target, "worker candidate")
+    head = subprocess.run(
+        ["git", "-C", str(target), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    (root / "worker.txt").write_text("candidate\n")
+    subprocess.run(["git", "-C", str(root), "add", "worker.txt"], check=True)
+    _commit(root, "squash landing")
+
+    worktrunk_remove(root, "batch/run/worker", keep_branch=True, reap=False)
+
+    retained = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "refs/heads/batch/run/worker^{commit}"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert not target.exists()
+    assert retained == head
+
+
+def test_terminal_release_archives_ignored_descriptor_artifacts_across_a_retry(
+    tmp_path: Path, config: Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Anti-vacuity: the real release path must retain ignored evidence before retrying."""
+    root = _repository(tmp_path / "repo")
+    write_project(root, worktrees=tmp_path / "worktrees")
+    descriptor = root / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text().replace(
+            'publish = "master"',
+            'publish = "master"\nretain_artifacts = [".cache/verify/*.json"]',
+        )
+    )
+    (root / ".gitignore").write_text(".cache/\n")
+    subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+    _commit(root, "fixture descriptor")
+    project = load_project_adapter(root)
+    target = tmp_path / "worktrees" / "lane"
+    branch = "batch/run/worker"
+    worktrunk_create(root, branch, path=target, base="master")
+    receipt = target / ".cache" / "verify" / "receipt.json"
+    receipt.parent.mkdir(parents=True)
+    receipt.write_text('{"attempt": 1}\n')
+    initial = landing._digest(receipt)
+    artifacts: list[dict[str, str]] = []
+    monkeypatch.setattr(landing, "_task_users", lambda _path: [])
+    monkeypatch.setattr(landing, "_process_users", lambda _path: [])
+
+    def fail_remove(*_args: object, **_kwargs: object) -> None:
+        raise WorktrunkError("simulated release failure")
+
+    monkeypatch.setattr(landing.worktrunk, "worktrunk_remove", fail_remove)
+    first = landing._drop_branch(
+        config,
+        project,
+        branch,
+        base="master",
+        recorded_path=target,
+        artifacts=artifacts,
+    )
+
+    assert first == "simulated release failure"
+    first_destination = landing._artifact_destination(
+        config, "orphan", target, receipt.relative_to(target), initial
+    )
+    assert first_destination.read_text() == '{"attempt": 1}\n'
+    assert receipt.exists(), "a failed removal must leave the checkout intact"
+
+    receipt.write_text('{"attempt": 2}\n')
+    updated = landing._digest(receipt)
+    monkeypatch.setattr(landing.worktrunk, "worktrunk_remove", worktrunk_remove)
+    second = landing._drop_branch(
+        config,
+        project,
+        branch,
+        base="master",
+        recorded_path=target,
+        artifacts=artifacts,
+    )
+
+    second_destination = landing._artifact_destination(
+        config, "orphan", target, receipt.relative_to(target), updated
+    )
+    assert second is None and not target.exists()
+    assert first_destination.read_text() == '{"attempt": 1}\n'
+    assert second_destination.read_text() == '{"attempt": 2}\n'
+
+
+def test_detached_recovery_retains_each_head_after_a_failed_release(
+    tmp_path: Path,
+) -> None:
+    """Anti-vacuity: one retry cannot replace the prior detached recovery ref."""
+    root = _repository(tmp_path / "repo")
+    first = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    (root / "later.txt").write_text("later\n")
+    subprocess.run(["git", "-C", str(root), "add", "later.txt"], check=True)
+    _commit(root, "later detached head")
+    second = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    checkout = tmp_path / "worktrees" / "detached"
+
+    first_ref = landing._recovery_ref(root, "run", checkout, first)
+    second_ref = landing._recovery_ref(root, "run", checkout, second)
+
+    assert first_ref != second_ref
+    for ref, expected in ((first_ref, first), (second_ref, second)):
+        retained = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", f"{ref}^{{commit}}"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        assert retained == expected
 
 
 def test_a_missing_repository_is_a_typed_refusal(tmp_path: Path) -> None:
