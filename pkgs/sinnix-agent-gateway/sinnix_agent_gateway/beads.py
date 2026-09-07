@@ -1458,9 +1458,9 @@ class BeadsService:
         history = None
         if target:
             try:
-                history = self._includes(
-                    project, project_id, target, {"history"}
-                ).get("history")
+                history = self._includes(project, project_id, target, {"history"}).get(
+                    "history"
+                )
             except BeadsError as exc:
                 # The owner confirmed the write and readback above. Optional
                 # history must not turn it into a failed (and retryable) write.
