@@ -395,8 +395,10 @@ rec {
         IOAccounting = true;
         CPUWeight = 200;
         IOWeight = 200;
-        MemoryHigh = "3G";
-        MemoryMax = "4G";
+        # A focused run still collects the whole corpus per xdist worker; 4G
+        # OOM-killed three runs in a wave. Two slots at 6G cost what three at 4G did.
+        MemoryHigh = "5G";
+        MemoryMax = "6G";
         MemorySwapMax = "0";
         ManagedOOMMemoryPressure = "kill";
         ManagedOOMMemoryPressureLimit = "50%";
