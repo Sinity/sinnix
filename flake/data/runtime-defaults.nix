@@ -332,8 +332,10 @@ rec {
       # of app.slice and session.slice, so its weights govern host contention.
       agentctl = {
         IOAccounting = true;
-        CPUWeight = 10;
-        IOWeight = 10;
+        # The job plane is the machine's main workload during a wave; at 10 it
+        # starved behind an idle desktop and the coordinator's own polls.
+        CPUWeight = 100;
+        IOWeight = 100;
         # The whole job plane's memory policy, and the only one: host memory
         # (31 GB) minus the desktop reservation below (app 6G + session 5G +
         # desktop-shell 512M, measured 2026-09-02 21:30 against app.slice peak
@@ -376,8 +378,10 @@ rec {
       };
       agentctl-pytest = {
         IOAccounting = true;
-        CPUWeight = 20;
-        IOWeight = 20;
+        # Tests are the wave's critical path; agent processes mostly wait on
+        # the API, so the test pools outrank them.
+        CPUWeight = 200;
+        IOWeight = 200;
         MemoryHigh = "6G";
         MemoryMax = "8G";
         MemorySwapMax = "0";
@@ -389,8 +393,8 @@ rec {
       # check): a separate pool so they never queue behind the corpus.
       agentctl-pytest-quick = {
         IOAccounting = true;
-        CPUWeight = 20;
-        IOWeight = 20;
+        CPUWeight = 200;
+        IOWeight = 200;
         MemoryHigh = "3G";
         MemoryMax = "4G";
         MemorySwapMax = "0";
@@ -400,8 +404,8 @@ rec {
       };
       agentctl-bulk = {
         IOAccounting = true;
-        CPUWeight = 20;
-        IOWeight = 10;
+        CPUWeight = 100;
+        IOWeight = 100;
         MemoryHigh = "10G";
         MemoryMax = "14G";
         MemorySwapMax = "0";
