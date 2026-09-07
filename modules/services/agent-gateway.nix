@@ -369,7 +369,7 @@ mkServiceModule {
                   --log.format json
               '';
               LoadCredential = "runtime-key:${endpoint.runtimeKeyFile}";
-              Restart = "on-failure";
+              Restart = "always";
               RestartSec = "5s";
               ProtectHome = false;
               ReadWritePaths = [
