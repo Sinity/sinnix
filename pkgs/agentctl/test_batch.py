@@ -2025,6 +2025,65 @@ def test_a_merge_the_branch_policy_refuses_is_armed_as_auto_merge_and_awaited(
     assert landed["acceptance"]["beads"]["fx-solo"]["state"] == "closed"
 
 
+def test_pr_policy_publishes_over_a_moved_base_and_refreshes_only_a_conflict(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Breaks if a PR landing re-integrates every time master moves, or if a
+    conflicting PR is merged over instead of handed back for a refresh."""
+    pr_project(harness)
+    monkeypatch.setattr(github, "push_branch", lambda *a, **k: None)
+    monkeypatch.setattr(github, "remote_head", lambda root, branch: None)
+    monkeypatch.setattr(github, "pull_request_for_branch", lambda root, branch: None)
+    monkeypatch.setattr(github, "create_pull_request", lambda root, **kw: 7)
+    monkeypatch.setattr(github, "pull_request_advisory", lambda root, number: [])
+    monkeypatch.setattr(github, "delete_remote_branch", lambda root, branch: None)
+    monkeypatch.setattr(github, "hosted_check_state", lambda pull, name: "success")
+    monkeypatch.setattr(github, "check_rollup", lambda pull, required=(): "ready")
+    merges: list[tuple[int, str]] = []
+    monkeypatch.setattr(
+        github, "merge_pr", lambda root, number, sha: merges.append((number, sha))
+    )
+    mergeable = ["MERGEABLE"]
+
+    def pull(root: Path, number: int) -> dict[str, Any]:
+        merged = bool(merges)
+        return {
+            "number": number,
+            "state": "MERGED" if merged else "OPEN",
+            "headRefOid": SHA,
+            "mergeable": mergeable[0],
+            "statusCheckRollup": [],
+            "mergeCommit": {"oid": MERGED} if merged else None,
+        }
+
+    monkeypatch.setattr(github, "pull_request", pull)
+
+    run = prepared_run(harness, "fx-solo")
+    harness.git.remote_bases = [BASE, MOVED, MOVED, MOVED]
+    landed = harness.land(run["run_id"])
+    assert landed["landing"]["refreshes"] == 0
+    assert landed["acceptance"]["published"]["base_commit"] == BASE
+    assert harness.git.resets == []
+
+    merges.clear()
+    mergeable[0] = "CONFLICTING"
+    stored = manifest.load(harness.config, run["run_id"])
+    assert (
+        landing_module._publish(
+            harness.config,
+            harness.project,
+            stored,
+            Path(stored.landing["integration_worktree"]),
+            BASE,
+            SHA,
+            lambda seconds: None,
+            harness.beads,
+        )
+        is None
+    )
+    assert merges == []
+
+
 def test_the_checks_a_landing_waits_for_come_from_the_descriptor(
     harness: Harness,
 ) -> None:
