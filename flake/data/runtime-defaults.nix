@@ -404,7 +404,7 @@ rec {
       };
       agentctl-bulk = {
         IOAccounting = true;
-        CPUWeight = 100;
+        CPUWeight = 90;
         IOWeight = 100;
         MemoryHigh = "10G";
         MemoryMax = "14G";
