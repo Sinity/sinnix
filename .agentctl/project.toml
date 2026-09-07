@@ -27,6 +27,11 @@ backend = "codex"
 model = "gpt-5.6-luna"
 effort = "medium"
 
+[packets.review]
+backend = "codex"
+model = "gpt-5.6-luna"
+effort = "high"
+
 [operations.check]
 description = "Run default Sinnix checks"
 exec = ["check"]
