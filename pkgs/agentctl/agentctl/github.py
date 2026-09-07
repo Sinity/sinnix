@@ -111,27 +111,6 @@ def create_pull_request(
     return int(match.group(1))
 
 
-def required_checks(root: Path, base_branch: str) -> tuple[str, ...]:
-    """The base branch's required status contexts; none when unprotected."""
-    try:
-        value = gh_json(
-            [
-                "api",
-                f"repos/{{owner}}/{{repo}}/branches/{base_branch}/protection/required_status_checks/contexts",
-            ],
-            cwd=root,
-        )
-    except GithubError as error:
-        if "404" in str(error) or "not protected" in str(error).lower():
-            return ()
-        raise
-    return (
-        tuple(item for item in value if isinstance(item, str))
-        if isinstance(value, list)
-        else ()
-    )
-
-
 def _check_name(check: Mapping[str, Any]) -> str:
     return str(check.get("name") or check.get("context") or "")
 

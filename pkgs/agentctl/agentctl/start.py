@@ -8,6 +8,8 @@ from typing import Any, Mapping, Sequence
 
 from . import gitcmd, launch, pueue, results, worktrunk
 from .agents import (
+    LANDING_AGENT_GROUP,
+    LANDING_AGENT_PARALLELISM,
     PUSH_TIMEOUT_SECONDS,
     WORKTREE_STATE_DIR,
     binding,
@@ -128,6 +130,9 @@ def _prepare(
     packets = PromptConfig.from_project(project, shared_template=config.worker_contract)
     if run.harness == "queued":
         pueue.group_add(landing_group(project.project_id), 1)
+    # The landing's own agents queue here, whatever `pools apply` has reached
+    # the daemon: a landing must not depend on the `agent` pool being open.
+    pueue.group_add(LANDING_AGENT_GROUP, LANDING_AGENT_PARALLELISM)
     for index, worker in enumerate(run.workers):
         worker_id = worker["id"]
         if not worker.get("claimed"):
@@ -527,16 +532,15 @@ def result(
             )
     if value["candidate_sha"] == run.base_commit:
         verdicts = results.satisfied_beads([value])
-        if all(verdicts.get(bead_id) for bead_id in worker["beads"]):
-            # Nothing to commit because the wanted state already holds: the
-            # evidence is the deliverable and lands without a candidate.
-            value["kind"] = "verified"
-        else:
-            raise BatchRefusal(
-                "empty_candidate",
-                f"result names the base commit {run.base_commit[:12]} without "
-                "every criterion satisfied; nothing to land and nothing proven",
-            )
+        # Nothing was committed. When every criterion holds, the wanted state
+        # already did and the evidence is the deliverable; otherwise the worker
+        # ends without work to land. Either way the result is the record, and
+        # the run lands its remaining workers.
+        value["kind"] = (
+            "verified"
+            if all(verdicts.get(bead_id) for bead_id in worker["beads"])
+            else "no_op"
+        )
     if worktree:
         # Landing merges every worker branch onto the run's base; a candidate
         # that does not descend from it carries work from somewhere else.

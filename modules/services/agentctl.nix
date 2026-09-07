@@ -40,6 +40,9 @@ mkServiceModule {
     type = lib.types.attrsOf lib.types.ints.positive;
     default = {
       agent = 8;
+      # The agents a landing owns (integration, review): a pool of their own so
+      # a paused `agent` pool holds back new workers without stalling landings.
+      land-agent = 2;
       pytest = 1;
       pytest-quick = 2;
       bulk = 1;

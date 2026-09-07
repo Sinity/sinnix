@@ -308,6 +308,7 @@ in
           managedWork = userSlices.agentctl;
           poolSlices = lib.genAttrs [
             "agentctl-agent"
+            "agentctl-land-agent"
             "agentctl-pytest"
             "agentctl-pytest-quick"
             "agentctl-bulk"

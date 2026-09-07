@@ -1174,9 +1174,6 @@ def test_pr_policy_pushes_the_branch_waits_for_required_checks_and_merges_the_he
         lambda root, branch: calls.append(("delete", branch)),
     )
     monkeypatch.setattr(
-        github, "required_checks", lambda root, base: ("lint", "verify")
-    )
-    monkeypatch.setattr(
         github,
         "hosted_check_state",
         lambda pull, name: "success" if name == "verify" else "missing",
@@ -1348,18 +1345,14 @@ def test_manifest_is_written_once_and_updated_under_the_lock(harness: Harness) -
 def test_a_result_must_name_a_commit_that_descends_from_the_run_base(
     harness: Harness,
 ) -> None:
-    """Breaks if a worker may file work landing cannot merge onto the base: the
-    base itself (nothing committed) or a commit from an unrelated history."""
+    """Breaks if a worker may file work landing cannot merge onto the base: a
+    commit from an unrelated history."""
     run = harness.start("fx-solo")
     worker = run["workers"][0]
 
     filed = harness.file_result(run, "fx-solo")
     assert filed["result"]["candidate_sha"] == SHA
     assert (BASE, SHA) in harness.git.ancestry
-
-    harness.git.heads[worker["worktree"]] = BASE
-    with pytest.raises(BatchRefusal, match="empty_candidate"):
-        harness.file_result(run, "fx-solo", sha=BASE, unsatisfied={"fx-solo"})
 
     harness.git.heads[worker["worktree"]] = MOVED
     harness.git.off_base.add(MOVED)
@@ -1383,6 +1376,54 @@ def test_a_verified_result_on_the_base_lands_without_a_candidate(
     assert landed["acceptance"]["beads"]["fx-solo"]["state"] == "closed"
     assert harness.git.merges == [] and harness.git.pushes == []
     assert [item[0] for item in harness.beads.closed] == ["fx-solo"]
+
+
+def no_op_worker(harness: Harness, run: dict[str, Any], worker_id: str) -> None:
+    """File a result with nothing committed and a criterion left unsatisfied."""
+    worker = next(item for item in run["workers"] if item["id"] == worker_id)
+    harness.git.heads[worker["worktree"]] = BASE
+    harness.git.branches[worker["branch"]] = BASE
+    harness.pueue.succeed(worker["task_id"])
+    harness.file_result(run, worker_id, sha=BASE, unsatisfied=set(worker["beads"]))
+
+
+def test_a_worker_with_nothing_to_land_is_filed_and_its_siblings_still_land(
+    harness: Harness,
+) -> None:
+    """Breaks if a worker that committed nothing and proved nothing blocks its
+    whole run: the coordinator then has to edit the manifest by hand."""
+    run = harness.start("fx-lead", "fx-solo")
+    no_op_worker(harness, run, "fx-lead")
+    solo = run["workers"][1]
+    harness.pueue.succeed(solo["task_id"])
+    harness.file_result(run, "fx-solo")
+
+    landed = harness.land(run["run_id"])
+
+    stored = manifest.load(harness.config, run["run_id"])
+    assert stored.worker("fx-lead")["result"]["kind"] == "no_op"
+    # The no-op branch is not merged; the sibling's work is the candidate.
+    assert harness.git.merges == [solo["branch"]]
+    assert landed["acceptance"]["candidate_sha"] == SHA
+    assert landed["acceptance"]["beads"]["fx-solo"]["state"] == "closed"
+    assert landed["acceptance"]["beads"]["fx-lead"]["state"] == "open"
+    assert [item[0] for item in harness.beads.closed] == ["fx-solo"]
+
+
+def test_a_run_whose_every_worker_has_nothing_to_land_accepts_without_a_candidate(
+    harness: Harness,
+) -> None:
+    """Breaks if the last no-op worker leaves the run stuck on `empty_candidate`
+    with nothing a retry could change."""
+    run = harness.start("fx-solo")
+    no_op_worker(harness, run, "fx-solo")
+
+    landed = harness.land(run["run_id"])
+
+    assert landed["acceptance"]["published"]["kind"] == "no_op"
+    assert landed["acceptance"]["beads"]["fx-solo"]["state"] == "open"
+    assert harness.git.merges == [] and harness.git.pushes == []
+    assert harness.beads.closed == []
 
 
 def test_a_head_that_descends_from_the_filed_candidate_rebinds_the_result(
@@ -1866,6 +1907,74 @@ def test_a_required_check_never_reported_is_check_missing_after_ten_minutes(
     assert stored.landing["failure"]["code"] == "check_missing"
 
 
+def test_a_merged_pr_is_the_acceptance_when_its_check_never_reports(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Breaks if a landing whose PR the repository already merged still fails on
+    `check_missing`: the merge is the acceptance, and no runner will report."""
+    pr_project(harness)
+    clock = [0.0]
+    monkeypatch.setattr(landing_module.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(github, "push_branch", lambda *a, **k: None)
+    monkeypatch.setattr(github, "remote_head", lambda root, branch: None)
+    monkeypatch.setattr(
+        github,
+        "pull_request",
+        lambda root, number: {
+            "number": number,
+            "state": "MERGED",
+            "headRefOid": SHA,
+            "statusCheckRollup": [],
+            "mergeCommit": {"oid": MERGED},
+        },
+    )
+    monkeypatch.setattr(github, "pull_request_for_branch", lambda root, branch: None)
+    monkeypatch.setattr(github, "create_pull_request", lambda root, **kw: 7)
+    monkeypatch.setattr(github, "pull_request_advisory", lambda root, number: [])
+    monkeypatch.setattr(github, "delete_remote_branch", lambda root, branch: None)
+
+    def no_second_merge(*args: Any, **kwargs: Any) -> None:
+        pytest.fail("merge_pr must not run on an already merged PR")
+
+    monkeypatch.setattr(github, "merge_pr", no_second_merge)
+    run = prepared_run(harness, "fx-solo")
+
+    def sleep(seconds: float) -> None:
+        clock[0] += seconds
+
+    landed = batch.land(
+        harness.config,
+        harness.project,
+        run["run_id"],
+        beads=harness.beads,
+        sleep=sleep,
+    )
+
+    assert landed["acceptance"]["verify_run"] == {
+        "kind": "merged",
+        "check": "verify",
+        "pr": 7,
+        "candidate_sha": SHA,
+        "phase": "succeeded",
+        "merge_commit": MERGED,
+    }
+    assert landed["acceptance"]["published"]["merge_commit"] == MERGED
+    assert landed["acceptance"]["beads"]["fx-solo"]["state"] == "closed"
+
+
+def test_the_checks_a_landing_waits_for_come_from_the_descriptor(
+    harness: Harness,
+) -> None:
+    """Breaks if branch protection decides again: a required context no workflow
+    reports would then fail every landing with `check_missing`."""
+    operation_run = manifest.Run.from_dict(prepared_run(harness, "fx-solo"))
+    assert operation_run.verify_profile == "check"
+    assert landing_module._required_checks(harness.project, operation_run) == ()
+    pr_project(harness)
+    hosted_run = manifest.Run.from_dict(prepared_run(harness, "fx-lead"))
+    assert landing_module._required_checks(harness.project, hosted_run) == ("verify",)
+
+
 def test_an_already_merged_pr_on_the_candidate_is_accepted_without_reintegrating(
     harness: Harness, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2003,19 +2112,19 @@ def test_manifests_and_the_runs_directory_are_private(harness: Harness) -> None:
     assert path.stat().st_mode & 0o777 == 0o600
 
 
-def test_landing_agents_outrank_queued_workers(harness: Harness) -> None:
-    """Breaks if the reviewer is queued at worker priority and waits behind them."""
+def test_landing_agents_run_in_their_own_pool(harness: Harness) -> None:
+    """Breaks if a landing's agents queue in the `agent` pool, where a pause
+    meant to hold back new workers strands every landing in flight."""
     run = prepared_run(harness, "fx-lead", "fx-solo", unsatisfied={"fx-member"})
     landed = harness.land(run["run_id"])
     review = landed["landing"]["review_verdict"]
     added = {entry["task_id"]: entry for entry in harness.pueue.added}
-    assert added[review["job_id"]]["priority"] == 10
-    worker_priorities = {
-        entry["priority"]
-        for entry in harness.pueue.added
-        if ":worker:" in entry["label"]
-    }
-    assert worker_priorities == {0}
+    # `batch start` creates the pool, so a landing never waits on `pools apply`.
+    assert harness.pueue.groups["land-agent"] == 2
+    assert added[review["job_id"]]["group"] == "land-agent"
+    assert {
+        entry["group"] for entry in harness.pueue.added if ":worker:" in entry["label"]
+    } == {"agent"}
 
 
 def test_review_policy_none_lands_on_verification_and_says_so(harness: Harness) -> None:

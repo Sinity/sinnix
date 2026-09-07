@@ -163,28 +163,6 @@ def test_add_names_the_group_label_directory_and_dependencies(
     ]
 
 
-def test_add_passes_a_nonzero_priority_and_omits_zero(
-    stub_pueue: Path, tmp_path: Path
-) -> None:
-    """Breaks if a landing agent's priority is dropped, so it queues behind workers."""
-    pueue.add(
-        group="agent",
-        label="polylogue:review:run",
-        command=("agentctl-run", "input.json"),
-        working_directory=tmp_path,
-        priority=10,
-    )
-    pueue.add(
-        group="agent",
-        label="polylogue:worker:run",
-        command=("agentctl-run", "input.json"),
-        working_directory=tmp_path,
-    )
-    calls = _calls(stub_pueue)
-    assert calls[0][calls[0].index("--priority") + 1] == "10"
-    assert "--priority" not in calls[1]
-
-
 def test_add_stashed_holds_the_task_and_enqueue_releases_it(
     stub_pueue: Path, tmp_path: Path
 ) -> None:

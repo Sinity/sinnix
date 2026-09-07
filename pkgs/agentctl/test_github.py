@@ -169,21 +169,6 @@ def test_create_pull_request_returns_the_number_from_the_url(
         )
 
 
-def test_required_checks_are_empty_for_an_unprotected_branch(
-    recorded_gh: dict[str, Any], tmp_path: Path
-) -> None:
-    recorded_gh["script"].write_text(
-        json.dumps({"stdout": '["lint", "verify"]', "exit": 0})
-    )
-    assert github.required_checks(tmp_path, "master") == ("lint", "verify")
-    recorded_gh["script"].write_text(
-        json.dumps(
-            {"stdout": "", "stderr": "HTTP 404: Branch not protected", "exit": 1}
-        )
-    )
-    assert github.required_checks(tmp_path, "master") == ()
-
-
 def test_advisory_lists_reviews_and_comments_with_author_state_head_and_url(
     recorded_gh: dict[str, Any], tmp_path: Path
 ) -> None:

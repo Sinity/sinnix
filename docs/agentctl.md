@@ -20,7 +20,7 @@ command, the run manifest of a batch, and one operator screen.
 | Verb                                                                                                      | Does                                                                                                                                                                                                                                       |
 | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `project list \| get [p] \| operations [p]`                                                               | the configured descriptors (`/etc/sinnix/agentctl.json` lists the roots)                                                                                                                                                                   |
-| `job start [p] <op> [--workspace <path>] [--wait] [-- args…]`                                             | `pueue add` in the operation's pool, label `<p>:<op>`, running `agentctl-run <launch.json>`; extra arguments are appended to the declared `exec`                                                                                           |
+| `job start [p] <op> [--workspace <path>] [--wait] [-- args…]`                                             | `pueue add` in the operation's pool, label `<p>:<op>`, running `agentctl-run <launch.json>`; each argument after `--` is appended to the declared `exec` as its own word                                                                   |
 | `job fire [p] <op>`                                                                                       | what a schedule timer runs: `job start` on the main checkout, skipped while the same label is queued or running                                                                                                                            |
 | `job list [--project p] [--active] [--all]`                                                               | `pueue status --json` reduced to job rows, newest first, the newest 40 unless `--all`; the date shows on a task that started on another day                                                                                                |
 | `job get \| logs \| result \| cancel \| retry \| wait <id>`                                               | one task by pueue id; `logs` reads the bounded log, `result` the typed artifact, `cancel` drops a queued task or stops a running task's unit, `retry` is `pueue restart --in-place`                                                        |
@@ -142,8 +142,9 @@ real one, plus `AGENTCTL_CONFIG` set to the configuration file this process
 read, so the agentctl calls inside a task (`batch result`, `batch land`) see
 the same projects, state directory and event spool.
 
-Groups admit work: `agent:8 pytest:1 bulk:1 normal:2 interactive:4`, plus
-`<project>-land` of parallelism 1 per configured project, declared by
+Groups admit work: `agent:8 land-agent:2 pytest:1 pytest-quick:2 bulk:1
+normal:2 interactive:4`, plus `<project>-land` of parallelism 1 per
+configured project, declared by
 `sinnix.services.agentctl.pools` and carried in `/etc/sinnix/agentctl.json`.
 pueued keeps its groups in its own state, so `agentctl pools apply` writes
 that declaration into the daemon that is already running: it creates a
@@ -269,6 +270,11 @@ The environment carries `BEADS_ACTOR` set to the task label with `:`
 replaced by `-`; an agent runs until it finishes (the unit watchdog is a
 week), and a coordinator cancels it by hand.
 
+The integration and review agents a landing owns queue in the `land-agent`
+pool, not in `agent`: pausing `agent` holds back new worker dispatch without
+stranding a landing already in flight, and the landing task's own
+`<project>-land` slot is taken while it waits.
+
 Worker, resume and review units cannot publish or mutate tasks: their
 environment sets `remote.origin.pushurl=/nonexistent` and an empty
 `credential.helper` through `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_n`/
@@ -312,7 +318,10 @@ it refuses `landing_in_progress` while the recorded landing task is still
 queued or running.
 
 1. Refuse unless every worker task succeeded with a valid result, and
-   refuse a run that already has an acceptance record or was abandoned.
+   refuse a run that already has an acceptance record or was abandoned. A
+   worker whose result carries no commit (`kind` `verified` or `no_op`) is
+   left out of the integration; when no worker carries one the run accepts
+   on the results alone, with no candidate, verification or publication.
 2. Fetch the current publication base and prepare the integration worktree
    from it. Record `refreshed_base` and merge the worker branches in manifest
    order with `git merge --no-ff`. A conflict
@@ -328,7 +337,9 @@ queued or running.
    moved default branch is `publish_rejected` rather than refreshed.
 3. Verify: one job of the descriptor's `verify.candidate` operation in the
    integration worktree, or, when it is `hosted:<check>`, the PR is pushed
-   and that required check is awaited. The receipt is `verify_run`.
+   and that check is awaited. A PR the repository has already merged on the
+   candidate ends the wait: the merge is the acceptance, recorded as
+   `verify_run.kind = "merged"`. The receipt is `verify_run`.
 4. Review: one reviewer job (label `<p>:review:<run>`) on
    `git diff base..candidate` with the `review` agent definition and
    `judge.schema.json`; the verdict is written to `landing.review_verdict`
@@ -351,11 +362,13 @@ queued or running.
    with `--force-with-lease=<branch>:<base>`. `publish = "pr"`: create or
    reuse the PR by stored number (title: the leader bead's subject; body:
    each bead's title and one checkbox line per criterion from the worker
-   results), wait for the required checks on exactly `candidate_sha`, then
-   `gh pr merge --squash --match-head-commit <sha>`, read the merge commit
-   back and delete the remote integration branch. A required check GitHub
-   has not reported at all ten minutes after the wait began is
-   `check_missing`. A stored PR already merged on `candidate_sha` is the
+   results), wait on exactly `candidate_sha` for the check the descriptor
+   declares as `verify.candidate = "hosted:<check>"` (an operation profile
+   names none), then `gh pr merge --squash --match-head-commit <sha>`, read
+   the merge commit back and delete the remote integration branch. That
+   declared check unreported ten minutes after the wait began is
+   `check_missing`; a branch protection context the descriptor does not name
+   is GitHub's to enforce at the merge and never stops the landing. A stored PR already merged on `candidate_sha` is the
    publication: nothing is merged again. If the target moved, one refresh
    rebases the run on the new base and repeats from step 2; a second
    movement stops with `target_moved_twice`.
@@ -402,9 +415,9 @@ check failing). The codes:
 | `already_accepted`             | the run has an acceptance record; nothing runs again                                |
 | `ambiguous_run`                | the suffix names more than one run                                                  |
 | `candidate_mismatch`           | the worktree HEAD does not descend from the filed candidate, or the tree is dirty   |
-| `check_missing`                | a required PR check was not reported within ten minutes                             |
+| `check_missing`                | the check the descriptor declares was not reported within ten minutes               |
 | `checks_failed`                | a required PR check failed, or did not finish (`timed_out`)                         |
-| `empty_candidate`              | the candidate equals the base commit and not every criterion is satisfied           |
+| `empty_candidate`              | integrating the workers that carry commits produced no change on the base           |
 | `candidate_off_base`           | the candidate does not descend from the run base                                    |
 | `exists`                       | a manifest with this run id already exists                                          |
 | `foreign_beads`                | the result covers beads outside the worker                                          |
@@ -443,9 +456,11 @@ criterion marked `satisfied`, `unsatisfied` or `superseded` with evidence,
 `unresolved` findings, and `verification` receipts. A worktree head that
 descends from the filed `candidate_sha` with a clean tree rebinds the result
 to the head; a dirty tree or an unrelated head is `candidate_mismatch`. A
-`candidate_sha` equal to the run's base commit is a verified result when
-every criterion is satisfied (the bead closes from the evidence and a batch of
-only such results lands with no PR), else `empty_candidate`. A candidate that
+`candidate_sha` equal to the run's base commit carries no commit to land:
+`kind = "verified"` when every criterion is satisfied (the bead closes from
+the evidence), else `kind = "no_op"` (the bead stays open with the residual).
+Either way the result is filed, the worker is left out of the integration and
+its siblings land; a batch of only such results lands with no PR. A candidate that
 does not descend from the base is `candidate_off_base`; one covering a bead
 outside the worker is `foreign_beads`.
 It then reads `git diff --name-only <base>..<candidate>`: when the worker's
@@ -528,8 +543,7 @@ launch fails the launch with its name. `[workspace]` declares `root`,
 `focused`, `candidate` and `corpus` operations; `candidate` may be
 `hosted:<check>` for a required PR check), `publish` (`pr` or `master`) and
 `review` (`agent`, the default, queues one reviewer per landing; `none` lands
-on the candidate verification alone and records that no review ran). Landing
-agents queue at pueue priority 10 so they start ahead of workers.
+on the candidate verification alone and records that no review ran).
 Every named operation must be declared. `[packets]` declares `template`
 (default: the `worker_contract` path in `agentctl.json`), `atlas_dir`,
 `branch_prefix`, `[packets.model_policy.<name>]` (`backend`, `model`),

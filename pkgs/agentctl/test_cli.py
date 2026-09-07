@@ -431,6 +431,8 @@ def test_job_clean_daemon_era_removes_only_the_listed_subtrees_and_is_idempotent
 def test_job_start_passes_arguments_after_a_bare_double_dash(
     fake_pueue: FakePueue, cli_config: Config, tmp_path: Path
 ) -> None:
+    """Breaks if arguments are joined: several selected files must reach the
+    operation as several words, so one job runs the whole selection."""
     workspace = cli_config.project_roots[0]
     assert (
         cli.main(
@@ -442,7 +444,8 @@ def test_job_start_passes_arguments_after_a_bare_double_dash(
                 "--workspace",
                 str(workspace),
                 "--",
-                "x.py",
+                "a.py",
+                "b.py",
                 "-n",
                 "0",
             ]
@@ -450,7 +453,7 @@ def test_job_start_passes_arguments_after_a_bare_double_dash(
         == 0
     )
     launch_input = json.loads(Path(fake_pueue.added[0]["command"][1]).read_text())
-    assert tuple(launch_input["argv"])[-3:] == ("x.py", "-n", "0")
+    assert tuple(launch_input["argv"])[-4:] == ("a.py", "b.py", "-n", "0")
 
 
 def test_an_unknown_operation_is_a_refusal_and_a_key_error_is_not(
