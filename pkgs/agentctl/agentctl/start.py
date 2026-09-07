@@ -273,11 +273,14 @@ def _rollback(
                 beads.unclaim(bead_id, actor=run.actor)
             except BatchError:
                 pass
-        if worker.get("worktree"):
-            try:
+        # By branch, not by the recorded worktree: provisioning that failed
+        # between `wt` creating one and the manifest recording it would
+        # otherwise leave the worktree behind with nothing naming it.
+        try:
+            if worktrunk.worktrunk_find(project.root, worker["branch"]) is not None:
                 worktrunk.worktrunk_remove(project.root, worker["branch"], force=True)
-            except WorktrunkError:
-                pass
+        except WorktrunkError:
+            pass
     manifest_path(config, run_id).unlink(missing_ok=True)
     manifest_path(config, run_id).with_suffix(".lock").unlink(missing_ok=True)
 

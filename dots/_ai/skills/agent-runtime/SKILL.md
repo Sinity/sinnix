@@ -92,6 +92,9 @@ replaced by ->` through `wt switch --create` (the project's `wt.toml` hooks
 - `agentctl batch abandon <run> [--reason R]` unclaims the members, removes
   the worktrees holding no unpreserved work and marks the manifest
   abandoned; refused while the landing task runs.
+- `agentctl batch clean <project>` removes the worktrees of runs that are
+  over -- landed, abandoned, or with no manifest left -- keeping and naming
+  any that holds uncommitted or unmerged work. Run state, never age.
 - `agentctl batch resume <run> --worker <w>` queues a fresh agent into the
   worker's existing worktree with a resume packet (`.agentctl/resume-<n>.md`)
   that carries the original. Uncommitted work there belongs to the new agent.
