@@ -150,6 +150,43 @@ def test_merge_names_the_verified_head_and_refuses_a_moved_one(
         github.merge_pr(tmp_path, 12, sha)
 
 
+def test_a_branch_policy_refusal_is_merge_blocked_and_auto_merge_names_the_head(
+    recorded_gh: dict[str, Any], tmp_path: Path
+) -> None:
+    """Breaks if a protected branch's check refusal reads as a plain failure,
+    or if arming auto-merge could land a head other than the candidate."""
+    sha = "c" * 40
+    recorded_gh["script"].write_text(
+        json.dumps(
+            {
+                "stdout": "",
+                "stderr": 'GraphQL: Required status check "ci/circleci: quick-gate" is expected. (mergePullRequest)',
+                "exit": 1,
+            }
+        )
+    )
+    with pytest.raises(github.MergeBlocked):
+        github.merge_pr(tmp_path, 12, sha)
+    recorded_gh["script"].write_text(
+        json.dumps(
+            {
+                "stdout": "",
+                "stderr": "X Pull request #12 is not mergeable: the base branch policy prohibits the merge.",
+                "exit": 1,
+            }
+        )
+    )
+    with pytest.raises(github.MergeBlocked):
+        github.merge_pr(tmp_path, 12, sha)
+
+    recorded_gh["script"].write_text(json.dumps({"stdout": "", "exit": 0}))
+    github.arm_auto_merge(tmp_path, 12, sha)
+    assert (
+        _calls(recorded_gh["ledger"])[-1]
+        == f"pr merge 12 --squash --auto --match-head-commit {sha}"
+    )
+
+
 def test_create_pull_request_returns_the_number_from_the_url(
     recorded_gh: dict[str, Any], tmp_path: Path
 ) -> None:

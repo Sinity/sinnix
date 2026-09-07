@@ -218,6 +218,10 @@ def delete_remote_branch(root: Path, branch: str) -> None:
     )
 
 
+class MergeBlocked(GithubError):
+    """Branch protection refused the merge for a check the landing does not wait on."""
+
+
 def merge_pr(root: Path, number: int, sha: str) -> None:
     """Squash-merge the PR only while its head is still ``sha``."""
     try:
@@ -227,13 +231,32 @@ def merge_pr(root: Path, number: int, sha: str) -> None:
         )
     except GithubError as error:
         message = str(error)
-        if "head" in message.lower() and (
-            "match" in message.lower() or "mismatch" in message.lower()
-        ):
+        lowered = message.lower()
+        if "head" in lowered and ("match" in lowered or "mismatch" in lowered):
             raise GithubError(
                 f"PR #{number} head is no longer {sha[:12]}: {message}"
             ) from error
+        if "base branch policy" in lowered or "required status check" in lowered:
+            raise MergeBlocked(message) from error
         raise
+
+
+def arm_auto_merge(root: Path, number: int, sha: str) -> None:
+    """Let GitHub squash-merge the PR once branch protection is satisfied,
+    still only while its head is ``sha``."""
+    _run(
+        [
+            "gh",
+            "pr",
+            "merge",
+            str(number),
+            "--squash",
+            "--auto",
+            "--match-head-commit",
+            sha,
+        ],
+        cwd=root,
+    )
 
 
 def push_branch(

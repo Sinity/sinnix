@@ -737,11 +737,17 @@ def _publish(
     if not github.merge_commit(pull):
         try:
             github.merge_pr(project.root, number, candidate)
+        except github.MergeBlocked:
+            # Branch protection gates on a check this landing does not wait
+            # for; GitHub merges the head once that check reports.
+            github.arm_auto_merge(project.root, number, candidate)
+            pull = _await_auto_merge(project, number, candidate, sleep, deadline)
         except GithubError as error:
             if "no longer" in str(error):
                 raise BatchRefusal("head_moved", str(error)) from error
             raise
-        pull = github.pull_request(project.root, number) or {}
+        else:
+            pull = github.pull_request(project.root, number) or {}
     merged = github.merge_commit(pull)
     if merged is None or pull.get("headRefOid") != candidate:
         raise BatchRefusal(
@@ -759,6 +765,34 @@ def _publish(
     except GithubError as error:
         published["remote_branch"] = f"kept: {error}"
     return published
+
+
+def _await_auto_merge(
+    project: ProjectAdapter,
+    number: int,
+    candidate: str,
+    sleep: Callable[[float], None],
+    deadline: float,
+) -> Mapping[str, Any]:
+    """The PR once GitHub's auto-merge has landed ``candidate``."""
+    while True:
+        pull = github.pull_request(project.root, number) or {}
+        if pull.get("headRefOid") != candidate:
+            raise BatchRefusal(
+                "head_moved", f"PR #{number} head is no longer {candidate[:12]}"
+            )
+        if github.merge_commit(pull):
+            return pull
+        if github.check_rollup(pull) == "failed":
+            raise BatchRefusal(
+                "checks_failed", f"PR #{number} has a failing required check"
+            )
+        if not _wait_seconds(sleep, deadline):
+            raise BatchRefusal(
+                "checks_failed",
+                f"PR #{number} auto-merge did not complete",
+                timed_out=True,
+            )
 
 
 def _accept(
