@@ -60,7 +60,7 @@ def test_workspace_artifacts_must_be_relative(tmp_path: Path) -> None:
     )
 
     descriptor.write_text(
-        descriptor.read_text().replace('.cache/verify/*.json', '../escape')
+        descriptor.read_text().replace(".cache/verify/*.json", "../escape")
     )
     with pytest.raises(ProjectConfigError, match="retain_artifacts must be relative"):
         load_project_adapter(root)

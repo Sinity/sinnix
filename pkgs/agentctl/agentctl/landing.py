@@ -1160,7 +1160,9 @@ def _process_users(path: Path) -> list[str]:
         except OSError as error:
             if error.errno in {errno.ENOENT, errno.ESRCH}:
                 continue
-            raise BatchError(f"cannot inspect process {entry.name} cwd: {error}") from error
+            raise BatchError(
+                f"cannot inspect process {entry.name} cwd: {error}"
+            ) from error
         if _under(cwd, path):
             users.append(f"pid {entry.name} cwd {cwd}")
     return users
@@ -1244,7 +1246,9 @@ def _artifact_paths(path: Path, patterns: Sequence[str]) -> list[Path]:
             try:
                 mode = candidate.stat().st_mode
             except OSError as error:
-                raise BatchError(f"cannot read artifact {candidate}: {error}") from error
+                raise BatchError(
+                    f"cannot read artifact {candidate}: {error}"
+                ) from error
             if not stat.S_ISREG(mode):
                 raise BatchError(f"artifact is not a regular file: {candidate}")
             found[candidate.relative_to(path)] = candidate
@@ -1320,8 +1324,13 @@ def _recovery_ref(root: Path, run_id: str | None, path: Path, head: str) -> str:
     token = hashlib.sha256(str(path).encode()).hexdigest()[:16]
     ref = f"refs/agentctl/recovery/{run_id or 'orphan'}/{token}/{head}"
     existing = gitcmd.git(
-        root, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}",
-        ok_statuses=(0, 1), error=BatchError,
+        root,
+        "rev-parse",
+        "--verify",
+        "--quiet",
+        f"{ref}^{{commit}}",
+        ok_statuses=(0, 1),
+        error=BatchError,
     )
     if existing and existing != head:
         raise BatchError(f"recovery ref differs: {ref}")
@@ -1383,17 +1392,27 @@ def _drop_branch(
         try:
             head = _git(path, "rev-parse", "HEAD")
             branch_head = gitcmd.git(
-                project.root, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}^{{commit}}",
-                ok_statuses=(0, 1), error=BatchError,
+                project.root,
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                f"refs/heads/{branch}^{{commit}}",
+                ok_statuses=(0, 1),
+                error=BatchError,
             )
             if detached:
                 _recovery_ref(project.root, run_id, path, head)
             elif branch_head != head:
                 return "worktree kept; branch no longer names checkout HEAD"
             copied = _preserve_artifacts(
-                config, project, run_id, path, artifacts=artifacts if artifacts is not None else []
+                config,
+                project,
+                run_id,
+                path,
+                artifacts=artifacts if artifacts is not None else [],
             )
             if copied and run_id is not None:
+
                 def retain(document: dict[str, Any]) -> None:
                     replacements = dict(copied)
                     for artifact in document.get("artifacts", []):
@@ -1403,15 +1422,23 @@ def _drop_branch(
                             replacements[destination] = copied[source]
                     history = list(document.get("artifacts", []))
                     updated = _replace_paths(
-                        {key: value for key, value in document.items() if key != "artifacts"},
+                        {
+                            key: value
+                            for key, value in document.items()
+                            if key != "artifacts"
+                        },
                         replacements,
                     )
                     document.clear()
                     document.update(updated)
                     document["artifacts"] = [
                         *history,
-                        *({"source": source, "destination": destination} for source, destination in copied.items()),
+                        *(
+                            {"source": source, "destination": destination}
+                            for source, destination in copied.items()
+                        ),
                     ]
+
                 update(config, run_id, retain)
             if _dirty_paths(path):
                 return "worktree kept; uncommitted changes"
@@ -1419,8 +1446,13 @@ def _drop_branch(
                 return "worktree kept; detached checkout HEAD changed"
             if not detached:
                 branch_head = gitcmd.git(
-                    project.root, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}^{{commit}}",
-                    ok_statuses=(0, 1), error=BatchError,
+                    project.root,
+                    "rev-parse",
+                    "--verify",
+                    "--quiet",
+                    f"refs/heads/{branch}^{{commit}}",
+                    ok_statuses=(0, 1),
+                    error=BatchError,
                 )
                 if branch_head != _git(path, "rev-parse", "HEAD"):
                     return "worktree kept; branch no longer names checkout HEAD"
@@ -1470,7 +1502,11 @@ def _drop_worktrees(
     with project_locked(config, project.project_id):
         for branch, base, recorded_path in branches:
             kept = _drop_branch(
-                config, project, branch, base=base, recorded_path=recorded_path,
+                config,
+                project,
+                branch,
+                base=base,
+                recorded_path=recorded_path,
                 run_id=run.run_id,
             )
             if kept:
@@ -1567,7 +1603,9 @@ def clean(config: Config, project: ProjectAdapter) -> dict[str, Any]:
             )
             integration = owner.landing.get("integration_worktree")
             if integration:
-                targets.append((owner.landing["integration_branch"], owner, Path(integration)))
+                targets.append(
+                    (owner.landing["integration_branch"], owner, Path(integration))
+                )
         for tree in worktrunk.worktrunk_list(project.root):
             match = _BATCH_BRANCH.match(tree.branch or "")
             if tree.main or match is None:
@@ -1588,8 +1626,12 @@ def clean(config: Config, project: ProjectAdapter) -> dict[str, Any]:
             seen.add(key)
             copied: list[dict[str, str]] = []
             reason = _drop_branch(
-                config, project, branch, base=owner.base_commit if owner else default_base,
-                recorded_path=recorded_path, run_id=owner.run_id if owner else None,
+                config,
+                project,
+                branch,
+                base=owner.base_commit if owner else default_base,
+                recorded_path=recorded_path,
+                run_id=owner.run_id if owner else None,
                 artifacts=copied,
             )
             if reason:
