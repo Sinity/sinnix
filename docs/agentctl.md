@@ -559,7 +559,9 @@ launch fails the launch with its name. `[workspace]` declares `root`,
 `focused`, `candidate` and `corpus` operations; `candidate` may be
 `hosted:<check>` for a required PR check), `publish` (`pr` or `master`) and
 `review` (`agent`, the default, queues one reviewer per landing; `none` lands
-on the candidate verification alone and records that no review ran).
+on the candidate verification alone and records that no review ran), plus
+`retain_artifacts` (relative file globs copied and byte-verified into private
+run state before a terminal checkout is released).
 Every named operation must be declared. `[packets]` declares `template`
 (default: the `worker_contract` path in `agentctl.json`), `atlas_dir`,
 `branch_prefix`, `[packets.model_policy.<name>]` (`backend`, `model`),
