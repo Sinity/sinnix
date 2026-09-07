@@ -109,7 +109,10 @@ def build_parser() -> argparse.ArgumentParser:
         func=lambda _a: (print(json.dumps(build_steering(), indent=2)), 0)[1]
     )
 
-    repair = sub.add_parser("repair-events", help="repair a closed event day from device bytes, preserving the old file")
+    repair = sub.add_parser(
+        "repair-events",
+        help="repair a closed event day from device bytes, preserving the old file",
+    )
     repair.add_argument("--day", required=True)
     repair.add_argument("--source", type=Path, required=True)
     repair.add_argument("--expected-sha256", required=True)
@@ -126,5 +129,9 @@ def main(argv: list[str] | None = None) -> int:
 def _repair_events(args: argparse.Namespace) -> int:
     from .uploads import repair_event_day
 
-    print(json.dumps(repair_event_day(args.day, args.source, args.expected_sha256), indent=2))
+    print(
+        json.dumps(
+            repair_event_day(args.day, args.source, args.expected_sha256), indent=2
+        )
+    )
     return 0

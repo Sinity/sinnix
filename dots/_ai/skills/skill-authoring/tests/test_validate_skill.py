@@ -76,8 +76,7 @@ class ValidateSkillTests(unittest.TestCase):
         skill_file = self.root / "example"
         skill_file.mkdir()
         content = (
-            f"---\nname: example\ndescription: {description}\n---\n"
-            + "line\n" * 501
+            f"---\nname: example\ndescription: {description}\n---\n" + "line\n" * 501
         )
         (skill_file / "SKILL.md").write_text(content, encoding="utf-8")
 

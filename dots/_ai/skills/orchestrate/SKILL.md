@@ -25,11 +25,11 @@ The corpus runs once at the master boundary through the descriptor's
 
 ## Model selection
 
-| Assignment | Initial model | Effort |
-| --- | --- | --- |
-| Bounded supervision, evidence collection, settled implementation | `gpt-5.6-luna` | high |
-| Substantial implementation, investigation, candidate review | `gpt-5.6-terra` | high |
-| Unresolved architecture, design-critical implementation | `gpt-6-astra` | high |
+| Assignment                                                       | Initial model   | Effort |
+| ---------------------------------------------------------------- | --------------- | ------ |
+| Bounded supervision, evidence collection, settled implementation | `gpt-5.6-luna`  | high   |
+| Substantial implementation, investigation, candidate review      | `gpt-5.6-terra` | high   |
+| Unresolved architecture, design-critical implementation          | `gpt-6-astra`   | high   |
 
 These are starting assignments to revise from experience. Every dispatch names
 backend, model and effort explicitly; only forks inherit. Check the actual

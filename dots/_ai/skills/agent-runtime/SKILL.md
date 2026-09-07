@@ -50,6 +50,13 @@ did not succeed.
   the state subtrees no verb reads. Never by age.
 - **Never poll.** Every task's start and finish reaches
   `/realm/state/agentctl/events.jsonl`; watch `agentctl events tail --follow`.
+  Keep one watch per concern and retain its execution-session handle. In
+  `functions.exec`, forward the full result with
+  `text(await tools.exec_command({...}))`: `session_id` means the command
+  is still running. Resume that session with `write_stdin`; an outer
+  “Script completed” only describes the JavaScript call. When supervision
+  ends, terminate the owned command and verify its exit. On takeover,
+  inspect full argv, including `.agentctl-wrapped`, before creating a watch.
 - Declared operations may run for up to eight hours; agents run until they
   finish and are cancelled by hand.
 - Every long launch carries an evidence-based duration expectation and a
