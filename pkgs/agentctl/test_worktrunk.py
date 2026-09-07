@@ -7,9 +7,6 @@ from pathlib import Path
 
 import pytest
 from agentctl.worktrunk import (
-    LIST_SCHEMA_VERSION,
-    ChecksFacts,
-    PullFacts,
     Worktree,
     WorktrunkError,
     worktrunk_create,
@@ -46,41 +43,24 @@ def _commit(root: Path, message: str, *, allow_empty: bool = False) -> None:
     )
 
 
-def test_list_pins_its_schema_over_a_user_config_that_selects_another(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Anti-vacuity: a user config selecting schema 1 must not reach the adapter.
-
-    Schema 1 is a bare list with differently named fields, so reading it would
-    make every access below silently wrong. The config here selects it
-    explicitly, and the raw probe proves the config is in force, so dropping
-    the per-call pin turns this red on any machine.
-    """
-    home = tmp_path / "home"
-    (home / ".config" / "worktrunk").mkdir(parents=True)
-    (home / ".config" / "worktrunk" / "config.toml").write_text(
-        "[list]\njson-schema = 1\n"
-    )
-    monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(home / ".config"))
-    root = _repository(tmp_path / "repo")
-
-    unpinned = subprocess.run(
-        ["wt", "-C", str(root), "list", "--format=json"],
-        capture_output=True,
-        text=True,
+def _worktree(root: Path, branch: str, path: Path) -> None:
+    subprocess.run(
+        ["git", "-C", str(root), "worktree", "add", "-q", "-b", branch, str(path)],
         check=True,
     )
-    assert unpinned.stdout.lstrip().startswith("["), (
-        "the fixture config must actually put wt on schema 1"
-    )
 
-    trees = worktrunk_list(root)
 
-    assert LIST_SCHEMA_VERSION == 2
-    assert [tree.branch for tree in trees] == ["master"]
-    assert trees[0].main is True
-    assert trees[0].path == root
+def _spy(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
+    """Every argv this process runs from here on."""
+    calls: list[list[str]] = []
+    original = subprocess.run
+
+    def record(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(list(argv))
+        return original(argv, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", record)
+    return calls
 
 
 def test_create_places_the_worktree_at_the_requested_path_and_remove_reverses_it(
@@ -94,7 +74,6 @@ def test_create_places_the_worktree_at_the_requested_path_and_remove_reverses_it
     assert created.path == target
     assert created.branch == "feature/lane"
     assert target.is_dir()
-    assert worktrunk_find(root, "feature/lane") is not None
 
     worktrunk_remove(root, "feature/lane")
 
@@ -102,129 +81,76 @@ def test_create_places_the_worktree_at_the_requested_path_and_remove_reverses_it
     assert worktrunk_find(root, "feature/lane") is None
 
 
-def test_an_unpublished_branch_is_not_integrated(tmp_path: Path) -> None:
-    root = _repository(tmp_path / "repo")
-    target = tmp_path / "worktrees" / "lane"
-    worktrunk_create(root, "feature/lane", path=target, base="master")
-    (target / "file.txt").write_text("content\n")
-    subprocess.run(["git", "-C", str(target), "add", "file.txt"], check=True)
-    _commit(target, "work")
-
-    tree = worktrunk_find(root, "feature/lane")
-
-    assert tree is not None
-    assert tree.integrated is False
-    assert tree.dirty is False
-
-
 def test_a_missing_repository_is_a_typed_refusal(tmp_path: Path) -> None:
     with pytest.raises(WorktrunkError):
         worktrunk_list(tmp_path / "absent")
 
 
-# Recorded from the live listing that broke the first `workspace create`: a
-# detached worktree publishes `"branch": null` beside a valid path.
-DETACHED_ITEM = {
-    "branch": None,
-    "head": {"sha": "dcc57853aedd35fb76cb18665016cfa51eac0cac"},
-    "worktree": {
-        "path": "/realm/worktrees/packet-polylogue-f16gi",
-        "main": False,
-        "detached": True,
-        "changes": {"modified": True},
-    },
-    "display": {"state": "detached"},
-}
+def test_the_listing_reads_the_registry_and_marks_gits_own_checkout(
+    tmp_path: Path,
+) -> None:
+    root = _repository(tmp_path / "repo")
+    _worktree(root, "feature/lane", tmp_path / "lane")
 
-BRANCH_ONLY_ITEM = {
-    "branch": "feature/no-worktree",
-    "head": {"sha": "3b56bb02205963d7edea903e0abfca8f02b6897a"},
-    "display": {"state": "ahead"},
-}
+    listed = worktrunk_list(root)
+
+    assert [(tree.branch, tree.path, tree.main) for tree in listed] == [
+        ("master", root, True),
+        ("feature/lane", tmp_path / "lane", False),
+    ]
 
 
-def test_a_detached_or_branch_only_item_is_read_not_refused() -> None:
-    """Anti-vacuity: refusing either one failed the whole 84-item listing.
-
-    One detached worktree anywhere in the repository made every workspace
-    create, drop, and integrated check raise before doing anything.
-    """
-    detached = Worktree.from_item(DETACHED_ITEM)
-    assert detached.branch is None
-    assert detached.path == Path("/realm/worktrees/packet-polylogue-f16gi")
-    assert detached.dirty is True
-
-    branch_only = Worktree.from_item(BRANCH_ONLY_ITEM)
-    assert branch_only.branch == "feature/no-worktree"
-    assert branch_only.path is None
-    assert branch_only.dirty is False
-
-
-def test_an_item_with_neither_branch_nor_path_is_a_typed_refusal() -> None:
-    with pytest.raises(WorktrunkError):
-        Worktree.from_item({"display": {"state": "ahead"}})
-
-
-FULL_ITEM = {
-    "branch": "feature/reviewed",
-    "head": {"sha": "3b56bb02205963d7edea903e0abfca8f02b6897a"},
-    "display": {"state": "ahead"},
-    "pr": {
-        "number": 4501,
-        "url": "https://github.com/o/r/pull/4501",
-        "mergeable": True,
-        "repo": "o/r",
-    },
-    "checks": {"status": "passed", "source": "hosted", "stale": False},
-}
-
-
-def test_a_full_item_parses_pr_and_checks() -> None:
-    tree = Worktree.from_item(FULL_ITEM)
-    assert tree.pr == PullFacts(
-        number=4501, url="https://github.com/o/r/pull/4501", mergeable=True, repo="o/r"
-    )
-    assert tree.checks == ChecksFacts(status="passed", source="hosted", stale=False)
-
-
-def test_an_item_without_pr_or_checks_leaves_them_absent() -> None:
-    tree = Worktree.from_item(BRANCH_ONLY_ITEM)
-    assert tree.pr is None
-    assert tree.checks is None
-
-
-def test_a_malformed_pr_or_checks_value_is_read_as_absent() -> None:
-    """Defensive parsing: a shape wt has not published yet must not raise."""
-    tree = Worktree.from_item(
-        {**FULL_ITEM, "pr": {"number": "not-an-int"}, "checks": "not-a-mapping"}
-    )
-    assert tree.pr is None
-    assert tree.checks is None
-
-
-def test_worktrunk_list_only_asks_for_full_when_requested(
+def test_a_lookup_over_a_hundred_worktrees_statuses_none_of_them(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    calls: list[list[str]] = []
-    original = subprocess.run
-
-    def spy(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-        calls.append(list(argv))
-        return original(argv, **kwargs)
-
-    monkeypatch.setattr(subprocess, "run", spy)
+    """Anti-vacuity: the `wt list` this replaced ran three `git status` per
+    worktree, one of which refreshes that worktree's index. Measured over 101
+    worktrees it was 303 status processes for a single branch lookup, and over
+    the 169 live ones it saturated the disk for minutes.
+    """
     root = _repository(tmp_path / "repo")
+    for index in range(100):
+        _worktree(root, f"unrelated/{index}", tmp_path / f"w{index}")
+    calls = _spy(monkeypatch)
 
-    worktrunk_list(root)
-    assert not any("--full" in call for call in calls)
-    calls.clear()
+    found = worktrunk_find(root, "unrelated/42")
 
-    worktrunk_list(root, full=True)
-    assert any("--full" in call for call in calls)
+    assert found is not None and found.path == tmp_path / "w42"
+    assert not [call for call in calls if "status" in call]
+    assert not [call for call in calls if Path(call[0]).name == "wt"]
 
 
-def test_find_skips_items_that_carry_no_branch(tmp_path: Path) -> None:
-    """A detached worktree must not shadow or break a lookup by branch."""
+def test_a_branch_with_no_worktree_is_found_without_a_path(tmp_path: Path) -> None:
+    """A caller about to create a worktree must tell this from an absent branch."""
+    root = _repository(tmp_path / "repo")
+    subprocess.run(["git", "-C", str(root), "branch", "feature/idle"], check=True)
+
+    assert worktrunk_find(root, "feature/idle") == Worktree(
+        branch="feature/idle", path=None
+    )
+    assert worktrunk_find(root, "feature/never-existed") is None
+
+
+def test_a_worktree_whose_directory_is_gone_keeps_its_registered_path(
+    tmp_path: Path,
+) -> None:
+    """The landing unregisters such a branch before recreating it, so the
+    lookup must publish the path rather than drop the entry."""
+    root = _repository(tmp_path / "repo")
+    _worktree(root, "feature/lane", tmp_path / "lane")
+    subprocess.run(["rm", "-rf", str(tmp_path / "lane")], check=True)
+
+    found = worktrunk_find(root, "feature/lane")
+
+    assert found is not None
+    assert found.path == tmp_path / "lane"
+    assert not found.path.is_dir()
+
+
+def test_a_detached_worktree_does_not_answer_for_its_former_branch(
+    tmp_path: Path,
+) -> None:
+    """A worktree that carries no branch must not shadow or break a lookup."""
     root = _repository(tmp_path / "repo")
     target = tmp_path / "worktrees" / "lane"
     worktrunk_create(root, "feature/lane", path=target, base="master")
@@ -235,8 +161,12 @@ def test_find_skips_items_that_carry_no_branch(tmp_path: Path) -> None:
     assert any(tree.branch is None for tree in listed), (
         "the fixture must actually produce a branchless item"
     )
-    assert worktrunk_find(root, "feature/lane") is None
-    assert worktrunk_find(root, "master") is not None
+    assert worktrunk_find(root, "feature/lane") == Worktree(
+        branch="feature/lane", path=None
+    )
+    assert worktrunk_find(root, "master") == Worktree(
+        branch="master", path=root, main=True
+    )
 
 
 def _fake_wt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, body: str) -> Path:

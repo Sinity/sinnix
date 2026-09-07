@@ -6,7 +6,7 @@ external tools own the state it reads and writes:
 | Authority | Owns                                                               | Read through                       |
 | --------- | ------------------------------------------------------------------ | ---------------------------------- |
 | pueue     | the queue, its groups (pools), every process, its terminal result  | `pueue status --json`, `pueue log` |
-| worktrunk | worktree creation, provisioning (`.config/wt.toml` hooks), removal | `wt list --format=json` (schema 2) |
+| worktrunk | worktree creation, provisioning (`.config/wt.toml` hooks), removal | `git worktree list --porcelain`    |
 | GitHub    | PRs, review, required checks, merge                                | `gh pr list/view/create/merge`     |
 | Beads     | tasks, claims                                                      | `bd ready/show/claim/close --json` |
 | systemd   | only the calendar wake-up a declared `schedule` needs              | transient user timers              |
@@ -27,6 +27,7 @@ command, the run manifest of a batch, and one operator screen.
 | `job clean <id> \| --all-terminal \| --daemon-era`                                                        | delete a terminal task's launch input, log, result, outcome and cancel marker, then `pueue remove`; a task pueue has already forgotten is found by its launch input; `--daemon-era` deletes the state subtrees no verb reads; never by age |
 | `batch start [p] <bead>… [--worker a,b]… [--workers queued\|external] [--backend B --model M --effort E]` | validate the members, write the run manifest, claim the beads, create one worktree per worker, queue the workers (or write their packets) and the landing task behind them                                                                 |
 | `batch land <run>`                                                                                        | the landing task's body: integrate, verify, review, publish, record acceptance, close satisfied beads and release the claim on the rest, remove worktrees; re-runnable                                                                     |
+| `batch clean [p]`                                                                                         | remove the worktrees of runs that are over -- landed, abandoned, or with no manifest left -- keeping any that holds uncommitted or unmerged work; never by age                                                                             |
 | `batch status <run>` / `batch list [p]`                                                                   | the manifest joined with pueue task state and the landing PR; `status` prints each worker's prompt path and, for an external worker without a result, the exact `batch result` line to run                                                 |
 | `batch result <run> <worker> <result.json>`                                                               | file a schema-validated result for a worker another harness ran; releases the stashed landing task once every worker has one                                                                                                               |
 | `batch scope-correct <run> <worker> <candidate> --authorize <bead>=<glob>…`                               | replace a malformed stored worker scope with candidate-bound, per-bead authority while retaining the correction history                                                                                                                    |
@@ -375,10 +376,14 @@ queued or running.
 6. Accept: write the acceptance record, `bd close` each bead whose criteria
    are all satisfied or superseded in its worker's result with the landed
    commit (the merge commit under `pr`, the candidate under `master`),
-   `bd comment` the rest with the residual, then `wt remove` the worker
-   worktrees. A cleanup failure leaves the beads closed and a named
-   residual; a close failure leaves worktrees. A landing whose stored PR is
-   merged on the stored candidate goes straight to this step.
+   `bd comment` the rest with the residual, then `wt remove` the worker and
+   integration worktrees. One is kept only when work would go with it -- an
+   unclean tree, or a HEAD no other ref holds -- and is named in the
+   acceptance residual with the reason; a bead left open keeps the bead open,
+   not the worktree, because its commits are in the published candidate. A
+   cleanup failure is a named residual and leaves the beads closed. A landing
+   whose stored PR is merged on the stored candidate goes straight to this
+   step.
 
 On retry, a clean integration HEAD and its successful verification/review are
 reused only when `inputs_digest` matches the current publication base, worker
@@ -401,6 +406,16 @@ worktree whose tree is clean and whose HEAD is the base or is held by
 another ref (`wt remove` deletes the branch, so a commit only on it would
 be lost), and records `abandoned: {reason, at, residual}`; kept worktrees
 and failed unclaims are the residual. The members can then start again.
+
+### Clean
+
+`batch clean [p]` removes the worktrees the project's finished runs left
+behind. A worktree is a candidate only when its branch is `batch/<run>/…` and
+that run no longer holds its beads: landed, abandoned, or with no manifest
+left at all. It is removed on the same rule as an abandon -- clean tree, and
+a HEAD that is the base or is held by another ref -- and one that is kept is
+printed with the reason. Run state, never age: a live run's worktrees and an
+operator's own are untouched.
 
 ### Refusals
 
@@ -579,7 +594,6 @@ unattended batches declares a scheduled operation whose `exec` runs
 | `limits.CALL_TIMEOUT_SECONDS` (60)                           | arbitrary bound (a minute distinguishes a wedged daemon from a slow one)  | max time for one `pueue`, `wt`, `gh`, `bd` or local `git` call       |
 | `limits.SYSTEMCTL_TIMEOUT_SECONDS` (30)                      | arbitrary bound                                                           | timeout for one `systemctl`/`systemd-run` call                       |
 | `limits.SHORT_ID` (8)                                        | arbitrary bound                                                           | hex characters shown of a run id's suffix, a commit, a reference     |
-| `worktrunk.LIST_SCHEMA_VERSION` (2)                          | external tool's contract                                                  | the `wt list` JSON schema this module parses                         |
 | `worktrunk.GIT_SETTLE_SECONDS` (30)                          | arbitrary bound                                                           | how long a mutation waits for Git to release the repository index    |
 | `launch.WAIT_SLICE_SECONDS` (5)                              | arbitrary bound                                                           | how long a wait blocks on one task id before re-reading the queue    |
 | `run.MAX_LOG_BYTES` / `MAX_RESULT_BYTES` (64,000)            | arbitrary bound                                                           | caps on the captured log and typed result                            |

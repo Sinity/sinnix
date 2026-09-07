@@ -6,7 +6,7 @@ reports.
 Output: a read verb (``project``, ``job list|get|logs|result|wait``,
 ``batch status|list``, ``view``, ``events tail``) prints a table in local
 time with an age column, or the document with ``--json``. A write verb
-(``job start|fire|cancel|retry|clean``, ``batch start|land|abandon|result|resume``,
+(``job start|fire|cancel|retry|clean``, ``batch start|land|abandon|clean|result|resume``,
 ``schedule apply``, ``pools apply``, ``backpressure tick``) prints the
 document as JSON on stdout and one summary line on stderr. Tables show a
 run's 8-character suffix and 8 characters of a commit; ``--full`` prints
@@ -259,6 +259,15 @@ def parser() -> argparse.ArgumentParser:
     batch_abandon.add_argument("--reason", default="", help="recorded in the manifest")
     _project_option(batch_abandon)
     _output_arguments(batch_abandon)
+    batch_clean = batch_verbs.add_parser(
+        "clean",
+        help="remove the worktrees of runs that are over (never by age)",
+    )
+    batch_clean.add_argument(
+        "selector", nargs="?", metavar="project", help=PROJECT_HELP
+    )
+    _project_option(batch_clean)
+    _output_arguments(batch_clean)
     batch_list = batch_verbs.add_parser(
         "list", help="every run of a project with its stage"
     )
@@ -538,6 +547,16 @@ def _batch(arguments: argparse.Namespace, config: Config, out: Output) -> int:
             abandoned,
             f"abandoned {out.run(run_id)}"
             + (f"\nresidual: {'; '.join(residual)}" if residual else ""),
+        )
+        return EXIT_OK
+    if verb == "clean":
+        project = _select_project(config, arguments.project, arguments.selector)
+        cleaned = batch.clean(config, project)
+        kept = [f"{row['branch']}: {row['reason']}" for row in cleaned["kept"]]
+        out.write(
+            cleaned,
+            f"removed {len(cleaned['removed'])} worktree(s)"
+            + (f"\nkept: {'; '.join(kept)}" if kept else ""),
         )
         return EXIT_OK
     if verb == "list":
