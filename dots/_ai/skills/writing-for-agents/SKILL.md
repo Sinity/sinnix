@@ -8,13 +8,15 @@ description: Write or revise skills, CLAUDE.md/AGENTS.md, memory files, and agen
 Reference for any document an agent consumes. The packaging differs (skill,
 CLAUDE.md, memory file, reference); the writing does not: the same levers make
 the agent take the same process every run. These documents are
-live infrastructure — dots-propagated instantly, loaded into every session —
-so every line has a per-session token cost and a drift risk.
+live infrastructure. Resolve installed files to their owning sources: live
+links expose edits immediately, while copied/generated configuration and skill
+roster changes require activation. Already-loaded context does not necessarily
+refresh. Skill descriptions are always loaded; bodies load when routed.
 
 ## Context pointers
 
 A **pointer** is an in-context reference to out-of-context material: a skill
-description, a CLAUDE.md line naming a doc, a `[[memory]]` link. The pointer's
+description, a CLAUDE.md line naming a doc, or a link to a memory file. The pointer's
 wording — not its target — decides whether the agent ever reaches the
 material. A load-bearing target behind weak wording is a variance bug:
 sharpen the wording first; inline the material only if sharpening fails.
@@ -110,8 +112,9 @@ project.toml`. A document restating them is a cache that goes stale into
 - Skills follow [[skill-authoring]] mechanics (frontmatter, validator,
   forward-probe routing tests). This skill owns the prose craft; that one
   owns the lifecycle.
-- Memory files: one fact per file, one-line index entry in MEMORY.md, link
-  liberally with `[[name]]`; archive superseded eras rather than deleting.
+- Memory files: one fact per file under the project memory directory, with one
+  index entry in `MEMORY.md`. Prefer Markdown links to exact filenames over
+  ambiguous wiki names; archive superseded eras rather than deleting.
 - Bead prose is agent-consumed too: titles name the artifact or behavior,
   never the ritual (see [[bead-authoring]]).
 - When editing any always-loaded file, state in the change what got SHORTER.

@@ -1,255 +1,150 @@
 # Sinity Environment Contract
 
-Stable cross-project operating rules. Machine inventory, project status, job
-state, and task queues are queryable (`agentctl`, project MCPs); do not
-duplicate them here. Project semantics live in each repository's `CLAUDE.md`.
+Cross-project rules. Repository semantics live in its `CLAUDE.md`;
+`AGENTS.md` is an alias. Query runtime and task state from their owners.
 
-## Working stance
+## Work and authority
 
-- Be a finisher. Carry work to a verified done-state unless a concrete blocker
-  remains; name the blocker and what would change it, or proceed.
-- **There is no end of session.** The harness compacts and continues, so "this
-  is a long session", "late in the session", or "a big change to start now" are
-  not reasons and must never appear in a decision. A task that is worth doing
-  is worth starting on the turn you identify it. Filing a bead instead of doing
-  the work is right only when someone else must decide or the evidence is
-  elsewhere — never because the work looks large from here. Context budget is
-  the real constraint, it is checkable, and it survives compaction.
-- A concerning discovery is the next work item, not a stopping point. Check the
-  fact that decides the question, not a proxy for it. Escalate only for
-  genuinely irreversible-and-ambiguous steps, missing authority/consent, or
-  evidence that does not exist on this machine.
-- Preserve intent; never substitute a smaller, safer, or more familiar product
-  decision. Prefer one canonical route: when a replacement is established,
-  remove the retired route's commands, wrappers, docs, and tests in the same
-  change.
-- Unfinished is not obsolete. Deleting an apparently unused path needs positive
-  evidence of abandonment (shipped replacement, recorded decision, explicit
-  retirement) — inspect history, tasks, and design docs first; otherwise
-  complete it or file the completion.
-- Work evidence-first: inspect source, live state, history, and recorded
-  results rather than extending an assumption. Separate observed fact from
-  inference; name what would change an uncertain conclusion.
+- Carry authorized work to a verified result. Compaction is a continuation,
+  not a deadline or a reason to defer substantial work.
+- Preserve the requested outcome. State scope and exclusions for multi-step
+  work; investigate discoveries that affect it, and record unrelated work
+  without silently expanding the task.
+- Check the evidence that decides the question. Separate observed facts,
+  inferences, and unverified claims. Name the missing evidence when blocked.
+- A request to inspect, diagnose, or advise authorizes relevant read-only
+  checks. A request to improve or implement authorizes scoped changes and
+  normal verification. Ask when authority, irreversible consequences, or the
+  intended outcome is genuinely ambiguous.
+- Unfinished code is not obsolete. Establish a shipped replacement, recorded
+  retirement, or explicit authorization before deleting it. When replacing a
+  route, account for its callers, commands, docs, and tests.
+- Preserve unrelated edits. Before destructive recovery, resolve exact
+  targets, preserve recoverable evidence, and state the intended action.
 
-## Scope, batching, communication
+## Communication and durable text
 
-- On multi-step requests, state the understood scope and exclusions, then
-  proceed. Batch related edits; diagnose the whole failure shape before fixing
-  one error at a time. Don't expand scope opportunistically — record follow-ups.
-- Report changed files, exact verification commands, and residual risk. Never
-  claim a broad invariant from a narrow check.
-- Don't truncate command output by default (`| tail`, `| grep -c`); let it
-  print, or capture to a file and read deliberately, with a stated reason.
-  A pipeline exits with its LAST command's status, so a verification piped
-  into `tail` reports success whatever it found. Redirect to a file and read
-  the file; never read a verdict through a pipe.
-- `pkill -f`/`pgrep -f` match the invoking shell's own command line: if the
-  pattern's literal text appears anywhere else in the same compound command
-  (a relaunch, a grep), you kill your own shell (exit 144). Issue `pkill -f`
-  as a standalone command with one character bracketed (`'app[.]py'`).
-- Load the `writing-style` skill for human-facing prose (issues, PRs, commits,
-  docs, chat).
+Load `writing-style` for human-facing prose and `writing-for-agents` when
+editing instructions or memory.
 
-### Say less — especially in artifacts
+- Report the outcome, changed files, exact verification, and residual risk.
+  Keep progress updates short and decision-relevant.
+- Write each fact once. Comments explain constraints; docs describe current
+  behavior; Beads carry problems, evidence, decisions, and wanted outcomes.
+  Put incident history in its task, not in always-loaded instructions.
+- Use ordinary language. Introduce a new term only when it removes genuine
+  ambiguity, and define it where used.
+- Keep always-loaded instructions small. Put procedures in skills and facts
+  discoverable from commands in their owning tools. Remove superseded advice
+  when adding its replacement.
+- Read command exit status directly. For large output, capture it and inspect
+  deliberately; a pipeline's final status does not prove an earlier check
+  passed. Do not pipe verification through `tail` or a summary filter.
 
-Endemic failure: narrating instead of stating. Worst in durable text (code
-comments, CLAUDE.md, contracts, bead descriptions, PR bodies), where every
-future reader pays the cost.
+## Filesystem and private data
 
-- **Comments state constraints, not history.** Why this must hold, or a
-  non-obvious invariant. Never what happened, who found it, when, or how many
-  attempts it took. `# 2026-08-26: caught after two lanes both...` is noise.
-- **Docs and contracts are reference, not retrospective.** Say what to do and
-  what is true. Incident stories belong in the bead or the retro, cited by ID
-  if needed at all.
-- **Beads: problem, evidence, wanted outcome.** Reproduction over narration.
-  No "MEASURED TRUTH" preambles, no session storytelling, no restating the
-  same finding in three registers.
-- **PR bodies: what changed, why it is correct, residual risk.** Not the
-  review's plot.
-- **One statement per fact**, everywhere. Do not restate a conclusion in a
-  summary line under it.
-- **A fix leaves no scar.** Once a mistake is corrected, the correction is the
-  only thing worth writing: state what is true now. "Dispatch is a verb" —
-  never "a verb, not a script", never a warning against the retired route,
-  never a dated note about who got it wrong. Naming the wrong path keeps it
-  alive in every future reader's context and half-reads as an instruction.
-  Guardrails against genuine harm are the exception, and they are short.
-- In chat: answer, don't preface; report outcomes, not journeys; no
-  self-congratulation ("damning", "textbook", "earned its keep").
+Host: `sinnix-prime`. Root storage is wear-limited; use `/realm` for heavy work.
 
-Write it once, in the shortest form that survives without you.
+- `/realm/project/`: active repositories.
+- `/realm/data/`: canonical personal data. Read `/realm/data/INVENTORY.md`;
+  mutations go through its owning tools.
+- `/realm/state/`: live service state and external Beads databases.
+- `/realm/tmp/work/`: private scratch output, aged after 30 days.
+  `/realm/worktrees/`: isolated checkouts and compile-heavy work.
+- `/tmp` is small tmpfs. `TMPDIR` is managed; do not invent heavy work roots
+  there. Home is rebuilt by Home Manager; edit the declared source of managed
+  files. Query `xdg-user-dir` for user-facing download/document locations.
 
-### Don't coin vocabulary
+Treat tracked files, commits, task exports, CI logs, and publication text as
+public. Never put secrets, captures, transcripts, personal databases, or
+generated private analyses in them. Synthetic fixtures stay neutral.
 
-These documents are agent-authored, so invented terms accrete: a phrase gets
-used twice, then cited, then treated as canonical, and every later reader pays
-to decode it. Use ordinary words.
+## Runtime ownership
 
-- Before naming a concept, check whether plain English already says it. "The
-  publication queue is invisible" beats coining a term for it.
-- A new term earns its place only if it names something real that is genuinely
-  awkward to say otherwise, AND it is defined where it is first used. Otherwise
-  write the idea out.
-- Never define a term in one document and use it undefined in another.
-- Domain words with outside meaning (worktree, squash-merge, cgroup,
-  idempotent, fail-closed) are not jargon — use them freely.
-- Deleting a coined term is not a loss of precision if the sentence still says
-  the same thing in plain words. It usually does.
+Load `agent-runtime` before nontrivial job/worktree recovery and `orchestrate`
+before parallel agent work. Consult `agentctl --help` for current verbs.
 
-## Machine and filesystem orientation
-
-Host `sinnix-prime`: i7-13700K, RTX 3080, 32 GB, NixOS unstable. Root SATA SSD
-is wear-limited — no gratuitous writes; NVMe is `/realm`.
-
-- `/realm/project/` — active repos (sinnix, polylogue, sinex, sinity-lynchpin…)
-- `/realm/data/` — canonical personal data lake (read for evidence; write only
-  through owning tools; see `/realm/data/INVENTORY.md`)
-- `/realm/state/` — live service state (polylogue archive, external task DBs
-  under `/realm/state/tasks/<project>`)
-- `/realm/tmp/work/` — throwaway analysis output (aged 30d); never heavy work
-  in `/tmp` (small tmpfs). `/realm/worktrees/` — compile-heavy checkouts.
-  `TMPDIR` is `/realm/tmp/<user>`, swept of unheld `nix-shell.*` trees by a
-  user timer.
-- Downloads land in `/realm/inbox/download`; query freedesktop dirs with
-  `xdg-user-dir`, don't assume `~/Downloads`.
-- Home is impermanent (rebuilt each boot from `/persist` + Home Manager).
-
-Rebuild sinnix ONLY via its devshell wrappers (`switch` / `boot` / `test-vm`,
-or `cd /realm/project/sinnix && nix develop --command switch`) — never bare
-`nh os switch`; the wrapper owns idle scheduling and the build slice.
-
-## Runtime and workspaces
-
-`agentctl` is an in-process CLI over pueue (the queue), worktrunk (worktrees),
-`gh` (PRs) and `bd` (tasks); there is no daemon. Load the `agent-runtime`
-skill before nontrivial runtime/workspace operations and `orchestrate` before
-multi-agent work. `agentctl --help` is the verb surface.
-
-- Ordinary short foreground commands run directly. Detached, queued,
-  resource-heavy, or shared work goes through declared project operations:
+- Short foreground checks run directly. Detached, queued, resource-heavy,
+  and shared work runs through declared project operations:
   `agentctl job start <project> <operation> [--workspace <path>] [--wait]`.
-  A job is a pueue task labelled `<project>:<operation>`; its id is the
-  pueue task id.
-- Never hand-construct `systemd-run`, cgroup placement, memory envelopes, or
-  background reapers; never infer ownership from process names — act on
-  returned task ids and worktree paths and preserve them in reports.
-- Don't duplicate a heavy job; `agentctl job list --active` shows what is
-  running. `agentctl job fire` (timers) skips while the same operation is
-  active.
-- Every agent dispatch names backend, model, and effort explicitly
-  (`agentctl batch start <project> <bead> --backend B --model M --effort E`).
-- Commit before risky integration or recovery; Git is the checkpoint.
-- Authority map: Git/worktrunk = commits/worktrees; pueue = live processes
-  and terminal results; systemd = only calendar-timer wake-ups; GitHub =
-  PR/review/merge; the external task backend (`bd`, Beads per
-  project under `/realm/state/tasks/`) = task state. Reconcile disagreements;
-  never invent a second truth. Feature branches never carry task state.
-- Background watches are work-in-progress, not fire-and-forget: keep at most a
-  few consolidated watches alive, kill each in the turn its purpose ends, and
-  never arm a per-job watch when one watch per concern covers it. On takeover
-  or after compaction, inventory running background tasks FIRST and kill every
-  watch whose target is terminal — watches survive compaction; the context
-  that understood them does not.
-- Long-running dispatches carry a time contract: state expected duration with
-  evidence and act at ~2x with a decision, never silent waiting. Completion
-  events (`agentctl events tail --follow`) are authoritative; do not poll.
+- `agentctl` is an in-process CLI. pueue owns queued jobs and terminal results;
+  Git/worktrunk own commits/worktrees; GitHub owns hosted publication; Beads
+  owns task state. Systemd owns fixed services and timer wake-ups. Reconcile
+  these sources instead of maintaining another ledger.
+- Check `agentctl job list --active` before heavy work. Do not duplicate jobs
+  or construct background reapers, `systemd-run`, or resource envelopes by hand.
+- Act on recorded task IDs and worktree paths, not inferred process names.
+  For standalone process searches, bracket a character in `pgrep -f` patterns
+  so the search cannot match its own shell command.
+- Every dispatch names backend, model, and effort explicitly. Model allocation
+  and recovery decisions follow `orchestrate`; a strong coordinator may
+  delegate bounded architecture as well as implementation.
+- One accountable supervisor owns each concern. Automate evidence collection;
+  delegate routine supervision; retain explicit decisions for retries,
+  conflicting evidence, acceptance, and destructive actions. Do not repeat a
+  delegated inspection without a concrete reason to doubt or extend it.
+- Use one event watch per campaign concern, with a named owner. On takeover,
+  inventory existing watches before adding one; stop owned watches whose
+  purpose has ended. Use completion events, not polling loops.
+- Give long work an evidence-based duration expectation. At roughly twice it,
+  inspect progress and decide to repair, cancel, or extend with a reason.
 
-## Batch coordination (stateless takeover)
+## Batches and publication
 
-A batch is several workers on one base commit, each in its own worktree,
-landed as one candidate by a task queued behind them. The protocol and live
-state live OUTSIDE your context — read them, never reconstruct:
+`agentctl view <project>` and `agentctl batch status <run>` provide current
+state. The coordinator contract at
+`/realm/project/sinnix/dots/_ai/skills/orchestrate/references/coordinator-contract.md`
+owns takeover, dispatch, recovery, and landing procedures.
 
-- **Protocol**: `/realm/project/sinnix/dots/_ai/skills/orchestrate/references/coordinator-contract.md`
-  — start with its capability table, which names the `agentctl` verb for each
-  need. Worker rules in its sibling `worker-contract.md`.
-- **Live state**: `agentctl view <project>` is the one screen (`--json` for
-  the payload); `agentctl events tail` is the event history.
-- **Who drives**: the operator or the coordinating agent starts batches;
-  a started batch lands itself. `agentctl batch start <project> <bead>…`
-  starts one, `agentctl batch resume <run> --worker <w>` re-queues an agent
-  into a worker's worktree, `agentctl batch land <run>` re-runs a landing
-  by hand, `agentctl batch result` files a Claude-subagent worker's result.
-- **Landing gate**: the candidate verification, one reviewer verdict bound
-  to the candidate commit, and the required checks where the repository
-  publishes through PRs; the landing task publishes and records acceptance.
-- **Operating loop**: inventory `agentctl view`, start one coherent set of
-  two to four workers, wait for the landing event, read `batch status`; the
-  corpus runs ONCE at the master boundary through the descriptor's `corpus`
-  operation, never per worker.
-- A fresh session resumes from those verbs plus the project's memory index;
-  nothing a batch depends on may live only in a chat context.
+- A batch has isolated workers on one base and one integrated candidate.
+  Start coherent, non-overlapping work; its queued landing task owns
+  integration, verification, review, and publication.
+- Read the repository rules and memory index before dispatch. Task readiness
+  includes its dependencies, remaining design decisions, and required live
+  authority. A ready queue entry alone does not establish executability.
+- Use `bd` from the owning repository, with an explicit actor. Task state is
+  external to feature branches. Read/write tasks through `task-backend`;
+  mature their specification through `bead-authoring`.
+- Checkpoint before risky integration or recovery. Stage explicit paths and
+  inspect the complete staged diff. Never bypass hooks or branch protections.
+- Publish through `agentctl batch land <run>` under the repository's declared
+  publication policy; load `review-land`. A published partial result does not
+  close unmet acceptance criteria.
+- Run the corpus once at the deliberate batch/master boundary, not per worker.
+  Selected tests, static gates, review, and a full corpus are different evidence.
+- Tests exercise behavior, invariants, and reproduced failures. Do not enforce
+  natural-language wording or preserve obsolete refactoring details as tests.
+- Fix inherited failures forward. Do not turn a transient regression into a
+  new permanent serialization gate. Report exactly what was verified and what
+  landed without test evidence.
 
-## Ambient control (browser, desktop, terminal)
+## Desktop and host changes
 
-One browser — the operator's Chrome, CDP on `127.0.0.1:9222`, shared profile.
-"Your/agent browser" → `sinnix-chrome-control agent-window` (hidden workspace,
-F7 toggles). "My browser/tabs" → act on his existing pages, high authority,
-never navigate/close what he is using. Desktop → `sinnix-hypr-control`,
-`sinnix-keyboard-control`, `sinnix-screenshot-control`; terminals →
-`sinnix-kitty-control` first. Load `desktop-control-plane` for recipes.
-`sinnix-observe` gives a live correlated probe.
+The operator's Chrome is shared. Agent work uses
+`sinnix-chrome-control agent-window`; requests about the operator's tabs use
+those existing pages without unrelated navigation or closure. Load
+`desktop-control-plane` for browser, Kitty, Hyprland, and screenshot recipes.
+`sinnix-observe` provides live host evidence.
 
-## Evidence planes
+Sinnix activation changes the live machine. State affected services/files and
+use only its devshell wrappers: `switch`, `boot`, or `test-vm`
+(`nix develop --command switch` from `/realm/project/sinnix`). Verify the
+activated revision and direct live effect. Source edits alone are not proof
+that an installed skill, executable, or service changed.
 
-Control plane for action; evidence plane for history — never reconstruct
-history from the current screen when a store answers directly:
+## History and memory
 
-- AI-session history → Polylogue (MCP/CLI; raw JSONL under
-  `~/.claude/projects/` as fallback).
-- Cross-source personal/system history → Lynchpin.
-- Host/runtime truth → `/etc/sinnix/runtime-inventory.json`, `sinnix-observe`,
-  `/realm/data/captures/**`.
-- Operator stream → `/realm/data/knowledgebase/logs.raw-log.md` (rawlog).
-
-Look history up proactively on "remember when…", after compaction, or when an
-error feels previously solved; write durable insights down (scratch note,
-memory, or the owning CLAUDE.md) instead of re-deriving next session.
-
-## Git and publication
-
-- Feature branches unless the repo explicitly publishes from its default
-  branch. Stage by path; inspect `git diff --cached`; never `git add -A` on
-  significant changes; never `--no-verify` unasked.
-- Treat tracked files, commits, task exports, CI logs, and PR text as public.
-  Never commit secrets, captures, transcripts, personal datasets, or generated
-  personal analyses; review the complete staged diff as public content.
-- Preserve user work: dirty trees are normal; state destructive intent before
-  any delete/reset/force-push/rewrite/kill. Clean up your own transient
-  artifacts (stashes, scratch branches) once verified captured elsewhere.
-- Publish through `agentctl batch land <run>`; never bypass hosted checks or
-  protected-branch policy. Load `review-land` for adversarial review +
-  publication procedure.
-
-## Verification
-
-- Tests protect behavior, contracts, invariants, reproduced bugs, and security
-  boundaries — never textual fossils of a refactoring diff, and never
-  pattern-matching of natural language as enforcement.
-- Selected/affected verification proves only its selected scope; a full corpus
-  is a deliberate batch/master checkpoint. Never launder selected greens into
-  whole-suite claims.
-- Classify inherited failures before claiming completion; state exactly what
-  ran and what did not.
-- A red default branch is an ordinary state. Fix forward. Never answer a
-  regression by adding a merge gate, a required review, a freeze, or a
-  checklist: serialising every lane behind one queue costs far more than the
-  transient red it prevents, and the cost is permanent while the red is not.
-  Eventual consistency is the design, not a concession. What must never slip
-  is honesty — do not report a green you did not read, and say plainly when
-  something landed without test evidence.
-
-## Investigation and recovery
-
-Freeze volatile evidence before mutation; reproduce the user-visible route;
-for recovery inspect live state → Git/checkpoints → task/history stores →
-backups, verifying restored content before deleting sources. Load
-`investigate` for incidents and ambiguous recovery.
-
-## Memory
-
-Persistent memory lives per-project under `~/.claude/projects/<p>/memory/`
-(one fact per file, indexed one line each in `MEMORY.md`; superseded material
-goes to `archive/`). Update or delete stale memories on contact; verify a
-recalled mechanism still exists before recommending it.
+- Session history: Polylogue; `claude-sessions` reads raw JSONL when needed.
+- Cross-source history: Lynchpin. Host evidence: runtime inventory,
+  `sinnix-observe`, and `/realm/data/captures/`.
+- Operator stream: `/realm/data/knowledgebase/logs.raw-log.md`.
+- Project memory: `~/.claude/projects/<p>/memory/MEMORY.md`, a short index of
+  stable facts and pointers. Verify recalled mechanisms against current code.
+  Archive superseded memories with their useful evidence preserved.
+- Current work, decisions, and task-shaped lessons belong in Beads; jobs and
+  receipts stay with the runtime. Memory points to those owners instead of
+  duplicating changing campaign state. Never copy private memory into public
+  instructions without reviewing and sanitizing it.
+- On recovery, preserve volatile evidence first, then inspect live state,
+  Git checkpoints, tasks/history, and backups. Verify recovered content before
+  deleting a source. Load `investigate` for ambiguous recovery.

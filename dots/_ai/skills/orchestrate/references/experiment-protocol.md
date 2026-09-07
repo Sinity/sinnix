@@ -1,31 +1,30 @@
-# Experiment protocol
+# Trials on ordinary work
 
-Registry: `.agent/scratch/experiments.jsonl` in the active project repo
-(polylogue during the reindex campaign). One JSON line per experiment or
-verdict note. Deletion trigger: rows whose doctrine update landed are dead
-weight — prune on consumption; the registry never becomes a database.
+Record a trial in the owning Bead's design or notes, with links to existing
+launches and results. Use work already worth doing. A trial needs one decision
+it could change, eligibility conditions, an assignment method, outcome evidence,
+a stopping rule and an expiry. Build supporting machinery only when it has
+independent operational value; keep one task record rather than a trial ledger.
 
-Every experiment row must name:
+For model allocation, apply `model-landscape.md` when defining comparable tasks
+and attributing outcomes. Select eligible tasks before assigning models; use a
+declared alternating or randomized assignment within that scope. Keep effort,
+review expectations and authority comparable. Record exceptions and retain them
+in the account of total cost. Resuming another model's work is an intervention,
+not an independent comparison with its predecessor.
 
-- **The decision it could change** (a doctrine line, a model default, a
-  dispatch shape). No decision → not an experiment, don't register it.
-- **A stopping rule** and an **expiry** (in merged packets or days).
-  Blocked/expired experiments close as _inconclusive_, never linger.
-- Its **status**: designed | running | complete | superseded | inconclusive.
+Example trial: determine whether Luna should start bounded implementation with
+settled design and an executable delivery check. Use the next six eligible
+ordinary tasks, alternating Luna and Terra with the same effort. Assess
+reviewed promised delivery, corrective work, interventions and observed usage.
+Stop after six tasks or seven days, whichever comes first. End the Luna arm
+early after two reviewer-confirmed material implementation misses against the
+settled specification. At expiry, insufficient comparable evidence is
+inconclusive. These thresholds bound the trial's cost; they do not establish
+statistical superiority.
 
-Discipline:
-
-- Prefer **piggybacking on product work** that would be dispatched anyway
-  over dedicated experiment arms; dedicated arms need the decision to be
-  worth their cost.
-- Supporting infrastructure gets built only when it has independent product
-  value (usage capture, event spool — yes; a bespoke experiment harness — no).
-- Results are **directional engineering evidence**, not science: n=1 gets
-  "replicate before changing a rule" stamped on it, and doctrine updates —
-  a changed default in this skill or its references — are the only durable
-  output. An experiment whose result never touches doctrine was wasted;
-  say so in its closing row.
-
-Standing measured results live where they're consumed: model/tier evidence
-in `model-landscape.md`, lens yields in the grok skill's
-`defect-lenses.md`, process smells in `worker-contract.md`.
+Close the trial with the supported decision: retain the current assignment,
+revise it for the observed task shape, or remain inconclusive. State exceptions
+and missing evidence. A single success or failure calls for replication before
+a general rule. Update the instruction where the resulting decision is used,
+link its evidence from the owning Bead, and leave historical outcomes there.

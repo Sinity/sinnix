@@ -21,16 +21,10 @@ documented maintenance actions, which are dry-run first.
 
 Current materialization is procedural. The AgentCTL operations wrap the
 existing CLI; the planned typed DAG and per-node executor are not current
-architecture. Discover the exact descriptor with `agentctl project operations
-lynchpin`. The registered routes are:
-
-```text
-agentctl job start lynchpin check
-agentctl job start lynchpin materialize_plan
-agentctl job start lynchpin promote_incremental
-agentctl job start lynchpin promote_full
-agentctl job start lynchpin chisel
-```
+architecture. Discover the exact operation names and requirements with
+`agentctl project operations lynchpin`, then run the declared route. Do not
+copy an operation name from this skill into a command without checking the
+descriptor first.
 
 Promotion is atomic and generation-coherent. Full promotion rebuilds all
 history; incremental promotion uses current canonical products and freshness

@@ -29,6 +29,12 @@ what it is told and reports. A started batch lands itself: the landing task
 is queued behind its workers and runs when they all succeed. A run's "next"
 on the view describes its state.
 
+For several live workers, delegate the event watch, result collection, routine
+in-scope recovery, and consolidated reports to one accountable supervisor.
+Give it explicit authority and escalation conditions; choose its model through
+`orchestrate`. The coordinator retains scope, model allocation, and exceptional
+decisions. The supervisor uses the same manifests and runtime verbs.
+
 ## Capability map
 
 Look for the verb before writing any procedure: `agentctl <verb> --help`.
@@ -40,7 +46,7 @@ Look for the verb before writing any procedure: `agentctl <verb> --help`.
 | start a batch of workers                      | `agentctl batch start <p> <bead>… [--worker a,b]… [--backend B --model M --effort E]` |
 | start a batch that Claude subagents will work | `agentctl batch start <p> <bead>… --workers external`                                 |
 | file an external worker's result              | `agentctl batch result <run> <worker> <result.json>`                                  |
-| land a run by hand, or again after a failure  | `agentctl batch land <run>`                                                           |
+| land a run by hand after resolving its failure | `agentctl batch land <run>`                                                         |
 | land a hand fix made on the integration tree  | `agentctl batch land <run> --keep-integration`                                        |
 | release a run that will not land              | `agentctl batch abandon <run> [--reason R]`                                           |
 | one run, every run                            | `agentctl batch status <run>`, `agentctl batch list <p>`                              |
@@ -84,18 +90,18 @@ For Claude-subagent workers: `batch start … --workers external`, run one
 result with `batch result` (the last one enqueues the landing task), then
 step 3.
 
-**Stages on the view** and what follows mechanically:
+**Stages on the view** and the next evidence to check:
 
 | Stage                       | Next                                                                        |
 | --------------------------- | --------------------------------------------------------------------------- |
 | `working`, `landing`        | wait                                                                        |
 | `stashed`                   | `batch result` per external worker; the landing task then runs              |
-| `awaiting workers`          | a failed worker: `batch resume --worker`; missing: `batch result`           |
+| `awaiting workers`          | inspect worker tasks and results; file a valid result or identify the recovery action before resuming |
 | `ready to land`             | `batch land`                                                                |
-| `landing dependency-failed` | `batch resume --worker <w>` for the failed worker; it re-queues the landing |
-| `failed: <code>`            | `job logs <landing task>`, then `batch land` again                          |
-| `landing <phase>`           | same                                                                        |
-| `unprepared`                | `batch start` again with the same members                                   |
+| `landing dependency-failed` | inspect the failed worker; identify the correction, then resume its owner to re-queue the landing |
+| `failed: <code>`            | read landing logs and verdict; address the cause, then choose the applicable landing command |
+| `landing <phase>`           | inspect the terminal result and determine whether completion or recovery is needed |
+| `unprepared`                | inspect the preparation refusal; correct its cause before starting the same members again |
 | `landed`, `abandoned`       | nothing                                                                     |
 
 **Verification**: workers run the descriptor's focused operation; the landing
@@ -128,8 +134,9 @@ frontier strategy. File product defects freely, process beads sparingly.
 
 - **One current-state note per bead.** Consolidate on contact; a superseded
   amendment reads as current to a fresh-context worker.
-- **Readiness lives only in typed dependency edges**, where the validator owns
-  it.
+- **Dependency edges encode prerequisites.** Dispatch also needs understood
+  scope, enough evidence to act, and executable verification. Resolve missing
+  decisions with the coordinator; keep these facts in the bead.
 - **Spec weight tracks work size.** Heavy acceptance criteria mark big work;
   small fixes stay light.
 - **Acceptance criteria must survive their neighbors.** Name the invariant and

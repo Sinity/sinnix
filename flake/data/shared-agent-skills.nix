@@ -24,6 +24,8 @@
   "rank-options"
   "recap"
   "review-land"
+  "sinex"
+  "sinnix"
   "skill-authoring"
   "task-backend"
   "writing-for-agents"

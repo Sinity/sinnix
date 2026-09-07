@@ -82,7 +82,11 @@ def validate(root: Path) -> list[dict[str, str]]:
                 {"path": str(skill_file), "error": "SKILL.md exceeds 500 lines"}
             )
         for target in LINK_RE.findall(skill_file.read_text(encoding="utf-8")):
-            if "://" not in target and not (skill_file.parent / target).exists():
+            if "://" in target:
+                continue
+            local_target, _, _fragment = target.partition("#")
+            reference = skill_file if not local_target else skill_file.parent / local_target
+            if not reference.exists():
                 findings.append(
                     {"path": str(skill_file), "error": f"broken reference: {target}"}
                 )

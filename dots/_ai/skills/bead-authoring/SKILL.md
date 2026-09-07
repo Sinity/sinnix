@@ -5,11 +5,11 @@ description: Write or mature Beads tasks, specifications, acceptance criteria, d
 
 # Bead authoring
 
-The rule here is design-first: invest in beads until implementation
-is the easy part, executable by a cheaper model without re-deriving intent.
-A bead is a prompt for a future executor ([[prompting]]'s decision-
-completeness applies in full) AND a durable record a cold reader must be
-able to trust.
+Write enough to preserve intent, scope and a checkable outcome. State settled
+decisions and open questions separately. Some work benefits from a bounded
+design task; some needs design and implementation in one worker. A bead is both
+a prompt for an executor (see [[prompting]]) and a durable record for a cold
+reader. Specification effort belongs in the cost of delivery.
 
 ## The bead itself
 
@@ -32,6 +32,15 @@ able to trust.
   rulings. Never hand-frozen snapshots of other beads' status — derive
   status from the graph (a known trap: pasted "current open
   blockers" lists that silently rot).
+- **Dispatch judgments expire with their evidence.** Revalidate existing
+  design and allocation judgments against current code and residual work.
+  Record the reason and evidence in notes;
+  these fields express judgments, not measured model capability. Use
+  [[orchestrate]] for allocation and comparisons between attempts.
+- **Delivery fits the worker's authority.** Identify which criteria can be
+  completed now and which need another owner or operational window. Preserve
+  the full criteria and name remaining proof after a partial delivery; a
+  published implementation alone does not close them.
 
 ## Slicing
 
@@ -79,7 +88,7 @@ placeholder children.)
 
 ## Maturing existing beads
 
-When upgrading a backlog (the current mandate): verify measured claims
+When upgrading a backlog: verify measured claims
 before propagating them; rewrite ritual-register titles; convert prose
 dependencies into edges; split partially-done scope to successors instead
 of letting a bead half-close; and check each AC against the falsifiability

@@ -5,10 +5,10 @@ description: Orchestrate parallel agent implementation, research, or continuous 
 
 # Orchestrate
 
-Coordinator rule: the orchestrating session specifies and reviews; workers
-execute self-sufficiently; mechanics route through `agentctl`, which does
-what it is told and reports. A started batch lands itself; nothing else
-dispatches on its own.
+The root session owns priorities, scope and consequential decisions. Delegate
+bounded supervision and implementation; automate observation and mechanics
+through `agentctl`. A started batch lands itself; new dispatches require an
+agent or operator decision.
 
 ## The operating loop
 
@@ -25,34 +25,26 @@ The corpus runs once at the master boundary through the descriptor's
 
 ## Model selection
 
-| Role                                  | Route                                     | Model            | Effort     |
-| ------------------------------------- | ----------------------------------------- | ---------------- | ---------- |
-| Specification, review, integration    | this session                              | (session model)  | default    |
-| Context-carrying analysis             | fork                                      | inherited        | —          |
-| Implementation and investigation      | `agentctl batch start … --backend claude` | claude-opus-5    | high       |
-| Design / debug / adversarial review   | Agent tool or backend claude              | claude-opus-5    | high       |
-| Review alternate (Claude quota tight) | backend codex                             | gpt-5.6-sol      | high       |
-| Menial coordination (≥3 live workers) | Agent tool                                | claude-haiku-4-5 | medium     |
-| Broad read-only sweeps                | Agent tool                                | sonnet or luna   | low/medium |
+| Assignment | Initial model | Effort |
+| --- | --- | --- |
+| Bounded supervision, evidence collection, settled implementation | `gpt-5.6-luna` | high |
+| Substantial implementation, investigation, candidate review | `gpt-5.6-terra` | high |
+| Unresolved architecture, design-critical implementation | `gpt-6-astra` | high |
 
-Every dispatch names backend, model, and effort explicitly; only forks inherit.
-Use another family when an independent failure mode is worth its cost, not as
-the default implementation route. Codex sessions: `gpt-5.6-luna` at high for
-the coordinating seat, `gpt-5.6-terra` at high for unattended workers.
+These are starting assignments to revise from experience. Every dispatch names
+backend, model and effort explicitly; only forks inherit. Check the actual
+launch, including resumes, against the intended assignment. Read
+[allocation guidance](references/model-landscape.md) before choosing or
+escalating a model, and the [trial protocol](references/experiment-protocol.md)
+before changing a default from observed outcomes.
 
-Multi-model redundancy runs only on a predeclared trigger: irreversible
-action, destructive-data risk, no executable oracle, or concrete disagreement
-after a first analysis. Otherwise one accountable decision-maker decides.
-Majority voting is not a substitute for a strong judge when errors correlate.
-Known correlated biases: deletion-aversion and merge-aversion. For
-DELETE/MERGE-shaped decisions, supply the replacement or dedup context in the
-prompt, or escalate to one strong judge.
+Use additional independent analysis for a named unresolved question involving
+irreversible action, destructive-data risk, no executable oracle, or concrete
+disagreement. One accountable reviewer decides from the evidence.
 
-References: `references/model-landscape.md` (pricing, supervision
-economics), `references/worker-contract.md` (the text compiled into every
-worker prompt, and the result schema), `references/coordinator-contract.md`
-(stateless takeover, verbs, stages), `references/experiment-protocol.md`.
-`scripts/defect_priors.py` ranks hunt targets — run it before a hunt wave.
+References: [worker contract](references/worker-contract.md) (compiled into
+every worker prompt), [coordinator contract](references/coordinator-contract.md)
+(takeover, verbs, stages). Run `scripts/defect_priors.py` before a hunt wave.
 
 ## Dispatch mechanics
 
@@ -85,10 +77,9 @@ worker prompt, and the result schema), `references/coordinator-contract.md`
   parallelism bounds them. Session subagents bypass pueue entirely: bound
   them explicitly (one pytest at a time, `-n 2`) or route the heavy step
   through `agentctl job start`.
-- The coordinator's judgment surface: scope-drift flags, schema flags,
-  adversarial review of risky workers, and oracle authorship — a read-only
-  probe against real state. Fixture-green alone is not evidence for
-  state-touching work.
+- Assign scope review, schema review and oracle authorship to bounded workers;
+  escalate unresolved decisions to the root. A state-touching change needs
+  evidence from its production route as well as fixtures.
 
 ## Worker contract
 
@@ -113,10 +104,10 @@ For Polylogue's graph and selection behavior, use the `polylogue` skill.
 
 ## Structural review
 
-Never accept a worker on its own result. The landing task's reviewer reads
-the candidate diff, the verify receipt and the worker results; spot-check
-workers yourself, and add an adversarial pass for risky ones. This applies to
-every unsupervised executor regardless of tier.
+Follow the project's declared review policy. When review is required, its
+assigned reviewer reads the candidate diff, verification evidence and worker
+results; the root resolves escalated questions. If an authorized policy omits
+independent review, report that fact. Model tier does not establish correctness.
 
 ## Batching
 
