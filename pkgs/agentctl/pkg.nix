@@ -1,9 +1,14 @@
 {
+  lib,
   python3Packages,
+  bash,
   git,
+  gh,
   beads,
   worktrunk,
   pueue,
+  nix,
+  systemd,
   ...
 }:
 python3Packages.buildPythonApplication {
@@ -13,6 +18,20 @@ python3Packages.buildPythonApplication {
   src = ./.;
 
   build-system = [ python3Packages.setuptools ];
+  makeWrapperArgs = [
+    "--prefix PATH : ${
+      lib.makeBinPath [
+        bash
+        git
+        gh
+        beads
+        worktrunk
+        pueue
+        nix
+        systemd
+      ]
+    }"
+  ];
   nativeCheckInputs = [
     python3Packages.pytest
     git

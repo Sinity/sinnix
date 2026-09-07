@@ -886,6 +886,54 @@ in
             PY
             touch "$out"
           '';
+      agentctlRuntimeFixture = pkgs.runCommand "agentctl-runtime-tools-fixture" { } ''
+        ${pkgs.python3}/bin/python - <<'PY'
+        import json
+        import os
+        import subprocess
+        import time
+        from pathlib import Path
+
+        root = Path(os.environ["TMPDIR"])
+        home = root / "home"
+        home.mkdir()
+        config = root / "agentctl.json"
+        config.write_text(json.dumps({"state_dir": str(root / "agentctl")}))
+        environment = {
+            "HOME": str(home),
+            "PATH": "",
+            "AGENTCTL_CONFIG": str(config),
+        }
+        with (root / "pueued.log").open("w+") as log:
+            daemon = subprocess.Popen(
+                ["${pkgs.pueue}/bin/pueued"],
+                env=environment, stdout=log, stderr=log,
+            )
+            try:
+                deadline = time.monotonic() + 10
+                while True:
+                    result = subprocess.run(
+                        ["${sinnixScriptRegistry.packageSet.agentctl}/bin/agentctl", "job", "list", "--json"],
+                        env=environment, capture_output=True, text=True, timeout=5,
+                    )
+                    if result.returncode == 0:
+                        assert json.loads(result.stdout) == []
+                        break
+                    assert "not installed" not in result.stderr, result.stderr
+                    if daemon.poll() is not None or time.monotonic() >= deadline:
+                        log.seek(0)
+                        raise AssertionError(result.stderr + log.read())
+                    time.sleep(0.05)
+            finally:
+                daemon.terminate()
+                try:
+                    daemon.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    daemon.kill()
+                    daemon.wait()
+        PY
+        touch "$out"
+      '';
       cachePushForegroundFixture =
         pkgs.runCommand "sinex-cache-push-foreground-fixture"
           {
@@ -1262,6 +1310,7 @@ in
         direnv-direct-commands = direnvDirectCommandsFixture;
         agentctl-operation-contract = agentctlOperationFixture;
         agentctl-operation-launch = agentctlOperationLaunchFixture;
+        agentctl-runtime-tools = agentctlRuntimeFixture;
         sinex-cache-push-foreground = cachePushForegroundFixture;
         sinex-cache-prebuild-lifecycle = cachePrebuildLifecycleFixture;
         preflight = preflightFixture;
