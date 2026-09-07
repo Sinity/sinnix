@@ -40,26 +40,26 @@ decisions. The supervisor uses the same manifests and runtime verbs.
 
 Look for the verb before writing any procedure: `agentctl <verb> --help`.
 
-| Need                                          | Verb                                                                                  |
-| --------------------------------------------- | ------------------------------------------------------------------------------------- |
-| see the runs, queue and ready work            | `agentctl view <p>`                                                                   |
-| watch what happens                            | `agentctl events tail --follow --project <p>`                                         |
-| start a batch of workers                      | `agentctl batch start <p> <bead>… [--worker a,b]… [--backend B --model M --effort E]` |
-| start a batch that Claude subagents will work | `agentctl batch start <p> <bead>… --workers external`                                 |
-| file an external worker's result              | `agentctl batch result <run> <worker> <result.json>`                                  |
-| land a run by hand after resolving its failure | `agentctl batch land <run>`                                                         |
-| land a hand fix made on the integration tree  | `agentctl batch land <run> --keep-integration`                                        |
-| release a run that will not land              | `agentctl batch abandon <run> [--reason R]`                                           |
-| drop the worktrees of finished runs           | `agentctl batch clean <p>`                                                            |
-| one run, every run                            | `agentctl batch status <run>`, `agentctl batch list <p>`                              |
-| re-queue an agent into a worker's worktree    | `agentctl batch resume <run> --worker <w> [--backend B --model M --effort E]`         |
-| run a declared operation                      | `agentctl job start <p> <operation> [--workspace <path>] [--wait]`                    |
-| read a job                                    | `agentctl job get\|logs\|result <id>`                                                 |
-| stop a job                                    | `agentctl job cancel <id>`                                                            |
-| run it again                                  | `agentctl job retry <id>`                                                             |
-| remove a finished job's artifacts             | `agentctl job clean <id>`                                                             |
-| the descriptors                               | `agentctl project list\|get\|operations`                                              |
-| timers, pool pressure                         | `agentctl schedule apply`, `agentctl backpressure tick`                               |
+| Need                                           | Verb                                                                                  |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------- |
+| see the runs, queue and ready work             | `agentctl view <p>`                                                                   |
+| watch what happens                             | `agentctl events tail --follow --project <p>`                                         |
+| start a batch of workers                       | `agentctl batch start <p> <bead>… [--worker a,b]… [--backend B --model M --effort E]` |
+| start a batch that Claude subagents will work  | `agentctl batch start <p> <bead>… --workers external`                                 |
+| file an external worker's result               | `agentctl batch result <run> <worker> <result.json>`                                  |
+| land a run by hand after resolving its failure | `agentctl batch land <run>`                                                           |
+| land a hand fix made on the integration tree   | `agentctl batch land <run> --keep-integration`                                        |
+| release a run that will not land               | `agentctl batch abandon <run> [--reason R]`                                           |
+| drop the worktrees of finished runs            | `agentctl batch clean <p>`                                                            |
+| one run, every run                             | `agentctl batch status <run>`, `agentctl batch list <p>`                              |
+| re-queue an agent into a worker's worktree     | `agentctl batch resume <run> --worker <w> [--backend B --model M --effort E]`         |
+| run a declared operation                       | `agentctl job start <p> <operation> [--workspace <path>] [--wait]`                    |
+| read a job                                     | `agentctl job get\|logs\|result <id>`                                                 |
+| stop a job                                     | `agentctl job cancel <id>`                                                            |
+| run it again                                   | `agentctl job retry <id>`                                                             |
+| remove a finished job's artifacts              | `agentctl job clean <id>`                                                             |
+| the descriptors                                | `agentctl project list\|get\|operations`                                              |
+| timers, pool pressure                          | `agentctl schedule apply`, `agentctl backpressure tick`                               |
 
 Task mutations go through `bd` directly; see [[task-backend]]. `batch start`
 claims the members and `batch land` closes them from the acceptance record.
@@ -94,17 +94,17 @@ step 3.
 
 **Stages on the view** and the next evidence to check:
 
-| Stage                       | Next                                                                        |
-| --------------------------- | --------------------------------------------------------------------------- |
-| `working`, `landing`        | wait                                                                        |
-| `stashed`                   | `batch result` per external worker; the landing task then runs              |
+| Stage                       | Next                                                                                                  |
+| --------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `working`, `landing`        | wait                                                                                                  |
+| `stashed`                   | `batch result` per external worker; the landing task then runs                                        |
 | `awaiting workers`          | inspect worker tasks and results; file a valid result or identify the recovery action before resuming |
-| `ready to land`             | `batch land`                                                                |
-| `landing dependency-failed` | inspect the failed worker; identify the correction, then resume its owner to re-queue the landing |
-| `failed: <code>`            | read landing logs and verdict; address the cause, then choose the applicable landing command |
-| `landing <phase>`           | inspect the terminal result and determine whether completion or recovery is needed |
-| `unprepared`                | inspect the preparation refusal; correct its cause before starting the same members again |
-| `landed`, `abandoned`       | nothing                                                                     |
+| `ready to land`             | `batch land`                                                                                          |
+| `landing dependency-failed` | inspect the failed worker; identify the correction, then resume its owner to re-queue the landing     |
+| `failed: <code>`            | read landing logs and verdict; address the cause, then choose the applicable landing command          |
+| `landing <phase>`           | inspect the terminal result and determine whether completion or recovery is needed                    |
+| `unprepared`                | inspect the preparation refusal; correct its cause before starting the same members again             |
+| `landed`, `abandoned`       | nothing                                                                                               |
 
 **Verification**: workers run the descriptor's focused operation; the landing
 task runs the `candidate` profile once on the integrated tree (a hosted check

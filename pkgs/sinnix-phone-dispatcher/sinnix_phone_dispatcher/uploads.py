@@ -299,7 +299,9 @@ def repair_event_day(day: str, source: Path, expected_sha256: str) -> dict:
     import tempfile
     from datetime import datetime, timezone
 
-    if not EVENTS_DAY_RE.fullmatch(day) or day >= datetime.now(timezone.utc).strftime("%Y%m%d"):
+    if not EVENTS_DAY_RE.fullmatch(day) or day >= datetime.now(timezone.utc).strftime(
+        "%Y%m%d"
+    ):
         raise ValueError("repair requires a closed UTC day")
     body = source.read_bytes()
     if not body or not body.endswith(b"\n"):
@@ -324,7 +326,9 @@ def repair_event_day(day: str, source: Path, expected_sha256: str) -> dict:
         raise ValueError("backup verification failed")
     pending: Path | None = None
     try:
-        with tempfile.NamedTemporaryFile(dir=EVENTS_DIR, prefix=".repair-", delete=False) as out:
+        with tempfile.NamedTemporaryFile(
+            dir=EVENTS_DIR, prefix=".repair-", delete=False
+        ) as out:
             pending = Path(out.name)
             out.write(body)
             out.flush()
@@ -337,5 +341,12 @@ def repair_event_day(day: str, source: Path, expected_sha256: str) -> dict:
     finally:
         if pending is not None:
             pending.unlink(missing_ok=True)
-    return {"ok": True, "changed": True, "day": day, "sha256": new_sha,
-            "previous_sha256": old_sha, "backup": str(backup), "bytes": len(body)}
+    return {
+        "ok": True,
+        "changed": True,
+        "day": day,
+        "sha256": new_sha,
+        "previous_sha256": old_sha,
+        "backup": str(backup),
+        "bytes": len(body),
+    }

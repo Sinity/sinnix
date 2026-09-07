@@ -130,29 +130,37 @@ def test_newest_in_an_unknown_lane_is_a_404() -> None:
 def test_repair_closed_day_preserves_original(monkeypatch, tmp_path):
     monkeypatch.setattr(uploads_mod, "EVENTS_DIR", tmp_path)
     target = tmp_path / "events-20200101.jsonl"
-    target.write_bytes(b'broken record\n')
+    target.write_bytes(b"broken record\n")
     original = target.read_bytes()
     source = tmp_path / "device.jsonl"
     source.write_bytes(b'{"kind":"power","ts":"2020-01-01T12:00:00Z"}\n')
-    result = uploads_mod.repair_event_day("20200101", source, hashlib.sha256(original).hexdigest())
+    result = uploads_mod.repair_event_day(
+        "20200101", source, hashlib.sha256(original).hexdigest()
+    )
     from pathlib import Path
+
     assert target.read_bytes() == source.read_bytes()
     assert Path(result["backup"]).read_bytes() == original
-    assert uploads_mod.repair_event_day("20200101", source, result["sha256"])["changed"] is False
+    assert (
+        uploads_mod.repair_event_day("20200101", source, result["sha256"])["changed"]
+        is False
+    )
 
 
 def test_repair_rejects_changed_destination_and_invalid_source(monkeypatch, tmp_path):
     monkeypatch.setattr(uploads_mod, "EVENTS_DIR", tmp_path)
     target = tmp_path / "events-20200101.jsonl"
-    target.write_bytes(b'old\n')
+    target.write_bytes(b"old\n")
     source = tmp_path / "device.jsonl"
-    source.write_bytes(b'{}\n')
+    source.write_bytes(b"{}\n")
     with pytest.raises(ValueError, match="destination changed"):
         uploads_mod.repair_event_day("20200101", source, "0" * 64)
-    source.write_bytes(b'broken\n')
+    source.write_bytes(b"broken\n")
     with pytest.raises(ValueError):
-        uploads_mod.repair_event_day("20200101", source, hashlib.sha256(b'old\n').hexdigest())
-    assert target.read_bytes() == b'old\n'
+        uploads_mod.repair_event_day(
+            "20200101", source, hashlib.sha256(b"old\n").hexdigest()
+        )
+    assert target.read_bytes() == b"old\n"
     assert not (tmp_path / ".repairs").exists()
 
 

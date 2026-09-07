@@ -85,7 +85,9 @@ def validate(root: Path) -> list[dict[str, str]]:
             if "://" in target:
                 continue
             local_target, _, _fragment = target.partition("#")
-            reference = skill_file if not local_target else skill_file.parent / local_target
+            reference = (
+                skill_file if not local_target else skill_file.parent / local_target
+            )
             if not reference.exists():
                 findings.append(
                     {"path": str(skill_file), "error": f"broken reference: {target}"}
