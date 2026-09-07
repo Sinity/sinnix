@@ -350,14 +350,14 @@ in
             && poolSlices.agentctl-pytest.MemoryMax == "8G"
             && poolSlices.agentctl-pytest.MemorySwapMax == "0"
             && poolSlices.agentctl-pytest.ManagedOOMMemoryPressure == "kill"
-            && poolSlices.agentctl-pytest.CPUWeight == 20
-            && poolSlices.agentctl-pytest.IOWeight == 20
+            && poolSlices.agentctl-pytest.CPUWeight == 200
+            && poolSlices.agentctl-pytest.IOWeight == 200
             && poolSlices.agentctl-bulk.MemoryHigh == "10G"
             && poolSlices.agentctl-bulk.MemoryMax == "14G"
             && poolSlices.agentctl-bulk.MemorySwapMax == "0"
             && poolSlices.agentctl-bulk.ManagedOOMMemoryPressure == "kill"
-            && poolSlices.agentctl-bulk.CPUWeight == 20
-            && poolSlices.agentctl-bulk.IOWeight == 10
+            && poolSlices.agentctl-bulk.CPUWeight == 100
+            && poolSlices.agentctl-bulk.IOWeight == 100
             && lib.all (slice: slice.IOAccounting == true) (lib.attrValues poolSlices)
           )
           "agentctl coordinator work must yield to protected interactive slices; pool slices own fixed caps";
