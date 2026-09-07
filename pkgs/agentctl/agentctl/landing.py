@@ -1115,7 +1115,13 @@ def _land_locked(
     return run.to_dict()
 
 
-def _drop_branch(project: ProjectAdapter, branch: str, *, base: str) -> str | None:
+def _drop_branch(
+    project: ProjectAdapter,
+    branch: str,
+    *,
+    base: str,
+    recorded_path: Path | None = None,
+) -> str | None:
     """Remove ``branch``'s worktree unless work would go with it.
 
     Returns why it was kept, or None once it is gone.
@@ -1123,14 +1129,33 @@ def _drop_branch(project: ProjectAdapter, branch: str, *, base: str) -> str | No
     tree = worktrunk.worktrunk_find(project.root, branch)
     if tree is None:
         return None
+    removal_target = branch
+    path = tree.path
+    if path is None and recorded_path is not None:
+        # A detached worktree has no branch for `worktree_find` to return. Use
+        # the manifest's exact path only when Git still registers that path.
+        path = next(
+            (
+                candidate.path
+                for candidate in worktrunk.worktrunk_list(project.root)
+                if not candidate.main and candidate.path == recorded_path
+            ),
+            None,
+        )
+        if path is not None:
+            removal_target = str(path)
     try:
-        keep = _unpreserved(tree.path, root=project.root, base=base, branch=branch)
+        keep = _unpreserved(path, root=project.root, base=base, branch=branch)
     except BatchError as error:
         keep = str(error)
     if keep:
         return f"worktree kept; {keep}"
     try:
-        worktrunk.worktrunk_remove(project.root, branch, force=True)
+        worktrunk.worktrunk_remove(project.root, removal_target, force=True)
+        if removal_target != branch:
+            # Removing by path handles the detached registry entry; the
+            # recorded branch still needs its ordinary branch cleanup.
+            worktrunk.worktrunk_remove(project.root, branch, force=True)
     except WorktrunkError as error:
         return str(error)
     return None
@@ -1145,12 +1170,29 @@ def _drop_worktrees(
     worktree is measured against it rather than against the run's base: its
     commits are out, so only uncommitted changes in it are still work.
     """
-    branches = [(worker["branch"], run.base_commit) for worker in run.workers]
-    branches.append((run.landing["integration_branch"], published or run.base_commit))
+    branches = [
+        (
+            worker["branch"],
+            run.base_commit,
+            Path(worker["worktree"]) if worker.get("worktree") else None,
+        )
+        for worker in run.workers
+    ]
+    branches.append(
+        (
+            run.landing["integration_branch"],
+            published or run.base_commit,
+            (
+                Path(run.landing["integration_worktree"])
+                if run.landing.get("integration_worktree")
+                else None
+            ),
+        )
+    )
     residual: list[str] = []
     with project_locked(config, project.project_id):
-        for branch, base in branches:
-            kept = _drop_branch(project, branch, base=base)
+        for branch, base, recorded_path in branches:
+            kept = _drop_branch(project, branch, base=base, recorded_path=recorded_path)
             if kept:
                 residual.append(f"{branch}: {kept}")
     return residual
