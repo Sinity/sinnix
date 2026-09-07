@@ -12,8 +12,8 @@ dispatches on its own.
 
 ## The operating loop
 
-1. Inventory: `agentctl view <project>`, open manifests, `wt list`,
-   `bd ready`, the project's rules.
+1. Inventory: `agentctl view <project>`, open manifests,
+   `git worktree list`, `bd ready`, the project's rules.
 2. Start one coherent set of two to four workers:
    `agentctl batch start <project> <bead>… [--worker a,b]…`.
 3. Wait for the `<project>:land:<run>` finished event; never poll.
