@@ -687,7 +687,8 @@ def _publish(
         merged = _merged(project, run, candidate)
         if merged is not None:
             return {**merged, "base_commit": base}
-    if _remote_base(project) != base:
+    # A squash-merged PR absorbs a moved base; only a conflicting PR refreshes.
+    elif _remote_base(project) != base:
         return None
     if workspace.publish == "master":
         try:
@@ -722,6 +723,8 @@ def _publish(
             )
         if github.merge_commit(pull):
             break
+        if pull.get("mergeable") == "CONFLICTING":
+            return None
         _refuse_missing_checks(pull, required, started, number)
         state = github.check_rollup(pull, required)
         if state == "ready":
