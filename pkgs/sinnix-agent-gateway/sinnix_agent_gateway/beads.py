@@ -613,6 +613,11 @@ class BeadsService:
                 f"unsupported native list filters: {sorted(unknown)}",
                 "unsupported_capability",
             )
+        if "stale_days" in values and view != "stale_claims":
+            raise BeadsError(
+                "native_filters.stale_days is supported only for stale_claims",
+                "unsupported_capability",
+            )
         return command
 
     def _snapshot_page(
@@ -642,17 +647,37 @@ class BeadsService:
         else:
             try:
                 token, value = cursor.split(".", 1)
+                if not re.fullmatch(r"[0-9a-f]{64}", token) or not value.isdecimal():
+                    raise ValueError("offset is not a decimal integer")
                 offset = int(value)
                 payload = json.loads((directory / f"{token}.json").read_text())
             except (OSError, ValueError, json.JSONDecodeError) as exc:
-                raise BeadsError("stale_cursor: Beads snapshot is unavailable") from exc
-            if payload.get("expires_at", 0) < time.time() or payload.get("key") != key:
                 raise BeadsError(
-                    "stale_cursor: Beads snapshot expired or belongs to another query"
+                    "Beads snapshot cursor is unavailable", "stale_cursor"
+                ) from exc
+            if not isinstance(payload, Mapping):
+                raise BeadsError("Beads snapshot metadata is malformed", "stale_cursor")
+            expires_at = payload.get("expires_at")
+            if (
+                not isinstance(expires_at, (int, float))
+                or not isinstance(payload.get("key"), str)
+                or not isinstance(payload.get("source_revision"), str)
+            ):
+                raise BeadsError("Beads snapshot metadata is malformed", "stale_cursor")
+            if expires_at < time.time() or payload.get("key") != key:
+                raise BeadsError(
+                    "Beads snapshot cursor expired or belongs to another query",
+                    "stale_cursor",
                 )
             if payload.get("source_revision") != source_revision:
-                raise BeadsError("source_changed: Beads source changed during paging")
+                raise BeadsError("Beads source changed during paging", "source_changed")
+            if not isinstance(payload.get("rows"), list):
+                raise BeadsError("Beads snapshot rows are malformed", "stale_cursor")
             rows = payload["rows"]
+            if offset < 0 or (offset >= len(rows) and offset != 0):
+                raise BeadsError(
+                    "Beads snapshot cursor is beyond the snapshot", "stale_cursor"
+                )
         page = rows[offset : offset + limit]
         next_cursor = (
             f"{token}.{offset + limit}" if offset + limit < len(rows) else None
@@ -864,6 +889,7 @@ class BeadsService:
                     "view": view,
                     "filters": filters or {},
                     "expression": expression,
+                    "native_filters": native_filters or {},
                     "order": order or {},
                     "includes": sorted(requested),
                 },

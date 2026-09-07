@@ -6,6 +6,22 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+DEFAULT_MCP_CALL_TIMEOUT_SECONDS = 30
+MAX_MCP_CALL_TIMEOUT_SECONDS = 3_600
+
+
+def validate_mcp_call_timeout(value: Any) -> int:
+    if (
+        not isinstance(value, int)
+        or isinstance(value, bool)
+        or not 1 <= value <= MAX_MCP_CALL_TIMEOUT_SECONDS
+    ):
+        raise ValueError(
+            "callTimeoutSeconds must be an integer "
+            f"between 1 and {MAX_MCP_CALL_TIMEOUT_SECONDS}"
+        )
+    return value
+
 
 def default_state_dir() -> Path:
     base = Path(os.environ.get("XDG_STATE_HOME", str(Path.home() / ".local" / "state")))
@@ -168,6 +184,17 @@ class GatewayConfig:
             for name, server in broker_servers.items()
         ):
             raise ValueError("mcpBrokerServers must map names to objects")
+        normalized_broker_servers: dict[str, dict[str, Any]] = {}
+        for name, server in broker_servers.items():
+            timeout = server.get("callTimeoutSeconds", DEFAULT_MCP_CALL_TIMEOUT_SECONDS)
+            try:
+                timeout = validate_mcp_call_timeout(timeout)
+            except ValueError as exc:
+                raise ValueError(f"mcpBrokerServers.{name}.{exc}") from exc
+            normalized_broker_servers[name] = {
+                **server,
+                "callTimeoutSeconds": timeout,
+            }
         return cls(
             state_dir=state_dir,
             projects=projects,
@@ -207,7 +234,7 @@ class GatewayConfig:
                 "chromeControlCommand", "sinnix-chrome-control"
             ),
             beads_command=raw.get("beadsCommand", "bd"),
-            mcp_broker_servers=broker_servers,
+            mcp_broker_servers=normalized_broker_servers,
             capture_command=raw.get("captureCommand", "sinnix-capture"),
         )
 

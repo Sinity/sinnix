@@ -2,13 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
 
 import pytest
 from agentctl import batch, launch, pueue
 from agentctl.config import Config
-from sinnix_agent_gateway.execution import LocalJobs
-from sinnix_mcp import ErrorCode, RequestEnvelope
+from sinnix_agent_gateway.execution import JobOwnerError, LocalJobs
+from sinnix_mcp import ErrorCode
 
 DESCRIPTOR = """
 schema = 1
@@ -40,15 +39,27 @@ JOB_ROW = {
 }
 
 
-def _request(operation: str, arguments: dict[str, Any]) -> RequestEnvelope:
-    return RequestEnvelope(
-        request_id=str(uuid4()),
-        correlation_id=str(uuid4()),
-        operation=operation,
-        owner="systemd-jobs",
-        principal="operator",
-        arguments=arguments,
-    )
+def _call(
+    adapter: LocalJobs, operation: str, arguments: dict[str, Any]
+) -> dict[str, Any]:
+    methods = {
+        "job.start": adapter.start,
+        "job.get": adapter.get,
+        "job.wait": adapter.wait,
+        "job.logs": adapter.logs,
+        "job.result": adapter.result,
+        "job.cancel": adapter.cancel,
+        "job.list": adapter.list,
+        "job.retry": adapter.retry,
+        "job.clean": adapter.clean,
+        "job.shell.start": adapter.shell_start,
+        "batch.list": adapter.batch_list,
+        "batch.start": adapter.batch_start,
+        "batch.status": adapter.batch_status,
+        "batch.land": adapter.batch_land,
+        "batch.resume": adapter.batch_resume,
+    }
+    return methods[operation](**arguments)
 
 
 @pytest.fixture
@@ -86,12 +97,10 @@ def test_job_start_launches_the_declared_operation(
         return {**JOB_ROW, "path": str(project.root)}
 
     monkeypatch.setattr(launch, "start_operation", fake_start)
-    response = adapter.dispatch(
-        _request("job.start", {"project_id": "fixture", "operation": "verify"})
+    payload = _call(
+        adapter, "job.start", {"project_id": "fixture", "operation": "verify"}
     )
-    assert response.error is None
     assert seen == {"project_id": "fixture", "operation": "verify", "workspace": None}
-    payload = response.payload.inline
     assert payload["job_id"] == "41"
     assert payload["kind"] == "declared-operation"
     assert payload["state"] == {
@@ -102,12 +111,10 @@ def test_job_start_launches_the_declared_operation(
     assert set(payload).isdisjoint({"contract", "principal", "artifacts"})
 
 
-def test_unknown_operation_is_an_error_envelope(adapter: LocalJobs) -> None:
-    """Red if an unrouted operation raises or answers with a payload."""
-    response = adapter.dispatch(_request("job.teleport", {}))
-    assert response.payload is None
-    assert response.error is not None
-    assert response.error.code is ErrorCode.INVALID_ARGUMENT
+def test_unknown_operation_is_an_error(adapter: LocalJobs) -> None:
+    """Red if an unrouted operation is silently accepted."""
+    with pytest.raises(KeyError):
+        _call(adapter, "job.teleport", {})
 
 
 def test_shell_start_queues_the_argv_inside_the_checkout(
@@ -122,28 +129,27 @@ def test_shell_start_queues_the_argv_inside_the_checkout(
         return {**JOB_ROW, "label": kwargs["label"], "group": kwargs["group"]}
 
     monkeypatch.setattr(launch, "enqueue", fake_enqueue)
-    response = adapter.dispatch(
-        _request(
-            "job.shell.start",
-            {
-                "project_id": "fixture",
-                "checkout_id": "default",
-                "argv": ["printf", "fixture"],
-                "cwd": "sub",
-                "timeout_seconds": 60,
-            },
-        )
+    payload = _call(
+        adapter,
+        "job.shell.start",
+        {
+            "project_id": "fixture",
+            "checkout_id": "default",
+            "argv": ["printf", "fixture"],
+            "cwd": "sub",
+            "timeout_seconds": 60,
+        },
     )
-    assert response.error is None, response.error
-    assert response.payload.inline["group"] == "interactive"
+    assert payload["group"] == "interactive"
     assert seen["label"] == "fixture:shell"
     assert seen["working_directory"] == (root / "sub").resolve()
     assert seen["argv"] == ("/bin/sh", "-c", "printf", "fixture")
     assert seen["timeout_seconds"] == 60
     assert seen["result_kind"] == "exit"
 
-    escaped = adapter.dispatch(
-        _request(
+    with pytest.raises(JobOwnerError) as escaped:
+        _call(
+            adapter,
             "job.shell.start",
             {
                 "project_id": "fixture",
@@ -153,10 +159,38 @@ def test_shell_start_queues_the_argv_inside_the_checkout(
                 "timeout_seconds": 60,
             },
         )
-    )
-    assert escaped.error is not None
-    assert escaped.error.code is ErrorCode.POLICY_DENIED
+    assert escaped.value.code is ErrorCode.POLICY_DENIED
     assert len(seen) == 9
+
+
+def test_job_list_cursor_is_bound_to_the_project_filter(
+    adapter: LocalJobs, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rows = [
+        {
+            **JOB_ROW,
+            "job_id": 30,
+            "project": "b",
+            "enqueued_at": "2026-09-07T02:00:00Z",
+        },
+        {
+            **JOB_ROW,
+            "job_id": 20,
+            "project": "a",
+            "enqueued_at": "2026-09-07T01:00:00Z",
+        },
+    ]
+    monkeypatch.setattr(launch, "list_jobs", lambda _project=None: rows)
+    monkeypatch.setattr(launch, "attach_bindings", lambda _config, page: page)
+
+    first = adapter.list(limit=1)
+    assert [row["job_id"] for row in first["jobs"]] == ["30"]
+    second = adapter.list(limit=1, cursor=first["next_cursor"])
+    assert [row["job_id"] for row in second["jobs"]] == ["20"]
+
+    with pytest.raises(JobOwnerError) as stale:
+        adapter.list(limit=1, project_id="b", cursor=first["next_cursor"])
+    assert stale.value.code is ErrorCode.STALE_CURSOR
 
 
 RUN_DOCUMENT = {
@@ -216,19 +250,16 @@ def test_batch_start_hands_the_beads_to_agentctl_and_answers_from_the_manifest(
 
     monkeypatch.setattr(batch, "start", fake_start)
     monkeypatch.setattr(batch, "status", lambda *_a, **_k: RUN_DOCUMENT)
-    response = adapter.dispatch(
-        _request(
-            "batch.start",
-            {
-                "project_id": "fixture",
-                "beads": ["fixture-1", "fixture-2"],
-                "workers": [["fixture-1", "fixture-2"]],
-                "backend": "claude",
-            },
-        )
+    payload = _call(
+        adapter,
+        "batch.start",
+        {
+            "project_id": "fixture",
+            "beads": ["fixture-1", "fixture-2"],
+            "workers": [["fixture-1", "fixture-2"]],
+            "backend": "claude",
+        },
     )
-    assert response.error is None, response.error
-    payload = response.payload.inline
     assert seen == {
         "project": "fixture",
         "seeds": ["fixture-1", "fixture-2"],
@@ -253,13 +284,11 @@ def test_batch_start_hands_the_beads_to_agentctl_and_answers_from_the_manifest(
         raise batch.BatchRefusal("members", "fixture-1: claimed by agent-x")
 
     monkeypatch.setattr(batch, "start", refuse)
-    refused = adapter.dispatch(
-        _request("batch.start", {"project_id": "fixture", "beads": ["fixture-1"]})
-    )
-    assert refused.error is not None
-    assert refused.error.code is ErrorCode.OPERATION_FAILED
-    assert refused.error.details.inline == {"refusal": "members"}
-    assert "claimed by agent-x" in refused.error.message
+    with pytest.raises(JobOwnerError) as refused:
+        _call(adapter, "batch.start", {"project_id": "fixture", "beads": ["fixture-1"]})
+    assert refused.value.code is ErrorCode.OPERATION_FAILED
+    assert refused.value.details == {"refusal": "members"}
+    assert "claimed by agent-x" in str(refused.value)
 
 
 def test_batch_land_queues_a_landing_task_and_reports_the_refusal_class(
@@ -278,18 +307,17 @@ def test_batch_land_queues_a_landing_task_and_reports_the_refusal_class(
         batch, "land", lambda *_a, **_k: pytest.fail("landing ran in the request")
     )
 
-    response = adapter.dispatch(_request("batch.land", {"run_id": "a2c81926"}))
-    assert response.error is None, response.error
-    assert response.payload.inline["landing_job_id"] == "77"
+    response = _call(adapter, "batch.land", {"run_id": "a2c81926"})
+    assert response["landing_job_id"] == "77"
 
     def refuse(*_args):
         raise batch.BatchRefusal("landing_in_progress", "landing task 42 is queued")
 
     monkeypatch.setattr(batch, "queue", refuse)
-    refused = adapter.dispatch(_request("batch.land", {"run_id": "a2c81926"}))
-    assert refused.error is not None
-    assert refused.error.code is ErrorCode.OPERATION_FAILED
-    assert refused.error.details.inline == {"refusal": "landing_in_progress"}
+    with pytest.raises(JobOwnerError) as refused:
+        _call(adapter, "batch.land", {"run_id": "a2c81926"})
+    assert refused.value.code is ErrorCode.OPERATION_FAILED
+    assert refused.value.details == {"refusal": "landing_in_progress"}
 
 
 def test_batch_verbs_refuse_a_run_that_belongs_to_another_project(
@@ -301,12 +329,14 @@ def test_batch_verbs_refuse_a_run_that_belongs_to_another_project(
     monkeypatch.setattr(
         batch, "load", lambda *_a: type("R", (), {"project": "other"})()
     )
-    refused = adapter.dispatch(
-        _request("batch.status", {"run_id": "a2c81926", "project_id": "fixture"})
-    )
-    assert refused.error is not None
-    assert refused.error.code is ErrorCode.INVALID_ARGUMENT
-    assert "belongs to other" in refused.error.message
+    with pytest.raises(JobOwnerError) as refused:
+        _call(
+            adapter,
+            "batch.status",
+            {"run_id": "a2c81926", "project_id": "fixture"},
+        )
+    assert refused.value.code is ErrorCode.INVALID_ARGUMENT
+    assert "belongs to other" in str(refused.value)
 
 
 def test_job_operations_pass_the_launch_reference_through_to_agentctl(
@@ -347,15 +377,13 @@ def test_job_operations_pass_the_launch_reference_through_to_agentctl(
         ("job.clean", {}),
         ("job.result", {}),
     ):
-        answer = adapter.dispatch(
-            _request(
-                operation,
-                {"job_id": 41, "launch_reference": reference, **arguments},
-            )
+        answer = _call(
+            adapter,
+            operation,
+            {"job_id": 41, "launch_reference": reference, **arguments},
         )
-        assert answer.error is None, (operation, answer.error)
-        assert answer.payload.inline["launch_reference"] == reference
-        assert answer.payload.inline["job_id"] == "44"
+        assert answer["launch_reference"] == reference
+        assert answer["job_id"] == "44"
 
     for name in ("wait", "get", "cancel", "retry", "clean", "result"):
         args, kwargs = seen[name]
@@ -364,11 +392,13 @@ def test_job_operations_pass_the_launch_reference_through_to_agentctl(
 
 def test_a_launch_reference_that_is_a_path_is_refused(adapter: LocalJobs) -> None:
     """It names one file under the state directory; a path would leave it."""
-    refused = adapter.dispatch(
-        _request("job.get", {"job_id": 41, "launch_reference": "../../etc/passwd"})
-    )
-    assert refused.error is not None
-    assert refused.error.code is ErrorCode.INVALID_ARGUMENT
+    with pytest.raises(JobOwnerError) as refused:
+        _call(
+            adapter,
+            "job.get",
+            {"job_id": 41, "launch_reference": "../../etc/passwd"},
+        )
+    assert refused.value.code is ErrorCode.INVALID_ARGUMENT
 
 
 def test_job_logs_reads_the_log_of_the_job_the_reference_addresses(
@@ -407,10 +437,7 @@ def test_job_logs_reads_the_log_of_the_job_the_reference_addresses(
     monkeypatch.setattr(launch, "addressed", addressed)
     monkeypatch.setattr(launch.pueue, "log", lambda _task_id: "")
 
-    answer = adapter.dispatch(
-        _request("job.logs", {"job_id": 41, "launch_reference": reference})
-    )
-    assert answer.error is None, answer.error
-    assert answer.payload.inline["launch_reference"] == reference
-    assert answer.payload.inline["job_id"] == "44"
-    assert answer.payload.inline["content"] == f"log of {reference}"
+    answer = _call(adapter, "job.logs", {"job_id": 41, "launch_reference": reference})
+    assert answer["launch_reference"] == reference
+    assert answer["job_id"] == "44"
+    assert answer["content"] == f"log of {reference}"

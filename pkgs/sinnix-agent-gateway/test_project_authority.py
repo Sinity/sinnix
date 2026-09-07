@@ -59,6 +59,16 @@ def test_project_checkouts_are_git_derived_and_explicit(tmp_path: Path) -> None:
     assert projects.checkout("fixture", rows[1]["checkout_id"])["checkout"] == rows[1]
 
 
+def test_project_summary_revision_tracks_head_and_worktree_state(
+    tmp_path: Path,
+) -> None:
+    projects, project, _linked = project_service(tmp_path)
+    first = projects.summary_revision("fixture")
+    (project / "README.md").write_text("changed\n")
+
+    assert projects.summary_revision("fixture") != first
+
+
 def test_worktree_porcelain_accepts_valueless_git_markers() -> None:
     records = ProjectService._worktree_records(
         """worktree /fixture

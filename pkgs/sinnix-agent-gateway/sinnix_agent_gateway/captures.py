@@ -22,6 +22,16 @@ class CaptureLane:
     root: Path | None = None
     native_lane: str | None = None
 
+    @property
+    def progress_path(self) -> Path | None:
+        if self.native_contract == "sinnix-capture-v1-sidecar":
+            if self.root is None or self.native_lane is None:
+                return None
+            return self.root / self.native_lane / f"{self.native_lane}-index.jsonl"
+        if self.path.is_file():
+            return self.path
+        return None
+
 
 def queryable_capture_lanes(runtime_inventory: Path) -> dict[str, CaptureLane]:
     """Derive capture query contracts from every declared runtime lane.
@@ -128,6 +138,41 @@ class CaptureService:
                 if lane.root is not None
                 else {}
             ),
+        }
+
+    def freshness(self, name: str) -> dict[str, Any]:
+        """Return freshness from the lane's actual capture progress record."""
+        self.principal.require_lane(name)
+        try:
+            lane = self._available_lanes()[name]
+        except KeyError as exc:
+            raise ValueError(
+                "capture lane is not declared by runtime inventory"
+            ) from exc
+        progress_path = lane.progress_path
+        if progress_path is None:
+            return {
+                "available": False,
+                "reason": "capture lane has no admitted progress record",
+                "lane": name,
+            }
+        try:
+            stat = progress_path.stat()
+        except FileNotFoundError:
+            return {
+                "available": False,
+                "reason": "capture progress record is missing",
+                "lane": name,
+                "progress_path": str(progress_path),
+            }
+        mtime = stat.st_mtime
+        return {
+            "available": True,
+            "lane": name,
+            "progress_path": str(progress_path),
+            "mtime": mtime,
+            "mtime_ns": stat.st_mtime_ns,
+            "size": stat.st_size,
         }
 
     def query(

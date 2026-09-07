@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-import base64
 import hashlib
 import json
 import subprocess
-import sys
 import threading
 import time
 from pathlib import Path
 
+import anyio
 import pytest
 from sinnix_agent_gateway.action import Action, MutationControls, RequestControls
 from sinnix_agent_gateway.actions import BY_NAME as ACTIONS
@@ -24,7 +23,16 @@ from sinnix_agent_gateway.results import (
     ResultService,
 )
 from sinnix_agent_gateway.schemas import GatewayModel, V2ToolEnvelope
-from sinnix_mcp.execution import ExecutionProfile, OwnerRoute
+
+
+def _execute(runtime, action, callback, request):
+    async def invoke():
+        async def async_callback():
+            return callback()
+
+        return await runtime.execute_v2_async(action, async_callback, request)
+
+    return anyio.run(invoke)
 
 
 class _Out(GatewayModel):
@@ -115,12 +123,14 @@ def test_runtime_v2_envelopes_success_and_public_error(tmp_path) -> None:
     runtime = Runtime.create(config(tmp_path), "observer")
     action = ACTIONS["gateway.catalog"]
 
-    success = runtime.execute_v2(
+    success = _execute(
+        runtime,
         action,
         lambda: {"cursor": 0, "next_cursor": None, "total": 1, "rows": ["bead"]},
         {"text": "bead"},
     )
-    failure = runtime.execute_v2(
+    failure = _execute(
+        runtime,
         action,
         lambda: (_ for _ in ()).throw(ValueError("invalid filter")),
         {"verb": "invalid"},
@@ -165,8 +175,8 @@ def test_runtime_v2_replaces_an_oversized_owner_payload_with_an_artifact(
     runtime = Runtime.create(config(tmp_path, max_result_bytes=1_024), "observer")
     action = ACTIONS["gateway.catalog"]
 
-    response = runtime.execute_v2(
-        action, lambda: {"rows": ["x" * 2_000]}, {"text": "large"}
+    response = _execute(
+        runtime, action, lambda: {"rows": ["x" * 2_000]}, {"text": "large"}
     )
 
     assert response["result"]["outcome"] == "ok"
@@ -198,7 +208,8 @@ def test_runtime_v2_keeps_each_expected_failure_in_a_typed_envelope(tmp_path) ->
     action = _fixture_action("fixture.typed-failure", VerbFamily.QUERY, {"observer"})
 
     for code in EXPECTED_ERROR_CODES:
-        response = runtime.execute_v2(
+        response = _execute(
+            runtime,
             action,
             lambda code=code: (_ for _ in ()).throw(
                 ProtocolError(code, f"safe {code} failure")
@@ -215,103 +226,6 @@ def test_runtime_v2_keeps_each_expected_failure_in_a_typed_envelope(tmp_path) ->
         )
 
 
-def test_jsonl_snapshot_pages_a_million_rows_without_logical_result_buffering(
-    tmp_path,
-) -> None:
-    runtime = Runtime.create(config(tmp_path), "observer")
-    action = ACTIONS["gateway.catalog"]
-    command = [
-        sys.executable,
-        "-c",
-        "import json\nfor row in range(1_000_000): print(json.dumps({'row': row}))",
-    ]
-
-    response = runtime.execute_v2_jsonl(
-        action,
-        command,
-        ExecutionProfile(
-            route=OwnerRoute("million-row-fixture"), max_stdout_bytes=1_024
-        ),
-        {"query": "million rows"},
-        source_revision="fixture-revision-1",
-        page_size=3,
-    )
-
-    assert response["result"]["outcome"] == "ok"
-    assert response["data"] == {
-        "rows": [{"row": 0}, {"row": 1}, {"row": 2}],
-        "row_count": 1_000_000,
-    }
-    assert response["page"]["kind"] == "snapshot"
-    assert response["page"]["next_cursor"] is not None
-    assert len(list(runtime.results.snapshots_root.glob("*"))) == 1
-    next_page = runtime.results.continue_snapshot(
-        response["page"]["next_cursor"],
-        query_sha256=response["result"]["request_sha256"],
-        source_revision="fixture-revision-1",
-    )
-    assert next_page["rows"] == [{"row": 3}, {"row": 4}, {"row": 5}]
-    assert next_page["next_cursor"] is not None
-    with pytest.raises(ResultError, match="source changed"):
-        runtime.results.continue_snapshot(
-            response["page"]["next_cursor"],
-            query_sha256=response["result"]["request_sha256"],
-            source_revision="fixture-revision-2",
-        )
-    with pytest.raises(ResultError, match="does not match"):
-        ResultService(
-            config(tmp_path), Principal.for_name("operator")
-        ).continue_snapshot(
-            response["page"]["next_cursor"],
-            query_sha256=response["result"]["request_sha256"],
-        )
-
-
-def test_snapshot_cursor_expires(tmp_path) -> None:
-    runtime = Runtime.create(config(tmp_path), "observer")
-    runtime.results.cursor_ttl_seconds = -1
-    response = runtime.execute_v2_jsonl(
-        ACTIONS["gateway.catalog"],
-        [sys.executable, "-c", "print('{\\\"row\\\": 1}'); print('{\\\"row\\\": 2}')"],
-        ExecutionProfile(route=OwnerRoute("expired-cursor")),
-        {"query": "expiry"},
-        source_revision="fixture-revision",
-        page_size=1,
-    )
-
-    with pytest.raises(ResultError, match="expired"):
-        runtime.results.continue_snapshot(
-            response["page"]["next_cursor"],
-            query_sha256=response["result"]["request_sha256"],
-        )
-
-
-def test_jsonl_stream_failure_cancels_child_and_removes_temp_writer(tmp_path) -> None:
-    runtime = Runtime.create(config(tmp_path), "observer")
-    action = ACTIONS["gateway.catalog"]
-    response = runtime.execute_v2_jsonl(
-        action,
-        [
-            sys.executable,
-            "-c",
-            "import sys, time; sys.stderr.write('token=secret-value\\n'); sys.stderr.flush(); print('x' * 4096, flush=True); time.sleep(60)",
-        ],
-        ExecutionProfile(route=OwnerRoute("invalid-jsonl"), max_stdout_bytes=128),
-        {"query": "bad stream"},
-        source_revision="fixture-revision",
-    )
-
-    assert response["error"]["code"] == "owner_failed"
-    assert response["error"]["details"]["failure_class"] == "command_stream_decode"
-    assert "secret-value" not in json.dumps(response)
-    diagnostic_id = response["error"]["diagnostic_refs"][0].rsplit("/", 1)[-1]
-    diagnostic = json.loads(
-        base64.b64decode(runtime.artifacts.read(diagnostic_id)["base64"])
-    )
-    assert diagnostic["stderr_excerpt"] == "token=[REDACTED]"
-    assert list(runtime.results.snapshots_root.glob(".*.writing")) == []
-
-
 def test_mutation_idempotency_replays_receipt_without_second_owner_write(
     tmp_path,
 ) -> None:
@@ -324,10 +238,10 @@ def test_mutation_idempotency_replays_receipt_without_second_owner_write(
         return {"created": True, "ref": "sinnix://fixtures/one"}
 
     request = {"idempotency_key": "fixture-key", "value": 1}
-    first = runtime.execute_v2(action, write, request)
-    replay = runtime.execute_v2(action, write, request)
-    conflict = runtime.execute_v2(
-        action, write, {"idempotency_key": "fixture-key", "value": 2}
+    first = _execute(runtime, action, write, request)
+    replay = _execute(runtime, action, write, request)
+    conflict = _execute(
+        runtime, action, write, {"idempotency_key": "fixture-key", "value": 2}
     )
 
     assert writes == ["owner write"]
@@ -350,18 +264,21 @@ def test_declared_deadline_and_idempotency_failures_persist_bounded_envelopes(
         "idempotency_key": "batch-failure-fixture",
     }
 
-    deadline = runtime.execute_v2(
+    deadline = _execute(
+        runtime,
         action,
         lambda: pytest.fail("expired request reached the owner"),
         {**request, "deadline_at": time.time() - 1},
     )
-    first = runtime.execute_v2(action, lambda: {"job_id": "first"}, request)
-    conflict = runtime.execute_v2(
+    first = _execute(runtime, action, lambda: {"job_id": "first"}, request)
+    conflict = _execute(
+        runtime,
         action,
         lambda: pytest.fail("conflicting request reached the owner"),
         {**request, "instructions": "different request"},
     )
-    unexpected = runtime.execute_v2(
+    unexpected = _execute(
+        runtime,
         action,
         lambda: (_ for _ in ()).throw(RuntimeError("owner implementation bug")),
         {**request, "idempotency_key": "unexpected-owner-fixture"},
@@ -398,16 +315,16 @@ def test_concurrent_matching_idempotency_returns_conflict_then_replays(
     first_result: dict[str, object] = {}
     thread = threading.Thread(
         target=lambda: first_result.setdefault(
-            "value", runtime.execute_v2(action, write, {"idempotency_key": "same"})
+            "value", _execute(runtime, action, write, {"idempotency_key": "same"})
         )
     )
     thread.start()
     assert started.wait(5)
-    concurrent = runtime.execute_v2(action, write, {"idempotency_key": "same"})
+    concurrent = _execute(runtime, action, write, {"idempotency_key": "same"})
     assert concurrent["error"]["code"] == "conflict"
     release.set()
     thread.join(5)
-    replay = runtime.execute_v2(action, write, {"idempotency_key": "same"})
+    replay = _execute(runtime, action, write, {"idempotency_key": "same"})
     assert replay == first_result["value"]
     assert writes == ["write"]
 
@@ -416,7 +333,8 @@ def test_partial_completion_is_explicitly_non_atomic(tmp_path) -> None:
     runtime = Runtime.create(config(tmp_path), "operator")
     action = _fixture_action("fixture.change", VerbFamily.CHANGE, {"operator"})
 
-    response = runtime.execute_v2(
+    response = _execute(
+        runtime,
         action,
         lambda: (_ for _ in ()).throw(
             ProtocolError("partial_completion", "first owner step completed")
@@ -433,7 +351,8 @@ def test_partial_completion_is_explicitly_non_atomic(tmp_path) -> None:
 def test_v2_rejects_ignored_preconditions(tmp_path) -> None:
     runtime = Runtime.create(config(tmp_path), "observer")
 
-    response = runtime.execute_v2(
+    response = _execute(
+        runtime,
         ACTIONS["gateway.catalog"],
         lambda: {"rows": []},
         {"preconditions": {"unexpected": "state"}},
@@ -516,7 +435,8 @@ def test_v2_operate_maps_canonical_targets_and_validates_owner_receipts(
         "idempotency_key": f"operate-{target}",
         "preconditions": {"expected_revision": 7},
     }
-    response = runtime.execute_v2(
+    response = _execute(
+        runtime,
         ACTIONS["machine.operate"],
         lambda: runtime.v2_operate(
             reference=reference,
@@ -552,7 +472,8 @@ def test_v2_operate_rejects_mismatched_owner_receipt(tmp_path) -> None:
         "operator_reason": "exercise typed operation",
         "expected_revision": 7,
     }  # type: ignore[method-assign]
-    response = runtime.execute_v2(
+    response = _execute(
+        runtime,
         ACTIONS["machine.operate"],
         lambda: runtime.v2_operate(
             reference="sinnix://machine/units/user/fixture.service",

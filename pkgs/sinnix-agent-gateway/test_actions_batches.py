@@ -6,25 +6,18 @@ Every worker and landing id these actions return is the pueue task id
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import anyio
 import pytest
-from conftest import call, ok
+from conftest import DirectJobs, call, ok
 from sinnix_agent_gateway import server as server_module
 from sinnix_agent_gateway.actions import batches, jobs
 from sinnix_agent_gateway.app import Runtime, create_server
 from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
 from sinnix_agent_gateway.locators import RunLocator
-from sinnix_mcp import (
-    ErrorCode,
-    ErrorEnvelope,
-    OpaquePayload,
-    RequestEnvelope,
-    ResponseEnvelope,
-)
+from sinnix_mcp import ErrorCode
 
 OWNED = (*batches.ACTIONS, *jobs.ACTIONS)
 RUN_ID = "fixture-20260906-012123-a2c81926"
@@ -70,32 +63,7 @@ RUN = {
 }
 
 
-@dataclass
-class FakeJobs:
-    calls: list[RequestEnvelope] = field(default_factory=list)
-    responses: dict[str, Any] = field(default_factory=dict)
-    errors: dict[str, tuple[ErrorCode, str, dict[str, Any]]] = field(
-        default_factory=dict
-    )
-
-    def dispatch(self, request: RequestEnvelope) -> ResponseEnvelope:
-        self.calls.append(request)
-        error = self.errors.get(request.operation)
-        if error is not None:
-            return ResponseEnvelope(
-                request_id=request.request_id,
-                correlation_id=request.correlation_id,
-                owner="systemd-jobs",
-                error=ErrorEnvelope(
-                    error[0], error[1], OpaquePayload.bounded(error[2])
-                ),
-            )
-        return ResponseEnvelope(
-            request_id=request.request_id,
-            correlation_id=request.correlation_id,
-            owner="systemd-jobs",
-            payload=OpaquePayload.bounded(self.responses.get(request.operation, RUN)),
-        )
+FakeJobs = DirectJobs
 
 
 def make_server(
@@ -112,7 +80,7 @@ def make_server(
         },
     )
     runtime = Runtime.create(config, principal)
-    fake = FakeJobs()
+    fake = FakeJobs(default=RUN)
     runtime.jobs = fake  # type: ignore[assignment]
     monkeypatch.setattr(Runtime, "create", classmethod(lambda _c, _g, _p: runtime))
     monkeypatch.setattr(

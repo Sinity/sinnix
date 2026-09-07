@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import anyio
 import pytest
+from conftest import DirectJobs
 from sinnix_agent_gateway.actions import BY_NAME as ACTIONS
 from sinnix_agent_gateway.app import Runtime
 from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
@@ -15,44 +15,9 @@ from sinnix_agent_gateway.runtime import (
     RESOURCE_READERS,
     ProtocolError,
 )
-from sinnix_mcp import (
-    ErrorCode,
-    ErrorEnvelope,
-    OpaquePayload,
-    RequestEnvelope,
-    ResponseEnvelope,
-)
+from sinnix_mcp import ErrorCode
 
-
-@dataclass
-class FakeJobs:
-    """Stands in for LocalJobs: records every request, answers from a table."""
-
-    calls: list[RequestEnvelope] = field(default_factory=list)
-    responses: dict[str, dict[str, Any]] = field(default_factory=dict)
-    errors: dict[str, tuple[ErrorCode, str, dict[str, Any]]] = field(
-        default_factory=dict
-    )
-
-    def dispatch(self, request: RequestEnvelope) -> ResponseEnvelope:
-        self.calls.append(request)
-        error = self.errors.get(request.operation)
-        if error is not None:
-            code, message, details = error
-            return ResponseEnvelope(
-                request_id=request.request_id,
-                correlation_id=request.correlation_id,
-                owner="systemd-jobs",
-                error=ErrorEnvelope(code, message, OpaquePayload.bounded(details)),
-            )
-        return ResponseEnvelope(
-            request_id=request.request_id,
-            correlation_id=request.correlation_id,
-            owner="systemd-jobs",
-            payload=OpaquePayload.bounded(
-                self.responses.get(request.operation, {"job_id": "job-fixture"})
-            ),
-        )
+FakeJobs = DirectJobs
 
 
 def runtime_with_jobs(
@@ -66,7 +31,7 @@ def runtime_with_jobs(
         max_result_bytes=max_result_bytes,
     )
     runtime = Runtime.create(config, principal_name)
-    jobs = FakeJobs()
+    jobs = FakeJobs(default={"job_id": "job-fixture"})
     runtime.jobs = jobs  # type: ignore[assignment]
     return runtime, jobs
 

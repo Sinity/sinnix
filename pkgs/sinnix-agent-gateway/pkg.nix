@@ -121,6 +121,7 @@ python3Packages.buildPythonApplication {
   build-system = [ python3Packages.setuptools ];
 
   dependencies = [
+    python3Packages.anyio
     mcp-sdk
     sinnix-mcp
     sinnix-lib
@@ -169,7 +170,6 @@ python3Packages.buildPythonApplication {
     "sinnix_agent_gateway.beads"
     "sinnix_agent_gateway.memory"
     "sinnix_agent_gateway.mcp_broker"
-    "sinnix_agent_gateway.project_context"
     "sinnix_agent_gateway.projects"
     "sinnix_agent_gateway.timeline"
   ];

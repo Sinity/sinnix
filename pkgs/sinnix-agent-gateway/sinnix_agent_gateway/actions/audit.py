@@ -8,7 +8,6 @@ from pydantic import Field, model_validator
 
 from ..action import ALL_PRINCIPALS, Action, Example, RequestControls
 from ..capability_index import CapabilityIndexError
-from ..catalog import search_rows
 from ..contracts import VerbFamily
 from ..results import ProtocolError, ResultError
 from ..schemas import GatewayModel
@@ -147,42 +146,17 @@ class Capabilities(GatewayModel):
     affordances: list[str] = Field(default_factory=list)
 
 
-_SEARCH_FIELDS = ("kind", "name", "description", "invoke", "owner", "docs")
-
-
 def _capabilities(runtime: Runtime, inp: CapabilitiesInput) -> Capabilities:
     op = inp.request
     try:
         if isinstance(op, DescribeOp):
             payload = runtime.capability_index.describe(op.name, op.kind)
         else:
-            payload = runtime.capability_index.search("", op.kind, op.enabled, 0, 500)
-            if payload.get("available"):
-                index = runtime.capability_index._load() or {"rows": []}
-                rows = [
-                    row
-                    for row in index["rows"]
-                    if (op.kind is None or row.get("kind") == op.kind)
-                    and (op.enabled is None or row.get("enabled") is op.enabled)
-                ]
-                rows = search_rows(rows, op.query, _SEARCH_FIELDS)
-                if op.cursor >= len(rows) and op.cursor != 0:
-                    raise ProtocolError(
-                        "stale_cursor", "cursor is beyond matching capability rows"
-                    )
-                page = rows[op.cursor : op.cursor + op.limit]
-                payload = {
-                    **payload,
-                    "query": op.query,
-                    "total": len(rows),
-                    "cursor": op.cursor,
-                    "next_cursor": op.cursor + len(page)
-                    if op.cursor + len(page) < len(rows)
-                    else None,
-                    "rows": page,
-                }
+            payload = runtime.capability_index.search(
+                op.query, op.kind, op.enabled, op.cursor, op.limit
+            )
     except CapabilityIndexError as exc:
-        raise ProtocolError("invalid_request", str(exc)) from exc
+        raise ProtocolError(exc.code, str(exc)) from exc
     for row in payload.get("rows", []):
         if isinstance(row.get("name"), str) and "ref" not in row:
             row["ref"] = f"sinnix://capabilities/{row['name']}"

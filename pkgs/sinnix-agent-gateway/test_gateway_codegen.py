@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
+import pytest
 from jsonschema import Draft202012Validator
+from sinnix_agent_gateway import actions as action_set
 from sinnix_agent_gateway.gateway_codegen import (
     DOCS_PATH,
     FIXTURE_PATH,
@@ -70,3 +73,24 @@ def test_corrupting_an_action_name_or_field_fails_generation_check(
     assert check_artifacts(tmp_path)
     reference.write_text(render_reference().replace("Catalog SHA-256", "Corrupt field"))
     assert check_artifacts(tmp_path)
+
+
+def test_catalog_hash_includes_examples_affordances_and_principals(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = action_set.visible
+    action = action_set.BY_NAME["gateway.status"]
+
+    def changed(principal: str):
+        rows = list(original(principal))
+        rows[rows.index(action)] = replace(
+            action,
+            affordances=("gateway.catalog", "gateway.status"),
+            principals=frozenset({"operator"}),
+            examples=(),
+        )
+        return tuple(rows)
+
+    baseline = action_set.catalog_hash("operator")
+    monkeypatch.setattr(action_set, "visible", changed)
+    assert action_set.catalog_hash("operator") != baseline

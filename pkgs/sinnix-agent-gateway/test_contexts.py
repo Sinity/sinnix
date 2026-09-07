@@ -205,6 +205,36 @@ def test_revision_cache_rejects_oversized_component_without_insertion() -> None:
     assert cache.get("large", "large") is None
 
 
+def test_revision_cache_skips_payload_probe_when_authoritative_revision_is_unchanged() -> (
+    None
+):
+    calls = 0
+    revision = "rev-a"
+
+    def probe() -> ComponentResult:
+        nonlocal calls
+        calls += 1
+        return ComponentResult.available("project", {"calls": calls}, revision=revision)
+
+    component = ComponentSpec("project", 12_000, probe, lambda: revision)
+    components = [
+        component,
+        ComponentSpec(
+            "checkout", 12_000, lambda: ComponentResult.available("checkout", {})
+        ),
+        ComponentSpec("tasks", 16_000, lambda: ComponentResult.available("tasks", {})),
+        ComponentSpec(
+            "authority", 8_000, lambda: ComponentResult.available("authority", {})
+        ),
+    ]
+    composer = ContextComposer()
+
+    composer.compose("project.orientation", "sinnix://projects/fixture", components)
+    composer.compose("project.orientation", "sinnix://projects/fixture", components)
+
+    assert calls == 1
+
+
 def test_missing_declared_component_is_explicitly_unavailable() -> None:
     result = ContextComposer().compose(
         "project.triage",

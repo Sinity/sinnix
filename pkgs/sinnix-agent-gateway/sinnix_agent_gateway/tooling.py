@@ -11,13 +11,29 @@ import anyio
 from mcp.server.mcpserver.tools.base import Tool
 from mcp.server.mcpserver.utilities.func_metadata import ArgModelBase, FuncMetadata
 from mcp.types import CallToolResult, TextContent
-from pydantic import ValidationError, create_model
+from pydantic import ConfigDict, ValidationError, create_model
 
 from .action import Action, ActionResult
 from .results import ProtocolError
 
 if TYPE_CHECKING:
     from .runtime import Runtime
+
+
+class _GatewayArgModel(ArgModelBase):
+    """Keep SDK arguments intact until the gateway validates the action input.
+
+    MCP's argument adapter normally projects a validated model back to only its
+    declared fields.  Gateway actions own validation and must see unknown keys
+    so a misspelled field produces a typed receipt instead of being ignored.
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="allow")
+
+    def model_dump_one_level(self) -> dict[str, Any]:
+        values = super().model_dump_one_level()
+        values.update(self.model_extra or {})
+        return values
 
 
 def _validation_error(exc: ValidationError, action: Action) -> ProtocolError:
@@ -57,16 +73,18 @@ def build_tool(action: Action, runtime: Runtime) -> Tool:
     # receipted and audited like any other failure.
     arg_model = create_model(
         f"{action.Input.__name__}Args",
-        __base__=ArgModelBase,
-        __config__=None,
+        __base__=_GatewayArgModel,
         **dict.fromkeys(action.Input.model_fields, (Any, None)),
     )
-    arg_model.model_config = {**ArgModelBase.model_config, "extra": "allow"}
 
     async def invoke(**kwargs: Any) -> Any:
         try:
             request_input = action.Input.model_validate(
-                {key: value for key, value in kwargs.items() if value is not None}
+                {
+                    key: value
+                    for key, value in kwargs.items()
+                    if value is not None or key not in action.Input.model_fields
+                }
             )
         except ValidationError as exc:
             failure = _validation_error(exc, action)

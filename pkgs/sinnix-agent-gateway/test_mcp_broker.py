@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Sequence, TextIO
@@ -12,7 +14,12 @@ import pytest
 from sinnix_agent_gateway.artifacts import ArtifactService
 from sinnix_agent_gateway.capabilities import Principal
 from sinnix_agent_gateway.config import GatewayConfig
-from sinnix_agent_gateway.mcp_broker import McpBrokerError, McpBrokerService
+from sinnix_agent_gateway.mcp_broker import (
+    McpBrokerDeadlineError,
+    McpBrokerError,
+    McpBrokerService,
+    McpBrokerTimeoutError,
+)
 from sinnix_mcp.execution import (
     EnvironmentProfile,
     ExecutionProfile,
@@ -378,6 +385,12 @@ def test_observer_broker_runs_upstream_in_read_only_unit(
     )
 
     assert captured[0].command == broker.config.systemd_run_command
+    broker.config.mcp_broker_servers["fixture"]["callTimeoutSeconds"] = 120
+    captured.clear()
+    anyio.run(
+        lambda: broker.call("fixture", "lookup", {"query": "fixture"}, write=False)
+    )
+    assert "--property=RuntimeMaxSec=120" in captured[0].args
     assert "--property=ReadOnlyPaths=/" in captured[0].args
     assert "--property=ReadWritePaths=/run/user/1000/fixture-locks" in captured[0].args
     assert "--property=PrivateNetwork=true" in captured[0].args
@@ -468,6 +481,46 @@ def test_broker_rejects_excluded_server_before_launch(tmp_path: Path) -> None:
         anyio.run(lambda: broker.call("blocked", "lookup", {}, write=False))
 
 
+class HangingCallSession(FakeSession):
+    async def call_tool(self, name: str, arguments: dict[str, object]) -> object:
+        await asyncio.sleep(60)
+        return await super().call_tool(name, arguments)
+
+
+def test_broker_uses_declared_timeout_and_classifies_upstream_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    broker = broker_service(tmp_path, "operator")
+    broker.config.mcp_broker_servers["fixture"]["callTimeoutSeconds"] = 1
+    monkeypatch.setattr(
+        "sinnix_agent_gateway.mcp_broker.stdio_client",
+        lambda _params, **_kwargs: FakeTransport(),
+    )
+    monkeypatch.setattr(
+        "sinnix_agent_gateway.mcp_broker.ClientSession", HangingCallSession
+    )
+
+    with pytest.raises(McpBrokerTimeoutError, match="timed out after 1s"):
+        anyio.run(
+            lambda: broker.call("fixture", "lookup", {"query": "fixture"}, write=False)
+        )
+
+
+def test_broker_enforces_caller_deadline_before_launch(tmp_path: Path) -> None:
+    broker = broker_service(tmp_path, "operator")
+
+    with pytest.raises(McpBrokerDeadlineError, match="deadline elapsed"):
+        anyio.run(
+            lambda: broker.call(
+                "fixture",
+                "lookup",
+                {},
+                write=False,
+                deadline_at=time.time() - 1,
+            )
+        )
+
+
 def test_gateway_config_loads_broker_servers(tmp_path: Path) -> None:
     config_path = tmp_path / "gateway.json"
     config_path.write_text(
@@ -481,5 +534,24 @@ def test_gateway_config_loads_broker_servers(tmp_path: Path) -> None:
     )
 
     assert GatewayConfig.load(config_path).mcp_broker_servers == {
-        "fixture": {"brokered": True}
+        "fixture": {"brokered": True, "callTimeoutSeconds": 30}
     }
+
+
+@pytest.mark.parametrize("value", [0, -1, 3_601, 1.5, True, "30"])
+def test_gateway_config_rejects_invalid_mcp_call_timeout(
+    tmp_path: Path, value: object
+) -> None:
+    config_path = tmp_path / "gateway.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "stateDir": str(tmp_path / "state"),
+                "projects": {},
+                "mcpBrokerServers": {"fixture": {"callTimeoutSeconds": value}},
+            }
+        )
+    )
+
+    with pytest.raises(ValueError, match="callTimeoutSeconds"):
+        GatewayConfig.load(config_path)

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -266,6 +268,61 @@ def test_capture_query_uses_the_native_lane_derived_from_a_nested_declared_path(
         "--lane",
         "logitech",
     ]
+
+
+def test_freshness_uses_sidecar_progress_when_directory_mtime_is_stale(
+    tmp_path: Path,
+) -> None:
+    gateway_config, lane_paths = config(tmp_path)
+    lane = lane_paths["mpris"]
+    old = time.time() - 3_600
+    os.utime(lane, (old, old))
+    index = lane / "mpris-index.jsonl"
+    with index.open("a") as handle:
+        handle.write('{"ts":2,"seq":2}\n')
+
+    service = CaptureService(gateway_config, Principal.for_name("observer"))
+    evidence = service.freshness("mpris")
+
+    assert evidence["available"] is True
+    assert evidence["progress_path"] == str(index)
+    assert evidence["mtime"] > old
+
+
+def test_freshness_uses_declared_file_and_reports_missing_directory_progress(
+    tmp_path: Path,
+) -> None:
+    inventory = tmp_path / "runtime-inventory.json"
+    direct_file = tmp_path / "machine" / "telemetry.jsonl"
+    directory = tmp_path / "machine" / "empty-lane"
+    direct_file.parent.mkdir(parents=True)
+    directory.mkdir()
+    direct_file.write_text("record\n")
+    inventory.write_text(
+        json.dumps(
+            {
+                "captures": [
+                    {"name": "telemetry", "path": str(direct_file)},
+                    {"name": "empty", "path": str(directory)},
+                ]
+            }
+        )
+    )
+    service = CaptureService(
+        GatewayConfig(
+            state_dir=tmp_path / "state",
+            projects={},
+            runtime_inventory=inventory,
+        ),
+        Principal.for_name("observer"),
+    )
+
+    assert service.freshness("telemetry")["progress_path"] == str(direct_file)
+    assert service.freshness("empty") == {
+        "available": False,
+        "reason": "capture lane has no admitted progress record",
+        "lane": "empty",
+    }
 
 
 def test_capture_read_without_a_lane_access_entry_is_a_config_error() -> None:

@@ -12,6 +12,7 @@ asserting them against the module that emits them would prove nothing.
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import Any
 
 import anyio
@@ -57,3 +58,55 @@ def assert_unavailable_upstreams(sources: list[dict[str, Any]]) -> None:
         unavailable["lynchpin"]["reason"]
         == "no gateway semantic adapter is registered yet"
     )
+
+
+@dataclass(frozen=True)
+class JobCall:
+    operation: str
+    arguments: dict[str, Any]
+
+
+@dataclass
+class DirectJobs:
+    """Typed owner double matching LocalJobs' direct operation methods."""
+
+    default: dict[str, Any] = field(default_factory=lambda: {"job_id": "41"})
+    calls: list[JobCall] = field(default_factory=list)
+    responses: dict[str, Any] = field(default_factory=dict)
+    errors: dict[str, tuple[Any, ...]] = field(default_factory=dict)
+
+    _operations = {
+        "start": "job.start",
+        "get": "job.get",
+        "wait": "job.wait",
+        "logs": "job.logs",
+        "result": "job.result",
+        "cancel": "job.cancel",
+        "list": "job.list",
+        "retry": "job.retry",
+        "clean": "job.clean",
+        "shell_start": "job.shell.start",
+        "batch_list": "batch.list",
+        "batch_start": "batch.start",
+        "batch_status": "batch.status",
+        "batch_land": "batch.land",
+        "batch_resume": "batch.resume",
+    }
+
+    def __getattr__(self, name: str) -> Any:
+        operation = self._operations.get(name)
+        if operation is None:
+            raise AttributeError(name)
+
+        def call(**arguments: Any) -> dict[str, Any]:
+            self.calls.append(JobCall(operation, dict(arguments)))
+            error = self.errors.get(operation)
+            if error is not None:
+                from sinnix_agent_gateway.execution import JobOwnerError
+
+                code, message, *details = error
+                raise JobOwnerError(code, message, details[0] if details else {})
+            answer = self.responses.get(operation, self.default)
+            return answer(dict(arguments)) if callable(answer) else answer
+
+        return call

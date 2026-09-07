@@ -441,7 +441,7 @@ class SearchResult(GatewayModel):
 _OUTPUT_CAP = 8 * 1024 * 1024
 
 
-def _run(argv: list[str], timeout: int) -> tuple[bytes, bool, int]:
+def _run(argv: list[str], timeout: int) -> tuple[bytes, bool, int, bool, bytes]:
     import subprocess
 
     try:
@@ -449,10 +449,16 @@ def _run(argv: list[str], timeout: int) -> tuple[bytes, bool, int]:
             argv, capture_output=True, timeout=timeout, check=False
         )
     except subprocess.TimeoutExpired as exc:
-        return (exc.stdout or b"")[:_OUTPUT_CAP], True, -1
+        return (exc.stdout or b"")[:_OUTPUT_CAP], True, -1, True, exc.stderr or b""
     except FileNotFoundError as exc:
         raise ProtocolError("unavailable", f"{argv[0]} is not installed") from exc
-    return completed.stdout[:_OUTPUT_CAP], False, completed.returncode
+    return (
+        completed.stdout[:_OUTPUT_CAP],
+        False,
+        completed.returncode,
+        len(completed.stdout) > _OUTPUT_CAP,
+        completed.stderr,
+    )
 
 
 def _search(runtime: Runtime, inp: SearchInput) -> SearchResult:
@@ -460,8 +466,19 @@ def _search(runtime: Runtime, inp: SearchInput) -> SearchResult:
     roots = [_authorized(runtime, root, existing=True) for root in inp.roots]
     root_refs = [encode_file_ref(str(root)) for root in roots]
     warnings: list[str] = []
+    if inp.content_regex is not None and inp.path_regex:
+        import re
+
+        try:
+            path_pattern = re.compile(inp.path_regex)
+        except re.error as exc:
+            raise ProtocolError(
+                "invalid_request", f"invalid path_regex: {exc}"
+            ) from exc
+    else:
+        path_pattern = None
     if inp.content_regex is not None:
-        argv = ["rg", "--json", "--no-messages", f"--max-count={inp.limit}"]
+        argv = ["rg", "--json", "--no-messages"]
         if inp.fixed_string:
             argv.append("--fixed-strings")
         if inp.case_insensitive:
@@ -481,10 +498,26 @@ def _search(runtime: Runtime, inp: SearchInput) -> SearchResult:
         if inp.max_bytes is not None:
             argv.append(f"--max-filesize={inp.max_bytes}")
         argv.extend(["--regexp", inp.content_regex, "--", *map(str, roots)])
-        output, timed_out, _ = _run(argv, inp.timeout_seconds)
+        output, timed_out, returncode, output_exceeded, stderr = _run(
+            argv, inp.timeout_seconds
+        )
+        if returncode not in (0, 1) and not timed_out:
+            diagnostic = stderr.decode("utf-8", "replace").strip()
+            code = (
+                "invalid_request"
+                if "regex parse error" in diagnostic.lower()
+                else "owner_failed"
+            )
+            raise ProtocolError(
+                code,
+                diagnostic or f"rg failed with exit status {returncode}",
+                details={"command": argv[0], "exit_status": returncode},
+            )
         import json as json_module
+        import time
 
         by_path: dict[str, FileMatch] = {}
+        limit_reached = False
         for raw in output.split(b"\n"):
             if not raw:
                 continue
@@ -497,11 +530,31 @@ def _search(runtime: Runtime, inp: SearchInput) -> SearchResult:
             path_text = data.get("path", {}).get("text")
             if not path_text or kind not in {"match", "context"}:
                 continue
+            candidate = Path(path_text)
+            try:
+                details = candidate.stat()
+            except OSError:
+                continue
+            candidate_kind = _kind(candidate, follow=False)
+            if inp.kind != "any" and candidate_kind != inp.kind:
+                continue
+            if inp.min_bytes is not None and details.st_size < inp.min_bytes:
+                continue
+            if inp.max_bytes is not None and details.st_size > inp.max_bytes:
+                continue
+            if (
+                inp.modified_within_seconds is not None
+                and time.time() - details.st_mtime > inp.modified_within_seconds
+            ):
+                continue
+            if path_pattern is not None and not path_pattern.search(str(candidate)):
+                continue
             entry = by_path.get(path_text)
             if entry is None:
                 if len(by_path) >= inp.limit:
+                    limit_reached = True
                     continue
-                base = _entry(Path(path_text))
+                base = _entry(candidate)
                 if base is None:
                     continue
                 entry = FileMatch(**base.model_dump(), match_count=0)
@@ -517,16 +570,11 @@ def _search(runtime: Runtime, inp: SearchInput) -> SearchResult:
             if kind == "match":
                 entry.match_count = (entry.match_count or 0) + 1
         matches = list(by_path.values())
-        if inp.path_regex:
-            import re
-
-            pattern = re.compile(inp.path_regex)
-            matches = [match for match in matches if pattern.search(match.path)]
         return SearchResult(
             roots=root_refs,
             matches=matches[: inp.limit],
             returned=min(len(matches), inp.limit),
-            truncated=len(matches) > inp.limit or len(output) >= _OUTPUT_CAP,
+            truncated=limit_reached or output_exceeded,
             engine="rg",
             timed_out=timed_out,
             warnings=warnings,
@@ -564,7 +612,16 @@ def _search(runtime: Runtime, inp: SearchInput) -> SearchResult:
         argv.append(".")
     argv.extend(["--"] if not (inp.name_glob or inp.path_regex) else [])
     argv.extend(str(root) for root in roots)
-    output, timed_out, _ = _run(argv, inp.timeout_seconds)
+    output, timed_out, returncode, output_exceeded, stderr = _run(
+        argv, inp.timeout_seconds
+    )
+    if returncode not in (0, 1) and not timed_out:
+        diagnostic = stderr.decode("utf-8", "replace").strip()
+        raise ProtocolError(
+            "owner_failed",
+            diagnostic or f"fd failed with exit status {returncode}",
+            details={"command": argv[0], "exit_status": returncode},
+        )
     paths = [
         piece.decode("utf-8", "surrogateescape")
         for piece in output.split(b"\0")
@@ -577,7 +634,7 @@ def _search(runtime: Runtime, inp: SearchInput) -> SearchResult:
         roots=root_refs,
         matches=[FileMatch(**entry.model_dump()) for entry in entries],
         returned=len(entries),
-        truncated=len(paths) > inp.limit,
+        truncated=len(paths) > inp.limit or output_exceeded,
         engine="fd",
         timed_out=timed_out,
         warnings=warnings,
@@ -650,67 +707,158 @@ def _split_lines(text: str) -> list[str]:
     return lines
 
 
-def _parse_hunks(patch: str) -> list[tuple[str, int, int, list[str]]]:
+def _single_file_patch(patch: str, filename: str) -> tuple[str, list[str]]:
+    """Normalize optional headers while enforcing the one-file patch boundary."""
     import re
 
-    header = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
-    hunks: list[tuple[str, int, int, list[str]]] = []
-    current: list[str] | None = None
-    for line in patch.split("\n"):
-        match = header.match(line)
+    lines = patch.splitlines(keepends=True)
+    hunk_pattern = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+    first_hunk = next(
+        (index for index, line in enumerate(lines) if hunk_pattern.match(line)),
+        len(lines),
+    )
+    old_headers = [
+        index
+        for index, line in enumerate(lines[:first_hunk])
+        if line.startswith("--- ")
+    ]
+    new_headers = [
+        index
+        for index, line in enumerate(lines[:first_hunk])
+        if line.startswith("+++ ")
+    ]
+    if len(old_headers) != len(new_headers):
+        raise ProtocolError("invalid_request", "patch has an incomplete file header")
+    if len(old_headers) > 1:
+        raise ProtocolError("invalid_request", "patch must identify one file")
+
+    def header_path(line: str) -> str:
+        return line[4:].split("\t", 1)[0].rstrip("\r\n")
+
+    if old_headers:
+        old_path = header_path(lines[old_headers[0]])
+        new_path = header_path(lines[new_headers[0]])
+        if old_path in {"/dev/null", "dev/null"} or new_path in {
+            "/dev/null",
+            "dev/null",
+        }:
+            raise ProtocolError(
+                "invalid_request", "patch must update the existing file"
+            )
+        old_path = old_path.removeprefix("a/")
+        new_path = new_path.removeprefix("b/")
+        if (old_path, new_path) not in {("a", "b"), (filename, filename)}:
+            raise ProtocolError("invalid_request", "patch targets a different file")
+        normalized = list(lines)
+        normalized[old_headers[0]] = f"--- a/{filename}\n"
+        normalized[new_headers[0]] = f"+++ b/{filename}\n"
+    else:
+        normalized = [f"--- a/{filename}\n", f"+++ b/{filename}\n", *lines]
+
+    hunk_headers: list[str] = []
+    hunk_started = False
+    expected_old = expected_new = seen_old = seen_new = None
+
+    def finish_hunk() -> None:
+        if hunk_started and (seen_old != expected_old or seen_new != expected_new):
+            raise ProtocolError("invalid_request", "patch hunk line counts are invalid")
+
+    for line in normalized:
+        match = hunk_pattern.match(line)
         if match:
-            current = []
-            hunks.append((line, int(match.group(1)), int(match.group(3)), current))
+            finish_hunk()
+            hunk_started = True
+            hunk_headers.append(line.rstrip("\r\n"))
+            expected_old = int(match.group(2) or "1") if match.group(1) != "0" else 0
+            expected_new = int(match.group(4) or "1") if match.group(3) != "0" else 0
+            seen_old = seen_new = 0
             continue
-        if current is None:
-            continue
-        if line == "" or line.startswith(("---", "+++")) and not hunks[-1][3]:
-            continue
-        if line[0] in " +-\\":
-            current.append(line)
-    if not hunks:
+        if hunk_started:
+            if not line or line[0] not in " +-\\":
+                raise ProtocolError("invalid_request", "patch contains trailing data")
+            if line[0] in " -":
+                seen_old += 1
+            if line[0] in " +":
+                seen_new += 1
+    finish_hunk()
+    if not hunk_headers:
         raise ProtocolError("invalid_request", "patch contains no @@ hunks")
-    return hunks
+    return "".join(normalized), hunk_headers
 
 
-def _apply_unified(
-    lines: list[str], patch: str
-) -> tuple[list[str], int, list[RejectedHunk]]:
-    result = list(lines)
-    offset = 0
-    applied = 0
-    rejected: list[RejectedHunk] = []
-    for index, (header, old_start, _new_start, body) in enumerate(_parse_hunks(patch)):
-        old = [line[1:] for line in body if line[0] in " -"]
-        new = [line[1:] for line in body if line[0] in " +"]
-        position = old_start - 1 + offset
-        if old_start == 0:
-            position = 0
-        window = result[position : position + len(old)]
-        if window != old:
-            found = None
-            for delta in range(1, 200):
-                for candidate in (position - delta, position + delta):
-                    if (
-                        0 <= candidate <= len(result) - len(old)
-                        and result[candidate : candidate + len(old)] == old
-                    ):
-                        found = candidate
-                        break
-                if found is not None:
-                    break
-            if found is None:
-                rejected.append(
-                    RejectedHunk(
-                        index=index, reason="context does not match", header=header
-                    )
+def _git_apply_patch(
+    original: bytes, patch: str, filename: str, mode: int
+) -> tuple[bytes, int, list[RejectedHunk]]:
+    """Apply one file through git in a private staging directory."""
+    import os
+    import re
+    import subprocess
+    import tempfile
+
+    normalized, hunk_headers = _single_file_patch(patch, filename)
+    with tempfile.TemporaryDirectory(prefix="gateway-patch-") as root:
+        staging = Path(root)
+        staged_target = staging / filename
+        staged_target.write_bytes(original)
+        staged_target.chmod(mode & 0o7777)
+        patch_path = staging / f".gateway-patch-input-{os.urandom(8).hex()}"
+        patch_path.write_text(normalized, encoding="utf-8", newline="")
+        try:
+            completed = subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(staging),
+                    "apply",
+                    "--reject",
+                    "--unidiff-zero",
+                    "--whitespace=nowarn",
+                    str(patch_path),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise ProtocolError("deadline", "git patch operation timed out") from exc
+        if completed.returncode not in (0, 1):
+            diagnostic = (completed.stderr or completed.stdout).strip()
+            raise ProtocolError(
+                "invalid_request",
+                diagnostic or "git rejected the unified patch",
+            )
+        reject_path = staged_target.with_name(f"{filename}.rej")
+        rejected_headers = []
+        if reject_path.exists():
+            rejected_text = reject_path.read_text(encoding="utf-8", errors="replace")
+            rejected_headers = re.findall(
+                r"^(@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@[^\r\n]*)",
+                rejected_text,
+                flags=re.MULTILINE,
+            )
+        rejected: list[RejectedHunk] = []
+        used: set[int] = set()
+        for header in rejected_headers:
+            try:
+                index = next(
+                    index
+                    for index, candidate in enumerate(hunk_headers)
+                    if index not in used and candidate == header
                 )
-                continue
-            position = found
-        result[position : position + len(old)] = new
-        offset += len(new) - len(old)
-        applied += 1
-    return result, applied, rejected
+            except StopIteration:
+                index = len(used)
+            used.add(index)
+            rejected.append(
+                RejectedHunk(
+                    index=index, reason="context does not match", header=header
+                )
+            )
+        if not staged_target.exists():
+            raise ProtocolError(
+                "invalid_request", "git apply did not produce the target file"
+            )
+        return staged_target.read_bytes(), len(hunk_headers) - len(rejected), rejected
 
 
 def _patch(runtime: Runtime, inp: PatchInput) -> PatchResult:
@@ -740,11 +888,12 @@ def _patch(runtime: Runtime, inp: PatchInput) -> PatchResult:
         text = original.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise ProtocolError("invalid_request", "file is not UTF-8 text") from exc
-    trailing_newline = text.endswith("\n") or text == ""
     lines = _split_lines(text)
     rejected: list[RejectedHunk] = []
     if inp.edit.mode == "unified":
-        updated, applied, rejected = _apply_unified(lines, inp.edit.patch)
+        encoded, applied, rejected = _git_apply_patch(
+            original, inp.edit.patch, target.name, target.stat().st_mode
+        )
         if rejected and not applied:
             raise ProtocolError(
                 "conflict",
@@ -771,8 +920,11 @@ def _patch(runtime: Runtime, inp: PatchInput) -> PatchResult:
             + lines[edit.end_line :]
         )
         applied = 1
-    new_text = "\n".join(updated) + ("\n" if trailing_newline and updated else "")
-    encoded = new_text.encode()
+        trailing_newline = text.endswith("\n") or text == ""
+        encoded = (
+            "\n".join(updated) + ("\n" if trailing_newline and updated else "")
+        ).encode()
+    updated = _split_lines(encoded.decode("utf-8"))
     if not inp.dry_run:
         temporary = target.with_name(f".{target.name}.gateway-tmp")
         temporary.write_bytes(encoded)

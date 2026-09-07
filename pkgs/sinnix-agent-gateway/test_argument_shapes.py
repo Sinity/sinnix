@@ -7,17 +7,15 @@ envelope — never a silent misroute and never an untyped crash.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import pytest
-from conftest import call
+from conftest import DirectJobs, call
 from sinnix_agent_gateway import server as server_module
 from sinnix_agent_gateway.actions import beads, jobs
 from sinnix_agent_gateway.app import Runtime, create_server
 from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
-from sinnix_mcp import OpaquePayload, RequestEnvelope, ResponseEnvelope
 
 OWNED = (*jobs.ACTIONS, *beads.ACTIONS)
 
@@ -29,18 +27,7 @@ JOB = {
 }
 
 
-@dataclass
-class FakeJobs:
-    calls: list[RequestEnvelope] = field(default_factory=list)
-
-    def dispatch(self, request: RequestEnvelope) -> ResponseEnvelope:
-        self.calls.append(request)
-        return ResponseEnvelope(
-            request_id=request.request_id,
-            correlation_id=request.correlation_id,
-            owner="systemd-jobs",
-            payload=OpaquePayload.bounded({**JOB, "timed_out": False}),
-        )
+FakeJobs = DirectJobs
 
 
 @pytest.fixture
@@ -56,7 +43,7 @@ def server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
         },
     )
     runtime = Runtime.create(config, "operator")
-    runtime.jobs = FakeJobs()  # type: ignore[assignment]
+    runtime.jobs = FakeJobs(default={**JOB, "timed_out": False})  # type: ignore[assignment]
     monkeypatch.setattr(Runtime, "create", classmethod(lambda _c, _g, _p: runtime))
     monkeypatch.setattr(
         server_module,
@@ -108,8 +95,8 @@ def test_the_catalogued_shape_reaches_the_owner(server: Any) -> None:
     decorated = call(
         server, "jobs.wait", {"target": {"job_id": 41}, "parameters": {"job_id": 9}}
     )
-    assert decorated["result"]["outcome"] == "ok", decorated
-    assert decorated["data"]["job_id"] == 41
+    assert decorated["result"]["outcome"] == "error", decorated
+    assert decorated["error"]["code"] == "invalid_request"
 
 
 def test_every_action_example_is_the_shape_its_schema_publishes(server: Any) -> None:

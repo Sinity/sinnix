@@ -58,6 +58,8 @@ class ObserveService:
             return None
         except (OSError, json.JSONDecodeError):
             return None
+        if not isinstance(snapshot, dict):
+            return None
         if (
             snapshot.get("schema") != "sinnix.gateway-connector-snapshot.v1"
             or not isinstance(snapshot.get("principal"), str)
