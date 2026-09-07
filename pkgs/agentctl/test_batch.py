@@ -273,7 +273,13 @@ class FakeWorktrunk:
     def remove(self, root: Path, branch: str, *, force: bool = False) -> None:
         if branch in self.refuse_remove:
             raise WorktrunkError(f"{branch} is locked")
-        self.trees.pop(branch, None)
+        if branch in self.trees:
+            self.trees.pop(branch)
+        else:
+            for key, tree in list(self.trees.items()):
+                if tree.path is not None and str(tree.path) == branch:
+                    self.trees.pop(key)
+                    break
         self.removed.append(branch)
 
 
@@ -1770,6 +1776,27 @@ def test_cleanup_preserves_unique_commits_when_the_worktree_directory_is_missing
     assert kept == f"worktree kept; commits only on {branch}"
     assert harness.wt.removed == []
     assert branch in harness.wt.trees
+
+
+def test_cleanup_removes_a_detached_owned_worktree_by_its_recorded_path(
+    harness: Harness,
+) -> None:
+    """A detached owned worktree is removed without trusting a branch lookup."""
+    run = prepared_run(harness, "fx-solo")
+    stored = manifest.load(harness.config, run["run_id"])
+    branch = run["workers"][0]["branch"]
+    harness.wt.trees[branch] = Worktree(branch=branch, path=None)
+    recorded_path = Path(run["workers"][0]["worktree"])
+    harness.wt.trees["detached"] = Worktree(branch=None, path=recorded_path)
+    harness.git.heads[str(recorded_path)] = BASE
+    harness.git.branches[branch] = BASE
+
+    residual = landing_module._drop_worktrees(harness.config, harness.project, stored)
+
+    assert residual == []
+    assert harness.wt.removed == [str(recorded_path), branch]
+    assert branch not in harness.wt.trees
+    assert "detached" not in harness.wt.trees
 
 
 def test_clean_refuses_before_removing_worktrees_when_a_manifest_is_unreadable(
