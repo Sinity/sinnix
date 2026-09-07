@@ -334,7 +334,7 @@ rec {
         IOAccounting = true;
         # The job plane is the machine's main workload during a wave; at 10 it
         # starved behind an idle desktop and the coordinator's own polls.
-        CPUWeight = 100;
+        CPUWeight = 90;
         IOWeight = 100;
         # The whole job plane's memory policy, and the only one: host memory
         # (31 GB) minus the desktop reservation below (app 6G + session 5G +
@@ -404,7 +404,7 @@ rec {
       };
       agentctl-bulk = {
         IOAccounting = true;
-        CPUWeight = 90;
+        CPUWeight = 100;
         IOWeight = 100;
         MemoryHigh = "10G";
         MemoryMax = "14G";
