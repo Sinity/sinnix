@@ -6,6 +6,7 @@ import fcntl
 import hashlib
 import json
 import os
+import subprocess
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -270,7 +271,10 @@ class FakeWorktrunk:
         self.bases[branch] = base or ""
         return tree
 
-    def remove(self, root: Path, branch: str, *, force: bool = False) -> None:
+    def remove(
+        self, root: Path, branch: str, *, force: bool = False,
+        keep_branch: bool = False, reap: bool = True,
+    ) -> None:
         if branch in self.refuse_remove:
             raise WorktrunkError(f"{branch} is locked")
         if branch in self.trees:
@@ -391,6 +395,7 @@ def harness(
     monkeypatch.setattr(worktrunk, "worktrunk_list", wt.list)
     monkeypatch.setattr(worktrunk, "worktrunk_create", create)
     monkeypatch.setattr(worktrunk, "worktrunk_remove", wt.remove)
+    monkeypatch.setattr(landing_module, "_process_users", lambda path: [])
     built = Harness(
         config=config,
         project=project,
@@ -1667,6 +1672,7 @@ def test_abandon_releases_claims_removes_safe_worktrees_and_frees_the_members(
     # The lead worktree carries a commit no other ref holds; solo's is merged
     # elsewhere; the integration worktree exists at the base.
     harness.git.heads[lead["worktree"]] = OTHER
+    harness.git.branches[lead["branch"]] = OTHER
     harness.git.holders[SHA] = [f"refs/heads/batch/{run_id}/fx-solo", "refs/heads/keep"]
     harness.git.holders[OTHER] = [f"refs/heads/batch/{run_id}/fx-lead"]
 
@@ -1674,17 +1680,17 @@ def test_abandon_releases_claims_removes_safe_worktrees_and_frees_the_members(
 
     record = abandoned["abandoned"]
     assert record["reason"] == "canary failed" and record["at"]
-    assert record["residual"] == [
-        f"batch/{run_id}/fx-lead: worktree kept; commits only on batch/{run_id}/fx-lead"
-    ]
+    assert record["residual"] == []
     assert {item[0] for item in harness.beads.released} == {
         "fx-lead",
         "fx-member",
         "fx-solo",
     }
     assert harness.beads.beads["fx-solo"]["status"] == "open"
-    assert harness.wt.removed == [f"batch/{run_id}/fx-solo"]
-    assert f"batch/{run_id}/fx-lead" in harness.wt.trees
+    assert sorted(harness.wt.removed) == sorted(
+        [f"batch/{run_id}/fx-lead", f"batch/{run_id}/fx-solo"]
+    )
+    assert harness.wt.trees == {}
     stage = batch.status(harness.config, run_id)["stage"]
     assert stage == "abandoned"
     with pytest.raises(BatchRefusal, match="abandoned"):
@@ -1761,20 +1767,21 @@ def test_clean_drops_the_worktrees_of_finished_runs_and_leaves_the_others(
     )
 
 
-def test_cleanup_preserves_unique_commits_when_the_worktree_directory_is_missing(
+def test_cleanup_leaves_a_branch_without_a_checkout_alone(
     harness: Harness,
 ) -> None:
-    """A branch-only registry entry still names commits that cleanup must keep."""
+    """A branch is a recovery ref, not a checkout cleanup target."""
     branch = "batch/fixture-20260101-000000-cccccccc/w1"
     harness.wt.trees[branch] = Worktree(branch=branch, path=None)
     harness.git.branches[branch] = OTHER
     harness.git.parents[OTHER] = (BASE,)
     harness.git.holders[OTHER] = [f"refs/heads/{branch}"]
 
-    kept = landing_module._drop_branch(harness.project, branch, base=BASE)
+    kept = landing_module._drop_branch(
+        harness.config, harness.project, branch, base=BASE
+    )
 
-    assert kept == f"worktree kept; commits only on {branch}"
-    assert harness.wt.removed == []
+    assert kept is None
     assert branch in harness.wt.trees
 
 
@@ -1794,9 +1801,126 @@ def test_cleanup_removes_a_detached_owned_worktree_by_its_recorded_path(
     residual = landing_module._drop_worktrees(harness.config, harness.project, stored)
 
     assert residual == []
-    assert harness.wt.removed == [str(recorded_path), branch]
-    assert branch not in harness.wt.trees
+    assert harness.wt.removed == [str(recorded_path)]
+    assert branch in harness.wt.trees
     assert "detached" not in harness.wt.trees
+
+
+def test_terminal_cleanup_keeps_a_checkout_used_by_a_nonterminal_task(
+    harness: Harness,
+) -> None:
+    """Anti-vacuity: a nonterminal task on the checkout must block removal."""
+    run = prepared_run(harness, "fx-solo")
+    worker = run["workers"][0]
+    harness.pueue.running(worker["task_id"])
+
+    residual = landing_module._drop_worktrees(
+        harness.config, harness.project, manifest.load(harness.config, run["run_id"])
+    )
+
+    assert residual == [
+        f"{worker['branch']}: worktree kept; active user: task {worker['task_id']} running cwd {worker['worktree']}"
+    ]
+    assert harness.wt.removed == []
+
+
+def test_terminal_cleanup_rehomes_agent_evidence_before_release(harness: Harness) -> None:
+    """Anti-vacuity: deleting the checkout used to leave prompt paths dangling."""
+    run = prepared_run(harness, "fx-solo")
+    worker = run["workers"][0]
+    source = Path(worker["prompt_path"])
+    source_text = source.read_text()
+
+    residual = landing_module._drop_worktrees(
+        harness.config, harness.project, manifest.load(harness.config, run["run_id"])
+    )
+
+    stored = manifest.load(harness.config, run["run_id"])
+    retained = Path(stored.worker(worker["id"])["prompt_path"])
+    assert residual == []
+    assert retained.is_file() and retained.read_text() == source_text
+    assert source.is_file()
+
+
+def test_terminal_cleanup_retries_with_a_changed_receipt(harness: Harness) -> None:
+    """Anti-vacuity: a failed release must not block a later receipt version."""
+    run = prepared_run(harness, "fx-solo")
+    worker = run["workers"][0]
+    source = Path(worker["prompt_path"])
+    harness.wt.refuse_remove = {worker["branch"]}
+
+    first = landing_module._drop_worktrees(
+        harness.config, harness.project, manifest.load(harness.config, run["run_id"])
+    )
+    first_path = Path(manifest.load(harness.config, run["run_id"]).worker(worker["id"])["prompt_path"])
+    source.write_text(source.read_text() + "updated receipt\n")
+    harness.wt.refuse_remove = set()
+
+    second = landing_module._drop_worktrees(
+        harness.config, harness.project, manifest.load(harness.config, run["run_id"])
+    )
+    second_path = Path(manifest.load(harness.config, run["run_id"]).worker(worker["id"])["prompt_path"])
+
+    assert first == [f"{worker['branch']}: {worker['branch']} is locked"]
+    assert second == []
+    assert first_path.is_file() and second_path.is_file()
+    assert first_path != second_path
+
+
+def test_privileged_cwd_refusal_fails_closed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Anti-vacuity: an unreadable same-user process must keep its checkout."""
+
+    def refused(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args=args[0], returncode=1, stdout="", stderr="sudo denied")
+
+    monkeypatch.setattr(landing_module.subprocess, "run", refused)
+
+    with pytest.raises(BatchError, match="sudo denied"):
+        landing_module._privileged_cwd(tmp_path / "123")
+
+
+def test_privileged_cwd_reports_the_exact_target(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Anti-vacuity: the fallback must report the privileged cwd, not a proxy."""
+
+    target = tmp_path / "checkout"
+
+    def succeeded(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args=args[0], returncode=0, stdout=f"{target}\n", stderr=""
+        )
+
+    monkeypatch.setattr(landing_module.subprocess, "run", succeeded)
+
+    assert landing_module._privileged_cwd(tmp_path / "123") == target
+
+
+def test_privileged_cwd_refuses_a_reused_pid(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Anti-vacuity: a PID reused during sudo probing cannot authorize removal."""
+    times = iter(("before", "after"))
+    monkeypatch.setattr(landing_module, "_process_starttime", lambda entry: next(times))
+    monkeypatch.setattr(landing_module, "_privileged_cwd", lambda entry: tmp_path / "checkout")
+
+    with pytest.raises(BatchError, match="changed during cwd probe"):
+        landing_module._stable_privileged_cwd(tmp_path / "123")
+
+
+def test_privileged_cwd_ignores_a_vanished_pid(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Anti-vacuity: a PID that exits during probing is not an active user."""
+    times = iter(("before", None))
+    monkeypatch.setattr(landing_module, "_process_starttime", lambda entry: next(times))
+
+    def vanished(entry: Path) -> Path:
+        raise BatchError("cannot inspect process 123 cwd: vanished")
+
+    monkeypatch.setattr(landing_module, "_privileged_cwd", vanished)
+
+    assert landing_module._stable_privileged_cwd(tmp_path / "123") is None
 
 
 def test_clean_refuses_before_removing_worktrees_when_a_manifest_is_unreadable(

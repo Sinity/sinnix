@@ -6,6 +6,7 @@ import threading
 from pathlib import Path
 
 import pytest
+from agentctl import landing
 from agentctl.worktrunk import (
     Worktree,
     WorktrunkError,
@@ -79,6 +80,70 @@ def test_create_places_the_worktree_at_the_requested_path_and_remove_reverses_it
 
     assert not target.exists()
     assert worktrunk_find(root, "feature/lane") is None
+
+
+def test_terminal_release_keeps_the_exact_branch_head(tmp_path: Path) -> None:
+    """Anti-vacuity: branch deletion would make this worker commit unreachable."""
+    root = _repository(tmp_path / "repo")
+    target = tmp_path / "worktrees" / "lane"
+    worktrunk_create(root, "batch/run/worker", path=target, base="master")
+    (target / "worker.txt").write_text("candidate\n")
+    subprocess.run(["git", "-C", str(target), "add", "worker.txt"], check=True)
+    _commit(target, "worker candidate")
+    head = subprocess.run(
+        ["git", "-C", str(target), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    (root / "worker.txt").write_text("candidate\n")
+    subprocess.run(["git", "-C", str(root), "add", "worker.txt"], check=True)
+    _commit(root, "squash landing")
+
+    worktrunk_remove(root, "batch/run/worker", keep_branch=True, reap=False)
+
+    retained = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "refs/heads/batch/run/worker^{commit}"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert not target.exists()
+    assert retained == head
+
+
+def test_detached_recovery_retains_each_head_after_a_failed_release(tmp_path: Path) -> None:
+    """Anti-vacuity: one retry cannot replace the prior detached recovery ref."""
+    root = _repository(tmp_path / "repo")
+    first = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    (root / "later.txt").write_text("later\n")
+    subprocess.run(["git", "-C", str(root), "add", "later.txt"], check=True)
+    _commit(root, "later detached head")
+    second = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    checkout = tmp_path / "worktrees" / "detached"
+
+    first_ref = landing._recovery_ref(root, "run", checkout, first)
+    second_ref = landing._recovery_ref(root, "run", checkout, second)
+
+    assert first_ref != second_ref
+    for ref, expected in ((first_ref, first), (second_ref, second)):
+        retained = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", f"{ref}^{{commit}}"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        assert retained == expected
 
 
 def test_a_missing_repository_is_a_typed_refusal(tmp_path: Path) -> None:
