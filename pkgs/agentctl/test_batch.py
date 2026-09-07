@@ -116,6 +116,8 @@ class FakeGit:
     status: dict[str, str] = field(default_factory=dict)
     # Commit -> refs holding it, for `for-each-ref --contains`.
     holders: dict[str, list[str]] = field(default_factory=dict)
+    # Worktree path -> the branch checked out there.
+    checkouts: dict[str, str] = field(default_factory=dict)
     greps: list[tuple[str, ...]] = field(default_factory=list)
 
     def is_ancestor(self, ancestor: str, sha: str) -> bool:
@@ -139,13 +141,33 @@ class FakeGit:
         head = self.heads.get(path, BASE)
         other = self.branch_head(branch)
         if self.is_ancestor(other, head):
+            self._moved(path)
             return
         if self.is_ancestor(head, other):
             self.heads[path] = other
+            self._moved(path)
             return
         merged = hashlib.sha1(f"{head}+{other}".encode()).hexdigest()
         self.parents[merged] = (head, other)
         self.heads[path] = merged
+        self._moved(path)
+
+    def _moved(self, path: str) -> None:
+        """The branch checked out at `path` follows that worktree's HEAD."""
+        branch = self.checkouts.get(path)
+        if branch is not None:
+            self.branches[branch] = self.heads.get(path, BASE)
+
+    def containing(self, commit: str) -> list[str]:
+        """Every ref holding `commit`, as `for-each-ref --contains` reports it."""
+        return [
+            *self.holders.get(commit, []),
+            *(
+                f"refs/heads/{branch}"
+                for branch, head in sorted(self.branches.items())
+                if self.is_ancestor(commit, head)
+            ),
+        ]
 
     def __call__(
         self,
@@ -194,7 +216,7 @@ class FakeGit:
             self.greps.append(arguments)
             return self.conflict_markers.get(key, "")
         if verb == "for-each-ref":
-            return "\n".join(self.holders.get(self.heads.get(key, SHA), []))
+            return "\n".join(self.containing(self.heads.get(key, SHA)))
         if verb == "merge-base":
             if arguments[1] == "--is-ancestor":
                 ancestor, descendant = arguments[2], arguments[3]
@@ -224,11 +246,14 @@ class FakeWorktrunk:
     removed: list[str] = field(default_factory=list)
     refuse_remove: set[str] = field(default_factory=set)
     fail_create: set[str] = field(default_factory=set)
-    # Branch -> whether `wt` reports its worktree dirty.
-    dirty: dict[str, bool] = field(default_factory=dict)
+    # Branch -> the base it was created from.
+    bases: dict[str, str] = field(default_factory=dict)
 
     def find(self, root: Path, branch: str) -> Worktree | None:
         return self.trees.get(branch)
+
+    def list(self, root: Path) -> tuple[Worktree, ...]:
+        return (Worktree(branch="master", path=root, main=True), *self.trees.values())
 
     def create(
         self, root: Path, branch: str, *, path: Path, base: str | None = None
@@ -236,15 +261,9 @@ class FakeWorktrunk:
         if branch in self.fail_create:
             raise WorktrunkError(f"wt refused {branch}")
         path.mkdir(parents=True, exist_ok=True)
-        tree = Worktree(
-            branch=branch,
-            path=path,
-            head=base or "",
-            main=False,
-            dirty=self.dirty.get(branch, False),
-            state="ahead",
-        )
+        tree = Worktree(branch=branch, path=path)
         self.trees[branch] = tree
+        self.bases[branch] = base or ""
         return tree
 
     def remove(self, root: Path, branch: str, *, force: bool = False) -> None:
@@ -352,12 +371,14 @@ def harness(
         root: Path, branch: str, *, path: Path, base: str | None = None
     ) -> Worktree:
         tree = wt.create(root, branch, path=path, base=base)
+        git.checkouts[str(path)] = branch
         if branch.endswith("/integration"):
             git.heads[str(path)] = base or BASE
         return tree
 
     monkeypatch.setattr(gitcmd, "git", git)
     monkeypatch.setattr(worktrunk, "worktrunk_find", wt.find)
+    monkeypatch.setattr(worktrunk, "worktrunk_list", wt.list)
     monkeypatch.setattr(worktrunk, "worktrunk_create", create)
     monkeypatch.setattr(worktrunk, "worktrunk_remove", wt.remove)
     built = Harness(
@@ -426,7 +447,7 @@ def test_start_claims_creates_worktrees_and_queues_workers_then_the_landing(
     lead = run["workers"][0]
     assert lead["branch"] == f"batch/{run['run_id']}/fx-lead"
     assert Path(lead["worktree"]).name == f"fixture-batch-{run['run_id']}-fx-lead"
-    assert harness.wt.trees[lead["branch"]].head == BASE
+    assert harness.wt.bases[lead["branch"]] == BASE
     prompt = (Path(lead["worktree"]) / ".agentctl" / "prompt.md").read_text()
     payload = json.loads(prompt.split("```json\n", 1)[1].split("\n```", 1)[0])
     assert payload["batch"]["run_id"] == run["run_id"] and payload["batch"][
@@ -849,19 +870,20 @@ def test_land_integrates_verifies_reviews_publishes_and_closes_satisfied_members
         and "without satisfying" in harness.beads.comments[0][1]
     )
     assert sorted(harness.wt.removed) == sorted(
-        [f"batch/{run_id}/fx-solo", integration]
+        [f"batch/{run_id}/fx-lead", f"batch/{run_id}/fx-solo", integration]
     )
-    assert acceptance["residual"] == [
-        f"batch/{run_id}/fx-lead: worktree kept; fx-member still open"
-    ]
+    assert acceptance["residual"] == []
     assert acceptance["advisory"] == []
     with pytest.raises(BatchRefusal, match="already_accepted"):
         harness.land(run_id)
 
 
-def test_a_failed_close_keeps_that_worker_worktree_and_removes_the_rest(
+def test_landing_removes_every_worktree_whose_work_the_candidate_carries(
     harness: Harness,
 ) -> None:
+    """A bead left open is a reason to keep the bead open, not the worktree:
+    its commits are in the published candidate, and a worktree that outlives
+    its run is a worktree every later listing pays for."""
     run = prepared_run(harness, "fx-lead", "fx-solo")
     run_id = run["run_id"]
     harness.beads.refuse_close = {"fx-solo"}
@@ -873,11 +895,34 @@ def test_a_failed_close_keeps_that_worker_worktree_and_removes_the_rest(
     assert "close failed" in members["fx-solo"]["evidence"]
     assert members["fx-lead"]["state"] == "closed"
     assert sorted(harness.wt.removed) == sorted(
-        [f"batch/{run_id}/fx-lead", f"batch/{run_id}/integration"]
+        [
+            f"batch/{run_id}/fx-lead",
+            f"batch/{run_id}/fx-solo",
+            f"batch/{run_id}/integration",
+        ]
     )
-    assert f"batch/{run_id}/fx-solo" in harness.wt.trees
+    assert harness.wt.trees == {}
+    assert landed["acceptance"]["residual"] == []
+
+
+def test_landing_keeps_a_worktree_holding_work_the_candidate_does_not(
+    harness: Harness,
+) -> None:
+    """Breaks if landing drops uncommitted work, or stops naming what it kept."""
+    run = prepared_run(harness, "fx-lead", "fx-solo")
+    run_id = run["run_id"]
+    solo = run["workers"][1]["worktree"]
+    harness.git.status[solo] = " M unfinished.py"
+
+    landed = harness.land(run_id)
+
+    assert harness.wt.removed == [
+        f"batch/{run_id}/fx-lead",
+        f"batch/{run_id}/integration",
+    ]
+    assert list(harness.wt.trees) == [f"batch/{run_id}/fx-solo"]
     assert landed["acceptance"]["residual"] == [
-        f"batch/{run_id}/fx-solo: worktree kept; fx-solo still open"
+        f"batch/{run_id}/fx-solo: worktree kept; uncommitted changes"
     ]
 
 
@@ -960,15 +1005,7 @@ def test_a_dirty_pre_existing_integration_worktree_is_preserved(
     integration = f"batch/{run['run_id']}/integration"
     existing = tmp_path / "integration"
     existing.mkdir()
-    harness.wt.dirty[integration] = True
-    harness.wt.trees[integration] = Worktree(
-        branch=integration,
-        path=existing,
-        head=MOVED,
-        main=False,
-        dirty=True,
-        state="ahead",
-    )
+    harness.wt.trees[integration] = Worktree(branch=integration, path=existing)
     harness.git.heads[str(existing)] = MOVED
     harness.git.status[str(existing)] = " M recovery.py"
     harness.git.remote_bases = [MOVED_AGAIN]
@@ -1046,6 +1083,10 @@ def test_target_moved_once_refreshes_and_twice_stops(harness: Harness) -> None:
     assert len([label for label in labels(harness.pueue) if ":review:" in label]) == 2
     assert harness.git.pushes[-1][1] == f"--force-with-lease=refs/heads/master:{MOVED}"
     assert landed["acceptance"]["published"]["base_commit"] == MOVED
+    # The candidate here is a merge commit no other ref holds, and it is
+    # published all the same: the integration worktree is measured against
+    # what was published, not against the run's base.
+    assert f"batch/{run['run_id']}/integration" in harness.wt.removed
 
     second = prepared_run(harness, "fx-other")
     harness.git.remote_bases = [BASE, MOVED, MOVED, MOVED_AGAIN, MOVED_AGAIN]
@@ -1101,14 +1142,7 @@ def test_a_registered_integration_branch_without_a_directory_is_recreated(
 ) -> None:
     run = prepared_run(harness, "fx-solo")
     integration = f"batch/{run['run_id']}/integration"
-    harness.wt.trees[integration] = Worktree(
-        branch=integration,
-        path=tmp_path / "gone",
-        head=BASE,
-        main=False,
-        dirty=False,
-        state="ahead",
-    )
+    harness.wt.trees[integration] = Worktree(branch=integration, path=tmp_path / "gone")
 
     landed = harness.land(run["run_id"])
 
@@ -1118,9 +1152,7 @@ def test_a_registered_integration_branch_without_a_directory_is_recreated(
 
     second = prepared_run(harness, "fx-other")
     stale = f"batch/{second['run_id']}/integration"
-    harness.wt.trees[stale] = Worktree(
-        branch=stale, path=None, head=BASE, main=False, dirty=False, state="ahead"
-    )
+    harness.wt.trees[stale] = Worktree(branch=stale, path=None)
     harness.wt.refuse_remove = {stale}
     with pytest.raises(BatchRefusal, match="integration_worktree_missing"):
         harness.land(second["run_id"])
@@ -1652,6 +1684,71 @@ def test_abandon_releases_claims_removes_safe_worktrees_and_frees_the_members(
 
     again = harness.start("fx-lead", "fx-solo")
     assert again["run_id"] != run_id and not again["existing"]
+
+
+def test_a_start_that_fails_before_recording_a_worktree_still_removes_it(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Anti-vacuity: `wt` has already made the worktree when the prompt fails,
+    and the manifest names no path yet, so a rollback that removes only what
+    the manifest records leaves a worktree nothing owns."""
+
+    def refuse(*arguments: Any, **keywords: Any) -> Any:
+        raise prompts.PromptError("bead body unreadable")
+
+    monkeypatch.setattr(start, "compile_worker_prompt", refuse)
+
+    with pytest.raises(prompts.PromptError):
+        harness.start("fx-solo")
+
+    assert harness.wt.removed and harness.wt.trees == {}
+    assert manifest.list_runs(harness.config) == []
+
+
+def test_clean_drops_the_worktrees_of_finished_runs_and_leaves_the_others(
+    harness: Harness, tmp_path: Path
+) -> None:
+    """Breaks if cleanup starts judging by age, touches a live run or an
+    operator's own worktree, or drops one holding uncommitted work."""
+    live = harness.start("fx-lead")
+    over = prepared_run(harness, "fx-solo")
+    over_branches = [
+        f"batch/{over['run_id']}/fx-solo",
+        f"batch/{over['run_id']}/integration",
+    ]
+    harness.wt.refuse_remove = set(over_branches)
+    harness.land(over["run_id"])
+    harness.wt.refuse_remove = set()
+    orphan, dirty, operator = (tmp_path / name for name in ("orphan", "dirty", "own"))
+    for path in (orphan, dirty, operator):
+        path.mkdir()
+    harness.git.status[str(dirty)] = " M scratch.py"
+    planted = {
+        "batch/fixture-20260101-000000-aaaaaaaa/w1": orphan,
+        "batch/fixture-20260101-000000-bbbbbbbb/w1": dirty,
+        "feature/operator-lane": operator,
+    }
+    for branch, path in planted.items():
+        harness.wt.trees[branch] = Worktree(branch=branch, path=path)
+
+    cleaned = batch.clean(harness.config, harness.project)
+
+    assert sorted(cleaned["removed"]) == sorted(
+        [*over_branches, "batch/fixture-20260101-000000-aaaaaaaa/w1"]
+    )
+    assert cleaned["kept"] == [
+        {
+            "branch": "batch/fixture-20260101-000000-bbbbbbbb/w1",
+            "reason": "worktree kept; uncommitted changes",
+        }
+    ]
+    assert sorted(harness.wt.trees) == sorted(
+        [
+            f"batch/{live['run_id']}/fx-lead",
+            "batch/fixture-20260101-000000-bbbbbbbb/w1",
+            "feature/operator-lane",
+        ]
+    )
 
 
 def test_abandon_refuses_while_the_landing_task_runs_and_drops_a_queued_one(
