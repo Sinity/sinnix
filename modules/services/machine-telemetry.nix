@@ -16,6 +16,7 @@
 let
   inherit (config.sinnix.paths) realmRoot;
   hostName = config.networking.hostName;
+  systemRevision = config.system.configurationRevision;
   dataRoot = config.sinnix.paths.machineRoot;
   dataDir = dataRoot;
   legacyDbPath = "${dataDir}/telemetry.sqlite";
@@ -403,7 +404,9 @@ mkServiceModule {
             --arg generation "''${GENERATION:-unknown}" \
             --arg activated_at "$ACTIVATED_AT" \
             --arg store_path "$STORE_PATH" \
-            --arg sinnix_revision "${config.system.configurationRevision}" \
+            --arg sinnix_revision ${
+              lib.escapeShellArg (if systemRevision == null then "unknown" else systemRevision)
+            } \
             --arg nixos_label "${config.system.nixos.label}" \
             --arg host "${config.networking.hostName}" \
             '{generation: $generation, activated_at: $activated_at, store_path: $store_path, sinnix_revision: $sinnix_revision, nixos_label: $nixos_label, host: $host}')" \
