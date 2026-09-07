@@ -89,12 +89,34 @@ let
     };
 
   vmTestConfig =
-    { lib, ... }:
+    {
+      config,
+      lib,
+      ...
+    }:
+    let
+      userName = config.sinnix.user.name;
+      homeDir = config.users.users.${userName}.home;
+    in
     {
       # why mkForce: the qemu-vm test harness disables timesyncd in its
       # base module. Keep the VM baseline aligned so sinnix's normal
       # networking defaults do not conflict with the test driver.
       services.timesyncd.enable = lib.mkForce false;
+
+      # Home Manager's activation script requires a writable per-user Nix
+      # profile directory. The VM starts from an empty tmpfs home, so create
+      # the profile parents before service tmpfiles create application state.
+      systemd.tmpfiles.rules = lib.mkBefore (
+        map (path: "d ${path} 0755 ${userName} users -") [
+          homeDir
+          "${homeDir}/.local"
+          "${homeDir}/.local/share"
+          "${homeDir}/.local/state"
+          "${homeDir}/.local/state/nix"
+          "${homeDir}/.local/state/nix/profiles"
+        ]
+      );
     };
 
   expect =
