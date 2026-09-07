@@ -54,6 +54,7 @@ _WORKSPACE_FIELDS = frozenset(
         "verify",
         "publish",
         "review",
+        "retain_artifacts",
     }
 )
 # `[workspace].verify` names one operation per profile; `candidate` may be
@@ -178,6 +179,8 @@ class WorkspacePolicy:
     publish: str = "pr"
     # `agent` queues a reviewer per landing; `none` lands on verification alone.
     review: str = "agent"
+    # Relative files to retain before a terminal checkout is released.
+    retain_artifacts: tuple[str, ...] = ()
 
     @property
     def base_branch(self) -> str:
@@ -192,6 +195,7 @@ class WorkspacePolicy:
             "verify": dict(self.verify),
             "publish": self.publish,
             "review": self.review,
+            "retain_artifacts": list(self.retain_artifacts),
         }
 
 
@@ -394,6 +398,17 @@ def _workspace(raw: Mapping[str, Any], descriptor: Path) -> WorkspacePolicy | No
                 f"{descriptor} workspace.review must be one of {sorted(REVIEW_POLICIES)}"
             )
         fields["review"] = raw_workspace["review"]
+    if "retain_artifacts" in raw_workspace:
+        patterns = _optional_string_list(
+            raw_workspace["retain_artifacts"], "workspace.retain_artifacts"
+        )
+        for pattern in patterns:
+            path = Path(pattern)
+            if path.is_absolute() or ".." in path.parts:
+                raise ProjectConfigError(
+                    f"{descriptor} workspace.retain_artifacts must be relative"
+                )
+        fields["retain_artifacts"] = patterns
     return WorkspacePolicy(root=Path(root), default_base=default_base, **fields)
 
 

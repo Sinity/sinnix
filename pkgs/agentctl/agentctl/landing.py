@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
+import os
 import re
+import shutil
+import stat
+import subprocess
 import time
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
@@ -1115,47 +1120,319 @@ def _land_locked(
     return run.to_dict()
 
 
+def _under(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+    except ValueError:
+        return False
+    return True
+
+
+def _process_users(path: Path) -> list[str]:
+    """Current-directory users outside pueue's authority."""
+    users: list[str] = []
+    proc = Path("/proc")
+    try:
+        entries = tuple(proc.iterdir())
+    except OSError as error:
+        raise BatchError(f"cannot inspect process users: {error}") from error
+    for entry in entries:
+        if not entry.name.isdigit():
+            continue
+        try:
+            cwd = Path(os.readlink(entry / "cwd"))
+        except FileNotFoundError:
+            continue
+        except PermissionError:
+            try:
+                owner = entry.stat().st_uid
+            except OSError as stat_error:
+                if stat_error.errno in {errno.ENOENT, errno.ESRCH}:
+                    continue
+                raise BatchError(
+                    f"cannot inspect process {entry.name} ownership: {stat_error}"
+                ) from stat_error
+            if owner != os.getuid():
+                continue
+            cwd = _stable_privileged_cwd(entry)
+            if cwd is None:
+                continue
+        except OSError as error:
+            if error.errno in {errno.ENOENT, errno.ESRCH}:
+                continue
+            raise BatchError(f"cannot inspect process {entry.name} cwd: {error}") from error
+        if _under(cwd, path):
+            users.append(f"pid {entry.name} cwd {cwd}")
+    return users
+
+
+def _process_starttime(entry: Path) -> str | None:
+    try:
+        payload = (entry / "stat").read_text()
+        return payload.rsplit(")", 1)[1].split()[19]
+    except OSError as error:
+        if error.errno in {errno.ENOENT, errno.ESRCH}:
+            return None
+        raise BatchError(f"cannot identify process {entry.name}: {error}") from error
+    except IndexError as error:
+        raise BatchError(f"cannot identify process {entry.name}: {error}") from error
+
+
+def _privileged_cwd(entry: Path) -> Path:
+    try:
+        completed = subprocess.run(
+            ["sudo", "-n", "readlink", str(entry / "cwd")],
+            capture_output=True,
+            text=True,
+            timeout=CALL_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise BatchError(f"cannot inspect process {entry.name} cwd: {error}") from error
+    if completed.returncode != 0 or not completed.stdout.strip():
+        detail = completed.stderr.strip() or completed.stdout.strip()
+        raise BatchError(f"cannot inspect process {entry.name} cwd: {detail}")
+    return Path(completed.stdout.strip())
+
+
+def _stable_privileged_cwd(entry: Path) -> Path | None:
+    start = _process_starttime(entry)
+    if start is None:
+        return None
+    try:
+        cwd = _privileged_cwd(entry)
+    except BatchError:
+        if _process_starttime(entry) is None:
+            return None
+        raise
+    end = _process_starttime(entry)
+    if end is None:
+        return None
+    if end != start:
+        raise BatchError(f"process {entry.name} changed during cwd probe")
+    return cwd
+
+
+def _task_users(path: Path) -> list[str]:
+    try:
+        tasks = pueue.tasks().values()
+    except PueueError as error:
+        raise BatchError(f"cannot inspect pueue users: {error}") from error
+    users = []
+    for task in tasks:
+        if task.terminal:
+            continue
+        try:
+            task_path = Path(task.path)
+        except TypeError:
+            continue
+        if task_path.is_absolute() and _under(task_path, path):
+            users.append(f"task {task.task_id} {task.status.lower()} cwd {task_path}")
+    return users
+
+
+def _artifact_paths(path: Path, patterns: Sequence[str]) -> list[Path]:
+    found: dict[Path, Path] = {}
+    root = path.resolve()
+    for pattern in patterns:
+        for candidate in path.glob(pattern):
+            if candidate.is_symlink():
+                raise BatchError(f"artifact path escapes checkout: {candidate}")
+            if candidate.is_dir():
+                continue
+            if not _under(candidate, root):
+                raise BatchError(f"artifact path escapes checkout: {candidate}")
+            try:
+                mode = candidate.stat().st_mode
+            except OSError as error:
+                raise BatchError(f"cannot read artifact {candidate}: {error}") from error
+            if not stat.S_ISREG(mode):
+                raise BatchError(f"artifact is not a regular file: {candidate}")
+            found[candidate.relative_to(path)] = candidate
+    return [found[key] for key in sorted(found)]
+
+
+def _artifact_destination(
+    config: Config, run_id: str, worktree: Path, relative: Path, digest: str
+) -> Path:
+    token = hashlib.sha256(str(worktree).encode()).hexdigest()[:16]
+    return (
+        config.state_dir
+        / "artifacts"
+        / run_id
+        / token
+        / relative.parent
+        / f"{relative.name}.{digest[:16]}"
+    )
+
+
+def _digest(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _preserve_artifacts(
+    config: Config,
+    project: ProjectAdapter,
+    run_id: str | None,
+    path: Path,
+    *,
+    artifacts: list[dict[str, str]],
+) -> dict[str, str]:
+    patterns = (f"{WORKTREE_STATE_DIR}/**/*", *workspace_of(project).retain_artifacts)
+    replacements: dict[str, str] = {}
+    for source in _artifact_paths(path, patterns):
+        relative = source.relative_to(path)
+        before = _digest(source)
+        destination = _artifact_destination(
+            config, run_id or "orphan", path, relative, before
+        )
+        destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        os.chmod(destination.parent, 0o700)
+        if destination.exists():
+            if _digest(destination) != before:
+                raise BatchError(f"artifact destination differs: {destination}")
+        else:
+            temporary = destination.with_suffix(destination.suffix + ".tmp")
+            shutil.copyfile(source, temporary)
+            if _digest(temporary) != before:
+                temporary.unlink(missing_ok=True)
+                raise BatchError(f"artifact verification failed: {destination}")
+            os.replace(temporary, destination)
+        replacements[str(source)] = str(destination)
+        artifacts.append({"source": str(source), "destination": str(destination)})
+    return replacements
+
+
+def _replace_paths(value: Any, replacements: Mapping[str, str]) -> Any:
+    if isinstance(value, str):
+        return replacements.get(value, value)
+    if isinstance(value, list):
+        return [_replace_paths(item, replacements) for item in value]
+    if isinstance(value, dict):
+        return {key: _replace_paths(item, replacements) for key, item in value.items()}
+    return value
+
+
+def _recovery_ref(root: Path, run_id: str | None, path: Path, head: str) -> str:
+    token = hashlib.sha256(str(path).encode()).hexdigest()[:16]
+    ref = f"refs/agentctl/recovery/{run_id or 'orphan'}/{token}/{head}"
+    existing = gitcmd.git(
+        root, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}",
+        ok_statuses=(0, 1), error=BatchError,
+    )
+    if existing and existing != head:
+        raise BatchError(f"recovery ref differs: {ref}")
+    if not existing:
+        _git(root, "update-ref", ref, head)
+    verified = _git(root, "rev-parse", "--verify", f"{ref}^{{commit}}")
+    if verified != head:
+        raise BatchError(f"recovery ref did not retain {head}: {ref}")
+    return ref
+
+
 def _drop_branch(
+    config: Config,
     project: ProjectAdapter,
     branch: str,
     *,
     base: str,
     recorded_path: Path | None = None,
+    run_id: str | None = None,
+    artifacts: list[dict[str, str]] | None = None,
 ) -> str | None:
-    """Remove ``branch``'s worktree unless work would go with it.
+    """Release one terminal checkout while retaining its Git history.
 
     Returns why it was kept, or None once it is gone.
     """
+    registry = worktrunk.worktrunk_list(project.root)
     tree = worktrunk.worktrunk_find(project.root, branch)
-    if tree is None:
-        return None
+    path = tree.path if tree is not None else None
     removal_target = branch
-    path = tree.path
-    if path is None and recorded_path is not None:
-        # A detached worktree has no branch for `worktree_find` to return. Use
-        # the manifest's exact path only when Git still registers that path.
-        path = next(
+    detached = False
+    if recorded_path is not None:
+        detached_tree = next(
             (
-                candidate.path
-                for candidate in worktrunk.worktrunk_list(project.root)
-                if not candidate.main and candidate.path == recorded_path
+                item
+                for item in registry
+                if not item.main and item.branch is None and item.path == recorded_path
             ),
             None,
         )
-        if path is not None:
+        if detached_tree is not None:
+            path = detached_tree.path
             removal_target = str(path)
+            detached = True
+    if path is None:
+        return None
+    if not path.is_dir():
+        if removal_target == branch:
+            return "worktree kept; checkout path is unavailable"
+    else:
+        try:
+            dirty = _dirty_paths(path)
+            users = [*_task_users(path), *_process_users(path)]
+        except BatchError as error:
+            return f"worktree kept; {error}"
+        if dirty:
+            return "worktree kept; uncommitted changes"
+        if users:
+            return f"worktree kept; active user: {users[0]}"
+        try:
+            head = _git(path, "rev-parse", "HEAD")
+            branch_head = gitcmd.git(
+                project.root, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}^{{commit}}",
+                ok_statuses=(0, 1), error=BatchError,
+            )
+            if detached:
+                _recovery_ref(project.root, run_id, path, head)
+            elif branch_head != head:
+                return "worktree kept; branch no longer names checkout HEAD"
+            copied = _preserve_artifacts(
+                config, project, run_id, path, artifacts=artifacts if artifacts is not None else []
+            )
+            if copied and run_id is not None:
+                def retain(document: dict[str, Any]) -> None:
+                    replacements = dict(copied)
+                    for artifact in document.get("artifacts", []):
+                        source = artifact.get("source")
+                        destination = artifact.get("destination")
+                        if source in copied and isinstance(destination, str):
+                            replacements[destination] = copied[source]
+                    history = list(document.get("artifacts", []))
+                    updated = _replace_paths(
+                        {key: value for key, value in document.items() if key != "artifacts"},
+                        replacements,
+                    )
+                    document.clear()
+                    document.update(updated)
+                    document["artifacts"] = [
+                        *history,
+                        *({"source": source, "destination": destination} for source, destination in copied.items()),
+                    ]
+                update(config, run_id, retain)
+            if _dirty_paths(path):
+                return "worktree kept; uncommitted changes"
+            if detached and _git(path, "rev-parse", "HEAD") != head:
+                return "worktree kept; detached checkout HEAD changed"
+            if not detached:
+                branch_head = gitcmd.git(
+                    project.root, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}^{{commit}}",
+                    ok_statuses=(0, 1), error=BatchError,
+                )
+                if branch_head != _git(path, "rev-parse", "HEAD"):
+                    return "worktree kept; branch no longer names checkout HEAD"
+            users = [*_task_users(path), *_process_users(path)]
+            if users:
+                return f"worktree kept; active user: {users[0]}"
+        except (BatchError, OSError) as error:
+            return f"worktree kept; {error}"
     try:
-        keep = _unpreserved(path, root=project.root, base=base, branch=branch)
-    except BatchError as error:
-        keep = str(error)
-    if keep:
-        return f"worktree kept; {keep}"
-    try:
-        worktrunk.worktrunk_remove(project.root, removal_target, force=True)
-        if removal_target != branch:
-            # Removing by path handles the detached registry entry; the
-            # recorded branch still needs its ordinary branch cleanup.
-            worktrunk.worktrunk_remove(project.root, branch, force=True)
+        worktrunk.worktrunk_remove(
+            project.root, removal_target, keep_branch=True, reap=False
+        )
     except WorktrunkError as error:
         return str(error)
     return None
@@ -1192,32 +1469,13 @@ def _drop_worktrees(
     residual: list[str] = []
     with project_locked(config, project.project_id):
         for branch, base, recorded_path in branches:
-            kept = _drop_branch(project, branch, base=base, recorded_path=recorded_path)
+            kept = _drop_branch(
+                config, project, branch, base=base, recorded_path=recorded_path,
+                run_id=run.run_id,
+            )
             if kept:
                 residual.append(f"{branch}: {kept}")
     return residual
-
-
-def _unpreserved(
-    path: Path | None, *, root: Path, base: str, branch: str
-) -> str | None:
-    """Why removing this worktree would lose work, or None when nothing would."""
-    if path is not None and path.is_dir():
-        if _dirty_paths(path):
-            return "uncommitted changes"
-        head = _git(path, "rev-parse", "HEAD")
-    else:
-        head = _git(root, "rev-parse", "--verify", f"refs/heads/{branch}^{{commit}}")
-    if head == base:
-        return None
-    holders = [
-        ref
-        for ref in _git(
-            root, "for-each-ref", "--format=%(refname)", "--contains", head
-        ).split()
-        if ref != f"refs/heads/{branch}"
-    ]
-    return None if holders else f"commits only on {branch}"
 
 
 def abandon(
@@ -1296,24 +1554,52 @@ def clean(config: Config, project: ProjectAdapter) -> dict[str, Any]:
         default_base = ""
     removed: list[str] = []
     kept: list[dict[str, str]] = []
+    retained_artifacts: list[dict[str, str]] = []
     with project_locked(config, project.project_id):
+        targets: list[tuple[str, Run | None, Path | None]] = []
+        for owner in runs.values():
+            if owner.live:
+                continue
+            targets.extend(
+                (worker["branch"], owner, Path(worker["worktree"]))
+                for worker in owner.workers
+                if worker.get("worktree")
+            )
+            integration = owner.landing.get("integration_worktree")
+            if integration:
+                targets.append((owner.landing["integration_branch"], owner, Path(integration)))
         for tree in worktrunk.worktrunk_list(project.root):
             match = _BATCH_BRANCH.match(tree.branch or "")
             if tree.main or match is None:
                 continue
             owner = runs.get(match.group("run"))
-            if owner is not None and owner.live:
+            if owner is not None:
                 continue
             if owner is None and not match.group("run").startswith(
                 f"{project.project_id}-"
             ):
                 continue
-            branch = str(tree.branch)
+            targets.append((str(tree.branch), owner, None))
+        seen: set[tuple[str, Path | None]] = set()
+        for branch, owner, recorded_path in targets:
+            key = (branch, recorded_path)
+            if key in seen:
+                continue
+            seen.add(key)
+            copied: list[dict[str, str]] = []
             reason = _drop_branch(
-                project, branch, base=owner.base_commit if owner else default_base
+                config, project, branch, base=owner.base_commit if owner else default_base,
+                recorded_path=recorded_path, run_id=owner.run_id if owner else None,
+                artifacts=copied,
             )
             if reason:
                 kept.append({"branch": branch, "reason": reason})
             else:
                 removed.append(branch)
-    return {"project": project.project_id, "removed": removed, "kept": kept}
+            retained_artifacts.extend(copied)
+    return {
+        "project": project.project_id,
+        "removed": removed,
+        "kept": kept,
+        "artifacts": retained_artifacts,
+    }

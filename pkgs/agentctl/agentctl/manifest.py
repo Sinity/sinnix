@@ -103,6 +103,7 @@ class Run:
     prepared: bool
     # `{reason, at, residual}` once `batch abandon` released the run.
     abandoned: dict[str, Any] | None = None
+    artifacts: tuple[dict[str, str], ...] = ()
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> Run:
@@ -123,6 +124,7 @@ class Run:
                 else None,
                 prepared=bool(value.get("prepared")),
                 abandoned=dict(value["abandoned"]) if value.get("abandoned") else None,
+                artifacts=tuple(dict(item) for item in value.get("artifacts") or ()),
             )
         except (KeyError, TypeError) as error:
             raise BatchRefusal(
@@ -144,6 +146,7 @@ class Run:
             "acceptance": dict(self.acceptance) if self.acceptance else None,
             "prepared": self.prepared,
             "abandoned": dict(self.abandoned) if self.abandoned else None,
+            "artifacts": [dict(item) for item in self.artifacts],
         }
 
     @property

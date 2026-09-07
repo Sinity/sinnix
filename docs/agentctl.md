@@ -402,9 +402,8 @@ follows.
 refused while the landing task is running (`landing_in_progress`), after
 acceptance, or twice. It cancels queued worker and landing tasks, unclaims
 every member as the run's actor, removes each worker and integration
-worktree whose tree is clean and whose HEAD is the base or is held by
-another ref (`wt remove` deletes the branch, so a commit only on it would
-be lost), and records `abandoned: {reason, at, residual}`; kept worktrees
+worktree whose tree is clean and has no active task or process user, retains
+its branch, and records `abandoned: {reason, at, residual}`; kept worktrees
 and failed unclaims are the residual. The members can then start again.
 
 ### Clean
@@ -412,9 +411,10 @@ and failed unclaims are the residual. The members can then start again.
 `batch clean [p]` removes the worktrees the project's finished runs left
 behind. A worktree is a candidate only when its branch is `batch/<run>/…` and
 that run no longer holds its beads: landed, abandoned, or with no manifest
-left at all. It is removed on the same rule as an abandon -- clean tree, and
-a HEAD that is the base or is held by another ref -- and one that is kept is
-printed with the reason. Run state, never age: a live run's worktrees and an
+left at all. It is removed on the same rule as an abandon. The branch remains
+as the recovery reference, and declared receipts are retained in private
+runtime state before removal. One that is kept is printed with the reason.
+Run state, never age: a live run's worktrees and an
 operator's own are untouched.
 
 ### Refusals
