@@ -36,7 +36,6 @@ in
               environment.systemPackages = [ pkgs.jq ];
               sinnix.features.desktop = {
                 activitywatch.enable = false;
-                agentVerifyTimer.enable = false;
                 audio.enable = false;
                 base.enable = false;
                 browser.enable = false;
@@ -82,7 +81,6 @@ in
               ];
               sinnix.features.desktop = {
                 activitywatch.enable = false;
-                agentVerifyTimer.enable = false;
                 audio.enable = false;
                 base.enable = false;
                 browser.enable = false;
