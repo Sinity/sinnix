@@ -17,6 +17,32 @@
     let
       pkgs = inputs.nixpkgs.legacyPackages.${system};
       sinnixObserve = sinnixScriptRegistry.packageSet.sinnix-observe;
+      lib = inputs.nixpkgs.lib;
+      testLib = import ../test-lib.nix { inherit inputs lib; };
+      generationLogCheck =
+        name: revision: expected:
+        let
+          dataDir = "/build/generation-${name}";
+          evaluated = testLib.evalTestSpec system (
+            testLib.mkServiceTest {
+              name = "generation-${name}";
+              service = "machine-telemetry";
+              extraModules = [
+                {
+                  system.configurationRevision = revision;
+                  sinnix.paths.machineRoot = dataDir;
+                }
+              ];
+              assertions = _: [ ];
+            }
+          );
+          activation = pkgs.writeShellScript "generation-${name}" evaluated.config.system.activationScripts.lynchpinGenerationLog.text;
+        in
+        pkgs.runCommand "telemetry-generation-${name}" { inherit expected; } ''
+          ${activation}
+          ${pkgs.jq}/bin/jq -e --arg expected "$expected" '.sinnix_revision == $expected' ${dataDir}/generations.jsonl
+          touch "$out"
+        '';
 
       sinnixObserveRuntime =
         pkgs.runCommand "sinnix-observe-runtime-check"
@@ -179,6 +205,8 @@
     {
       checks = {
         sinnix-observe-runtime = sinnixObserveRuntime;
+        telemetry-generation-unknown = generationLogCheck "unknown" null "unknown";
+        telemetry-generation-known = generationLogCheck "known" "fixture-revision" "fixture-revision";
       };
     };
 }
