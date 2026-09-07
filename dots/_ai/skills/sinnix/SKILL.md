@@ -17,8 +17,8 @@ and `docs/agent-gateway.md` for those contracts.
   and checks.
 - `pkgs/`: real packages, including agentctl and the agent gateway.
 - `scripts/`: auto-discovered small tools with required frontmatter.
-- `dots/`: live Home Manager out-of-store links, including shared skills and
-  agent instructions.
+- `dots/`: managed configuration sources, including live links for shared
+  skills and agent instructions.
 
 Use the existing factories and registries. Features use `mkFeatureModule`,
 services use `mkServiceModule`, scheduled jobs use `mkScheduledJob`, and capture
@@ -51,6 +51,8 @@ switch`, and do not preflight a switch with duplicate evaluation. After
 activation, compare `nixos-version --configuration-revision` with the intended
 commit and inspect the direct live service or file fact.
 
-Dotfile edits propagate immediately and normally need no rebuild. Structural
-agent-environment changes regenerate `docs/agent-environment.md`; generated
-gateway references change through their renderer, never by hand.
+Edits through live out-of-store links take effect immediately. Copied Codex
+configuration, generated MCP profiles, and shared skill roster changes need
+activation; inspect the installed target to verify delivery. Structural agent
+changes regenerate `docs/agent-environment.md`; generated gateway references
+change through their renderer.

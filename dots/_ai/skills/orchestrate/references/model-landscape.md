@@ -1,44 +1,65 @@
-# Model landscape and supervision economics
+# Model allocation from observed work
 
-Re-derive prices before any cost-sensitive decision; the rules below age
-slower than the numbers.
+Choose from the remaining decisions, implementation scope, evidence available
+and worker authority. The assignments in `../SKILL.md` are initial choices,
+not measured capability rankings. A strong model may own implementation when
+design and coding need to proceed together. Preparing a specification is work;
+include its cost when comparing dispatch choices.
 
-## Pricing ($/M in/out)
+## Before dispatch
 
-Fable 10/50 · Opus 5 5/25 · Sonnet 5 3/15 · Sol 5/30 · Terra 2.5/15 ·
-Luna 1/6 · Gemini 3.7 Flash is the cost floor.
+Read the current bead and code. Revalidate existing design and allocation
+judgments in its metadata or notes. These are
+agent judgments: cite the evidence and unresolved choices in a dated bead note.
+A detailed packet does not establish that its design decisions are settled.
+Use existing fields and notes; add metadata only for a demonstrated consumer.
 
-Luna is roughly Sonnet-tier and the volume engine for massive parallel work
-under tight bead specs, structural review and cheap escalation to Terra. Sol
-is for contained, deliverable-shaped analysis where Luna-tier judgment falls
-short and Claude is to be preserved. Sticker price lies: total-token
-consumption can erase a tier discount, so judge a route by realized burn per
-merged outcome.
+Name the delivery the worker can finish with its authority and available
+evidence. Retain every acceptance criterion; identify any operational proof
+that requires another owner or window. Such a criterion remains open after a
+code-only delivery. Allocate a bounded design task when its answer makes an
+implementation tractable; keep design and implementation together when their
+feedback is necessary to resolve the problem.
 
-## Supervision rules
+Select explicit backend/model/effort using the main skill's assignments and
+record the reason when departing from them. Verify the effective launch.
+Descriptive Beads fields such as `worker_model_class` are not launch evidence;
+policy names and descriptor defaults must be checked against current resolution.
 
-- **Two-tier topology**: a frontier model supervises; capable models
-  execute. Opus 5 thinks well locally and is an excellent subagent, but is
-  weaker in the coordinator seat; small-context models are worse still
-  there. Judgment sits above coordination.
-- **Effort settings**: more effort amplifies spinning and never un-sticks. A
-  stuck worker gets a five-word hint, a model switch, or a respecified bead,
-  not an effort bump.
-- **Redundancy beats deliberation** on decisions that matter: run Fable +
-  Opus + Sol and pick the best answer. Only big model-selection mistakes
-  matter.
-- **Every executor is unsupervised**: structural review and authority gating
-  apply to all executors, and the risk model assumes no human in the loop.
-  The seat is the risk, not the model: an unbounded coordinator seat fails
-  where a contained job of the same model performs well.
-- **Tokens are a cost, not a benefit**: process machinery that generates
-  spend without merged outcomes is the failure mode, and it flatters itself
-  as rigor.
+## After an attempt
 
-## Niche notes
+Join the exact launch, prompt snapshot, starting commit, result and verification
+by their existing run, worker and attempt references. A resume can change model
+and inherit code or hints; the worker's original model field cannot attribute
+every later result. Missing launch or usage evidence stays unknown.
 
-Sonnet 5: fast-iteration loops, browser-use robustness, simple tasks; not a
-daily driver. Luna: cheapest capable tier, substantially weaker. Opus 5:
-refusal-classifier fallback with far fewer unnecessary refusals than Fable
-and a higher hallucination rate; keep it off hallucination-sensitive
-synthesis.
+Keep machine facts separate from judgments. Launch arguments, commits, process
+timing and recorded check results are observations. Worker criterion statuses
+are claims; reviewer assessments and explanations of failure are attributed
+judgments with evidence. Record consequential hints, respecification, reviewer
+fixes and inherited work in the owning bead note with attempt references.
+
+Assess reviewed delivery against the original promised scope. Publication,
+criterion supersession and task closure answer different questions. Preserve
+partial acceptance and missing proof; a changed criterion creates a changed
+comparison. Review work and interventions belong to the whole delivery's cost,
+not solely to the model that produced the final commit.
+
+## Escalation and cost
+
+On an unresolved attempt, inspect the concrete residual before changing models.
+Resolve missing authority, infrastructure or evidence through their owners.
+Reopen a design judgment when implementation exposes a missing decision; use a
+bounded architecture task or design-critical implementation assignment. For a
+concrete implementation miss against settled requirements, consider Terra or
+Astra with the failing case and preserved work. State what the next attempt
+must resolve. Repetition without a new diagnosis does not justify more retries
+or a higher effort setting.
+
+Use observed usage and current applicable pricing for cost comparisons; include
+specification, failed attempts, review and interventions. Queue delay and agent
+runtime are separate measurements, and elapsed time does not measure attention.
+Historical completion rates confound task selection, revisions, inherited work
+and infrastructure. Apply the trial protocol before changing a default; keep
+model choice with the accountable agent rather than an automatic router or
+completion leaderboard.

@@ -291,3 +291,51 @@ def append_events(
         "sha256": digest,
         "at": utc_ts(),
     }
+
+
+def repair_event_day(day: str, source: Path, expected_sha256: str) -> dict:
+    """Replace a closed UTC day from verified device bytes, retaining the old inode."""
+    import json
+    import tempfile
+    from datetime import datetime, timezone
+
+    if not EVENTS_DAY_RE.fullmatch(day) or day >= datetime.now(timezone.utc).strftime("%Y%m%d"):
+        raise ValueError("repair requires a closed UTC day")
+    body = source.read_bytes()
+    if not body or not body.endswith(b"\n"):
+        raise ValueError("source must contain complete JSONL records")
+    for line in body.splitlines():
+        if not isinstance(json.loads(line), dict):
+            raise ValueError("source contains a non-object record")
+    target = _day_file(day)
+    previous = target.read_bytes()
+    old_sha = hashlib.sha256(previous).hexdigest()
+    if old_sha != expected_sha256:
+        raise ValueError("destination changed; expected SHA-256 does not match")
+    new_sha = hashlib.sha256(body).hexdigest()
+    if body == previous:
+        return {"ok": True, "changed": False, "sha256": new_sha}
+    backups = EVENTS_DIR / ".repairs"
+    backups.mkdir(exist_ok=True)
+    backup = backups / f"{day}-{old_sha}.jsonl"
+    if not backup.exists():
+        os.link(target, backup)
+    if hashlib.sha256(backup.read_bytes()).hexdigest() != old_sha:
+        raise ValueError("backup verification failed")
+    pending: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=EVENTS_DIR, prefix=".repair-", delete=False) as out:
+            pending = Path(out.name)
+            out.write(body)
+            out.flush()
+            os.fsync(out.fileno())
+        if target.read_bytes() != previous:
+            raise ValueError("destination changed during repair")
+        os.chmod(pending, 0o660)
+        os.replace(pending, target)
+        pending = None
+    finally:
+        if pending is not None:
+            pending.unlink(missing_ok=True)
+    return {"ok": True, "changed": True, "day": day, "sha256": new_sha,
+            "previous_sha256": old_sha, "backup": str(backup), "bytes": len(body)}

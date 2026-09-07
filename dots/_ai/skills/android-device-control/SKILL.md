@@ -7,9 +7,9 @@ metadata:
 
 # Android device control (unrooted)
 
-Verified live on the operator's unrooted Xiaomi device; where a claim is
-inferred it says so. Device-specific facts (model, tailnet address) live in
-bead `sinnix-uyvt` — read it, don't assume them from here.
+Device-specific observations below came from one unrooted Xiaomi device.
+Verify the current device, OS, and connection before applying them. Device
+identity and retained evidence live in bead `sinnix-uyvt`.
 
 ## The two control surfaces
 
@@ -20,10 +20,13 @@ A phone worth controlling has **both**, because each covers the other's gaps:
 | `adb` over TCP (`adb tcpip 5555`) | any tailnet peer | packages, settings, input, screencap, UI dumps | phone reboots (TCP mode resets) |
 | Termux `sshd` (:8022)             | any tailnet peer | real shell, rsync, scripted work               | Termux is killed or uninstalled |
 
-`adb tcpip` binds all interfaces, so it rides the tailnet with no extra work —
-this is the single highest-leverage move for remote phone control. Two adb
-transports (USB + TCP) coexist; disambiguate with `ANDROID_SERIAL`, not
-`adb -s` (the latter breaks when callers build command strings).
+Prefer the existing USB or authenticated wireless-debugging connection.
+Legacy `adb tcpip` listens beyond the tailnet: do not enable it without
+checking exposure on every connected network and obtaining authority for
+remote debugging. A tailnet connection alone does not restrict the listener.
+Disable temporary TCP debugging when finished; verify the listener is gone.
+Select the exact device with `ANDROID_SERIAL` or the caller's supported
+`adb -s` argument; verify its identity before a mutation.
 
 ## UI automation that actually works
 
@@ -53,9 +56,10 @@ type went to Termux, not the installer).
 **Installing apps.** There are _two_ independent blockers, and conflating them
 wastes hours:
 
-1. **Package verifier** — makes the installer hang forever on "Installing…".
-   `settings put global package_verifier_enable 0` and
-   `verifier_verify_adb_installs 0` clear it.
+1. **Package verifier** can delay or block an installation. Inspect installer
+   output and package provenance first. Disabling verification changes a
+   security boundary and requires explicit authority; preserve the original
+   settings and restore them after a temporary diagnostic.
 2. **The MIUI gate proper** — `adb install` of a _genuinely new_ package
    returns `INSTALL_FAILED_USER_RESTRICTED` regardless of the verifier.
    Reinstalling an app that already exists succeeds. No user restriction is
@@ -77,10 +81,10 @@ adb shell settings put secure miui_optimization 0  # helps, wants a reboot
 adb shell settings put secure always_on_vpn_app com.tailscale.ipn   # THE fix for a VPN
 ```
 
-For a VPN specifically, **always-on VPN is the only thing that held**. The
-first three left Tailscale dropping every 5–10 minutes. Leave
-`always_on_vpn_lockdown` at `0` — lockdown kills all traffic whenever the
-tunnel is down, the wrong trade for a phone.
+Always-on VPN improved persistence on the observed device. Verify the current
+failure before changing power or VPN settings. Lockdown trades offline
+availability for preventing traffic outside the VPN; preserve the operator's
+choice rather than changing it as a background-process workaround.
 
 **Play-store Termux is crippled**: it cannot install Termux:API
 (termux-play-store/termux-apps#29). `termux-battery-status` works from a
@@ -115,7 +119,8 @@ Two rules learned the hard way:
   against the current device to find orphans; a device switch strands whole
   vendor stacks.
 
-Unambiguously safe MIUI removals: `com.miui.msa.global` (the ad engine),
+Device-specific candidates for inspection, not blanket removal:
+`com.miui.msa.global` (the ad engine),
 `com.miui.analytics`, `com.xiaomi.mipicks`, `com.mi.globalminusscreen`
 (App Vault), `com.miui.android.fashiongallery` (lockscreen ads),
 `com.xiaomi.ugd`, `com.miui.cleaner`, `com.miui.yellowpage`.
@@ -134,8 +139,8 @@ breaks silently when DHCP moves the device.
 
 ## Discipline
 
-- **Prove it with a round-trip.** "Installed" is not "working". Every claim
-  here was verified by an actual request, transfer, or observed state change.
+- **Prove it with a round-trip.** Verify installation and operation separately
+  with a request, transfer, or observed state change on the current device.
 - **A dozing Android drops ICMP but accepts TCP.** Health-check a phone with a
   TCP connect, never `ping` — otherwise you report a false outage on a working
   link.

@@ -398,13 +398,10 @@ contract:
    — it is the fallback when `navigator.clipboard` is blocked, and it doubles
    as visible confirmation that something was captured.
 
-True realtime two-way sync (agent sees edits without a paste) needs either a
-companion local server — which breaks the zero-external-request contract this
-skill is built on — or Claude's Artifact runtime capabilities (`window.claude.*`,
-gated behind the `artifact-capabilities` skill), which only apply when the
-deliverable is specifically published as a Claude Artifact, not a generic file
-opened by Codex/Gemini or via `file://`. Out of scope here; the copy-button
-handback below is the general-purpose answer.
+Realtime two-way sync requires a separately authorized connected runtime.
+Inspect its exposed tool contract before using it; a local HTML file does not
+inherit hosted capabilities. The copy-button handback below works without
+introducing a server or an external publication dependency.
 
 **Core script** (put once, near the other scripts):
 

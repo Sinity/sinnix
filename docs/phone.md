@@ -274,6 +274,22 @@ process, at three cadences:
   quiet. Four consecutive zero samples (80s) cycles the recorder.
 - **File growth, every 20s.** A chunk file that has not grown for 90s means the
   recorder stopped producing frames while still believing it is running.
+  After a 60-second startup allowance, production below half the configured
+  96 kbps AAC rate also triggers recovery, allowing ten seconds of buffering.
+- **Private recording spool.** The live encoder writes under the app's
+  `files/ambient-recording` directory. A background publisher copies closed
+  chunks to the shared upload directory, fsyncs and checks SHA-256 before
+  retiring the private copy. Failed copies remain queued; capture continues.
+  `status.json.recording_dir` identifies the live recording location.
+- **Encoded duration, at close.** The phone reads media duration before making
+  the file uploadable and compares it with monotonic elapsed time (two-second
+  tolerance). `chunk_closed.seconds` and `last_chunk_seconds` report encoded
+  duration; `elapsed_seconds`, `duration_verified`, and `complete` identify
+  gaps and verification failures. Incomplete chunks remain preserved and
+  cannot clear the failure alert. Nonempty failed recordings become orphans.
+  Android recording-configuration events report microphone silencing.
+  The hourly ribbon requires verified coverage; legacy unchecked chunks
+  remain unverified.
 - **Decoding, at intake.** `sinnix phone ambient-audit` decodes every chunk as
   it lands into `ambient-levels.jsonl` with duration, rate, mean and peak,
   flagging the −91 dB a stream of exact zeroes decodes to. Run against the
@@ -290,7 +306,7 @@ third-party call-audio capture since Android 10.
 
 ### Keepalive, cheapest first
 
-The 20s heartbeat self-heals audio failures in seconds. Opening the app
+The 20s heartbeat detects stalls and silence, then retries capture after two seconds. Opening the app
 restarts a dead service immediately. A 10-minute inexact alarm covers process
 death. `START_STICKY` covers the platform's own low-memory path. `BootReceiver`
 covers reboots.

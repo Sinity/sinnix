@@ -27,6 +27,11 @@ backend = "codex"
 model = "gpt-5.6-luna"
 effort = "medium"
 
+[packets.review]
+backend = "codex"
+model = "gpt-5.6-luna"
+effort = "high"
+
 [operations.check]
 description = "Run default Sinnix checks"
 exec = ["check"]
@@ -92,3 +97,35 @@ exec = ["sinnix-census", "--window-days", "90"]
 pool = "normal"
 result = "exit"
 schedule = "weekly"
+
+[operations.transcribe]
+description = "Transcribe selected audio files with the local speech engine"
+exec = ["sinnix-stt", "transcribe"]
+pool = "normal"
+result = "exit"
+cache = "none"
+timeout_seconds = 3600
+
+[operations.diarize]
+description = "Identify speaker turns in a selected audio file"
+exec = ["sinnix-stt", "diarize"]
+pool = "normal"
+result = "exit"
+cache = "none"
+timeout_seconds = 3600
+
+[operations.phone_app_build]
+description = "Build the phone application and its signing installer"
+exec = ["nix", "build", ".#sinnix-phone-app-install", "--no-link", "--print-out-paths"]
+pool = "bulk"
+result = "exit"
+cache = "none"
+timeout_seconds = 3600
+
+[operations.phone_dispatcher_build]
+description = "Build and test the phone upload and repair tools"
+exec = ["nix", "build", ".#checks.x86_64-linux.sinnix-phone-dispatcher-suite", "--no-link", "--print-out-paths"]
+pool = "normal"
+result = "exit"
+cache = "none"
+timeout_seconds = 1800

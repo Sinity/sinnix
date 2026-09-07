@@ -1,169 +1,59 @@
 ---
 name: meta
-description: Meta-level introspection - analyze session, improve setup, persist learnings
+description: Audit and improve agent instructions, configuration, memory organization, and delegation using observed session friction. Use for self-audits or explicit requests to improve the agent setup.
 ---
 
-# Meta-Level Introspection
+# Improve the agent setup
 
-Shift to meta-level: analyze this session's patterns, improve the setup, persist learnings.
+## Scope and authority
 
-**Arguments**: $ARGUMENTS
+For an audit request, inspect and recommend. When the user authorizes changes,
+make scoped improvements and show the resulting diff; do not ask for the same
+authorization again. Obtain direction for ambiguous destructive changes or
+live activation beyond the request.
 
----
+Use `writing-for-agents` for instructions and memory, `skill-authoring` for
+skill lifecycle and routing, and `orchestrate` for delegation changes.
 
-## Capabilities
+## Audit
 
-### Analyze (default)
+1. Resolve the active files, symlinks, generated sources, and repository rules.
+   Distinguish source configuration from what the current harness loaded.
+2. Inventory global/project instructions, memory indexes, skills, agent
+   definitions, and relevant runtime settings. Preserve unrelated work and
+   avoid printing credentials or private transcripts.
+3. Check instructions against current code and observed attempts. Look for
+   contradictions, duplicated authorities, stale task state, misleading model
+   defaults, broken pointers, and procedures that require unnecessary turns.
+4. Prioritize defects by the decisions they change. Delegate bounded catalog
+   checks; use strong judgment for architecture and disputed conclusions.
+   A structural validator cannot establish that advice is correct.
 
-Review current session for friction, successes, and gaps. Propose concrete improvements.
+## Improve
 
-### Improve
+- Keep global instructions for cross-project constraints and project
+  `CLAUDE.md` for stable semantics. Put procedures in their owning skill,
+  task state in Beads, and job evidence in runtime artifacts.
+- Update the existing owner before adding a field, rule, skill, or ledger.
+  Replace contradictory advice in the same change and name what got shorter.
+- Automate deterministic collection, validation, and formatting. Keep failure
+  attribution, model selection, scope changes, and acceptance as decisions
+  unless a specific policy is explicitly authorized and testable.
+- Read session history through Polylogue or the harness-specific session
+  skill. Use bounded evidence; distinguish measured activity from inferred
+  cost or competence. Compare model attempts using actual launch identities
+  and inherited work, not nominal task labels or closure counts.
+- Preserve useful superseded memory in its archive. An unfinished task is
+  not stale merely because it is old; verify its owner and current evidence.
 
-Make specific changes to CLAUDE.md, skills, hooks, or settings. Show diff, get approval, apply.
+## Verify and hand off
 
-### Audit
+Validate changed skill structure and links, probe changed routing with
+positive and negative requests, and review the full diff for private data.
+For configuration changes, verify the generated surface through its owning
+tools. Do not activate the host merely to claim a documentation change done.
 
-Inventory all config files. Find: orphaned skills, outdated info, conflicts, misplaced content.
-
-### Remember `<thing>`
-
-Quick path to CLAUDE.md. Infer scope (global vs project) from context, or ask. Show diff, apply.
-
----
-
-## Key Concepts
-
-**CLAUDE.md vs Skills**
-
-```
-CLAUDE.md = eager (always loaded, costs tokens every session)
-Skills    = lazy (loaded on demand)
-```
-
-Rule: If it's static knowledge → CLAUDE.md. If it's a workflow → skill.
-
-**Subagents**
-
-- Don't inherit conversation history
-- Use when: different model, tool restrictions, or isolation needed
-- Personas should be skills (need conversation context), not agents
-
-**What goes where**
-| Content | Location |
-|---------|----------|
-| Behavioral rules + cross-project patterns | Global CLAUDE.md (flat; `dots/claude/CLAUDE.md` in sinnix) |
-| Project-specific | Project CLAUDE.md (flat; AGENTS.md is a symlink to it) |
-| Interactive workflows | `skills/` |
-| Isolated/different-model tasks | `agents/` |
-| Preserved but unused | `archive/` |
-
----
-
-## Config Layout
-
-### Global `~/.claude/`
-
-```
-CLAUDE.md                 # Core behavioral contract
-├── @includes/...         # Modular pieces (use _index.md as manifest)
-settings.json             # Permissions
-skills/*/SKILL.md         # Lazy-loaded workflows
-agents/*.md               # Subagent definitions
-archive/{skills,includes} # Preserved, not loaded
-```
-
-### Project `.claude/`
-
-```
-CLAUDE.md                 # Project patterns (loaded when in dir)
-.claude/
-├── includes/             # Modular project docs (_index.md pattern)
-├── settings.json         # Project permissions
-└── scratch/              # Working notes (pin via @path in CLAUDE.md)
-```
-
-### Include Pattern
-
-- `@path/to/file.md` transcludes content
-- `_index.md` in folder imports siblings — comment out to disable
-- Max 5 recursive hops
-- Not evaluated inside code blocks
-
----
-
-## Project CLAUDE.md Structure
-
-```markdown
-# Project Name
-
-> Brief: what this is, when to update
-
-## Quick Reference
-
-[Commands, key paths]
-
-## Patterns (DO/DON'T)
-
-[With code examples]
-
-## Troubleshooting
-
-[Error → fix format]
-
-## Pinned Notes
-
-@.agent/scratch/topic.md
-```
-
-**Heuristic**: If you've explained something twice, it should be documented.
-
----
-
-## Session Log Access
-
-Session logs are stored as JSONL files at `~/.claude/projects/<project-path>/`.
-
-### Listing Sessions
-
-```bash
-# Recent sessions for a project
-ls -lt ~/.claude/projects/-realm-project-sinex/*.jsonl | head -10
-
-# Project paths use dash-delimited absolute paths
-# /realm/project/sinex → -realm-project-sinex
-```
-
-### Extracting User Messages
-
-```bash
-# Get genuine conversational prompts (< 400 chars, not pasted plans)
-jq -c 'select(.type=="user")' session.jsonl | while read -r line; do
-  content=$(echo "$line" | jq -r '.message.content | if type == "array" then .[0] | select(.type=="text") | .text else . end')
-  len=${#content}
-  if [ "$len" -gt 5 ] && [ "$len" -lt 400 ]; then
-    case "$content" in
-      "null"|"[Request"*|"<local"*|"<command"*|"Implement the following plan"*) ;;
-      *) echo "$content" ;;
-    esac
-  fi
-done
-```
-
-### Key Observations
-
-- User messages have `.type == "user"` and content in `.message.content`
-- Content is either a string or array of `{type: "text", text: "..."}` objects
-- Pasted plans appear as single large text blocks (> 500 chars typically)
-- System commands (`/clear`, etc.) appear as `<command-name>` prefixed entries
-- Tool interruptions appear as `[Request interrupted by user for tool use]`
-
----
-
-## Applying This
-
-When doing meta work:
-
-1. This skill gives you the architectural understanding
-2. Use any capability above based on what's needed
-3. Ask for steering if unclear ("should I analyze first or go straight to changes?")
-4. Propose concrete changes with diffs before applying
+Report coverage, material changes, exact checks, unresolved defects, and
+whether changes are source-only, published, or active. Record task-shaped
+follow-ups in the owning Beads project. Keep experimental allocation rules
+bounded by a decision, stopping condition, and expiry.
