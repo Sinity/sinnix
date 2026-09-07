@@ -112,7 +112,9 @@ def test_terminal_release_keeps_the_exact_branch_head(tmp_path: Path) -> None:
     assert retained == head
 
 
-def test_detached_recovery_retains_each_head_after_a_failed_release(tmp_path: Path) -> None:
+def test_detached_recovery_retains_each_head_after_a_failed_release(
+    tmp_path: Path,
+) -> None:
     """Anti-vacuity: one retry cannot replace the prior detached recovery ref."""
     root = _repository(tmp_path / "repo")
     first = subprocess.run(

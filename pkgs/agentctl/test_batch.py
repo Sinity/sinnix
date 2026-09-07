@@ -272,8 +272,13 @@ class FakeWorktrunk:
         return tree
 
     def remove(
-        self, root: Path, branch: str, *, force: bool = False,
-        keep_branch: bool = False, reap: bool = True,
+        self,
+        root: Path,
+        branch: str,
+        *,
+        force: bool = False,
+        keep_branch: bool = False,
+        reap: bool = True,
     ) -> None:
         if branch in self.refuse_remove:
             raise WorktrunkError(f"{branch} is locked")
@@ -1824,7 +1829,9 @@ def test_terminal_cleanup_keeps_a_checkout_used_by_a_nonterminal_task(
     assert harness.wt.removed == []
 
 
-def test_terminal_cleanup_rehomes_agent_evidence_before_release(harness: Harness) -> None:
+def test_terminal_cleanup_rehomes_agent_evidence_before_release(
+    harness: Harness,
+) -> None:
     """Anti-vacuity: deleting the checkout used to leave prompt paths dangling."""
     run = prepared_run(harness, "fx-solo")
     worker = run["workers"][0]
@@ -1852,14 +1859,18 @@ def test_terminal_cleanup_retries_with_a_changed_receipt(harness: Harness) -> No
     first = landing_module._drop_worktrees(
         harness.config, harness.project, manifest.load(harness.config, run["run_id"])
     )
-    first_path = Path(manifest.load(harness.config, run["run_id"]).worker(worker["id"])["prompt_path"])
+    first_path = Path(
+        manifest.load(harness.config, run["run_id"]).worker(worker["id"])["prompt_path"]
+    )
     source.write_text(source.read_text() + "updated receipt\n")
     harness.wt.refuse_remove = set()
 
     second = landing_module._drop_worktrees(
         harness.config, harness.project, manifest.load(harness.config, run["run_id"])
     )
-    second_path = Path(manifest.load(harness.config, run["run_id"]).worker(worker["id"])["prompt_path"])
+    second_path = Path(
+        manifest.load(harness.config, run["run_id"]).worker(worker["id"])["prompt_path"]
+    )
 
     assert first == [f"{worker['branch']}: {worker['branch']} is locked"]
     assert second == []
@@ -1867,11 +1878,15 @@ def test_terminal_cleanup_retries_with_a_changed_receipt(harness: Harness) -> No
     assert first_path != second_path
 
 
-def test_privileged_cwd_refusal_fails_closed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_privileged_cwd_refusal_fails_closed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """Anti-vacuity: an unreadable same-user process must keep its checkout."""
 
     def refused(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
-        return subprocess.CompletedProcess(args=args[0], returncode=1, stdout="", stderr="sudo denied")
+        return subprocess.CompletedProcess(
+            args=args[0], returncode=1, stdout="", stderr="sudo denied"
+        )
 
     monkeypatch.setattr(landing_module.subprocess, "run", refused)
 
@@ -1902,7 +1917,9 @@ def test_privileged_cwd_refuses_a_reused_pid(
     """Anti-vacuity: a PID reused during sudo probing cannot authorize removal."""
     times = iter(("before", "after"))
     monkeypatch.setattr(landing_module, "_process_starttime", lambda entry: next(times))
-    monkeypatch.setattr(landing_module, "_privileged_cwd", lambda entry: tmp_path / "checkout")
+    monkeypatch.setattr(
+        landing_module, "_privileged_cwd", lambda entry: tmp_path / "checkout"
+    )
 
     with pytest.raises(BatchError, match="changed during cwd probe"):
         landing_module._stable_privileged_cwd(tmp_path / "123")
