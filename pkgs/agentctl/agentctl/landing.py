@@ -1123,13 +1123,12 @@ def _drop_branch(project: ProjectAdapter, branch: str, *, base: str) -> str | No
     tree = worktrunk.worktrunk_find(project.root, branch)
     if tree is None:
         return None
-    if tree.path is not None and tree.path.is_dir():
-        try:
-            keep = _unpreserved(tree.path, base=base, branch=branch)
-        except BatchError as error:
-            keep = str(error)
-        if keep:
-            return f"worktree kept; {keep}"
+    try:
+        keep = _unpreserved(tree.path, root=project.root, base=base, branch=branch)
+    except BatchError as error:
+        keep = str(error)
+    if keep:
+        return f"worktree kept; {keep}"
     try:
         worktrunk.worktrunk_remove(project.root, branch, force=True)
     except WorktrunkError as error:
@@ -1157,17 +1156,22 @@ def _drop_worktrees(
     return residual
 
 
-def _unpreserved(path: Path, *, base: str, branch: str) -> str | None:
+def _unpreserved(
+    path: Path | None, *, root: Path, base: str, branch: str
+) -> str | None:
     """Why removing this worktree would lose work, or None when nothing would."""
-    if _dirty_paths(path):
-        return "uncommitted changes"
-    head = _git(path, "rev-parse", "HEAD")
+    if path is not None and path.is_dir():
+        if _dirty_paths(path):
+            return "uncommitted changes"
+        head = _git(path, "rev-parse", "HEAD")
+    else:
+        head = _git(root, "rev-parse", "--verify", f"refs/heads/{branch}^{{commit}}")
     if head == base:
         return None
     holders = [
         ref
         for ref in _git(
-            path, "for-each-ref", "--format=%(refname)", "--contains", head
+            root, "for-each-ref", "--format=%(refname)", "--contains", head
         ).split()
         if ref != f"refs/heads/{branch}"
     ]
@@ -1234,7 +1238,9 @@ def clean(config: Config, project: ProjectAdapter) -> dict[str, Any]:
     manifest left at all. It is removed only when nothing would be lost with
     it, and one that is kept is named with the reason.
     """
-    runs = {run.run_id: run for run in list_runs(config, project.project_id)}
+    runs = {
+        run.run_id: run for run in list_runs(config, project.project_id, strict=True)
+    }
     try:
         default_base = _git(
             project.root,

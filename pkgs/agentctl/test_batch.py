@@ -192,6 +192,10 @@ class FakeGit:
                 )
             if arguments[-1].startswith("batch/"):
                 return self.branch_head(arguments[-1].removesuffix("^{commit}"))
+            if arguments[-1].startswith("refs/heads/batch/"):
+                return self.branch_head(
+                    arguments[-1].removeprefix("refs/heads/").removesuffix("^{commit}")
+                )
             return BASE
         if verb == "merge" and arguments[1] == "--abort":
             self.aborts.append(key)
@@ -216,7 +220,7 @@ class FakeGit:
             self.greps.append(arguments)
             return self.conflict_markers.get(key, "")
         if verb == "for-each-ref":
-            return "\n".join(self.containing(self.heads.get(key, SHA)))
+            return "\n".join(self.containing(arguments[-1]))
         if verb == "merge-base":
             if arguments[1] == "--is-ancestor":
                 ancestor, descendant = arguments[2], arguments[3]
@@ -1749,6 +1753,42 @@ def test_clean_drops_the_worktrees_of_finished_runs_and_leaves_the_others(
             "feature/operator-lane",
         ]
     )
+
+
+def test_cleanup_preserves_unique_commits_when_the_worktree_directory_is_missing(
+    harness: Harness,
+) -> None:
+    """A branch-only registry entry still names commits that cleanup must keep."""
+    branch = "batch/fixture-20260101-000000-cccccccc/w1"
+    harness.wt.trees[branch] = Worktree(branch=branch, path=None)
+    harness.git.branches[branch] = OTHER
+    harness.git.parents[OTHER] = (BASE,)
+    harness.git.holders[OTHER] = [f"refs/heads/{branch}"]
+
+    kept = landing_module._drop_branch(harness.project, branch, base=BASE)
+
+    assert kept == f"worktree kept; commits only on {branch}"
+    assert harness.wt.removed == []
+    assert branch in harness.wt.trees
+
+
+def test_clean_refuses_before_removing_worktrees_when_a_manifest_is_unreadable(
+    harness: Harness, tmp_path: Path
+) -> None:
+    """An uncertain ownership map must fail closed rather than orphan cleanup."""
+    branch = "batch/fixture-20260101-000000-dddddddd/w1"
+    harness.wt.trees[branch] = Worktree(branch=branch, path=tmp_path / "orphan")
+    (tmp_path / "orphan").mkdir()
+    manifest.runs_dir(harness.config).mkdir(parents=True, exist_ok=True)
+    (
+        manifest.runs_dir(harness.config) / "fixture-20260101-000000-corrupt.json"
+    ).write_text("{not-json")
+
+    with pytest.raises(BatchRefusal, match="manifest"):
+        batch.clean(harness.config, harness.project)
+
+    assert harness.wt.removed == []
+    assert branch in harness.wt.trees
 
 
 def test_abandon_refuses_while_the_landing_task_runs_and_drops_a_queued_one(
