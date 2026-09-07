@@ -1375,6 +1375,8 @@ def _drop_branch(
             removal_target = str(path)
             detached = True
     if path is None:
+        if recorded_path is not None and recorded_path.exists():
+            return f"worktree kept; checkout path is unregistered: {recorded_path}"
         return None
     if not path.is_dir():
         if removal_target == branch:
@@ -1467,6 +1469,8 @@ def _drop_branch(
         )
     except WorktrunkError as error:
         return str(error)
+    if path.exists():
+        return f"worktree kept; checkout path remains after removal: {path}"
     return None
 
 
@@ -1589,6 +1593,7 @@ def clean(config: Config, project: ProjectAdapter) -> dict[str, Any]:
         # which is the check that decides preservation anyway.
         default_base = ""
     removed: list[str] = []
+    absent: list[str] = []
     kept: list[dict[str, str]] = []
     retained_artifacts: list[dict[str, str]] = []
     with project_locked(config, project.project_id):
@@ -1624,6 +1629,22 @@ def clean(config: Config, project: ProjectAdapter) -> dict[str, Any]:
             if key in seen:
                 continue
             seen.add(key)
+            registered = worktrunk.worktrunk_find(project.root, branch)
+            if recorded_path is not None:
+                registered = registered or next(
+                    (
+                        tree
+                        for tree in worktrunk.worktrunk_list(project.root)
+                        if not tree.main
+                        and tree.branch is None
+                        and tree.path == recorded_path
+                    ),
+                    None,
+                )
+            if registered is None or registered.path is None:
+                if recorded_path is None or not recorded_path.exists():
+                    absent.append(branch)
+                    continue
             copied: list[dict[str, str]] = []
             reason = _drop_branch(
                 config,
@@ -1642,6 +1663,7 @@ def clean(config: Config, project: ProjectAdapter) -> dict[str, Any]:
     return {
         "project": project.project_id,
         "removed": removed,
+        "absent": absent,
         "kept": kept,
         "artifacts": retained_artifacts,
     }

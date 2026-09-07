@@ -288,6 +288,7 @@ def test_failed_verification_is_retried_on_the_same_candidate(
 
 def test_large_review_evidence_is_exact_and_locally_readable(harness: Harness) -> None:
     run = prepared_run(harness, "fx-solo", unsatisfied={"fx-solo"})
+    harness.wt.leave_paths = {f"batch/{run['run_id']}/integration"}
     harness.beads.beads["fx-solo"]["design"] = (
         "Publish code now; live rehearsal follows and keeps this bead open."
     )

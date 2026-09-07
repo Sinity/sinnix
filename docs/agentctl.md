@@ -414,6 +414,7 @@ that run no longer holds its beads: landed, abandoned, or with no manifest
 left at all. It is removed on the same rule as an abandon. The branch remains
 as the recovery reference, and declared receipts are retained in private
 runtime state before removal. One that is kept is printed with the reason.
+Already-absent checkouts are reported separately and are never counted as removals.
 Run state, never age: a live run's worktrees and an
 operator's own are untouched.
 
