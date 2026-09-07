@@ -6,6 +6,7 @@ import fcntl
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -250,6 +251,7 @@ class FakeWorktrunk:
     trees: dict[str, Worktree] = field(default_factory=dict)
     removed: list[str] = field(default_factory=list)
     refuse_remove: set[str] = field(default_factory=set)
+    leave_paths: set[str] = field(default_factory=set)
     fail_create: set[str] = field(default_factory=set)
     # Branch -> the base it was created from.
     bases: dict[str, str] = field(default_factory=dict)
@@ -282,13 +284,19 @@ class FakeWorktrunk:
     ) -> None:
         if branch in self.refuse_remove:
             raise WorktrunkError(f"{branch} is locked")
-        if branch in self.trees:
-            self.trees.pop(branch)
-        else:
+        removed = self.trees.pop(branch, None)
+        if removed is None:
             for key, tree in list(self.trees.items()):
                 if tree.path is not None and str(tree.path) == branch:
-                    self.trees.pop(key)
+                    removed = self.trees.pop(key)
                     break
+        if (
+            removed is not None
+            and removed.path is not None
+            and branch not in self.leave_paths
+            and removed.path.is_dir()
+        ):
+            shutil.rmtree(removed.path)
         self.removed.append(branch)
 
 
@@ -966,6 +974,7 @@ def test_a_conflict_runs_one_integration_agent_and_requires_every_branch_merged(
     harness: Harness,
 ) -> None:
     run = prepared_run(harness, "fx-lead", "fx-solo")
+    harness.wt.leave_paths = {f"batch/{run['run_id']}/integration"}
     harness.git.conflict_on = {f"batch/{run['run_id']}/fx-solo"}
 
     landed = harness.land(run["run_id"])
@@ -1790,6 +1799,59 @@ def test_cleanup_leaves_a_branch_without_a_checkout_alone(
     assert branch in harness.wt.trees
 
 
+def test_clean_reports_a_branch_without_a_checkout_as_absent(harness: Harness) -> None:
+    """Anti-vacuity: a retained branch is not evidence that a checkout was removed."""
+    branch = "batch/fixture-20260101-000000-cccccccc/w1"
+    harness.wt.trees[branch] = Worktree(branch=branch, path=None)
+
+    cleaned = batch.clean(harness.config, harness.project)
+
+    assert cleaned["removed"] == []
+    assert cleaned["absent"] == [branch]
+
+
+def test_cleanup_keeps_an_unregistered_recorded_checkout(harness: Harness) -> None:
+    """Anti-vacuity: a missing registry entry cannot hide its remaining directory."""
+    run = prepared_run(harness, "fx-solo")
+    worker = run["workers"][0]
+    harness.wt.trees.pop(worker["branch"])
+
+    reason = landing_module._drop_branch(
+        harness.config,
+        harness.project,
+        worker["branch"],
+        base=run["base_commit"],
+        recorded_path=Path(worker["worktree"]),
+        run_id=run["run_id"],
+    )
+
+    assert (
+        reason == f"worktree kept; checkout path is unregistered: {worker['worktree']}"
+    )
+
+
+def test_cleanup_keeps_a_deregistered_checkout_residue(harness: Harness) -> None:
+    """Anti-vacuity: successful deregistration does not prove the directory left."""
+    run = prepared_run(harness, "fx-solo")
+    worker = run["workers"][0]
+    harness.wt.leave_paths = {worker["branch"]}
+
+    reason = landing_module._drop_branch(
+        harness.config,
+        harness.project,
+        worker["branch"],
+        base=run["base_commit"],
+        recorded_path=Path(worker["worktree"]),
+        run_id=run["run_id"],
+    )
+
+    assert (
+        reason
+        == f"worktree kept; checkout path remains after removal: {worker['worktree']}"
+    )
+    assert worker["branch"] not in harness.wt.trees
+
+
 def test_cleanup_removes_a_detached_owned_worktree_by_its_recorded_path(
     harness: Harness,
 ) -> None:
@@ -1846,7 +1908,7 @@ def test_terminal_cleanup_rehomes_agent_evidence_before_release(
     retained = Path(stored.worker(worker["id"])["prompt_path"])
     assert residual == []
     assert retained.is_file() and retained.read_text() == source_text
-    assert source.is_file()
+    assert not source.exists()
 
 
 def test_terminal_cleanup_retries_with_a_changed_receipt(harness: Harness) -> None:
@@ -2061,6 +2123,7 @@ def test_landing_agents_get_members_scopes_and_exact_evidence(
     harness.beads.beads["fx-member"]["metadata"]["write_scope"] = ["a.py"]
     harness.beads.beads["fx-lead"]["owner"] = "someone@example.com"
     run = prepared_run(harness, "fx-lead", "fx-solo")
+    harness.wt.leave_paths = {f"batch/{run['run_id']}/integration"}
     harness.git.conflict_on = {f"batch/{run['run_id']}/fx-solo"}
     worker = manifest.load(harness.config, run["run_id"]).workers[0]
     stored = json.loads(Path(worker["result_path"]).read_text())
