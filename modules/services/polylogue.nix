@@ -161,6 +161,7 @@ mkServiceModule {
       # These are Polylogue archive inputs, so their destination must follow
       # the same archive-root option as the daemon and hook spool.
       systemd.tmpfiles.rules = [
+        "d ${cfg.dataDir} 0755 ${userName} users -"
         "d ${cfg.dataDir}/inbox 0755 ${userName} users -"
         "L+ ${cfg.dataDir}/inbox/chatgpt - - - - /realm/data/ai/chatlog/raw/chatgpt"
         "L+ ${cfg.dataDir}/inbox/claude - - - - /realm/data/ai/chatlog/raw/claude"
@@ -182,7 +183,12 @@ mkServiceModule {
         # To release: delete this block and switch. Do NOT release before the
         # blob-collector liveness fixes have landed (#4133) — that path can
         # unlink live payload it cannot prove is referenced.
-        systemd.user.services.polylogued.Unit.RefuseManualStart = true;
+        systemd.user.services.polylogued.Unit = {
+          # The upstream unit is wanted by default.target, so ordering it
+          # after that target leaves the user manager with a startup cycle.
+          After = lib.mkForce [ ];
+          RefuseManualStart = true;
+        };
 
         programs.polylogued = {
           enable = true;

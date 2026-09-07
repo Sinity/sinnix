@@ -51,11 +51,20 @@ in
                 theming.enable = false;
                 ui.enable = false;
               };
-              sinnix.services.polylogue.enable = true;
+              # Agent activation requires the workstation checkout.
+              sinnix.features.dev = {
+                agentTools.enable = false;
+                mcp-servers.enable = false;
+              };
+              sinnix.services.polylogue = {
+                enable = true;
+                daemon.autoStart = true;
+              };
             };
           testScript = ''
             start_all()
             machine.wait_for_unit("multi-user.target")
+            machine.wait_for_unit("home-manager-sinity.service")
 
             uid = machine.succeed("id -u sinity").strip()
             as_user = f"XDG_RUNTIME_DIR=/run/user/{uid} runuser -u sinity --"
@@ -66,7 +75,10 @@ in
 
             machine.succeed(f"{as_user} systemctl --user is-active --quiet polylogued.service")
             machine.succeed(f"{as_user} ${
-              inputs.polylogue.packages.${system}.default
+              import ../polylogue-package.nix {
+                inherit inputs pkgs;
+                package = inputs.polylogue.packages.${system}.polylogue;
+              }
             }/bin/polylogued status --format json | jq -e '.daemon == \"polylogued\" and (.live.source_count >= 0)' >/dev/null")
           '';
         };
