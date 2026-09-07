@@ -73,6 +73,10 @@ every worker prompt), [coordinator contract](references/coordinator-contract.md)
   criteria are all satisfied. Re-run it by hand after fixing a named failure.
 - Observation: ONE persistent watch on `agentctl events tail --follow`.
   Completion events are authoritative; no per-job wait loops.
+- Release finished session agents through the harness's close/unload action
+  when available. Completion and interruption need not release MCP helpers.
+  If unloading is unavailable, report retained resources; helper age or idle
+  CPU alone does not establish that its connection can be terminated safely.
 - Heavy host operations run as declared operations so pueue's per-group
   parallelism bounds them. Session subagents bypass pueue entirely: bound
   them explicitly (one pytest at a time, `-n 2`) or route the heavy step
