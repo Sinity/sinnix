@@ -74,12 +74,17 @@ in
             machine.wait_for_unit("polylogued.service", "sinity")
 
             machine.succeed(f"{as_user} systemctl --user is-active --quiet polylogued.service")
-            machine.succeed(f"{as_user} ${
+            status_command = f"{as_user} ${
               import ../polylogue-package.nix {
                 inherit inputs pkgs;
                 package = inputs.polylogue.packages.${system}.polylogue;
               }
-            }/bin/polylogued status --format json | jq -e '.daemon == \"polylogued\" and (.live.source_count >= 0)' >/dev/null")
+            }/bin/polylogued status --format json > /tmp/polylogued-status.json"
+            try:
+                machine.wait_until_succeeds(status_command, timeout=120)
+            finally:
+                machine.succeed("cat /tmp/polylogued-status.json")
+            machine.succeed("jq -e '.daemon == \"polylogued\" and (.live.source_count >= 0)' /tmp/polylogued-status.json >/dev/null")
           '';
         };
         transmission-vm = mkVmCheck system {
