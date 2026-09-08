@@ -302,3 +302,58 @@ def test_a_group_seen_running_after_our_pause_is_released_and_an_operator_repaus
         spool=spool,
     )
     assert calls == [] and result["action"] == "hold"
+
+
+def test_io_pressure_keeps_focused_tests_admissible(monkeypatch) -> None:
+    """A long reader must not close the bounded test pool after closing bulk."""
+    result, calls = _tick(
+        monkeypatch,
+        {"io_full_avg60": 60.0, "memory_full_avg60": 1.0},
+        {"pytest": "Paused", "bulk": "Paused", "pytest-quick": "Running"},
+    )
+    assert calls == []
+    assert result["action"] == "hold"
+
+
+def test_old_io_pause_reopens_focused_tests_during_io_pressure(
+    monkeypatch, tmp_path
+) -> None:
+    """The policy upgrade releases its own existing I/O-only closure."""
+    result, calls = _tick(
+        monkeypatch,
+        {"io_full_avg60": 60.0, "memory_full_avg60": 1.0},
+        {"pytest": "Paused", "bulk": "Paused", "pytest-quick": "Paused"},
+        spool=_spool(tmp_path, _ours("pytest-quick")),
+    )
+    assert calls == [("resume", "pytest-quick")]
+    assert result["action"] == "opened"
+
+
+def test_memory_pressure_still_closes_focused_tests(monkeypatch) -> None:
+    result, calls = _tick(
+        monkeypatch,
+        {"io_full_avg60": 60.0, "memory_full_avg60": 30.0},
+        {
+            "pytest": "Paused",
+            "normal": "Paused",
+            "bulk": "Paused",
+            "pytest-quick": "Running",
+        },
+    )
+    assert calls == [("pause", "pytest-quick")]
+    assert result["action"] == "closed"
+
+
+def test_operator_focused_test_pause_is_preserved_under_io_pressure(
+    monkeypatch, tmp_path
+) -> None:
+    result, calls = _tick(
+        monkeypatch,
+        {"io_full_avg60": 60.0, "memory_full_avg60": 1.0},
+        {"pytest": "Paused", "bulk": "Paused", "pytest-quick": "Paused"},
+        spool=_spool(
+            tmp_path, {"action": "closed", "group": "pytest-quick", "owner": "operator"}
+        ),
+    )
+    assert calls == []
+    assert result["action"] == "hold"

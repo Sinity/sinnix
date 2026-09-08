@@ -30,10 +30,10 @@ MEMORY_FULL_FREEZE = 25.0
 # queue closed for several stale minutes.
 RESUME_BELOW = 10.0
 
-# Conversations stay admissible under both signals. Their fixed six-slot cap
-# and cgroup limits bound them; pressure gates the heavy work they can launch.
+# Conversations stay admissible under both signals. Focused tests retain their
+# bounded pool under I/O pressure; memory pressure still closes their admission.
 CLOSE_ORDER = {
-    "io": ("pytest", "bulk", "pytest-quick"),
+    "io": ("pytest", "bulk"),
     "memory": ("pytest", "normal", "bulk", "pytest-quick"),
 }
 MANAGED_GROUPS = ("agent", "pytest", "pytest-quick", "normal", "bulk")
