@@ -26,12 +26,8 @@ let
   # btrbk→borg coverage.
   backupRoot = "/realm/state/db-dumps/machine-telemetry";
   backupSnapshotRoot = "${realmRoot}/state/machine-telemetry-backup-snapshots";
-  # The run is two passes over a database now past 38 GB, inside a unit capped
-  # at 80 MB/s reading /realm: an integrity walk of the snapshot, then the
-  # compression pass a live run measured at 9m07s for 34.7 GiB plus the archive
-  # test. Giving the walk 18 of the 30 minutes leaves the compressor its
-  # measured cost with margin, and makes a walk that no longer fits fail as
-  # itself rather than as an opaque unit timeout.
+  # Integrity checking has 18 minutes; compression and archive verification
+  # must fit within the remaining 12 minutes.
   backupTimeoutMinutes = 30;
   integrityBudgetSeconds = backupTimeoutMinutes * 60 * 3 / 5;
   manifestPath = "${dataDir}/manifest.json";
@@ -289,6 +285,10 @@ mkServiceModule {
           serviceConfig = {
             Group = "users";
             TimeoutStartSec = "${toString backupTimeoutMinutes}min";
+            # The integrity walk must finish within its fixed time budget.
+            IOReadBandwidthMax = map (
+              limit: if lib.hasPrefix "${realmRoot} " limit then "${realmRoot} 100M" else limit
+            ) config.sinnix.runtime.inventory.classes.backup-maintenance.serviceConfig.IOReadBandwidthMax;
           };
           unit = {
             after = [
