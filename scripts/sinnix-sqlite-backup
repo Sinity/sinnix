@@ -197,14 +197,9 @@ def backup_database(
                 f"file:{source_path}?mode=ro&immutable=1", uri=True, timeout=5.0
             )
             source.execute("PRAGMA busy_timeout=5000")
-            # A b-tree walk visits pages in logical order, which SQLite serves
-            # one QD1 4 KiB pread at a time; over a mapping the same walk gets
-            # kernel readahead instead. Measured cold on a 928 MB fixture, 522s
-            # unmapped against 4.0s mapped. SQLite caps a mapping at
-            # SQLITE_MAX_MMAP_SIZE (2 GiB here) and preads the remainder, so
-            # this covers the head of a large database and all of a small one.
-            # Mapped pages are clean page cache, so the cost is address space
-            # rather than resident memory.
+            # Map the immutable database so integrity walks use kernel
+            # readahead. The packaged SQLite permits mappings up to 1 TiB;
+            # clean mapped pages remain reclaimable under memory pressure.
             source.execute(f"PRAGMA mmap_size={source_bytes}")
             started = time.monotonic()
             check = check_immutable_snapshot(

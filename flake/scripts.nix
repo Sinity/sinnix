@@ -55,6 +55,10 @@ let
   discovered = discovery.discover (inputs.self + "/scripts");
 
   registry = discovered.registry // {
+    sinnix-sqlite-backup = import ./sqlite-backup.nix {
+      inherit pkgs;
+      entry = discovered.registry.sinnix-sqlite-backup;
+    };
     # Same shape for the steering CLI: its source moved into the steering
     # workspace, but it remains an operator verb — keep it in the registry so
     # `sinnix help` lists it and `sinnix steer ...` dispatches.
