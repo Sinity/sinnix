@@ -6,7 +6,9 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import os
+import select
 import signal
 import sqlite3
 import subprocess
@@ -14,6 +16,7 @@ import sys
 import threading
 import time
 from pathlib import Path
+from typing import Iterator
 
 
 class BackupCancelled(Exception):
@@ -21,6 +24,7 @@ class BackupCancelled(Exception):
 
 
 cancel_requested = False
+cancel_wakeup_read_fd: int | None = None
 FULL_INTEGRITY_PAGE_LIMIT = 100_000
 CHECK_POLL_SECONDS = 0.02
 # Every sidecar cleanup() ever creates ends in one of these compound
@@ -37,6 +41,24 @@ STALE_SIDECAR_GRACE_SECONDS = 3600
 def request_cancel(_signum: int, _frame: object) -> None:
     global cancel_requested
     cancel_requested = True
+
+
+@contextmanager
+def cancellation_wakeup() -> Iterator[int]:
+    """Make signals observable while the main thread is inside SQLite C code."""
+    global cancel_wakeup_read_fd
+    read_fd, write_fd = os.pipe()
+    os.set_blocking(read_fd, False)
+    os.set_blocking(write_fd, False)
+    previous_fd = signal.set_wakeup_fd(write_fd)
+    cancel_wakeup_read_fd = read_fd
+    try:
+        yield read_fd
+    finally:
+        cancel_wakeup_read_fd = None
+        signal.set_wakeup_fd(previous_fd)
+        os.close(read_fd)
+        os.close(write_fd)
 
 
 def sweep_stale_sidecars(output_path: Path) -> None:
@@ -93,15 +115,28 @@ def run_check(
     reason: list[str] = []
 
     def watchdog() -> None:
-        while not stop.wait(CHECK_POLL_SECONDS):
+        while not stop.is_set():
+            readable, _, _ = select.select(
+                ([cancel_wakeup_read_fd] if cancel_wakeup_read_fd is not None else []),
+                [],
+                [],
+                CHECK_POLL_SECONDS,
+            )
+            if stop.is_set():
+                return
+            if readable:
+                os.read(readable[0], 4096)
+                reason.append("cancelled")
+                connection.interrupt()
+                return
             if cancel_requested:
                 reason.append("cancelled")
-            elif deadline is not None and time.monotonic() >= deadline:
+                connection.interrupt()
+                return
+            if deadline is not None and time.monotonic() >= deadline:
                 reason.append("deadline")
-            else:
-                continue
-            connection.interrupt()
-            return
+                connection.interrupt()
+                return
 
     if cancel_requested:
         raise BackupCancelled
@@ -135,7 +170,7 @@ def check_immutable_snapshot(
     archive of it.
 
     Above the page limit the check is quick_check rather than integrity_check:
-    quick_check walks every page and b-tree once, while integrity_check
+    quick_check validates b-trees and scans table rows. integrity_check
     additionally cross-verifies every index entry against its table, which does
     not stream and scales with index count. The argument bounds the reported
     error list to one row, so a shredded database cannot accumulate a result
@@ -310,12 +345,13 @@ def main() -> int:
     signal.signal(signal.SIGTERM, request_cancel)
     signal.signal(signal.SIGINT, request_cancel)
     try:
-        backup_database(
-            args.source,
-            args.output,
-            immutable_source=args.immutable_source,
-            check_budget_seconds=args.check_budget_seconds,
-        )
+        with cancellation_wakeup():
+            backup_database(
+                args.source,
+                args.output,
+                immutable_source=args.immutable_source,
+                check_budget_seconds=args.check_budget_seconds,
+            )
     except BackupCancelled:
         print("SQLite backup cancelled", file=sys.stderr)
         return 143
