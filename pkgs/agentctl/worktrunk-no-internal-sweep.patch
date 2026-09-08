@@ -1,0 +1,36 @@
+--- a/src/cli/mod.rs
++++ b/src/cli/mod.rs
+@@ -508,0 +509,8 @@
++    /// Skip the repo-wide stale-trash and orphan-fsmonitor cleanup.
++    ///
++    /// Worktrunk still performs the requested worktree removal and its
++    /// per-worktree fsmonitor stop. This is intended for callers that own
++    /// cleanup scope and must not sweep unrelated repository state.
++    #[arg(long)]
++    pub(crate) no_internal_sweep: bool,
++
+
+--- a/src/commands/remove.rs
++++ b/src/commands/remove.rs
+@@ -372,4 +372,6 @@
+-                // Fire-and-forget repo-wide internal cleanup (stale trash +
+-                // orphaned fsmonitor daemons) — runs after primary output so
+-                // it never delays the user-visible progress/success message.
+-                super::process::run_internal_sweep(&repo);
++                if !args.no_internal_sweep {
++                    // Fire-and-forget repo-wide internal cleanup (stale trash +
++                    // orphaned fsmonitor daemons) — runs after primary output so
++                    // it never delays the user-visible progress/success message.
++                    super::process::run_internal_sweep(&repo);
++                }
+@@ -453,4 +455,6 @@
+-                // Fire-and-forget repo-wide internal cleanup (stale trash +
+-                // orphaned fsmonitor daemons) — runs after primary output so
+-                // it never delays the user-visible progress/success messages.
+-                super::process::run_internal_sweep(&repo);
++                if !args.no_internal_sweep {
++                    // Fire-and-forget repo-wide internal cleanup (stale trash +
++                    // orphaned fsmonitor daemons) — runs after primary output so
++                    // it never delays the user-visible progress/success messages.
++                    super::process::run_internal_sweep(&repo);
++                }
