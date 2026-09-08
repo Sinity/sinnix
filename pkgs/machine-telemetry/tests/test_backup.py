@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import select
 import shutil
 import signal
 import sqlite3
@@ -351,6 +352,54 @@ def test_run_answers_sigterm_once_the_walk_has_started(
     assert "cancelled" in errors
     assert not output.exists()
     assert not list(tmp_path.glob("*.tmp*"))
+
+
+def test_run_check_interrupts_a_native_sqlite_statement_on_sigterm(
+    tmp_path: Path,
+) -> None:
+    """The wakeup fd interrupts SQLite while Python is blocked in execute()."""
+    helper = tmp_path / "interrupt.py"
+    helper.write_text(
+        f"""import runpy, signal, sqlite3
+module = runpy.run_path({str(SCRIPT)!r})
+signal.signal(signal.SIGTERM, module["request_cancel"])
+with module["cancellation_wakeup"]():
+    connection = sqlite3.connect(":memory:")
+    print("ready", flush=True)
+    try:
+        module["run_check"](
+            connection,
+            "WITH RECURSIVE numbers(value) AS ("
+            "SELECT 0 UNION ALL SELECT value + 1 FROM numbers "
+            "WHERE value < 2000000000) SELECT sum(value) FROM numbers",
+            None,
+        )
+    except module["BackupCancelled"]:
+        print("cancelled", flush=True)
+        raise SystemExit(143)
+    raise SystemExit("query unexpectedly completed")
+"""
+    )
+    process = subprocess.Popen(
+        ["python3", str(helper)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert process.stdout
+        assert select.select([process.stdout], [], [], 10)[0], "helper did not start"
+        assert process.stdout.readline().strip() == "ready"
+        time.sleep(0.05)
+        process.send_signal(signal.SIGTERM)
+        output, errors = process.communicate(timeout=10)
+
+        assert process.returncode == 143, (output, errors)
+        assert "cancelled" in output
+    finally:
+        if process.poll() is None:
+            process.kill()
+        process.wait()
 
 
 def test_cancellation_during_compression_leaves_no_partial_artifact(
