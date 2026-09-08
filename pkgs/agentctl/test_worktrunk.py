@@ -172,13 +172,23 @@ def test_agentctl_remove_disables_worktrunk_global_sweep_without_changing_operat
     assert worktrunk_find(agent_repo, "feature/owned") is None
     assert (
         subprocess.run(
-            ["git", "-C", str(agent_repo), "show-ref", "--verify", "--quiet", "refs/heads/feature/owned"],
+            [
+                "git",
+                "-C",
+                str(agent_repo),
+                "show-ref",
+                "--verify",
+                "--quiet",
+                "refs/heads/feature/owned",
+            ],
             check=False,
         ).returncode
         != 0
     )
     assert stale_agent.is_dir(), "agentctl removal must leave unrelated old trash"
-    assert marker_agent.is_file(), "agentctl removal must leave unrelated fsmonitor state"
+    assert marker_agent.is_file(), (
+        "agentctl removal must leave unrelated fsmonitor state"
+    )
 
     operator_repo = _repository(tmp_path / "operator-repo")
     operator_target = tmp_path / "operator-owned"

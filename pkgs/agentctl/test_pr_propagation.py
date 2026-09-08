@@ -4,10 +4,11 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from agentctl import github, landing as landing_module, manifest
+from agentctl import github, manifest
+from agentctl import landing as landing_module
 from agentctl.batch import BatchRefusal
-from test_batch import MOVED, OTHER, SHA, Harness, harness as harness_fixture
-from test_batch import prepared_run, pr_project
+from test_batch import MOVED, OTHER, SHA, Harness, pr_project, prepared_run
+from test_batch import harness as harness
 
 
 def _pull(number: int, head: str, *, merged: bool = False) -> dict[str, Any]:
@@ -18,11 +19,6 @@ def _pull(number: int, head: str, *, merged: bool = False) -> dict[str, Any]:
         "statusCheckRollup": [],
         "mergeCommit": {"oid": "9" * 40} if merged else None,
     }
-
-
-@pytest.fixture
-def harness(harness_fixture: Harness) -> Harness:
-    return harness_fixture
 
 
 def test_publication_waits_for_exact_candidate_after_push(
@@ -96,8 +92,12 @@ def test_publication_refuses_third_head_during_propagation(
         "push_branch",
         lambda root, name, *, sha, lease, timeout=0: pushes.append(lease),
     )
-    monkeypatch.setattr(github, "pull_request_for_branch", lambda root, name: _pull(7, MOVED))
-    monkeypatch.setattr(github, "pull_request", lambda root, number: _pull(number, OTHER))
+    monkeypatch.setattr(
+        github, "pull_request_for_branch", lambda root, name: _pull(7, MOVED)
+    )
+    monkeypatch.setattr(
+        github, "pull_request", lambda root, number: _pull(number, OTHER)
+    )
     monkeypatch.setattr(
         github, "merge_pr", lambda root, number, candidate: merges.append(candidate)
     )
@@ -129,8 +129,12 @@ def test_publication_refuses_unobserved_candidate_at_deadline(
     monkeypatch.setattr(landing_module.time, "monotonic", lambda: clock[0])
     monkeypatch.setattr(github, "remote_head", lambda root, name: MOVED)
     monkeypatch.setattr(github, "push_branch", lambda *args, **kwargs: None)
-    monkeypatch.setattr(github, "pull_request_for_branch", lambda root, name: _pull(7, MOVED))
-    monkeypatch.setattr(github, "pull_request", lambda root, number: _pull(number, MOVED))
+    monkeypatch.setattr(
+        github, "pull_request_for_branch", lambda root, name: _pull(7, MOVED)
+    )
+    monkeypatch.setattr(
+        github, "pull_request", lambda root, number: _pull(number, MOVED)
+    )
     monkeypatch.setattr(
         github, "merge_pr", lambda root, number, candidate: merges.append(candidate)
     )
@@ -166,7 +170,9 @@ def test_publication_refuses_head_move_after_candidate_observed(
     merges: list[str] = []
     monkeypatch.setattr(github, "remote_head", lambda root, name: MOVED)
     monkeypatch.setattr(github, "push_branch", lambda *args, **kwargs: None)
-    monkeypatch.setattr(github, "pull_request_for_branch", lambda root, name: _pull(7, MOVED))
+    monkeypatch.setattr(
+        github, "pull_request_for_branch", lambda root, name: _pull(7, MOVED)
+    )
     monkeypatch.setattr(
         github, "pull_request", lambda root, number: _pull(number, next(reads))
     )
@@ -235,7 +241,9 @@ def test_publication_maps_a_lease_race_to_head_moved(
     pushes: list[str] = []
     monkeypatch.setattr(github, "remote_head", lambda root, branch: MOVED)
 
-    def push(root: Path, branch: str, *, sha: str, lease: str | None, timeout=0) -> None:
+    def push(
+        root: Path, branch: str, *, sha: str, lease: str | None, timeout=0
+    ) -> None:
         pushes.append(lease or "")
         raise github.GithubError("git push: stale info")
 
