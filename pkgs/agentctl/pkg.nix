@@ -11,6 +11,13 @@
   systemd,
   ...
 }:
+let
+  # AgentCTL removals must not sweep unrelated repository state.
+  # Remove this patch when upstream provides --no-internal-sweep.
+  scopedWorktrunk = worktrunk.overrideAttrs (old: {
+    patches = (old.patches or [ ]) ++ [ ./worktrunk-no-internal-sweep.patch ];
+  });
+in
 python3Packages.buildPythonApplication {
   pname = "agentctl";
   version = "0.1.0";
@@ -25,7 +32,7 @@ python3Packages.buildPythonApplication {
         git
         gh
         beads
-        worktrunk
+        scopedWorktrunk
         pueue
         nix
         systemd
@@ -36,7 +43,7 @@ python3Packages.buildPythonApplication {
     python3Packages.pytest
     git
     beads
-    worktrunk
+    scopedWorktrunk
     pueue
   ];
 
