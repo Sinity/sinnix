@@ -174,9 +174,11 @@ and bulk slices have fixed memory, swap, CPU and IO budgets,
 pressure; they do not choose capacity from instantaneous free RAM.
 
 `agentctl-backpressure.timer` runs `agentctl backpressure tick`, which
-pauses one group per minute while the host's `full` IO or memory stall
-stays above threshold and resumes in reverse order once clear; a paused
-task keeps its work. Every pause event carries `"owner": "agentctl"` and
+pauses one eligible group per minute while the host's `full` IO or memory
+stall stays above threshold and resumes once the closing signal clears.
+The bounded `pytest-quick` pool remains admissible under IO pressure; memory
+pressure can still close it. Pausing admission leaves running tasks active.
+Every pause event carries `"owner": "agentctl"` and
 the group, and a group is resumed only when its most recent pause event in
 the spool is agentctl's own: an operator's `pueue pause -g <group>` stays
 paused.
