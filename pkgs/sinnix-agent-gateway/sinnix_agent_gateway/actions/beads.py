@@ -207,9 +207,11 @@ def _query(runtime: Runtime, inp: QueryInput) -> BeadQuery:
         view=inp.view,
         filters=inp.filters,
         expression=inp.expression,
-        native_filters=inp.native_filters.model_dump(exclude_none=True)
-        if inp.native_filters
-        else None,
+        native_filters=(
+            inp.native_filters.model_dump(exclude_none=True)
+            if inp.native_filters
+            else None
+        ),
         order=inp.order.model_dump() if inp.order else None,
         includes=list(inp.includes),
         limit=inp.limit,
@@ -534,6 +536,7 @@ class ChangeResult(GatewayModel):
     project_ref: str
     project_id: str
     bead_id: str | None = None
+    created_id: str | None = None
     target_ref: str | None = None
     operation: Operation
     mode: Literal["apply", "preview"]
@@ -545,6 +548,9 @@ class ChangeResult(GatewayModel):
     owner_result: Any = None
     owner_history_ref: str | None = None
     owner_history: Any = None
+    mutation_state: Literal["applied", "indeterminate"] | None = None
+    post_write: dict[str, Any] | None = None
+    uncertainty: dict[str, str] | None = None
     native_validation: str
     atomicity: str
     command: list[str]
@@ -567,7 +573,7 @@ def _change(runtime: Runtime, inp: ChangeInput) -> ChangeResult:
     )
     after = result.get("after")
     created = after.get("id") if isinstance(after, dict) and bead_id is None else None
-    bead = bead_id or created
+    bead = bead_id or created or result.get("created_id")
     return ChangeResult(
         ref=bead_ref(project_id, bead) if bead else project_ref(project_id),
         project_id=project_id,
@@ -628,6 +634,7 @@ class ChangesetResult(GatewayModel):
     compensation: dict[str, Any]
     outcomes: list[dict[str, Any]] | None = None
     after_source_revisions: dict[str, str] | None = None
+    after_source_revision_errors: dict[str, dict[str, str]] | None = None
     partial_completion: bool | None = None
     affordances: list[str] = Field(default_factory=list)
 

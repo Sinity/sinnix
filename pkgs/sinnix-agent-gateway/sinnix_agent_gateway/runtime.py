@@ -508,9 +508,11 @@ class Runtime:
                 return ComponentResult.available(
                     name,
                     value,
-                    revision=revision
-                    if isinstance(revision, str)
-                    else source_revision(value),
+                    revision=(
+                        revision
+                        if isinstance(revision, str)
+                        else source_revision(value)
+                    ),
                     source_ref=source_ref,
                 )
 
@@ -1180,9 +1182,11 @@ class Runtime:
                     "target": wait_target.value,
                     "ref": reference,
                     "polls": 0,
-                    "evidence": evidence
-                    if isinstance(evidence, Mapping)
-                    else {"value": evidence},
+                    "evidence": (
+                        evidence
+                        if isinstance(evidence, Mapping)
+                        else {"value": evidence}
+                    ),
                     "source_revision": source_revision(evidence),
                     "continuation": source_revision(
                         {"ref": reference, "evidence": evidence}
@@ -1378,6 +1382,8 @@ class Runtime:
             owner_route = result.get("owner_route")
             owner_version = result.get("owner_version")
             owner_history_ref = result.get("owner_history_ref")
+            mutation_state = result.get("mutation_state")
+            post_write = result.get("post_write")
         else:
             before_refs = []
             after_refs = []
@@ -1386,6 +1392,8 @@ class Runtime:
             owner_route = None
             owner_version = None
             owner_history_ref = None
+            mutation_state = None
+            post_write = None
         payload = {
             "schema": "sinnix.gateway-receipt.v2",
             "action": action.name,
@@ -1398,20 +1406,28 @@ class Runtime:
             "idempotency_key": context.idempotency_key,
             "target_refs": sorted(set(target_refs)),
             "owner": action.owner,
-            "owner_route": owner_route
-            if isinstance(owner_route, str)
-            else action.route,
-            "owner_version": owner_version
-            if isinstance(owner_version, (str, int))
-            else ACTION_REVISION,
+            "owner_route": (
+                owner_route if isinstance(owner_route, str) else action.route
+            ),
+            "owner_version": (
+                owner_version
+                if isinstance(owner_version, (str, int))
+                else ACTION_REVISION
+            ),
             "preconditions": dict(context.preconditions or {}),
             "before_refs": before_refs,
             "after_refs": after_refs,
             "before_revision": before_revision,
             "after_revision": after_revision,
-            "owner_history_ref": owner_history_ref
-            if isinstance(owner_history_ref, str)
-            else None,
+            "owner_history_ref": (
+                owner_history_ref if isinstance(owner_history_ref, str) else None
+            ),
+            "mutation_state": (
+                mutation_state
+                if mutation_state in {"applied", "indeterminate"}
+                else None
+            ),
+            "post_write": dict(post_write) if isinstance(post_write, Mapping) else None,
             "effects": sorted(effect.value for effect in action.storage_effects),
             "created_objects": created_objects,
             "artifact_refs": sorted(set(artifact_refs)),
@@ -1425,19 +1441,23 @@ class Runtime:
             "atomicity": (
                 "read_only_with_observability_persistence"
                 if action.effect is EffectMode.READ
-                else result.get("atomicity", "owner_declared")
-                if isinstance(result, Mapping)
-                else "not_atomic"
-                if error and error.get("code") == "partial_completion"
-                else "owner_declared"
+                else (
+                    result.get("atomicity", "owner_declared")
+                    if isinstance(result, Mapping)
+                    else (
+                        "not_atomic"
+                        if error and error.get("code") == "partial_completion"
+                        else "owner_declared"
+                    )
+                )
             ),
             "partial_completion": bool(
                 (isinstance(result, Mapping) and result.get("partial_completion"))
                 or (error and error.get("code") == "partial_completion")
             ),
-            "compensation": result.get("compensation")
-            if isinstance(result, Mapping)
-            else None,
+            "compensation": (
+                result.get("compensation") if isinstance(result, Mapping) else None
+            ),
             "error": dict(error or {}),
         }
         return self.audit.append(action.name, outcome, payload)

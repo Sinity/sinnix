@@ -44,6 +44,12 @@ if args[-1] == 'where':
     print(json.dumps({{'path': root + '/.beads', 'database_path': root + '/.beads/dolt', 'schema_version': 1}}))
 elif args[-1] == 'status':
     print(json.dumps({{'summary': {{'total_issues': 3 + state['writes']}}}}))
+elif 'sql' in args:
+    query = args[-1]
+    if 'DOLT_HASHOF_DB' in query:
+        print(json.dumps([{{'state_hash': 'working-%d' % state['writes']}}]))
+    else:
+        raise SystemExit('unexpected SQL query')
 elif 'export' in args:
     dest = pathlib.Path(args[args.index('-o') + 1]); dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(json.dumps({{'writes': state['writes']}}) + '\\n'); print(json.dumps({{'exported': str(dest)}}))
