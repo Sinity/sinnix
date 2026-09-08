@@ -245,9 +245,14 @@ class BeadsService:
 
     def task_authority_status(self, project_id: str) -> dict[str, Any]:
         project, authority = self._authority(project_id, False)
-        where, status = (
+        where, status, state = (
             self._run(project, ["where"], False),
             self._run(project, ["status"], False),
+            self._run(
+                project,
+                ["sql", "SELECT DOLT_HASHOF_DB() AS state_hash"],
+                False,
+            ),
         )
         if (
             not isinstance(where, Mapping)
@@ -264,9 +269,15 @@ class BeadsService:
             )
         if not isinstance(status, Mapping):
             raise BeadsError("Beads status did not return an object")
-        revision = hashlib.sha256(
-            json.dumps(status, sort_keys=True, separators=(",", ":")).encode()
-        ).hexdigest()
+        if (
+            not isinstance(state, list)
+            or len(state) != 1
+            or not isinstance(state[0], Mapping)
+            or not isinstance(state[0].get("state_hash"), str)
+            or not state[0]["state_hash"]
+        ):
+            raise BeadsError("Beads did not return its Dolt working-state hash")
+        revision = hashlib.sha256(state[0]["state_hash"].encode()).hexdigest()
         return {
             "project_id": project_id,
             "ref": self.project_ref(project_id),
@@ -290,9 +301,7 @@ class BeadsService:
         rows = (
             value
             if isinstance(value, list)
-            else value.get("issues")
-            if isinstance(value, Mapping)
-            else None
+            else value.get("issues") if isinstance(value, Mapping) else None
         )
         if (
             rows is None
@@ -371,9 +380,13 @@ class BeadsService:
         )
         if parent_ref is not None:
             links["parent"] = parent_ref
+        # Owner output changes shape with requested projections.  Bind the
+        # canonical target ref to the owner revision instead of hashing a view.
         etag = hashlib.sha256(
             json.dumps(
-                dict(row), sort_keys=True, separators=(",", ":"), default=str
+                {"ref": self.bead_ref(project_id, bead_id), "revision": revision},
+                sort_keys=True,
+                separators=(",", ":"),
             ).encode()
         ).hexdigest()
         return {
@@ -869,9 +882,11 @@ class BeadsService:
                     "returned": len(normalized),
                     "total": len(normalized),
                     "total_exact": len(normalized) < owner_cap,
-                    "paging": "owner_native_unavailable"
-                    if len(normalized) == owner_cap
-                    else "complete",
+                    "paging": (
+                        "owner_native_unavailable"
+                        if len(normalized) == owner_cap
+                        else "complete"
+                    ),
                     "revision": status["revision"],
                 }
             except BeadsError as exc:
@@ -1060,9 +1075,11 @@ class BeadsService:
         command = (
             ["recall", self._string(key, "key", 256)]
             if key
-            else ["memories", self._string(query, "query", 1000)]
-            if query
-            else ["memories"]
+            else (
+                ["memories", self._string(query, "query", 1000)]
+                if query
+                else ["memories"]
+            )
         )
         return {
             "kind": "bead_memory",
@@ -1186,12 +1203,47 @@ class BeadsService:
                     "unset",
                 }:
                     raise BeadsError("patch.metadata is invalid")
-                for key, value in metadata.get("set", {}).items():
+                values_to_set = metadata.get("set", {})
+                keys_to_unset = metadata.get("unset", [])
+                if not isinstance(values_to_set, Mapping) or not isinstance(
+                    keys_to_unset, list
+                ):
+                    raise BeadsError("patch.metadata is invalid")
+                if values_to_set and keys_to_unset:
+                    raise BeadsError(
+                        "Beads cannot atomically combine typed metadata set and unset",
+                        "unsupported_capability",
+                    )
+                if values_to_set:
+                    typed_metadata: dict[str, Any] = {}
+                    for key, value in values_to_set.items():
+                        typed_key = self._string(key, "metadata key", 256)
+                        try:
+                            encoded = json.dumps(
+                                value,
+                                sort_keys=True,
+                                separators=(",", ":"),
+                                allow_nan=False,
+                            )
+                        except (TypeError, ValueError) as exc:
+                            raise BeadsError(
+                                f"metadata value for {typed_key!r} is not JSON serializable"
+                            ) from exc
+                        if len(encoded.encode()) > 4000:
+                            raise BeadsError(
+                                "metadata value exceeds the owner input bound"
+                            )
+                        typed_metadata[typed_key] = value
                     command += [
-                        "--set-metadata",
-                        f"{self._string(key, 'metadata key', 256)}={self._string(str(value), 'metadata value', 4000)}",
+                        "--metadata",
+                        json.dumps(
+                            typed_metadata,
+                            sort_keys=True,
+                            separators=(",", ":"),
+                            allow_nan=False,
+                        ),
                     ]
-                for key in metadata.get("unset", []):
+                for key in keys_to_unset:
                     command += [
                         "--unset-metadata",
                         self._string(key, "metadata key", 256),
@@ -1205,9 +1257,11 @@ class BeadsService:
                         "patch.notes must explicitly choose append or replace"
                     )
                 command += [
-                    "--append-notes"
-                    if notes.get("mode", "append") == "append"
-                    else "--notes",
+                    (
+                        "--append-notes"
+                        if notes.get("mode", "append") == "append"
+                        else "--notes"
+                    ),
                     self._string(notes.get("text"), "patch.notes.text", 32000),
                 ]
             unset = patch.get("unset", [])
@@ -1442,12 +1496,14 @@ class BeadsService:
             "before": before,
             "before_revision": before_status["revision"],
             "precondition_semantics": {
-                "expected_status": "native"
-                if operation == "update"
-                else "gateway_best_effort",
-                "expected_assignee": "native"
-                if operation in {"update", "unclaim"}
-                else "gateway_best_effort",
+                "expected_status": (
+                    "native" if operation == "update" else "gateway_best_effort"
+                ),
+                "expected_assignee": (
+                    "native"
+                    if operation in {"update", "unclaim"}
+                    else "gateway_best_effort"
+                ),
                 "expected_etag": "gateway_best_effort",
             },
             "atomicity": "per_step_commits",
@@ -1469,18 +1525,99 @@ class BeadsService:
             if operation == "graph.create":
                 self._run(project, native_command + ["--dry-run"], True)
                 native_validation = "dry_run"
-            native = self._run(project, native_command, True)
-            after_status = self.task_authority_status(project_id)
+            try:
+                native = self._run(project, native_command, True)
+            except BeadsError as exc:
+                if exc.code not in {"deadline", "response_bound"}:
+                    raise
+                reconciliation: dict[str, Any] = {}
+                try:
+                    reconciliation["status"] = {
+                        "status": "available",
+                        "revision": self.task_authority_status(project_id)["revision"],
+                    }
+                except BeadsError as status_error:
+                    reconciliation["status"] = {
+                        "status": "unavailable",
+                        "error": {
+                            "code": status_error.code,
+                            "message": str(status_error),
+                        },
+                    }
+                after = None
+                if target:
+                    try:
+                        after = self.get(project_id, target)
+                        reconciliation["readback"] = {"status": "available"}
+                    except BeadsError as readback_error:
+                        reconciliation["readback"] = {
+                            "status": "unavailable",
+                            "error": {
+                                "code": readback_error.code,
+                                "message": str(readback_error),
+                            },
+                        }
+                return {
+                    **preview,
+                    "mode": "apply",
+                    "before": before,
+                    "after": after,
+                    "before_revision": before_status["revision"],
+                    "after_revision": reconciliation.get("status", {}).get("revision"),
+                    "owner_result": None,
+                    "mutation_state": "indeterminate",
+                    "post_write": reconciliation,
+                    "uncertainty": {"code": exc.code, "message": str(exc)},
+                    "owner_history_ref": (
+                        f"{self.bead_ref(project_id, target)}/history"
+                        if target
+                        else None
+                    ),
+                    "owner_history": None,
+                    "native_validation": native_validation,
+                    "atomicity": self._atomicity(operation, native_validation),
+                }
+            post_write: dict[str, Any] = {}
+            try:
+                after_status = self.task_authority_status(project_id)
+                post_write["status"] = {"status": "available"}
+            except BeadsError as exc:
+                after_status = None
+                post_write["status"] = {
+                    "status": "unavailable",
+                    "error": {"code": exc.code, "message": str(exc)},
+                }
         finally:
             if graph_path is not None:
                 graph_path.unlink(missing_ok=True)
         created: dict[str, Any] | None = None
+        created_id: str | None = None
         if target is None and operation == "create":
-            created_rows = self._issues(native)
-            created = self._normalize(
-                project_id, created_rows[0], after_status["revision"]
-            )
-        after = self.get(project_id, target) if target else created
+            try:
+                created_rows = self._issues(native)
+            except BeadsError:
+                created_rows = []
+            if created_rows:
+                created_id = self._id(created_rows[0]["id"])
+                if after_status is not None:
+                    created = self._normalize(
+                        project_id, created_rows[0], after_status["revision"]
+                    )
+        after = created
+        if target:
+            try:
+                after = self.get(project_id, target)
+                post_write["readback"] = {"status": "available"}
+            except BeadsError as exc:
+                post_write["readback"] = {
+                    "status": "unavailable",
+                    "error": {"code": exc.code, "message": str(exc)},
+                }
+        elif after_status is None:
+            post_write["readback"] = {
+                "status": "unavailable",
+                "error": post_write["status"]["error"],
+            }
         history = None
         if target:
             try:
@@ -1500,11 +1637,24 @@ class BeadsService:
             "before": before,
             "after": after,
             "before_revision": before_status["revision"],
-            "after_revision": after_status["revision"],
+            "after_revision": after_status["revision"] if after_status else None,
             "owner_result": native,
-            "owner_history_ref": f"{self.bead_ref(project_id, target)}/history"
-            if target
-            else (created or {}).get("links", {}).get("history"),
+            "created_id": created_id,
+            "mutation_state": "applied",
+            "post_write": post_write,
+            "uncertainty": None,
+            "owner_history_ref": (
+                f"{self.bead_ref(project_id, target)}/history"
+                if target
+                else (
+                    (created or {}).get("links", {}).get("history")
+                    or (
+                        f"{self.bead_ref(project_id, created_id)}/history"
+                        if created_id
+                        else None
+                    )
+                )
+            ),
             "owner_history": history,
             "native_validation": native_validation,
             "atomicity": self._atomicity(operation, native_validation),
@@ -1796,9 +1946,9 @@ class BeadsService:
         atomicity = (
             "owner_atomic"
             if owner_atomic
-            else "cross_project_partitioned"
-            if len(projects) > 1
-            else "per_step_commits"
+            else (
+                "cross_project_partitioned" if len(projects) > 1 else "per_step_commits"
+            )
         )
         return {
             "plan": plan,
@@ -1836,9 +1986,11 @@ class BeadsService:
         atomicity = (
             "owner_atomic"
             if owner_atomic
-            else "per_step_commits"
-            if prepared["atomicity"] == "owner_atomic"
-            else prepared["atomicity"]
+            else (
+                "per_step_commits"
+                if prepared["atomicity"] == "owner_atomic"
+                else prepared["atomicity"]
+            )
         )
         public_plan = [
             {
@@ -1890,6 +2042,7 @@ class BeadsService:
         symbols: dict[str, str] = {}
         outcomes: list[dict[str, Any]] = []
         halted = False
+        halt_reason = "on_error=stop after an earlier failed step"
         for item in prepared["plan"]:
             outcome = {
                 "index": item["index"],
@@ -1901,7 +2054,7 @@ class BeadsService:
                     {
                         **outcome,
                         "outcome": "skipped",
-                        "reason": "on_error=stop after an earlier failed step",
+                        "reason": halt_reason,
                     }
                 )
                 continue
@@ -1914,30 +2067,79 @@ class BeadsService:
                     mode="apply",
                     preconditions=item["preconditions"],
                 )
+                if applied["mutation_state"] == "indeterminate":
+                    outcomes.append(
+                        {
+                            **outcome,
+                            "outcome": "indeterminate",
+                            "before_revision": applied["before_revision"],
+                            "after_revision": applied["after_revision"],
+                            "result_ref": (
+                                applied.get("after", {}).get("ref")
+                                if isinstance(applied.get("after"), Mapping)
+                                else None
+                            ),
+                            "uncertainty": applied["uncertainty"],
+                            "post_write": applied["post_write"],
+                            "compensation": self._compensation_hint(
+                                item["operation"], parameters, applied
+                            ),
+                        }
+                    )
+                    # A later step could depend on an owner write that may have
+                    # committed.  Do not continue or replay until reconciliation.
+                    halted = True
+                    halt_reason = "an earlier owner write has indeterminate state"
+                    continue
                 if item["bind"] is not None:
                     after = applied.get("after")
-                    if not isinstance(after, Mapping) or not isinstance(
-                        after.get("id"), str
-                    ):
-                        raise BeadsError(
-                            "owner create response omitted the bead id required by changeset bind",
-                            "owner_failed",
+                    bound_id = (
+                        after.get("id")
+                        if isinstance(after, Mapping)
+                        and isinstance(after.get("id"), str)
+                        else applied.get("created_id")
+                    )
+                    if not isinstance(bound_id, str):
+                        outcomes.append(
+                            {
+                                **outcome,
+                                "outcome": "applied",
+                                "before_revision": applied["before_revision"],
+                                "after_revision": applied["after_revision"],
+                                "result_ref": None,
+                                "bind_uncertainty": {
+                                    "symbol": item["bind"],
+                                    "reason": "owner confirmed the create but did not provide a bead id",
+                                    "post_write": applied["post_write"],
+                                },
+                                "compensation": self._compensation_hint(
+                                    item["operation"], parameters, applied
+                                ),
+                            }
                         )
-                    symbols[item["bind"]] = after["id"]
+                        halted = True
+                        halt_reason = (
+                            "an earlier applied create could not bind its owner id"
+                        )
+                        continue
+                    symbols[item["bind"]] = bound_id
                 outcomes.append(
                     {
                         **outcome,
                         "outcome": "applied",
                         "before_revision": applied["before_revision"],
                         "after_revision": applied["after_revision"],
-                        "result_ref": applied.get("after", {}).get("ref")
-                        if isinstance(applied.get("after"), Mapping)
-                        else None,
-                        "bound_ref": self.bead_ref(
-                            item["project_id"], symbols[item["bind"]]
-                        )
-                        if item["bind"] is not None
-                        else None,
+                        "result_ref": (
+                            applied.get("after", {}).get("ref")
+                            if isinstance(applied.get("after"), Mapping)
+                            else None
+                        ),
+                        "bound_ref": (
+                            self.bead_ref(item["project_id"], symbols[item["bind"]])
+                            if item["bind"] is not None
+                            else None
+                        ),
+                        "post_write": applied["post_write"],
                         "compensation": self._compensation_hint(
                             item["operation"], parameters, applied
                         ),
@@ -1955,15 +2157,28 @@ class BeadsService:
                     }
                 )
                 halted = prepared["on_error"] == "stop"
-        after_revisions = {
-            project_id: self.task_authority_status(project_id)["revision"]
-            for project_id in prepared["source_revisions"]
-        }
+        after_revisions: dict[str, str] = {}
+        after_revision_errors: dict[str, dict[str, str]] = {}
+        for project_id in prepared["source_revisions"]:
+            try:
+                after_revisions[project_id] = self.task_authority_status(project_id)[
+                    "revision"
+                ]
+            except BeadsError as exc:
+                after_revision_errors[project_id] = {
+                    "code": exc.code,
+                    "message": str(exc),
+                }
         return {
             **response,
             "outcomes": outcomes,
             "after_source_revisions": after_revisions,
-            "partial_completion": any(item["outcome"] == "failed" for item in outcomes),
+            "after_source_revision_errors": after_revision_errors,
+            "partial_completion": any(
+                item["outcome"] in {"failed", "indeterminate"}
+                or "bind_uncertainty" in item
+                for item in outcomes
+            ),
         }
 
     def operate(
