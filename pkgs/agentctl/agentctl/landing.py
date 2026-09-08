@@ -45,6 +45,8 @@ from .pueue import PueueError
 from .worktrunk import WorktrunkError
 
 HOSTED_CHECK_TIMEOUT_SECONDS = 2 * 3_600
+# GitHub may briefly serve the branch head from before a successful push.
+PR_PROPAGATION_TIMEOUT_SECONDS = 30
 # A required check that GitHub has not reported at all within this window is
 # `check_missing`: no runner will pick it up.
 CHECK_MISSING_SECONDS = 600
@@ -411,6 +413,47 @@ def _pr_text(run: Run, beads: Beads) -> tuple[str, str]:
     return title, "\n".join(lines).rstrip() + "\n"
 
 
+def _await_candidate_head(
+    project: ProjectAdapter,
+    number: int,
+    candidate: str,
+    prior_head: str | None,
+    sleep: Callable[[float], None],
+    *,
+    first_pull: Mapping[str, Any] | None = None,
+) -> None:
+    """Wait only for the pushed candidate to become visible through the PR API.
+
+    ``prior_head`` is the exact remote head used by the push lease.  It is the
+    only non-candidate head that can be a read-after-write result; any other
+    head is an immediate refusal.  Once the candidate is observed this helper
+    returns and every later publication read is candidate-bound again.
+    """
+    started = time.monotonic()
+    deadline = started + PR_PROPAGATION_TIMEOUT_SECONDS
+    pull = first_pull
+    while True:
+        if pull is None:
+            pull = github.pull_request(project.root, number) or {}
+        head = pull.get("headRefOid")
+        if head == candidate:
+            return
+        if head != prior_head:
+            raise BatchRefusal(
+                "head_moved",
+                f"PR #{number} head is neither the leased {str(prior_head)[:12]} "
+                f"nor candidate {candidate[:12]}: {str(head)[:12]}",
+            )
+        if not _wait_seconds(sleep, deadline):
+            raise BatchRefusal(
+                "checks_failed",
+                f"PR #{number} candidate {candidate[:12]} was not observable "
+                "after the push",
+                timed_out=True,
+            )
+        pull = None
+
+
 def _merged(project: ProjectAdapter, run: Run, candidate: str) -> dict[str, Any] | None:
     """The stored PR as a publication when it is merged on exactly ``candidate``."""
     number = run.landing.get("pr_number")
@@ -437,17 +480,33 @@ def _merged_earlier(project: ProjectAdapter, run: Run) -> dict[str, Any] | None:
 
 
 def _ensure_pr(
-    project: ProjectAdapter, run: Run, path: Path, candidate: str, beads: Beads
+    project: ProjectAdapter,
+    run: Run,
+    path: Path,
+    candidate: str,
+    beads: Beads,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> int:
     workspace = workspace_of(project)
     branch = run.landing["integration_branch"]
-    github.push_branch(
-        path,
-        branch,
-        sha=candidate,
-        lease=github.remote_head(path, branch),
-        timeout=PUSH_TIMEOUT_SECONDS,
-    )
+    prior_head = github.remote_head(path, branch)
+    try:
+        github.push_branch(
+            path,
+            branch,
+            sha=candidate,
+            lease=prior_head,
+            timeout=PUSH_TIMEOUT_SECONDS,
+        )
+    except GithubError as error:
+        # A lease race is a branch movement.  Do not retry it or overwrite the
+        # head; all other push failures retain their original error semantics.
+        message = str(error).lower()
+        if "stale info" in message or "fetch first" in message:
+            raise BatchRefusal(
+                "head_moved", f"PR branch moved before pushing {candidate[:12]}"
+            ) from error
+        raise
     number = run.landing.get("pr_number")
     pull = (
         github.pull_request(project.root, number) if isinstance(number, int) else None
@@ -456,14 +515,20 @@ def _ensure_pr(
         pull = github.pull_request_for_branch(project.root, branch)
     if pull is None:
         title, body = _pr_text(run, beads)
-        return github.create_pull_request(
+        number = github.create_pull_request(
             project.root,
             head=branch,
             base=workspace.base_branch,
             title=title,
             body=body,
         )
-    return int(pull["number"])
+        _await_candidate_head(project, number, candidate, prior_head, sleep)
+        return number
+    number = int(pull["number"])
+    _await_candidate_head(
+        project, number, candidate, prior_head, sleep, first_pull=pull
+    )
+    return number
 
 
 def _refuse_missing_checks(
@@ -507,46 +572,49 @@ def _verify(
         )
     if profile.startswith("hosted:"):
         check = profile.removeprefix("hosted:")
-        number = _ensure_pr(project, run, path, candidate, beads)
+        number = _ensure_pr(project, run, path, candidate, beads, sleep)
         run = land_update(config, run.run_id, pr_number=number)
         started = time.monotonic()
         deadline = started + HOSTED_CHECK_TIMEOUT_SECONDS
         while True:
             pull = github.pull_request(project.root, number) or {}
-            if pull.get("headRefOid") == candidate:
-                merged = github.merge_commit(pull)
-                if merged is not None:
-                    # The repository merged this exact candidate: its own gates
-                    # let it through, and that is the acceptance the landing
-                    # records instead of waiting for a check to report.
-                    return run, {
-                        "kind": "merged",
-                        "check": check,
-                        "pr": number,
-                        "candidate_sha": candidate,
-                        "phase": "succeeded",
-                        "merge_commit": merged,
-                    }
-                _refuse_missing_checks(pull, (check,), started, number)
-                state = github.hosted_check_state(pull, check)
-                if state == "success":
-                    receipt = {
-                        "kind": "hosted",
-                        "check": check,
-                        "pr": number,
-                        "candidate_sha": candidate,
-                        "phase": "succeeded",
-                        "checks": [
-                            entry
-                            for entry in pull.get("statusCheckRollup") or ()
-                            if entry.get("name", entry.get("context")) == check
-                        ],
-                    }
-                    return run, receipt
-                if state == "failure":
-                    raise BatchRefusal(
-                        "verify_failed", f"hosted check {check} failed on PR #{number}"
-                    )
+            if pull.get("headRefOid") != candidate:
+                raise BatchRefusal(
+                    "head_moved", f"PR #{number} head is no longer {candidate[:12]}"
+                )
+            merged = github.merge_commit(pull)
+            if merged is not None:
+                # The repository merged this exact candidate: its own gates
+                # let it through, and that is the acceptance the landing
+                # records instead of waiting for a check to report.
+                return run, {
+                    "kind": "merged",
+                    "check": check,
+                    "pr": number,
+                    "candidate_sha": candidate,
+                    "phase": "succeeded",
+                    "merge_commit": merged,
+                }
+            _refuse_missing_checks(pull, (check,), started, number)
+            state = github.hosted_check_state(pull, check)
+            if state == "success":
+                receipt = {
+                    "kind": "hosted",
+                    "check": check,
+                    "pr": number,
+                    "candidate_sha": candidate,
+                    "phase": "succeeded",
+                    "checks": [
+                        entry
+                        for entry in pull.get("statusCheckRollup") or ()
+                        if entry.get("name", entry.get("context")) == check
+                    ],
+                }
+                return run, receipt
+            if state == "failure":
+                raise BatchRefusal(
+                    "verify_failed", f"hosted check {check} failed on PR #{number}"
+                )
             if not _wait_seconds(sleep, deadline):
                 raise BatchRefusal(
                     "verify_failed",
@@ -712,7 +780,7 @@ def _publish(
                 raise BatchRefusal("publish_rejected", message) from error
             raise
         return {"policy": "master", "candidate_sha": candidate, "base_commit": base}
-    number = _ensure_pr(project, run, path, candidate, beads)
+    number = _ensure_pr(project, run, path, candidate, beads, sleep)
     run = land_update(config, run.run_id, pr_number=number)
     required = _required_checks(project, run)
     started = time.monotonic()
@@ -739,6 +807,13 @@ def _publish(
             raise BatchRefusal(
                 "checks_failed", f"PR #{number} checks did not finish", timed_out=True
             )
+    # Checks can become ready after the earlier observation.  Bind the merge
+    # request to a fresh PR read immediately before consuming that readiness.
+    pull = github.pull_request(project.root, number) or {}
+    if pull.get("headRefOid") != candidate:
+        raise BatchRefusal(
+            "head_moved", f"PR #{number} head is no longer {candidate[:12]}"
+        )
     if not github.merge_commit(pull):
         try:
             github.merge_pr(project.root, number, candidate)
