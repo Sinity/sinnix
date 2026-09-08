@@ -95,6 +95,7 @@
         # test_project_tree_and_read_reject_symlink_escape ("DID NOT RAISE
         # ProjectError"; 1 failed, 23 passed); reverted after confirming red.
         sinnix-agent-gateway-suite = sinnixScriptRegistry.packageSet.sinnix-agent-gateway;
+        sqlite-backup-package = sinnixScriptRegistry.packageSet.sinnix-sqlite-backup;
 
         # Owner-execution has daemon and adapter consumers. This package check
         # exercises its bounded subprocess contract at its package boundary.
