@@ -34,14 +34,7 @@ from .limits import CALL_TIMEOUT_SECONDS
 
 # Removal is asynchronous by default; a caller that drops a workspace and then
 # reports it gone must observe the removal, so every call passes --foreground.
-_REMOVE_ARGUMENTS = (
-    "--reap",
-    "--foreground",
-    "--no-internal-sweep",
-    "-y",
-    "--format",
-    "json",
-)
+_REMOVE_ARGUMENTS = ("--foreground", "--no-internal-sweep", "-y", "--format", "json")
 
 # `--porcelain -z` terminates every attribute with a NUL and every worktree
 # with an empty one, so a path is read exactly as Git holds it.
@@ -280,9 +273,20 @@ def worktrunk_create(
     return created
 
 
-def worktrunk_remove(root: Path, branch: str, *, force: bool = False) -> None:
-    """Remove ``branch``'s worktree and its local branch, killing its processes."""
+def worktrunk_remove(
+    root: Path,
+    branch: str,
+    *,
+    force: bool = False,
+    keep_branch: bool = False,
+    reap: bool = True,
+) -> None:
+    """Remove one worktree, optionally retaining its branch and process users."""
     arguments = ["remove", branch, *_REMOVE_ARGUMENTS]
+    if keep_branch:
+        arguments.append("--no-delete-branch")
+    if reap:
+        arguments.append("--reap")
     if force:
         arguments.append("--force")
     _mutate(root, arguments, "remove")
