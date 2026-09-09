@@ -45,6 +45,7 @@ in
     ./tests/host-build.nix
     ./tests/runtime.nix
     ./tests/script-suites.nix
+    ./tests/file-catalog.nix
     ./tests/pkg-suites.nix
     ./tests/lifecycle-manifest.nix
     ./tests/ops-reducer.nix

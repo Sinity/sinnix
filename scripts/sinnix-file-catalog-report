@@ -1,0 +1,238 @@
+#!/usr/bin/env python3
+# @sinnix-package
+# description: Render a portable file inspection catalog as a searchable offline report
+# runtimeInputs: python3
+# docs: docs/file-catalog.md
+"""Render authored catalog observations without reading the described payloads."""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import html
+import json
+import os
+import re
+import shlex
+import tempfile
+from pathlib import Path
+
+
+STYLE = """
+.catalog-controls{display:flex;flex-wrap:wrap;gap:.6rem;align-items:center}
+.catalog-controls label{display:flex;flex-direction:column;gap:.25rem}
+.catalog-controls input,.catalog-controls select{font:inherit;padding:.45rem;
+ background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:.35rem}
+.catalog-controls input{min-width:18rem;max-width:100%}
+.asset{border-top:1px solid var(--line);padding:1.1rem 0;scroll-margin-top:5rem}
+.asset:target{outline:2px solid var(--accent);outline-offset:.4rem}
+.asset h3{margin:.1rem 0 .4rem}.asset p{margin:.45rem 0}
+.asset .path,.asset code{overflow-wrap:anywhere;word-break:break-word}
+.asset .tags{display:flex;gap:.3rem;flex-wrap:wrap;margin:.4rem 0}
+.asset details{margin:.6rem 0}.asset .related{display:flex;gap:.45rem;flex-wrap:wrap}
+.scope{color:var(--muted)}.catalog-controls[hidden],.asset[hidden]{display:none!important}
+.catalog-count{font-variant-numeric:tabular-nums}.catalog-data{white-space:pre-wrap}
+"""
+
+SCRIPT = r"""
+(()=>{
+ const rows=[...document.querySelectorAll('.asset')];
+ const q=document.getElementById('catalog-query');
+ const method=document.getElementById('catalog-method');
+ const count=document.getElementById('catalog-count');
+ let related=null;
+ function filter(){
+  const terms=q.value.toLocaleLowerCase().trim().split(/\s+/).filter(Boolean);
+  let visible=0;
+  rows.forEach(row=>{
+   const text=row.textContent.toLocaleLowerCase();
+   const methods=JSON.parse(row.dataset.methods);
+   const show=terms.every(term=>text.includes(term))&&(!method.value||methods.includes(method.value))
+      &&(!related||related.has(row.id));
+   row.hidden=!show;if(show)visible++;
+  });
+  count.textContent=visible+' of '+rows.length+' records shown';
+ }
+ q.addEventListener('input',filter);method.addEventListener('change',filter);
+ document.getElementById('catalog-reset').addEventListener('click',()=>{
+  q.value='';method.value='';related=null;filter();
+ });
+ document.querySelectorAll('[data-related]').forEach(button=>button.addEventListener('click',()=>{
+  related=new Set(JSON.parse(button.dataset.related));q.value='';method.value='';filter();
+  document.getElementById('catalog').scrollIntoView();
+ }));
+ function revealTarget(){
+  if(location.hash.startsWith('#asset-')){
+   q.value='';method.value='';related=null;filter();
+   const target=document.getElementById(location.hash.slice(1));
+   if(target)target.scrollIntoView();
+  }
+ }
+ addEventListener('hashchange',revealTarget);
+ document.querySelector('.catalog-controls').hidden=false;
+ filter();revealTarget();
+})();
+"""
+
+
+def esc(value: object) -> str:
+    return html.escape(str(value), quote=True)
+
+
+def path_link(path: str) -> str:
+    return f'<a class="path" href="{esc(Path(path).as_uri())}">{esc(path)}</a>'
+
+
+def render_asset(asset: dict, by_id: dict) -> str:
+    asset_id = asset["id"]
+    inspections = asset["inspections"]
+    methods = sorted({item["method"] for item in inspections})
+    tags = "".join(f'<span class="chip">{esc(tag)}</span>' for tag in asset.get("tags", []))
+    parts = [
+        f'<article class="asset" id="asset-{esc(asset_id)}" data-methods="{esc(json.dumps(methods))}">',
+        f'<h3>{esc(asset["title"])}</h3>',
+        f'<p>{esc(asset["description"])}</p>',
+        f'<p>{path_link(asset["current_path"])}</p><div class="tags">{tags}</div>',
+    ]
+    for inspection in inspections:
+        parts.append(
+            f'<p class="scope"><strong>{esc(inspection["method"])}</strong>: '
+            f'{esc(inspection["scope"])}</p>'
+        )
+    if asset.get("uncertainties"):
+        parts.append('<details><summary>Uncertainty and limits</summary><ul>')
+        parts.extend(f'<li>{esc(note)}</li>' for note in asset["uncertainties"])
+        parts.append('</ul></details>')
+    if asset.get("visible_text"):
+        parts.append('<details><summary>Selected visible text</summary><ul>')
+        parts.extend(f'<li>{esc(text)}</li>' for text in asset["visible_text"])
+        parts.append('</ul></details>')
+    related_ids = {"asset-" + asset_id}
+    for relation in asset.get("relations", []):
+        target = by_id[relation["target_id"]]
+        related_ids.add("asset-" + target["id"])
+        parts.append(
+            f'<p><strong>{esc(relation["type"].replace("_", " "))}</strong>: '
+            f'<a href="#asset-{esc(target["id"])}">{esc(target["title"])}</a>. '
+            f'<span class="scope">{esc(relation["basis"])}</span></p>'
+        )
+    if len(related_ids) > 1:
+        parts.append(
+            f'<button class="fs" data-related="{esc(json.dumps(sorted(related_ids)))}">'
+            'Show this record and related files</button>'
+        )
+    details = {
+        "id": asset_id,
+        "kind": asset["kind"],
+        "previous_paths": asset.get("previous_paths", []),
+        "identity": asset.get("identity", {}),
+        "inspections": inspections,
+    }
+    for key in ("media", "dates", "sensitivity", "source_artifact_paths"):
+        if key in asset:
+            details[key] = asset[key]
+    parts.append('<details><summary>Identity, path history and inspection evidence</summary>')
+    parts.append(f'<pre class="catalog-data">{esc(json.dumps(details, ensure_ascii=False, indent=2))}</pre>')
+    parts.append('</details></article>')
+    return "\n".join(parts)
+
+
+def render(catalog: dict, source: Path, template: str, command: str) -> str:
+    if catalog.get("schema_version") != 1 or not isinstance(catalog.get("assets"), list):
+        raise ValueError("expected schema_version 1 catalog with assets")
+    assets = catalog["assets"]
+    by_id = {asset["id"]: asset for asset in assets}
+    if len(by_id) != len(assets):
+        raise ValueError("duplicate asset IDs")
+    for asset in assets:
+        for relation in asset.get("relations", []):
+            if relation["target_id"] not in by_id:
+                raise ValueError("dangling relation target")
+    if "<body>" not in template or "<script>" not in template:
+        raise ValueError("template needs body and inline script blocks")
+    preamble = template.split("<body>", 1)[0]
+    preamble = re.sub(r"<title>.*?</title>", "<title>File inspection catalog</title>", preamble, flags=re.S)
+    preamble = re.sub(r'data-accent="[^"]*"', 'data-accent="archive"', preamble, count=1)
+    preamble = preamble.replace("</head>", f"<style>{STYLE}</style>\n</head>")
+    common_script = template.split("<script>", 1)[1].rsplit("</script>", 1)[0]
+    generated = dt.datetime.now(dt.timezone.utc).isoformat()
+    methods = sorted({item["method"] for asset in assets for item in asset["inspections"]})
+    options = ''.join(f'<option value="{esc(method)}">{esc(method)}</option>' for method in methods)
+    relationship_rows = []
+    for asset in assets:
+        for relation in asset.get("relations", []):
+            target = by_id[relation["target_id"]]
+            relationship_rows.append(
+                f'<tr><td><a href="#asset-{esc(asset["id"])}">{esc(asset["title"])}</a></td>'
+                f'<td>{esc(relation["type"].replace("_", " "))}</td>'
+                f'<td><a href="#asset-{esc(target["id"])}">{esc(target["title"])}</a></td>'
+                f'<td>{esc(relation["basis"])}</td></tr>'
+            )
+    cards = '\n'.join(render_asset(asset, by_id) for asset in sorted(assets, key=lambda a: a["title"].casefold()))
+    # The canonical data is embedded losslessly, but cannot terminate its script element.
+    data = json.dumps(catalog, ensure_ascii=False).replace("<", "\\u003c").replace("&", "\\u0026")
+    return f'''{preamble}
+<body>
+<header class="page"><h1>File inspection catalog</h1><span class="chip">private · portable</span>
+<span class="spacer"></span><button class="fs" onclick="fs(-1)">A−</button>
+<button class="fs" onclick="fs(1)">A+</button><button class="theme" onclick="tgl()">◐ theme</button></header>
+<div class="layout"><nav id="toc" aria-label="contents"></nav><main>
+<section id="about"><h2>Knowledge retained from inspections</h2>
+<p>Descriptions, original paths and relationships stay attached to stable asset IDs. Descriptions are authored observations;
+each record states the inspected surface and its limits. A title-page or filename inspection does not imply a full-content review.</p>
+<dl class="meta"><dt>generated</dt><dd><time class="age" datetime="{esc(generated)}">{esc(generated)}</time></dd>
+<dt>catalog updated</dt><dd>{esc(catalog['updated_at'])}</dd><dt>inspection dates</dt><dd>Recorded individually below</dd>
+<dt>canonical source</dt><dd>{path_link(str(source))}</dd><dt>basis</dt><dd>Authored observations and attributed source metadata; counts derived from catalog records</dd></dl>
+<div class="tiles"><div class="tile"><span class="n">{len(assets)}</span><span class="l">catalog records</span></div>
+<div class="tile"><span class="n">{len(relationship_rows)}</span><span class="l">explicit relationships</span></div></div>
+</section>
+<section id="catalog"><h2>Browse files and collections</h2>
+<div class="catalog-controls" hidden><label>Search descriptions, tags and old names
+<input id="catalog-query" type="search" placeholder="certificate, GPU, postcard…"></label>
+<label>Inspection method<select id="catalog-method"><option value="">All methods</option>{options}</select></label>
+<button class="fs" id="catalog-reset">Reset filters</button></div>
+<p id="catalog-count" class="catalog-count" aria-live="polite">{len(assets)} records shown</p>
+{cards}</section>
+<section id="relationships"><h2>Relationships and their evidence</h2>
+<p>These links are explicit assertions with a stated basis. They do not identify unknown people or imply causal relationships.</p>
+<div class="tablewrap"><table><thead><tr><th>From</th><th>Relationship</th><th>To</th><th>Basis</th></tr></thead>
+<tbody>{''.join(relationship_rows)}</tbody></table></div></section>
+<section id="maintenance"><h2>Updating this view</h2>
+<p>Edit observations through the catalog tool, retain prior inspections and path history, then regenerate this view.
+The page does not edit source files or send annotations anywhere. Original-file links require local access.</p>
+<pre class="catalog-data">{esc(command)}</pre></section>
+</main></div>
+<script type="application/json" id="catalog-source">{data}</script>
+<script>{common_script}</script>
+<script>{SCRIPT}</script>
+</body></html>'''
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--catalog", type=Path, required=True)
+    parser.add_argument("--template", type=Path, required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    args = parser.parse_args()
+    source = args.catalog.resolve()
+    catalog = json.loads(source.read_text(encoding="utf-8"))
+    command = shlex.join([
+        "sinnix-file-catalog-report", "--catalog", str(source),
+        "--template", str(args.template.resolve()), "--output", str(args.output.resolve()),
+    ])
+    output = render(catalog, source, args.template.read_text(encoding="utf-8"), command)
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=f'.{args.output.name}.', dir=args.output.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as file:
+            file.write(output)
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(temporary, args.output)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+    print(args.output)
+
+
+if __name__ == "__main__":
+    main()
