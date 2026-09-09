@@ -361,30 +361,20 @@
     ];
     depends = [ "/realm" ];
   };
-  services.journald = {
-    storage = lib.mkForce "persistent";
-    # Set through the options rather than repeated in extraConfig below.
-    # NixOS emits its own RateLimitInterval=/RateLimitBurst= lines from these,
-    # so restating them in extraConfig produced a journald.conf carrying each
-    # key twice with DIFFERENT values (burst 10000 then 500) plus the
-    # deprecated RateLimitInterval= spelling. Last-wins resolved it, but
-    # nothing readable said which value was in force.
-    rateLimitInterval = lib.mkForce "30s";
-    rateLimitBurst = lib.mkForce 500;
-    extraConfig = lib.mkForce ''
-      Compress=yes
-      SyncIntervalSec=2min
-      # Persistent (not volatile) is deliberate: the journal is the forensic
-      # source for OOM/earlyoom kill events, which the kill_event capture
-      # greps out of it. Retention is time-based; the size cap is a backstop,
-      # not a preallocation.
-      MaxRetentionSec=365day
-      SystemMaxUse=100G
-      SystemKeepFree=200G
-      SystemMaxFileSize=128M
-      MaxFileSec=1week
-      ForwardToSyslog=no
-    '';
+  # The persistent journal supplies the OOM/earlyoom kill-event capture.
+  # Retention is time-based; the size cap is a backstop, not a preallocation.
+  services.journald.settings.Journal = {
+    Storage = lib.mkForce "persistent";
+    RateLimitIntervalSec = lib.mkForce "30s";
+    RateLimitBurst = lib.mkForce 500;
+    Compress = lib.mkForce true;
+    SyncIntervalSec = lib.mkForce "2min";
+    MaxRetentionSec = lib.mkForce "365day";
+    SystemMaxUse = lib.mkForce "100G";
+    SystemKeepFree = lib.mkForce "200G";
+    SystemMaxFileSize = lib.mkForce "128M";
+    MaxFileSec = lib.mkForce "1week";
+    ForwardToSyslog = lib.mkForce false;
   };
 
   # /tmp is plain root-backed btrfs on the MX500 (wear-limited). Bounded
