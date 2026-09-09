@@ -13,13 +13,26 @@ let
     doCheck = false;
   });
   replaceOpenai = input: if final.lib.getName input == "openai" then openai else input;
-  ytPolisher = inputs.yt-polisher.packages.${system}.default.overrideAttrs (old: {
-    # buildPythonPackage derives propagatedBuildInputs from `dependencies`;
-    # overriding only the derived field leaves the external package unchanged.
-    dependencies = map replaceOpenai (old.dependencies or [ ]);
-    # Also replace the already-materialized field; this is what the final
-    # derivation uses when the input package was built by another nixpkgs.
-    propagatedBuildInputs = map replaceOpenai (old.propagatedBuildInputs or [ ]);
+  ytPolisher = inputs.yt-polisher.packages.${system}.default.overridePythonAttrs (old: {
+    # The input's Nix package covers captions; its uv environment owns local
+    # model backends. Keep the wheel metadata consistent with that package.
+    pythonRemoveDeps = [
+      "chatterbox-tts"
+      "datasets"
+      "demucs"
+      "f5-tts"
+      "faster-whisper"
+      "mediapipe"
+      "pyannote-audio"
+      "resemblyzer"
+      "torch"
+      "torchaudio"
+    ];
+    dependencies = map replaceOpenai (old.dependencies or [ ]) ++ [
+      final.python312Packages.huggingface-hub
+      final.python312Packages.num2words
+    ];
+    pythonImportsCheck = (old.pythonImportsCheck or [ ]) ++ [ "yt_polisher.__main__" ];
   });
 in
 {
