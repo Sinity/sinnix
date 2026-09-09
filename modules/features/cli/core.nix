@@ -16,6 +16,7 @@ mkFeatureModule {
     }:
     let
       scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
+      userRuntimeDirectory = "/run/user/${toString config.users.users.${user}.uid}";
     in
     {
       environment.systemPackages =
@@ -104,7 +105,11 @@ mkFeatureModule {
           # Lifecycle events come from `agentctl-run` alone (started and
           # finished `queue-task` records in the shared spool); pueue runs
           # no completion callback.
-          services.pueue.enable = true;
+          services.pueue = {
+            enable = true;
+            # System services running as this user do not inherit XDG_RUNTIME_DIR.
+            settings.shared.runtime_directory = userRuntimeDirectory;
+          };
           # Worktrees for every repo land under /realm/worktrees as
           # <repo>-<branch>; project hooks live in each repo's .config/wt.toml.
           xdg.configFile."worktrunk/config.toml".text = ''
