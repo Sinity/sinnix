@@ -1,0 +1,357 @@
+#!/usr/bin/env python3
+# @sinnix-package
+# description: Maintain an evidence catalog of files and collections
+# runtimeInputs: python3
+
+"""Small, portable file evidence catalog.
+
+The catalog is deliberately metadata-only: importing an observation never
+hashes a file or changes the file system.  Paths are checked and stat'ed so a
+catalog cannot silently point at a different object after replacement.
+"""
+
+from __future__ import annotations
+
+import argparse
+import copy
+import datetime as _dt
+import fcntl
+import json
+import os
+import stat
+import sys
+import tempfile
+import uuid
+from pathlib import Path
+from typing import Any
+
+SCHEMA_VERSION = 1
+REQUIRED_INSPECTION = ("method", "scope", "basis")
+
+
+class CatalogError(ValueError):
+    pass
+
+
+def fail(message: str) -> int:
+    print(f"sinnix-file-catalog: {message}", file=sys.stderr)
+    return 2
+
+
+def now() -> str:
+    return _dt.datetime.now(_dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def read_json(path: Path) -> Any:
+    try:
+        with path.open(encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        raise CatalogError(f"catalog does not exist: {path}")
+    except (OSError, json.JSONDecodeError) as e:
+        raise CatalogError(f"cannot read JSON {path}: {e}")
+
+
+def identity(path: Path) -> dict[str, Any]:
+    try:
+        s = path.stat()
+    except OSError as e:
+        raise CatalogError(f"current_path does not exist or is inaccessible: {path}: {e}")
+    return {
+        "device": s.st_dev,
+        "inode": s.st_ino,
+        "size": s.st_size,
+        "mtime_ns": s.st_mtime_ns,
+        "mode": stat.S_IMODE(s.st_mode),
+    }
+
+
+def same_identity(a: Any, b: Any, kind: str = "file") -> bool:
+    if not isinstance(a, dict) or not isinstance(b, dict):
+        return False
+    keys = ("device", "inode") if kind == "collection" else ("device", "inode", "size", "mtime_ns", "mode")
+    return all(a.get(k) == b.get(k) for k in keys)
+
+
+def check_path_kind(path: Path, kind: str) -> None:
+    try:
+        if kind == "collection" and not path.is_dir():
+            raise CatalogError(f"collection current_path is not a directory: {path}")
+        if kind == "file" and not path.is_file():
+            raise CatalogError(f"file current_path is not a regular file: {path}")
+    except OSError as e:
+        raise CatalogError(f"cannot inspect current_path {path}: {e}")
+
+
+def check_inspection(item: Any) -> None:
+    if not isinstance(item, dict):
+        raise CatalogError("inspection must be an object")
+    for key in REQUIRED_INSPECTION:
+        if not isinstance(item.get(key), str) or not item[key].strip():
+            raise CatalogError(f"inspection requires nonempty {key}")
+
+
+def check_asset(asset: Any, *, require_path: bool = True, require_identity: bool = True) -> None:
+    if not isinstance(asset, dict):
+        raise CatalogError("asset must be an object")
+    for key in ("id", "kind", "current_path", "title", "description"):
+        if not isinstance(asset.get(key), str) or not asset[key].strip():
+            raise CatalogError(f"asset requires nonempty {key}")
+    if asset["kind"] not in ("file", "collection"):
+        raise CatalogError("asset kind must be file or collection")
+    if require_identity and not isinstance(asset.get("identity"), dict):
+        raise CatalogError("asset requires identity object")
+    if isinstance(asset.get("identity"), dict):
+        for key in ("device", "inode", "size", "mtime_ns", "mode"):
+            if not isinstance(asset["identity"].get(key), int):
+                raise CatalogError(f"identity requires integer {key}")
+        if "sha256" in asset["identity"] and not isinstance(asset["identity"]["sha256"], str):
+            raise CatalogError("identity sha256 must be a string")
+    try:
+        parsed_id = uuid.UUID(asset["id"])
+    except (ValueError, AttributeError):
+        raise CatalogError(f"asset id is not a UUID: {asset.get('id')}")
+    if str(parsed_id) != asset["id"]:
+        raise CatalogError(f"asset id is not canonical UUID: {asset['id']}")
+    for key in ("previous_paths", "tags", "inspections", "uncertainties", "relations"):
+        if not isinstance(asset.get(key, []), list):
+            raise CatalogError(f"asset {key} must be a list")
+    if not Path(asset["current_path"]).is_absolute():
+        raise CatalogError(f"current_path must be absolute: {asset['current_path']}")
+    for previous in asset.get("previous_paths", []):
+        if not isinstance(previous, str) or not Path(previous).is_absolute():
+            raise CatalogError("previous_paths must contain absolute paths")
+    if not asset.get("inspections"):
+        raise CatalogError("asset requires at least one inspection")
+    if not all(isinstance(tag, str) for tag in asset.get("tags", [])):
+        raise CatalogError("tags must contain strings")
+    if not all(isinstance(note, str) for note in asset.get("uncertainties", [])):
+        raise CatalogError("uncertainties must contain strings")
+    for inspection in asset.get("inspections", []):
+        check_inspection(inspection)
+    for relation in asset.get("relations", []):
+        if (not isinstance(relation, dict)
+                or not all(isinstance(relation.get(k), str) and relation[k].strip() for k in ("type", "target_id", "basis"))):
+            raise CatalogError("relation requires nonempty type, target_id, and basis")
+        try:
+            if str(uuid.UUID(relation["target_id"])) != relation["target_id"]:
+                raise ValueError
+        except ValueError:
+            raise CatalogError(f"relation target is not a UUID: {relation['target_id']}")
+    if require_path:
+        path = Path(asset["current_path"])
+        check_path_kind(path, asset["kind"])
+        actual = identity(path)
+        if not same_identity(asset["identity"], actual, asset["kind"]):
+            raise CatalogError(f"identity mismatch for {asset['current_path']}")
+
+
+def validate_catalog(catalog: Any, *, check_paths: bool = True) -> None:
+    if (not isinstance(catalog, dict) or catalog.get("schema_version") != SCHEMA_VERSION
+            or not isinstance(catalog.get("updated_at"), str)
+            or not isinstance(catalog.get("assets"), list)):
+        raise CatalogError("catalog must be an object with schema_version 1, updated_at, and assets list")
+    ids: set[str] = set()
+    paths: set[str] = set()
+    for asset in catalog["assets"]:
+        check_asset(asset, require_path=check_paths)
+        if asset["id"] in ids:
+            raise CatalogError(f"duplicate asset id: {asset['id']}")
+        if asset["current_path"] in paths:
+            raise CatalogError(f"duplicate current_path: {asset['current_path']}")
+        ids.add(asset["id"])
+        paths.add(asset["current_path"])
+    for asset in catalog["assets"]:
+        for relation in asset.get("relations", []):
+            if relation["target_id"] not in ids:
+                raise CatalogError(f"dangling relation target: {relation['target_id']}")
+
+
+def load_catalog(path: Path, *, paths: bool = True) -> dict[str, Any]:
+    catalog = read_json(path)
+    validate_catalog(catalog, check_paths=paths)
+    return catalog
+
+
+def observation_list(value: Any) -> list[dict[str, Any]]:
+    if isinstance(value, list):
+        rows = value
+    elif isinstance(value, dict) and isinstance(value.get("observations"), list):
+        rows = value["observations"]
+    else:
+        raise CatalogError("observations JSON must be a list")
+    if not all(isinstance(row, dict) for row in rows):
+        raise CatalogError("each observation must be an object")
+    return rows
+
+
+def observation_asset(row: dict[str, Any]) -> dict[str, Any]:
+    item = copy.deepcopy(row)
+    item.setdefault("id", str(uuid.uuid4()))
+    item.setdefault("kind", "file")
+    item.setdefault("previous_paths", [])
+    item.setdefault("tags", [])
+    item.setdefault("inspections", [])
+    item.setdefault("uncertainties", [])
+    item.setdefault("relations", [])
+    check_asset(item, require_path=False, require_identity=False)
+    p = Path(item["current_path"])
+    check_path_kind(p, item["kind"])
+    for inspection in item["inspections"]:
+        # Keep the authored context alongside the observation.  This prevents
+        # a later asset-level edit from rewriting the meaning of old evidence.
+        inspection.setdefault("title", item["title"])
+        inspection.setdefault("description", item["description"])
+    observed = identity(p)
+    old = item.get("identity")
+    if old is not None and not same_identity(old, observed, item["kind"]):
+        raise CatalogError(f"supplied identity mismatch for {p}")
+    extras = {k: v for k, v in old.items() if k not in observed} if isinstance(old, dict) else {}
+    item["identity"] = {**observed, **extras}
+    return item
+
+
+def merge_asset(old: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
+    # Preserve annotation keys unknown to this version and merge known fields.
+    merged = copy.deepcopy(old)
+    old_identity = old.get("identity")
+    if old_identity is not None and not same_identity(old_identity, incoming["identity"], old["kind"]):
+        raise CatalogError(f"refusing replacement at {incoming['current_path']}; identity differs from catalog")
+    identity_fields = {**old_identity, **incoming["identity"]} if isinstance(old_identity, dict) else incoming["identity"]
+    merged.update(copy.deepcopy(incoming))
+    merged["identity"] = identity_fields
+    for key in ("previous_paths", "tags", "inspections", "uncertainties", "relations"):
+        values = []
+        for value in [*old.get(key, []), *incoming.get(key, [])]:
+            marker = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            if marker not in {json.dumps(v, ensure_ascii=False, sort_keys=True, separators=(",", ":")) for v in values}:
+                values.append(copy.deepcopy(value))
+        merged[key] = values
+    return merged
+
+
+def write_catalog(path: Path, catalog: dict[str, Any]) -> None:
+    catalog["updated_at"] = now()
+    text = json.dumps(catalog, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temporary, path)
+    finally:
+        try: os.unlink(temporary)
+        except FileNotFoundError: pass
+
+
+def locked(path: Path):
+    lock = path.with_name(path.name + ".lock")
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    f = lock.open("a+")
+    fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+    return f
+
+
+def cmd_import(args: argparse.Namespace) -> int:
+    path = Path(args.catalog)
+    rows = observation_list(read_json(Path(args.observations)))
+    with locked(path):
+        if path.exists():
+            # Existing unrelated paths may be temporarily absent while a
+            # batch of external renames is being repaired.
+            catalog = load_catalog(path, paths=False)
+        else:
+            catalog = {"schema_version": SCHEMA_VERSION, "updated_at": now(), "assets": []}
+        additions = [observation_asset(row) for row in rows]
+        assets = catalog["assets"]
+        by_id = {x["id"]: x for x in assets}
+        by_path = {x["current_path"]: x for x in assets}
+        seen_ids: set[str] = set()
+        seen_paths: set[str] = set()
+        for row, item in zip(rows, additions):
+            if item["id"] in seen_ids:
+                raise CatalogError(f"duplicate asset id in observations: {item['id']}")
+            if item["current_path"] in seen_paths:
+                raise CatalogError(f"duplicate current_path in observations: {item['current_path']}")
+            seen_ids.add(item["id"])
+            seen_paths.add(item["current_path"])
+            old = by_id.get(item["id"]) or by_path.get(item["current_path"])
+            if old is not None and old["current_path"] == item["current_path"] and "id" not in row:
+                item["id"] = old["id"]
+            if old is not None and old["id"] == item["id"] and old["current_path"] != item["current_path"]:
+                raise CatalogError(f"asset path changed; use relocate for {item['id']}")
+            if old is not None and old["current_path"] == item["current_path"] and "id" in row and row["id"] != old["id"]:
+                raise CatalogError(f"current_path already belongs to asset {old['id']}")
+            if old is None:
+                assets.append(item)
+            else:
+                merged = merge_asset(old, item)
+                assets[assets.index(old)] = merged
+            by_id = {x["id"]: x for x in assets}
+            by_path = {x["current_path"]: x for x in assets}
+        validate_catalog(catalog, check_paths=False)
+        write_catalog(path, catalog)
+    return 0
+
+
+def cmd_search(args: argparse.Namespace) -> int:
+    catalog = load_catalog(Path(args.catalog), paths=False)
+    needle = args.text.casefold()
+    for asset in catalog["assets"]:
+        hay = " ".join([asset["title"], asset["description"], asset["current_path"], *asset.get("previous_paths", []), *asset.get("tags", [])]).casefold()
+        if needle in hay:
+            print(json.dumps(asset, ensure_ascii=False, sort_keys=True))
+    return 0
+
+
+def cmd_show(args: argparse.Namespace) -> int:
+    catalog = load_catalog(Path(args.catalog), paths=False)
+    for asset in catalog["assets"]:
+        if asset["id"] == args.id:
+            print(json.dumps(asset, ensure_ascii=False, indent=2, sort_keys=True))
+            return 0
+    return fail(f"asset id not found: {args.id}")
+
+
+def cmd_relocate(args: argparse.Namespace) -> int:
+    path, new_path = Path(args.catalog), Path(args.new_path)
+    with locked(path):
+        # Relocation is the one operation that intentionally starts with the
+        # old current_path absent; validate every other catalog invariant first.
+        catalog = load_catalog(path, paths=False)
+        target = next((a for a in catalog["assets"] if a["id"] == args.id), None)
+        if target is None: raise CatalogError(f"asset id not found: {args.id}")
+        old_path = Path(target["current_path"])
+        if old_path.exists(): raise CatalogError(f"old path still exists; perform the external rename first: {old_path}")
+        if any(a is not target and a["current_path"] == str(new_path) for a in catalog["assets"]):
+            raise CatalogError(f"new path already belongs to another asset: {new_path}")
+        actual = identity(new_path)
+        check_path_kind(new_path, target["kind"])
+        if not same_identity(target.get("identity"), actual, target["kind"]): raise CatalogError("new path identity does not match catalog")
+        target.setdefault("previous_paths", []).append(target["current_path"])
+        target["current_path"] = str(new_path)
+        extras = {k: v for k, v in target.get("identity", {}).items() if k not in actual}
+        target["identity"] = {**actual, **extras}
+        validate_catalog(catalog, check_paths=False)
+        write_catalog(path, catalog)
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--catalog", required=True, help="catalog JSON path")
+    sub = parser.add_subparsers(dest="command", required=True)
+    p = sub.add_parser("import"); p.add_argument("observations"); p.set_defaults(func=cmd_import)
+    p = sub.add_parser("search"); p.add_argument("text"); p.set_defaults(func=cmd_search)
+    p = sub.add_parser("show"); p.add_argument("id"); p.set_defaults(func=cmd_show)
+    p = sub.add_parser("relocate"); p.add_argument("id"); p.add_argument("new_path"); p.set_defaults(func=cmd_relocate)
+    p = sub.add_parser("validate"); p.set_defaults(func=lambda a: (load_catalog(Path(a.catalog)) or 0) and 0)
+    args = parser.parse_args(argv)
+    try: return args.func(args)
+    except (CatalogError, OSError) as e: return fail(str(e))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
