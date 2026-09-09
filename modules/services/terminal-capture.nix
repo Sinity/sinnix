@@ -65,7 +65,7 @@ mkServiceModule {
             fi
           '';
 
-          home.sessionVariables.SINNIX_CAPTURE_ROOT = recordingsDir;
+          xdg.configFile."sinnix/terminal-capture-root".text = recordingsDir + "\n";
           home.sessionVariables.SINNIX_CAPTURE_TERMINAL = "kitty";
 
           programs.zsh.initContent = lib.mkBefore ''
