@@ -38,6 +38,7 @@ exec = ["check"]
 pool = "bulk"
 result = "exit"
 cache = "tree+environment"
+timeout_seconds = 7200
 
 [operations.verify_quick]
 description = "Run maintained lint and formatting checks before lane publication"
@@ -83,6 +84,7 @@ description = "Build and activate the workstation configuration"
 exec = ["switch"]
 pool = "bulk"
 result = "exit"
+timeout_seconds = 28800
 
 [operations.sinex_cache_prebuild]
 description = "Build and cache the pinned Sinex revision after an input move"

@@ -55,7 +55,7 @@ mkServiceModule {
       unitName = "sinex-cache-prebuild";
       manager = "user";
       description = "Submit the named Sinex cache-prebuild operation";
-      execStart = "${scriptPkgs.agentctl}/bin/agentctl job start sinnix sinex_cache_prebuild";
+      execStart = "${scriptPkgs.agentctl}/bin/agentctl job fire sinnix sinex_cache_prebuild";
       serviceConfig = {
         # This unit only performs the local AgentCTL submission. The declared
         # operation owns the actual build's lifecycle and timeout.

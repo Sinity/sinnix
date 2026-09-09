@@ -356,8 +356,6 @@ def fire(
     config: Config, project: ProjectAdapter, operation: ProjectOperation
 ) -> dict[str, Any]:
     """A timer's launch: skipped while the same operation is still queued or running."""
-    if operation.schedule is None:
-        raise JobError(f"{project.project_id}.{operation.name} declares no schedule")
     label = label_for(project.project_id, operation.name)
     active = [
         task

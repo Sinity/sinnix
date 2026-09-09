@@ -588,6 +588,10 @@ a changed expression is a new unit. Daily or rarer timers are `Persistent`
 unattended batches declares a scheduled operation whose `exec` runs
 `agentctl batch start` with its own selection rule.
 
+Fixed Nix-owned timers can also call `job fire`; their operations do not need
+a descriptor `schedule`. A firing skips an operation that is already queued
+or running, so a slow build does not accumulate duplicate jobs.
+
 ## Limits
 
 | constant                                                     | origin                                                                    | stands for                                                           |
