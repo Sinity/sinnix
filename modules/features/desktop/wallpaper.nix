@@ -5,7 +5,7 @@
 # active wallpaper drives the whole system palette. This module owns the
 # corpus and scheduling around that pipeline:
 #
-#   - a curated corpus at `corpusRoot` (default /realm/library/media/wallpaper, off
+#   - a curated corpus at `corpusRoot` (default /realm/library/images/wallpaper, off
 #     the wear-limited root SSD) organized as sets/<mood>/{dark,light}, plus a
 #     flat pool/ for imported-but-unclassified images and generated/ for the
 #     opt-in ComfyUI lane (modules/services/wallpaper-generate.nix);
@@ -42,7 +42,7 @@ mkFeatureModule {
   extraOptions = {
     corpusRoot = lib.mkOption {
       type = lib.types.str;
-      default = "/realm/library/media/wallpaper";
+      default = "/realm/library/images/wallpaper";
       description = ''
         Canonical wallpaper corpus: sets/<mood>/{dark,light} (curated,
         time-of-day x theme-mode), pool/ (imported, not yet classified), and
@@ -135,6 +135,7 @@ mkFeatureModule {
         # sinity-owned parent, and tmpfiles then refuses every leaf below it
         # ("Detected unsafe path transition ...").
         systemd.tmpfiles.rules = [
+          "d ${config.sinnix.paths.libraryRoot}/images 0755 ${user} users -"
           "d ${cfg.corpusRoot} 0755 ${user} users -"
           "d ${cfg.corpusRoot}/sets 0755 ${user} users -"
           "d ${cfg.corpusRoot}/pool 0755 ${user} users -"

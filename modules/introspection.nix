@@ -99,7 +99,7 @@ let
         keylog = "${activityRoot}/keylog";
         syslog = "${machineRoot}/syslog";
         machine = machineRoot;
-        activitywatch = "${activityRoot}/activitywatch/activitywatch";
+        activitywatch = "${activityRoot}/activitywatch";
         shell = "${activityRoot}/shell";
         webhistory = "${activityRoot}/webhistory";
         kitty-scrollback = "${activityRoot}/kitty-scrollback";

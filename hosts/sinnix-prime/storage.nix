@@ -515,7 +515,7 @@ in
       "d ${realmRoot}/state/nats 0755 nats nats -"
       # Keep Stashbox state on /realm while preserving its stable XDG path.
       # Regenerable members stay outside frequent persist backup coverage.
-      "L+ /home/${username}/.local/share/stashbox - - - - ${realmRoot}/library/media/stashbox"
+      "L+ /home/${username}/.local/share/stashbox - - - - ${realmRoot}/state/stashbox"
     ];
 
     # XDG consumers use the same archive as the configured daemon and MCP.

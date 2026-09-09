@@ -3,7 +3,7 @@
 
 Usage: reports-index.py <reports-dir> [--out index.html]
 
-Reads every *.html in the directory (non-recursive; index.html itself and
+Reads every *.html recursively (the output index itself and
 *.pl.html translations are grouped under their base report), extracts title,
 dates, status, and supersession metadata from the report's own markup, and
 emits a single self-contained index page following the skill's template
@@ -19,9 +19,11 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import html as html_mod
+import os
 import re
 import sys
 from pathlib import Path
+from urllib.parse import quote
 
 TITLE_RE = re.compile(r"<title>(.*?)</title>", re.S)
 STATUS_RE = re.compile(
@@ -61,8 +63,8 @@ def build(reports_dir: Path, out: Path) -> int:
     files = sorted(
         [
             p
-            for p in reports_dir.glob("*.html")
-            if p.name != out.name and not p.name.endswith(".pl.html")
+            for p in reports_dir.rglob("*.html")
+            if p.resolve() != out.resolve() and not p.name.endswith(".pl.html")
         ],
         key=lambda p: p.stat().st_mtime,
         reverse=True,
@@ -86,7 +88,7 @@ def build(reports_dir: Path, out: Path) -> int:
         accent = f"<span class='chip'>{r['accent']}</span>" if r["accent"] else ""
         trs.append(
             f"<tr{' class=sup' if r['superseded'] else ''}>"
-            f"<td><a href='{html_mod.escape(r['path'].name)}'>{html_mod.escape(r['title'])}</a></td>"
+            f"<td><a href='{html_mod.escape(quote(os.path.relpath(r['path'], out.parent)))}'>{html_mod.escape(r['title'])}</a></td>"
             f"<td data-v='{int(r['mtime'].timestamp())}'>{r['mtime'].strftime('%Y-%m-%d %H:%M')}</td>"
             f"<td>{badge}</td><td>{accent}</td>"
             f"<td data-v='{r['size_kb']}'>{r['size_kb']} K</td></tr>"

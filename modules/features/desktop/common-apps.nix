@@ -124,8 +124,8 @@ mkFeatureModule {
           path = paths.stateRoot;
         }
         {
-          name = "Media";
-          path = paths.mediaRoot;
+          name = "Library";
+          path = paths.libraryRoot;
         }
         {
           name = "Downloads";
