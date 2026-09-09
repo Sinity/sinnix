@@ -204,7 +204,11 @@ def test_fire_skips_while_the_same_operation_is_active(
     third = launch.fire(config, project, operation)
 
     assert first["fired"] is True
-    assert second == {"fired": False, "label": f"fixture:{operation_name}", "active": [1]}
+    assert second == {
+        "fired": False,
+        "label": f"fixture:{operation_name}",
+        "active": [1],
+    }
     assert third["fired"] is True and third["job_id"] == 2
 
 

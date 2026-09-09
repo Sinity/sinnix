@@ -362,7 +362,7 @@ its own `handle_path` block and its own Unix-socket process.
 Three sources, none of them a new capture lane:
 
 - **Live** — every kitty shell already runs under `asciinema session
-  --stream-local` (that is how the capture lake is written), so the reducer
+--stream-local` (that is how the capture lake is written), so the reducer
   reads the recorder's own process environment and listening port back out of
   `/proc` and proxies its player and WebSocket under `/terminals/v1/live/
 <pid>/<window_id>/`. A viewer joining late gets the current screen first.
