@@ -181,29 +181,31 @@ def test_an_unknown_pool_is_a_typed_refusal_and_leaves_no_input_behind(
     assert list(config.inputs_dir.glob("*")) == []
 
 
+@pytest.mark.parametrize("operation_name", ["nightly", "check"])
+@pytest.mark.parametrize("running", [False, True])
 def test_fire_skips_while_the_same_operation_is_active(
-    fake_pueue: FakePueue, config: Config, project_root: Path
+    fake_pueue: FakePueue,
+    config: Config,
+    project_root: Path,
+    operation_name: str,
+    running: bool,
 ) -> None:
-    """A timer firing into a still-running corpus must not stack a second one."""
+    """Descriptor timers and fixed Nix timers share the same admission rule."""
     project = load_project_adapter(project_root)
-    operation = project.operation("nightly")
+    operation = project.operation(operation_name)
 
     first = launch.fire(config, project, operation)
+    if running:
+        fake_pueue.running(first["job_id"])
+    else:
+        fake_pueue.queue(first["job_id"])
     second = launch.fire(config, project, operation)
     fake_pueue.succeed(first["job_id"])
     third = launch.fire(config, project, operation)
 
     assert first["fired"] is True
-    assert second == {"fired": False, "label": "fixture:nightly", "active": [1]}
+    assert second == {"fired": False, "label": f"fixture:{operation_name}", "active": [1]}
     assert third["fired"] is True and third["job_id"] == 2
-
-
-def test_fire_refuses_an_operation_without_a_schedule(
-    fake_pueue: FakePueue, config: Config, project_root: Path
-) -> None:
-    project = load_project_adapter(project_root)
-    with pytest.raises(JobError, match="declares no schedule"):
-        launch.fire(config, project, project.operation("check"))
 
 
 def test_phases_come_from_pueue_results_and_the_wrapper_exit_codes(
