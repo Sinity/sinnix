@@ -163,8 +163,8 @@ mkServiceModule {
       systemd.tmpfiles.rules = [
         "d ${cfg.dataDir} 0755 ${userName} users -"
         "d ${cfg.dataDir}/inbox 0755 ${userName} users -"
-        "L+ ${cfg.dataDir}/inbox/chatgpt - - - - /realm/ai/chatlog/raw/chatgpt"
-        "L+ ${cfg.dataDir}/inbox/claude - - - - /realm/ai/chatlog/raw/claude"
+        "L+ ${cfg.dataDir}/inbox/chatgpt - - - - /realm/accounts/chatgpt"
+        "L+ ${cfg.dataDir}/inbox/claude - - - - /realm/accounts/claude"
       ];
 
       # ── Import the upstream Home Manager module ────────────────────

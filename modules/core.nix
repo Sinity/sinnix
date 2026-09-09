@@ -80,6 +80,7 @@ in
         # (state/journal, state/containers, backup targets, swap, .btrfs)
         # stay root on purpose.
         "d ${paths.realmRoot} 0755 ${username} users -"
+        "f+ ${paths.realmRoot}/.hidden 0644 ${username} users - state\\ntmp\\nworktrees\\n"
         "d /realm/state 0755 ${username} users -"
         "d /realm/library 0755 ${username} users -"
         "d /realm/library/datasets 0755 ${username} users -"
@@ -90,7 +91,6 @@ in
         "d ${paths.machineRoot} 0775 ${username} users -"
         "d ${paths.healthRoot} 0755 ${username} users -"
         "d ${paths.activityRoot}/irc 0755 ${username} users -"
-        "d ${paths.aiRoot} 0755 ${username} users -"
         "d ${paths.activityRoot}/shell 0755 ${username} users -"
         "d ${paths.activityRoot}/shell/zsh 0700 ${username} users -"
         "d ${paths.journalRoot} 0700 ${username} users -"

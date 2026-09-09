@@ -50,11 +50,6 @@ in
               default = "${config.realmRoot}/health";
               description = "Health records, measurements, genome data, and therapy material.";
             };
-            aiRoot = mkOption {
-              type = types.str;
-              default = "${config.realmRoot}/ai";
-              description = "AI chat/dialogue archives and analyses, including the live polylogue capture lane.";
-            };
             journalRoot = mkOption {
               type = types.str;
               default = "${config.realmRoot}/journal";
@@ -72,7 +67,7 @@ in
             mediaRoot = mkOption {
               type = types.str;
               default = "${config.realmRoot}/library/media";
-              description = "Consumption media: Steam, books, videos, substack, wallpaper, edu, stashbox. Re-acquirable, ownership='others' -- was /realm/media until the library/ recut (2026-08-17); everything under it is loss-tolerant the same way libraryRoot as a whole is.";
+              description = "Media collections and application libraries, including unique saves and catalog metadata.";
             };
             datasetsRoot = mkOption {
               type = types.str;

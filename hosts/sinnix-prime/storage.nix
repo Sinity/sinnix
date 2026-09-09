@@ -18,7 +18,7 @@ let
   polylogueDbRoot = config.sinnix.services.polylogue.dataDir;
   polylogueShareMount = "/home/${username}/.local/share/polylogue";
 
-  swapFile = "${realmRoot}/swap/swapfile";
+  swapFile = "${realmRoot}/state/swap/swapfile";
   # The generated unit name follows the swapfile PATH (systemd path escaping),
   # so derive it rather than hardcoding: a change of swapFile would otherwise
   # silently orphan the prepare/drain unit wiring below.
@@ -291,10 +291,10 @@ in
     # ephemeral MX500 root this is maximum wear for zero benefit: the boot wipe
     # destroys the warm cache and forces full recompiles that write it all
     # again. /realm NVMe keeps caches warm across boots on the wear-tolerant
-    # disk; /realm/cache is excluded from the btrbk→borg pipeline (build caches
+    # disk; /realm/state/cache is excluded from the btrbk→borg pipeline (build caches
     # are regenerable, see modules/backup.nix realmExcludes).
     "/var/cache/sinex" = {
-      device = "/realm/cache/sinex";
+      device = "/realm/state/cache/sinex";
       fsType = "none";
       options = [
         "bind"
@@ -509,13 +509,10 @@ in
       # NVMe-backed regenerable-cache root (bind-mount source for
       # /var/cache/sinex; nix-build/sccache siblings live here too).
       # Excluded from btrbk→borg — never persist-grade data.
-      "d ${realmRoot}/cache 0755 root root -"
-      "d ${realmRoot}/cache/sinex 0775 ${username} users -"
+      "d ${realmRoot}/state/cache 0755 root root -"
+      "d ${realmRoot}/state/cache/sinex 0775 ${username} users -"
       # NATS JetStream state, backed up with the realm volume.
       "d ${realmRoot}/state/nats 0755 nats nats -"
-      # DB-backup staging (telemetry/polylogue sqlite, sinex pg dumps),
-      # covered by the /realm borg job.
-      "d ${realmRoot}/backup 0755 root root -"
       # Keep Stashbox state on /realm while preserving its stable XDG path.
       # Regenerable members stay outside frequent persist backup coverage.
       "L+ /home/${username}/.local/share/stashbox - - - - ${realmRoot}/library/media/stashbox"

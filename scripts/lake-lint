@@ -73,9 +73,9 @@ check_root() {
 
 # Human-facing subjects and service-owned storage have distinct homes.
 check_root /realm \
-  project activity accounts ai archive code-snapshots documents health journal library machine \
-  notes photos probable-junk reports secrets state backup swap cache worktrees tmp inbox INVENTORY.md \
-  -- .btrfs .Trash-1000
+  project activity accounts archive documents health journal library machine \
+  notes photos probable-junk reports state worktrees tmp inbox INVENTORY.md \
+  -- .btrfs .Trash-1000 .hidden
 
 check_root /outer-realm \
   backup archive inbox INVENTORY.md \

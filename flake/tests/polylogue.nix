@@ -113,8 +113,8 @@ in
             ''
               jq -e --arg root "$sentinelDataDir" '
                 index("d \($root)/inbox 0755 sinity users -") != null and
-                index("L+ \($root)/inbox/chatgpt - - - - /realm/ai/chatlog/raw/chatgpt") != null and
-                index("L+ \($root)/inbox/claude - - - - /realm/ai/chatlog/raw/claude") != null
+                index("L+ \($root)/inbox/chatgpt - - - - /realm/accounts/chatgpt") != null and
+                index("L+ \($root)/inbox/claude - - - - /realm/accounts/claude") != null
               ' <<<"$actualTmpfiles" >/dev/null
               touch "$out"
             '';
