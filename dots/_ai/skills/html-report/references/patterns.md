@@ -659,8 +659,7 @@ next agent regenerating the report knows precisely how each cell was derived.
       <figcaption>measured 2026-07-31</figcaption>
       <pre>
 sqlite3 "file:$ARCHIVE/index.db?mode=ro" \
-  "select count(*) from messages;"</pre
-      >
+  "select count(*) from messages;"</pre>
     </figure></template
   >
 </div>

@@ -17,7 +17,6 @@ SCRIPT = ROOT / "scripts" / "lake-lint"
 ROOTS = ("realm", "outer-realm")
 
 
-
 def run(prefix: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [str(SCRIPT)],
@@ -82,9 +81,7 @@ def test_half_finished_rename_fails_from_both_ends(tmp_path):
     """The failure this ratchet exists for: data moved, manifest not, or vice versa."""
     prefix = tmp_path / "lake"
     build_lake(prefix)
-    (prefix / "realm" / "activity").rename(
-        prefix / "realm" / "captures"
-    )
+    (prefix / "realm" / "activity").rename(prefix / "realm" / "captures")
     result = run(prefix)
     assert result.returncode == 1
     assert str(prefix / "realm/captures") in result.stdout

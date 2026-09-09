@@ -45,6 +45,7 @@ names, and exits with one result document.
    inputs read-only, writes its output there, and prints a summary). Read
    the result from the job log the run prints. A process that is OOM-killed
    in the agent unit is a contract violation, not bad luck.
+
 7. **Exit with a clean tree and the result document.** The final message is
    the JSON below and nothing else; a worker whose result does not validate
    has failed, whatever its exit status.
