@@ -94,7 +94,8 @@ in
               config.sinnix.paths.neoOuterRealm
               config.sinnix.paths.outerRealm
             ];
-            fromDeclaredRoot = path: builtins.any (root: lib.hasPrefix "${root}/" path) declaredRoots;
+            fromDeclaredRoot =
+              path: builtins.any (root: path == root || lib.hasPrefix "${root}/" path) declaredRoots;
             hyprlandPortalConf = config.environment.etc."xdg/xdg-desktop-portal/hyprland-portals.conf".text;
           in
           [
