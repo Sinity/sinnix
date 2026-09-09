@@ -7,7 +7,12 @@ if [[ -z "$shell_bin" || ! -x "$shell_bin" ]]; then
   shell_bin="$(command -v zsh)"
 fi
 
-capture_root="${SINNIX_CAPTURE_ROOT:-/realm/activity/asciinema}"
+capture_root_file="${XDG_CONFIG_HOME:-$HOME/.config}/sinnix/terminal-capture-root"
+if [[ -r "$capture_root_file" ]]; then
+  IFS= read -r capture_root < "$capture_root_file"
+else
+  capture_root="${SINNIX_CAPTURE_ROOT:-/realm/activity/asciinema}"
+fi
 capture_disabled="${SINNIX_CAPTURE_DISABLE:-}"
 
 json_escape() {

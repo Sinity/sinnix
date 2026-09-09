@@ -42,7 +42,8 @@ in
                 pkgs.zsh
               ]
             }:$PATH"
-            mkdir -p "$HOME" "$TMPDIR/captures"
+            mkdir -p "$HOME/.config/sinnix" "$TMPDIR/captures"
+            printf '%s\n' "$TMPDIR/captures" > "$HOME/.config/sinnix/terminal-capture-root"
 
             # The shell the recorder launches must not inherit any
             # SINNIX_CAPTURE_* state from whoever started it: a nested
@@ -62,7 +63,7 @@ in
 
             transcript="$TMPDIR/terminal-capture-runtime.typescript"
 
-            script -qfec "env \
+            script -qfec "stty rows 24 cols 80; exec env \
               EPOCHREALTIME='1773285652,647035000' \
               HOME='$HOME' \
               HOSTNAME='terminal-capture-test' \
@@ -70,13 +71,17 @@ in
               SHELL='$TMPDIR/fake-shell.zsh' \
               SINNIX_CAPTURE_CAST_FILE='$TMPDIR/poison.cast' \
               SINNIX_CAPTURE_EVENTS_FILE='$TMPDIR/poison.events.jsonl' \
-              SINNIX_CAPTURE_ROOT='$TMPDIR/captures' \
+              SINNIX_CAPTURE_ROOT='$TMPDIR/retired-captures' \
               SINNIX_CAPTURE_POISON='leaked' \
               SINNIX_CAPTURE_SESSION_ID='poison-session' \
               TERM='xterm-kitty' \
               USER='tester' \
               ${pkgs.bash}/bin/bash ${../../scripts/sinnix-captured-shell}" "$transcript"
 
+            if test -e "$TMPDIR/retired-captures"; then
+              echo "Recorder used the inherited retired capture root" >&2
+              exit 1
+            fi
             grep -q "terminal-capture-ready" "$transcript"
             grep -q "inherited-capture-marker: stripped" "$transcript"
 
@@ -225,7 +230,7 @@ in
             transcript="$TMPDIR/terminal-capture-runtime-failure.typescript"
 
             set +e
-            script -qfec "env \
+            script -qfec "stty rows 24 cols 80; exec env \
               EPOCHREALTIME='1773285652,647035000' \
               HOME='$HOME' \
               HOSTNAME='terminal-capture-test' \
