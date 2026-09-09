@@ -57,8 +57,8 @@ let
             priority = config.zramSwap.priority;
           };
         journald = {
-          storage = config.services.journald.storage;
-          extraConfig = config.services.journald.extraConfig;
+          storage = config.services.journald.settings.Journal.Storage or "auto";
+          extraConfig = config.environment.etc."systemd/journald.conf".text;
         };
         zram = {
           enable = config.zramSwap.enable;
