@@ -19,7 +19,6 @@ let
   systemRevision = config.system.configurationRevision;
   dataRoot = config.sinnix.paths.machineRoot;
   dataDir = dataRoot;
-  legacyDbPath = "${dataDir}/telemetry.sqlite";
   dbRoot = "${realmRoot}/state/machine-telemetry";
   dbPath = "${dbRoot}/telemetry.sqlite";
   # Lives on /realm, not /persist (worn MX500); still inside the /realm
@@ -315,14 +314,6 @@ mkServiceModule {
       )
       {
         systemd.tmpfiles.rules = [
-          # Operator-owned like the rest of the lake, and group-writable so the
-          # root daemons and operator producers that share this namespace can
-          # both create files. It must NOT be root-owned under an
-          # operator-owned parent: systemd-tmpfiles refuses such a directory
-          # outright ("Detected unsafe path transition ... during
-          # canonicalization"), which silently stops it managing this path at
-          # all.
-          "d ${dataRoot} 0775 ${username} users -"
           "d ${dataDir}/experiments 0775 ${username} users -"
           "d ${dataDir}/legacy 0775 ${username} users -"
           "d ${backupRoot} 0700 ${username} users -"
@@ -339,11 +330,10 @@ mkServiceModule {
             pkgs.btrfs-progs
             pkgs.coreutils
             pkgs.e2fsprogs
-            pkgs.sqlite
           ];
           serviceConfig.Type = "oneshot";
           script = ''
-            install -d -m 0755 -o root -g users ${dataRoot}
+            install -d -m 0775 -o ${username} -g users ${dataRoot}
             if ! btrfs subvolume show ${lib.escapeShellArg dbRoot} >/dev/null 2>&1; then
               btrfs subvolume create ${lib.escapeShellArg dbRoot}
               chattr +C ${lib.escapeShellArg dbRoot} || true
@@ -351,33 +341,6 @@ mkServiceModule {
             chown root:users ${lib.escapeShellArg dbRoot}
             chmod 0755 ${lib.escapeShellArg dbRoot}
             chattr +C ${lib.escapeShellArg dbRoot} || true
-
-            if [ -L ${lib.escapeShellArg legacyDbPath} ]; then
-              current="$(readlink ${lib.escapeShellArg legacyDbPath})"
-              if [ "$current" != ${lib.escapeShellArg dbPath} ]; then
-                echo "Refusing to replace unexpected machine telemetry DB symlink ${legacyDbPath} -> $current" >&2
-                exit 1
-              fi
-            elif [ -e ${lib.escapeShellArg legacyDbPath} ]; then
-              sqlite3 ${lib.escapeShellArg legacyDbPath} 'PRAGMA wal_checkpoint(TRUNCATE);'
-              for sidecar in ${lib.escapeShellArg "${legacyDbPath}-wal"} ${lib.escapeShellArg "${legacyDbPath}-shm"}; do
-                if [ -e "$sidecar" ]; then
-                  echo "Refusing to migrate machine telemetry DB while SQLite sidecar exists: $sidecar" >&2
-                  echo "Stop machine-telemetry and checkpoint/truncate WAL before running machine-telemetry-db-scaffold." >&2
-                  exit 1
-                fi
-              done
-              if [ -e ${lib.escapeShellArg dbPath} ]; then
-                echo "Refusing to overwrite existing machine telemetry DB target ${dbPath}" >&2
-                exit 1
-              fi
-              cp --reflink=never --preserve=mode,ownership,timestamps ${lib.escapeShellArg legacyDbPath} ${lib.escapeShellArg "${dbPath}.tmp"}
-              mv ${lib.escapeShellArg "${dbPath}.tmp"} ${lib.escapeShellArg dbPath}
-              rm ${lib.escapeShellArg legacyDbPath}
-              ln -s ${lib.escapeShellArg dbPath} ${lib.escapeShellArg legacyDbPath}
-            elif [ -e ${lib.escapeShellArg dbPath} ]; then
-              ln -s ${lib.escapeShellArg dbPath} ${lib.escapeShellArg legacyDbPath}
-            fi
           '';
         };
 

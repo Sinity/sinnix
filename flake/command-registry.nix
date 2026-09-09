@@ -289,7 +289,7 @@ let
     need_active below.service
     need_active machine-telemetry.service
 
-    telemetry_db="/realm/machine/telemetry.sqlite"
+    telemetry_db="/realm/state/machine-telemetry/telemetry.sqlite"
     [ -s "$telemetry_db" ]
 
     now="$(${pkgs.coreutils}/bin/date +%s)"
