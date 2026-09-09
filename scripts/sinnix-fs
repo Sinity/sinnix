@@ -420,7 +420,9 @@ CONTENT_EXCLUDE_PREFIXES = (
     # search over the polluted index reported 821 hits where 8 were real.
     "/realm/.btrfs/",
     "/realm/activity/",
-    "/realm/library/media/",
+    "/realm/library/images/",
+    "/realm/library/videos/",
+    "/realm/library/games/",
     "/realm/library/models/",
     "/realm/library/datasets/",
     "/realm/state/cache/",
