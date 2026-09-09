@@ -173,7 +173,7 @@ def test_new_kinds_get_census_verdicts_through_the_kind_to_class_map(tmp_path) -
                 "enabled": True,
                 "owner": "modules/services/capture-a11y.nix",
                 "docs": None,
-                "path": "/realm/data/activity/a11y",
+                "path": "/realm/activity/a11y",
             },
             {
                 "kind": "agent-lane",

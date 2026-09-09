@@ -61,8 +61,8 @@ def test_index_sidecar_has_one_entry_per_write(tmp_path: Path) -> None:
 
 def test_raw_ref_is_preserved(tmp_path: Path) -> None:
     writer = CaptureWriter(tmp_path, "lane-d")
-    envelope = writer.write({"n": 1}, raw_ref="/realm/data/captures/lane-d/raw/1.bin")
-    assert envelope["raw_ref"] == "/realm/data/captures/lane-d/raw/1.bin"
+    envelope = writer.write({"n": 1}, raw_ref="/realm/activity/lane-d/raw/1.bin")
+    assert envelope["raw_ref"] == "/realm/activity/lane-d/raw/1.bin"
 
 
 def test_empty_seq_file_recovers_from_index_without_reusing_numbers(

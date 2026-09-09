@@ -78,7 +78,7 @@ long-running service:
 | ------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `sinnix-steering-morning` | 08:00  | `sinnix-steer ritual morning`: `claude -p` over the store — one root-probing question, then 1–3 proposed intentions with forecasts. Writes a review row, notifies. |
 | `sinnix-steering-evening` | 21:30  | `sinnix-steer ritual evening`: written review — what happened vs. intended, a done/missed/carry call per open commitment. Writes a review row, notifies.           |
-| `sinnix-steering-export`  | 23:50  | Full store to `/realm/data/activity/steering/<date>.jsonl` — the lake copy lynchpin joins against telemetry.                                                       |
+| `sinnix-steering-export`  | 23:50  | Full store to `/realm/activity/steering/<date>.jsonl` — the lake copy lynchpin joins against telemetry.                                                       |
 | `sinnix-cockpit`          | always | Read-only web view on loopback port 8791.                                                                                                                          |
 
 ## The surfaces, and why each exists

@@ -54,7 +54,7 @@ _sinnix_project_kind() {
     /realm/project/scribe-tap) printf '%s\n' rust-project ;;
     /realm/project/intercept-bounce) printf '%s\n' rust-project ;;
     /realm/project/knowledge-extract) printf '%s\n' python-project ;;
-    /realm/data/knowledgebase) printf '%s\n' data-project ;;
+    /realm/archive/knowledgebase) printf '%s\n' data-project ;;
     /realm/project/*)
       if [ -e "$project_root/flake.nix" ] \
         || [ -e "$project_root/Cargo.toml" ] \

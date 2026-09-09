@@ -28,7 +28,7 @@ let
   # would have split the lane in two on the next changed envelope. A literal,
   # like stateDir above, because this `let` runs outside the module's config
   # scope; point it at paths.healthRoot once that option lands.
-  laneDir = "/realm/data/health/xiaomi-cloud";
+  laneDir = "/realm/health/xiaomi-cloud";
 in
 mkServiceModule {
   name = "xiaomi-witness";

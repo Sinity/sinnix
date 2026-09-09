@@ -396,7 +396,7 @@ let
         # 94 directories under /realm carry one today, and the path list was
         # missing several of them purely because of what they were named
         # (.lynchpin/cache is not .cache; .sinex/trybuild-target is not target;
-        # data/self/genome/cache was 285G of exactly this).
+        # health/genome/cache was 285G of exactly this).
         #
         # .nobackup is sinnix's marker for regenerable-but-not-a-cache:
         # scratch trees where CACHEDIR.TAG would be a lie about what the
@@ -503,7 +503,7 @@ let
     # replicating into borg-realm-v2 in full. The irreplaceable half of that
     # tree — genotype/, holding the 70G of raw FASTQ reads that cannot be
     # regenerated without re-sequencing — stays in coverage deliberately.
-    "data/self/genome/cache"
+    "health/genome/cache"
     # 23G of podman OCI layers (the graphroot set in services/ml-containers.nix,
     # deliberately on /realm rather than the wear-limited root). Images are
     # re-pullable by digest and the modules that use them pin those digests, so

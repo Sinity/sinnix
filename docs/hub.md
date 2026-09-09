@@ -319,7 +319,7 @@ report served by the hub and from one opened straight off disk as `file://`
 
 `/feedback` is a route on the ops-reducer, reached through the same reverse
 proxy as the pages. Submissions land in
-`/realm/data/derived/hub-feedback/<UTC-date>.jsonl`, one JSON object per line,
+`/realm/state/hub-feedback/<UTC-date>.jsonl`, one JSON object per line,
 each wrapping the payload in an envelope carrying the receive time, the
 referring page, and a sequence number — so a consuming agent can tell
 submissions apart without trusting client-supplied fields. That file format is
@@ -371,7 +371,7 @@ Three sources, none of them a new capture lane:
   wired in, or outside `sinnix-captured-shell`).
 - **History** — the existing full-ANSI scrollback captures
   `sinnix-capture-kitty-scrollback` already writes to
-  `/realm/data/activity/kitty-scrollback`, joined to a window by the
+  `/realm/activity/kitty-scrollback`, joined to a window by the
   `(kitty_pid, window_id)` pair that is the capture's own filename key.
 
 `send-text`/`send-key`, from the page's input box and quick-action buttons,

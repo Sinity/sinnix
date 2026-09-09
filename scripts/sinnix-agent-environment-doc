@@ -73,7 +73,7 @@ mkdir -p "$(dirname "$output")"
   done
 } > "$output"
 
-if rg -n '/home/|/persist/|/realm/cache/|/realm/data/|/nix/store/' "$output" >/dev/null; then
+if rg -n '/home/|/persist/|/realm/|/nix/store/' "$output" >/dev/null; then
   printf 'private path found in generated document: %s\n' "$output" >&2
   exit 1
 fi

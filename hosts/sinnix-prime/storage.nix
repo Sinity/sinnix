@@ -9,43 +9,13 @@
 let
   inherit (config.sinnix.paths)
     realmRoot
-    aiRoot
     outerRealm
     neoOuterRealm
     ;
   username = config.sinnix.user.name;
   primaryGroupName = config.users.users.${username}.group;
-  # The service option is the sole active archive authority. The existing
-  # XDG tree remains a compatibility projection; activation does not migrate
-  # or merge its non-database siblings into the canonical root.
-  polylogueArchiveRoot = "${aiRoot}/polylogue";
+  # CLI, daemon, and XDG consumers share one archive directory.
   polylogueDbRoot = config.sinnix.services.polylogue.dataDir;
-  polylogueDbFiles = [
-    "index.db"
-    "source.db"
-    "embeddings.db"
-    "ops.db"
-    "audit.db"
-    "user.db"
-  ];
-  polylogueDbLinkScript = lib.concatMapStringsSep "\n" (
-    name:
-    let
-      archivePath = "${polylogueArchiveRoot}/${name}";
-      targetPath = "${polylogueDbRoot}/${name}";
-    in
-    ''
-      if [ -L ${lib.escapeShellArg archivePath} ]; then
-        current="$(readlink ${lib.escapeShellArg archivePath})"
-        if [ "$current" != ${lib.escapeShellArg targetPath} ]; then
-          echo "Refusing to replace unexpected Polylogue compatibility link ${archivePath} -> $current" >&2
-          exit 1
-        fi
-      elif [ ! -e ${lib.escapeShellArg archivePath} ] && [ -e ${lib.escapeShellArg targetPath} ]; then
-        ln -s ${lib.escapeShellArg targetPath} ${lib.escapeShellArg archivePath}
-      fi
-    ''
-  ) polylogueDbFiles;
   polylogueShareMount = "/home/${username}/.local/share/polylogue";
 
   swapFile = "${realmRoot}/swap/swapfile";
@@ -521,7 +491,6 @@ in
         pkgs.e2fsprogs
       ];
       script = ''
-        install -d -m 0700 -o ${username} -g ${primaryGroupName} ${polylogueArchiveRoot}
         if ! btrfs subvolume show ${lib.escapeShellArg polylogueDbRoot} >/dev/null 2>&1; then
           btrfs subvolume create ${lib.escapeShellArg polylogueDbRoot}
           chattr +C ${lib.escapeShellArg polylogueDbRoot} || true
@@ -529,14 +498,12 @@ in
         chown ${username}:${primaryGroupName} ${lib.escapeShellArg polylogueDbRoot}
         chmod 0700 ${lib.escapeShellArg polylogueDbRoot}
         chattr +C ${lib.escapeShellArg polylogueDbRoot} || true
-
-        ${polylogueDbLinkScript}
       '';
     };
 
     tmpfiles.rules = lib.mkAfter [
       "d /swap 0750 root root -"
-      "d ${polylogueArchiveRoot} 0700 ${username} ${primaryGroupName} -"
+      "d ${polylogueDbRoot} 0700 ${username} ${primaryGroupName} -"
       "d /home/${username}/.local/share 0700 ${username} ${primaryGroupName} -"
       "d ${polylogueShareMount} 0700 ${username} ${primaryGroupName} -"
       # NVMe-backed regenerable-cache root (bind-mount source for
@@ -554,15 +521,11 @@ in
       "L+ /home/${username}/.local/share/stashbox - - - - ${realmRoot}/library/media/stashbox"
     ];
 
-    # Polylogue's archive is an active SQLite/write-heavy workload. Keep the
-    # default XDG path stable for CLI/MCP/service consumers, but place the
-    # archive bytes on /realm's NVMe instead of the root/persist SATA SSD.
-    # The six SQLite tier files are symlinked into a nested nodatacow subvolume
-    # at ${polylogueDbRoot}; hooks, inbox, blobs, and attachments in the
-    # canonical dataDir remain independent from this compatibility projection.
+    # XDG consumers use the same archive as the configured daemon and MCP.
+    # The bind mount keeps writes on the existing NVMe subvolume.
     mounts = [
       {
-        what = polylogueArchiveRoot;
+        what = polylogueDbRoot;
         where = polylogueShareMount;
         type = "none";
         options = "bind,x-systemd.requires-mounts-for=${realmRoot}";

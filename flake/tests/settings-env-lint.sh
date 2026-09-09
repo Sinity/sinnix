@@ -11,7 +11,7 @@ cat >"$root/local/.claude/settings.json" <<EOF
 {"env":{"LOCAL":"$root/local/cache"}}
 EOF
 cat >"$root/global/.claude/settings.json" <<'EOF'
-{"env":{"CACHE":"/realm/data/shared-cache"}}
+{"env":{"CACHE":"/realm/shared-cache"}}
 EOF
 cat >"$root/suspicious/.claude/settings.json" <<'EOF'
 {"env":{"CLOUD":"/tmp/cloud-only-path"}}
@@ -21,7 +21,7 @@ cat >"$root/secret/.claude/settings.json" <<'EOF'
 EOF
 
 set +e
-report=$(python3 "$scanner" --root "$root" --intentional-prefix /realm/data)
+report=$(python3 "$scanner" --root "$root" --intentional-prefix /realm)
 status=$?
 set -e
 test "$status" -eq 2
@@ -35,7 +35,7 @@ printf '%s' "$report" | jq -e '
 ' >/dev/null
 
 set +e
-clean=$(python3 "$scanner" --root "$root" --intentional-prefix /realm/data --intentional-prefix /tmp/cloud-only-path)
+clean=$(python3 "$scanner" --root "$root" --intentional-prefix /realm --intentional-prefix /tmp/cloud-only-path)
 status=$?
 set -e
 test "$status" -eq 0

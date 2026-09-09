@@ -355,6 +355,8 @@ let
         pkgs.libnotify
       ];
       text = ''
+        export SINNIX_STEERING_EXPORT_DIR="''${SINNIX_STEERING_EXPORT_DIR:-/realm/activity/steering}"
+        export SINNIX_RANK_ROOT="''${SINNIX_RANK_ROOT:-/realm/activity/ranking}"
         exec python3 ${inputs.steering}/sinnix-steer "$@"
       '';
       meta.description = "Steering store CLI — intentions, forecasts, activities, rituals";

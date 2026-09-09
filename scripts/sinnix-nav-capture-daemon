@@ -37,7 +37,7 @@ import subprocess
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-CAPTURE_ROOT = os.environ.get("SINNIX_CAPTURE_ROOT", "/realm/data/activity")
+CAPTURE_ROOT = os.environ.get("SINNIX_CAPTURE_ROOT", "/realm/activity")
 BIND_HOST = "127.0.0.1"
 BIND_PORT = int(os.environ.get("SINNIX_NAV_CAPTURE_PORT", "8767"))
 

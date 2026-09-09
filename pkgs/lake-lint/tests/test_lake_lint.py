@@ -14,22 +14,8 @@ from pathlib import Path
 ROOT = Path(__file__).parents[3]
 SCRIPT = ROOT / "scripts" / "lake-lint"
 
-ROOTS = ("realm", "outer-realm", "realm/data")
+ROOTS = ("realm", "outer-realm")
 
-# Every level-1 name a previous reorganisation retired. Each survived for
-# weeks beside its replacement because the lint's allow-list named both.
-RETIRED = (
-    ("realm", "media"),
-    ("realm", "staging"),
-    ("realm", "db"),
-    ("realm/data", "libraries"),
-    ("realm/data", "captures"),
-    ("realm/data", "exports"),
-    ("realm/data", "comms"),
-    ("realm/data", "reports"),
-    ("realm/data", "decisions"),
-    ("outer-realm", "archive-staged"),
-)
 
 
 def run(prefix: Path) -> subprocess.CompletedProcess[str]:
@@ -52,7 +38,7 @@ def required_nodes(prefix: Path) -> list[str]:
         for line in result.stdout.splitlines()
         if "MISSING required node: " in line
     ]
-    # /realm/data is created above as a root, so it is not reported missing.
+    # /realm is created above as a root, so it is not reported missing.
     assert missing, result.stdout
     return missing
 
@@ -75,7 +61,7 @@ def test_matching_tree_passes(tmp_path):
 def test_node_on_disk_that_the_manifest_does_not_name_fails(tmp_path):
     prefix = tmp_path / "lake"
     build_lake(prefix)
-    node = prefix / "realm" / "data" / "unratified"
+    node = prefix / "realm" / "unratified"
     node.mkdir()
     result = run(prefix)
     assert result.returncode == 1
@@ -85,7 +71,7 @@ def test_node_on_disk_that_the_manifest_does_not_name_fails(tmp_path):
 def test_manifest_node_missing_from_disk_fails(tmp_path):
     prefix = tmp_path / "lake"
     nodes = build_lake(prefix)
-    victim = next(node for node in nodes if node.endswith("/realm/data/activity"))
+    victim = next(node for node in nodes if node.endswith("/realm/activity"))
     Path(victim).rmdir()
     result = run(prefix)
     assert result.returncode == 1
@@ -96,25 +82,13 @@ def test_half_finished_rename_fails_from_both_ends(tmp_path):
     """The failure this ratchet exists for: data moved, manifest not, or vice versa."""
     prefix = tmp_path / "lake"
     build_lake(prefix)
-    (prefix / "realm" / "data" / "activity").rename(
-        prefix / "realm" / "data" / "captures"
+    (prefix / "realm" / "activity").rename(
+        prefix / "realm" / "captures"
     )
     result = run(prefix)
     assert result.returncode == 1
-    assert str(prefix / "realm/data/captures") in result.stdout
-    assert str(prefix / "realm/data/activity") in result.stdout
-
-
-def test_no_retired_name_is_admitted(tmp_path):
-    prefix = tmp_path / "lake"
-    build_lake(prefix)
-    for root, name in RETIRED:
-        node = prefix / root / name
-        node.mkdir()
-        result = run(prefix)
-        assert result.returncode == 1, f"{node} was admitted:\n{result.stdout}"
-        assert f"UNEXPECTED node: {node}" in result.stdout
-        node.rmdir()
+    assert str(prefix / "realm/captures") in result.stdout
+    assert str(prefix / "realm/activity") in result.stdout
 
 
 def test_a_regenerable_tool_cache_is_not_a_node(tmp_path):
@@ -135,3 +109,24 @@ def test_absent_roots_are_skipped_not_failed(tmp_path):
     result = run(tmp_path / "nowhere")
     assert result.returncode == 0
     assert result.stderr.count("SKIP") == len(ROOTS)
+
+
+def test_canonical_node_cannot_be_an_alias(tmp_path):
+    prefix = tmp_path / "lake"
+    build_lake(prefix)
+    node = prefix / "realm" / "journal"
+    node.rmdir()
+    node.symlink_to(prefix / "realm" / "notes", target_is_directory=True)
+    result = run(prefix)
+    assert result.returncode == 1
+    assert f"SYMLINK at canonical node: {node}" in result.stdout
+
+
+def test_dangling_unexpected_alias_is_reported(tmp_path):
+    prefix = tmp_path / "lake"
+    build_lake(prefix)
+    node = prefix / "realm" / "obsolete-alias"
+    node.symlink_to(prefix / "missing")
+    result = run(prefix)
+    assert result.returncode == 1
+    assert f"UNEXPECTED node: {node}" in result.stdout

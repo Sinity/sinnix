@@ -23,9 +23,8 @@ let
   targetUserName = config.sinnix.user.name;
   targetUserHome = "/home/${targetUserName}";
   homeManagerServiceName = "home-manager-${targetUserName}";
-  # Sinex's own operational substrate, distinct from /realm/data/captures
-  # (which is input data sinex *ingests*). On sinnix-prime this places the
-  # active substrate on the root SSD, not on /realm.
+  # Sinex's operational substrate. Host storage binds this path to
+  # /realm/state/sinex; subject capture folders provide its inputs.
   sinexRuntimeRoot = "/var/lib/sinex";
   sinexStateRoot = "${sinexRuntimeRoot}/state";
   sinexHome = "${sinexRuntimeRoot}/home";

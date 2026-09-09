@@ -206,7 +206,7 @@ def main() -> None:
     parser.add_argument(
         "--feedback-dir",
         type=Path,
-        default=Path("/realm/data/derived/hub-feedback"),
+        default=Path("/realm/state/hub-feedback"),
         help=(
             "Spool directory for annotations posted to /feedback: one "
             "append-only JSONL file per UTC day, which agents read directly."

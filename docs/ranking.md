@@ -34,7 +34,7 @@ the tool that created it.
 - `draw` — which item to hand over now: `top`, `softmax`, or Thompson
   sampling (the default).
 
-Raw comparisons live at `/realm/data/activity/ranking/<domain>/` and are never
+Raw comparisons live at `/realm/activity/ranking/<domain>/` and are never
 pruned. Fits are always recomputed from them, never cached back into the
 domain directory. `SINNIX_RANK_ROOT` moves the root for fixtures.
 
@@ -159,7 +159,7 @@ sinnix-rank-keybinds inventory                 # what is bound right now
 sinnix-rank-keybinds sync                      # register them as items
 sinnix-rank compare keybinds                   # operator comparisons
 sinnix-rank-keybinds usage --source atuin      # bounded, labelled prior
-sinnix-rank-keybinds manifest --output /realm/data/derived/keybinds/manifest.json
+sinnix-rank-keybinds manifest --output /realm/activity/keylog/keybinds/manifest.json
 sinnix-deck-forge keybinds                     # a phone recall deck
 ```
 

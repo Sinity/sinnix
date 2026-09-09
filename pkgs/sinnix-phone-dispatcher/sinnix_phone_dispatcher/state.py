@@ -21,7 +21,7 @@ from pathlib import Path
 from sinnix_lib import phone_inbox
 
 STATE_DIR = Path(os.environ.get("SINNIX_PHONE_STATE_DIR", "/realm/state/sinnix-phone"))
-LAKE_ROOT = Path(os.environ.get("SINNIX_PHONE_LAKE", "/realm/data/machine/phone"))
+LAKE_ROOT = Path(os.environ.get("SINNIX_PHONE_LAKE", "/realm/machine/phone"))
 
 # What prime has waiting for the device. The app FETCHES this over
 # /phone/v1/inbox on its own cadence and confirms each one-shot it landed;

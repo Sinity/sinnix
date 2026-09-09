@@ -147,8 +147,8 @@ The generator should:
 Judgments remain authored assessments with an author and evidence. A generator
 may collect their inputs, but must not silently turn a judgment into an
 unconditional finding. Keep recurring reports in
-`/realm/data/derived/reports/`, run `python3 generators/reports-index.py
-/realm/data/derived/reports`, and make the index reflect current files.
+`/realm/reports/`, run `python3 generators/reports-index.py
+/realm/reports`, and make the index reflect current files.
 
 ## Shipping checks
 

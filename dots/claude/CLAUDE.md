@@ -46,7 +46,7 @@ editing instructions or memory.
 Host: `sinnix-prime`. Root storage is wear-limited; use `/realm` for heavy work.
 
 - `/realm/project/`: active repositories.
-- `/realm/data/`: canonical personal data. Read `/realm/data/INVENTORY.md`;
+- `/realm/`: subject folders and service storage. Read `/realm/INVENTORY.md`;
   mutations go through its owning tools.
 - `/realm/state/`: live service state and external Beads databases.
 - `/realm/tmp/work/`: private scratch output, aged after 30 days.
@@ -136,8 +136,8 @@ that an installed skill, executable, or service changed.
 
 - Session history: Polylogue; `claude-sessions` reads raw JSONL when needed.
 - Cross-source history: Lynchpin. Host evidence: runtime inventory,
-  `sinnix-observe`, and `/realm/data/captures/`.
-- Operator stream: `/realm/data/knowledgebase/logs.raw-log.md`.
+  `sinnix-observe`, `/realm/activity/`, and `/realm/machine/`.
+- Operator stream: `/realm/journal/raw-log.md`.
 - Project memory: `~/.claude/projects/<p>/memory/MEMORY.md`, a short index of
   stable facts and pointers. Verify recalled mechanisms against current code.
   Archive superseded memories with their useful evidence preserved.

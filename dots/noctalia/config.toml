@@ -27,7 +27,7 @@ transparency_mode = "glass"
 [shell.screenshot]
 save_to_file = true
 copy_to_clipboard = true
-directory = "/realm/data/activity/screenshot"
+directory = "/realm/activity/screenshot"
 filename_pattern = "%Y-%m-%d-At-%Hh%Mm%Ss"
 freeze_screen = false
 confirm_region = false
@@ -136,8 +136,7 @@ show_actions = true
 show_app_name = true
 background_opacity = 0.96
 
-# Notes are plain Markdown in the data lake, one capture lane like the rest
-# of activity/; the plugin is a view over them, not their store.
+# Notes are plain Markdown in the notes folder; the plugin is a view over them.
 [plugin_settings."noctalia/notes"]
-notes_dir = "/realm/data/activity/notes"
+notes_dir = "/realm/notes"
 extension = "md"

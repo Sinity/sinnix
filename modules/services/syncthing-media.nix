@@ -23,7 +23,7 @@ mkServiceModule {
     let
       username = config.sinnix.user.name;
       stateDir = "/realm/state/syncthing";
-      mediaDir = "/realm/data/self/photos/phone-sync";
+      mediaDir = "/realm/photos/phone-sync";
     in
     {
       services.syncthing = {

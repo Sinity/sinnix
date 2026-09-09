@@ -13,7 +13,7 @@ intention.
 
 Store convention (design doc section 2): raw comparisons/items are
 behavioral capture, kept forever under
-/realm/data/activity/ranking/<domain>/; derived fits are never written back
+/realm/activity/ranking/<domain>/; derived fits are never written back
 into that directory, so a full refit from raw comparisons stays reproducible
 at any time -- `status`/`spin` always refit in memory rather than trusting a
 cached theta file.
@@ -34,7 +34,7 @@ from rank_core.draw import POLICIES
 from rank_core.store import VALID_KINDS
 
 CAPTURE_ROOT = Path(
-    os.environ.get("SINNIX_RANK_ROOT", "/realm/data/activity/ranking")
+    os.environ.get("SINNIX_RANK_ROOT", "/realm/activity/ranking")
 )
 BACKLOG_ACTIVITY_NAME = "backlog session"
 

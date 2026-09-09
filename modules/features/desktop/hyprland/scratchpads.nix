@@ -7,7 +7,7 @@
 {
   pkgs,
   lib,
-  knowledgebaseRoot,
+  journalRoot,
 }:
 let
   # Common scratchpad spec:
@@ -47,8 +47,9 @@ let
         "--class"
         "notes-scratch"
         "-d"
-        knowledgebaseRoot
+        journalRoot
         "${pkgs.neovim}/bin/nvim"
+        "${journalRoot}/raw-log.md"
       ];
     };
 

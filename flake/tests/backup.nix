@@ -379,7 +379,7 @@ in
               to = "$TMPDIR/sinex-source";
             }
             {
-              from = "/realm/data";
+              from = "/realm";
               to = "$TMPDIR/realm-data";
             }
             {
