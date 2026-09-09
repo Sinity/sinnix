@@ -469,9 +469,9 @@ let
     # regenerable members carry their own provenance. Precious-small media
     # (books, videos, substack, edu, music-audio-features, web-content)
     # deliberately stays in coverage.
-    # steamapps, not library/media/Steam: the games are 98G of the 103G and Steam
+    # steamapps, not library/games/steam: the games are 98G of the 103G and Steam
     # re-downloads them, but the remaining ~5G is client state that CONTAINS
-    # library/media/Steam/userdata -- Steam Cloud save files and game recordings, which
+    # library/games/steam/userdata -- Steam Cloud save files and game recordings, which
     # no reinstall recreates.
     #
     # While the plain-path patterns were inert, userdata was being backed up by
@@ -488,11 +488,11 @@ let
     # too. They are dropped, not repointed: each now carries a CACHEDIR.TAG
     # (commit 2dfa8ae6), and --exclude-caches below already excludes them by
     # that property regardless of where they live -- which is the whole
-    # point of a property-based marker surviving the media/ -> library/media/
-    # move for free. Steam has no such marker (games do not self-tag as
+    # point of a property-based marker surviving library moves.
+    # Steam has no such marker (games do not self-tag as
     # caches), so it is the one entry still named by path, repointed to its
     # new location.
-    "library/media/Steam/steamapps"
+    "library/games/steam/steamapps"
     # Regenerable-cache root (sinex cargo/dev caches via the
     # /var/cache/sinex bind, nix-build) — pure churn, never backup material.
     "state/cache"

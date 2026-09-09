@@ -64,10 +64,10 @@ in
               type = types.str;
               default = "${config.realmRoot}/photos";
             };
-            mediaRoot = mkOption {
+            libraryRoot = mkOption {
               type = types.str;
-              default = "${config.realmRoot}/library/media";
-              description = "Media collections and application libraries, including unique saves and catalog metadata.";
+              default = "${config.realmRoot}/library";
+              description = "Books, media, reference datasets, models, packaged code, and game libraries.";
             };
             datasetsRoot = mkOption {
               type = types.str;
@@ -77,7 +77,7 @@ in
             modelsRoot = mkOption {
               type = types.str;
               default = "${config.realmRoot}/library/models";
-              description = "Model weights (ollama, gguf, embeddings, sherpa, tts, whisper, ...): re-acquirable, ownership='others'. Was mediaRoot/model until the library/ recut split it out with its own root, since it was previously a subdirectory of media rather than a peer.";
+              description = "Model weights used by workstation services and analysis tools.";
             };
             stateRoot = mkOption {
               type = types.str;
