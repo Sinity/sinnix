@@ -40,8 +40,8 @@ names, and exits with one result document.
    agent unit is capped at a small memory ceiling and shares the host with a
    dozen siblings; anything expected to exceed 1 GB of memory, 5 minutes, or
    a scan of the live archive runs through the project's declared scratch
-   operation: `agentctl job start <project> scratch --workspace . --wait --
-   <script> [args]` (the script lives under `/realm/tmp/work/`, reads its
+   operation: `agentctl job start <project> scratch --workspace . --wait -- <script> [args]`
+   (the script lives under `/realm/tmp/work/`, reads its
    inputs read-only, writes its output there, and prints a summary). Read
    the result from the job log the run prints. A process that is OOM-killed
    in the agent unit is a contract violation, not bad luck.
