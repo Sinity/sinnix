@@ -1,6 +1,11 @@
 --- a/src/cli/mod.rs
 +++ b/src/cli/mod.rs
-@@ -508,0 +509,8 @@
+@@ -508,2 +508,10 @@
+-    #[arg(long)]
+-    pub(crate) reap: bool,
++    #[arg(long)]
++    pub(crate) reap: bool,
++
 +    /// Skip the repo-wide stale-trash and orphan-fsmonitor cleanup.
 +    ///
 +    /// Worktrunk still performs the requested worktree removal and its
@@ -8,7 +13,6 @@
 +    /// cleanup scope and must not sweep unrelated repository state.
 +    #[arg(long)]
 +    pub(crate) no_internal_sweep: bool,
-+
 
 --- a/src/commands/remove.rs
 +++ b/src/commands/remove.rs
