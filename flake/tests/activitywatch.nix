@@ -27,7 +27,7 @@ in
           ''
             set -eu
             test -x "$awatcherPatched/bin/awatcher"
-            test "$("$awatcherPatched/bin/awatcher" --version)" = "Activity Watcher 0.3.3"
+            test "$("$awatcherPatched/bin/awatcher" --version)" = "Activity Watcher ${awatcherPatched.version}"
             touch "$out"
           '';
     };
