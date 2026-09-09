@@ -406,7 +406,7 @@ in
           [
             {
               assertion =
-                lib.hasInfix "/bin/agentctl job start sinnix sinex_cache_prebuild" service.ExecStart
+                lib.hasInfix "/bin/agentctl job fire sinnix sinex_cache_prebuild" service.ExecStart
                 && service.TimeoutStartSec == "1min";
               message = "the Sinex cache-prebuild timer must submit the bounded named AgentCTL operation";
             }
