@@ -89,7 +89,7 @@ let
       append_override_arg lynchpin "$SINNIX_LYNCHPIN_OVERRIDE"
     fi
     # --impure: modules/secrets.nix reads agenix secrets from
-    # /realm/secrets/sinnix, outside the flake source. Pure evaluation
+    # /realm/state/secrets/sinnix, outside the flake source. Pure evaluation
     # cannot see paths outside the flake's store copy, and fails silently
     # doing so (builtins.pathExists/readDir return false/empty rather than
     # erroring) — the symptom is a system with zero secrets, not a build
@@ -616,7 +616,7 @@ in
     agenix = {
       description = "Manage encrypted secrets with agenix";
       script = ''
-        cd /realm/secrets/sinnix && exec ${inputs.agenix.packages.${system}.default}/bin/agenix "$@"
+        cd /realm/state/secrets/sinnix && exec ${inputs.agenix.packages.${system}.default}/bin/agenix "$@"
       '';
     };
 

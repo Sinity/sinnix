@@ -174,11 +174,11 @@
           exec ${pkgs.nh}/bin/nh clean all
         '';
         # secrets.nix + secret/*.age live outside the checkout at
-        # /realm/secrets/sinnix (see modules/secrets.nix) — cd there so
+        # /realm/state/secrets/sinnix (see modules/secrets.nix) — cd there so
         # RULES defaults to ./secrets.nix and relative FILE args like
         # `secret/foo.age` resolve.
         agenix = pkgs.writeShellScriptBin "agenix" ''
-          cd /realm/secrets/sinnix && exec ${inputs.agenix.packages.${system}.default}/bin/agenix "$@"
+          cd /realm/state/secrets/sinnix && exec ${inputs.agenix.packages.${system}.default}/bin/agenix "$@"
         '';
         diff-closure = pkgs.writeShellScriptBin "diff-closure" ''
           set -euo pipefail

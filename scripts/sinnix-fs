@@ -423,7 +423,7 @@ CONTENT_EXCLUDE_PREFIXES = (
     "/realm/library/media/",
     "/realm/library/models/",
     "/realm/library/datasets/",
-    "/realm/cache/",
+    "/realm/state/cache/",
     "/realm/tmp/shell/",
     "/realm/worktrees/",
     "/nix/store/",

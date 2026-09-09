@@ -51,7 +51,7 @@ _tmp_do_not_include_in_version_control.md
 .serena/
 
 # Secrets and secret-shaped files. Encrypted agenix payloads live outside
-# the checkout entirely (/realm/secrets/sinnix); anything matching
+# the checkout entirely (/realm/state/secrets/sinnix); anything matching
 # these shapes inside the repo is a mistake.
 *.key
 *.pem

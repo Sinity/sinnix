@@ -155,7 +155,7 @@ let
 
   # Exclusion patterns are written relative to the archive root, but borg
   # matches them against the FULL SOURCE PATH it walks -- the bind mount, e.g.
-  # run/borgbackup-snapshot-inputs/realm/cache/... (borg strips the leading
+  # run/borgbackup-snapshot-inputs/realm/state/cache/... (borg strips the leading
   # separator). A bare `cache` must match from the start of that path and never
   # can, so every plain-path exclusion in realmExcludes was inert. Only the
   # `**/...` entries worked, because `**` absorbs the bind prefix -- and since
@@ -493,9 +493,9 @@ let
     # caches), so it is the one entry still named by path, repointed to its
     # new location.
     "library/media/Steam/steamapps"
-    # Top-level regenerable-cache root (sinex cargo/dev caches via the
+    # Regenerable-cache root (sinex cargo/dev caches via the
     # /var/cache/sinex bind, nix-build) — pure churn, never backup material.
-    "cache"
+    "state/cache"
     # 285G of public reference downloads: GRCh38 reference (156G), PGS Catalog
     # (101G), kraken2, dbSNP, snpEff, GWAS sumstats. Re-acquirable from their
     # upstreams exactly like media/model, and matched by neither "cache"
