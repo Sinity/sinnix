@@ -87,7 +87,7 @@ in
         "d ${paths.realmRoot}/accounts 0755 ${username} users -"
         "d ${paths.realmRoot}/notes 0755 ${username} users -"
         "d ${paths.activityRoot} 0755 ${username} users -"
-        "d ${paths.machineRoot} 0755 ${username} users -"
+        "d ${paths.machineRoot} 0775 ${username} users -"
         "d ${paths.healthRoot} 0755 ${username} users -"
         "d ${paths.activityRoot}/irc 0755 ${username} users -"
         "d ${paths.aiRoot} 0755 ${username} users -"
