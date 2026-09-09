@@ -110,7 +110,7 @@ mkServiceModule {
               "%t/sinnix"
               stateDir
               # The annotation spool the /feedback route appends to. Nothing
-              # else under /realm/data is writable from here.
+              # else under /realm is writable from here.
               cfg.feedbackDir
               # The health sweep's transition ledger and dedup state, shared
               # with the root-run failure template (runtime.nix).
@@ -131,7 +131,7 @@ mkServiceModule {
 
     feedbackDir = lib.mkOption {
       type = lib.types.str;
-      default = "/realm/data/derived/hub-feedback";
+      default = "/realm/state/hub-feedback";
       description = ''
         Spool directory for annotations posted to the reducer's /feedback
         route: one append-only JSONL file per UTC day, which agents read

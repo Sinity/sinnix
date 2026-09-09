@@ -56,8 +56,8 @@ SILERO = MODEL_ROOT / "silero_vad.onnx"
 SEGMENTATION = MODEL_ROOT / "sherpa-onnx-pyannote-segmentation-3-0" / "model.onnx"
 EMBEDDING = MODEL_ROOT / "nemo_en_titanet_small.onnx"
 
-ACTIVITY = Path(os.environ.get("SINNIX_ACTIVITY_ROOT", "/realm/data/activity"))
-MACHINE = Path(os.environ.get("SINNIX_MACHINE_ROOT", "/realm/data/machine"))
+ACTIVITY = Path(os.environ.get("SINNIX_ACTIVITY_ROOT", "/realm/activity"))
+MACHINE = Path(os.environ.get("SINNIX_MACHINE_ROOT", "/realm/machine"))
 TRANSCRIPT_DIR = ACTIVITY / "transcripts"
 LEDGER = TRANSCRIPT_DIR / "transcribed.jsonl"
 

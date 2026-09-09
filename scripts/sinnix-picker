@@ -23,26 +23,25 @@ can't answer before they've found the thing.
 
 SOURCES (each optional -- a missing/unreadable source is skipped, never a
 hard failure):
-  - History: /realm/data/activity/webhistory/gestalt/derived/full_history.ndjson
+  - History: /realm/activity/webhistory/gestalt/derived/full_history.ndjson
     (932k+ rows spanning 2013-present) -- capped to the most-recent N by
     iso_time, deduplicated by normalized URL keeping the newest visit. Full
     history is too large to hand fuzzel wholesale; recency is the right cut
     for "convenient access" (old one-off visits are what the URL-ledger /
     lynchpin are for, not a keybind).
   - Bookmarks: raindrop processed export
-    (/realm/data/accounts/raindrop/processed/bookmarks.csv) AND live Chrome
+    (/realm/accounts/raindrop/processed/bookmarks.csv) AND live Chrome
     bookmarks (~/.config/chrome-ws/Default/Bookmarks, Chrome's own JSON
     format, walked recursively for the folder tree).
   - Clipboard: capture-clipboard's own JSONL lane
-    (/realm/data/activity/clipboard/clipboard/clipboard-*.jsonl) -- text entries only
+    (/realm/activity/clipboard/clipboard/clipboard-*.jsonl) -- text entries only
     (image/binary clipboard entries are skipped here; they have no useful
     single-line picker representation), most recent N.
   - Recent project directories: zoxide's own database (`zoxide query -l`,
     already-maintained "places of note" ranking -- reused rather than
     building a parallel file-recency tracker from scratch).
 
-ONETAB: no export exists anywhere in the lake (checked
-/realm/data/exports and the whole repo) -- NOT implemented as a source.
+ONETAB: no export was found during the source audit; it is not implemented as a source.
 This is a real gap, not an oversight; left as an explicit follow-up (the
 OneTab extension's localStorage export would need to be dumped once,
 manually or via a small extension-storage-reading script, before this
@@ -72,11 +71,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 HISTORY_PATH = Path(
-    "/realm/data/activity/webhistory/gestalt/derived/full_history.ndjson"
+    "/realm/activity/webhistory/gestalt/derived/full_history.ndjson"
 )
-RAINDROP_CSV = Path("/realm/data/accounts/raindrop/processed/bookmarks.csv")
+RAINDROP_CSV = Path("/realm/accounts/raindrop/processed/bookmarks.csv")
 CHROME_BOOKMARKS = Path.home() / ".config/chrome-ws/Default/Bookmarks"
-CLIPBOARD_DIR = Path("/realm/data/activity/clipboard/clipboard")
+CLIPBOARD_DIR = Path("/realm/activity/clipboard/clipboard")
 READING_STACK_PATH = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "sinnix/reading-stack.json"
 
 HISTORY_LIMIT = 4000

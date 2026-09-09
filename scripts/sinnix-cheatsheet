@@ -40,7 +40,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_OUTPUT = Path("/realm/data/derived/reports/cheatsheet.html")
+DEFAULT_OUTPUT = Path("/realm/reports/cheatsheet.html")
 
 
 def esc(s: str) -> str:

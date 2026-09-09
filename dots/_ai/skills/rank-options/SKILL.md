@@ -31,7 +31,7 @@ sinnix-rank record <domain> --set A,B --winner A # one operator judgment
 sinnix-rank status <domain> --json               # fitted order + evidence
 ```
 
-State lives in `/realm/data/activity/ranking/<domain>/` (override the root
+State lives in `/realm/activity/ranking/<domain>/` (override the root
 with `SINNIX_RANK_ROOT`). `items.jsonl` and `comparisons.jsonl` are
 append-only; comparisons are never pruned, only tombstoned by
 `sinnix-rank retract`.

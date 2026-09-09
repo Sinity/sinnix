@@ -124,13 +124,13 @@ mkServiceModule {
 
     reportsDir = lib.mkOption {
       type = lib.types.str;
-      default = "/realm/data/derived/reports";
+      default = "/realm/reports";
       description = "Directory of generated HTML reports served under /reports/.";
     };
 
     feedbackDir = lib.mkOption {
       type = lib.types.str;
-      default = "/realm/data/derived/hub-feedback";
+      default = "/realm/state/hub-feedback";
       description = ''
         Spool directory for report annotations posted to /feedback. One
         append-only JSONL file per UTC day; agents read it directly.
@@ -544,7 +544,7 @@ mkServiceModule {
           captures = [
             {
               name = "phone-ambient";
-              path = "/realm/data/machine/phone/ambient";
+              path = "/realm/machine/phone/ambient";
               cadenceSeconds = 300;
               staleAfterSeconds = 7200;
             }
@@ -579,7 +579,7 @@ mkServiceModule {
               # was concerned. That directory keeps its files as history;
               # nothing writes it any more, so it is no longer declared.
               name = "phone-events";
-              path = "/realm/data/machine/phone/events";
+              path = "/realm/machine/phone/events";
               cadenceSeconds = 20;
               staleAfterSeconds = 1800;
             }

@@ -35,34 +35,39 @@ in
               type = types.str;
               default = "/realm";
             };
-            dataRoot = mkOption {
-              type = types.str;
-              default = "${config.realmRoot}/data";
-            };
             activityRoot = mkOption {
               type = types.str;
-              default = "${config.dataRoot}/activity";
-              description = "Ambient personal-activity capture: input devices, window/app focus, terminal, media playback, notifications, URL visits, IRC, mail, calendar, transcripts, ranking sessions. Sole home for capture lanes about the operator (captures/ and comms/ retired 2026-08-24; a new lane lands here or in machineRoot/healthRoot by subject).";
+              default = "${config.realmRoot}/activity";
+              description = "Personal activity records: app focus, terminal, media playback, notifications, browsing, messages, transcripts, and ranking sessions.";
             };
             machineRoot = mkOption {
               type = types.str;
-              default = "${config.dataRoot}/machine";
+              default = "${config.realmRoot}/machine";
               description = "Host/device telemetry: machine-telemetry, syslog, netflow, router, monitor DDC, audio device/topology streams, the phone app's own lane.";
             };
             healthRoot = mkOption {
               type = types.str;
-              default = "${config.dataRoot}/health";
-              description = "Body/environment physiology: Awair air quality (as health/environment), Xiaomi cloud health witness, phone health/battery/thermal.";
+              default = "${config.realmRoot}/health";
+              description = "Health records, measurements, genome data, and therapy material.";
             };
             aiRoot = mkOption {
               type = types.str;
-              default = "${config.dataRoot}/ai";
+              default = "${config.realmRoot}/ai";
               description = "AI chat/dialogue archives and analyses, including the live polylogue capture lane.";
             };
-            selfRoot = mkOption {
+            journalRoot = mkOption {
               type = types.str;
-              default = "${config.dataRoot}/self";
-              description = "Personal-identity records: genome, finance, private, code-archives, photos. Distinct from mediaRoot/books, which holds curated reference material, not records about the operator.";
+              default = "${config.realmRoot}/journal";
+              description = "The operator journal and its historical entries.";
+            };
+            documentsRoot = mkOption {
+              type = types.str;
+              default = "${config.realmRoot}/documents";
+              description = "Personal documents, including finance, career, insurance and device records.";
+            };
+            photosRoot = mkOption {
+              type = types.str;
+              default = "${config.realmRoot}/photos";
             };
             mediaRoot = mkOption {
               type = types.str;
@@ -141,10 +146,6 @@ in
             interceptBounce = mkOption {
               type = types.str;
               default = "${config.root}/intercept-bounce";
-            };
-            knowledgebase = mkOption {
-              type = types.str;
-              default = "/realm/data/knowledgebase";
             };
             entries = mkOption {
               type = types.attrsOf (
@@ -314,9 +315,9 @@ in
       # checkout, so it belongs in the data lake rather than per-checkout state.
       # Every worktree and lane inherits this, which is what makes cross-lane
       # comparison possible at all.
-      POLYLOGUE_VERIFY_HISTORY_PATH = "/realm/data/activity/dev/polylogue/verify-history.jsonl";
+      POLYLOGUE_VERIFY_HISTORY_PATH = "/realm/activity/dev/polylogue/verify-history.jsonl";
       SINNIX_ROOT = cfg.projects.sinnix;
-      KNOWLEDGEBASE_ROOT = cfg.projects.knowledgebase;
+      RAWLOG_FILE = "${cfg.paths.journalRoot}/raw-log.md";
     };
   };
 }

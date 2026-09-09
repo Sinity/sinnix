@@ -47,13 +47,12 @@ SCHEMA = "sinnix.phone.deck/1"
 STATE_DIR = Path(os.environ.get("SINNIX_PHONE_STATE_DIR", "/realm/state/sinnix-phone"))
 DECKS_DIR = STATE_DIR / "inbox" / "decks"
 
-ACTIVITY = Path(os.environ.get("SINNIX_ACTIVITY_ROOT", "/realm/data/activity"))
-MACHINE = Path(os.environ.get("SINNIX_MACHINE_ROOT", "/realm/data/machine"))
-DERIVED = Path(os.environ.get("SINNIX_DERIVED_ROOT", "/realm/data/derived"))
+ACTIVITY = Path(os.environ.get("SINNIX_ACTIVITY_ROOT", "/realm/activity"))
+MACHINE = Path(os.environ.get("SINNIX_MACHINE_ROOT", "/realm/machine"))
+KEYBIND_MANIFEST = Path(os.environ.get("SINNIX_KEYBIND_MANIFEST", "/realm/activity/keylog/keybinds/manifest.json"))
 
 ATUIN_DB = Path(os.environ.get("ATUIN_DB", Path.home() / ".local/share/atuin/history.db"))
 KEYLOG = ACTIVITY / "keylog" / "logs"
-KEYBIND_MANIFEST = DERIVED / "keybinds" / "manifest.json"
 
 
 def write_deck(deck: dict, *, dry_run: bool = False) -> Path | None:
@@ -568,7 +567,7 @@ def cmd_typing(args: argparse.Namespace) -> int:
     if profile is None:
         print("forge: no usable keystroke captures; skipping the typing analysis", file=sys.stderr)
         return 0
-    out_dir = DERIVED / "typing"
+    out_dir = Path(os.environ.get("SINNIX_TYPING_OUTPUT", "/realm/activity/keylog/analysis"))
     out_dir.mkdir(parents=True, exist_ok=True)
     dest = out_dir / f"{dt.datetime.now(dt.timezone.utc).date().isoformat()}.json"
     dest.write_text(json.dumps(profile, indent=2) + "\n", encoding="utf-8")

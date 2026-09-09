@@ -15,7 +15,7 @@ let
   # Outside the flake checkout entirely, not merely gitignored: ciphertext and
   # the agenix recipient manifest stay clear of repo-local git operations and
   # are invisible to Nix's flake-source filtering by construction.
-  secretDir = /realm/data/secrets/sinnix/secret;
+  secretDir = /realm/secrets/sinnix/secret;
   cfg = config.sinnix.secrets;
 
   secretFiles =

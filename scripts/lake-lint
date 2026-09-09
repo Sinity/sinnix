@@ -1,19 +1,10 @@
 #!/usr/bin/env bash
 # @sinnix-package
-# description: Assert the level-1 node sets of /realm, /realm/data and /outer-realm match the taxonomy exactly, in both directions
+# description: Assert the level-1 node sets of /realm and /outer-realm match the taxonomy exactly, in both directions
 # runtimeInputs: bash coreutils
 #
-# Taxonomy source of truth: /realm/INVENTORY.md and /outer-realm/INVENTORY.md.
-# The check is BIDIRECTIONAL: a node on disk that the manifest does not name
-# is debris or an unratified taxonomy change, and a REQUIRED manifest node
-# missing from disk is a half-finished rename. Both fail. This is the ratchet
-# that stops a rename from leaving two coexisting naming generations behind
-# (media->library, captures->activity, exports->accounts, comms->accounts/
-# activity, reports->derived/reports all survived for weeks because the old
-# allow-list permitted both halves of every pair).
-#
-# A taxonomy change therefore updates the INVENTORY and this manifest in the
-# same commit that moves the data - never before, never after.
+# The root inventory and this manifest describe the same physical layout.
+# Unexpected nodes, missing required nodes, and aliases at canonical roots fail.
 set -euo pipefail
 
 status=0
@@ -55,7 +46,7 @@ check_root() {
   }
   local entry base ok
   for entry in "$root"/* "$root"/.[!.]*; do
-    [ -e "$entry" ] || continue
+    [ -e "$entry" ] || [ -L "$entry" ] || continue
     base="$(basename "$entry")"
     ok=1
     for a in "${required[@]}" "${optional[@]}"; do
@@ -70,41 +61,25 @@ check_root() {
     fi
   done
   for a in "${required[@]}"; do
-    if [ ! -e "$root/$a" ]; then
+    if [ -L "$root/$a" ]; then
+      echo "lake-lint: SYMLINK at canonical node: $root/$a"
+      status=1
+    elif [ ! -e "$root/$a" ]; then
       echo "lake-lint: MISSING required node: $root/$a"
       status=1
     fi
   done
 }
 
-# /realm level-1 manifest. backup/ holds explicit backup landings (the
-# polylogue consolidation and its live-store snapshot, 2026-08-16);
-# code-snapshots is a deliberate convenience door onto
-# data/derived/lynchpin/code-snapshots (D3, 2026-08-24). staging/ and db/
-# were dissolved 2026-08; captures/ comms/ reports/ decisions/ were
-# dissolved 2026-08-24.
+# Human-facing subjects and service-owned storage have distinct homes.
 check_root /realm \
-  project data library state backup swap cache worktrees tmp inbox \
-  code-snapshots INVENTORY.md \
+  project activity accounts ai archive code-snapshots documents health journal library machine \
+  notes photos probable-junk reports secrets state backup swap cache worktrees tmp inbox INVENTORY.md \
   -- .btrfs .Trash-1000
 
 check_root /outer-realm \
   backup archive inbox INVENTORY.md \
   -- .Trash-1000
-
-# /realm/data level-1 manifest (personal lake only), post the 2026-08-24
-# collapse. Cut is by GENESIS: activity/ (machine observed the operator),
-# machine/ (about the host), health/ (physiology), accounts/ (bounded
-# third-party pulls, incl. platform comms archives), ai/ (AI dialogue
-# archives), derived/ (tool-computed, incl. derived/reports and
-# derived/comms), knowledgebase/ (raw-log repo, load-bearing path),
-# self/ (irreplaceable personal artifacts), secrets/ (agenix ciphertext),
-# records/ + code/ (bounded personal/document datasets). notes/ persists
-# only until the operator-subject prose merge (D2-b) is ratified; do NOT
-# add new content there.
-check_root /realm/data \
-  accounts activity ai code derived health knowledgebase machine \
-  notes records secrets self INVENTORY.md
 
 if [ "$status" -eq 0 ]; then
   echo "lake-lint: all roots match taxonomy"

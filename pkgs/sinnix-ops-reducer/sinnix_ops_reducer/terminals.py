@@ -79,7 +79,7 @@ MAX_BODY = 1 << 16  # 64 KiB: a pasted command, not a file upload
 # .meta.json sibling). No host ever ran the retired daemon with a different
 # --history-dir than this, so the value is now a fixed convention rather than
 # a reducer CLI flag.
-HISTORY_DIR = Path("/realm/data/activity/kitty-scrollback")
+HISTORY_DIR = Path("/realm/activity/kitty-scrollback")
 HISTORY_NAME_RE = re.compile(
     r"^(?P<ts>[^-]+)-(?P<host>[^-]+)-pid(?P<pid>\d+)-win(?P<winid>\d+)-"
 )

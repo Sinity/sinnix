@@ -116,8 +116,8 @@ mkFeatureModule {
           path = paths.projectRoot;
         }
         {
-          name = "Data lake";
-          path = paths.dataRoot;
+          name = "Files";
+          path = paths.realmRoot;
         }
         {
           name = "State";

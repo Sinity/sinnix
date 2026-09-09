@@ -9,7 +9,7 @@ Two things this process already holds close that answer that:
 
   * the hub's own route table -- the only capability kind Nix cannot see,
     because the routes are declared here in Python (pages/__init__.py);
-  * the weekly usage census (`sinnix-census`, /realm/data/machine/usage-census.jsonl),
+  * the weekly usage census (`sinnix-census`, /realm/machine/usage-census.jsonl),
     whose evidence-joined verdict per script, service, MCP server and skill has
     until now been a file nobody opens.
 
@@ -33,7 +33,7 @@ from typing import Any, Iterable
 
 SCHEMA = "sinnix-capability-index-v1"
 DEFAULT_INDEX = Path("/etc/sinnix/capability-index.json")
-DEFAULT_CENSUS = Path("/realm/data/machine/usage-census.jsonl")
+DEFAULT_CENSUS = Path("/realm/machine/usage-census.jsonl")
 
 # Which census class covers which capability kind. The census keys services by
 # runtime-surface name, which is why a service row is also matched against every

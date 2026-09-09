@@ -202,7 +202,7 @@
       collectIntervalSec = 5;
       # Keep telemetry on /realm so the root filesystem stays slim. Same
       # subtree as machine-telemetry and activitywatch captures.
-      storeDir = "/realm/data/machine/below";
+      storeDir = "/realm/machine/below";
     };
     sinex = {
       prepareHost = true;

@@ -61,7 +61,7 @@ mkServiceModule {
     }:
     let
       scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
-      machineTelemetryLakeRoot = "${config.sinnix.paths.dataRoot}/derived/machine-telemetry";
+      machineTelemetryLakeRoot = "${config.sinnix.paths.machineRoot}/analysis";
       localRoot = "${cfg.repoRoot}/.lynchpin";
       localHotDirs = [
         "cache"

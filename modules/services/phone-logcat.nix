@@ -47,7 +47,7 @@ mkServiceModule {
       # here is "the cable is out and the phone has rebooted", not a fault.
       {
         name = "phone-logcat";
-        path = "/realm/data/machine/phone/logcat";
+        path = "/realm/machine/phone/logcat";
         cadenceSeconds = 1800;
         staleAfterSeconds = 86400;
       }

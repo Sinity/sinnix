@@ -13,14 +13,14 @@ let
 
   # Helpers for home-manager config
   repoRoot = config.sinnix.paths.projectRoot;
-  knowledgebaseRoot = config.sinnix.projects.knowledgebase;
+  journalRoot = config.sinnix.paths.journalRoot;
 
   # Scratchpad configuration (single source of truth)
   scratchpadData = import ./scratchpads.nix {
     inherit
       pkgs
       lib
-      knowledgebaseRoot
+      journalRoot
       ;
   };
 

@@ -58,8 +58,8 @@ from sinnix_lib.process import run
 
 HOME = Path.home()
 REPO = Path(os.environ.get("SINNIX_REPO", "/realm/project/sinnix"))
-CAPTURES = Path("/realm/data/machine")
-SECRET_DIR = Path("/realm/data/secrets/sinnix/secret")
+CAPTURES = Path("/realm/machine")
+SECRET_DIR = Path("/realm/secrets/sinnix/secret")
 INVENTORY = Path("/etc/sinnix/runtime-inventory.json")
 CAPABILITY_INDEX = Path("/etc/sinnix/capability-index.json")
 

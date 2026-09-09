@@ -1,7 +1,7 @@
 """One UTC grammar in the records these two runners write.
 
 The experiment manifest is the join key between a workload window and machine
-telemetry, and Lynchpin reads it out of ``/realm/data/machine/experiments``
+telemetry, and Lynchpin reads it out of ``/realm/machine/experiments``
 long after the run. Both runners emit ``%Y-%m-%dT%H:%M:%SZ`` -- the same
 string ``sinnix_lib.ledger.utc_ts`` produces -- so a manifest, a boot-metric
 index row and a ledger receipt compare as text without a per-producer parser.

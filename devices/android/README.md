@@ -2,7 +2,7 @@
 
 `nix-android` records reviewed Android state and compares or applies it over an
 explicit adb connection. Personal device snapshots and generated imports stay
-under `/realm/data/self/devices/`, outside this public repository.
+under `/realm/documents/devices/`, outside this public repository.
 
 Inspect changes before applying them:
 

@@ -42,11 +42,11 @@ if [[ -z "$OUTPUT" ]]; then
 fi
 mkdir -p "$(dirname "$OUTPUT")"
 
-RAWLOG=/realm/data/knowledgebase/logs.raw-log.md
+RAWLOG=${RAWLOG_FILE:-/realm/journal/raw-log.md}
 PACK_DIR=/realm/project/sinity-lynchpin/.agent/scratch/current-state-packs
 
 GH_REPOS=(Sinity/sinnix Sinity/sinex Sinity/polylogue Sinity/knowledgebase Sinity/scribe-tap Sinity/intercept-bounce)
-GIT_REPOS=(/realm/project/sinex /realm/project/polylogue /realm/project/sinity-lynchpin /realm/project/sinnix /realm/data/knowledgebase)
+GIT_REPOS=(/realm/project/sinex /realm/project/polylogue /realm/project/sinity-lynchpin /realm/project/sinnix)
 
 SUBSTRATE="$(mktemp -t oracle-substrate.XXXXXX.md)"
 trap 'rm -f "$SUBSTRATE"' EXIT

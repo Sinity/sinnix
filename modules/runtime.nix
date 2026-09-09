@@ -254,8 +254,8 @@ let
         projections = [
           {
             name = "home-xdg-data";
-            path = "${config.sinnix.paths.aiRoot}/polylogue";
-            kind = "compatibility";
+            path = "/home/${config.sinnix.user.name}/.local/share/polylogue";
+            kind = "bind-mount";
             source = config.sinnix.services.polylogue.dataDir;
           }
         ];

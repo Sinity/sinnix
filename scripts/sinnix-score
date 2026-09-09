@@ -51,7 +51,7 @@ from sinnix_lib.phone_inbox import emit_receipt
 SCHEMA = "sinnix.phone.score/1"
 
 STATE_DIR = Path(os.environ.get("SINNIX_PHONE_STATE_DIR", "/realm/state/sinnix-phone"))
-LAKE_ROOT = Path(os.environ.get("SINNIX_PHONE_LAKE", "/realm/data/machine/phone"))
+LAKE_ROOT = Path(os.environ.get("SINNIX_PHONE_LAKE", "/realm/machine/phone"))
 
 OUTBOX = LAKE_ROOT / "outbox"
 EVENTS = LAKE_ROOT / "events"

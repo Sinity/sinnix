@@ -31,7 +31,7 @@ only for the interaction patterns the artifact needs.
    when an exposed tool and the current authority permit it. Otherwise return
    the local path and say what was not published.
 6. Place one-shot reports beside the deliverable. Place living or
-   cross-referenced reports in `/realm/data/derived/reports/` and refresh its
+   cross-referenced reports in `/realm/reports/` and refresh its
    index with the bundled generator.
 
 ## Verification

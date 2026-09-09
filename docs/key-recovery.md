@@ -5,7 +5,7 @@ full access to the system's secrets from nothing but an escrow blob + a passphra
 
 > **2026-07 change — secrets moved out of the git repo.** `secret/*.age` and
 > `secrets.nix` used to live inside this repo (encrypted, but still git
-> history payload). They now live at `/realm/data/secrets/sinnix/`, outside
+> history payload). They now live at `/realm/secrets/sinnix/`, outside
 > the checkout entirely (see `modules/secrets.nix`). `git clone` alone no
 > longer recovers the encrypted secrets — only the Nix module code that
 > knows where to look for them. **This removes GitHub as an off-site backup
@@ -15,7 +15,7 @@ full access to the system's secrets from nothing but an escrow blob + a passphra
 > is the local `/realm` → `/outer-realm` Borg pipeline (see
 > `modules/backup.nix`) — both drives in the same machine/location. Given the
 > whole directory is small (~30 files, well under 1 MB), the simplest
-> mitigation is to fold a copy of `/realm/data/secrets/sinnix/` into the same
+> mitigation is to fold a copy of `/realm/secrets/sinnix/` into the same
 > escrow blob described below, so a truly off-site recovery path still
 > exists. Not yet done — flagged here as a real, not-hypothetical gap.
 
@@ -120,18 +120,18 @@ GIT_SSH_COMMAND='ssh -i ~/.ssh/id_ed25519_github' \
     git clone git@github.com:Sinity/sinnix
 cd sinnix
 
-# 3. Restore the encrypted secrets themselves to /realm/data/secrets/sinnix/
+# 3. Restore the encrypted secrets themselves to /realm/secrets/sinnix/
 #    (secret/*.age + secrets.nix). They are NOT in the git clone above — see
 #    the 2026-07 callout at the top of this doc. Recover them either from:
 #      a. the local Borg /realm backup (modules/backup.nix), if that drive
 #         survived whatever caused the loss, or
 #      b. a copy folded into the escrow blob, if that mitigation has since
 #         been done (recommended — see the callout above).
-mkdir -p /realm/data/secrets/sinnix
+mkdir -p /realm/secrets/sinnix
 # ... restore secret/ and secrets.nix into that directory from (a) or (b) ...
 
 # 4. Decrypt any secret with the recovered user key. Examples:
-cd /realm/data/secrets/sinnix
+cd /realm/secrets/sinnix
 nix run github:ryantm/agenix -- -d secret/borg-passphrase.age   # restore backups
 nix run github:ryantm/agenix -- -d secret/root-password.age
 ```

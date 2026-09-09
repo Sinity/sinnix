@@ -33,7 +33,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-OLD_ROOT = Path("/realm/data/notes/preferences")
+OLD_ROOT = Path("/realm/notes/preferences")
 NEW_ROOT = Path("/realm/state/elicit")
 DRAIN_UNIT = "sinnix-elicit-autoingest.service"
 

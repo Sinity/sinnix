@@ -89,7 +89,7 @@ let
       append_override_arg lynchpin "$SINNIX_LYNCHPIN_OVERRIDE"
     fi
     # --impure: modules/secrets.nix reads agenix secrets from
-    # /realm/data/secrets/sinnix, outside the flake source. Pure evaluation
+    # /realm/secrets/sinnix, outside the flake source. Pure evaluation
     # cannot see paths outside the flake's store copy, and fails silently
     # doing so (builtins.pathExists/readDir return false/empty rather than
     # erroring) — the symptom is a system with zero secrets, not a build
@@ -289,7 +289,7 @@ let
     need_active below.service
     need_active machine-telemetry.service
 
-    telemetry_db="/realm/data/machine/telemetry.sqlite"
+    telemetry_db="/realm/machine/telemetry.sqlite"
     [ -s "$telemetry_db" ]
 
     now="$(${pkgs.coreutils}/bin/date +%s)"
@@ -299,7 +299,7 @@ let
       exit 1
     fi
 
-    ${pkgs.findutils}/bin/find /realm/data/machine/below/store -type f | ${pkgs.gnugrep}/bin/grep -q .
+    ${pkgs.findutils}/bin/find /realm/machine/below/store -type f | ${pkgs.gnugrep}/bin/grep -q .
 
     session_id="inactive"
     if [ "$(${pkgs.systemd}/bin/systemctl is-active transmission.service)" = "active" ]; then
@@ -348,7 +348,7 @@ let
   '';
   hostSmokeAllScript = ''
     ${resolveFlakeDir}
-    artifact_root="''${SINNIX_HOST_SMOKE_ROOT:-/realm/data/machine/host-smoke}"
+    artifact_root="''${SINNIX_HOST_SMOKE_ROOT:-/realm/machine/host-smoke}"
     run_id="$(${pkgs.coreutils}/bin/date -u +%Y%m%dT%H%M%SZ)-$$"
     run_dir="$artifact_root/$run_id"
     mkdir -p "$run_dir"
@@ -616,7 +616,7 @@ in
     agenix = {
       description = "Manage encrypted secrets with agenix";
       script = ''
-        cd /realm/data/secrets/sinnix && exec ${inputs.agenix.packages.${system}.default}/bin/agenix "$@"
+        cd /realm/secrets/sinnix && exec ${inputs.agenix.packages.${system}.default}/bin/agenix "$@"
       '';
     };
 

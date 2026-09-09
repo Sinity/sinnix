@@ -113,8 +113,8 @@ in
             ''
               jq -e --arg root "$sentinelDataDir" '
                 index("d \($root)/inbox 0755 sinity users -") != null and
-                index("L+ \($root)/inbox/chatgpt - - - - /realm/data/ai/chatlog/raw/chatgpt") != null and
-                index("L+ \($root)/inbox/claude - - - - /realm/data/ai/chatlog/raw/claude") != null
+                index("L+ \($root)/inbox/chatgpt - - - - /realm/ai/chatlog/raw/chatgpt") != null and
+                index("L+ \($root)/inbox/claude - - - - /realm/ai/chatlog/raw/claude") != null
               ' <<<"$actualTmpfiles" >/dev/null
               touch "$out"
             '';
@@ -145,7 +145,7 @@ in
               jq -e --arg root "$sentinelDataDir" '
                 .archiveRoot == $root and
                 (.databaseTiers == ["index.db", "source.db", "embeddings.db", "ops.db", "audit.db", "user.db"]) and
-                (.projections | any(.kind == "compatibility" and .source == $root))
+                (.projections | any(.kind == "bind-mount" and .path == "/home/sinity/.local/share/polylogue" and .source == $root))
               ' <<<"$actual" >/dev/null
               touch "$out"
             '';

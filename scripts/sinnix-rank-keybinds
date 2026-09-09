@@ -56,8 +56,8 @@ DEFAULT_INVENTORY = Path(
         "SINNIX_HYPR_LUA", str(Path.home() / ".config/hypr/hyprland.lua")
     )
 )
-CAPTURE_ROOT = Path(os.environ.get("SINNIX_RANK_ROOT", "/realm/data/activity/ranking"))
-DERIVED = Path(os.environ.get("SINNIX_DERIVED_ROOT", "/realm/data/derived"))
+CAPTURE_ROOT = Path(os.environ.get("SINNIX_RANK_ROOT", "/realm/activity/ranking"))
+KEYBIND_MANIFEST = Path(os.environ.get("SINNIX_KEYBIND_MANIFEST", "/realm/activity/keylog/keybinds/manifest.json"))
 ATUIN_DB = Path(
     os.environ.get("ATUIN_DB", str(Path.home() / ".local/share/atuin/history.db"))
 )
@@ -523,7 +523,7 @@ def build_parser() -> argparse.ArgumentParser:
     manifest.add_argument(
         "--output",
         default=None,
-        help=f"write the manifest here (deck-forge default: {DERIVED / 'keybinds' / 'manifest.json'})",
+        help=f"write the manifest here (deck-forge default: {KEYBIND_MANIFEST})",
     )
     manifest.add_argument("--evidence-threshold", type=float, default=EVIDENCE_THRESHOLD)
     manifest.add_argument("--uncertainty-weight", type=float, default=UNCERTAINTY_WEIGHT)

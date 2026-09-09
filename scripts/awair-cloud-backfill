@@ -333,8 +333,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--capture-root",
         type=Path,
-        default=Path("/realm/data/health"),
-        help="Capture lake root (parent of the lane directory), default /realm/data/health",
+        default=Path("/realm/health"),
+        help="Capture lake root (parent of the lane directory), default /realm/health",
     )
     parser.add_argument(
         "--max-calls",

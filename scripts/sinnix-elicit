@@ -70,8 +70,8 @@ from sinnix_lib.ledger import utc_ts
 
 SCHEMA = "sinnix-elicit-v1"
 BASE_DIR = Path(os.environ.get("SINNIX_ELICIT_DIR", "/realm/state/elicit"))
-REPORTS_DIR = Path(os.environ.get("SINNIX_HUB_REPORTS_DIR", "/realm/data/derived/reports"))
-FEEDBACK_DIR = Path(os.environ.get("SINNIX_HUB_FEEDBACK_DIR", "/realm/data/derived/hub-feedback"))
+REPORTS_DIR = Path(os.environ.get("SINNIX_HUB_REPORTS_DIR", "/realm/reports"))
+FEEDBACK_DIR = Path(os.environ.get("SINNIX_HUB_FEEDBACK_DIR", "/realm/state/hub-feedback"))
 
 
 # ──────────────────────────────────────────────────────────────────────────

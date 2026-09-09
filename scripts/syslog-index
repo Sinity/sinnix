@@ -3,7 +3,7 @@
 # description: Build a no-loss index for canonical boot-metric captures
 # runtimeInputs: coreutils
 # pythonPackages: @sinnix-lib
-"""Build derived indexes for /realm/data/machine/syslog.
+"""Build derived indexes for /realm/machine/syslog.
 
 The index is not a summary replacement. It records where raw boot-metric files
 live, with enough metadata to navigate them quickly. Raw logs remain canonical
@@ -23,7 +23,7 @@ from sinnix_lib.atomic_json import write_json_atomic
 from sinnix_lib.ledger import utc_ts, write_jsonl_atomic
 
 SCHEMA = "sinnix-syslog-index-v1"
-DEFAULT_ROOT = Path("/realm/data/machine/syslog")
+DEFAULT_ROOT = Path("/realm/machine/syslog")
 OUTPUT_MODE = 0o640
 
 

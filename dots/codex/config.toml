@@ -46,10 +46,10 @@ trust_level = "trusted"
 [projects."/realm/project/knowledge-extract"]
 trust_level = "trusted"
 
-[projects."/realm/data/knowledgebase"]
+[projects."/realm/archive/knowledgebase"]
 trust_level = "trusted"
 
-[projects."/realm/data/activity/irc"]
+[projects."/realm/activity/irc"]
 trust_level = "trusted"
 
 [projects."/neo-outer-realm/content/media"]

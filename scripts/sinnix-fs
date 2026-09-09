@@ -419,7 +419,7 @@ CONTENT_EXCLUDE_PREFIXES = (
     # and 203 GB of 263 GB. It also produces phantom findings — a stray-file
     # search over the polluted index reported 821 hits where 8 were real.
     "/realm/.btrfs/",
-    "/realm/data/activity/",
+    "/realm/activity/",
     "/realm/library/media/",
     "/realm/library/models/",
     "/realm/library/datasets/",
