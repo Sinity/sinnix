@@ -120,7 +120,8 @@ let
     # every login shell.
     "spotify-refresh-token".exportEnv = false;
     "mail-app-password".exportEnv = false;
-    # Read only by the github-runner-polylogue unit at registration time.
+    # Retired registration token; the runner registers with github-token.
+    # Ciphertext retirement is the operator's call, so keep it out of shells.
     "github-runner-polylogue-token".exportEnv = false;
   };
 

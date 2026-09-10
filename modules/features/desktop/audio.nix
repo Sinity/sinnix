@@ -115,6 +115,10 @@ mkFeatureModule {
         }
       ];
 
+      # pipewire-pulse's mod.rt asks for nice -11 itself; without CAP_SYS_NICE
+      # that only succeeds when the unit already runs there.
+      systemd.user.services.pipewire-pulse.serviceConfig.Nice = -11;
+
       systemd.user.services.wireplumber.serviceConfig = lib.mkMerge [
         (lib.sinnix.systemd.mkRestartPolicy {
           strategy = "always";

@@ -5,8 +5,25 @@ local ENDPOINT = noctalia.getConfig("endpoint") or "http://127.0.0.1:3090"
 local TOKEN_PATH = noctalia.getConfig("token_path") or "$XDG_RUNTIME_DIR/sinnix/ops.token"
 local STALE_SECONDS = tonumber(noctalia.getConfig("stale_seconds")) or 30
 local STREAM_PATH = ENDPOINT .. "/v1/events"
-local SNAPSHOT_PATH = ENDPOINT .. "/v1/snapshot"
-local RECEIPTS_PATH = ENDPOINT .. "/v1/receipts"
+-- Every async callback runs under Noctalia's 25 ms CPU budget, decode
+-- included. Ask the reducer for just the state keys panel.luau reads instead
+-- of the full snapshot (hundreds of KB of inventory and unit rows), and for
+-- the few receipts the panel summarises.
+local SNAPSHOT_STATE_KEYS = table.concat({
+  "agent_gateway",
+  "ambient_intelligence",
+  "blocked_tasks",
+  "config_drift",
+  "gaps_summary",
+  "live_pressure",
+  "resource_slices",
+  "runtime_inventory",
+  "session_anchor",
+  "systemd_units",
+  "workload_rows",
+}, ",")
+local SNAPSHOT_PATH = ENDPOINT .. "/v1/snapshot?state=" .. SNAPSHOT_STATE_KEYS
+local RECEIPTS_PATH = ENDPOINT .. "/v1/receipts?limit=5"
 local stream = nil
 local reconnectAt = 0
 local lastReceived = 0
