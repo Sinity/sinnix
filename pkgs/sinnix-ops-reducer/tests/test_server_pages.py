@@ -70,3 +70,24 @@ def test_an_unknown_path_answers_a_browser_in_html(hub_server: str, http_get) ->
     assert status == 404
     assert content_type.startswith("text/html")
     assert http_get(hub_server + "/v1/nope")[1] == "application/json"
+
+
+def test_snapshot_state_query_projects_the_named_keys(
+    hub_server: str, http_get
+) -> None:
+    full = json.loads(http_get(hub_server + "/v1/snapshot")[2])
+    assert "systemd_units" in full["state"]
+
+    status, _, body = http_get(hub_server + "/v1/snapshot?state=systemd_units,absent")
+    projected = json.loads(body)
+
+    assert status == 200
+    assert projected["state"] == {"systemd_units": full["state"]["systemd_units"]}
+    assert {k: v for k, v in projected.items() if k != "state"} == {
+        k: v for k, v in full.items() if k != "state"
+    }
+
+
+def test_snapshot_without_query_is_unprojected(hub_server: str, http_get) -> None:
+    body = http_get(hub_server + "/v1/snapshot")[2]
+    assert "systemd_units" in json.loads(body)["state"]

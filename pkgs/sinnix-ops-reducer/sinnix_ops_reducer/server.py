@@ -11,6 +11,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
 from sinnix_lib.systemd import sd_notify, watchdog_period
 
@@ -447,6 +448,9 @@ class Handler(BaseHTTPRequestHandler):
         if not self._authorized():
             self._write(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
             return
+        parts = urlsplit(self.path)
+        route = parts.path
+        query = parse_qs(parts.query)
         if pages.is_page_route(self.path):
             self._serve_page(self.path)
         elif terminals.is_terminal_route(self.path):
@@ -479,13 +483,29 @@ class Handler(BaseHTTPRequestHandler):
                     ),
                 },
             )
-        elif self.path == "/v1/snapshot":
+        elif route == "/v1/snapshot":
             try:
                 value = json.loads(
                     self.reducer.snapshot_path.read_text(encoding="utf-8")
                 )
             except (OSError, json.JSONDecodeError):
                 value = self.reducer.health()
+            # `?state=a,b` keeps only the named state keys. The Noctalia bridge
+            # decodes the body inside a 25 ms Luau callback budget; the full
+            # snapshot (runtime inventory, every unit, every workload row)
+            # blows that budget, and the panel reads a handful of keys.
+            wanted = [
+                key
+                for raw in query.get("state", [])
+                for key in raw.split(",")
+                if key
+            ]
+            if wanted and isinstance(value.get("state"), dict):
+                state = value["state"]
+                value = {
+                    **value,
+                    "state": {key: state[key] for key in wanted if key in state},
+                }
             self._write(HTTPStatus.OK, value)
         elif self.path == "/v1/revision":
             try:
@@ -524,8 +544,13 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
-        elif self.path == "/v1/receipts":
-            receipts = list(self.reducer.actions.receipts.values())[-20:]
+        elif route == "/v1/receipts":
+            try:
+                limit = int(query.get("limit", ["20"])[0])
+            except ValueError:
+                limit = 20
+            limit = max(1, min(limit, 20))
+            receipts = list(self.reducer.actions.receipts.values())[-limit:]
             self._write(
                 HTTPStatus.OK,
                 {"schema": "sinnix-ops-receipts-v1", "receipts": receipts},

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @sinnix-package
 # description: Retarget ~/wallpaper/{dark,light} to the current time-of-day wallpaper set
-# runtimeInputs: bash coreutils
+# runtimeInputs: bash coreutils findutils gawk
 set -euo pipefail
 
 export LC_ALL=C
@@ -80,11 +80,44 @@ changed=0
 if relink "${WALLPAPER_DIR}/dark" "$target_dark"; then changed=1; fi
 if relink "${WALLPAPER_DIR}/light" "$target_light"; then changed=1; fi
 
+# Noctalia remembers the last wallpaper by path in its state file. After a
+# retarget that path points into the previous set, and Noctalia's next start
+# warns "cannot open file" before its startup automation picks a fresh one.
+# Repoint the remembered paths at a file that exists in the new set so a
+# session started after the switch loads cleanly.
+repoint_state() {
+  local state="${XDG_STATE_HOME:-$HOME/.local/state}/noctalia/settings.toml"
+  [[ -f "$state" ]] || return 0
+  local replacement
+  replacement=$(find -L "${WALLPAPER_DIR}/dark" -maxdepth 2 -type f \
+    \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.webp' \) \
+    -print -quit 2>/dev/null || true)
+  [[ -n "$replacement" ]] || return 0
+  local tmp
+  tmp=$(mktemp "${state}.XXXXXX")
+  awk -v dir="${WALLPAPER_DIR}/" -v repl="$replacement" '
+    /^[[:space:]]*path[[:space:]]*=[[:space:]]*"/ {
+      line = $0
+      sub(/^[^"]*"/, "", line); sub(/".*$/, "", line)
+      if (index(line, dir) == 1) {
+        cmd = "test -f \"" line "\""
+        if (system(cmd) != 0) {
+          sub(/"[^"]*"/, "\"" repl "\"")
+        }
+      }
+    }
+    { print }
+  ' "$state" >"$tmp" && cat "$tmp" >"$state"
+  rm -f "$tmp"
+}
+
 if [[ "$changed" == "1" ]]; then
   echo "sinnix-wallpaper-timeofday: switched to '${mood}' set"
   noctalia_bin="${SINNIX_NOCTALIA_BIN:-noctalia}"
-  # Best-effort: apply immediately instead of waiting for the next
-  # automation rotation. Non-fatal if the shell isn't up yet (e.g. right
-  # after boot before login).
-  "$noctalia_bin" msg wallpaper-random >/dev/null 2>&1 || true
+  # Apply immediately instead of waiting for the next automation rotation.
+  # When the shell isn't up (boot, TTY-only session) Noctalia will read its
+  # state file on the next start, so fix the remembered paths instead.
+  if ! "$noctalia_bin" msg wallpaper-random >/dev/null 2>&1; then
+    repoint_state
+  fi
 fi

@@ -136,8 +136,11 @@ in
               if [ "$current_tty" = "/dev/tty1" ] && command -v uwsm >/dev/null 2>&1; then
                 # UWSM's packaged desktop entry launches Hyprland without a
                 # config argument. Lua is not its default discovery path, so
-                # pass the Home Manager-generated config explicitly.
-                exec uwsm start -e -D Hyprland -- ${hyprlandPkg}/bin/Hyprland --config "$HOME/.config/hypr/hyprland.lua"
+                # pass the Home Manager-generated config explicitly. Hyprland
+                # 0.56+ expects to run under its start-hyprland watchdog (it
+                # warns otherwise); uwsm's hyprland plugin recognises that
+                # launcher, and the earlyoom avoid pattern protects it.
+                exec uwsm start -e -D Hyprland -- ${hyprlandPkg}/bin/start-hyprland -- --config "$HOME/.config/hypr/hyprland.lua"
               fi
             fi
           '';
@@ -258,7 +261,15 @@ in
             };
 
             submaps = bindings.submaps;
-            extraConfig = "";
+            # Noctalia's hyprland template renders the wallpaper palette to
+            # ~/.config/hypr/noctalia.lua and, absent this exact require in
+            # hyprland.lua, tries to append it to the read-only store symlink.
+            # pcall keeps a fresh home (no palette rendered yet) bootable.
+            extraConfig = ''
+              pcall(function()
+                require("noctalia").apply_theme()
+              end)
+            '';
             extraLuaFiles."sinnix-startup.lua" = {
               autoLoad = true;
               content = ''
