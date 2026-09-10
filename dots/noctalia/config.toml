@@ -41,9 +41,17 @@ wallpaper_scheme = "vibrant"
 enable_builtin_templates = true
 # hyprland: the native template writes the wallpaper palette to
 # ~/.config/hypr/noctalia.lua and hyprland.lua applies it.
-builtin_ids = ["gtk3", "gtk4", "hyprland", "kitty", "qt"]
+# kitty is a user template below: the builtin's apply hook edits kitty.conf,
+# which Home Manager owns; the managed kitty.conf already includes the theme.
+builtin_ids = ["gtk3", "gtk4", "hyprland", "qt"]
 enable_community_templates = true
 community_ids = ["zed", "yazi"]
+
+[theme.templates.user.kitty]
+enabled = true
+input_path = "templates/kitty.conf"
+output_path = "$XDG_CONFIG_HOME/kitty/themes/noctalia.conf"
+post_hook = "pkill -USR1 kitty >/dev/null 2>&1 || true"
 
 [wallpaper]
 enabled = true
@@ -59,7 +67,7 @@ transition_on_startup = true
 enabled = true
 # Every change rewrites settings.toml (wallpaper.last) and triggers a full
 # config reload, so the interval is also the reload cadence.
-interval_seconds = 1800
+interval_seconds = 120
 order = "random"
 recursive = true
 

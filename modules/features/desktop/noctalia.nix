@@ -138,6 +138,16 @@ mkFeatureModule {
         ".local/state/noctalia"
         ".cache/noctalia/community-templates"
         ".cache/noctalia/community-palettes"
+        # Rendered template outputs (noctalia.css, themes/noctalia.conf,
+        # hypr/noctalia.lua; ~/.config/yazi is persisted elsewhere). gtk.css imports noctalia.css
+        # unconditionally, so early GTK clients (nm-applet, blueman) error
+        # until Noctalia re-renders unless the files survive the reboot.
+        ".config/gtk-3.0"
+        ".config/gtk-4.0"
+        ".config/kitty/themes"
+        ".config/hypr"
+        ".config/qt5ct"
+        ".config/qt6ct"
       ];
     };
 } args
