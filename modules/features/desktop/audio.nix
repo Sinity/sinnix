@@ -136,10 +136,13 @@ mkFeatureModule {
         }
       ];
 
+      # These reach the user manager (user@.service goes through PAM), which
+      # is where the unit-level LimitNICE above gets its hard ceiling.
       security.pam.loginLimits = lib.sinnix.mkPAMLimits {
         domain = "@audio";
         rtprio = 95;
         memlock = "unlimited";
+        nice = -11;
       };
 
       environment.systemPackages = with pkgs; [
