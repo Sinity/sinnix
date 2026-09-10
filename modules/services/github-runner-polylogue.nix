@@ -20,9 +20,13 @@
 }@args:
 let
   userName = config.sinnix.user.name;
-  tokenSecret = "github-runner-polylogue-token";
+  # The host's classic PAT (repo scope), already used for Nix fetches. The
+  # runner service mints its own short-lived registration token from it, so a
+  # configuration change re-registers cleanly; a stored registration token
+  # expires after an hour and left the unit crash-looping on 404.
+  tokenSecret = "github-token";
   # Fail closed. modules/secrets.nix declares an age.secrets entry only for
-  # ciphertext that exists, so an unminted token leaves the runner off and the
+  # ciphertext that exists, so a missing token leaves the runner off and the
   # host configuration still evaluates and builds.
   tokenAvailable = config.age.secrets ? ${tokenSecret};
 in
@@ -63,8 +67,8 @@ mkServiceModule {
         warnings = lib.optional (!tokenAvailable) ''
           sinnix.services.github-runner-polylogue is enabled but the agenix
           secret ${tokenSecret} does not exist, so the runner is not
-          configured. Mint the token and encrypt it to
-          secret/${tokenSecret}.age to activate it.
+          configured. Encrypt a repo-scoped PAT to secret/${tokenSecret}.age
+          to activate it.
         '';
       }
       (lib.mkIf tokenAvailable {

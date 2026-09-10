@@ -375,7 +375,13 @@ in
       after = [
         "systemd-remount-fs.service"
       ];
-      unitConfig.DefaultDependencies = false;
+      unitConfig = {
+        DefaultDependencies = false;
+        # The swap directory lives on /realm. Without this the unit races the
+        # mount at boot, runs against the empty stub directory on the root
+        # subvolume and fails, leaving the file swap inactive.
+        RequiresMountsFor = [ (builtins.dirOf swapFile) ];
+      };
       serviceConfig = {
         Type = "oneshot";
         ExecStart = "${prepareSwapfile}/bin/sinnix-prime-prepare-swapfile";
