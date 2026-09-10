@@ -99,6 +99,10 @@ mkFeatureModule {
       systemd.user.services.pipewire.serviceConfig = lib.mkMerge [
         {
           Nice = -11;
+          # mod.rt raises its own threads to nice -11 with setpriority before
+          # asking rtkit; without this rlimit that first attempt logs
+          # "Permission denied" on every start even though rtkit then succeeds.
+          LimitNICE = -11;
           LimitRTPRIO = 95;
           LimitMEMLOCK = "infinity";
         }
@@ -115,9 +119,11 @@ mkFeatureModule {
         }
       ];
 
-      # pipewire-pulse's mod.rt asks for nice -11 itself; without CAP_SYS_NICE
-      # that only succeeds when the unit already runs there.
-      systemd.user.services.pipewire-pulse.serviceConfig.Nice = -11;
+      # Same mod.rt behaviour in pipewire-pulse (see pipewire above).
+      systemd.user.services.pipewire-pulse.serviceConfig = {
+        Nice = -11;
+        LimitNICE = -11;
+      };
 
       systemd.user.services.wireplumber.serviceConfig = lib.mkMerge [
         (lib.sinnix.systemd.mkRestartPolicy {
