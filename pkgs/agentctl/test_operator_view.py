@@ -370,6 +370,7 @@ def test_to_dict_carries_stage_next_timing_and_group_counts() -> None:
         "running": 0,
         "queued": 0,
         "paused": 0,
+        "held": 0,
     }
     assert payload["groups"]["agent"]["running"] == 1
     runs = {row["run"]: row for row in payload["runs"]}
