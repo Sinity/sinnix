@@ -68,6 +68,7 @@ in
           ''
             grep -Fq 'codex_args=(--profile ${lane.mcpProfile})' ${wrapper}
             grep -Fq 'export SINNIX_CODEX_PROFILE=${lane.mcpProfile}' ${wrapper}
+            grep -Fq 'codex_uses_profile()' ${wrapper}
           ''
         ) agentLanes.codexLanes
       );
@@ -807,6 +808,22 @@ in
             grep -Fq '@google/gemini-cli' "$HOME/.local/bin/gemini"
             grep -Fq 'npm install -g "$npm_package"' '${../../scripts/sinnix-agent-npm-bootstrap}'
             grep -Fq 'export npm_config_prefix="$STATE/npm"' '${../../scripts/sinnix-agent-npm-bootstrap}'
+
+            # Codex only accepts --profile for runtime commands (and mcp),
+            # so app-server must reach its stdio transport without that flag.
+            awk '
+              /^codex_uses_profile\(\)/ { in_gate = 1 }
+              in_gate { print }
+              in_gate && /^}$/ { exit }
+            ' "$HOME/.local/bin/codex" > "$TMPDIR/codex-profile-gate.sh"
+            source "$TMPDIR/codex-profile-gate.sh"
+            codex_uses_profile
+            codex_uses_profile exec
+            codex_uses_profile mcp
+            codex_uses_profile debug prompt-input
+            ! codex_uses_profile app-server
+            ! codex_uses_profile doctor
+            ! codex_uses_profile debug
 
             "$HOME/.local/bin/mcp-polylogue" --help | grep -q 'Start the Polylogue MCP stdio bridge'
             grep -Fq 'sinnix-mcp-sinex-script' "$(readlink -f "$HOME/.local/bin/mcp-sinex")"
