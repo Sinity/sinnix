@@ -75,10 +75,7 @@ in
 
             machine.succeed(f"{as_user} systemctl --user is-active --quiet polylogued.service")
             status_command = f"{as_user} ${
-              import ../polylogue-package.nix {
-                inherit inputs pkgs;
-                package = inputs.polylogue.packages.${system}.polylogue;
-              }
+              inputs.polylogue.packages.${system}.polylogue
             }/bin/polylogued status --format json > /tmp/polylogued-status.json"
             try:
                 machine.wait_until_succeeds(status_command, timeout=120)
