@@ -15,6 +15,7 @@ from .agents import (
     other_worktrees,
     queue_agent,
     queue_landing,
+    requeue_landing,
     result_path,
     worker_then,
     workspace_of,
@@ -591,47 +592,6 @@ def _rebind_candidate(worktree: Path, *, filed: str, head: str) -> str:
     return head
 
 
-def _requeue_landing(
-    config: Config,
-    project: ProjectAdapter,
-    run: Run,
-    tasks: Mapping[int, pueue.Task],
-) -> tuple[Run, int]:
-    """Queue a landing for a run whose recorded landing task the queue lost.
-
-    It waits for the worker tasks pueue still has and has not finished. A
-    worker that already ended is answered by the result it filed, which is
-    what the landing refuses on; depending on an id the queue no longer has
-    would strand the new task exactly as the old one was stranded.
-    """
-    after = [
-        task.task_id
-        for worker in run.workers
-        if (
-            task := launch.find_task(
-                tasks, worker.get("task_id"), worker.get("task_reference")
-            )
-        )
-        is not None
-        and not task.terminal
-    ]
-    ensure_landing_groups(project.project_id)
-    stashed = run.harness == "external" and not all(
-        worker.get("result") for worker in run.workers
-    )
-    landing_id = queue_landing(config, project, run, after=after, stashed=stashed)
-    queued = pueue.task(landing_id)
-    return (
-        land_update(
-            config,
-            run.run_id,
-            task_id=landing_id,
-            task_reference=launch.launch_reference(queued) if queued else None,
-        ),
-        landing_id,
-    )
-
-
 def result(
     config: Config,
     run_id: str,
@@ -725,16 +685,17 @@ def result(
             lost = landing_id
             if project is not None:
                 try:
-                    run, requeued = _requeue_landing(config, project, run, tasks)
+                    run, requeued = requeue_landing(config, project, run, tasks)
                 except (PueueError, JobError) as error:
                     # Filing the result is this verb's work; a recovery that
                     # the queue refuses is reported, never raised over it.
                     requeue_error = str(error)
-        elif (
-            run.harness == "external"
-            and task.status == "Stashed"
-            and all(item.get("result") for item in run.workers)
+        elif task.status == "Stashed" and all(
+            item.get("result") for item in run.workers
         ):
+            # A landing is stashed exactly while a result is outstanding, in
+            # an external run from the start and in any run from a requeue.
+            # The last result is what it was waiting for.
             pueue.enqueue(task.task_id)
             released = True
     return {

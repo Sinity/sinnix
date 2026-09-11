@@ -20,10 +20,9 @@ from .agents import (
     PUSH_TIMEOUT_SECONDS,
     WORKTREE_STATE_DIR,
     binding,
-    ensure_landing_groups,
     other_worktrees,
     queue_agent,
-    queue_landing,
+    requeue_landing,
     workspace_of,
     worktree_path,
     write_prompt,
@@ -978,37 +977,26 @@ def queue(config: Config, project: ProjectAdapter, run_id: str) -> dict[str, Any
     """Queue a fresh landing task for a run whose landing is not already running.
 
     `batch start` queues the first landing behind the workers; this re-queues
-    one after a landing failed, so a caller that cannot hold a process for the
-    whole landing still drives it through pueue.
+    one after a landing failed or the queue lost it, so a caller that cannot
+    hold a process for the whole landing still drives it through pueue. The
+    replacement is placed like every other requeue: behind the worker tasks
+    still running, and stashed while a worker owes a result, because a
+    landing that runs before then only refuses `worker_not_done`.
     """
     run = load(config, run_id)
     if run.project != project.project_id:
         raise BatchRefusal("project", f"run {run_id} belongs to {run.project}")
     _refuse_unless_live(run)
+    tasks = pueue.tasks()
     task_id = run.landing.get("task_id")
-    current = launch.find_task(
-        pueue.tasks(), task_id, run.landing.get("task_reference")
-    )
+    current = launch.find_task(tasks, task_id, run.landing.get("task_reference"))
     if current is not None and not current.terminal:
         raise BatchRefusal(
             "landing_in_progress",
             f"landing task {task_id} is {current.status.lower()}",
         )
-    ensure_landing_groups(project.project_id)
-    queued = queue_landing(config, project, run, after=(), stashed=False)
-    queued_task = pueue.task(queued)
-    return {
-        **land_update(
-            config,
-            run_id,
-            task_id=queued,
-            task_reference=launch.launch_reference(queued_task)
-            if queued_task is not None
-            else None,
-            failure=None,
-        ).to_dict(),
-        "landing_task_id": queued,
-    }
+    run, queued = requeue_landing(config, project, run, tasks)
+    return {**run.to_dict(), "landing_task_id": queued}
 
 
 def land(

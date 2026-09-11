@@ -329,7 +329,15 @@ def run_next(
     if stage == "stashed":
         return "batch result, then the landing task runs"
     if stage == "landing vanished":
-        return "batch queue"
+        # A landing queued while a worker owes a result only refuses
+        # `worker_not_done`, and filing the last outstanding result queues the
+        # replacement landing itself. `batch queue` is the step only once the
+        # evidence the landing refuses on is complete.
+        return (
+            "batch queue"
+            if all(worker.get("result") for worker in run.workers)
+            else _worker_next(worker_tasks, vanished)
+        )
     if stage.startswith("failed") or stage.startswith("landing "):
         return (
             f"job logs {landing.task_id}, then batch land or batch resume"
@@ -339,13 +347,18 @@ def run_next(
     if stage == "unprepared":
         return "batch start again"
     if stage == "awaiting workers":
-        failed = [
-            task
-            for task in worker_tasks
-            if task is not None and task.terminal and not task.succeeded
-        ]
-        return "batch resume --worker" if failed or vanished.workers else "batch result"
+        return _worker_next(worker_tasks, vanished)
     return "batch land"
+
+
+def _worker_next(worker_tasks: Sequence[Task | None], vanished: Vanished) -> str:
+    """How the outstanding results arrive: by hand, or by a fresh agent."""
+    failed = [
+        task
+        for task in worker_tasks
+        if task is not None and task.terminal and not task.succeeded
+    ]
+    return "batch resume --worker" if failed or vanished.workers else "batch result"
 
 
 def _group_counts(tasks: Sequence[Task], group: str) -> dict[str, int]:
@@ -416,6 +429,52 @@ def table(headers: Sequence[str], rows: Sequence[Sequence[Any]]) -> str:
             ).rstrip()
         )
     return "\n".join(lines)
+
+
+def _worker_commands(document: Mapping[str, Any]) -> dict[str, str]:
+    """The exact command each worker still owing a result needs, by worker id.
+
+    Every worker without a result has an entry, empty when there is nothing
+    for a person to run yet: an external worker's result is filed by hand at
+    any time, while a queued worker files its own when its task ends, so it
+    needs a command only once the run has no live task left to do it — which
+    is what the `landing vanished` stage establishes.
+    """
+    stranded = document.get("stage") == "landing vanished"
+    commands: dict[str, str] = {}
+    for worker in document["workers"]:
+        if worker.get("result"):
+            continue
+        if document["harness"] == "external":
+            result = worker.get("result_path") or (
+                f"{worker['worktree']}/.agentctl/prompt.result.json"
+                if worker.get("worktree")
+                else "<result.json>"
+            )
+            commands[worker["id"]] = (
+                f"agentctl batch result {document['run_id']} {worker['id']} {result}"
+            )
+        else:
+            commands[worker["id"]] = (
+                f"agentctl batch resume {document['run_id']} --worker {worker['id']}"
+                if stranded
+                else ""
+            )
+    return commands
+
+
+def _landing_next(document: Mapping[str, Any], commands: Mapping[str, str]) -> str:
+    """The step that replaces a landing the queue lost.
+
+    Queueing one while a worker owes a result buys a task that refuses
+    `worker_not_done`; the outstanding results are the step, and filing the
+    last of them queues the replacement landing itself.
+    """
+    if not commands:
+        return f"agentctl batch queue {document['run_id']}"
+    if any(commands.values()):
+        return "the worker commands above; the last result queues the landing"
+    return "wait for the running workers; the last result queues the landing"
 
 
 def _lost_jobs(row: Mapping[str, Any]) -> str:
@@ -672,6 +731,7 @@ class Output:
             for worker in document["workers"]
         )
         landing = document["landing"]
+        commands = _worker_commands(document)
         lines = [
             f"run {self.run(document['run_id'])} {document['project']} {document['harness']} "
             f"base {self.sha(document['base_commit'])} stage {document.get('stage', '-')} "
@@ -685,16 +745,8 @@ class Output:
                 else "-"
             )
             lines.append(f"  {worker['id']}: prompt {prompt}")
-            if document["harness"] == "external" and not worker.get("result"):
-                result = worker.get("result_path") or (
-                    f"{worker['worktree']}/.agentctl/prompt.result.json"
-                    if worker.get("worktree")
-                    else "<result.json>"
-                )
-                lines.append(
-                    f"    next: agentctl batch result {document['run_id']} "
-                    f"{worker['id']} {result}"
-                )
+            if commands.get(worker["id"]):
+                lines.append(f"    next: {commands[worker['id']]}")
         lines.append(
             f"landing: task {landing.get('task_id')}"
             f"{' (pueue no longer has it)' if landing.get('vanished') is not None else ''}"
@@ -703,7 +755,7 @@ class Output:
             f"{' failure ' + landing['failure']['code'] if landing.get('failure') else ''}"
         )
         if landing.get("vanished") is not None:
-            lines.append(f"  next: agentctl batch queue {document['run_id']}")
+            lines.append(f"  next: {_landing_next(document, commands)}")
         return "\n".join(lines)
 
     def runs_table(self, rows: Sequence[Mapping[str, Any]]) -> str:

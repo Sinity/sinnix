@@ -5,7 +5,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from agentctl import launch, manifest, prompts
+from agentctl import batch, launch, manifest, prompts
 from agentctl.batch import BatchError, BatchRefusal
 from conftest import read_launch
 from test_batch import BASE, MOVED, SHA, Harness, labels, prepared_run, verdict
@@ -471,3 +471,32 @@ def test_a_worker_with_no_result_and_no_task_still_refuses_to_land(
     harness.pueue.reset_state()
     with pytest.raises(BatchRefusal, match="gone from pueue"):
         harness.land(run["run_id"])
+
+
+def test_batch_queue_waits_for_the_worker_that_has_not_filed(
+    harness: Harness,
+) -> None:
+    """mzw2 review: a landing that can run at once refuses `worker_not_done`.
+
+    `batch queue` replaces a landing the queue lost, which is exactly when a
+    worker may still owe its result; the replacement waits for it instead of
+    ending as a failed task nobody is waiting on.
+    """
+    run = harness.start("fx-lead", "fx-solo")
+    lead, solo = run["workers"]
+    harness.pueue.succeed(lead["task_id"])
+    harness.pueue.remove([run["landing"]["task_id"]])
+
+    queued = batch.queue(harness.config, harness.project, run["run_id"])
+
+    task = harness.pueue.task(queued["landing_task_id"])
+    assert task.status == "Stashed" and task.dependencies == (solo["task_id"],)
+    harness.file_result(run, "fx-lead")
+    assert harness.pueue.task(task.task_id).status == "Stashed"
+
+    harness.pueue.succeed(solo["task_id"])
+    harness.file_result(run, "fx-solo")
+
+    # The last result is what the landing was waiting for, whatever harness
+    # the run uses: nothing else would ever release it.
+    assert harness.pueue.task(task.task_id).status != "Stashed"
