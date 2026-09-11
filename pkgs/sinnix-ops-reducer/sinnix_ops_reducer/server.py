@@ -495,10 +495,7 @@ class Handler(BaseHTTPRequestHandler):
             # snapshot (runtime inventory, every unit, every workload row)
             # blows that budget, and the panel reads a handful of keys.
             wanted = [
-                key
-                for raw in query.get("state", [])
-                for key in raw.split(",")
-                if key
+                key for raw in query.get("state", []) for key in raw.split(",") if key
             ]
             if wanted and isinstance(value.get("state"), dict):
                 state = value["state"]

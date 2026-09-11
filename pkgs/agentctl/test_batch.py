@@ -1724,13 +1724,7 @@ def test_conflict_marker_scan_catches_diff3_and_larger_git_markers(
         tmp_path,
         "changed.txt",
         "before\n",
-        "<<<<<<<< ours\n"
-        "ours\n"
-        "|||||||| base\n"
-        "base\n"
-        "========\n"
-        "theirs\n"
-        ">>>>>>>> theirs\n",
+        "<<<<<<<< ours\nours\n|||||||| base\nbase\n========\ntheirs\n>>>>>>>> theirs\n",
     )
 
     with pytest.raises(BatchRefusal) as refused:
