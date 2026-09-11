@@ -828,6 +828,16 @@ in
             ! codex_uses_profile -c features.hooks=true app-server --stdio
             codex_uses_profile -C /realm/project/sinnix exec
             codex_uses_profile "app-server please help"
+            ! codex_uses_profile --profile full sandbox bash -c 'exit 0'
+            test "$SINNIX_CODEX_PROFILE" = full
+            ! codex_uses_profile -p evidence exec
+            test "$SINNIX_CODEX_PROFILE" = evidence
+            ! codex_uses_profile --profile=browser exec
+            test "$SINNIX_CODEX_PROFILE" = browser
+            ! codex_uses_profile -pfull exec
+            test "$SINNIX_CODEX_PROFILE" = full
+            ! codex_uses_profile -C /realm/project/sinnix --profile full exec
+            codex_uses_profile -c 'prompt=--profile' exec
 
             "$HOME/.local/bin/mcp-polylogue" --help | grep -q 'Start the Polylogue MCP stdio bridge'
             grep -Fq 'sinnix-mcp-sinex-script' "$(readlink -f "$HOME/.local/bin/mcp-sinex")"
