@@ -353,7 +353,27 @@ let
         ${extraEnv}
 
         export SINNIX_CODEX_PROFILE=${lib.escapeShellArg profile}
-        codex_args=(--profile ${lib.escapeShellArg profile})
+        # Codex rejects --profile for utility commands such as app-server;
+        # its own runtime diagnostic names the supported command family.
+        # Keep ordinary prompts in the profiled runtime path, while utility
+        # commands pass through without an unsupported global option.
+        codex_uses_profile() {
+          case "''${1:-}" in
+            agents|app-server|apply|cloud|completion|doctor|exec-server|features|help|login|logout|migrate-rollouts|plugin|remote-control|update)
+              return 1
+              ;;
+            debug)
+              [ "''${2:-}" = prompt-input ]
+              ;;
+            *)
+              return 0
+              ;;
+          esac
+        }
+        codex_args=()
+        if codex_uses_profile "$@"; then
+          codex_args=(--profile ${lib.escapeShellArg profile})
+        fi
 
         exec "$STATE/npm/bin/codex" "''${codex_args[@]}" "$@"
       '';
