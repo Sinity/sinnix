@@ -592,15 +592,100 @@ def test_result_read_projection_preserves_integer_bead_revision(
     assert filed["provenance"]["bead_revisions"] == {"fx-solo": str(revision)}
 
 
+def test_launch_binds_beads_authored_v2_criteria_into_the_worker_result(
+    harness: Harness,
+) -> None:
+    revision = 7773497739344011640
+    criteria = [{"id": "AC-solo-1", "text": "the focused check passes"}]
+    harness.beads.beads["fx-solo"]["revision"] = revision
+    harness.beads.beads["fx-solo"]["metadata"]["acceptance_criteria"] = criteria
+
+    run = harness.start("fx-solo")
+    worker = run["workers"][0]
+    packet = json.loads(
+        Path(worker["prompt_path"])
+        .read_text()
+        .split("```json\n", 1)[1]
+        .split("\n```", 1)[0]
+    )
+    binding = {
+        "v2_available": True,
+        "bead_revision": str(revision),
+        "criteria": [{"ac_id": "AC-solo-1", "text": "the focused check passes"}],
+    }
+    assert packet["beads"][0]["evidence_binding"] == binding
+    assert packet["result_contract"]["schema_version"] == 2
+    assert packet["result_contract"]["beads"] == [{"id": "fx-solo", **binding}]
+    assert worker["evidence_binding"] == [{"id": "fx-solo", **binding}]
+    assert worker["bead_revisions"] == {"fx-solo": str(revision)}
+
+    filed = harness.file_result(
+        run,
+        "fx-solo",
+        schema_version=2,
+        planned_model="fixture-model",
+        execution="queued",
+        attempt=1,
+        model_segments=[
+            {"attempt": 1, "planned_model": "fixture-model", "measured_usage": None}
+        ],
+        measured_usage=None,
+        beads=[
+            {
+                "id": "fx-solo",
+                "bead_revision": str(revision),
+                "criteria": [
+                    {
+                        "ac_id": "AC-solo-1",
+                        "text": "the focused check passes",
+                        "status": "satisfied",
+                        "evidence": "pytest -q: passed",
+                    }
+                ],
+            }
+        ],
+        verification=[
+            {
+                "command": "pytest -q",
+                "receipt": "1 passed",
+                "tested_sha": SHA,
+                "status": "passed",
+                "coverage": {"ac_ids": ["AC-solo-1"], "scope": "unit"},
+            }
+        ],
+    )
+
+    assert filed["result"]["beads"][0]["bead_revision"] == str(revision)
+    assert filed["result"]["beads"][0]["criteria"][0]["ac_id"] == "AC-solo-1"
+
+    for mutate in (
+        lambda document: document["beads"][0].__setitem__("bead_revision", "other"),
+        lambda document: document["beads"][0]["criteria"][0].__setitem__(
+            "ac_id", "AC-other"
+        ),
+        lambda document: document["beads"][0]["criteria"][0].__setitem__(
+            "text", "other criterion"
+        ),
+    ):
+        mismatched = json.loads(json.dumps(filed["result"]))
+        mutate(mismatched)
+        with pytest.raises(BatchRefusal, match="result_evidence_binding"):
+            harness.file_result(run, "fx-solo", **mismatched)
+
+
 def test_versioned_worker_claim_never_becomes_observed_executor_fact(
     harness: Harness,
 ) -> None:
+    harness.beads.beads["fx-solo"]["revision"] = "claim-revision"
+    harness.beads.beads["fx-solo"]["metadata"]["acceptance_criteria"] = [
+        {"id": "fx-solo/ac-1", "text": "done"}
+    ]
     run = harness.start("fx-solo")
     filed = harness.file_result(
         run,
         "fx-solo",
         schema_version=2,
-        execution="native",
+        execution="queued",
         planned_model="gpt-5.6-luna",
         actual_executor_model="gpt-5.6-luna",
         actual_executor_observed_by="runner",

@@ -317,6 +317,7 @@ class PromptSnapshot:
             "dimensions": self.dimensions.to_dict(),
             "atlas_refs": list(self.atlas_refs),
             "worker_contract_path": self.worker_contract_path,
+            "result_contract": _result_contract(self.beads, self.dimensions, self.batch),
         }
         if self.batch:
             document["batch"] = dict(self.batch)
@@ -599,9 +600,96 @@ def public_bead(bead: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _owner_revision(value: Any) -> str | None:
+    if isinstance(value, str) and value:
+        return value
+    if isinstance(value, int) and not isinstance(value, bool):
+        return str(value)
+    return None
+
+
+def _stable_criteria(bead: Mapping[str, Any]) -> tuple[dict[str, str], ...]:
+    """The Beads-authored AC IDs and text, or nothing when they are unavailable."""
+    raw = _metadata(bead).get("acceptance_criteria")
+    if not isinstance(raw, list) or not raw:
+        return ()
+    rows: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in raw:
+        if not isinstance(item, Mapping):
+            return ()
+        ac_id = item.get("id", item.get("ac_id"))
+        text = item.get("text")
+        if (
+            not isinstance(ac_id, str)
+            or not ac_id
+            or ac_id in seen
+            or not isinstance(text, str)
+            or not text
+        ):
+            return ()
+        seen.add(ac_id)
+        rows.append({"ac_id": ac_id, "text": text})
+    return tuple(rows)
+
+
+def evidence_binding(bead: Mapping[str, Any]) -> dict[str, Any]:
+    """Stable owner facts a v2 worker may copy, never synthesized identities."""
+    revision = _owner_revision(bead.get("revision"))
+    criteria = _stable_criteria(bead)
+    available = revision is not None and bool(criteria)
+    return {
+        "v2_available": available,
+        "bead_revision": revision,
+        "criteria": list(criteria),
+        **(
+            {}
+            if available
+            else {
+                "reason": (
+                    "Beads must author metadata.acceptance_criteria as a nonempty "
+                    "list of unique {id, text} rows and provide a row revision; "
+                    "use the legacy result contract until then"
+                )
+            }
+        ),
+    }
+
+
+def _result_contract(
+    beads: Sequence[Mapping[str, Any]], dimensions: PromptDimensions, batch: Mapping[str, Any]
+) -> dict[str, Any]:
+    bindings = [
+        {"id": bead.get("id"), **dict(bead.get("evidence_binding") or {})}
+        for bead in beads
+    ]
+    available = bool(bindings) and all(
+        item.get("v2_available") is True for item in bindings
+    )
+    if not available:
+        return {
+            "schema_version": 1,
+            "evidence": "unknown",
+            "reason": "One or more dispatched beads lack Beads-authored stable AC IDs or a row revision",
+        }
+    execution = batch.get("harness")
+    return {
+        "schema_version": 2,
+        "execution": execution if execution in {"queued", "external"} else "native",
+        "attempt": 1,
+        "planned_model": dimensions.model,
+        "model_segments": [
+            {"attempt": 1, "planned_model": dimensions.model, "measured_usage": None}
+        ],
+        "measured_usage": None,
+        "beads": bindings,
+    }
+
+
 def _project_relationships(bead: Mapping[str, Any], reader: BdReader) -> dict[str, Any]:
     """Keep dispatched fields intact while bounding embedded graph records."""
     projected = public_bead(bead)
+    projected["evidence_binding"] = evidence_binding(bead)
     for relationship_name in ("dependencies", "dependents"):
         value = projected.get(relationship_name)
         if value is None:
@@ -652,7 +740,10 @@ def _render_prompt(snapshot: PromptSnapshot, template: str) -> str:
         return full
     digested = {
         **snapshot.to_dict(),
-        "beads": [digest_bead(bead) for bead in snapshot.beads],
+        "beads": [
+            {**digest_bead(bead), "evidence_binding": bead.get("evidence_binding")}
+            for bead in snapshot.beads
+        ],
         "bead_bodies": "digest",
     }
     return _bounded(render(digested, " " + _DIGEST_INSTRUCTION))

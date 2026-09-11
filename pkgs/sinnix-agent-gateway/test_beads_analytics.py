@@ -404,6 +404,8 @@ def test_provenance_preserves_direction_external_origins_and_bounds(
 
     def sql(statement):
         statements.append(statement)
+        if "JSON_TYPE" in statement:
+            return []
         return rows
 
     monkeypatch.setattr(analytical, "sql", sql)
@@ -440,6 +442,178 @@ def test_provenance_owner_failure_is_explicit_without_erasing_membership(
     )
     assert edges == [] and coverage["complete"] is False
     assert coverage["frontier"][0]["reason"] == "owner_unavailable"
+
+
+def test_metadata_provenance_covers_incoming_normalizes_refs_and_deduplicates(
+    tmp_path, monkeypatch
+):
+    service, _ = beads_service(tmp_path)
+    analytical = Analytics(service, service.config.projects["fixture"], REVISION)
+    statements = []
+
+    def sql(statement):
+        statements.append(statement)
+        assert "AS OF '" + REVISION + "'" in statement
+        assert "description" not in statement
+        if "JSON_TYPE" in statement:
+            return [
+                {
+                    "id": "fixture-new",
+                    "split_from_type": "STRING",
+                    "split_from": "sinnix://projects/fixture/beads/fixture-root",
+                },
+                {
+                    "id": "fixture-root",
+                    "residual_of_type": "STRING",
+                    "residual_of": "sinnix://projects/other/beads/other-origin",
+                },
+                {
+                    "id": "fixture-root",
+                    "supersedes_type": "STRING",
+                    "supersedes": "fixture-old",
+                },
+                {
+                    "id": "fixture-unrelated",
+                    "split_from_type": "STRING",
+                    "split_from": "fixture-outside",
+                },
+            ]
+        return [
+            {
+                "issue_id": "fixture-root",
+                "depends_on_external": "sinnix://projects/fixture/beads/fixture-old",
+                "type": "supersedes",
+            }
+        ]
+
+    monkeypatch.setattr(analytical, "sql", sql)
+    edges, coverage = analytical.provenance(
+        ["fixture-root"], max_edges=10, membership_complete=True
+    )
+    assert coverage["complete"] is True
+    assert len(edges) == 3
+    assert edges[0]["native_relation"] == "supersedes"
+    assert edges[1] == {
+        "from": "fixture-new",
+        "to": "fixture-root",
+        "relation": "split_from",
+        "native_relation": None,
+        "metadata_key": "split_from",
+        "source": "issue_metadata",
+        "target_kind": "bead",
+    }
+    assert edges[2]["target_kind"] == "external"
+    assert edges[2]["to"] == "sinnix://projects/other/beads/other-origin"
+    assert "id IN" not in statements[1]  # Incoming non-members must be searched.
+    assert "depends_on_external IN" in statements[0]
+    assert "LEFT(JSON_UNQUOTE" in statements[1]
+
+
+@pytest.mark.parametrize(
+    "value,value_type,reason",
+    [
+        ("", "STRING", "invalid_metadata_reference"),
+        ("https://example.invalid/task", "STRING", "invalid_metadata_reference"),
+        (
+            "sinnix://projects/fixture/beads/../secret",
+            "STRING",
+            "invalid_metadata_reference",
+        ),
+        ("[]", "ARRAY", "unsupported_metadata_value"),
+        ("null", "NULL", "unsupported_metadata_value"),
+        ("{}", "OBJECT", "unsupported_metadata_value"),
+    ],
+)
+def test_metadata_provenance_invalid_values_are_explicit(
+    tmp_path, monkeypatch, value, value_type, reason
+):
+    service, _ = beads_service(tmp_path)
+    analytical = Analytics(service, service.config.projects["fixture"], REVISION)
+    monkeypatch.setattr(
+        analytical,
+        "sql",
+        lambda statement: (
+            [{"id": "fixture-new", "split_from": value, "split_from_type": value_type}]
+            if "JSON_TYPE" in statement
+            else []
+        ),
+    )
+    edges, coverage = analytical.provenance(
+        ["fixture-root"], max_edges=10, membership_complete=True
+    )
+    assert edges == []
+    assert coverage["complete"] is False
+    assert coverage["frontier"] == [
+        {"reason": reason, "from": "fixture-new", "key": "split_from"}
+    ]
+
+
+def test_metadata_provenance_bounds_candidates_and_combined_edges(
+    tmp_path, monkeypatch
+):
+    service, _ = beads_service(tmp_path)
+    analytical = Analytics(service, service.config.projects["fixture"], REVISION)
+    monkeypatch.setattr(
+        analytical,
+        "sql",
+        lambda statement: (
+            [
+                {
+                    "id": "fixture-a",
+                    "split_from": "fixture-root",
+                    "split_from_type": "STRING",
+                },
+                {
+                    "id": "fixture-b",
+                    "split_from": "fixture-root",
+                    "split_from_type": "STRING",
+                },
+            ]
+            if "JSON_TYPE" in statement
+            else [
+                {
+                    "issue_id": "fixture-root",
+                    "depends_on_issue_id": "fixture-old",
+                    "type": "supersedes",
+                }
+            ]
+        ),
+    )
+    edges, coverage = analytical.provenance(
+        ["fixture-root"], max_edges=1, membership_complete=True
+    )
+    assert len(edges) == 1
+    assert coverage["complete"] is False
+    assert {item["reason"] for item in coverage["frontier"]} == {
+        "metadata_candidate_bound",
+        "edge_bound",
+    }
+
+
+def test_metadata_provenance_owner_failure_preserves_native_edges(
+    tmp_path, monkeypatch
+):
+    service, _ = beads_service(tmp_path)
+    analytical = Analytics(service, service.config.projects["fixture"], REVISION)
+
+    def sql(statement):
+        if "JSON_TYPE" in statement:
+            raise BeadsError("historical metadata unavailable")
+        return [
+            {
+                "issue_id": "fixture-root",
+                "depends_on_issue_id": "fixture-old",
+                "type": "supersedes",
+            }
+        ]
+
+    monkeypatch.setattr(analytical, "sql", sql)
+    edges, coverage = analytical.provenance(
+        ["fixture-root"], max_edges=10, membership_complete=True
+    )
+    assert len(edges) == 1
+    assert coverage["complete"] is False
+    assert coverage["frontier"][0]["reason"] == "metadata_owner_unavailable"
 
 
 @pytest.mark.parametrize(
@@ -515,16 +689,14 @@ def test_historical_missing_row_revision_remains_unknown_without_live_fallback(
     assert result["nodes"][0]["bead_revision"] is None
     assert result["nodes"][0]["bead_revision_domain"] is None
     assert "historical schema" in result["nodes"][0]["bead_revision_unavailable_reason"]
-    assert (
-        len(
-            [
-                statement
-                for statement in statements
-                if "FROM issues" in statement and "JOIN" not in statement
-            ]
-        )
-        == 2
+    node_reads = [
+        statement for statement in statements if "acceptance_criteria" in statement
+    ]
+    assert len(node_reads) == 2
+    assert node_reads[1] == node_reads[0].replace(
+        ", CAST(row_lock AS CHAR) AS bead_revision", ""
     )
+    assert "WHERE id IN (" + literal("fixture-a") + ")" in node_reads[1]
 
 
 def test_wide_closure_batches_nodes_edges_and_readiness_at_one_revision(
@@ -591,8 +763,8 @@ def test_wide_closure_batches_nodes_edges_and_readiness_at_one_revision(
     assert result["readiness"]["fixture-000"]["state"] == "blocked"
     assert result["nodes"][-1]["bead_revision"] == str(7773497739344011714)
     assert (
-        len(statements) == 6
-    )  # Two breadth levels, one readiness batch, one provenance batch.
+        len(statements) == 7
+    )  # Two breadth levels, readiness, native and metadata provenance batches.
     assert sum("CAST(row_lock AS CHAR)" in statement for statement in statements) == 2
 
 

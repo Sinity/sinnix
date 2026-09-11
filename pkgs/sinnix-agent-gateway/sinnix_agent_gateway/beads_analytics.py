@@ -656,13 +656,17 @@ class Analytics:
         edges, frontier = {}, []
         kinds = ",".join(literal(kind) for kind in sorted(PROVENANCE_RELATIONS))
         for offset in range(0, len(nodes), 100):
-            selected = ",".join(
-                literal(node) for node in sorted(nodes)[offset : offset + 100]
+            chunk = sorted(nodes)[offset : offset + 100]
+            selected = ",".join(literal(node) for node in chunk)
+            selected_refs = ",".join(
+                literal(self.service.bead_ref(self.project.project_id, node))
+                for node in chunk
             )
             statement = (
                 "SELECT issue_id, depends_on_issue_id, depends_on_wisp_id, depends_on_external, type "
                 f"FROM {self.table('dependencies')} WHERE type IN ({kinds}) "
-                f"AND (issue_id IN ({selected}) OR depends_on_issue_id IN ({selected})) "
+                f"AND (issue_id IN ({selected}) OR depends_on_issue_id IN ({selected}) "
+                f"OR depends_on_external IN ({selected_refs})) "
                 "ORDER BY issue_id, depends_on_issue_id, depends_on_external, depends_on_wisp_id, type "
                 f"LIMIT {max_edges + 1}"
             )
@@ -693,6 +697,10 @@ class Analytics:
                     ),
                     ("unavailable", None),
                 )
+                if isinstance(target, str) and target.startswith("sinnix://projects/"):
+                    normalized_kind, normalized_target = self._provenance_target(target)
+                    if normalized_target is not None:
+                        target_kind, target = normalized_kind, normalized_target
                 key = (row["issue_id"], target_kind, target, kind)
                 if key not in edges and len(edges) >= max_edges:
                     frontier.append({"reason": "edge_bound", "max_edges": max_edges})
@@ -718,16 +726,127 @@ class Analytics:
                 if not any(item["reason"] == "edge_bound" for item in frontier):
                     frontier.append({"reason": "edge_bound", "max_edges": max_edges})
                 break
+        metadata_edges, metadata_frontier = self._metadata_provenance(
+            nodes, max_candidates=max_edges
+        )
+        frontier.extend(metadata_frontier)
+        for edge in metadata_edges:
+            key = (
+                edge["from"],
+                edge["target_kind"],
+                edge["to"],
+                relation(edge["relation"]),
+            )
+            if key in edges:
+                continue
+            if len(edges) >= max_edges:
+                if not any(item["reason"] == "edge_bound" for item in frontier):
+                    frontier.append({"reason": "edge_bound", "max_edges": max_edges})
+                break
+            edges[key] = edge
         if not membership_complete:
             frontier.append({"reason": "membership_incomplete"})
         return list(edges.values()), {
             "state": "partial" if frontier else "complete",
             "complete": not frontier,
             "scope": "incoming_and_outgoing_edges_touching_members",
+            "project_id": self.project.project_id,
             "revision": self.revision,
             "returned": len(edges),
             "frontier": frontier,
         }
+
+    def _metadata_provenance(
+        self, nodes: list[str], *, max_candidates: int
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        # Scan projected keys across this owner's snapshot so incoming edges
+        # from outside the selected membership are covered as well.
+        keys = sorted(kind.replace("-", "_") for kind in PROVENANCE_RELATIONS)
+        columns, predicates = ["id"], []
+        for key in keys:
+            extract = f"JSON_EXTRACT(metadata, {literal('$.' + key)})"
+            columns.extend(
+                (
+                    f"JSON_TYPE({extract}) AS {key}_type",
+                    f"CASE WHEN JSON_TYPE({extract}) = 'STRING' "
+                    f"THEN LEFT(JSON_UNQUOTE({extract}), 1024) ELSE NULL END AS {key}",
+                )
+            )
+            predicates.append(f"{extract} IS NOT NULL")
+        statement = (
+            f"SELECT {', '.join(columns)} FROM {self.table('issues')} "
+            f"WHERE ({' OR '.join(predicates)}) ORDER BY id LIMIT {max_candidates + 1}"
+        )
+        try:
+            rows = self.sql(statement)
+        except BeadsError as exc:
+            return [], [{"reason": "metadata_owner_unavailable", "error": str(exc)}]
+        frontier: list[dict[str, Any]] = []
+        if len(rows) > max_candidates:
+            frontier.append(
+                {"reason": "metadata_candidate_bound", "max_candidates": max_candidates}
+            )
+        members = set(nodes)
+        edges = []
+        for row in rows[:max_candidates]:
+            source = row.get("id")
+            if not isinstance(source, str) or not source:
+                frontier.append({"reason": "metadata_missing_source"})
+                continue
+            for key in keys:
+                value_type = row.get(key + "_type")
+                if value_type is None:
+                    continue
+                value = row.get(key)
+                if value_type != "STRING" or not isinstance(value, str):
+                    frontier.append(
+                        {
+                            "reason": "unsupported_metadata_value",
+                            "from": source,
+                            "key": key,
+                        }
+                    )
+                    continue
+                target_kind, target = self._provenance_target(value)
+                if target is None:
+                    frontier.append(
+                        {
+                            "reason": "invalid_metadata_reference",
+                            "from": source,
+                            "key": key,
+                        }
+                    )
+                    continue
+                if source not in members and not (
+                    target_kind == "bead" and target in members
+                ):
+                    continue
+                edges.append(
+                    {
+                        "from": source,
+                        "to": target,
+                        "relation": key,
+                        "native_relation": None,
+                        "metadata_key": key,
+                        "source": "issue_metadata",
+                        "target_kind": target_kind,
+                    }
+                )
+        return edges, frontier
+
+    def _provenance_target(self, value: str) -> tuple[str, str | None]:
+        identifier = r"[A-Za-z0-9][A-Za-z0-9._-]{0,255}"
+        if re.fullmatch(identifier, value):
+            return "bead", value
+        canonical = re.fullmatch(
+            rf"sinnix://projects/({identifier})/beads/({identifier})", value
+        )
+        if canonical:
+            _, bead = canonical.groups()
+            if self.service.bead_ref(self.project.project_id, bead) == value:
+                return "bead", bead
+            return "external", value
+        return "unavailable", None
 
     def _closure_edges(
         self,

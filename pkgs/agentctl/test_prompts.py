@@ -409,7 +409,9 @@ def test_the_packet_drops_people_stamps_and_counters_from_beads(
         "description",
         "metadata",
         "acceptance_criteria",
+        "evidence_binding",
     }
+    assert dispatched["evidence_binding"]["v2_available"] is False
     assert "someone@example.com" not in snapshot.prompt
     assert public_bead(rich.beads["fx-solo"])["acceptance_criteria"] == "kept"
     assert "untrusted process" in snapshot.prompt.split("```json", 1)[0]

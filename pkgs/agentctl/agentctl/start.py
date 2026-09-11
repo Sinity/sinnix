@@ -179,18 +179,78 @@ def _attempt(
     }
 
 
-def _bead_revisions(beads: Beads, bead_ids: Sequence[str]) -> dict[str, str | None]:
-    """The dispatch-time revisions, without inventing one when Beads omits it."""
+def _bead_revisions(beads: Sequence[Mapping[str, Any]]) -> dict[str, str | None]:
+    """The exact revisions embedded in this worker's prompt snapshot."""
     revisions: dict[str, str | None] = {}
-    for bead_id in bead_ids:
-        value = beads.show(bead_id).get("revision")
-        if isinstance(value, str) and value:
-            revisions[bead_id] = value
-        elif isinstance(value, int) and not isinstance(value, bool):
-            revisions[bead_id] = str(value)
-        else:
-            revisions[bead_id] = None
+    for bead in beads:
+        bead_id = bead.get("id")
+        binding = bead.get("evidence_binding")
+        if not isinstance(bead_id, str) or not bead_id:
+            continue
+        value = binding.get("bead_revision") if isinstance(binding, Mapping) else None
+        revisions[bead_id] = value if isinstance(value, str) and value else None
     return revisions
+
+
+def _evidence_binding(beads: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """The v2 facts copied into the dispatch packet, retained with its worker."""
+    records: list[dict[str, Any]] = []
+    for bead in beads:
+        binding = bead.get("evidence_binding")
+        if not isinstance(binding, Mapping):
+            continue
+        records.append(
+            {
+                "id": bead.get("id"),
+                "v2_available": binding.get("v2_available") is True,
+                "bead_revision": binding.get("bead_revision"),
+                "criteria": list(binding.get("criteria") or ()),
+            }
+        )
+    return records
+
+
+def _v2_binding_errors(worker: Mapping[str, Any], value: Mapping[str, Any]) -> list[str]:
+    """A v2 claim must copy stable owner facts from this worker's launch."""
+    if value.get("schema_version") != results.RESULT_SCHEMA_VERSION:
+        return []
+    records = worker.get("evidence_binding")
+    if not isinstance(records, list):
+        return ["v2 result has no dispatch-time stable acceptance binding"]
+    expected = {
+        row.get("id"): row
+        for row in records
+        if isinstance(row, Mapping)
+        and isinstance(row.get("id"), str)
+        and row.get("v2_available") is True
+    }
+    if set(expected) != set(worker.get("beads") or ()):
+        return ["v2 result requires Beads-authored stable acceptance IDs and revisions"]
+    submitted = {
+        row.get("id"): row
+        for row in value.get("beads") or ()
+        if isinstance(row, Mapping) and isinstance(row.get("id"), str)
+    }
+    if set(submitted) != set(expected):
+        return ["v2 result beads do not match the dispatch binding"]
+    errors: list[str] = []
+    for bead_id, expected_bead in expected.items():
+        actual = submitted[bead_id]
+        if actual.get("bead_revision") != expected_bead.get("bead_revision"):
+            errors.append(f"v2 result {bead_id} bead_revision differs from dispatch")
+        expected_criteria = {
+            (criterion.get("ac_id"), criterion.get("text"))
+            for criterion in expected_bead.get("criteria") or ()
+            if isinstance(criterion, Mapping)
+        }
+        actual_criteria = {
+            (criterion.get("ac_id"), criterion.get("text"))
+            for criterion in actual.get("criteria") or ()
+            if isinstance(criterion, Mapping)
+        }
+        if actual_criteria != expected_criteria:
+            errors.append(f"v2 result {bead_id} criteria differ from dispatch")
+    return errors
 
 
 def result_provenance(
@@ -345,7 +405,8 @@ def _prepare(
                 effort=snapshot.dimensions.effort,
                 write_scope=list(snapshot.write_scope),
                 scope_authority=list(scope_authority(snapshot.beads)),
-                bead_revisions=_bead_revisions(beads, worker["beads"]),
+                bead_revisions=_bead_revisions(snapshot.beads),
+                evidence_binding=_evidence_binding(snapshot.beads),
             )
             worker = run.workers[index]
         if run.harness == "queued" and worker.get("task_id") is None:
@@ -679,6 +740,13 @@ def result(
     value, errors = results.load_result(path, kind="worker")
     if errors:
         raise BatchRefusal("invalid_result", "; ".join(errors[:6]), errors=errors)
+    binding_errors = _v2_binding_errors(worker, value)
+    if binding_errors:
+        raise BatchRefusal(
+            "result_evidence_binding",
+            "; ".join(binding_errors),
+            errors=binding_errors,
+        )
     worktree = worker.get("worktree")
     if worktree:
         head = gitcmd.git(Path(worktree), "rev-parse", "HEAD", error=BatchError)
