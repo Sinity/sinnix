@@ -268,6 +268,23 @@ def land_lock_path(config: Config, run_id: str) -> Path:
     return runs_dir(config) / f"{run_id}.land.lock"
 
 
+def landing_recovery_lock_path(config: Config, run_id: str) -> Path:
+    """The lock for replacing a landing task the queue has lost."""
+    return runs_dir(config) / f"{run_id}.landing-recovery.lock"
+
+
+@contextmanager
+def landing_recovery_locked(config: Config, run_id: str) -> Iterator[None]:
+    """Serialize recovery of one run's lost landing task.
+
+    Unlike ``landing_locked``, result filing waits for this short lock: two
+    workers may complete at once, and exactly one must inspect the lost task,
+    enqueue its replacement, and relink the manifest.
+    """
+    with _flock(landing_recovery_lock_path(config, run_id)):
+        yield
+
+
 @contextmanager
 def landing_locked(config: Config, run_id: str) -> Iterator[None]:
     """Hold the run's landing lock for the caller's whole duration, or refuse."""

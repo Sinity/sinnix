@@ -1137,6 +1137,21 @@ def find_task(
     return tasks.get(task_id) if isinstance(task_id, int) else None
 
 
+def vanished(
+    tasks: Mapping[int, Task], task_id: object, reference: object = None
+) -> bool:
+    """Whether a recorded job identity names nothing the queue holds any more.
+
+    pueue's state is a file it can lose: after a reset its task ids start at
+    zero again, so every id recorded before it names either nothing or a
+    stranger's task. A record that named no task in the first place — an
+    external worker, a landing not yet queued — has not vanished.
+    """
+    if not isinstance(task_id, int) and not isinstance(reference, str):
+        return False
+    return find_task(tasks, task_id, reference) is None
+
+
 def addressed(task_id: int, reference: str | None = None) -> Task:
     """The task carrying this job now, whatever id the queue moved it to.
 
