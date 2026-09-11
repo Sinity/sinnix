@@ -302,7 +302,9 @@ class BeadsService:
         rows = (
             value
             if isinstance(value, list)
-            else value.get("issues") if isinstance(value, Mapping) else None
+            else value.get("issues")
+            if isinstance(value, Mapping)
+            else None
         )
         if (
             rows is None

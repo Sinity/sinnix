@@ -8,14 +8,14 @@ trap 'rm -rf "$work_root"' EXIT
 
 mkdir -p "$work_root/bin"
 {
-printf '#!%s\n' "$BASH"
-cat <<'EOF'
+  printf '#!%s\n' "$BASH"
+  cat <<'EOF'
 printf '%s\n' "${NOCTALIA_TEST_HOUR:-12}"
 EOF
-} > "$work_root/bin/date"
+} >"$work_root/bin/date"
 {
-printf '#!%s\n' "$BASH"
-cat <<'EOF'
+  printf '#!%s\n' "$BASH"
+  cat <<'EOF'
 set -euo pipefail
 printf '%s\n' "$*" >> "$NOCTALIA_TEST_LOG"
 if [[ "${1:-}" == msg && "${2:-}" == wallpaper-automation-get ]]; then
@@ -25,33 +25,33 @@ if [[ "${1:-}" == msg && "${2:-}" == wallpaper-automation-get ]]; then
   esac
 fi
 EOF
-} > "$work_root/noctalia"
+} >"$work_root/noctalia"
 chmod +x "$work_root/bin/date" "$work_root/noctalia"
 
 make_fixture() {
   local root="$1"
   mkdir -p "$root/home/wallpaper" "$root/original-dark" "$root/original-light"
-  : > "$root/original-dark/old.jpg"
-  : > "$root/original-light/old.jpg"
+  : >"$root/original-dark/old.jpg"
+  : >"$root/original-light/old.jpg"
   ln -s "$root/original-dark" "$root/home/wallpaper/dark"
   ln -s "$root/original-light" "$root/home/wallpaper/light"
   for mood in night evening; do
     mkdir -p "$root/corpus/sets/$mood/dark" "$root/corpus/sets/$mood/light"
-    : > "$root/corpus/sets/$mood/dark/$mood.jpg"
-    : > "$root/corpus/sets/$mood/light/$mood.jpg"
+    : >"$root/corpus/sets/$mood/dark/$mood.jpg"
+    : >"$root/corpus/sets/$mood/light/$mood.jpg"
   done
 }
 
 run_timeofday() {
   local root="$1" automation="$2" schedule="$3"
   NOCTALIA_TEST_LOG="$root/noctalia.log" \
-  NOCTALIA_TEST_AUTOMATION="$automation" \
-  HOME="$root/home" \
-  PATH="$work_root/bin:$PATH" \
-  SINNIX_NOCTALIA_BIN="$work_root/noctalia" \
-  SINNIX_WALLPAPER_CORPUS="$root/corpus" \
-  SINNIX_WALLPAPER_MOODS="night,evening" \
-  SINNIX_WALLPAPER_TIME_OF_DAY_SCHEDULE="$schedule" \
+    NOCTALIA_TEST_AUTOMATION="$automation" \
+    HOME="$root/home" \
+    PATH="$work_root/bin:$PATH" \
+    SINNIX_NOCTALIA_BIN="$work_root/noctalia" \
+    SINNIX_WALLPAPER_CORPUS="$root/corpus" \
+    SINNIX_WALLPAPER_MOODS="night,evening" \
+    SINNIX_WALLPAPER_TIME_OF_DAY_SCHEDULE="$schedule" \
     bash "$script"
 }
 

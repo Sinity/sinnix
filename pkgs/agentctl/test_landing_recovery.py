@@ -545,9 +545,10 @@ def test_a_queued_landing_manually_stashed_by_the_operator_is_preserved(
 
     assert filed["landing_released"] is False
     assert harness.pueue.task(landing_id).status == "Stashed"
-    assert manifest.load(harness.config, run["run_id"]).landing[
-        "waiting_for_results"
-    ] is False
+    assert (
+        manifest.load(harness.config, run["run_id"]).landing["waiting_for_results"]
+        is False
+    )
 
 
 def test_repeated_result_does_not_release_an_operator_restash_after_ours(
@@ -566,9 +567,10 @@ def test_repeated_result_does_not_release_an_operator_restash_after_ours(
 
     assert repeated["landing_released"] is False
     assert harness.pueue.task(landing_id).status == "Stashed"
-    assert manifest.load(harness.config, run["run_id"]).landing[
-        "waiting_for_results"
-    ] is False
+    assert (
+        manifest.load(harness.config, run["run_id"]).landing["waiting_for_results"]
+        is False
+    )
 
 
 def test_a_queue_reset_does_not_strand_workers_that_filed_results(

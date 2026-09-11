@@ -210,7 +210,9 @@ def _evidence_binding(beads: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]
     return records
 
 
-def _v2_binding_errors(worker: Mapping[str, Any], value: Mapping[str, Any]) -> list[str]:
+def _v2_binding_errors(
+    worker: Mapping[str, Any], value: Mapping[str, Any]
+) -> list[str]:
     """A v2 claim must copy stable owner facts from this worker's launch."""
     if value.get("schema_version") != results.RESULT_SCHEMA_VERSION:
         return []
@@ -871,9 +873,7 @@ def result(
                 # operator restash cannot be released by a repeated filing.
                 pueue.enqueue(task.task_id)
                 released = True
-                run = land_update(
-                    config, run_id, waiting_for_results=False
-                )
+                run = land_update(config, run_id, waiting_for_results=False)
     return {
         **run.worker(worker_id),
         "landing_task": run.landing.get("task_id"),

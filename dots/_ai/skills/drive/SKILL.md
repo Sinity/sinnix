@@ -49,15 +49,19 @@ status: active | stopped(<reason>)
 ---
 
 ## FRONTIER
+
 <next move>
 
 ## PASSES
+
 <direction, outcome, artifacts, verification>
 
 ## ASSUMPTIONS
+
 <decisions taken in auto mode>
 
 ## RULES
+
 <constraints added during the drive>
 ```
 

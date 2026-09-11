@@ -18,7 +18,7 @@ git -C "$work_root" init -q
 git -C "$work_root" apply --check "$automation_patch"
 (
   cd "$work_root"
-  patch -p1 --dry-run < "$audio_patch"
+  patch -p1 --dry-run <"$audio_patch"
 )
 
 bash -n "$wallpaper_script" "$timeofday_script"

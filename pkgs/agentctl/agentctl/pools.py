@@ -18,7 +18,7 @@ from typing import Any, Mapping
 
 from . import pueue
 from .config import PoolPolicy
-from .pueue import PueueError, Task
+from .pueue import PueueError
 
 # This runs as pueued starts, and the daemon answers only once its socket is
 # bound.

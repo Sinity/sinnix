@@ -36,8 +36,8 @@ command, the run manifest of a batch, and one operator screen.
 | `view [p]`                                                                                                | queue groups, what needs attention (failures of the last six hours, and jobs a live run recorded that the queue no longer has, at any age), active jobs, open runs with each worker's stage, ready beads (epics and decisions left out)    |
 | `events tail [--lines N] [--follow] [--project p]`                                                        | the event spool (`/realm/state/agentctl/events.jsonl`)                                                                                                                                                                                     |
 | `schedule apply`                                                                                          | make the transient timer set equal the declared schedules                                                                                                                                                                                  |
-| `pools apply`                                                                                             | write the declared parallelism of every pueue group into the running daemon                                                                                                         |
-| `backpressure tick`                                                                                       | one admission pass: pause or resume one pool against host stall, then report any safely retired legacy holds                                                                                                            |
+| `pools apply`                                                                                             | write the declared parallelism of every pueue group into the running daemon                                                                                                                                                                |
+| `backpressure tick`                                                                                       | one admission pass: pause or resume one pool against host stall, then report any safely retired legacy holds                                                                                                                               |
 
 The project is `--project`, a leading positional naming a configured project
 or a checkout path, or the checkout enclosing the working directory. A run
@@ -162,7 +162,7 @@ stashes are preserved exactly as queued. Agentctl no longer adds cross-pool
 admission locks, synthetic stashes, or nested-launch refusals.
 
 At the first backpressure pass after this upgrade, agentctl may retire an old
-cross-pool stash only when the task is non-terminal and still stashed *and*
+cross-pool stash only when the task is non-terminal and still stashed _and_
 its latest matching spool event is an unresolved `held`. A stale launch
 marker, missing/conflicting history, or a terminal task is reported and left
 alone; this never revives a cancelled job or releases an operator/external

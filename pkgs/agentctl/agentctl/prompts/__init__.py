@@ -317,7 +317,9 @@ class PromptSnapshot:
             "dimensions": self.dimensions.to_dict(),
             "atlas_refs": list(self.atlas_refs),
             "worker_contract_path": self.worker_contract_path,
-            "result_contract": _result_contract(self.beads, self.dimensions, self.batch),
+            "result_contract": _result_contract(
+                self.beads, self.dimensions, self.batch
+            ),
         }
         if self.batch:
             document["batch"] = dict(self.batch)
@@ -657,7 +659,9 @@ def evidence_binding(bead: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _result_contract(
-    beads: Sequence[Mapping[str, Any]], dimensions: PromptDimensions, batch: Mapping[str, Any]
+    beads: Sequence[Mapping[str, Any]],
+    dimensions: PromptDimensions,
+    batch: Mapping[str, Any],
 ) -> dict[str, Any]:
     bindings = [
         {"id": bead.get("id"), **dict(bead.get("evidence_binding") or {})}
