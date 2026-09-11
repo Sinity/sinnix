@@ -358,6 +358,26 @@ let
         # Keep ordinary prompts in the profiled runtime path, while utility
         # commands pass through without an unsupported global option.
         codex_uses_profile() {
+          # Only consume Codex's known global flags.  An arbitrary first word
+          # remains an interactive prompt, rather than being normalized as a
+          # command by this wrapper.
+          while [ "$#" -gt 0 ]; do
+            case "$1" in
+              -c|--config|--enable|--disable|--remote|--remote-auth-token-env|-m|--model|--local-provider|-p|--profile|-s|--sandbox|-C|--cd|--add-dir|-a|--ask-for-approval)
+                [ "$#" -ge 2 ] || return 0
+                shift 2
+                ;;
+              --config=*|--enable=*|--disable=*|--remote=*|--remote-auth-token-env=*|--model=*|--local-provider=*|--profile=*|--sandbox=*|--cd=*|--add-dir=*|--ask-for-approval=*)
+                shift
+                ;;
+              --strict-config|--oss|--approve-for-me|--dangerously-bypass-approvals-and-sandbox|--dangerously-bypass-hook-trust|--worktree|--search|--no-alt-screen)
+                shift
+                ;;
+              *)
+                break
+                ;;
+            esac
+          done
           case "''${1:-}" in
             agents|app-server|apply|cloud|completion|doctor|exec-server|features|help|login|logout|migrate-rollouts|plugin|remote-control|update)
               return 1

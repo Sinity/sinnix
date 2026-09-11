@@ -1,11 +1,11 @@
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: b917f073440a06ea6bb0d5462fe6209e13e21a4a292092cb0f2a154a16087721 -->
+<!-- gateway-catalog-sha256: 9f49432feb3f30b07b9eb865f4941f0150e3f4b0cb404eca11ea0e55fbfd9109 -->
 # Sinnix Agent Gateway reference
 
 Generated from `sinnix_agent_gateway.actions`. Every action is one MCP tool whose `tools/list` input schema is the one below; the catalog hash changes when any principal-visible action catalog row changes, including its schema, principal set, example or affordance.
 
-Revision: `v3-typed-actions`. Catalog SHA-256: `b917f073440a06ea6bb0d5462fe6209e13e21a4a292092cb0f2a154a16087721`.
+Revision: `v3-typed-actions`. Catalog SHA-256: `9f49432feb3f30b07b9eb865f4941f0150e3f4b0cb404eca11ea0e55fbfd9109`.
 
 ## Invocation
 
@@ -112,8 +112,8 @@ MCP: call the tool named after the action. CLI: `sinnix-agent-gateway call <acti
 | `processes.wait`         | `wait`    | `machine`          | `agent-control, observer, operator` | Wait until a process (same pid and start ticks) exits, or the bounded timeout elapses.                                                                                                                                                                                                                               |
 | `mcp.servers`            | `status`  | `mcp-broker`       | `observer, operator`                | Each probe runs initialize + tools/list with a 5 s bound; a timeout stores the upstream stderr as an artifact and returns its ref.                                                                                                                                                                                   |
 | `mcp.tools`              | `catalog` | `mcp-broker`       | `observer, operator`                | Catalog of every admitted upstream tool with its namespaced ref, input schema and read/change effect.                                                                                                                                                                                                                |
-| `mcp.call`               | `query`   | `mcp-broker`       | `observer, operator`                | Tools without a read-only annotation are refused here; use mcp.change (operator only).                                                                                                                                                                                                                               |
-| `mcp.change`             | `change`  | `mcp-broker`       | `operator`                          | Invoke one upstream tool that is not declared read-only.                                                                                                                                                                                                                                                             |
+| `mcp.call`               | `query`   | `mcp-broker`       | `observer, operator`                | Reads require an owner read-only annotation or an exact match to trusted registry selectors. Other requests require mcp.change (operator only).                                                                                                                                                                      |
+| `mcp.change`             | `change`  | `mcp-broker`       | `operator`                          | Invoke an upstream request not admitted as read-only by annotation or trusted registry selectors.                                                                                                                                                                                                                    |
 | `artifacts.list`         | `catalog` | `artifacts`        | `agent-control, observer, operator` | List principal-visible artifacts with kind, owner, size and canonical ref.                                                                                                                                                                                                                                           |
 | `artifacts.get`          | `get`     | `artifacts`        | `agent-control, observer, operator` | Metadata of one artifact without its bytes.                                                                                                                                                                                                                                                                          |
 | `artifacts.read`         | `query`   | `artifacts`        | `agent-control, observer, operator` | Read an artifact: text inline with offsets, images as an image block, other binary as a resource block.                                                                                                                                                                                                              |
@@ -17206,7 +17206,7 @@ Read tools mentioning search:
 
 ### `mcp.call`
 
-Tools without a read-only annotation are refused here; use mcp.change (operator only).
+Reads require an owner read-only annotation or an exact match to trusted registry selectors. Other requests require mcp.change (operator only).
 
 Family: `query`. Owner: `mcp-broker`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
@@ -17354,7 +17354,7 @@ Call by server and tool:
 
 ### `mcp.change`
 
-Invoke one upstream tool that is not declared read-only.
+Invoke an upstream request not admitted as read-only by annotation or trusted registry selectors.
 
 Family: `change`. Owner: `mcp-broker`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 

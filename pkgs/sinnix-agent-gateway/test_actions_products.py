@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -28,6 +29,32 @@ class Broker:
         if self.failure:
             raise McpBrokerError("owner unavailable")
         return {"response": {"structuredContent": self.data}}
+
+
+@pytest.mark.parametrize(
+    "owner_data",
+    [
+        {"sessions": [], "coverage": {"complete": False}},
+        {"ok": False, "status": "error", "message": "archive unavailable"},
+    ],
+)
+def test_owner_string_return_is_decoded_from_sdk_structured_wrapper(
+    tmp_path, monkeypatch, owner_data
+):
+    _, runtime, _ = make_server(tmp_path, "observer", monkeypatch)
+    runtime.mcp_broker = Broker({"result": json.dumps(owner_data)})
+    result = anyio.run(
+        products._orchestration,
+        runtime,
+        products.OrchestrationInput(session_refs=["session:a"]),
+    )
+    product = result.sessions[0]
+    assert product.data == owner_data
+    assert product.availability == (
+        "unavailable" if owner_data.get("ok") is False else "available"
+    )
+    if owner_data.get("ok") is False:
+        assert product.reason == "archive unavailable"
 
 
 def test_runtime_projection_keeps_requested_and_observed_evidence_separate():

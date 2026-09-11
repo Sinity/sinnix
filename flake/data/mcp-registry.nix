@@ -85,6 +85,20 @@ let
       tier = "deep-evidence";
       callTimeoutSeconds = 300;
       command = "mcp-lynchpin";
+      # The owner marks this mixed router as converge; these action contracts are read-only.
+      gatewayReadOnlyRoutes =
+        map
+          (action: {
+            tool = "lynchpin_project";
+            arguments = { inherit action; };
+          })
+          [
+            "campaign_evidence"
+            "campaign_progress"
+            "campaign_scope_delta"
+            "verification_regression"
+            "project_trajectory"
+          ];
       env = {
         LYNCHPIN_REPO_ROOT = "/realm/project/sinity-lynchpin";
         LYNCHPIN_LOCAL_ROOT = "/realm/project/sinity-lynchpin/.lynchpin";
@@ -103,6 +117,17 @@ let
       transport = "stdio";
       tier = "recall";
       command = "mcp-polylogue";
+      # These owner-declared read projections currently omit MCP tool annotations.
+      gatewayReadOnlyRoutes = [
+        {
+          tool = "query";
+          arguments.projection = "sessions";
+        }
+        {
+          tool = "get";
+          arguments.projection = "orchestration";
+        }
+      ];
       # polylogue-mcp is read-only by default and has no role flag; write
       # dispatchers are an environment opt-in.
       profiles =

@@ -64,6 +64,15 @@ async def owner_product(
             source_ref=source_ref,
         )
     data = response.get("structuredContent")
+    if (
+        isinstance(data, dict)
+        and set(data) == {"result"}
+        and isinstance(data["result"], str)
+    ):
+        try:
+            data = json.loads(data["result"])
+        except ValueError:
+            data = None
     if data is None:
         for item in response.get("content", []):
             if item.get("type") == "text":
@@ -100,7 +109,10 @@ async def owner_product(
             availability="unavailable",
             data=data,
             reason=str(
-                data.get("reason") or data.get("error") or f"Owner outcome: {outcome}"
+                data.get("reason")
+                or data.get("message")
+                or data.get("error")
+                or f"Owner outcome: {outcome}"
             ),
             source_ref=source_ref,
             owner_metadata=owner_metadata,
