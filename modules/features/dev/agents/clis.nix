@@ -321,6 +321,7 @@ mkFeatureModule {
           {
             home.packages = [
               scriptPkgs.beads
+              scriptPkgs.beads.passthru.dolt
               scriptPkgs.sinnix-agent-control-mcp
               scriptPkgs.sinnix-context-handoff
               scriptPkgs.sinnix-agent-profile-benchmark
@@ -583,6 +584,7 @@ mkFeatureModule {
 
         environment.systemPackages = [
           scriptPkgs.beads
+          scriptPkgs.beads.passthru.dolt
         ];
       }
     ];
