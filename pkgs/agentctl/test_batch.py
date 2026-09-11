@@ -1652,6 +1652,99 @@ def test_a_clean_merge_is_scanned_for_markers_too(harness: Harness) -> None:
     assert any(call[0] == "grep" for call in harness.git.greps)
 
 
+def _marker_repository(
+    tmp_path: Path, filename: str, initial: str, updated: str
+) -> tuple[Path, str, str]:
+    root = tmp_path / "repo"
+    subprocess.run(["git", "init", "-q", "-b", "master", str(root)], check=True)
+    (root / filename).write_text(initial)
+    subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(root),
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.test",
+            "commit",
+            "-q",
+            "-m",
+            "base",
+        ],
+        check=True,
+    )
+    base = subprocess.check_output(
+        ["git", "-C", str(root), "rev-parse", "HEAD"], text=True
+    ).strip()
+    (root / filename).write_text(updated)
+    subprocess.run(["git", "-C", str(root), "add", filename], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(root),
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.test",
+            "commit",
+            "-q",
+            "-m",
+            "updated",
+        ],
+        check=True,
+    )
+    candidate = subprocess.check_output(
+        ["git", "-C", str(root), "rev-parse", "HEAD"], text=True
+    ).strip()
+    return root, base, candidate
+
+
+def test_conflict_marker_scan_ignores_restructuredtext_table_underlines(
+    tmp_path: Path,
+) -> None:
+    root, base, candidate = _marker_repository(
+        tmp_path,
+        "table.rst",
+        "===================== ======================\n",
+        "===================== ======================\n"
+        "Column                Value\n"
+        "===================== ======================\n",
+    )
+
+    landing_module._refuse_conflict_markers(root, base, candidate)
+
+
+def test_conflict_marker_scan_catches_diff3_and_larger_git_markers(
+    tmp_path: Path,
+) -> None:
+    root, base, candidate = _marker_repository(
+        tmp_path,
+        "changed.txt",
+        "before\n",
+        "<<<<<<<< ours\n"
+        "ours\n"
+        "|||||||| base\n"
+        "base\n"
+        "========\n"
+        "theirs\n"
+        ">>>>>>>> theirs\n",
+    )
+
+    with pytest.raises(BatchRefusal) as refused:
+        landing_module._refuse_conflict_markers(root, base, candidate)
+
+    assert refused.value.code == "integration_conflict_markers"
+    assert refused.value.to_dict()["markers"] == [
+        f"{candidate}:changed.txt:1:<<<<<<<< ours",
+        f"{candidate}:changed.txt:3:|||||||| base",
+        f"{candidate}:changed.txt:5:========",
+        f"{candidate}:changed.txt:7:>>>>>>>> theirs",
+    ]
+
+
 def test_a_failing_verdict_is_recorded_and_a_hand_fix_lands_with_keep_integration(
     harness: Harness,
 ) -> None:

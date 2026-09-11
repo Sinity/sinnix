@@ -57,7 +57,16 @@ PR_PROPAGATION_TIMEOUT_SECONDS = 30
 # `check_missing`: no runner will pick it up.
 CHECK_MISSING_SECONDS = 600
 POLL_INTERVAL_SECONDS = 15
-CONFLICT_MARKER = r"^(<{7}|={7}|>{7})"
+# Git emits seven marker characters by default, but ``git merge-file`` also
+# supports a larger marker size.  Labels on the opening, base (diff3), and
+# closing markers are separated by whitespace; the separator is important so
+# a source line such as ``===================== =====`` cannot match the
+# opening seven equals.  The middle marker has no label and therefore gets
+# its own branch that only permits trailing whitespace.
+CONFLICT_MARKER = (
+    r"^(<{7,}|>{7,}|\|{7,})([[:space:]].*)?$"
+    r"|^={7,}[[:space:]]*$"
+)
 # How many times the default branch may move under a run before landing
 # stops with `target_moved_twice`.
 MAX_REFRESHES = 1
