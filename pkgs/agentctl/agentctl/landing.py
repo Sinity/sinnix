@@ -23,7 +23,7 @@ from .agents import (
     binding,
     other_worktrees,
     queue_agent,
-    queue_landing,
+    requeue_landing,
     workspace_of,
     worktree_path,
     write_prompt,
@@ -87,24 +87,30 @@ def _refuse_unless_workers_done(run: Run) -> None:
     _refuse_unless_live(run)
     tasks = pueue.tasks() if run.harness == "queued" else {}
     for worker in run.workers:
+        # The result document is the evidence; how the task ended after
+        # writing it (cancelled, timed out, killed, or lost with the queue's
+        # own state) is not.
+        if worker.get("result"):
+            continue
         if run.harness == "queued":
             task_id = worker.get("task_id")
             task = launch.find_task(tasks, task_id, worker.get("task_reference"))
             if task is None:
                 raise BatchRefusal(
-                    "worker_not_done", f"worker {worker['id']} has no task"
+                    "worker_not_done",
+                    f"worker {worker['id']} has no task"
+                    if task_id is None
+                    else f"worker {worker['id']} task {task_id} is gone from pueue "
+                    "and filed no result",
                 )
-            # The result document is the evidence; how the task ended after
-            # writing it (cancelled, timed out, killed) is not.
-            if not task.terminal and not worker.get("result"):
+            if not task.terminal:
                 raise BatchRefusal(
                     "worker_not_done",
                     f"worker {worker['id']} task {task_id} is {task.status.lower()}",
                 )
-        if not worker.get("result"):
-            raise BatchRefusal(
-                "worker_result_missing", f"worker {worker['id']} filed no valid result"
-            )
+        raise BatchRefusal(
+            "worker_result_missing", f"worker {worker['id']} filed no valid result"
+        )
 
 
 def _worker_results(run: Run) -> list[dict[str, Any]]:
@@ -1124,36 +1130,26 @@ def queue(config: Config, project: ProjectAdapter, run_id: str) -> dict[str, Any
     """Queue a fresh landing task for a run whose landing is not already running.
 
     `batch start` queues the first landing behind the workers; this re-queues
-    one after a landing failed, so a caller that cannot hold a process for the
-    whole landing still drives it through pueue.
+    one after a landing failed or the queue lost it, so a caller that cannot
+    hold a process for the whole landing still drives it through pueue. The
+    replacement is placed like every other requeue: behind the worker tasks
+    still running, and stashed while a worker owes a result, because a
+    landing that runs before then only refuses `worker_not_done`.
     """
     run = load(config, run_id)
     if run.project != project.project_id:
         raise BatchRefusal("project", f"run {run_id} belongs to {run.project}")
     _refuse_unless_live(run)
+    tasks = pueue.tasks()
     task_id = run.landing.get("task_id")
-    current = launch.find_task(
-        pueue.tasks(), task_id, run.landing.get("task_reference")
-    )
+    current = launch.find_task(tasks, task_id, run.landing.get("task_reference"))
     if current is not None and not current.terminal:
         raise BatchRefusal(
             "landing_in_progress",
             f"landing task {task_id} is {current.status.lower()}",
         )
-    queued = queue_landing(config, project, run, after=(), stashed=False)
-    queued_task = pueue.task(queued)
-    return {
-        **land_update(
-            config,
-            run_id,
-            task_id=queued,
-            task_reference=launch.launch_reference(queued_task)
-            if queued_task is not None
-            else None,
-            failure=None,
-        ).to_dict(),
-        "landing_task_id": queued,
-    }
+    run, queued = requeue_landing(config, project, run, tasks)
+    return {**run.to_dict(), "landing_task_id": queued}
 
 
 def land(

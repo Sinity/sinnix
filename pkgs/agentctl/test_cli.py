@@ -473,3 +473,80 @@ def test_an_unknown_operation_is_a_refusal_and_a_key_error_is_not(
     monkeypatch.setattr(cli.launch, "list_jobs", broken)
     with pytest.raises(KeyError):
         cli.main(["job", "list"])
+
+
+def _lost_landing(config: Config, run_id: str, *, filed: bool) -> Path:
+    """A run whose recorded landing task the queue no longer has."""
+    _manifest(config, run_id)
+    path = manifest.manifest_path(config, run_id)
+    document = json.loads(path.read_text())
+    document["landing"]["task_id"] = 4547
+    document["landing"]["task_reference"] = "land-4547"
+    if filed:
+        document["workers"][0]["result"] = {
+            "candidate_sha": "c" * 40,
+            "beads": [],
+            "unresolved": [],
+            "verification": [],
+        }
+    path.write_text(json.dumps(document))
+    return path
+
+
+def test_batch_status_asks_for_the_outstanding_result_not_a_landing(
+    fake_pueue: FakePueue, cli_config: Config, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """mzw2: a landing queued while a worker owes a result only refuses it.
+
+    The phantom stage read `ready to land`; naming `batch queue` in its place
+    would buy a task that fails `worker_not_done` the moment it runs.
+    """
+    run_id = "fixture-20260903-080000-0123abcd"
+    _lost_landing(cli_config, run_id, filed=False)
+
+    assert cli.main(["batch", "status", "0123abcd"]) == 0
+    text = capsys.readouterr().out
+    assert "stage landing vanished" in text
+    assert "landing: task 4547 (pueue no longer has it)" in text
+    assert (
+        f"    next: agentctl batch result {run_id} w1 "
+        "/nowhere/.agentctl/prompt.result.json\n" in text
+    )
+    assert "agentctl batch queue" not in text
+    assert "  next: the worker commands above" in text
+    assert cli.main(["--json", "batch", "status", "0123abcd"]) == 0
+    assert json.loads(capsys.readouterr().out)["landing"]["vanished"] == 4547
+
+    # A caller that queues one anyway gets a task that waits for the result
+    # rather than one that runs into a refusal.
+    assert cli.main(["batch", "queue", "0123abcd"]) == 0
+    stashed = json.loads(capsys.readouterr().out)["landing_task_id"]
+    assert fake_pueue.task(stashed).status == "Stashed"
+
+
+def test_batch_queue_replaces_a_lost_landing_once_the_results_are_in(
+    fake_pueue: FakePueue, cli_config: Config, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """mzw2: with every result filed, the landing is all that is missing."""
+    run_id = "fixture-20260903-080000-0123abcd"
+    path = _lost_landing(cli_config, run_id, filed=True)
+
+    assert cli.main(["batch", "status", "0123abcd"]) == 0
+    text = capsys.readouterr().out
+    assert "stage landing vanished" in text
+    assert "landing: task 4547 (pueue no longer has it)" in text
+    assert f"  next: agentctl batch queue {run_id}\n" in text
+
+    assert cli.main(["batch", "queue", "0123abcd"]) == 0
+    printed, summary = capsys.readouterr()
+    queued = json.loads(printed)["landing_task_id"]
+    task = fake_pueue.task(queued)
+    assert task.label == f"fixture:land:{run_id}"
+    # Nothing is left to wait for, so the replacement runs.
+    assert task.status != "Stashed" and task.dependencies == ()
+    assert summary == f"queued landing task {queued} for 0123abcd\n"
+    stored = json.loads(path.read_text())["landing"]
+    assert stored["task_id"] == queued and stored["task_reference"] is not None
+
+    assert cli.main(["batch", "status", "0123abcd"]) == 0
+    assert "pueue no longer has it" not in capsys.readouterr().out

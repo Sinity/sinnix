@@ -36,19 +36,72 @@ DEFAULT_JOB_ROWS = 40
 # ---------------------------------------------------------------- stage
 
 
-def worker_stage(worker: Mapping[str, Any], task: Task | None) -> str:
+@dataclass(frozen=True)
+class Vanished:
+    """The task identities a live run recorded that pueue no longer has.
+
+    A landed or abandoned run's jobs are free to be cleaned, so only a live
+    run's records name tasks the queue is still holding for it. For those, an
+    identity the queue cannot resolve is state pueue lost — after a daemon
+    reset the whole manifest points at ids that name nothing — and not a job
+    that ended.
+    """
+
+    landing: int | None = None
+    workers: tuple[str, ...] = ()
+
+    def __bool__(self) -> bool:
+        return self.landing is not None or bool(self.workers)
+
+
+NOTHING_VANISHED = Vanished()
+
+
+def vanished_of(run: Run, tasks: Mapping[int, Task] | None) -> Vanished:
+    """What the queue lost of this run; ``None`` tasks means it was unreadable.
+
+    An unreadable queue is not evidence of loss: every id would look vanished.
+    """
+    if tasks is None or not run.live:
+        return NOTHING_VANISHED
+    landing_id = run.landing.get("task_id")
+    return Vanished(
+        landing=landing_id
+        if launch.vanished(tasks, landing_id, run.landing.get("task_reference"))
+        else None,
+        workers=tuple(
+            worker["id"]
+            for worker in run.workers
+            if launch.vanished(
+                tasks, worker.get("task_id"), worker.get("task_reference")
+            )
+        ),
+    )
+
+
+def worker_stage(
+    worker: Mapping[str, Any], task: Task | None, *, vanished: bool = False
+) -> str:
     """What the worker is doing, from pueue first and the manifest second."""
     if task is not None and not task.terminal:
         return task.status.lower()
+    # A filed result is the evidence; that the queue lost the task afterwards
+    # takes nothing away from it.
     if worker.get("result"):
         return "done"
     if task is not None and task.terminal:
         return launch.phase_of(task)
+    if vanished:
+        return "vanished"
     return "awaiting result" if worker.get("worktree") else "unprepared"
 
 
 def run_stage(
-    run: Run, landing: Task | None, worker_tasks: Sequence[Task | None]
+    run: Run,
+    landing: Task | None,
+    worker_tasks: Sequence[Task | None],
+    *,
+    vanished: Vanished = NOTHING_VANISHED,
 ) -> str:
     """The run as one word: an active worker or landing task is never landed."""
     if any(task is not None and not task.terminal for task in worker_tasks):
@@ -64,6 +117,11 @@ def run_stage(
         return f"failed: {failure.get('code')}"
     if not run.prepared:
         return "unprepared"
+    if vanished.landing is not None:
+        # Nothing will run the landing: the manifest names a task the queue
+        # does not have, so "ready to land" would describe a task that is not
+        # waiting anywhere.
+        return "landing vanished"
     if landing is not None and landing.terminal and not landing.succeeded:
         return f"landing {launch.phase_of(landing)}"
     return (
@@ -79,19 +137,24 @@ def status(
     """The manifest with each task's pueue view and the landing PR's state."""
     run = load(config, run_id)
     tasks = pueue.tasks()
+    lost = vanished_of(run, tasks)
     document = run.to_dict()
     for worker in document["workers"]:
         task = launch.find_task(
             tasks, worker.get("task_id"), worker.get("task_reference")
         )
         worker["task"] = job_view(task) if task else None
-        worker["stage"] = worker_stage(worker, task)
+        worker["vanished"] = worker["id"] in lost.workers
+        worker["stage"] = worker_stage(worker, task, vanished=worker["vanished"])
     landing_task = launch.find_task(
         tasks,
         document["landing"].get("task_id"),
         document["landing"].get("task_reference"),
     )
     document["landing"]["task"] = job_view(landing_task) if landing_task else None
+    # The recorded landing id when pueue no longer has it, so a reader never
+    # takes `task_id` for a task that exists.
+    document["landing"]["vanished"] = lost.landing
     document["stage"] = run_stage(
         run,
         landing_task,
@@ -99,6 +162,7 @@ def status(
             launch.find_task(tasks, w.get("task_id"), w.get("task_reference"))
             for w in run.workers
         ],
+        vanished=lost,
     )
     number = run.landing.get("pr_number")
     if project is not None and isinstance(number, int):
@@ -122,6 +186,9 @@ class Snapshot:
     runs: tuple[Run, ...]
     ready: tuple[Mapping[str, Any], ...]
     errors: tuple[str, ...] = field(default_factory=tuple)
+    # Whether `tasks` is the queue's answer. When it is not, an empty task
+    # list says nothing about the jobs a run recorded.
+    queue_read: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -141,7 +208,10 @@ class Snapshot:
                 }
                 for task in self.tasks
             ],
-            "runs": [run_dict(run, self.tasks, self.now) for run in self.runs],
+            "runs": [
+                run_dict(run, self.tasks, self.now, queue_read=self.queue_read)
+                for run in self.runs
+            ],
             "ready": [
                 {
                     "id": bead.get("id"),
@@ -191,16 +261,21 @@ def local_clock(stamp: str | None, *, seconds: bool = False) -> str:
     return moment.astimezone().strftime("%H:%M:%S" if seconds else "%H:%M")
 
 
-def _task(tasks: Sequence[Task], task_id: Any) -> Task | None:
-    if not isinstance(task_id, int):
-        return None
-    return next((task for task in tasks if task.task_id == task_id), None)
-
-
-def run_dict(run: Run, tasks: Sequence[Task], now: datetime) -> dict[str, Any]:
+def run_dict(
+    run: Run, tasks: Sequence[Task], now: datetime, *, queue_read: bool = True
+) -> dict[str, Any]:
     """One run's rows: stage from pueue first, the manifest second."""
-    worker_tasks = [_task(tasks, worker.get("task_id")) for worker in run.workers]
-    landing_task = _task(tasks, run.landing.get("task_id"))
+    # By launch reference where the manifest has one: an id alone names a
+    # queue position, which `pueue switch` and a daemon reset both reassign.
+    index = {task.task_id: task for task in tasks}
+    lost = vanished_of(run, index if queue_read else None)
+    worker_tasks = [
+        launch.find_task(index, worker.get("task_id"), worker.get("task_reference"))
+        for worker in run.workers
+    ]
+    landing_task = launch.find_task(
+        index, run.landing.get("task_id"), run.landing.get("task_reference")
+    )
     workers = []
     for worker, task in zip(run.workers, worker_tasks, strict=True):
         since = (task.started_at or task.enqueued_at) if task else None
@@ -210,7 +285,9 @@ def run_dict(run: Run, tasks: Sequence[Task], now: datetime) -> dict[str, Any]:
                 "beads": list(worker["beads"]),
                 "branch": worker["branch"],
                 "worktree": worker.get("worktree"),
-                "stage": worker_stage(worker, task),
+                "stage": worker_stage(
+                    worker, task, vanished=worker["id"] in lost.workers
+                ),
                 "job": task.task_id if task else None,
                 "since": since,
                 "elapsed": age(since, now) if since else None,
@@ -228,12 +305,13 @@ def run_dict(run: Run, tasks: Sequence[Task], now: datetime) -> dict[str, Any]:
         "run": run.run_id,
         "harness": run.harness,
         "base_commit": run.base_commit,
-        "stage": run_stage(run, landing_task, worker_tasks),
-        "next": run_next(run, landing_task, worker_tasks),
+        "stage": run_stage(run, landing_task, worker_tasks, vanished=lost),
+        "next": run_next(run, landing_task, worker_tasks, vanished=lost),
         "workers": workers,
         "landing": {
             "job": landing_task.task_id if landing_task else None,
             "phase": job_view(landing_task)["phase"] if landing_task else None,
+            "vanished": lost.landing,
             "candidate_sha": landing.get("candidate_sha"),
             "pr_number": landing.get("pr_number"),
             "failure": landing.get("failure"),
@@ -244,16 +322,30 @@ def run_dict(run: Run, tasks: Sequence[Task], now: datetime) -> dict[str, Any]:
 
 
 def run_next(
-    run: Run, landing: Task | None, worker_tasks: Sequence[Task | None]
+    run: Run,
+    landing: Task | None,
+    worker_tasks: Sequence[Task | None],
+    *,
+    vanished: Vanished = NOTHING_VANISHED,
 ) -> str:
     """What follows mechanically; nothing here dispatches."""
-    stage = run_stage(run, landing, worker_tasks)
+    stage = run_stage(run, landing, worker_tasks, vanished=vanished)
     if stage in {"working", "landing"}:
         return "wait"
     if stage in {"landed", "abandoned"}:
         return "-"
     if stage == "stashed":
         return "batch result, then the landing task runs"
+    if stage == "landing vanished":
+        # A landing queued while a worker owes a result only refuses
+        # `worker_not_done`, and filing the last outstanding result queues the
+        # replacement landing itself. `batch queue` is the step only once the
+        # evidence the landing refuses on is complete.
+        return (
+            "batch queue"
+            if all(worker.get("result") for worker in run.workers)
+            else _worker_next(worker_tasks, vanished)
+        )
     if stage.startswith("failed") or stage.startswith("landing "):
         return (
             f"job logs {landing.task_id}, then batch land or batch resume"
@@ -263,13 +355,18 @@ def run_next(
     if stage == "unprepared":
         return "batch start again"
     if stage == "awaiting workers":
-        failed = [
-            task
-            for task in worker_tasks
-            if task is not None and task.terminal and not task.succeeded
-        ]
-        return "batch resume --worker" if failed else "batch result"
+        return _worker_next(worker_tasks, vanished)
     return "batch land"
+
+
+def _worker_next(worker_tasks: Sequence[Task | None], vanished: Vanished) -> str:
+    """How the outstanding results arrive: by hand, or by a fresh agent."""
+    failed = [
+        task
+        for task in worker_tasks
+        if task is not None and task.terminal and not task.succeeded
+    ]
+    return "batch resume --worker" if failed or vanished.workers else "batch result"
 
 
 def _group_counts(
@@ -298,6 +395,7 @@ def collect(
 ) -> Snapshot:
     errors: list[str] = []
     prefix = f"{project.project_id}:"
+    queue_read = True
     try:
         every = pueue.tasks()
         tasks = tuple(
@@ -307,7 +405,7 @@ def collect(
         )
         groups = pueue.groups_status()
     except PueueError as error:
-        tasks, groups = (), {}
+        tasks, groups, queue_read = (), {}, False
         errors.append(f"pueue: {error}")
     runs = tuple(list_runs(config, project.project_id))
     reader = SubprocessBdReader(project.root)
@@ -328,6 +426,7 @@ def collect(
         runs=runs,
         ready=ready,
         errors=tuple(errors),
+        queue_read=queue_read,
     )
 
 
@@ -347,6 +446,66 @@ def table(headers: Sequence[str], rows: Sequence[Sequence[Any]]) -> str:
             ).rstrip()
         )
     return "\n".join(lines)
+
+
+def _worker_commands(document: Mapping[str, Any]) -> dict[str, str]:
+    """The exact command each worker still owing a result needs, by worker id.
+
+    Every worker without a result has an entry, empty when there is nothing
+    for a person to run yet: an external worker's result is filed by hand at
+    any time, while a queued worker files its own when its task ends, so it
+    needs a command only once the run has no live task left to do it — which
+    is what the `landing vanished` stage establishes.
+    """
+    stranded = document.get("stage") == "landing vanished"
+    commands: dict[str, str] = {}
+    for worker in document["workers"]:
+        if worker.get("result"):
+            continue
+        if document["harness"] == "external":
+            result = worker.get("result_path") or (
+                f"{worker['worktree']}/.agentctl/prompt.result.json"
+                if worker.get("worktree")
+                else "<result.json>"
+            )
+            commands[worker["id"]] = (
+                f"agentctl batch result {document['run_id']} {worker['id']} {result}"
+            )
+        else:
+            commands[worker["id"]] = (
+                f"agentctl batch resume {document['run_id']} --worker {worker['id']}"
+                if stranded
+                else ""
+            )
+    return commands
+
+
+def _landing_next(document: Mapping[str, Any], commands: Mapping[str, str]) -> str:
+    """The step that replaces a landing the queue lost.
+
+    Queueing one while a worker owes a result buys a task that refuses
+    `worker_not_done`; the outstanding results are the step, and filing the
+    last of them queues the replacement landing itself.
+    """
+    if not commands:
+        return f"agentctl batch queue {document['run_id']}"
+    if any(commands.values()):
+        return "the worker commands above; the last result queues the landing"
+    return "wait for the running workers; the last result queues the landing"
+
+
+def _lost_jobs(row: Mapping[str, Any]) -> str:
+    """What this run row records and pueue no longer has, named for a person."""
+    lost = []
+    landing = row["landing"].get("vanished")
+    if landing is not None:
+        lost.append(f"landing task {landing}")
+    workers = [
+        worker["id"] for worker in row["workers"] if worker["stage"] == "vanished"
+    ]
+    if workers:
+        lost.append(f"worker{'s' if len(workers) > 1 else ''} {', '.join(workers)}")
+    return "; ".join(lost)
 
 
 def render(snapshot: Snapshot) -> str:
@@ -376,17 +535,25 @@ def render(snapshot: Snapshot) -> str:
         and recent(task.ended_at, now)
     ]
     failed.sort(key=lambda task: task.ended_at or "", reverse=True)
-    runs = [run_dict(run, snapshot.tasks, now) for run in snapshot.runs]
+    runs = [
+        run_dict(run, snapshot.tasks, now, queue_read=snapshot.queue_read)
+        for run in snapshot.runs
+    ]
     attention = [
         row
         for row in runs
-        if recent(row["changed_at"], now)
-        and (
-            row["stage"].startswith(("failed", "landing "))
-            or any(
-                worker["stage"]
-                in {"failed", "timeout", "refused", "cancelled", "launch-failed"}
-                for worker in row["workers"]
+        # A job the queue lost stays lost however long ago the run last
+        # changed: nothing else will report it, and no one is waiting on it.
+        if _lost_jobs(row)
+        or (
+            recent(row["changed_at"], now)
+            and (
+                row["stage"].startswith(("failed", "landing "))
+                or any(
+                    worker["stage"]
+                    in {"failed", "timeout", "refused", "cancelled", "launch-failed"}
+                    for worker in row["workers"]
+                )
             )
         )
     ]
@@ -399,7 +566,9 @@ def render(snapshot: Snapshot) -> str:
                 f" at {local_clock(task.ended_at)} ({age(task.ended_at, now)} ago)"
             )
         for row in attention:
-            lines.append(f"  ! run {row['run']} {row['stage']}: {row['next']}")
+            lost = _lost_jobs(row)
+            note = f" ({lost} gone from pueue)" if lost else ""
+            lines.append(f"  ! run {row['run']} {row['stage']}{note}: {row['next']}")
     else:
         lines.append("== nothing needs attention")
 
@@ -449,13 +618,19 @@ def render(snapshot: Snapshot) -> str:
                     )
                 )
             landing = row["landing"]
+            if landing["vanished"] is not None:
+                job_cell = f"#{landing['vanished']} gone"
+            elif landing["job"] is not None:
+                job_cell = f"#{landing['job']}"
+            else:
+                job_cell = "-"
             rows.append(
                 (
                     row["run"],
                     "landing",
                     row["stage"],
                     "-",
-                    f"#{landing['job']}" if landing["job"] is not None else "-",
+                    job_cell,
                     row["next"],
                 )
             )
@@ -573,6 +748,7 @@ class Output:
             for worker in document["workers"]
         )
         landing = document["landing"]
+        commands = _worker_commands(document)
         lines = [
             f"run {self.run(document['run_id'])} {document['project']} {document['harness']} "
             f"base {self.sha(document['base_commit'])} stage {document.get('stage', '-')} "
@@ -586,21 +762,17 @@ class Output:
                 else "-"
             )
             lines.append(f"  {worker['id']}: prompt {prompt}")
-            if document["harness"] == "external" and not worker.get("result"):
-                result = worker.get("result_path") or (
-                    f"{worker['worktree']}/.agentctl/prompt.result.json"
-                    if worker.get("worktree")
-                    else "<result.json>"
-                )
-                lines.append(
-                    f"    next: agentctl batch result {document['run_id']} "
-                    f"{worker['id']} {result}"
-                )
+            if commands.get(worker["id"]):
+                lines.append(f"    next: {commands[worker['id']]}")
         lines.append(
-            f"landing: task {landing.get('task_id')} candidate {self.sha(landing.get('candidate_sha'))}"
+            f"landing: task {landing.get('task_id')}"
+            f"{' (pueue no longer has it)' if landing.get('vanished') is not None else ''}"
+            f" candidate {self.sha(landing.get('candidate_sha'))}"
             f"{' PR #' + str(landing['pr_number']) if landing.get('pr_number') else ''}"
             f"{' failure ' + landing['failure']['code'] if landing.get('failure') else ''}"
         )
+        if landing.get("vanished") is not None:
+            lines.append(f"  next: {_landing_next(document, commands)}")
         return "\n".join(lines)
 
     def runs_table(self, rows: Sequence[Mapping[str, Any]]) -> str:

@@ -8,15 +8,14 @@ from typing import Any, Mapping, Sequence
 
 from . import gitcmd, launch, pueue, results, worktrunk
 from .agents import (
-    LANDING_AGENT_GROUP,
-    LANDING_AGENT_PARALLELISM,
     PUSH_TIMEOUT_SECONDS,
     WORKTREE_STATE_DIR,
     binding,
-    landing_group,
+    ensure_landing_groups,
     other_worktrees,
     queue_agent,
     queue_landing,
+    requeue_landing,
     result_path,
     worker_then,
     workspace_of,
@@ -34,6 +33,7 @@ from .manifest import (
     Run,
     create,
     land_update,
+    landing_recovery_locked,
     list_runs,
     load,
     manifest_path,
@@ -271,11 +271,7 @@ def _prepare(
 ) -> Run:
     """Claim, create, enqueue — each step skipped where the manifest records it done."""
     packets = PromptConfig.from_project(project, shared_template=config.worker_contract)
-    if run.harness == "queued":
-        pueue.group_add(landing_group(project.project_id), 1)
-    # The landing's own agents queue here, whatever `pools apply` has reached
-    # the daemon: a landing must not depend on the `agent` pool being open.
-    pueue.group_add(LANDING_AGENT_GROUP, LANDING_AGENT_PARALLELISM)
+    ensure_landing_groups(project.project_id)
     for index, worker in enumerate(run.workers):
         worker_id = worker["id"]
         if not worker.get("claimed"):
@@ -405,6 +401,10 @@ def _prepare(
             task_reference=launch.launch_reference(landing_task)
             if landing_task is not None
             else None,
+            # Only the external harness starts its landing stashed for result
+            # filing. A normal queued landing can later be stashed by an
+            # operator, which is not ours to release.
+            waiting_for_results=run.harness == "external",
         )
 
     def mark_prepared(document: dict[str, Any]) -> None:
@@ -741,22 +741,78 @@ def result(
 
     run = update(config, run_id, record)
     released = False
-    landing_id = run.landing.get("task_id")
-    if (
-        run.harness == "external"
-        and isinstance(landing_id, int)
-        and all(item.get("result") for item in run.workers)
-    ):
-        task = launch.find_task(
-            pueue.tasks(), landing_id, run.landing.get("task_reference")
-        )
-        if task is not None and task.status == "Stashed":
-            pueue.enqueue(task.task_id)
-            released = True
+    lost: int | None = None
+    requeued: int | None = None
+    requeue_error: str | None = None
+    # The manifest update above makes this result durable. The recovery itself
+    # needs one broader lock: concurrent final results otherwise both read the
+    # lost landing, then each enqueue a replacement and race to relink it.
+    # Reload after acquiring it so a waiter acts on every result and relink
+    # made by the process ahead of it.
+    with landing_recovery_locked(config, run_id):
+        run = load(config, run_id)
+        landing_id = run.landing.get("task_id")
+        reference = run.landing.get("task_reference")
+        if run.live and isinstance(landing_id, int):
+            try:
+                tasks = pueue.tasks()
+            except PueueError as error:
+                # The result record is already durable. A temporary unreadable
+                # queue is not proof that the landing vanished, and must not
+                # turn a successful result filing into a failed command.
+                requeue_error = str(error)
+                tasks = None
+            if tasks is None:
+                return {
+                    **run.worker(worker_id),
+                    "landing_task": landing_id,
+                    "landing_released": released,
+                    "landing_vanished": lost,
+                    "landing_requeued": requeued,
+                    "landing_requeue_error": requeue_error,
+                }
+            task = launch.find_task(tasks, landing_id, reference)
+            if task is None:
+                # The queue lost the landing task with its state. Nothing else
+                # would queue another, and the manifest would keep naming a task
+                # id that resolves to nothing, so the run would wait forever.
+                lost = landing_id
+                if project is not None:
+                    try:
+                        run, requeued = requeue_landing(config, project, run, tasks)
+                    except (PueueError, JobError) as error:
+                        # Filing the result is this verb's work; a recovery that
+                        # the queue refuses is reported, never raised over it.
+                        requeue_error = str(error)
+            elif (
+                task.status == "Stashed"
+                and all(item.get("result") for item in run.workers)
+                and (
+                    run.landing.get("waiting_for_results") is True
+                    # Old external manifests used the same protocol before
+                    # ownership was recorded. Do not infer it for queued
+                    # landings: their stash may be an operator's.
+                    or (
+                        run.harness == "external"
+                        and "waiting_for_results" not in run.landing
+                    )
+                )
+            ):
+                # This is an agentctl-marked result wait, not an arbitrary
+                # pueue stash. Clear the marker after enqueueing so a later
+                # operator restash cannot be released by a repeated filing.
+                pueue.enqueue(task.task_id)
+                released = True
+                run = land_update(
+                    config, run_id, waiting_for_results=False
+                )
     return {
         **run.worker(worker_id),
-        "landing_task": landing_id,
+        "landing_task": run.landing.get("task_id"),
         "landing_released": released,
+        "landing_vanished": lost,
+        "landing_requeued": requeued,
+        "landing_requeue_error": requeue_error,
     }
 
 
@@ -907,6 +963,7 @@ def resume(
                 document["landing"]["task_reference"] = (
                     launch.launch_reference(task) if task is not None else None
                 )
+                document["landing"]["waiting_for_results"] = False
 
             run = update(config, run_id, relink)
     return {**run.to_dict(), "job": job, "worker": worker_id}
