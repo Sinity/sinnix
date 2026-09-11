@@ -210,14 +210,16 @@ let
     # auto-started on demand). Embedded mode serializes every invocation on a
     # process-exclusive lock — under multi-agent fanouts that convoys for
     # minutes, and it pays ~2.3s engine startup per call vs ~65ms as a server
-    # client. Wrap rather than add dolt globally so every bd consumer (hooks,
-    # devshells, agent lanes) gets server capability unconditionally.
+    # client. Keep the wrapper's PATH injection so every bd consumer (hooks,
+    # devshells, agent lanes) gets server capability unconditionally, while
+    # exposing the exact same Dolt package through passthru for the user PATH.
     beads =
       let
         # No local patches. Upstream carries its own guard for the stale
         # issues.jsonl defect (a stale file re-imposed over newer Dolt rows
         # on every mutating command after a branch switch) -- the
         # GetStatistics emptiness guard in cmd/bd/auto_import_upgrade.go.
+        doltPackage = pkgs.dolt;
         beadsBase = pkgs.callPackage (inputs.beads + "/default.nix") {
           self = inputs.beads;
           buildGoModule = pkgs.buildGo126Module;
@@ -226,9 +228,14 @@ let
       pkgs.symlinkJoin {
         name = "beads-with-dolt";
         paths = [ beadsBase ];
+        # Consumers that need the standalone Dolt CLI should use this exact
+        # package, so its version cannot drift from the one wrapped into bd.
+        passthru = {
+          dolt = doltPackage;
+        };
         nativeBuildInputs = [ pkgs.makeWrapper ];
         postBuild = ''
-          wrapProgram $out/bin/bd --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.dolt ]}
+          wrapProgram $out/bin/bd --prefix PATH : ${pkgs.lib.makeBinPath [ doltPackage ]}
         '';
       };
 
