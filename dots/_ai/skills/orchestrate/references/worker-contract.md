@@ -31,21 +31,15 @@ names, and exits with one result document.
 4. **Do not publish, do not claim beads.** No push, no PR, no merge, no
    rebase onto a newer base, no rebuild of the host. No `bd update`,
    `claim`, `close` or `comment`: `batch start` claimed the beads and
-   `batch land` closes them from the acceptance record. The unit enforces
-   this: `git push` has no reachable remote, no credential is forwarded,
-   `bd` is read-only, the project checkout is read-only and the other
-   workers' worktrees are inaccessible.
+   `batch land` closes them from the acceptance record. Queued workers are
+   constrained to that boundary; external and native harnesses must follow it
+   directly and report any inability to do so.
 5. **No scope expansion.** Discoveries go into `unresolved`, never into
    extra work.
-6. **Heavy work runs as a job, never in the agent's own process.** The
-   agent unit is capped at a small memory ceiling and shares the host with a
-   dozen siblings; anything expected to exceed 1 GB of memory, 5 minutes, or
-   a scan of the live archive runs through the project's declared scratch
-   operation: `agentctl job start <project> scratch --workspace . --wait -- <script> [args]`
-   (the script lives under `/realm/tmp/work/`, reads its
-   inputs read-only, writes its output there, and prints a summary). Read
-   the result from the job log the run prints. A process that is OOM-killed
-   in the agent unit is a contract violation, not bad luck.
+6. **Use the declared execution route.** Short focused checks may run in the
+   foreground when the project permits them. Shared, resource-heavy or
+   durable commands run through the project's declared AgentCTL operation;
+   do not reconstruct a host execution recipe in the worker.
 
 7. **Exit with a clean tree and the result document.** The final message is
    the JSON below and nothing else; a worker whose result does not validate
@@ -55,25 +49,49 @@ names, and exits with one result document.
 
 Validated against `dots/claude/agents/schemas/worker.schema.json`:
 
+When every dispatched bead's `evidence_binding.v2_available` is `true`, use
+this v2 shape. Copy each stable `ac_id`, criterion text and `bead_revision`
+exactly from that snapshot; do not make identifiers from text. The requested
+model is `planned_model`. Omit `actual_executor_model` unless the executor
+observed it, and use `null` for unavailable measured usage. `tested_sha` is
+the actual candidate SHA a command tested, not a guessed future integration
+SHA.
+
 ```json
 {
+  "schema_version": 2,
+  "planned_model": "<snapshot result_contract.planned_model>",
+  "execution": "queued | external | native",
+  "attempt": 1,
+  "model_segments": [{"attempt": 1, "planned_model": "<requested model>", "measured_usage": null}],
+  "measured_usage": null,
   "candidate_sha": "<40-hex HEAD of the worker branch>",
-  "beads": [
-    {
-      "id": "<bead id>",
-      "criteria": [
-        {
-          "text": "<the acceptance criterion as written>",
-          "status": "satisfied | unsatisfied | superseded",
-          "evidence": "<command and result line, path:line, or why superseded>"
-        }
-      ]
-    }
-  ],
+  "beads": [{
+    "id": "<bead id>",
+    "bead_revision": "<snapshot evidence_binding.bead_revision>",
+    "criteria": [{
+      "ac_id": "<snapshot evidence_binding.criteria[].ac_id>",
+      "text": "<the exact snapshot criterion text>",
+      "status": "satisfied | unsatisfied | superseded",
+      "evidence": "<command and result line, path:line, or why superseded>"
+    }]
+  }],
   "unresolved": ["<finding or follow-up not implemented>"],
-  "verification": [{ "command": "<exact command>", "receipt": "<result line>" }]
+  "verification": [{
+    "command": "<exact command>",
+    "receipt": "<result line>",
+    "tested_sha": "<candidate SHA actually tested>",
+    "status": "passed | failed | skipped",
+    "coverage": {"ac_ids": ["<copied stable ac_id>"], "scope": "<what this command covers>"}
+  }]
 }
 ```
+
+When any binding is unavailable, file the legacy result shape (without
+`schema_version`) and leave evidence identity unknown. That means Beads needs
+authoring first: `metadata.acceptance_criteria` is one authoritative nonempty
+list of unique `{id, text}` rows, plus the bead's row revision. Do not duplicate
+the criterion prose elsewhere or derive IDs by hashing freeform text.
 
 - `candidate_sha` must equal `git rev-parse HEAD` in the worktree when the
   result is filed.

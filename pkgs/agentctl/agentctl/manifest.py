@@ -54,6 +54,7 @@ REFUSALS: dict[str, str] = {
     "review_failed": "the review task did not succeed",
     "review_invalid": "the verdict does not validate against the judge schema",
     "review_rejected": "the verdict is not `pass`",
+    "result_evidence_binding": "a v2 worker result differs from its dispatch-time stable acceptance binding",
     "runner": "the agent runner is missing or not executable",
     "target_moved_twice": "the default branch moved again after one refresh",
     "unknown_run": "no run has this id or suffix",

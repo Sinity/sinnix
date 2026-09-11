@@ -28,6 +28,13 @@ reader. Specification effort belongs in the cost of delivery.
   shape; each AC checkable by a named command or inspection. Adversarial
   read before saving: can an executor satisfy the wording while missing the
   point? Include **non-goals** — scope substitution is the default failure.
+- **Versioned acceptance evidence uses authored IDs.** Store criteria once in
+  `metadata.acceptance_criteria` as a nonempty list of unique `{id, text}`
+  rows. Keep each ID stable while its criterion remains the same obligation;
+  Beads supplies the row revision used at dispatch. Do not duplicate the
+  criterion prose in another field or derive IDs from existing freeform text.
+  Legacy tasks without this structure remain valid, but their acceptance
+  evidence cannot be automatically matched to a versioned criterion.
 - **Notes carry dated facts**: measurements, disproved hypotheses, operator
   rulings. Never hand-frozen snapshots of other beads' status — derive
   status from the graph (a known trap: pasted "current open
@@ -55,6 +62,13 @@ reader. Specification effort belongs in the cost of delivery.
 - **Blocking edges are the plan.** Wire them as real `bd` dependencies, not
   prose; the frontier (open, unblocked, unclaimed) is then queryable and
   the sequencing enforces itself. A bead with no blockers can start now.
+- **Record why follow-up scope exists.** Link the new bead to its origin
+  with `discovered-from` for a discovery or `supersedes` for a replacement.
+  For a split or residual, set the new bead's `split_from` or `residual_of`
+  metadata to one canonical `sinnix://projects/<project>/beads/<id>` string
+  using `bd update <new-id> --set-metadata '<key>=<ref>'`. These are origin
+  relationships, not prerequisites; add `blocks` separately when needed.
+  Do not infer provenance from titles, numbering, or parent/child membership.
 - **Dispatch groups**: beads sharing a file, area, fix pattern, or required
   context get `dispatch_group=<leader-id>` metadata (leader's notes list the
   members) — one lane executes the group, one integration branch, one
