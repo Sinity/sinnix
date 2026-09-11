@@ -117,12 +117,12 @@ let
     in
     ''
       ${authFragment}
-      ${modelVar}="${model}"
-      export ANTHROPIC_MODEL="$${modelVar}"
-      export ANTHROPIC_DEFAULT_OPUS_MODEL="$${modelVar}"
-      export ANTHROPIC_DEFAULT_SONNET_MODEL="$${modelVar}"
-      export ANTHROPIC_DEFAULT_HAIKU_MODEL="$${modelVar}"
-      export CLAUDE_CODE_SUBAGENT_MODEL="$${modelVar}"
+      ${modelVar}=${lib.escapeShellArg model}
+      export ANTHROPIC_MODEL="${"$"}${modelVar}"
+      export ANTHROPIC_DEFAULT_OPUS_MODEL="${"$"}${modelVar}"
+      export ANTHROPIC_DEFAULT_SONNET_MODEL="${"$"}${modelVar}"
+      export ANTHROPIC_DEFAULT_HAIKU_MODEL="${"$"}${modelVar}"
+      export CLAUDE_CODE_SUBAGENT_MODEL="${"$"}${modelVar}"
     '';
 
   # Shared backend-switch env builder for the codex-deepseek/codex-local

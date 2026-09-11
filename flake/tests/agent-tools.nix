@@ -56,6 +56,7 @@ in
           ''
           + lib.optionalString (lane ? env) ''
             grep -Fq 'ANTHROPIC_BASE_URL="${lane.env.baseUrl}"' ${wrapper}
+            ${pkgs.python3}/bin/python ${./claude-backend-model.py} ${wrapper} ${lib.escapeShellArg lane.model}
           ''
         ) agentLanes.claudeLanes
       );
@@ -547,6 +548,7 @@ in
           '';
           script = ''
             trap 'echo "dev-agent-tools-runtime failed at line $LINENO" >&2' ERR
+            ${pkgs.python3}/bin/python ${./claude-state.py} ${../../modules/features/dev/agents/claude-state.py}
 
             # mkHmRuntimeCheck renders declared files but deliberately does
             # not execute Home Manager activation. Exercise the private
