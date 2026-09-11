@@ -1,24 +1,36 @@
 ---
 name: orchestrate
-description: Orchestrate parallel agent implementation, research, or continuous queue work through explicit ownership, model selection, agentctl batches and jobs, structural review, and one landed candidate per batch.
+description: Orchestrate parallel implementation, research, or queue work with explicit ownership, model selection, agentctl batches, verification, and one landed candidate per batch.
 ---
 
 # Orchestrate
 
-The root session owns priorities, scope and consequential decisions. Delegate
-bounded supervision and implementation; automate observation and mechanics
-through `agentctl`. A started batch lands itself; new dispatches require an
-agent or operator decision.
+The root session owns priorities, scope, allocation, and consequential
+decisions. Delegate bounded supervision and implementation; automate mechanics
+through `agentctl`. Each concern has one accountable supervisor: consolidate
+normal successes, but report terminal failures and decision blockers promptly
+before unrelated queue work continues. A completed worker checkpoints its work,
+files its result, and exits; it does not need a perpetual status turn.
+
+## Dispatch and evidence
+
+Read [allocation and dispatch guidance](references/model-landscape.md). Native
+dispatch defaults to `fork_turns='none'`; deliberate full-history inheritance
+uses explicit `fork_turns='all'` with no model or effort override. A bounded
+packet expresses intent; check execution against owning launch/session metadata.
 
 ## The operating loop
 
-1. Inventory: `agentctl view <project>`, open manifests,
-   `git worktree list`, `bd ready`, the project's rules.
-2. Start one coherent set of two to four workers:
+1. Inventory: `agentctl view <project>`, active jobs, manifests,
+   `git worktree list`, `bd ready`, and the project's rules.
+2. Finish or recover existing candidates before starting new work. Start one
+   coherent, non-overlapping set of two to four workers only when it has a
+   concrete delivery:
    `agentctl batch start <project> <bead>… [--worker a,b]…`.
-3. Wait for the `<project>:land:<run>` finished event; never poll.
-4. `agentctl batch status <run>`: landed with an acceptance record, or a
-   named failure to act on.
+3. Use one event watch per campaign concern and wait for the
+   `<project>:land:<run>` completion event; do not poll.
+4. Read `agentctl batch status <run>`: landed with an acceptance record, or a
+   named failure with its next owner.
 
 The corpus runs once at the master boundary through the descriptor's
 `corpus` operation or its schedule, never per worker.
@@ -31,9 +43,7 @@ The corpus runs once at the master boundary through the descriptor's
 | Substantial implementation, investigation, candidate review      | `gpt-5.6-terra` | high   |
 | Unresolved architecture, design-critical implementation          | `gpt-6-astra`   | high   |
 
-These are starting assignments to revise from experience. Every dispatch names
-backend, model and effort explicitly; only forks inherit. Check the actual
-launch, including resumes, against the intended assignment. Read
+These are starting assignments to revise from experience. Read
 [allocation guidance](references/model-landscape.md) before choosing or
 escalating a model, and the [trial protocol](references/experiment-protocol.md)
 before changing a default from observed outcomes.
@@ -64,28 +74,9 @@ every worker prompt), [coordinator contract](references/coordinator-contract.md)
   `agentctl batch result <run> <worker> <result.json>`. The last result
   enqueues the landing task. Before trusting a subagent's output, confirm its
   worktree is the linked one the manifest names and is on the worker branch.
-- Continue or unblock a worker: `agentctl batch resume <run> --worker <w>`
-  queues a fresh agent into the existing worktree; uncommitted work there is
-  the new agent's.
-- Resume a completed session agent with `followup_task`; `send_message`
-  delivers context only and does not start a turn.
-- Landing (`batch land`) integrates the worker branches, runs the candidate
-  verification once, runs one reviewer on the candidate diff, publishes by
-  the descriptor's policy, records acceptance and closes the beads whose
-  criteria are all satisfied. Re-run it by hand after fixing a named failure.
-- Observation: ONE persistent watch on `agentctl events tail --follow`.
-  Completion events are authoritative; no per-job wait loops.
-- Release finished session agents through the harness's close/unload action
-  when available. Completion and interruption need not release MCP helpers.
-  If unloading is unavailable, report retained resources; helper age or idle
-  CPU alone does not establish that its connection can be terminated safely.
-- Heavy host operations run as declared operations so pueue's per-group
-  parallelism bounds them. Session subagents bypass pueue entirely: bound
-  them explicitly (one pytest at a time, `-n 2`) or route the heavy step
-  through `agentctl job start`.
-- Assign scope review, schema review and oracle authorship to bounded workers;
-  escalate unresolved decisions to the root. A state-touching change needs
-  evidence from its production route as well as fixtures.
+- Continue, recover, and land through the verbs and stages in the
+  [coordinator contract](references/coordinator-contract.md); it owns watches,
+  resumes, result filing, and publication mechanics.
 
 ## Worker contract
 
@@ -115,18 +106,11 @@ assigned reviewer reads the candidate diff, verification evidence and worker
 results; the root resolves escalated questions. If an authorized policy omits
 independent review, report that fact. Model tier does not establish correctness.
 
-## Batching
-
-Gather context → decide the coherent change → apply → verify once with the
-narrowest command that exercises the changed surface. When a check fails,
-diagnose the whole failure shape and batch the fixes.
-
 ## Continuous queue mode
 
-Start the highest-value ready ownership groups as batches via
-[[task-backend]] for selection, keep the agent frontier full, and let each
-batch land. Heavy verification remains independently bounded by its own
-groups.
+Use [[task-backend]] to select the highest-value ready ownership groups, then
+let each useful batch land. Prioritize finishing candidates over filling slots;
+heavy verification remains independently bounded by its own groups.
 
 ## Runtime architecture
 

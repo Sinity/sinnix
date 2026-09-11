@@ -46,6 +46,18 @@ jsonFormat.generate "codex-hooks.json" {
     ];
     PreToolUse = [
       {
+        # Codex 0.154 exposes spawn_agent through PreToolUse. The guard
+        # validates request intent only; it cannot observe child resolution.
+        matcher = "^spawn_agent$";
+        hooks = [
+          {
+            type = "command";
+            command = "${dotsRoot}/claude/hooks/pretooluse-agent-model.sh";
+            timeout = 5;
+          }
+        ];
+      }
+      {
         hooks = [
           {
             type = "command";

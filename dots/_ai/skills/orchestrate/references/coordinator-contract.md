@@ -30,11 +30,12 @@ what it is told and reports. A started batch lands itself: the landing task
 is queued behind its workers and runs when they all succeed. A run's "next"
 on the view describes its state.
 
-For several live workers, delegate the event watch, result collection, routine
-in-scope recovery, and consolidated reports to one accountable supervisor.
-Give it explicit authority and escalation conditions; choose its model through
-`orchestrate`. The coordinator retains scope, model allocation, and exceptional
-decisions. The supervisor uses the same manifests and runtime verbs.
+For several live workers, assign one accountable supervisor per concern for the
+event watch, result collection, routine in-scope recovery, and one consolidated,
+decision-ready report. Give it authority and escalation conditions; choose its
+model through `orchestrate`. The coordinator retains scope, allocation, and
+exceptional decisions. A worker checkpoints and files its result when complete;
+it is not kept alive for status alone.
 
 ## Capability map
 
@@ -77,11 +78,11 @@ candidate. Hosted review comments are handled as `docs/agentctl.md` states.
 
 ## The operating loop
 
-1. Inventory: `agentctl view <p>`, open manifests, `git worktree list`,
-   `bd ready`, the project's rules.
-2. Start one coherent set as a batch, two to four workers: `agentctl batch
-start <p> <bead>…`. Each seed bead's open dispatch group is one worker;
-   `--worker a,b` names one explicitly.
+1. Inventory: `agentctl view <p>`, active jobs, open manifests,
+   `git worktree list`, `bd ready`, and the project's rules.
+2. Finish existing candidates, then start one coherent set as a batch, two to
+   four workers: `agentctl batch start <p> <bead>…`. Each seed bead's open
+   dispatch group is one worker; `--worker a,b` names one explicitly.
 3. Wait for the `<p>:land:<run>` finished event on the watch; do not poll.
 4. `agentctl batch status <run>`: `landed` with an acceptance record, or a
    named failure.
