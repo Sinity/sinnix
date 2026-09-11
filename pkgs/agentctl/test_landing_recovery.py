@@ -1,11 +1,13 @@
 """Landing and cleanup preserve a live batch's inputs and recovery work."""
 
 import json
+import threading
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
 from agentctl import batch, launch, manifest, prompts
+from agentctl import start as start_module
 from agentctl.batch import BatchError, BatchRefusal
 from conftest import read_launch
 from test_batch import BASE, MOVED, SHA, Harness, labels, prepared_run, verdict
@@ -403,6 +405,67 @@ def test_the_last_result_requeues_a_landing_the_queue_lost(harness: Harness) -> 
     stored = manifest.load(harness.config, run["run_id"])
     assert stored.landing["task_id"] == queued
     assert stored.landing["task_reference"] == launch.launch_reference(task)
+
+
+def test_concurrent_results_replace_a_lost_landing_once(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """mzw2: recovery locks its queue snapshot through the manifest relink.
+
+    Both workers preserve the same pre-recovery task snapshot behind this
+    barrier. Without the recovery lock they both see the missing landing and
+    enqueue one, leaving the first task orphaned; with it, the second sees the
+    replacement and releases it after reloading the first result.
+    """
+    run = harness.start(workers=[["fx-lead"], ["fx-solo"]], harness="external")
+    lost = run["landing"]["task_id"]
+    harness.pueue.reset_state()
+    original_tasks = harness.pueue.tasks
+    snapshots = threading.Barrier(2)
+
+    def concurrent_snapshots():
+        snapshot = original_tasks()
+        try:
+            # A recovery lock holds the second caller outside this function;
+            # timing out then lets the first proceed. Without that lock both
+            # callers return their identical stale snapshots together.
+            snapshots.wait(timeout=0.2)
+        except threading.BrokenBarrierError:
+            pass
+        return snapshot
+
+    monkeypatch.setattr(start_module.pueue, "tasks", concurrent_snapshots)
+    ready = threading.Barrier(2)
+    filed: list[dict[str, object]] = []
+    errors: list[BaseException] = []
+
+    def file(worker_id: str) -> None:
+        try:
+            ready.wait(timeout=2)
+            filed.append(harness.file_result(run, worker_id))
+        except BaseException as error:  # surface failures from both threads
+            errors.append(error)
+
+    threads = [
+        threading.Thread(target=file, args=(worker["id"],)) for worker in run["workers"]
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=3)
+
+    assert not any(thread.is_alive() for thread in threads)
+    assert not errors
+    replacement = [
+        task for task in harness.pueue.tasks().values() if task.label.endswith(f":{run['run_id']}")
+    ]
+    assert len(replacement) == 1
+    task = replacement[0]
+    assert task.status != "Stashed"
+    stored = manifest.load(harness.config, run["run_id"])
+    assert stored.landing["task_id"] == task.task_id
+    assert all(worker.get("result") for worker in stored.workers)
+    assert any(entry["landing_vanished"] == lost for entry in filed)
 
 
 def test_a_requeued_landing_waits_for_the_workers_still_running(
