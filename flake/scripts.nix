@@ -191,10 +191,7 @@ let
       };
     };
 
-  polylogueSrc = import ./polylogue-package.nix {
-    inherit inputs pkgs;
-    package = inputs.polylogue.packages.${pkgs.stdenv.hostPlatform.system}.default;
-  };
+  polylogueSrc = inputs.polylogue.packages.${pkgs.stdenv.hostPlatform.system}.default;
 
   externalPackages = rec {
     # bd needs the dolt binary on PATH for sql-server mode (per-project server,
