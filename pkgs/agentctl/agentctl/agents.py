@@ -253,8 +253,25 @@ def other_worktrees(
 
 
 def binding(run: Run, worker_id: str | None) -> dict[str, Any]:
-    beads = list(run.worker(worker_id)["beads"]) if worker_id else list(run.beads)
-    return {"beads": beads, "run_id": run.run_id, "worker": worker_id}
+    worker = run.worker(worker_id) if worker_id else None
+    beads = list(worker["beads"]) if worker else list(run.beads)
+    requested = (
+        {
+            key: worker.get(key)
+            for key in ("backend", "model", "effort")
+            if isinstance(worker.get(key), str) and worker.get(key)
+        }
+        if worker
+        else {}
+    )
+    return {
+        "beads": beads,
+        "run_id": run.run_id,
+        "worker": worker_id,
+        "execution": run.harness,
+        "attempt": (len(worker.get("task_ids") or []) + 1) if worker else None,
+        "requested": requested,
+    }
 
 
 def result_path(worktree: Path) -> Path:

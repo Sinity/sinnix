@@ -38,7 +38,6 @@
         localInputOverrideArgs
         resolveFlakeDir
         avoidRepoCwdForActivation
-        switchFallback
         ;
       mkNhCommand =
         name: action:
@@ -70,7 +69,6 @@
               "''${nh_extra_args[@]}" || _rebuild_status=$?
 
           if [ "${action}" = "switch" ]; then
-            ${switchFallback name}
             ${commandRegistry.sinexCachePush}
           fi
 
@@ -81,45 +79,7 @@
       devCommands = {
         check = pkgs.writeShellScriptBin "check" ''
           set -euo pipefail
-          ${resolveFlakeDir}
-          if [ "''${AGENTCTL_PRINCIPAL:-}" = agent-control ] \
-            && [ "''${AGENTCTL_OPERATION:-}" != check ] \
-            && [ "''${AGENTCTL_OPERATION:-}" != verify_quick ]; then
-            exec agentctl job start sinnix check --workspace "$_flake_dir" --wait -- "$@"
-          fi
-          exec 9>/tmp/sinnix-switch.lock
-          if ! ${pkgs.util-linux}/bin/flock --nonblock 9; then
-            echo "sinnix check: another heavy nix operation is running — queued behind it (waiting for the lock)" >&2
-            ${pkgs.util-linux}/bin/flock 9
-          fi
-
-          for arg in "$@"; do
-            case "$arg" in
-              --no-build)
-                ;;
-              *)
-                echo "sinnix check: unsupported argument '$arg'" >&2
-                echo "This command runs the curated default check tier sequentially; use nix directly for custom checks." >&2
-                exit 64
-                ;;
-            esac
-          done
-
-          mapfile -t default_targets < <(
-            ${nix} eval "$_flake_dir#checks.${system}" \
-              --apply builtins.attrNames \
-              --json \
-              | ${pkgs.jq}/bin/jq -r '.[] | "checks.${system}.\(.)"'
-          )
-
-          cd "$_flake_dir"
-          for target in "''${default_targets[@]}"; do
-            echo "Running default check: $target"
-            NIX_CONFIG="eval-cache = false" SINNIX_REBUILD_ACTIVE=1 \
-              ${scriptPkgs.nix-safe}/bin/nix-safe build "$_flake_dir#$target" --no-link
-          done
-
-          echo "Default check tier complete."
+          ${commandRegistry.appCommands.check.script}
         '';
         format = pkgs.writeShellScriptBin "format" ''exec ${nix} fmt "$@"'';
         switch = mkNhCommand "switch" "switch";
@@ -155,6 +115,7 @@
         lint = pkgs.writeShellScriptBin "lint" ''exec ${nix} run .#lint -- "$@"'';
         check-heavy = pkgs.writeShellScriptBin "check-heavy" ''exec ${nix} run .#check-heavy -- "$@"'';
         check-all = pkgs.writeShellScriptBin "check-all" ''exec ${nix} run .#check-all -- "$@"'';
+        check-master = pkgs.writeShellScriptBin "check-master" ''exec ${nix} run .#check-master -- "$@"'';
         update = pkgs.writeShellScriptBin "update" ''
           set -euo pipefail
           if [ "$#" -gt 0 ]; then

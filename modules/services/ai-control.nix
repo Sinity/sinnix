@@ -112,33 +112,18 @@ let
       };
     };
 
-  # The backends that get a front door, named by their `sinnix.services.<name>`
-  # option and their runtime-surface name. These keys are static on purpose:
-  # they are what lets mkProxy read one surface's leaves without the surface
-  # set having to know this module's definitions first. The assertions below
-  # keep the list and the declared surfaces in step in both directions.
-  #
-  # ComfyUI, TTS (OpenedAI-Speech), MusicGen, and OCR are OCI containers with
-  # CDI GPU passthrough (modules/services/{comfyui,tts,musicgen,ocr}.nix), but
-  # `virtualisation.oci-containers` generates an ordinary
-  # systemd.services.podman-<name> unit, so they proxy exactly like the native
-  # backends. The one container-specific requirement: the container's own
-  # `ports` mapping must sit on the backend port, leaving the public port to
-  # systemd-socket-proxyd.
-  backendNames = [
-    "ollama"
-    "koboldcpp"
-    "stt"
-    "litellm"
-    "kokoro"
-    "llama-cpp"
-    "muse-glimmer"
-    "qwen38-vram"
-    "comfyui"
-    "tts"
-    "musicgen"
-    "ocr"
-  ];
+  # Backends own their AI marker and socket-proxy declaration. Reading that
+  # source metadata avoids enumerating runtime surfaces, to which this module
+  # contributes proxy rows itself.
+  backendNames = lib.naturalSort (
+    lib.attrNames (
+      lib.filterAttrs (
+        name: service:
+        (lib.attrByPath [ "meta" "ai" ] null service) != null
+        && (lib.attrByPath [ "meta" "ai" "socketProxy" ] false service)
+      ) config.sinnix.services
+    )
+  );
   proxies = lib.genAttrs backendNames mkProxy;
   enabledProxies = lib.filterAttrs (name: _: config.sinnix.services.${name}.enable) proxies;
 
@@ -178,35 +163,8 @@ let
     ) meshMembers
   );
 
-  # A backend that declares socket-proxy activation and never gets a row here
-  # is unreachable: its public endpoint has no listener and its unit, held by
-  # PartOf on a proxy that does not exist, can never be started. That is
-  # exactly how qwen38-vram shipped dead. Checked in both directions, since a
-  # row whose backend does not ask for a front door would proxy a port nothing
-  # serves.
-  declaredBackends = lib.attrNames (
-    lib.filterAttrs (
-      _: surface: surface.kind == "service" && surface.activation.mode == "socket-proxy"
-    ) config.sinnix.runtime.surfaces
-  );
-  frontDoorless = lib.subtractLists backendNames declaredBackends;
-  frontDoorOnly = lib.subtractLists declaredBackends (lib.attrNames enabledProxies);
 in
 {
-  assertions = [
-    {
-      assertion = frontDoorless == [ ];
-      message =
-        "runtime surfaces declaring activation.mode = \"socket-proxy\" have no front door in modules/services/ai-control.nix: "
-        + lib.concatStringsSep ", " frontDoorless;
-    }
-    {
-      assertion = frontDoorOnly == [ ];
-      message =
-        "modules/services/ai-control.nix proxies backends whose surface does not declare activation.mode = \"socket-proxy\": "
-        + lib.concatStringsSep ", " frontDoorOnly;
-    }
-  ];
   environment.systemPackages = [ scriptPkgs.sinnix-ai ];
   systemd.sockets = forEachProxy (proxy: {
     ${proxy.proxy} = proxy.socket;

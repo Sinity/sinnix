@@ -19,9 +19,9 @@ let
   shellTmpRoot = "${sinnixCfg.paths.realmRoot}/tmp/${user}";
   clodexCredentialHelper = "${scriptPkgs.sinnix-clodex-credential-helper}/bin/sinnix-clodex-credential-helper";
 
-  # Shared npm bootstrap prelude — delegates state-dir setup, first-run npm
-  # install, and launcher regeneration to scripts/sinnix-agent-npm-bootstrap.
-  # The agent launches directly via the generated launch.sh, not through
+  # Shared npm bootstrap prelude — delegates state-dir setup and first-run npm
+  # recovery to scripts/sinnix-agent-npm-bootstrap. The agent executable is
+  # invoked directly after setup, not through a generated launcher or
   # buildFHSEnv/bubblewrap, so sudo and other privileged helpers do not
   # inherit no_new_privileges. `STATE` is recomputed here because the
   # bootstrap subprocess cannot export it back to the wrapper.
@@ -33,6 +33,12 @@ let
     }:
     ''
       STATE="$HOME/.local/state/${stateDir}"
+      # The bootstrap is a subprocess. Keep the npm prefix and runtime PATH in
+      # this wrapper too, because the final direct exec must not depend on the
+      # removed launch.sh to reconstruct them.
+      export npm_config_prefix="$STATE/npm"
+      export NPM_CONFIG_PREFIX="$STATE/npm"
+      export PATH="${agentRuntimePath}:$STATE/npm/bin:$PATH"
       # Guarantee the NVMe scratch TMPDIR rather than trusting inheritance:
       # environment.sessionVariables.TMPDIR (profiles/workstation.nix) only
       # reaches processes whose session imported it, so an agent CLI started
@@ -42,7 +48,7 @@ let
         export TMPDIR=${lib.escapeShellArg shellTmpRoot}
         ${pkgs.coreutils}/bin/install -d -m 0700 "$TMPDIR" 2>/dev/null || true
       fi
-      ${scriptPkgs.sinnix-agent-npm-bootstrap}/bin/sinnix-agent-npm-bootstrap \
+        ${scriptPkgs.sinnix-agent-npm-bootstrap}/bin/sinnix-agent-npm-bootstrap \
         ${lib.escapeShellArg stateDir} \
         ${lib.escapeShellArg npmPackage} \
         ${lib.escapeShellArg binaryName} \
@@ -207,7 +213,7 @@ let
           claude_args+=(--add-dir "/home/${user}")
         fi
 
-        exec "$STATE/launch.sh" "''${claude_args[@]}" "$@"
+        exec "$STATE/npm/bin/claude" "''${claude_args[@]}" "$@"
       '';
       executable = true;
       force = true;
@@ -319,7 +325,7 @@ let
       }}
       export CLODEX_CREDENTIAL_HELPER=${lib.escapeShellArg clodexCredentialHelper}
 
-      exec "$STATE/launch.sh" server --proxy
+      exec "$STATE/npm/bin/clodex" server --proxy
     '';
     executable = true;
     force = true;
@@ -349,7 +355,7 @@ let
         export SINNIX_CODEX_PROFILE=${lib.escapeShellArg profile}
         codex_args=(--profile ${lib.escapeShellArg profile})
 
-        exec "$STATE/launch.sh" "''${codex_args[@]}" "$@"
+        exec "$STATE/npm/bin/codex" "''${codex_args[@]}" "$@"
       '';
       executable = true;
       force = true;

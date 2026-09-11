@@ -49,9 +49,11 @@ class ContextSnapshotStore:
         components = body.get("components")
         if isinstance(components, list):
             body["components"] = [
-                {**component, "snapshot_ref": "pending"}
-                if isinstance(component, Mapping)
-                else component
+                (
+                    {**component, "snapshot_ref": "pending"}
+                    if isinstance(component, Mapping)
+                    else component
+                )
                 for component in components
             ]
         return source_revision(body)
@@ -187,6 +189,18 @@ class ContextIntentSpec:
 
 
 CONTEXT_INTENTS: dict[str, ContextIntentSpec] = {
+    "campaign.progress": ContextIntentSpec(
+        "campaign.progress", 60000, (("campaign", 56000),)
+    ),
+    "session.orchestration": ContextIntentSpec(
+        "session.orchestration", 60000, (("orchestration", 56000),)
+    ),
+    "verification.regression": ContextIntentSpec(
+        "verification.regression", 60000, (("evidence", 56000),)
+    ),
+    "project.trajectory": ContextIntentSpec(
+        "project.trajectory", 60000, (("evidence", 56000),)
+    ),
     "project.orientation": ContextIntentSpec(
         "project.orientation",
         48_000,

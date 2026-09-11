@@ -5,11 +5,12 @@ description: Operate or recover agentctl jobs and batches — declared operation
 
 # Agent runtime
 
-`agentctl` is an in-process CLI; nothing runs on its behalf. pueue owns the
-queue, every process and its terminal result; worktrunk owns worktrees;
-GitHub owns review, required checks and merge; Beads owns tasks and claims;
-systemd owns only calendar wake-ups. Do not add a parallel ledger for any of
-them. `docs/agentctl.md` in sinnix is the reference.
+`agentctl` is an in-process CLI; nothing runs on its behalf. pueue owns each
+job's queue, process and terminal result; worktrunk owns batch worktrees;
+GitHub owns review, required checks and merge; Beads owns tasks and claims.
+Systemd owns fixed services, timer wake-ups and transient job units, while pueue remains
+the authority for queue pause/resume and task state. Do not add a parallel
+ledger for any of them. `docs/agentctl.md` in sinnix is the reference.
 
 Verbs: `project`, `job`, `batch`, `view`, `events`, `schedule`, `pools`,
 `backpressure`. `agentctl <verb> --help` is the surface. Reads print tables
@@ -48,7 +49,7 @@ did not succeed.
   `--all-terminal` retains jobs referenced by live batches and refuses if run
   manifests cannot be read; `--daemon-era` deletes
   the state subtrees no verb reads. Never by age.
-- **Never poll.** Every task's start and finish reaches
+- Every task's start and finish reaches
   `/realm/state/agentctl/events.jsonl`; watch `agentctl events tail --follow`.
   Keep one watch per concern and retain its execution-session handle. In
   `functions.exec`, forward the full result with
@@ -116,9 +117,9 @@ needs attention (failed jobs, workers and landings of the last six hours),
 active jobs with start time and elapsed, every open run with each worker's
 stage, since and job, the landing task and what follows next, and the ready
 beads (epics and decisions left out).
-A job whose state reads `held for <pool>` is waiting for a pool declared
-exclusive of its own to drain (the corpus pytest run and the agent wave never
-run together); it needs nothing from you and starts at the drain.
+Pressure pauses admit no new work while already running jobs finish. Native
+Pueue dependencies and operator stashes remain separate; no pool-wide
+pytest/agent exclusion is imposed.
 `agentctl events tail [--follow] [--project p]` is the same over time.
 
 ## Worker toolbelt
@@ -126,12 +127,10 @@ run together); it needs nothing from you and starts at the drain.
 Agents have `lane` on PATH:
 
 - `lane task` prints the dispatch packet (`.agentctl/prompt.md`).
-- `lane verify` runs the descriptor's focused verification through
-  `agentctl job start <project> <focused> --workspace . --wait`. A worker may
-  not start a launch into a pool declared exclusive of its own (the corpus
-  pytest run while its wave is live): that launch is refused, because holding
-  it would wait for the worker itself. The corpus runs from the coordinator or
-  its schedule, once the wave drains.
+- `lane verify` is available only when the descriptor declares a focused
+  profile; it runs that operation through `agentctl job start`. A worker does
+  not assume a focused profile or launch broad verification from inside its
+  own run; the coordinator chooses any broader check explicitly.
 - `lane done <result.json>` requires a clean tree, validates the document
   against `.agentctl/worker.schema.json` with `candidate_sha` equal to HEAD, and
   prints it as the final message. It never pushes; the landing task

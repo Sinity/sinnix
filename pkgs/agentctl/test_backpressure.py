@@ -32,7 +32,9 @@ def _ours(group: str) -> dict:
     return {"action": "closed", "group": group, "owner": backpressure.OWNER}
 
 
-def test_agent_admission_reopens_under_pressure(monkeypatch, tmp_path) -> None:
+def test_unattributed_legacy_pause_is_not_reopened_until_all_signals_are_quiet(
+    monkeypatch, tmp_path
+) -> None:
     result, calls = _tick(
         monkeypatch,
         {"io_full_avg60": 15.22, "memory_full_avg60": 1.92},
@@ -45,8 +47,8 @@ def test_agent_admission_reopens_under_pressure(monkeypatch, tmp_path) -> None:
         spool=_spool(tmp_path, _ours("agent")),
     )
 
-    assert calls == [("resume", "agent")]
-    assert result["action"] == "opened"
+    assert calls == []
+    assert result["action"] == "hold"
 
 
 def test_io_closure_stays_until_io_below_hysteresis(monkeypatch) -> None:
@@ -89,6 +91,49 @@ def test_io_closure_reopens_when_current_pressure_recovers(
     assert result["action"] == "opened"
 
 
+def test_zero_avg10_is_current_recovery_not_a_stale_avg60_fallback(
+    monkeypatch, tmp_path
+) -> None:
+    """Zero is valid PSI, so it must not select the older high average."""
+    result, calls = _tick(
+        monkeypatch,
+        {
+            "io_full_avg10": 0.0,
+            "io_full_avg60": 30.0,
+            "memory_full_avg10": 1.0,
+            "memory_full_avg60": 1.0,
+        },
+        {
+            "agent": "Running",
+            "pytest": "Paused",
+            "normal": "Running",
+            "bulk": "Running",
+        },
+        spool=_spool(tmp_path, _ours("pytest")),
+    )
+
+    assert calls == [("resume", "pytest")]
+    assert result["action"] == "opened"
+
+
+def test_checkpoint_round_trips_nonempty_legacy_holds(tmp_path) -> None:
+    spool = tmp_path / "events.jsonl"
+    checkpoint = tmp_path / "checkpoint.json"
+    held = {
+        "kind": "pool-hold",
+        "action": "held",
+        "task_id": 7,
+        "held_at": "2026-09-11T03:17:00Z",
+    }
+    spool.write_text(json.dumps(held) + "\n")
+
+    written = backpressure.event_state(spool, checkpoint=checkpoint)
+    restored = backpressure.event_state(None, checkpoint=checkpoint)
+
+    assert written.legacy_holds == {7: held}
+    assert restored.legacy_holds == {7: held}
+
+
 def test_memory_closure_stays_until_memory_below_hysteresis(monkeypatch) -> None:
     result, calls = _tick(
         monkeypatch,
@@ -120,8 +165,8 @@ def test_signal_transition_reopens_excluded_group_before_closing_another(
         spool=_spool(tmp_path, _ours("agent")),
     )
 
-    assert calls == [("resume", "agent")]
-    assert result["group"] == "agent"
+    assert calls == [("pause", "pytest")]
+    assert result["group"] == "pytest"
 
 
 def test_pressure_closes_admission_without_stopping_tasks(monkeypatch) -> None:
@@ -325,8 +370,8 @@ def test_old_io_pause_reopens_focused_tests_during_io_pressure(
         {"pytest": "Paused", "bulk": "Paused", "pytest-quick": "Paused"},
         spool=_spool(tmp_path, _ours("pytest-quick")),
     )
-    assert calls == [("resume", "pytest-quick")]
-    assert result["action"] == "opened"
+    assert calls == []
+    assert result["action"] == "hold"
 
 
 def test_memory_pressure_still_closes_focused_tests(monkeypatch) -> None:

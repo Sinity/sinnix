@@ -107,6 +107,7 @@ def test_job_start_launches_the_declared_operation(
         "phase": "queued",
         "terminal": False,
         "exit_code": None,
+        "dependencies": None,
     }
     assert set(payload).isdisjoint({"contract", "principal", "artifacts"})
 
@@ -274,7 +275,12 @@ def test_batch_start_hands_the_beads_to_agentctl_and_answers_from_the_manifest(
     assert worker["job_id"] == "41" and worker["job_ids"] == ["41"]
     # The manifest's stable reference for each job, which jobs.* addresses by.
     assert worker["job_launch_reference"] == "fixture-worker-abcd1234"
-    assert worker["state"] == {"phase": "running", "terminal": False, "exit_code": None}
+    assert worker["state"] == {
+        "phase": "running",
+        "terminal": False,
+        "exit_code": None,
+        "dependencies": None,
+    }
     assert worker["result_filed"] is False
     assert payload["landing"]["job_id"] == "42"
     assert payload["landing"]["job_launch_reference"] == "fixture-integrate-9f10"

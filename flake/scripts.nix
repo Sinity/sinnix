@@ -77,9 +77,7 @@ let
     # entirely from `registry`, not from an external flake input.
     sinnix = import ./cli-dispatcher.nix { inherit lib pkgs registry; };
   };
-  runtimeDefaults = import ./data/runtime-defaults.nix { inherit lib; };
   mcpRegistry = import ./data/mcp-registry.nix { inherit lib; };
-  sharedAgentSkills = import ./data/shared-agent-skills.nix;
   agentEnvironmentData = pkgs.writeText "sinnix-agent-environment-data.json" (
     builtins.toJSON {
       profiles =
@@ -115,13 +113,6 @@ let
         command = server.command or null;
         url = server.url or null;
       }) mcpRegistry.registry;
-      skills = sharedAgentSkills;
-    }
-  );
-  defaultRuntimeInventoryJson = builtins.toJSON (
-    runtimeDefaults.mkInventory {
-      hostname = "sinnix-fallback";
-      surfaces = runtimeDefaults.baseSurfaces;
     }
   );
   sinnixMcpPackage = pkgs.callPackage ../pkgs/sinnix-mcp/pkg.nix { };
@@ -329,7 +320,7 @@ let
     chatgpt-app = pkgs.callPackage ../pkgs/chatgpt-app { };
 
     sinnix-observe = pkgs.callPackage ../pkgs/sinnix-observe/pkg.nix {
-      inherit defaultRuntimeInventoryJson sinnix-lib;
+      inherit sinnix-lib;
     };
 
     sinnix-ops-reducer = pkgs.callPackage ../pkgs/sinnix-ops-reducer/pkg.nix {

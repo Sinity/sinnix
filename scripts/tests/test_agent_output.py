@@ -158,8 +158,9 @@ class NativeOutputTest(unittest.TestCase):
         self.assertEqual(outcome.returncode, 0, outcome.stderr)
         self.assertEqual(outcome.stdout, "")
         self.assertIn("changed 9 packages", outcome.stderr)
+        self.assertFalse((self.root / ".local/state/fixture-agent/launch.sh").exists())
         launched = subprocess.run(
-            ["bash", str(self.root / ".local/state/fixture-agent/launch.sh")],
+            [str(self.root / ".local/state/fixture-agent/npm/bin/fixture")],
             env={**self.env, "HOME": str(self.root)},
             text=True,
             capture_output=True,

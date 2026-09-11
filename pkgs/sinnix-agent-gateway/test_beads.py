@@ -39,8 +39,13 @@ def beads_service(
         "elif 'sql' in args:\n"
         "    query=args[-1]\n"
         "    if 'DOLT_HASHOF_DB' in query: print(json.dumps([{'state_hash':f'working-{state[\"revision\"]}'}]))\n"
+        "    elif 'DOLT_HASHOF(' in query or 'DOLT_LOG(' in query: print(json.dumps([{'commit_hash':'0123456789abcdefghijklmnopqrstuv','committed_at':'2026-09-01T00:00:00Z','commit_order':1}]))\n"
         "    elif 'dolt_log' in query: print(json.dumps([{'commit_hash':'commit-0'}]))\n"
         "    elif 'dolt_status' in query: print(json.dumps([{'table_name':'issues','staged':False,'status':'modified'}] if state['revision'] else []))\n"
+        "    elif 'COUNT(*)' in query: print(json.dumps([{'count':2}]))\n"
+        "    elif 'comments' in query: print(json.dumps([{'id':1,'text':'fixture comment'}]))\n"
+        "    elif 'dependencies' in query and 'LEFT JOIN' in query: print(json.dumps([{'id':'fixture-2','dependency_type':'blocks','status':'open'}]))\n"
+        "    elif 'FROM issues' in query: print(json.dumps([{'id':'fixture-1','title':'first','status':'open'},{'id':'fixture-2','title':'second','status':'open'}]))\n"
         "    else: raise SystemExit('unexpected SQL query')\n"
         "elif 'unrelated-write' in args: state['writes'] += 1; state['revision'] += 1; pathlib.Path(state_path).write_text(json.dumps(state)); print(json.dumps({'unrelated': True}))\n"
         "elif 'force-fail' in args: print('forced owner failure', file=sys.stderr); raise SystemExit(7)\n"
@@ -123,7 +128,9 @@ def test_query_normalizes_project_qualified_resources_and_snapshot_pages(
     assert first["items"][0]["links"]["history"].endswith("/history")
     assert first["coverage"]["fixture"]["state"] == "complete"
     assert second["items"][0]["id"] == "fixture-2"
-    assert any("--parse-only" in command for command in commands(log))
+    assert any(
+        "sql" in command and "COUNT(*)" in command[-1] for command in commands(log)
+    )
 
 
 def test_snapshot_cursor_rejects_negative_and_out_of_range_offsets(
@@ -168,8 +175,12 @@ def test_stale_claims_forwards_stale_days_to_the_owner(tmp_path: Path) -> None:
         native_filters={"stale_days": 30},
     )
 
-    command = next(command for command in commands(log) if "stale" in command)
-    assert command[command.index("--days") + 1] == "30"
+    command = next(
+        command
+        for command in commands(log)
+        if "sql" in command and "COUNT(*)" in command[-1]
+    )
+    assert "i.updated_at<" in command[-1] and "i.status='in_progress'" in command[-1]
 
 
 def test_query_compiles_native_list_filters_and_records_parse_parity(
@@ -194,9 +205,11 @@ def test_query_compiles_native_list_filters_and_records_parse_parity(
     query = next(
         command
         for command in commands(log)
-        if "list" in command and "--updated-after" in command
+        if "sql" in command
+        and "COUNT(*)" in command[-1]
+        and "i.updated_at>" in command[-1]
     )
-    assert "--limit" in query and "--max-rows" in query
+    assert "NOT EXISTS" in query[-1] and "i.priority<=1" in query[-1]
     assert result["totals"]["returned"] == 2
     assert result["owner_capabilities"]["native_offset_paging"] is False
 
@@ -208,18 +221,21 @@ def test_ready_query_requests_issue_rows_without_unbounded_explanation(
 
     result = beads.query(project_ids=["fixture"], view="ready", limit=20)
 
-    ready = next(command for command in commands(log) if "ready" in command)
-    assert "--explain" not in ready
-    assert ready[ready.index("--limit") + 1] == "20"
+    ready = next(
+        command
+        for command in commands(log)
+        if "sql" in command and "COUNT(*)" in command[-1]
+    )
+    assert "NOT EXISTS" in ready[-1] and "d.type='blocks'" in ready[-1]
     assert result["items"]
     assert result["coverage"]["fixture"]["total_exact"] is True
 
 
 @pytest.mark.parametrize("view", ["open", "query", "stale_claims"])
-def test_query_applies_the_caller_page_bound_before_owner_serialization(
+def test_query_projects_before_owner_serialization_and_pages_complete_snapshot(
     tmp_path: Path, view: str
 ) -> None:
-    """Red if a compact frontier still asks the owner to materialize 200 rows."""
+    """Large description bodies never enter the summary snapshot."""
     beads, log = beads_service(tmp_path)
     kwargs: dict[str, object] = {"project_ids": ["fixture"], "view": view, "limit": 10}
     if view == "query":
@@ -227,10 +243,12 @@ def test_query_applies_the_caller_page_bound_before_owner_serialization(
 
     beads.query(**kwargs)
 
-    command = commands(log)[-1]
-    assert command[command.index("--limit") + 1] == "10"
-    if "--max-rows" in command:
-        assert command[command.index("--max-rows") + 1] == "10"
+    command = next(
+        command
+        for command in commands(log)
+        if "sql" in command and command[-1].startswith("SELECT i.id")
+    )
+    assert "i.description" not in command[-1] and "LIMIT 10001" in command[-1]
 
 
 def test_get_graph_and_memory_keep_owner_features_explicit(tmp_path: Path) -> None:
@@ -264,7 +282,8 @@ def test_get_graph_and_memory_keep_owner_features_explicit(tmp_path: Path) -> No
     assert item["as_of"] == "HEAD" and item["links"]["jobs"].endswith("/jobs")
     assert item["includes"]["blockers"]["items"][0]["id"] == "fixture-2"
     assert graph["owner_capabilities"]["native_cycle_detection"] is True
-    assert any(command[-2:] == ["--limit", "20"] for command in commands(log))
+    assert item["includes"]["history"]["state"] == "unavailable"
+    assert item["task_revision"] == "0123456789abcdefghijklmnopqrstuv"
 
 
 def test_preview_never_writes_and_apply_protects_notes_by_default(

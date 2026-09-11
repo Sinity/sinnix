@@ -45,7 +45,11 @@ let
   baseModules = (mkBaseModules inputs) ++ [ ../modules/default.nix ];
 
   # Shared special args for test evaluation
-  sharedSpecialArgs = mkSharedSpecialArgs sanitizedInputs;
+  sharedSpecialArgs = mkSharedSpecialArgs sanitizedInputs // {
+    # Tests explicitly declare no private host inputs; secret tests inject
+    # their own public synthetic declarations.
+    secretDeclarations = { };
+  };
 
   # Mock filesystem roots for test VMs (prevents real FS dependencies)
   mountTmpfsRoots = _: {
@@ -302,9 +306,12 @@ let
               }
             )
           ];
-        specialArgs = sharedSpecialArgs // {
-          lib = extendedLib;
-        };
+        specialArgs =
+          sharedSpecialArgs
+          // {
+            lib = extendedLib;
+          }
+          // (spec.specialArgs or { });
       };
       failures = builtins.filter (entry: !entry.assertion) evaluated.config.assertions;
       report = lib.concatMapStringsSep "\n" (entry: "  - ${entry.message}") failures;

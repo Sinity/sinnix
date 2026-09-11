@@ -25,6 +25,11 @@ mkServiceModule {
   name = "litellm";
   description = "LiteLLM gateway (Anthropic↔OpenAI) for local models";
   docs = "docs/local-ai-activation.md";
+  meta.ai = {
+    backendKind = "native";
+    requiresCuda = false;
+    socketProxy = true;
+  };
   surface = {
     unit = "litellm.service";
     # Uncapped memory: a single 1M-token request is buffered in the proxy while

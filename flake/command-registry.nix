@@ -58,12 +58,18 @@ let
     fi
   '';
   loadCheckTargets = outputName: ''
-    mapfile -t ${outputName}_targets < <(
-      ${pkgs.nix}/bin/nix eval "$_flake_dir#${outputName}.${system}" \
+    if ! _check_names=$(${pkgs.nix}/bin/nix eval "$_flake_dir#${outputName}.${system}" \
         --apply builtins.attrNames \
-        --json \
-        | ${pkgs.jq}/bin/jq -r '.[] | "${outputName}.${system}.\(.)"'
-    )
+        --json); then
+      echo "sinnix: failed to discover ${outputName}" >&2
+      exit 1
+    fi
+    if ! _check_targets=$(printf '%s' "$_check_names" | ${pkgs.jq}/bin/jq -er \
+        'if type == "array" and length > 0 and all(.[]; type == "string" and length > 0) then .[] | "${outputName}.${system}.\(.)" else error("expected nonempty check names") end'); then
+      echo "sinnix: invalid or empty ${outputName} discovery" >&2
+      exit 1
+    fi
+    mapfile -t ${outputName}_targets <<<"$_check_targets"
   '';
   avoidRepoCwdForActivation = ''
     # nixos-rebuild-ng can trip over a git checkout cwd during activation.
@@ -88,12 +94,8 @@ let
     if [ -n "''${SINNIX_LYNCHPIN_OVERRIDE:-}" ]; then
       append_override_arg lynchpin "$SINNIX_LYNCHPIN_OVERRIDE"
     fi
-    # --impure: modules/secrets.nix reads agenix secrets from
-    # /realm/state/secrets/sinnix, outside the flake source. Pure evaluation
-    # cannot see paths outside the flake's store copy, and fails silently
-    # doing so (builtins.pathExists/readDir return false/empty rather than
-    # erroring) — the symptom is a system with zero secrets, not a build
-    # error.
+    # Host declarations import the private agenix deployment manifest outside
+    # the flake source. Pure test evaluation supplies explicit synthetic input.
     nh_extra_args=(-- --impure)
     if [ "''${#nix_override_args[@]}" -gt 0 ]; then
       nh_extra_args+=("''${nix_override_args[@]}")
@@ -151,46 +153,6 @@ let
   sinexCachePush = ''
     if [ "$_rebuild_status" -eq 0 ]; then
       ${scriptPkgs.sinnix-sinex-cache-push}/bin/sinnix-sinex-cache-push /run/current-system || true
-    fi
-  '';
-  # Shared by this file's own `switch` appCommand and dev-shell.nix's
-  # mkNhCommand (switch action only): the exact-toplevel activation fallback,
-  # parameterized by `name` so both call sites get an accurate log prefix
-  # from one implementation.
-  switchFallback = name: ''
-    if [ "$_rebuild_status" -ne 0 ] && [ "$_rebuild_status" -ne 130 ]; then
-      echo "sinnix ${name}: nh failed with status $_rebuild_status; trying exact toplevel activation fallback" >&2
-      _toplevel_drv="$(
-        SINNIX_REBUILD_ACTIVE=1 NIX_CONFIG="eval-cache = false" \
-          ${pkgs.nix}/bin/nix eval \
-            "$_invoke_flake_dir#nixosConfigurations.sinnix-prime.config.system.build.toplevel.drvPath" \
-            --raw \
-            --impure \
-            "''${nix_override_args[@]}"
-      )"
-      _toplevel_out="$(
-        SINNIX_REBUILD_ACTIVE=1 NIX_CONFIG="eval-cache = false" \
-          ${pkgs.nix}/bin/nix-store -r "$_toplevel_drv"
-      )"
-      # Register the generation BEFORE activating: without the profile entry,
-      # switch-to-configuration boot has no generation to point the
-      # bootloader at, and a reboot would silently resurrect the previous
-      # generation. Twin comment: flake/dev-shell.nix.
-      /run/wrappers/bin/sudo ${pkgs.nix}/bin/nix-env \
-        --profile /nix/var/nix/profiles/system --set "$_toplevel_out"
-      _rebuild_status=0
-      /run/wrappers/bin/sudo "$_toplevel_out/bin/switch-to-configuration" switch || _rebuild_status=$?
-      # switch-to-configuration exits non-zero whenever ANY unit fails to
-      # (re)start, even one wholly unrelated to this config change.
-      # Registering the built generation as the persistent boot default is
-      # orthogonal to whether every service started cleanly, so always do it
-      # as a separate step — but keep the real "switch" exit status (unless
-      # this step itself fails worse) so a genuine regression still surfaces.
-      _boot_status=0
-      /run/wrappers/bin/sudo "$_toplevel_out/bin/switch-to-configuration" boot || _boot_status=$?
-      if [ "$_boot_status" -ne 0 ]; then
-        _rebuild_status="$_boot_status"
-      fi
     fi
   '';
   hostSmokeTerminalScript = ''
@@ -388,17 +350,62 @@ in
   inherit
     scriptPkgs
     resolveFlakeDir
+    loadCheckTargets
     rebuildLock
     rebuildContainmentFlags
     rebuildDefaultArgs
     rebuildServicePath
     localInputOverrideArgs
     avoidRepoCwdForActivation
-    switchFallback
     sinexCachePush
     ;
 
   appCommands = {
+    check = {
+      description = "Run the default semantic check tier, or evaluate it with --no-build";
+      script = ''
+        ${resolveFlakeDir}
+        if [ "''${AGENTCTL_PRINCIPAL:-}" = agent-control ] \
+          && [ "''${AGENTCTL_OPERATION:-}" != check ] \
+          && [ "''${AGENTCTL_OPERATION:-}" != verify_quick ]; then
+          exec agentctl job start sinnix check --workspace "$_flake_dir" --wait -- "$@"
+        fi
+        exec 9>/tmp/sinnix-switch.lock
+        if ! ${pkgs.util-linux}/bin/flock --nonblock 9; then
+          echo "sinnix check: waiting for the current Nix operation" >&2
+          ${pkgs.util-linux}/bin/flock 9
+        fi
+        _check_no_build=0
+        for arg in "$@"; do
+          case "$arg" in
+            --no-build) _check_no_build=1 ;;
+            *) echo "sinnix check: unsupported argument '$arg'" >&2; exit 64 ;;
+          esac
+        done
+        ${loadCheckTargets "checks"}
+        cd "$_flake_dir"
+        for target in "''${checks_targets[@]}"; do
+          echo "Running default check: $target"
+          if [ "$_check_no_build" = 1 ]; then
+            ${pkgs.nix}/bin/nix eval "$_flake_dir#$target.drvPath" --raw
+          else
+            NIX_CONFIG="eval-cache = false" SINNIX_REBUILD_ACTIVE=1 \
+              ${scriptPkgs.nix-safe}/bin/nix-safe build "$_flake_dir#$target" --no-link
+          fi
+        done
+        echo "Default check tier complete."
+      '';
+    };
+    check-master = {
+      description = "Verify committed master on explicit request";
+      script = ''
+        _flake_dir='git+file:///realm/project/sinnix?ref=master'
+        ${loadCheckTargets "checks"}
+        for target in "''${checks_targets[@]}"; do
+          ${pkgs.nix}/bin/nix build "$_flake_dir#$target" --no-link --accept-flake-config
+        done
+      '';
+    };
     lint = {
       description = "Lint Nix and shell files without modifying sources, and assert the /realm taxonomy";
       script = ''
@@ -596,7 +603,6 @@ in
             --max-jobs "$rebuild_jobs" \
             --cores "$rebuild_cores" \
             "''${nh_extra_args[@]}" || _rebuild_status=$?
-        ${switchFallback "switch"}
         ${sinexCachePush}
         exit "$_rebuild_status"
       '';

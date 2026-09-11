@@ -27,10 +27,10 @@ lanes use `mkCaptureLane`. A bypass needs a structural reason.
 ## Agent surfaces
 
 `flake/data/agent-lanes.nix` defines CLI lanes;
-`flake/data/mcp-registry.nix` defines MCP profiles;
-`flake/data/shared-agent-skills.nix` defines the shared skill roster.
-`modules/features/dev/agents/` renders them. The bare `claude` wrapper is lean;
-the upstream installer owns `~/.local/bin/claude`.
+`flake/data/mcp-registry.nix` defines MCP profiles; `dots/_ai/skills/` is the
+source for shared skills and `modules/features/dev/agents/` renders client
+links. `claude-lean` is the managed lean launcher;
+the upstream installer owns the bare `~/.local/bin/claude`.
 
 agentctl is in `pkgs/agentctl/`; the gateway is in
 `pkgs/sinnix-agent-gateway/`. Inspect `.agentctl/project.toml` and
@@ -51,8 +51,9 @@ switch`, and do not preflight a switch with duplicate evaluation. After
 activation, compare `nixos-version --configuration-revision` with the intended
 commit and inspect the direct live service or file fact.
 
-Edits through live out-of-store links take effect immediately. Copied Codex
-configuration, generated MCP profiles, and shared skill roster changes need
-activation; inspect the installed target to verify delivery. Structural agent
+Edits through live out-of-store links are available on the next read; existing
+sessions may retain loaded instructions. Generated MCP profiles and link-layout
+changes need activation. Codex's private configuration is an app-owned overlay,
+not an activation-time copy. Inspect installed targets to verify delivery. Structural agent
 changes regenerate `docs/agent-environment.md`; generated gateway references
 change through their renderer.

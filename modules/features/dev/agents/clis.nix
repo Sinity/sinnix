@@ -227,13 +227,6 @@ mkFeatureModule {
           );
         }
       );
-      inherit
-        (import ./skill-farm.nix {
-          inherit lib pkgs;
-          dotsRoot = sinnixCfg.paths.dotsRoot;
-        })
-        sharedSkillFarm
-        ;
       backends = import ./backends.nix {
         inherit
           lib
@@ -326,45 +319,6 @@ mkFeatureModule {
               scriptPkgs.sinnix-context-handoff
               scriptPkgs.sinnix-agent-profile-benchmark
             ];
-
-            programs.zsh = {
-              # Derived from flake/data/agent-lanes.nix: every generated wrapper
-              # gets a self-alias (its own binName). Exceptions are remapped by
-              # hand below — they have no registry lane, or point at a
-              # differently-named one.
-              shellAliases =
-                let
-                  selfAlias = binName: lib.nameValuePair binName "~/.local/bin/${binName}";
-                in
-                (lib.listToAttrs (
-                  lib.concatMap (
-                    name: lib.optional (name != "lean") (selfAlias agentLanes.claudeLanes.${name}.binName)
-                  ) (lib.attrNames agentLanes.claudeLanes)
-                ))
-                // (lib.listToAttrs (
-                  map (name: selfAlias agentLanes.codexLanes.${name}.binName) (lib.attrNames agentLanes.codexLanes)
-                ))
-                // (lib.listToAttrs (
-                  map (name: lib.nameValuePair "hermes-${name}" "~/.local/bin/hermes-${name}") (
-                    lib.attrNames agentLanes.hermesProfiles
-                  )
-                ))
-                // {
-                  # `claude` routes through claude-lean, never a bare
-                  # ~/.local/bin/claude: Claude Code's native local-installer
-                  # claims that literal path and clobbers any symlink there on
-                  # auto-update. Suffixed names are never touched.
-                  claude = "~/.local/bin/claude-lean";
-                  claude-clodex = "~/.local/bin/claude-clodex";
-                  clodex = "~/.local/bin/clodex";
-                  gemini = "~/.local/bin/gemini";
-                  grok = "~/.local/bin/grok-sinnix";
-                  agy = "~/.local/bin/agy-sinnix";
-                  hermes = "~/.local/bin/hermes";
-                  hermes-acp = "~/.local/bin/hermes-acp";
-                  hermes-update = "~/.local/bin/hermes-update";
-                };
-            };
 
             xdg.configFile = {
               # Claude hooks are NOT registered here: settings.json references
@@ -522,7 +476,11 @@ mkFeatureModule {
                     export CLODEX_CLAUDE_PATH="$claude_binary"
                     export TWEAKCC_CC_INSTALLATION_PATH="$claude_binary"
 
-                    exec "$CLODEX_STATE/launch.sh" "$@"
+                    # The second bootstrap prepares Claude, but Clodex owns
+                    # the process below and any npm update it starts.
+                    export npm_config_prefix="$CLODEX_STATE/npm"
+                    export NPM_CONFIG_PREFIX="$CLODEX_STATE/npm"
+                    exec "$CLODEX_STATE/npm/bin/clodex" "$@"
                   '';
                   executable = true;
                   force = true;
@@ -540,7 +498,7 @@ mkFeatureModule {
                       binaryName = "gemini";
                     }}
 
-                    exec "$STATE/launch.sh" "$@"
+                    exec "$STATE/npm/bin/gemini" "$@"
                   '';
                   executable = true;
                   force = true;
@@ -553,7 +511,7 @@ mkFeatureModule {
                 ".local/bin/agy-sinnix" = mkAntigravityWrapper;
 
                 ".config/hermes/skills" = {
-                  source = sharedSkillFarm;
+                  source = mkDotsFile "/_ai/skills";
                   force = true;
                 };
                 # Base (non-profile) hermes command — not a registry lane.

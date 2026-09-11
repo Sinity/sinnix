@@ -4,11 +4,8 @@ from __future__ import annotations
 
 import json
 import os
-from copy import deepcopy
 from pathlib import Path
 from typing import Any
-
-from .default_runtime_inventory import DEFAULT_RUNTIME_INVENTORY_JSON
 
 
 def inventory_path() -> Path:
@@ -20,23 +17,40 @@ def inventory_path() -> Path:
     )
 
 
-def _default_inventory() -> dict[str, Any]:
-    return json.loads(DEFAULT_RUNTIME_INVENTORY_JSON)
-
-
 def load_inventory() -> dict[str, Any]:
     path = inventory_path()
-    if path.exists():
-        try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            pass
-    return deepcopy(_default_inventory())
+    if not path.is_file():
+        return {
+            "available": False,
+            "reason": "runtime inventory missing",
+        }
+    try:
+        inventory = json.loads(path.read_text(encoding="utf-8"))
+    except OSError:
+        return {
+            "available": False,
+            "reason": "runtime inventory unreadable",
+        }
+    except json.JSONDecodeError:
+        return {
+            "available": False,
+            "reason": "runtime inventory malformed",
+        }
+    if not isinstance(inventory, dict):
+        return {
+            "available": False,
+            "reason": "runtime inventory malformed",
+        }
+    return inventory
 
 
 def surfaces() -> dict[str, dict[str, Any]]:
     raw = load_inventory().get("surfaces", {})
-    return {str(name): value for name, value in raw.items() if isinstance(value, dict)}
+    return (
+        {str(name): value for name, value in raw.items() if isinstance(value, dict)}
+        if isinstance(raw, dict)
+        else {}
+    )
 
 
 def polylogue_archive() -> dict[str, Any]:
@@ -64,7 +78,10 @@ def observed_slices() -> list[tuple[str, str]]:
     slices = inventory.get("slices", {})
     rows: list[tuple[str, str]] = []
     for manager in ("user", "system"):
-        for name in slices.get(manager, {}):
+        manager_slices = slices.get(manager, {}) if isinstance(slices, dict) else {}
+        if not isinstance(manager_slices, dict):
+            continue
+        for name in manager_slices:
             rows.append((manager, f"{name}.slice"))
     return rows
 

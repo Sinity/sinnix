@@ -611,6 +611,63 @@ def _verification_failure_detail(
     return f"{detail} ({', '.join(facts)})"
 
 
+def _worktree_attestation(path: Path) -> dict[str, Any]:
+    """Observe the checkout around a local verification without guessing.
+
+    A successful command is useful only as evidence for the exact, clean
+    candidate that the command ran against.  Git observation can itself fail
+    (for example while a worktree is being removed); record that absence rather
+    than turning it into a clean attestation.
+    """
+    try:
+        return {
+            "head": _git(path, "rev-parse", "HEAD"),
+            "dirty": bool(_git(path, "status", "--porcelain")),
+        }
+    except BatchError:
+        return {"head": None, "dirty": None}
+
+
+def _hosted_check_attestation(
+    pull: Mapping[str, Any], check: str, candidate: str
+) -> dict[str, Any]:
+    """Return only check-run facts GitHub explicitly associated with a SHA.
+
+    The PR head and a merge are not substitutes for a check run's tested
+    commit.  Different GitHub API versions use different spellings, so retain
+    the complete rollup separately and recognize the common explicit SHA and
+    URL/id fields here.
+    """
+    for entry in pull.get("statusCheckRollup") or ():
+        if not isinstance(entry, Mapping):
+            continue
+        if entry.get("name", entry.get("context")) != check:
+            continue
+        observed = entry.get("headSha") or entry.get("head_sha")
+        commit = entry.get("commit")
+        if observed is None and isinstance(commit, Mapping):
+            observed = commit.get("oid") or commit.get("sha")
+        if observed != candidate:
+            continue
+        attestation: dict[str, Any] = {"tested_sha": candidate}
+        for key in (
+            "detailsUrl",
+            "details_url",
+            "targetUrl",
+            "target_url",
+            "url",
+            "databaseId",
+            "database_id",
+            "id",
+        ):
+            value = entry.get(key)
+            if value is not None:
+                attestation["reference"] = str(value)
+                break
+        return attestation
+    return {}
+
+
 def _verify(
     config: Config,
     project: ProjectAdapter,
@@ -640,32 +697,41 @@ def _verify(
                 )
             merged = github.merge_commit(pull)
             if merged is not None:
-                # The repository merged this exact candidate: its own gates
-                # let it through, and that is the acceptance the landing
-                # records instead of waiting for a check to report.
+                # A merge is publication evidence, not a check-run receipt.
+                # Keep that distinction so downstream acceptance never treats
+                # branch protection or a merge as proof that this check ran.
                 return run, {
                     "kind": "merged",
                     "check": check,
                     "pr": number,
                     "candidate_sha": candidate,
-                    "phase": "succeeded",
+                    "requested_sha": candidate,
+                    "phase": "unknown",
+                    "status": "unknown",
                     "merge_commit": merged,
+                    "recorded_at": now(),
                 }
             _refuse_missing_checks(pull, (check,), started, number)
             state = github.hosted_check_state(pull, check)
             if state == "success":
+                checks = [
+                    entry
+                    for entry in pull.get("statusCheckRollup") or ()
+                    if isinstance(entry, Mapping)
+                    and entry.get("name", entry.get("context")) == check
+                ]
                 receipt = {
                     "kind": "hosted",
                     "check": check,
                     "pr": number,
                     "candidate_sha": candidate,
+                    "requested_sha": candidate,
                     "phase": "succeeded",
-                    "checks": [
-                        entry
-                        for entry in pull.get("statusCheckRollup") or ()
-                        if entry.get("name", entry.get("context")) == check
-                    ],
+                    "status": "passed",
+                    "checks": checks,
+                    "recorded_at": now(),
                 }
+                receipt.update(_hosted_check_attestation(pull, check, candidate))
                 return run, receipt
             if state == "failure":
                 raise BatchRefusal(
@@ -678,6 +744,7 @@ def _verify(
                     timed_out=True,
                 )
     operation = project.operation(profile)
+    before = _worktree_attestation(path)
     started = launch.start_operation(config, project, operation, workspace=path)
     job_id = started.get("job_id")
     if not isinstance(job_id, int):
@@ -708,15 +775,33 @@ def _verify(
             timed_out=waited.get("phase") == "timeout"
             or waited.get("wait_timed_out") is True,
         )
+    after = _worktree_attestation(path)
+    clean_candidate = (
+        before["head"] == candidate
+        and after["head"] == candidate
+        and before["dirty"] is False
+        and after["dirty"] is False
+    )
     receipt = {
         "kind": "operation",
         "operation": profile,
         "job_id": waited["job_id"],
         "candidate_sha": candidate,
+        "requested_sha": candidate,
         "phase": "succeeded",
+        "status": "passed",
         "reference": started.get("reference"),
+        "receipt": f"agentctl://jobs/{waited['job_id']}",
         "command": list(operation.command),
+        "head_before": before["head"],
+        "head_after": after["head"],
+        "git_dirty": False
+        if clean_candidate
+        else (True if before["dirty"] is True or after["dirty"] is True else None),
+        "recorded_at": now(),
     }
+    if clean_candidate:
+        receipt["tested_sha"] = candidate
     task = launch.find_task(pueue.tasks(), waited["job_id"], started.get("reference"))
     if task is not None:
         for key, suffix in (("log_path", ".log"), ("result_path", ".result")):

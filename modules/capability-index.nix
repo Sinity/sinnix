@@ -44,7 +44,6 @@ let
     inherit scriptRegistry commandDocs;
     inherit (helpers.data) mcpRegistry agentLanes;
     skillsRoot = "${inputs.self}/dots/_ai/skills";
-    sharedSkills = import (inputs.self + "/flake/data/shared-agent-skills.nix");
   };
 in
 {

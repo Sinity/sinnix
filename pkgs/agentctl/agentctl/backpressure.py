@@ -1,58 +1,178 @@
-"""Close queue admission under host pressure instead of killing what is running.
+"""Pressure admission with an incremental, regenerable spool projection.
 
-One pass: read the host's pressure, pause or resume one pueue group, record
-the transition, exit. A timer runs it. Nothing here loops or sleeps, and
-nothing is cancelled — a paused group's tasks keep their work and resume.
+Pueue owns dependencies and stashes. This module only pauses a group with
+``pause --wait`` and later resumes pauses it can prove it made.
 """
 
 from __future__ import annotations
 
 import json
+import math
+import os
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Mapping, Sequence
+from typing import Any, Mapping
 
 from . import pueue
 from .pueue import PueueError
 
-# Eight concurrent normal-pool jobs drive io full avg10 past 75%; at 25% new
-# work stops being admitted, so that is where the queue freezes.
 IO_FULL_FREEZE = 25.0
-
-# systemd-oomd on this host kills at memory full 50% sustained 30s. Freezing at
-# half of that leaves the queue a margin to go quiet before oomd chooses a
-# victim, which is the whole difference between freezing and thrashing.
 MEMORY_FULL_FREEZE = 25.0
-
-# A signal that caused a closure remains latched while its current 10-second
-# pressure is at or above this level. Freeze decisions use avg60 to avoid
-# reacting to spikes; recovery uses avg10 so completed load does not hold the
-# queue closed for several stale minutes.
 RESUME_BELOW = 10.0
-
-# Conversations stay admissible under both signals. Focused tests retain their
-# bounded pool under I/O pressure; memory pressure still closes their admission.
 CLOSE_ORDER = {
     "io": ("pytest", "bulk"),
     "memory": ("pytest", "normal", "bulk", "pytest-quick"),
 }
 MANAGED_GROUPS = ("agent", "pytest", "pytest-quick", "normal", "bulk")
-
-# Every pause this module records names itself, and `tick` reopens only a
-# group whose most recent pause event is its own and that has not run since:
-# an operator's `pueue pause -g X` leaves no event and stays paused until the
-# operator says, and a group seen running after our pause was released by
-# the operator, so a later pause of theirs is theirs too.
 OWNER = "agentctl"
+CHECKPOINT_SCHEMA = 1
 
 
-def read_pressure(root: Path = Path("/proc/pressure")) -> dict[str, float]:
-    """The host's `full` stall averages. Absent PSI reads as no pressure."""
-    values = {
-        "memory_full_avg10": 0.0,
-        "memory_full_avg60": 0.0,
-        "io_full_avg10": 0.0,
-        "io_full_avg60": 0.0,
+@dataclass
+class SpoolState:
+    pauses: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # The complete last unresolved event, not just its task id: task ids can
+    # move under `pueue switch`, so retirement needs a corroborating identity.
+    legacy_holds: dict[int, dict[str, Any]] = field(default_factory=dict)
+    cursor: dict[str, int] | None = None
+
+    def apply(self, event: Mapping[str, Any]) -> None:
+        if event.get("kind") == "backpressure":
+            group, action = event.get("group"), event.get("action")
+            if not isinstance(group, str):
+                return
+            if action == "closed":
+                signal = event.get("signal")
+                self.pauses[group] = {
+                    "owner": event.get("owner"),
+                    "signals": signal.split("+") if isinstance(signal, str) else [],
+                }
+            elif action in {"opened", "released"}:
+                self.pauses.pop(group, None)
+        elif event.get("kind") == "pool-hold":
+            task_id, action = event.get("task_id"), event.get("action")
+            if not isinstance(task_id, int):
+                return
+            if action == "held":
+                self.legacy_holds[task_id] = dict(event)
+            elif action in {"released", "retired"}:
+                self.legacy_holds.pop(task_id, None)
+
+    def ours(self) -> set[str]:
+        return {
+            group
+            for group, record in self.pauses.items()
+            if record.get("owner") == OWNER
+        }
+
+
+def _checkpoint_path(spool: Path | None, checkpoint: Path | None) -> Path | None:
+    if checkpoint is not None:
+        return checkpoint
+    return spool.with_name(f"{spool.name}.backpressure-state.json") if spool else None
+
+
+def _load_checkpoint(path: Path | None) -> SpoolState:
+    if path is None:
+        return SpoolState()
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return SpoolState()
+    if not isinstance(raw, dict) or raw.get("schema_version") != CHECKPOINT_SCHEMA:
+        return SpoolState()
+    state = SpoolState()
+    if isinstance(raw.get("pauses"), dict):
+        state.pauses = {
+            group: dict(record)
+            for group, record in raw["pauses"].items()
+            if isinstance(group, str) and isinstance(record, dict)
+        }
+    if isinstance(raw.get("legacy_holds"), dict):
+        state.legacy_holds = {
+            int(task_id): dict(event)
+            for task_id, event in raw["legacy_holds"].items()
+            if isinstance(task_id, str)
+            and task_id.isdigit()
+            and isinstance(event, dict)
+        }
+    cursor = raw.get("cursor")
+    if isinstance(cursor, dict) and all(
+        isinstance(cursor.get(key), int) for key in ("device", "inode", "offset")
+    ):
+        state.cursor = dict(cursor)
+    return state
+
+
+def _save_checkpoint(path: Path | None, state: SpoolState) -> None:
+    if path is None:
+        return
+    payload = {
+        "schema_version": CHECKPOINT_SCHEMA,
+        "cursor": state.cursor,
+        "pauses": state.pauses,
+        "legacy_holds": {
+            str(task_id): event for task_id, event in state.legacy_holds.items()
+        },
+    }
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        temporary.write_text(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+        os.replace(temporary, path)
+    except OSError:
+        return
+
+
+def event_state(spool: Path | None, *, checkpoint: Path | None = None) -> SpoolState:
+    """Advance by new bytes only, retaining ownership across rotation/truncation."""
+    checkpoint_path = _checkpoint_path(spool, checkpoint)
+    state = _load_checkpoint(checkpoint_path)
+    if spool is None:
+        return state
+    try:
+        with spool.open("rb") as handle:
+            # Attribute bytes to the inode actually opened, not a path that
+            # may have rotated between stat and open.
+            metadata = os.fstat(handle.fileno())
+            identity = {"device": metadata.st_dev, "inode": metadata.st_ino}
+            offset = 0
+            if (
+                state.cursor is not None
+                and all(
+                    state.cursor.get(key) == value for key, value in identity.items()
+                )
+                and 0 <= state.cursor["offset"] <= metadata.st_size
+            ):
+                offset = state.cursor["offset"]
+            handle.seek(offset)
+            appended = handle.read()
+    except OSError:
+        return state
+    complete, separator, _partial = appended.rpartition(b"\n")
+    if separator:
+        consumed = len(complete) + 1
+        for line in complete.splitlines():
+            try:
+                event = json.loads(line.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                continue
+            if isinstance(event, dict):
+                state.apply(event)
+        offset += consumed
+    state.cursor = {**identity, "offset": offset}
+    _save_checkpoint(checkpoint_path, state)
+    return state
+
+
+def read_pressure(root: Path = Path("/proc/pressure")) -> dict[str, float | None]:
+    """Unknown PSI is unknown; it never silently reads as zero."""
+    values: dict[str, float | None] = {
+        "memory_full_avg10": None,
+        "memory_full_avg60": None,
+        "io_full_avg10": None,
+        "io_full_avg60": None,
     }
     for resource in ("memory", "io"):
         try:
@@ -63,144 +183,161 @@ def read_pressure(root: Path = Path("/proc/pressure")) -> dict[str, float]:
             fields = line.split()
             if not fields or fields[0] != "full":
                 continue
-            for field in fields[1:]:
-                key, _, raw = field.partition("=")
-                if key in {"avg10", "avg60"}:
-                    try:
-                        values[f"{resource}_full_{key}"] = float(raw)
-                    except ValueError:
-                        pass
+            for metric in fields[1:]:
+                key, _, raw = metric.partition("=")
+                if key not in {"avg10", "avg60"}:
+                    continue
+                try:
+                    value = float(raw)
+                except ValueError:
+                    continue
+                if math.isfinite(value) and value >= 0:
+                    values[f"{resource}_full_{key}"] = value
     return values
 
 
-def over_threshold(pressure: Mapping[str, float]) -> tuple[str, ...]:
-    """Every signal that currently requires reduced admission."""
+def _value(pressure: Mapping[str, float | None], key: str) -> float | None:
+    value = pressure.get(key)
+    return value if isinstance(value, (int, float)) and math.isfinite(value) else None
+
+
+def over_threshold(pressure: Mapping[str, float | None]) -> tuple[str, ...]:
     active = []
-    if pressure.get("io_full_avg60", 0.0) >= IO_FULL_FREEZE:
+    if (
+        value := _value(pressure, "io_full_avg60")
+    ) is not None and value >= IO_FULL_FREEZE:
         active.append("io")
-    if pressure.get("memory_full_avg60", 0.0) >= MEMORY_FULL_FREEZE:
+    if (
+        value := _value(pressure, "memory_full_avg60")
+    ) is not None and value >= MEMORY_FULL_FREEZE:
         active.append("memory")
     return tuple(active)
 
 
-def _recovery_pressure(pressure: Mapping[str, float], signal: str) -> float:
-    return pressure.get(
-        f"{signal}_full_avg10",
-        pressure.get(f"{signal}_full_avg60", 0.0),
+def _recovery_pressure(
+    pressure: Mapping[str, float | None], signal: str
+) -> float | None:
+    avg10 = _value(pressure, f"{signal}_full_avg10")
+    return avg10 if avg10 is not None else _value(pressure, f"{signal}_full_avg60")
+
+
+def _pressure_complete(pressure: Mapping[str, float | None]) -> bool:
+    return all(
+        _value(pressure, f"{signal}_full_avg60") is not None for signal in CLOSE_ORDER
     )
 
 
-def _desired_paused(pressure: Mapping[str, float], paused: Sequence[str]) -> set[str]:
-    """Keep existing closures latched per signal until that signal clears."""
-    desired: set[str] = set()
-    for signal, groups in CLOSE_ORDER.items():
-        if _recovery_pressure(pressure, signal) >= RESUME_BELOW:
-            desired.update(group for group in paused if group in groups)
-    return desired
-
-
-def _append(spool: Path | None, event: Mapping[str, object]) -> None:
-    if spool is None:
-        return
-    line = json.dumps(
-        {
-            "schema_version": 1,
-            "emitted_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "kind": "backpressure",
-            "owner": OWNER,
-            **dict(event),
-        },
-        sort_keys=True,
-        separators=(",", ":"),
+def _can_reopen(
+    record: Mapping[str, Any], pressure: Mapping[str, float | None]
+) -> bool:
+    signals = record.get("signals")
+    sources = (
+        tuple(signal for signal in signals if signal in CLOSE_ORDER)
+        if isinstance(signals, list)
+        else ()
     )
-    try:
-        spool.parent.mkdir(parents=True, exist_ok=True)
-        with open(spool, "a", encoding="utf-8") as handle:
-            handle.write(line + "\n")
-    except OSError:
-        return
+    # Old events had no signal. Require all readings known and quiet rather
+    # than accidentally releasing after an invalid PSI read.
+    sources = sources or tuple(CLOSE_ORDER)
+    return _pressure_complete(pressure) and all(
+        (value := _recovery_pressure(pressure, signal)) is not None
+        and value < RESUME_BELOW
+        for signal in sources
+    )
 
 
-def paused_by_us(spool: Path | None) -> set[str]:
-    """Groups whose latest pause event in the spool is this module's own."""
-    if spool is None:
-        return set()
-    try:
-        lines = spool.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return set()
-    latest: dict[str, bool] = {}
-    for line in lines:
+def _append(spool: Path | None, event: Mapping[str, object]) -> dict[str, Any]:
+    record = {
+        "schema_version": 1,
+        "emitted_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "kind": "backpressure",
+        "owner": OWNER,
+        **dict(event),
+    }
+    if spool is not None:
         try:
-            event = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(event, dict) or event.get("kind") != "backpressure":
-            continue
-        group = event.get("group")
-        if not isinstance(group, str):
-            continue
-        if event.get("action") == "closed":
-            latest[group] = event.get("owner") == OWNER
-        elif event.get("action") in {"opened", "released"}:
-            latest.pop(group, None)
-    return {group for group, ours in latest.items() if ours}
+            spool.parent.mkdir(parents=True, exist_ok=True)
+            with open(spool, "a", encoding="utf-8") as handle:
+                handle.write(
+                    json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n"
+                )
+        except OSError:
+            pass
+    return record
 
 
-def tick(*, spool: Path | None, pressure_root: Path = Path("/proc/pressure")) -> dict:
-    """Close or reopen one admission group. Never stops running tasks."""
+def paused_by_us(spool: Path | None, *, checkpoint: Path | None = None) -> set[str]:
+    return event_state(spool, checkpoint=checkpoint).ours()
+
+
+def tick(
+    *,
+    spool: Path | None,
+    pressure_root: Path = Path("/proc/pressure"),
+    checkpoint: Path | None = None,
+) -> dict[str, Any]:
+    """Close or reopen one admission group. Never stops or stashes tasks."""
     pressure = read_pressure(pressure_root)
+    state = event_state(spool, checkpoint=checkpoint)
+    checkpoint_path = _checkpoint_path(spool, checkpoint)
     try:
         groups = pueue.groups_status()
     except PueueError as error:
         return {"action": "unavailable", "error": str(error), "pressure": pressure}
-
-    paused = [name for name in MANAGED_GROUPS if groups.get(name) == "Paused"]
+    for name in sorted(state.ours()):
+        if groups.get(name) == "Running":
+            state.apply(_append(spool, {"action": "released", "group": name}))
+    _save_checkpoint(checkpoint_path, state)
     signals = over_threshold(pressure)
     signal = "+".join(signals) or None
-
-    desired_paused = _desired_paused(pressure, paused)
-    ours = paused_by_us(spool)
-    # A group running while the spool says we paused it was started by the
-    # operator; record the release so a later operator pause is not reopened.
-    for name in sorted(ours):
-        if groups.get(name) == "Running":
-            _append(spool, {"action": "released", "group": name})
-            ours.discard(name)
-    obsolete = [name for name in paused if name not in desired_paused and name in ours]
+    paused = [name for name in MANAGED_GROUPS if groups.get(name) == "Paused"]
+    obsolete = [
+        name
+        for name in paused
+        if name in state.ours() and _can_reopen(state.pauses[name], pressure)
+    ]
     if obsolete:
         target = obsolete[0]
         try:
             pueue.resume(target)
         except PueueError as error:
-            return {"action": "failed", "group": target, "error": str(error)}
-        event = {"action": "opened", "group": target, "signal": signal, **pressure}
-        _append(spool, event)
+            return {
+                "action": "failed",
+                "group": target,
+                "error": str(error),
+                "pressure": pressure,
+            }
+        event = _append(
+            spool, {"action": "opened", "group": target, "signal": signal, **pressure}
+        )
+        state.apply(event)
+        _save_checkpoint(checkpoint_path, state)
         return event
-
     if signals:
         close_order = tuple(
             dict.fromkeys(group for active in signals for group in CLOSE_ORDER[active])
         )
         running = [name for name in close_order if groups.get(name) == "Running"]
-        if not running:
-            return {
-                "action": "hold",
-                "frozen": paused,
-                "signal": signal,
-                **pressure,
-            }
-        target = running[0]
-        try:
-            pueue.pause(target)
-        except PueueError as error:
-            return {"action": "failed", "group": target, "error": str(error)}
-        event = {"action": "closed", "group": target, "signal": signal, **pressure}
-        _append(spool, event)
-        return event
-
+        if running:
+            target = running[0]
+            try:
+                pueue.pause(target)
+            except PueueError as error:
+                return {
+                    "action": "failed",
+                    "group": target,
+                    "error": str(error),
+                    "pressure": pressure,
+                }
+            event = _append(
+                spool,
+                {"action": "closed", "group": target, "signal": signal, **pressure},
+            )
+            state.apply(event)
+            _save_checkpoint(checkpoint_path, state)
+            return event
     return {
-        "action": "hold",
+        "action": "hold" if _pressure_complete(pressure) else "unknown-pressure",
         "frozen": paused,
         "signal": signal,
         **pressure,

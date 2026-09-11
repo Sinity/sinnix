@@ -20,6 +20,15 @@ in
       runtimeDefaults = import ../data/runtime-defaults.nix { inherit lib; };
       mcpRegistry = import ../data/mcp-registry.nix { inherit lib; };
       agentLanes = import ../data/agent-lanes.nix;
+      codexProfileNames =
+        mcpRegistry.codexProfileNames
+        ++ lib.unique (
+          lib.mapAttrsToList (_: lane: lane.mcpProfile) (
+            lib.filterAttrs (
+              _: lane: lane ? env && !(builtins.elem lane.mcpProfile mcpRegistry.codexProfileNames)
+            ) agentLanes.codexLanes
+          )
+        );
       # Derived from the lane registry rather than hand-listed: every declared
       # lane must produce an installed wrapper, and adding or retiring a lane
       # must not require editing this file in several places.
@@ -107,6 +116,7 @@ in
           let
             hm = config.home-manager.users.${config.sinnix.user.name};
             activationText = hm.home.activation.claudeSymlink.data or "";
+            codexMigrationText = hm.home.activation.codexSystemDefaultsMigration.data or "";
           in
           [
             {
@@ -126,6 +136,34 @@ in
             {
               assertion = builtins.hasAttr ".config/claude/agents" hm.home.file;
               message = "Claude agent definitions must be linked as one directory from the shared dots tree.";
+            }
+            {
+              assertion =
+                (config.environment.etc."codex/config.toml".source or null)
+                == "${config.sinnix.paths.dotsRoot}/codex/config.toml";
+              message = "Codex defaults must be deployed to /etc/codex as a live dots link.";
+            }
+            {
+              assertion = builtins.hasAttr ".agents/skills" hm.home.file;
+              message = "Native Codex skill discovery must link ~/.agents/skills to the live shared root.";
+            }
+            {
+              assertion =
+                let
+                  skillsActivation = hm.home.activation.codexSkills.data or "";
+                in
+                lib.hasInfix "run rm" skillsActivation
+                && lib.hasInfix "run mkdir" skillsActivation
+                && lib.hasInfix "run ln" skillsActivation
+                && !(lib.hasInfix "\n                      rm " skillsActivation);
+              message = "Codex skill migration must route every mutation through Home Manager's dry-run-aware run helper.";
+            }
+            {
+              assertion =
+                lib.hasInfix "codex_pending=\"$codex_marker.pending\"" codexMigrationText
+                && lib.hasInfix "run touch \"$codex_pending\"" codexMigrationText
+                && lib.hasInfix "run mv \"$codex_pending\" \"$codex_marker\"" codexMigrationText;
+              message = "Codex defaults migration must leave a pending marker before rewriting private state, and never retry a pending rewrite automatically.";
             }
             {
               assertion = builtins.hasAttr "sinnix-clodex" hm.systemd.user.services;
@@ -189,26 +227,32 @@ in
           pkgs.python3
           pkgs.zsh
         ];
-        homeFiles = laneWrapperFiles ++ [
-          ".local/bin/claude-clodex"
-          ".local/bin/clodex"
-          ".local/bin/clodex-claude"
-          ".local/bin/sinnix-clodex-server"
-          ".gemini/settings.json"
-          ".gemini/config/mcp_config.json"
-          ".gemini/config/skills"
-          ".gemini/config/AGENTS.md"
-          ".local/bin/gemini"
-          ".local/bin/grok-sinnix"
-          ".local/bin/agy-sinnix"
-          ".local/bin/hermes"
-          ".local/bin/mcp-firecrawl"
-          ".local/bin/mcp-chrome-devtools"
-          ".local/bin/mcp-polylogue"
-          ".local/bin/mcp-sinex"
-          ".config/hermes/skills"
-          ".config/claude/agents"
-        ];
+        homeFiles =
+          laneWrapperFiles
+          ++ [
+            ".local/bin/claude-clodex"
+            ".local/bin/clodex"
+            ".local/bin/clodex-claude"
+            ".local/bin/sinnix-clodex-server"
+            ".gemini/settings.json"
+            ".gemini/config/mcp_config.json"
+            ".gemini/config/skills"
+            ".gemini/config/AGENTS.md"
+            ".local/bin/gemini"
+            ".local/bin/grok-sinnix"
+            ".local/bin/agy-sinnix"
+            ".local/bin/hermes"
+            ".local/bin/mcp-firecrawl"
+            ".local/bin/mcp-chrome-devtools"
+            ".local/bin/mcp-polylogue"
+            ".local/bin/mcp-sinex"
+            ".config/hermes/skills"
+            ".config/claude/agents"
+            ".agents/skills"
+            ".codex/agents/explorer.toml"
+            ".codex/hooks.json"
+          ]
+          ++ map (name: ".codex/${name}.config.toml") codexProfileNames;
         fixtureAssets = [
           {
             target = ".local/bin/sinnix-chrome-control";
@@ -245,6 +289,7 @@ in
           "claude/mcp.json"
           "claude/mcp-lean.json"
           "claude/mcp-browser.json"
+          "claude/skills"
         ];
         useHmZshrc = true;
         zshrcPreamble = ''
@@ -273,26 +318,18 @@ in
         agentToolsRuntimeConfig.home-manager.users.${agentToolsRuntimeConfig.sinnix.user.name}.systemd.user.services.sinnix-clodex.Service.ExecCondition;
       agentToolsCodexConfigSource =
         agentToolsRuntimeConfig.sinnix.features.dev.mcp-servers.codexConfigSource;
-      agentToolsCodexFullConfigSource =
-        agentToolsRuntimeConfig.sinnix.features.dev.mcp-servers.codexFullConfigSource;
-      agentToolsCodexLeanConfigSource =
-        agentToolsRuntimeConfig.sinnix.features.dev.mcp-servers.codexLeanConfigSource;
-      agentToolsCodexEvidenceConfigSource =
-        agentToolsRuntimeConfig.sinnix.features.dev.mcp-servers.codexEvidenceConfigSource;
-      agentToolsCodexBrowserConfigSource =
-        agentToolsRuntimeConfig.sinnix.features.dev.mcp-servers.codexBrowserConfigSource;
-      agentToolsCodexDeepseekConfigSource =
-        agentToolsRuntimeConfig.sinnix.features.dev.mcp-servers.codexDeepseekConfigSource;
-      agentToolsCodexLocalConfigSource =
-        agentToolsRuntimeConfig.sinnix.features.dev.mcp-servers.codexLocalConfigSource;
-      agentToolsCodexHooksSource =
-        agentToolsRuntimeConfig.sinnix.features.dev.mcp-servers.codexHooksSource;
       agentToolsAntigravityMcpConfigSource =
         agentToolsRuntimeConfig.sinnix.features.dev.mcp-servers.antigravityMcpConfigSource;
       agentToolsHermesConfigSource =
         agentToolsRuntimeConfig.sinnix.features.dev.agentTools.hermesConfigSource;
       agentToolsHermesProfileConfigSources =
         agentToolsRuntimeConfig.sinnix.features.dev.agentTools.hermesProfileConfigSources;
+      agentToolsCodexSkillsActivation = pkgs.writeText "codex-skills-activation.sh" (
+        agentToolsRuntimeConfig.home-manager.users.${agentToolsRuntimeConfig.sinnix.user.name}.home.activation.codexSkills.data
+      );
+      agentToolsCodexMigrationActivation = pkgs.writeText "codex-system-defaults-migration.sh" (
+        agentToolsRuntimeConfig.home-manager.users.${agentToolsRuntimeConfig.sinnix.user.name}.home.activation.codexSystemDefaultsMigration.data
+      );
 
       # Provably fails when: a generic runtime, browser, shell or agent binary
       # is added to the earlyoom emergency avoid list (verified by adding
@@ -437,7 +474,8 @@ in
             ${pkgs.bash}/bin/bash "$bootstrap" fake-agent @example/fake-cli fakeagent "$runtime_path"
             test "$(cat "$HOME/npm-invocations")" = 1
             test -d "$package_parent/.fake-cli-Keep1234"
-            test "$(${pkgs.bash}/bin/bash "$HOME/.local/state/fake-agent/launch.sh" --version)" = "fakeagent 1.0"
+            test ! -e "$HOME/.local/state/fake-agent/launch.sh"
+            test "$("$state/bin/fakeagent" --version)" = "fakeagent 1.0"
             touch "$out"
           '';
 
@@ -457,14 +495,7 @@ in
           nativeBuildInputs = builtins.filter (pkg: pkg != pkgs.expect) agentToolsFixture.nativeBuildInputs;
           setup = agentToolsFixture.setup + ''
             mkdir -p "$HOME/.codex"
-            cp ${agentToolsCodexConfigSource} "$HOME/.codex/config.toml"
-            cp ${agentToolsCodexFullConfigSource} "$HOME/.codex/full.config.toml"
-            cp ${agentToolsCodexLeanConfigSource} "$HOME/.codex/lean.config.toml"
-            cp ${agentToolsCodexEvidenceConfigSource} "$HOME/.codex/evidence.config.toml"
-            cp ${agentToolsCodexBrowserConfigSource} "$HOME/.codex/browser.config.toml"
-            cp ${agentToolsCodexDeepseekConfigSource} "$HOME/.codex/deepseek.config.toml"
-            cp ${agentToolsCodexLocalConfigSource} "$HOME/.codex/local.config.toml"
-            cp ${agentToolsCodexHooksSource} "$HOME/.codex/hooks.json"
+            printf '[private]\nkeep = true\n\n[features]\nmulti_agent_v2 = true\n' > "$HOME/.codex/config.toml"
             test "$(readlink -f "$HOME/.gemini/config/mcp_config.json")" = ${agentToolsAntigravityMcpConfigSource}
             mkdir -p "$HOME/.hermes"
             cp ${agentToolsHermesConfigSource} "$HOME/.hermes/config.yaml"
@@ -479,29 +510,80 @@ in
                 chmod 600 "$HOME/.hermes/profiles/${name}/config.yaml"
               '') agentToolsHermesProfileConfigSources
             )}
-            chmod 644 "$HOME/.codex/config.toml"
-            chmod 644 "$HOME/.codex/full.config.toml"
-            chmod 644 "$HOME/.codex/lean.config.toml"
-            chmod 644 "$HOME/.codex/evidence.config.toml"
-            chmod 644 "$HOME/.codex/browser.config.toml"
-            chmod 644 "$HOME/.codex/deepseek.config.toml"
-            chmod 644 "$HOME/.codex/local.config.toml"
             ${pkgs.python3}/bin/python - <<'PY'
             import tomllib
             from pathlib import Path
 
-            config = tomllib.loads(Path.home().joinpath(".codex/config.toml").read_text())
+            config = tomllib.loads(Path("${agentToolsCodexConfigSource}").read_text())
             assert "model_catalog_json" not in config
             assert config["features"]["multi_agent_v2"] is True
             PY
-            chmod 644 "$HOME/.codex/hooks.json"
           '';
           script = ''
             trap 'echo "dev-agent-tools-runtime failed at line $LINENO" >&2' ERR
 
+            # mkHmRuntimeCheck renders declared files but deliberately does
+            # not execute Home Manager activation. Exercise the private
+            # migration here with the same `run` contract used by activation.
+            run() { "$@"; }
+            source ${agentToolsCodexMigrationActivation}
+            unset -f run
+
             test -f "$HOME/.codex/config.toml"
             test ! -L "$HOME/.codex/config.toml"
-            test ! -L "$HOME/.codex/hooks.json"
+            grep -Fq 'keep = true' "$HOME/.codex/config.toml"
+            # An inherited default is removed from the private overlay, while
+            # the unknown user section survives and the original is backed up.
+            ! grep -Fq 'multi_agent_v2 = true' "$HOME/.codex/config.toml"
+            test -f "$HOME/.codex/config.toml.sinnix-before-system-defaults-v1.bak"
+            test "$(stat -c '%a' "$HOME/.codex/config.toml.sinnix-before-system-defaults-v1.bak")" = 600
+            test -f "$HOME/.codex/.sinnix-system-defaults-v1"
+            test ! -e "$HOME/.codex/.sinnix-system-defaults-v1.pending"
+            test -L "$HOME/.codex/hooks.json"
+            test -L "$HOME/.codex/full.config.toml"
+            test -L "$HOME/.codex/lean.config.toml"
+            test -L "$HOME/.agents/skills"
+            test "$(readlink -f "$HOME/.agents/skills")" = ${agentToolsRuntimeConfig.sinnix.paths.dotsRoot}/_ai/skills
+            test -L "$HOME/.config/claude/skills"
+            test "$(readlink -f "$HOME/.config/claude/skills")" = ${agentToolsRuntimeConfig.sinnix.paths.dotsRoot}/_ai/skills
+            # Home Manager's dry-run helper must be the sole mutation path for
+            # the skills migration. It must neither replace existing app state
+            # nor create its declared links in a synthetic home.
+            dry_home="$TMPDIR/codex-skills-dry-run"
+            mkdir -p "$dry_home/.codex/skills"
+            touch "$dry_home/.codex/skills/app-installed-skill"
+            (
+              export HOME="$dry_home"
+              run() { :; }
+              source ${agentToolsCodexSkillsActivation}
+            )
+            test -f "$dry_home/.codex/skills/app-installed-skill"
+            test ! -e "$dry_home/.codex/skills/agent-runtime"
+            # A pending migration means the previous rewrite may have reached
+            # disk without recording completion. It is intentionally a hard
+            # preservation state, not an invitation to strip matching values
+            # again on a later activation.
+            pending_home="$TMPDIR/codex-pending-migration"
+            mkdir -p "$pending_home/.codex"
+            printf '[features]\nmulti_agent_v2 = true\n[user]\nchoice = "keep"\n' > "$pending_home/.codex/config.toml"
+            cp "$pending_home/.codex/config.toml" "$pending_home/expected.toml"
+            touch "$pending_home/.codex/.sinnix-system-defaults-v1.pending"
+            (
+              export HOME="$pending_home"
+              run() { "$@"; }
+              source ${agentToolsCodexMigrationActivation}
+            )
+            cmp -s "$pending_home/expected.toml" "$pending_home/.codex/config.toml"
+            test -e "$pending_home/.codex/.sinnix-system-defaults-v1.pending"
+            test ! -e "$pending_home/.codex/.sinnix-system-defaults-v1"
+            # Dry-run mode must not create even the migration marker.
+            migration_dry_home="$TMPDIR/codex-migration-dry-run"
+            (
+              export HOME="$migration_dry_home"
+              run() { :; }
+              source ${agentToolsCodexMigrationActivation}
+            )
+            test ! -e "$migration_dry_home/.codex"
             test -f "$HOME/.gemini/settings.json"
             test -f "$HOME/.gemini/config/mcp_config.json"
             test -L "$HOME/.gemini/config/skills"
@@ -700,7 +782,11 @@ in
               "$HOME/.local/bin/claude-full" \
               "$HOME/.local/bin/codex" \
               "$HOME/.local/bin/gemini"; do
-              grep -Fq 'launch.sh' "$wrapper"
+              grep -Fq 'npm/bin/' "$wrapper"
+              if grep -Fq 'launch.sh' "$wrapper"; then
+                echo "agent wrappers must execute installed npm binaries directly" >&2
+                exit 1
+              fi
               grep -Fq '/proc/self/cgroup' "$wrapper"
               grep -Fq -- '--slice=agent.slice' "$wrapper"
               grep -Fq -- '${runtimeDefaults.agentContainedCasePattern}' "$wrapper"
@@ -711,6 +797,9 @@ in
             fi
             for wrapper in "$HOME/.local/bin/claude-full" "$HOME/.local/bin/codex" "$HOME/.local/bin/gemini"; do
               grep -Fq 'sinnix-agent-npm-bootstrap' "$wrapper"
+              grep -Fq 'export npm_config_prefix="$STATE/npm"' "$wrapper"
+              grep -Fq 'export NPM_CONFIG_PREFIX="$STATE/npm"' "$wrapper"
+              grep -Fq 'export PATH=' "$wrapper"
             done
             grep -Fq '@anthropic-ai/claude-code' "$HOME/.local/bin/claude-full"
             grep -Fq '@openai/codex' "$HOME/.local/bin/codex"
@@ -1184,28 +1273,20 @@ in
             touch "$out"
           '';
       # The rank-options skill is instructions over scripts/sinnix-rank, so its
-      # suite drives the real CLI in a repository-shaped fixture root, and the
-      # installation claim is checked against the farm the clients actually
-      # get rather than against the roster's text.
+      # suite drives the real CLI in a repository-shaped fixture root. Native
+      # clients discover every SKILL.md beneath the live root, so the fixture
+      # checks that source directly rather than a generated farm.
       #
       # Provably fails when: `record` stores the loser, `settled` stops
       # following the stopping threshold in either direction, a re-`add`
       # re-appends registered items, `add` stops refusing a duplicate label or
       # a changed option under a live id, the evidence block stops reporting
       # disconnected components, private option text reaches the working tree
-      # or the diff, or the roster stops listing the skill (the farm then
-      # carries no rank-options entry). Each verified by mutation.
+      # or the diff, or root discovery stops finding the skill. Each verified
+      # by mutation.
       rankOptionsSkillFixture =
-        let
-          sharedSkillFarm =
-            (import ../../modules/features/dev/agents/skill-farm.nix {
-              inherit lib pkgs;
-              dotsRoot = inputs.self + "/dots";
-            }).sharedSkillFarm;
-        in
         pkgs.runCommand "rank-options-skill-fixture"
           {
-            inherit sharedSkillFarm;
             nativeBuildInputs = [
               (pkgs.python3.withPackages (ps: [
                 ps.pytest
@@ -1215,14 +1296,13 @@ in
             ];
           }
           ''
-            test -e "$sharedSkillFarm/rank-options/SKILL.md"
+            test -e ${../../dots/_ai/skills/rank-options/SKILL.md}
 
             root="$TMPDIR/repo"
             mkdir -p "$root/scripts" "$root/pkgs" "$root/flake/data" "$root/dots/_ai/skills"
             install -m 0755 ${../../scripts/sinnix-rank} "$root/scripts/sinnix-rank"
             patchShebangs "$root/scripts/sinnix-rank"
             cp -r ${../../pkgs/sinnix-rank-core} "$root/pkgs/sinnix-rank-core"
-            cp ${../../flake/data/shared-agent-skills.nix} "$root/flake/data/shared-agent-skills.nix"
             cp -r ${../../dots/_ai/skills/rank-options} "$root/dots/_ai/skills/rank-options"
             cp -r ${../../dots/_ai/skills/skill-authoring} "$root/dots/_ai/skills/skill-authoring"
             chmod -R u+w "$root"

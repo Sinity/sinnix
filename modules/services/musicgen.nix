@@ -16,6 +16,11 @@
 mkServiceModule {
   name = "musicgen";
   description = "MusicGen text-to-music (containerized, CDI GPU)";
+  meta.ai = {
+    backendKind = "container";
+    requiresCuda = true;
+    socketProxy = true;
+  };
   surface = {
     unit = "podman-musicgen.service";
     resourceClass = "interactive-agent";

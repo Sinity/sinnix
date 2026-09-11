@@ -1,30 +1,22 @@
-# Agenix secret management with auto-discovery
+# Agenix secret management from an explicit host declaration
 #
-# Auto-discovers .age files (via builtins.readDir at eval time, so no separate
-# manifest) and generates age.secrets entries with appropriate permissions, an
-# environment export script, and config.sinnix.secrets.paths.
+# The host supplies `secretDeclarations`: a private deployment input mapping
+# secret names to agenix ciphertext paths. This module never scans a private
+# directory, so pure public evaluations use an explicit empty fixture instead
+# of silently discovering no secrets.
 {
   lib,
   config,
+  secretDeclarations,
   ...
 }:
 let
   username = config.sinnix.user.name;
   primaryGroupName = config.users.users.${username}.group or username;
   userPasswordSecret = "${username}-password";
-  # Outside the flake checkout entirely, not merely gitignored: ciphertext and
-  # the agenix recipient manifest stay clear of repo-local git operations and
-  # are invisible to Nix's flake-source filtering by construction.
-  secretDir = /realm/state/secrets/sinnix/secret;
   cfg = config.sinnix.secrets;
 
-  secretFiles =
-    if cfg.enable && builtins.pathExists secretDir then
-      lib.filterAttrs (name: _: lib.hasSuffix ".age" name) (builtins.readDir secretDir)
-    else
-      { };
-
-  secretNames = lib.mapAttrsToList (name: _: lib.removeSuffix ".age" name) secretFiles;
+  secretNames = builtins.attrNames secretDeclarations;
 
   # Public runtime contracts referenced by this configuration. Listing a name
   # here only makes its conventional /run/agenix path available during pure
@@ -125,26 +117,23 @@ let
     "github-runner-polylogue-token".exportEnv = false;
   };
 
-  secretSpecs = lib.mapAttrs' (filename: _: {
-    name = lib.removeSuffix ".age" filename;
-    value =
-      let
-        secretName = lib.removeSuffix ".age" filename;
-        meta = secretMeta.${secretName} or { };
-      in
-      {
-        file = secretDir + "/${filename}";
-        path = "/run/agenix/${secretName}";
-        owner = meta.owner or username;
-        mode = meta.mode or "0400";
-      }
-      // lib.optionalAttrs (meta ? group) { inherit (meta) group; };
-  }) secretFiles;
+  secretSpecs = lib.mapAttrs (
+    secretName: declaration:
+    let
+      meta = secretMeta.${secretName} or { };
+    in
+    {
+      file = declaration.file;
+      path = "/run/agenix/${secretName}";
+      owner = meta.owner or username;
+      mode = meta.mode or "0400";
+    }
+    // lib.optionalAttrs (meta ? group) { inherit (meta) group; }
+  ) secretDeclarations;
 
-  # Consumers need stable runtime paths during pure public evaluation, where
-  # Nix deliberately cannot inspect the external ciphertext directory. The
-  # actual age.secrets declarations remain limited to files discovered during
-  # an impure/live evaluation.
+  # Consumers need stable runtime paths during public evaluations with their
+  # explicit empty declaration fixture. A host only materializes the entries
+  # in its private declaration input.
   declaredSecretNames = lib.unique (
     secretNames ++ runtimeSecretContracts ++ builtins.attrNames secretMeta
   );
@@ -186,6 +175,14 @@ in
   };
 
   config = {
+    assertions = [
+      {
+        assertion = lib.all (declaration: builtins.isAttrs declaration && declaration ? file) (
+          lib.attrValues secretDeclarations
+        );
+        message = "secretDeclarations must map every secret name to an attrset with a ciphertext file path";
+      }
+    ];
     # mkForce: Ensure these options are authoritative regardless of module import order
     sinnix.secrets.exportScript = lib.mkForce (if cfg.enable then secretsExportScript else "");
     sinnix.secrets.paths = lib.mkForce (if cfg.enable then secretPaths else { });

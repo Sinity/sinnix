@@ -761,35 +761,33 @@ def _dispatch(arguments: argparse.Namespace, config: Config, out: Output) -> int
         if not config.pools:
             raise ConfigError(f"{config.config_path} declares no pools")
         applied = pools.apply(config.pools)
-        exclusive = "; ".join(
-            f"{group} excludes {', '.join(partners)}"
-            for group, partners in applied["exclusive"].items()
-        )
         out.write(
             applied,
             f"pools: created {len(applied['created'])}, "
             f"resized {len(applied['resized'])}, "
-            f"unchanged {len(applied['unchanged'])}"
-            + (f"; {exclusive}" if exclusive else ""),
+            f"unchanged {len(applied['unchanged'])}",
         )
         return EXIT_OK
     if verb == "backpressure":
-        # One admission pass: the host's pressure against the pools, then the
-        # holds an excluded pool was still running when they were queued.
-        decision = backpressure.tick(spool=config.event_spool)
-        holds = launch.release_holds(config)
+        checkpoint = config.state_dir / "backpressure-spool.json"
+        decision = backpressure.tick(spool=config.event_spool, checkpoint=checkpoint)
+        retirement = launch.retire_legacy_holds(
+            config,
+            backpressure.event_state(
+                config.event_spool, checkpoint=checkpoint
+            ).legacy_holds,
+        )
         decision = {
             **decision,
-            "released": holds["released"],
-            "held": holds["waiting"],
-            # The queue answering one call and not the other is worth seeing.
-            **({"holds_error": holds["error"]} if "error" in holds else {}),
+            "legacy_holds_retired": retirement["retired"],
+            "legacy_holds_ambiguous": retirement["ambiguous"],
+            "legacy_holds_skipped": retirement["skipped"],
         }
         summary = f"backpressure {decision.get('action')}"
-        if holds["released"] or holds["waiting"]:
+        if retirement["retired"] or retirement["ambiguous"]:
             summary += (
-                f"; holds: released {len(holds['released'])}, "
-                f"waiting {len(holds['waiting'])}"
+                f"; legacy holds: retired {len(retirement['retired'])}, "
+                f"ambiguous {len(retirement['ambiguous'])}"
             )
         out.write(decision, summary)
         return EXIT_OK

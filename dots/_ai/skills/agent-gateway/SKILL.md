@@ -5,7 +5,7 @@ description: Use when invoking, inspecting, or documenting Sinnix Agent Gateway 
 
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: 3f50f79721ff50338c130d143c28296a60b63b2af45cda42b963e35df25dacd1 -->
+<!-- gateway-catalog-sha256: b917f073440a06ea6bb0d5462fe6209e13e21a4a292092cb0f2a154a16087721 -->
 
 # Agent Gateway
 
@@ -49,7 +49,8 @@ Effectful actions (families change, operate, run) require `idempotency_key`; rep
 - `projects.read` — Read a bounded line range of one project file.
 - `projects.diff` — Show uncommitted changes in a checkout, optionally against a git ref.
 - `projects.search` — Search project file contents with ripgrep.
-- `beads.query` — limit is passed to the owner so at most limit rows per project are read; page.next_cursor continues the same snapshot.
+- `beads.closure` — Read a bounded dependency closure, cycles, declared gates and decisions, readiness and incomplete frontier at one revision.
+- `beads.query` — The owner filters, projects and counts before serialization. limit sizes pages of one immutable snapshot (10,000 matching rows per project maximum); cursors never reread live rows. at pins historical reads to an exact resolved Dolt revision. aggregate counts or groups without fetching issue bodies.
 - `jobs.list` — List queued jobs (pueue tasks) newest first, optionally for one project.
 - `batches.list` — List batch runs newest first, with each worker's stage and task.
 - `desktop.screenshot` — full captures the focused output through the HDR-aware screenshot owner; window/rect/monitor targets capture with grim. On HDR outputs a corrected SDR variant is produced and preferred for the image block.
@@ -67,9 +68,11 @@ Effectful actions (families change, operate, run) require `idempotency_key`; rep
 - `artifacts.read` — Read an artifact: text inline with offsets, images as an image block, other binary as a resource block.
 - `captures.query` — List runtime-declared capture lanes, describe one, or read per-lane record deltas since a time.
 - `activity.query` — Reads sinnix-capture-v1 envelope files under each lane path within the time window; coverage lists which lanes contributed and which have no envelope files.
-- `sessions.query` — page.next_cursor continues a newest-first snapshot for one hour; omit cursor to refresh. Reads return next_offset. Search hits carry byte offsets and matching snippets; truncated marks incomplete coverage.
+- `sessions.query` — operation=structured queries Polylogue's sessions projection and retains owner coverage and provenance. The owner does not support sessions continuation. Legacy list cursors continue a newest-first snapshot for one hour; legacy reads return next_offset and legacy searches expose their bounded file coverage.
 - `memory.query` — Search session-derived memory across providers or fetch one object by reference, with source provenance.
 - `timeline.query` — Session evidence ordered by file mtime within an RFC 3339 window, per provider, without claiming unavailable upstreams.
+- `campaign.progress` — Task closure, verified delivery and acceptance remain separate. Missing evidence is unknown; bounded closure cannot establish an exact denominator. Historical task state is read at its resolved owner revision.
+- `sessions.orchestration` — Native parent, model and token fields remain unknown when absent from stored evidence. Each owner product retains its coverage, provenance and ingestion watermark.
 
 ### get
 
@@ -129,7 +132,7 @@ Effectful actions (families change, operate, run) require `idempotency_key`; rep
 ### run
 
 - `operations.run` — Queue one project-declared operation in its declared pool on the root or a worktree.
-- `shell.run` — cwd is confined to the checkout; the job's log carries the output.
+- `shell.run` — cwd is confined to the checkout. Default execution is asynchronous. wait=true waits up to wait_timeout_seconds (default 5, maximum 30) on the same job and returns bounded output; a timeout returns a continuation locator without cancelling the job.
 - `batches.start` — backend, model and effort default to the project descriptor's packet defaults. Refused when a bead is claimed or already in a live run. The landing task is queued behind the workers and runs itself.
 - `batches.land` — batches.start already queues the first landing behind the workers; this re-queues one after a landing failed. The landing runs as a job, so wait on landing_job_id rather than on this call.
 - `batches.resume` — backend, model and effort default to the worker's own. Refused while the worker's task is still queued or running.
@@ -137,4 +140,4 @@ Effectful actions (families change, operate, run) require `idempotency_key`; rep
 
 The complete schemas and examples are in `docs/generated/agent-gateway-reference.md`.
 
-Catalog revision: `v3-typed-actions`. Catalog SHA-256: `3f50f79721ff50338c130d143c28296a60b63b2af45cda42b963e35df25dacd1`.
+Catalog revision: `v3-typed-actions`. Catalog SHA-256: `b917f073440a06ea6bb0d5462fe6209e13e21a4a292092cb0f2a154a16087721`.

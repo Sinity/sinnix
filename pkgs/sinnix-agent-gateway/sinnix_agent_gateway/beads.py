@@ -6,6 +6,7 @@ import os
 import re
 import tempfile
 import time
+from datetime import datetime, timezone
 from difflib import unified_diff
 from pathlib import Path
 from typing import Any, Mapping
@@ -301,9 +302,7 @@ class BeadsService:
         rows = (
             value
             if isinstance(value, list)
-            else value.get("issues")
-            if isinstance(value, Mapping)
-            else None
+            else value.get("issues") if isinstance(value, Mapping) else None
         )
         if (
             rows is None
@@ -483,25 +482,32 @@ class BeadsService:
         ):
             raise BeadsError("includes must be a list of strings")
         project, status = self._attest(project_id, False)
+        from .beads_analytics import Analytics
+
+        analytical = Analytics(self, project)
+        temporal = analytical.resolve(as_of) if as_of else None
         command = ["show", self._id(bead_id)]
         requested = set(includes or [])
         for include, flag in (
             ("comments", "--include-comments"),
             ("dependents", "--include-dependents"),
         ):
-            if include in requested:
+            if include in requested and temporal is None:
                 command.append(flag)
-        if as_of is not None:
-            command += ["--as-of", as_of]
+        if temporal is not None:
+            command += ["--as-of", temporal["resolved_revision"]]
         result = self._normalize(
             project_id,
             self._issues(self._run(project, command, False))[0],
-            status["revision"],
+            temporal["resolved_revision"] if temporal else status["revision"],
         )
-        result["includes"] = self._includes(
-            project, project_id, result["id"], requested
+        result["includes"] = (
+            analytical.includes(result["id"], requested)
+            if temporal
+            else self._includes(project, project_id, result["id"], requested)
         )
         result["as_of"] = as_of
+        result["temporal"] = temporal
         return result
 
     @staticmethod
@@ -642,6 +648,7 @@ class BeadsService:
         rows: list[dict[str, Any]],
         limit: int,
         cursor: str | None,
+        metadata: dict[str, Any] | None = None,
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         directory = self.config.state_dir / "beads-snapshots"
         directory.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -654,6 +661,7 @@ class BeadsService:
                 "source_revision": source_revision,
                 "expires_at": time.time() + 300,
                 "rows": rows,
+                "metadata": metadata or {},
             }
             (directory / f"{token}.json").write_text(
                 json.dumps(payload, sort_keys=True, separators=(",", ":"))
@@ -684,8 +692,6 @@ class BeadsService:
                     "Beads snapshot cursor expired or belongs to another query",
                     "stale_cursor",
                 )
-            if payload.get("source_revision") != source_revision:
-                raise BeadsError("Beads source changed during paging", "source_changed")
             if not isinstance(payload.get("rows"), list):
                 raise BeadsError("Beads snapshot rows are malformed", "stale_cursor")
             rows = payload["rows"]
@@ -706,6 +712,7 @@ class BeadsService:
             "total": len(rows),
             "expires_at": payload["expires_at"],
             "snapshot_ref": f"sinnix://results/beads-{token}",
+            "metadata": payload.get("metadata", {}),
         }
 
     def query(
@@ -720,244 +727,224 @@ class BeadsService:
         includes: list[str] | None = None,
         limit: int | None = None,
         cursor: str | None = None,
+        at: str | None = None,
+        projection: str = "summary",
+        aggregate: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
-        project_ids = (
-            sorted(self.config.projects) if project_ids is None else project_ids
-        )
+        from .beads_analytics import COLUMNS, Analytics
+
+        projects = sorted(self.config.projects) if project_ids is None else project_ids
         if (
-            not isinstance(project_ids, list)
-            or not project_ids
-            or len(project_ids) > 32
-            or len(set(project_ids)) != len(project_ids)
+            not isinstance(projects, list)
+            or not 1 <= len(projects) <= 32
+            or len(set(projects)) != len(projects)
         ):
             raise BeadsError("project_ids must contain 1-32 unique projects")
-        if filters is not None and not isinstance(filters, Mapping):
-            raise BeadsError("filters must be an object")
-        expression = (
-            self._string(expression, "expression", 4000)
-            if expression is not None
-            else None
-        )
-        generated = self._filter_expression(filters or {})
-        expression = (
-            f"({generated}) AND ({expression})"
-            if generated and expression
-            else generated or expression
-        )
-        if not isinstance(includes or [], list) or not all(
-            isinstance(item, str) for item in includes or []
-        ):
-            raise BeadsError("includes must be strings")
-        requested = set(includes or [])
-        native_args = self._native_list_filters(native_filters or {}, view=view)
-        if view == "query" and native_filters:
-            raise BeadsError(
-                "query supports standard filters and native expression, not list-only filters",
-                "unsupported_capability",
-            )
-        if view == "stale_claims" and set(native_filters or {}) - {"stale_days"}:
-            raise BeadsError(
-                "stale_claims supports only native_filters.stale_days",
-                "unsupported_capability",
-            )
-        if view == "blocked" and native_filters:
-            raise BeadsError(
-                "blocked has no owner-native filter flags", "unsupported_capability"
-            )
-        rows: list[dict[str, Any]] = []
-        coverage: dict[str, Any] = {}
-        revisions: dict[str, str] = {}
-        parsed: dict[str, Any] = {}
-        owner_cap = self._limit(limit)
-        for project_id in sorted(project_ids):
+        for project_id in projects:
+            if project_id in self.config.projects:
+                self._project(project_id, False)
+        if projection not in {"summary", "full"}:
+            raise BeadsError("projection must be summary or full")
+        self._native_list_filters(native_filters or {}, view=view)
+        page_limit = self._limit(limit)
+        request = {
+            "principal": self.principal.name,
+            "projects": sorted(projects),
+            "view": view,
+            "filters": filters or {},
+            "expression": expression,
+            "native": native_filters or {},
+            "order": order or {},
+            "includes": sorted(includes or []),
+            "at": at,
+            "projection": projection,
+            "aggregate": aggregate,
+        }
+        key = hashlib.sha256(json.dumps(request, sort_keys=True).encode()).hexdigest()
+        if cursor:
+            rows, page = self._snapshot_page(key, "", [], page_limit, cursor)
+            metadata = page.pop("metadata")
+            return {"kind": "bead_query", "items": rows, "page": page, **metadata}
+        rows, coverage, revisions, temporals = [], {}, {}, {}
+        for project_id in sorted(projects):
             try:
-                project, status = self._attest(project_id, False)
-                revisions[project_id] = status["revision"]
-                if expression:
-                    parsed[project_id] = self._run(
-                        project, ["query", expression, "--parse-only"], False
-                    )
-                if (expression or view == "query") and native_args:
-                    raise BeadsError(
-                        "native list filters cannot be combined with the owner query route",
-                        "unsupported_capability",
-                    )
-                if view == "ready":
-                    command = [
-                        "ready",
-                        "--limit",
-                        str(owner_cap),
-                        "--max-rows",
-                        str(owner_cap),
-                    ]
-                elif view == "blocked":
-                    command = ["blocked"]
-                elif view in {
-                    "open",
-                    "all",
-                    "recent",
-                    "overdue",
-                    "deferred",
-                    "unassigned",
-                    "stale_claims",
-                    "epic_progress",
-                    "changed_since",
-                }:
-                    command = [
-                        "list",
-                        "--flat",
-                        "--limit",
-                        str(owner_cap),
-                        "--max-rows",
-                        str(owner_cap),
-                    ]
-                    command += {
-                        "open": ["--status", "open"],
-                        "all": ["--all"],
-                        "recent": ["--sort", "updated", "--reverse"],
-                        "overdue": ["--overdue"],
-                        "deferred": ["--deferred"],
-                        "unassigned": ["--no-assignee"],
-                        "epic_progress": ["--type", "epic"],
-                    }.get(view, [])
-                    if view == "stale_claims":
-                        command = [
-                            "stale",
-                            "--status",
-                            "in_progress",
-                            "--limit",
-                            str(owner_cap),
-                        ]
-                        if "stale_days" in (native_filters or {}):
-                            command += ["--days", str(native_filters["stale_days"])]
-                    if view == "changed_since" and "updated_after" not in (
-                        native_filters or {}
-                    ):
-                        raise BeadsError(
-                            "changed_since requires native_filters.updated_after"
-                        )
-                elif view == "query":
-                    if not expression:
-                        raise BeadsError("query view requires filters or expression")
-                    command = ["query", expression, "--limit", str(owner_cap)]
-                else:
-                    raise BeadsError(
-                        f"unsupported_capability: unknown Beads view {view!r}"
-                    )
-                if expression and view != "query":
-                    command = ["query", expression, "--limit", str(owner_cap)]
-                elif view != "stale_claims":
-                    command += native_args
-                if order:
-                    if (
-                        not isinstance(order, Mapping)
-                        or set(order) - {"field", "reverse"}
-                        or order.get("field")
-                        not in {
-                            "priority",
-                            "created",
-                            "updated",
-                            "closed",
-                            "status",
-                            "id",
-                            "title",
-                            "type",
-                            "assignee",
+                project, authority = self._attest(project_id, False)
+                analytical = Analytics(self, project)
+                temporal = analytical.resolve(at) if at else None
+                revision = (
+                    temporal["resolved_revision"] if temporal else authority["revision"]
+                )
+                native_rows, details = analytical.select(
+                    view=view,
+                    filters=filters or {},
+                    expression=expression,
+                    native=native_filters or {},
+                    order=order or {},
+                    projection=projection,
+                    aggregate=aggregate,
+                    max_rows=10000,
+                )
+                normalized = (
+                    [
+                        {
+                            "project_id": project_id,
+                            "fields": row,
+                            "task_revision": revision,
                         }
-                    ):
-                        raise BeadsError("order is unsupported")
-                    command += ["--sort", str(order["field"])] + (
-                        ["--reverse"] if order.get("reverse") else []
-                    )
-                normalized = [
-                    self._normalize(project_id, row, status["revision"])
-                    for row in self._issues(self._run(project, command, False))
-                ]
+                        for row in native_rows
+                    ]
+                    if aggregate is not None
+                    else [
+                        self._normalize(project_id, row, revision)
+                        for row in native_rows
+                    ]
+                )
                 for row in normalized:
-                    if requested:
-                        row["includes"] = self._includes(
-                            project, project_id, row["id"], requested
+                    if includes and aggregate is None:
+                        row["includes"] = (
+                            analytical.includes(row["id"], set(includes))
+                            if temporal
+                            else self._includes(
+                                project, project_id, row["id"], set(includes)
+                            )
                         )
-                rows += normalized
+                # A live response is accepted only if all component reads saw
+                # one owner state. Historical table reads are already pinned.
+                if (
+                    not temporal
+                    and self.task_authority_status(project_id)["revision"] != revision
+                ):
+                    raise BeadsError(
+                        "Beads source changed while building snapshot", "source_changed"
+                    )
+                rows.extend(normalized)
+                revisions[project_id] = revision
+                temporals[project_id] = temporal
                 coverage[project_id] = {
-                    "state": "complete",
+                    "state": "partial" if details["truncated"] else "complete",
                     "returned": len(normalized),
-                    "total": len(normalized),
-                    "total_exact": len(normalized) < owner_cap,
-                    "paging": (
-                        "owner_native_unavailable"
-                        if len(normalized) == owner_cap
-                        else "complete"
-                    ),
-                    "revision": status["revision"],
+                    "revision": revision,
+                    **details,
                 }
             except BeadsError as exc:
+                if exc.code == "invalid_request" and project_id in self.config.projects:
+                    raise
                 coverage[project_id] = {
                     "state": "partial",
                     "error": str(exc),
                     "code": exc.code,
+                    "total_exact": False,
                 }
-        rows.sort(key=lambda row: (row["project_id"], row["id"]))
-        key = hashlib.sha256(
-            json.dumps(
-                {
-                    "principal": self.principal.name,
-                    "projects": sorted(project_ids),
-                    "view": view,
-                    "filters": filters or {},
-                    "expression": expression,
-                    "native_filters": native_filters or {},
-                    "order": order or {},
-                    "includes": sorted(requested),
-                },
-                sort_keys=True,
-                separators=(",", ":"),
-            ).encode()
-        ).hexdigest()
-        source_revision = hashlib.sha256(
+        if aggregate is None:
+            field = (order or {}).get(
+                "field", "updated" if view == "recent" else "priority"
+            )
+            column = COLUMNS.get(field, field)
+            rows.sort(key=lambda row: (row["project_id"], row["id"]))
+            reverse = (field in {"created", "updated", "closed"}) != bool(
+                (order or {}).get("reverse", False)
+            )
+
+            def sort_value(row: dict[str, Any]) -> tuple[bool, Any]:
+                value = row["id"] if field == "id" else row["fields"].get(column)
+                return value is not None, value if value is not None else ""
+
+            rows.sort(key=sort_value, reverse=reverse)
+        metadata = {
+            "coverage": coverage,
+            "source_revisions": revisions,
+            "temporal": temporals,
+            "totals": {
+                "returned": len(rows),
+                "matched": sum(item.get("total", 0) for item in coverage.values()),
+                "projects": len(projects),
+                "healthy_projects": sum(
+                    item["state"] == "complete" for item in coverage.values()
+                ),
+                "partial_projects": sum(
+                    item["state"] == "partial" for item in coverage.values()
+                ),
+                "exact": all(
+                    item.get("total_exact", False) for item in coverage.values()
+                ),
+            },
+            "native_parse": {},
+            "owner_capabilities": {
+                "native_expression_parse": False,
+                "compiled_readonly_sql": True,
+                "native_offset_paging": False,
+                "exact_query_total": True,
+                "server_projection": True,
+            },
+            "warnings": (
+                ["partial_source"]
+                if any(item["state"] == "partial" for item in coverage.values())
+                else []
+            ),
+        }
+        revision_key = hashlib.sha256(
             json.dumps(revisions, sort_keys=True).encode()
         ).hexdigest()
         page_rows, page = self._snapshot_page(
-            key, source_revision, rows, self._limit(limit), cursor
+            key, revision_key, rows, page_limit, None, metadata
         )
-        totals = {
-            "returned": len(rows),
-            "projects": len(project_ids),
-            "healthy_projects": sum(
-                item["state"] == "complete" for item in coverage.values()
-            ),
-            "partial_projects": sum(
-                item["state"] == "partial" for item in coverage.values()
-            ),
-            "exact": all(
-                item.get("total_exact", False)
-                for item in coverage.values()
-                if item["state"] == "complete"
-            )
-            and not any(item["state"] == "partial" for item in coverage.values()),
-        }
-        warnings = [
-            "partial_source" for item in coverage.values() if item["state"] == "partial"
-        ]
-        if any(
-            item.get("paging") == "owner_native_unavailable"
-            for item in coverage.values()
+        page.pop("metadata")
+        return {"kind": "bead_query", "items": page_rows, "page": page, **metadata}
+
+    def campaign_closure(
+        self,
+        project_id: str,
+        roots: list[str],
+        *,
+        at: str | None = None,
+        relation: str | None = "blocks",
+        direction: str = "prerequisites",
+        max_nodes: int = 500,
+        max_depth: int = 50,
+    ) -> dict[str, Any]:
+        from .beads_analytics import Analytics
+
+        if not roots or len(roots) > 100:
+            raise BeadsError("closure needs 1-100 roots")
+        roots = [self._id(root) for root in roots]
+        if direction not in {"prerequisites", "dependents", "both"}:
+            raise BeadsError("unsupported closure direction")
+        max_nodes = self._limit(max_nodes, 500, 1000)
+        max_depth = self._limit(max_depth, 50, 100)
+        project, authority = self._attest(project_id, False)
+        analytical = Analytics(self, project)
+        temporal = analytical.resolve(at) if at else None
+        revision = temporal["resolved_revision"] if temporal else authority["revision"]
+        result = analytical.closure(
+            roots,
+            relation_filter=relation,
+            direction=direction,
+            max_nodes=max_nodes,
+            max_depth=max_depth,
+        )
+        if (
+            not temporal
+            and self.task_authority_status(project_id)["revision"] != revision
         ):
-            warnings.append("owner_paging_unavailable")
+            raise BeadsError("Beads source changed during closure", "source_changed")
+        for row in result["nodes"]:
+            row["ref"] = self.bead_ref(project_id, row["id"])
+            row["task_revision"] = revision
+        result["provenance_coverage"]["revision"] = revision
         return {
-            "kind": "bead_query",
-            "items": page_rows,
-            "page": page,
-            "coverage": coverage,
-            "totals": totals,
-            "source_revisions": revisions,
-            "native_parse": parsed,
-            "owner_capabilities": {
-                "native_expression_parse": True,
-                "native_offset_paging": False,
-                "exact_query_total": False,
+            **result,
+            "complete": result["coverage"]["complete"],
+            "temporal": temporal
+            or {
+                "requested": None,
+                "resolved_revision": revision,
+                "effective_at": None,
+                "observed_at": datetime.now(timezone.utc).isoformat(),
+                "known_at": None,
+                "watermark": revision,
             },
-            "warnings": warnings,
+            "task_revision": revision,
+            "project_id": project_id,
         }
 
     def graph(
@@ -1296,13 +1283,15 @@ class BeadsService:
                 self._string(values.pop("text", None), "text", 32000),
             ]
         elif operation == "dependency.add":
+            from .beads_analytics import relation
+
             command = [
                 "dep",
                 "add",
                 target,
                 self._id(values.pop("depends_on", None), "depends_on"),
                 "--type",
-                self._string(values.pop("type", "blocks"), "type", 64),
+                relation(self._string(values.pop("type", "blocks"), "type", 64)),
             ]
         elif operation == "dependency.remove":
             command = [

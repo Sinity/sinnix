@@ -41,6 +41,109 @@ def test_a_conforming_worker_result_has_no_errors() -> None:
     assert results.validate_worker_result(worker_result()) == []
 
 
+def test_versioned_result_carries_explicit_provenance_and_stable_evidence() -> None:
+    result = worker_result(
+        schema_version=2,
+        planned_model="gpt-5.6",
+        execution="queued",
+        parent_session_ref="parent-1",
+        child_session_ref="child-1",
+        attempt=1,
+        model_segments=[
+            {
+                "attempt": 1,
+                "actual_executor_model": "gpt-5.6",
+                "actual_executor_observed_by": "runner",
+                "measured_usage": None,
+            }
+        ],
+        measured_usage={"input_tokens": 12, "output_tokens": 8},
+        beads=[
+            {
+                "id": "fx-1",
+                "bead_revision": "sha256:fixture",
+                "criteria": [
+                    {
+                        "ac_id": "fx-1/ac-1",
+                        "text": "tests pass",
+                        "status": "satisfied",
+                        "evidence": "pytest -q",
+                    }
+                ],
+            }
+        ],
+        verification=[
+            {
+                "command": "pytest -q",
+                "receipt": "3 passed",
+                "tested_sha": SHA,
+                "status": "passed",
+                "coverage": {
+                    "ac_ids": ["fx-1/ac-1"],
+                    "scope": "pkgs/agentctl/test_results.py",
+                },
+            }
+        ],
+    )
+    assert results.validate_worker_result(result) == []
+    # A historical result remains valid, but its absent provenance is unknown.
+    assert results.validate_worker_result(worker_result()) == []
+
+
+def test_versioned_result_rejects_missing_stable_evidence() -> None:
+    errors = results.validate_worker_result(worker_result(schema_version=2))
+    assert any("missing execution" in error for error in errors)
+    assert any("missing bead_revision" in error for error in errors)
+    assert any("missing ac_id" in error for error in errors)
+    assert any("missing tested_sha" in error for error in errors)
+
+
+def test_versioned_result_requires_attribution_and_unique_acceptance_ids() -> None:
+    result = worker_result(
+        schema_version=2,
+        execution="native",
+        attempt=1,
+        model_segments=[],
+        measured_usage=None,
+        actual_executor_model="gpt-5.6",
+        beads=[
+            {
+                "id": "fx-1",
+                "bead_revision": "rev",
+                "criteria": [
+                    {
+                        "ac_id": "ac-1",
+                        "text": "one",
+                        "status": "satisfied",
+                        "evidence": "e",
+                    },
+                    {
+                        "ac_id": "ac-1",
+                        "text": "two",
+                        "status": "satisfied",
+                        "evidence": "e",
+                    },
+                ],
+            }
+        ],
+        verification=[
+            {
+                "command": "x",
+                "receipt": "ok",
+                "tested_sha": SHA,
+                "status": "passed",
+                "coverage": {"ac_ids": ["ac-1"], "scope": "one"},
+            }
+        ],
+    )
+    errors = results.validate_worker_result(result)
+    assert any(
+        "actual_executor_model missing actual_executor_observed_by" in error
+        for error in errors
+    )
+    assert any("duplicate ac_id ac-1" in error for error in errors)
+
+
 @pytest.mark.parametrize(
     ("overrides", "fragment"),
     [

@@ -16,12 +16,9 @@ anything else).
    bead asked — every AC addressed (satisfied / deferred-to-named-successor
    / misframed), non-goals respected, no quiet scope substitution or creep?
    Quote the bead line per finding.
-2. **Correctness & standards**: repo standards first (documented rules win);
-   then the smell baseline (references/smells.md — Fowler set: mysterious
-   name, duplication, feature envy, data clumps, primitive obsession,
-   repeated switches, shotgun surgery, divergent change, speculative
-   generality, message chains, middle man, refused bequest) as labelled
-   judgment calls, skipping anything tooling enforces.
+2. **Correctness & standards**: repo standards first (documented rules win),
+   then concrete code evidence and labelled judgment calls, skipping anything
+   tooling already enforces.
 3. **Production reachability & test honesty**: new tests exercise
    production-reachable code at real seams; no tautological assertions (an
    expectation recomputed the way the code computes it proves nothing); no
@@ -43,28 +40,30 @@ five means the change should be split).
 
 ## Landing
 
-- **One candidate per batch.** `agentctl batch land <run>` is the route:
-  it merges the worker branches into a fresh integration worktree, runs the
-  descriptor's candidate verification once, runs one reviewer bound to the
-  candidate commit, publishes, and records acceptance. Run it by hand after
-  fixing a named failure. Product repos (`publish = "pr"`): one PR whose
-  title is the permanent master subject (≤72 chars, imperative), merged with
-  `gh pr merge --squash --match-head-commit <candidate>` after the required
-  checks and the reviewer verdict. Sinnix (`publish = "master"`): the
-  candidate commit is fast-forwarded onto master once master still equals
-  the run's base. Body sections for a hand-written PR: Summary, Problem
-  (evidence), Solution (modules + non-obvious decisions), Verification
-  (exact commands + the output line that matters).
+- **Match the delivery route.** For an external batch,
+  `agentctl batch land <run>` integrates the worker branches, runs the
+  descriptor's declared candidate profile when present, applies its review
+  policy, publishes, and records acceptance. A hosted profile waits for that
+  named check; an agent review runs only when the descriptor requests it. For
+  native work, the coordinator verifies the selected evidence and commits the
+  cohesive result in the repository's normal publication route. Neither route
+  adds a corpus or reviewer by default. Product repos (`publish = "pr"`): one
+  PR whose title is the permanent master subject (≤72 chars, imperative),
+  merged with `gh pr merge --squash --match-head-commit <candidate>` after the
+  declared checks. Sinnix (`publish = "master"`): fast-forward the candidate
+  once master still equals the run's base. Body sections for a hand-written PR:
+  Summary, Problem (evidence), Solution (modules + non-obvious decisions),
+  Verification (exact commands + the output line that matters).
 - Stage by path, never `git add -A` on significant changes. Never
   `--no-verify` unbidden; a hook failure means fix the cause in a new
   commit. From a linked worktree, use `git -C /abs/path`.
-- A green hosted check is not test evidence where CI skips the heavy suite
-  (recorded polylogue gotcha) — verify locally with the focused selector
-  and say which tier ran. Read the candidate's receipt and the project's
-  verification contract; a selected green proves only the recorded scope.
-- Land everything in progress, then run the corpus once at the master
-  boundary through the descriptor's `corpus` operation. Never a corpus run
-  per worker; excisions land as whole merges.
+- A green hosted check proves only the job it actually ran. Read the
+  candidate's receipt and verification contract, run a focused selector when
+  the task requires local test evidence, and state which tier ran; a selected
+  green proves only the recorded scope.
+- Land the requested cohesive scope. Run an affected/full suite only when the
+  operator explicitly requests it; record it separately from focused checks.
+  Excisions land as whole merges.
 - Before claiming "unified / complete / converged": grep the diff and check
   both paths. State partial work honestly; split remainder to a successor
   bead ([[task-backend]] close discipline).

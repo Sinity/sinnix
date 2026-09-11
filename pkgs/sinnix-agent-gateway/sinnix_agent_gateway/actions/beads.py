@@ -109,6 +109,16 @@ class MemoryQuery(GatewayModel):
 
 
 class QueryInput(RequestControls):
+    at: str | None = Field(
+        default=None,
+        max_length=256,
+        description="Exact revision or RFC3339 timestamp with timezone; all reads use the resolved revision.",
+    )
+    projection: Literal["summary", "full"] = "summary"
+    aggregate: dict[str, Any] | None = Field(
+        default=None,
+        description="Count matching records; optional group_by status/type/priority/assignee/owner.",
+    )
     projects: list[str] | None = Field(
         default=None,
         min_length=1,
@@ -127,7 +137,7 @@ class QueryInput(RequestControls):
         default=None,
         min_length=1,
         max_length=4_000,
-        description="Native Beads query, e.g. status=open AND priority<=1.",
+        description="Beads-compatible comparison/AND/OR/NOT expression compiled to read-only owner SQL. Supports RFC3339/date and h/d/w relative dates; natural-language dates are unavailable.",
     )
     native_filters: NativeFilters | None = None  # type: ignore[valid-type]
     order: Order | None = None
@@ -136,7 +146,7 @@ class QueryInput(RequestControls):
         default=50,
         ge=1,
         le=200,
-        description="Applied at the owner before any row is materialized.",
+        description="Page size within an immutable snapshot; matching rows are projected at the owner, with a 10,000-row snapshot bound.",
     )
     cursor: str | None = Field(default=None, min_length=1, max_length=256)
     graph: GraphQuery | None = Field(
@@ -169,6 +179,7 @@ class BeadQuery(GatewayModel):
     coverage: dict[str, Any] | None = None
     totals: dict[str, Any] | None = None
     source_revisions: dict[str, str] | None = None
+    temporal: dict[str, Any] | None = None
     native_parse: dict[str, Any] | None = None
     owner_capabilities: dict[str, Any] | None = None
     warnings: list[str] = Field(default_factory=list)
@@ -184,9 +195,27 @@ def _query(runtime: Runtime, inp: QueryInput) -> BeadQuery:
     refs = [project_ref(project_id) for project_id in projects]
     affordances = ["beads.get", "beads.change", "projects.context"]
     if inp.graph is not None:
-        result = runtime.beads.graph(
-            projects[0], inp.graph.bead, **inp.graph.model_dump(exclude={"bead"})
-        )
+        if inp.at:
+            if inp.graph.status or inp.graph.mermaid:
+                raise ProtocolError(
+                    "unsupported_capability",
+                    "historical graph status and Mermaid projections are unavailable",
+                )
+            result = runtime.beads.campaign_closure(
+                projects[0],
+                [inp.graph.bead],
+                at=inp.at,
+                relation=inp.graph.edge_type,
+                direction={"down": "prerequisites", "up": "dependents", "both": "both"}[
+                    inp.graph.direction
+                ],
+                max_nodes=inp.graph.max_rows,
+                max_depth=inp.graph.depth,
+            )
+        else:
+            result = runtime.beads.graph(
+                projects[0], inp.graph.bead, **inp.graph.model_dump(exclude={"bead"})
+            )
         return BeadQuery(
             kind="bead_graph",
             project_refs=refs,
@@ -195,6 +224,11 @@ def _query(runtime: Runtime, inp: QueryInput) -> BeadQuery:
             affordances=affordances,
         )
     if inp.memory is not None:
+        if inp.at:
+            raise ProtocolError(
+                "unsupported_capability",
+                "owner memories have no historical revision projection",
+            )
         result = runtime.beads.memories(projects[0], **inp.memory.model_dump())
         return BeadQuery(
             kind="bead_memory",
@@ -216,6 +250,9 @@ def _query(runtime: Runtime, inp: QueryInput) -> BeadQuery:
         includes=list(inp.includes),
         limit=inp.limit,
         cursor=inp.cursor,
+        at=inp.at,
+        projection=inp.projection,
+        aggregate=inp.aggregate,
     )
     return BeadQuery(project_refs=refs, affordances=affordances, **result)
 
@@ -233,7 +270,7 @@ class GetInput(RequestControls):
     as_of: str | None = Field(
         default=None,
         max_length=256,
-        description="Owner history point (bd show --as-of).",
+        description="Exact owner revision or RFC3339 timestamp with timezone, resolved to the latest reachable revision at or before it.",
     )
     graph_depth: int = Field(default=2, ge=1, le=20)
 
@@ -252,14 +289,47 @@ class Bead(GatewayModel):
 
 
 def _get(runtime: Runtime, inp: GetInput) -> Bead:
-    project_id, bead_id, ref = inp.target.resolve(runtime)
+    historical_revision = inp.as_of
+    if inp.as_of and inp.target.title_contains:
+        project_id = inp.target.project or ""
+        ProjectLocator(project=project_id).resolve(runtime)
+        matches = runtime.beads.query(
+            project_ids=[project_id],
+            view="all",
+            native_filters={"title_contains": inp.target.title_contains},
+            at=inp.as_of,
+            limit=2,
+        )
+        if matches["coverage"].get(project_id, {}).get("state") != "complete":
+            raise ProtocolError("unavailable", "historical title lookup is incomplete")
+        if len(matches["items"]) != 1:
+            raise ProtocolError(
+                "invalid_request" if matches["items"] else "not_found",
+                "historical title must identify exactly one bead",
+            )
+        selected = matches["items"][0]
+        bead_id, ref = selected["id"], selected["ref"]
+        historical_revision = selected["task_revision"]
+    else:
+        project_id, bead_id, ref = inp.target.resolve(runtime)
     bead = runtime.beads.get(
-        project_id, bead_id, includes=list(inp.includes), as_of=inp.as_of
+        project_id, bead_id, includes=list(inp.includes), as_of=historical_revision
     )
     graph = None
     if inp.projection == "graph":
-        graph = runtime.beads.graph(
-            project_id, bead_id, direction="both", depth=inp.graph_depth
+        graph = (
+            runtime.beads.campaign_closure(
+                project_id,
+                [bead_id],
+                at=bead["task_revision"],
+                relation=None,
+                direction="both",
+                max_depth=inp.graph_depth,
+            )
+            if inp.as_of
+            else runtime.beads.graph(
+                project_id, bead_id, direction="both", depth=inp.graph_depth
+            )
         )
     elif inp.projection == "notes":
         fields = bead.get("fields", {})
@@ -761,7 +831,79 @@ def _operate(runtime: Runtime, inp: OperateInput) -> OperateResult:
 
 _PROJECT = {"project": "sinnix"}
 
+
+class ClosureInput(RequestControls):
+    project: str = Field(min_length=1, max_length=128)
+    roots: list[str] = Field(min_length=1, max_length=100)
+    relation: str | None = Field(default="blocks", max_length=64)
+    direction: Literal["prerequisites", "dependents", "both"] = "prerequisites"
+    at: str | None = Field(default=None, max_length=256)
+    max_nodes: int = Field(default=500, ge=1, le=1000)
+    max_depth: int = Field(default=50, ge=1, le=100)
+
+
+class ClosureOutput(GatewayModel):
+    project_id: str
+    roots: list[str]
+    nodes: list[dict[str, Any]]
+    edges: list[dict[str, Any]]
+    provenance_edges: list[dict[str, Any]]
+    provenance_coverage: dict[str, Any]
+    cycles: list[list[str]]
+    graph_leaves: list[str]
+    declared_gates: list[str]
+    declared_decisions: list[str]
+    unknown_roles: list[str]
+    readiness: dict[str, Any]
+    frontier: list[dict[str, Any]]
+    coverage: dict[str, Any]
+    counts: dict[str, Any]
+    complete: bool
+    temporal: dict[str, Any]
+    task_revision: str
+
+
+def _closure(runtime: Runtime, inp: ClosureInput) -> ClosureOutput:
+    ProjectLocator(project=inp.project).resolve(runtime)
+    return ClosureOutput(
+        **runtime.beads.campaign_closure(
+            project_id=inp.project,
+            roots=inp.roots,
+            at=inp.at,
+            relation=inp.relation,
+            direction=inp.direction,
+            max_nodes=inp.max_nodes,
+            max_depth=inp.max_depth,
+        )
+    )
+
+
 ACTIONS: tuple[Action, ...] = (
+    Action(
+        name="beads.closure",
+        family=VerbFamily.QUERY,
+        owner="beads",
+        summary="Read a bounded dependency closure, cycles, declared gates and decisions, readiness and incomplete frontier at one revision.",
+        Input=ClosureInput,
+        Output=ClosureOutput,
+        handler=_closure,
+        principals=ALL_PRINCIPALS,
+        resource_kinds=_KINDS,
+        affordances=("beads.get", "beads.query"),
+        aliases=("dependency closure", "campaign closure"),
+        examples=(
+            Example(
+                title="Blocking closure at a historical time",
+                input={
+                    "project": "sinnix",
+                    "roots": ["sinnix-abc1"],
+                    "relation": "blocks",
+                    "at": "2026-09-01T12:00:00Z",
+                    "max_nodes": 100,
+                },
+            ),
+        ),
+    ),
     Action(
         name="beads.query",
         family=VerbFamily.QUERY,
@@ -783,7 +925,7 @@ ACTIONS: tuple[Action, ...] = (
             "bd ready",
             "backlog",
         ),
-        documentation="limit is passed to the owner so at most limit rows per project are read; page.next_cursor continues the same snapshot.",
+        documentation="The owner filters, projects and counts before serialization. limit sizes pages of one immutable snapshot (10,000 matching rows per project maximum); cursors never reread live rows. at pins historical reads to an exact resolved Dolt revision. aggregate counts or groups without fetching issue bodies.",
         examples=(
             Example(
                 title="Ready work in one project",

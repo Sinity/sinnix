@@ -42,6 +42,11 @@ The ownership boundaries are:
 - The gateway owns principal/capability policy and high-level machine/project
   tools; it calls agentctl's launch and batch routes in process and does not
   implement another job controller.
+- Native agents are appropriate for investigation, bounded help, and cohesive
+  implementation in a shared checkout with disjoint write scopes; the
+  coordinator commits their integrated result. AgentCTL batches integrate
+  independent isolated groups; external workers use native agents, while
+  queued workers support unattended execution and explicit backends.
 - Project descriptors (`.agentctl/project.toml`) own repository semantics:
   environment, declared operations, result parsing, packet defaults.
 - Systemd remains live process/service authority. Do not duplicate its process
@@ -91,11 +96,11 @@ Declared operations choose a pueue group (`interactive`, `normal`, `bulk`,
 `pytest`, `agent`). Each group's width is declared by
 `sinnix.services.agentctl.pools` and written into the running daemon by
 `agentctl pools apply`, never by restarting pueued. The group bounds
-concurrency; a group declared exclusive of another never runs beside it, so a
-launch into either waits, stashed, until the other drains;
-`agentctl-backpressure.timer` pauses groups under sustained host IO or memory
-stall and releases those holds; memory is bounded by the slice hierarchy, not
-by per-job arithmetic. Fixed runtime surfaces use the resource classes and
+concurrency without blanket exclusion between agent and test pools.
+The backpressure timer wakes
+`agentctl`, which asks pueue to pause or release a group; pueue owns that queue
+state. Memory is bounded by the slice hierarchy, not by per-job arithmetic.
+Fixed runtime surfaces use the resource classes and
 slice budgets declared in `flake/data/runtime-defaults.nix`; do not restate
 those values here.
 
@@ -175,10 +180,11 @@ check.
 
 ## Verification
 
-Use the narrowest check that proves the changed contract, then the default
-semantic tier once at the change boundary.
+Use the narrowest check that proves the changed contract. Run a default or
+broad semantic tier only when the task, publication policy, or explicit
+operator request calls for it.
 
-Core checks:
+Available project checks:
 
 ```bash
 agentctl job start sinnix lint

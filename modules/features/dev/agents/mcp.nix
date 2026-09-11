@@ -87,7 +87,11 @@ mkFeatureModule {
       scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
       jsonFormat = pkgs.formats.json { };
       tomlFormat = pkgs.formats.toml { };
-      inherit (helpers.data) mcpRegistry;
+      # The Home Manager user function below also calls its argument `config`.
+      # Keep the NixOS-level live dots root in this lexical binding so nested
+      # activation text cannot accidentally resolve the Home Manager config.
+      dotsRoot = config.sinnix.paths.dotsRoot;
+      inherit (helpers.data) mcpRegistry agentLanes;
       browser = import ./browser.nix {
         inherit
           lib
@@ -95,7 +99,7 @@ mkFeatureModule {
           scriptPkgs
           inputs
           ;
-        dotsRoot = config.sinnix.paths.dotsRoot;
+        inherit dotsRoot;
       };
       mcpTools = import ./mcp-tools.nix {
         inherit
@@ -111,15 +115,59 @@ mkFeatureModule {
           pkgs
           inputs
           mcpRegistry
+          agentLanes
           tomlFormat
           jsonFormat
           ;
-        dotsRoot = config.sinnix.paths.dotsRoot;
+        inherit dotsRoot;
       };
       codexHooksFile = import ./hooks.nix {
         inherit pkgs;
-        dotsRoot = config.sinnix.paths.dotsRoot;
+        inherit dotsRoot;
       };
+      codexMigrationPython = pkgs.python3.withPackages (ps: [ ps.tomlkit ]);
+      # This is the old copied-to-private baseline, not the live system
+      # default. Keep it immutable so a later dots edit cannot alter the
+      # one-time three-way migration, and so activation does not depend on a
+      # checkout being mounted (as in the hermetic runtime fixture).
+      codexSystemDefaultsBaseline = pkgs.writeText "sinnix-codex-system-defaults-v1.toml" (
+        builtins.readFile "${inputs.self}/dots/codex/config.toml"
+      );
+      codexSystemDefaultsMigration = pkgs.writeText "sinnix-codex-system-defaults-migration.py" ''
+        import os
+        import sys
+        from pathlib import Path
+
+        import tomlkit
+
+        baseline_path, user_path = map(Path, sys.argv[1:])
+        baseline = tomlkit.parse(baseline_path.read_text())
+        user = tomlkit.parse(user_path.read_text())
+
+        def values_match(left, right):
+            unwrap_left = left.unwrap() if hasattr(left, "unwrap") else left
+            unwrap_right = right.unwrap() if hasattr(right, "unwrap") else right
+            return unwrap_left == unwrap_right
+
+        def retain_user_overlay(old, current):
+            for key in list(current):
+                if key not in old:
+                    continue
+                old_value = old[key]
+                current_value = current[key]
+                if hasattr(old_value, "items") and hasattr(current_value, "items"):
+                    retain_user_overlay(old_value, current_value)
+                    if not list(current_value):
+                        del current[key]
+                elif values_match(old_value, current_value):
+                    del current[key]
+
+        retain_user_overlay(baseline, user)
+        temporary = user_path.with_name(user_path.name + ".sinnix-migration.tmp")
+        temporary.write_text(tomlkit.dumps(user))
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, user_path)
+      '';
       inherit (browser)
         mcpChromeDevtoolsBin
         desktopControlScripts
@@ -130,19 +178,18 @@ mkFeatureModule {
         mcpPolylogueText
         ;
       inherit (clientProfiles)
-        codexConfigFile
-        codexExplorerAgentFile
-        codexFullConfigFile
-        codexLeanConfigFile
-        codexEvidenceConfigFile
-        codexBrowserConfigFile
-        codexDeepseekConfigFile
-        codexLocalConfigFile
-        sharedSkillFarm
-        codexSkillFarm
+        codexProfileFiles
+        codexEndpointFiles
         geminiSettingsFile
         antigravityMcpConfigFile
         ;
+      codexConfigFiles = codexProfileFiles // codexEndpointFiles;
+      codexFullConfigFile = codexProfileFiles.full;
+      codexLeanConfigFile = codexProfileFiles.lean;
+      codexEvidenceConfigFile = codexProfileFiles.evidence;
+      codexBrowserConfigFile = codexProfileFiles.browser;
+      codexDeepseekConfigFile = codexEndpointFiles.deepseek;
+      codexLocalConfigFile = codexEndpointFiles.local;
     in
     lib.mkMerge [
       # NixOS-level systemd.user (manager="user", preserving the unit's
@@ -173,7 +220,11 @@ mkFeatureModule {
         }
       )
       {
-        sinnix.features.dev.mcp-servers.codexConfigSource = codexConfigFile;
+        # Codex reads this system layer before the private ~/.codex/config.toml.
+        # Keep it an out-of-store link so operational defaults can be updated
+        # without copying them into the GUI-owned home configuration.
+        environment.etc."codex/config.toml".source = "${dotsRoot}/codex/config.toml";
+        sinnix.features.dev.mcp-servers.codexConfigSource = inputs.self + "/dots/codex/config.toml";
         sinnix.features.dev.mcp-servers.codexFullConfigSource = codexFullConfigFile;
         sinnix.features.dev.mcp-servers.codexLeanConfigSource = codexLeanConfigFile;
         sinnix.features.dev.mcp-servers.codexEvidenceConfigSource = codexEvidenceConfigFile;
@@ -220,30 +271,143 @@ mkFeatureModule {
                     fi
                   ''
                 );
-                # Write config.toml as a writable file (not a symlink to the Nix
-                # store) so Codex can append runtime state such as project trust
-                # entries. Nix settings always win on activation; trust entries
-                # added between rebuilds survive until the next switch.
-                codexConfig = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-                  run mkdir -p "$HOME/.codex/agents"
-                  run cp ${codexConfigFile} "$HOME/.codex/config.toml"
-                  run cp ${codexExplorerAgentFile} "$HOME/.codex/agents/explorer.toml"
-                  run cp ${codexFullConfigFile} "$HOME/.codex/full.config.toml"
-                  run cp ${codexLeanConfigFile} "$HOME/.codex/lean.config.toml"
-                  run cp ${codexEvidenceConfigFile} "$HOME/.codex/evidence.config.toml"
-                  run cp ${codexBrowserConfigFile} "$HOME/.codex/browser.config.toml"
-                  run cp ${codexDeepseekConfigFile} "$HOME/.codex/deepseek.config.toml"
-                  run cp ${codexLocalConfigFile} "$HOME/.codex/local.config.toml"
-                  run cp ${codexHooksFile} "$HOME/.codex/hooks.json"
-                  run chmod 644 "$HOME/.codex/config.toml"
-                  run chmod 644 "$HOME/.codex/agents/explorer.toml"
-                  run chmod 644 "$HOME/.codex/full.config.toml"
-                  run chmod 644 "$HOME/.codex/lean.config.toml"
-                  run chmod 644 "$HOME/.codex/evidence.config.toml"
-                  run chmod 644 "$HOME/.codex/browser.config.toml"
-                  run chmod 644 "$HOME/.codex/deepseek.config.toml"
-                  run chmod 644 "$HOME/.codex/local.config.toml"
-                  run chmod 644 "$HOME/.codex/hooks.json"
+                # Prior generations copied managed values into the private
+                # config. Remove only values unchanged from that old baseline;
+                # retain user changes and unknown keys as the private overlay.
+                codexSystemDefaultsMigration = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+                  codex_home="$HOME/.codex"
+                  codex_config="$codex_home/config.toml"
+                  codex_marker="$codex_home/.sinnix-system-defaults-v1"
+                  codex_pending="$codex_marker.pending"
+                  codex_baseline=${lib.escapeShellArg (toString codexSystemDefaultsBaseline)}
+                  run mkdir -p "$codex_home"
+                  if [ ! -e "$codex_marker" ]; then
+                    if [ -e "$codex_pending" ]; then
+                      echo "codex: system-default migration is pending; preserving private config for review" >&2
+                    elif [ -f "$codex_config" ]; then
+                      if [ ! -e "$codex_config.sinnix-before-system-defaults-v1.bak" ]; then
+                        run cp -p "$codex_config" "$codex_config.sinnix-before-system-defaults-v1.bak"
+                        run chmod 600 "$codex_config.sinnix-before-system-defaults-v1.bak"
+                      fi
+                      run touch "$codex_pending"
+                      if run ${codexMigrationPython}/bin/python ${codexSystemDefaultsMigration} "$codex_baseline" "$codex_config"; then
+                        run mv "$codex_pending" "$codex_marker"
+                      else
+                        run rm "$codex_pending"
+                        echo "codex: retained an unreadable private config; migration will retry after it is repaired" >&2
+                      fi
+                    else
+                      run touch "$codex_marker"
+                    fi
+                  fi
+                '';
+                # Native profile layers and hooks replace writable copies from
+                # older generations. Preserve a differing old file once before
+                # Home Manager installs the declared link.
+                codexNativeLayersBackup = lib.hm.dag.entryBefore [ "linkGeneration" ] ''
+                  codex_home="$HOME/.codex"
+                  codex_backup="$codex_home/.sinnix-before-native-layers-v1"
+                  codex_marker="$codex_backup/.complete"
+                  if [ ! -e "$codex_marker" ]; then
+                    run mkdir -p "$codex_backup"
+                    ${lib.concatMapStringsSep "\n" (codex_name: ''
+                      codex_name=${lib.escapeShellArg "${codex_name}.config.toml"}
+                      codex_source=${lib.escapeShellArg (toString codexConfigFiles.${codex_name})}
+                      codex_destination="$codex_home/$codex_name"
+                      if [ -f "$codex_destination" ] || [ -L "$codex_destination" ]; then
+                        if ! cmp -s "$codex_destination" "$codex_source"; then
+                          run mkdir -p "$(dirname "$codex_backup/$codex_name")"
+                          if [ ! -e "$codex_backup/$codex_name" ] && [ ! -L "$codex_backup/$codex_name" ]; then
+                            run cp -a "$codex_destination" "$codex_backup/$codex_name"
+                          fi
+                        fi
+                      fi
+                    '') (lib.attrNames codexConfigFiles)}
+                    codex_name=hooks.json
+                    codex_source=${lib.escapeShellArg (toString codexHooksFile)}
+                    codex_destination="$codex_home/$codex_name"
+                    if [ -f "$codex_destination" ] || [ -L "$codex_destination" ]; then
+                      if ! cmp -s "$codex_destination" "$codex_source" && [ ! -e "$codex_backup/$codex_name" ] && [ ! -L "$codex_backup/$codex_name" ]; then
+                        run cp -a "$codex_destination" "$codex_backup/$codex_name"
+                      fi
+                    fi
+                    run touch "$codex_marker"
+                  fi
+                '';
+                # ~/.codex/skills can contain app-installed skills and Codex's
+                # .system directory. Expand only a recognisable old Sinnix
+                # farm. An unknown directory symlink is ambiguous user state
+                # and is deliberately left untouched.
+                codexSkills = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
+                  codex_skills="$HOME/.codex/skills"
+                  declared_skills="${dotsRoot}/codex/skills"
+                  codex_manage_skills=1
+                  if [ -L "$codex_skills" ]; then
+                    codex_link="$(readlink "$codex_skills" || true)"
+                    codex_old="$(readlink -f "$codex_skills" || true)"
+                    codex_owned_farm=1
+                    codex_system_link=""
+                    # Only the old Home Manager output that wrapped our named
+                    # codex farm is safe to replace. A custom or empty link is
+                    # still private state, even if it happens to look sparse.
+                    case "$codex_link:$codex_old" in
+                      /nix/store/*-home-manager-files/.codex/skills:/nix/store/*-sinnix-codex-agent-skills) ;;
+                      *) codex_owned_farm=0 ;;
+                    esac
+                    if [ -z "$codex_old" ] || [ ! -d "$codex_old" ] || [ ! -L "$codex_old/.system" ]; then
+                      codex_owned_farm=0
+                    else
+                      for codex_entry in "$codex_old"/* "$codex_old"/.[!.]*; do
+                        [ -e "$codex_entry" ] || [ -L "$codex_entry" ] || continue
+                        codex_name="$(basename "$codex_entry")"
+                        if [ "$codex_name" = .system ]; then
+                          codex_system_link="$(readlink "$codex_entry" || true)"
+                          continue
+                        fi
+                        codex_target="$(readlink -f "$codex_entry" || true)"
+                        if [ "$codex_target" != "${dotsRoot}/_ai/skills/$codex_name" ] && [ "$codex_target" != "$(readlink -f "$declared_skills/$codex_name" || true)" ]; then
+                          codex_owned_farm=0
+                          break
+                        fi
+                      done
+                    fi
+                    if [ "$codex_owned_farm" -eq 1 ]; then
+                      run rm "$codex_skills"
+                      run mkdir -p "$codex_skills"
+                      if [ -n "$codex_system_link" ]; then
+                        run ln -s "$codex_system_link" "$codex_skills/.system"
+                      fi
+                    else
+                      echo "codex: preserving an unrecognised ~/.codex/skills link" >&2
+                      codex_manage_skills=0
+                    fi
+                  else
+                    run mkdir -p "$codex_skills"
+                  fi
+                  if [ "$codex_manage_skills" -eq 1 ]; then
+                  for codex_entry in "$codex_skills"/* "$codex_skills"/.[!.]*; do
+                    [ -L "$codex_entry" ] || continue
+                    codex_name="$(basename "$codex_entry")"
+                    codex_target="$(readlink -f "$codex_entry" || true)"
+                    if [ "$codex_target" = "${dotsRoot}/_ai/skills/$codex_name" ] && [ ! -e "$declared_skills/$codex_name" ]; then
+                      run rm "$codex_entry"
+                    fi
+                  done
+                  for codex_source in "$declared_skills"/* "$declared_skills"/.[!.]*; do
+                    [ -e "$codex_source" ] || [ -L "$codex_source" ] || continue
+                    codex_name="$(basename "$codex_source")"
+                    codex_destination="$codex_skills/$codex_name"
+                    if [ -e "$codex_destination" ] || [ -L "$codex_destination" ]; then
+                      codex_target="$(readlink -f "$codex_destination" || true)"
+                      if [ "$codex_target" != "$(readlink -f "$codex_source")" ]; then
+                        echo "codex: preserving existing skill $codex_name" >&2
+                        continue
+                      fi
+                      run rm "$codex_destination"
+                    fi
+                    run ln -s "$codex_source" "$codex_destination"
+                  done
+                  fi
                 '';
               };
             };
@@ -256,12 +420,20 @@ mkFeatureModule {
                 source = mkDotsFile "/claude/agents";
                 force = true;
               };
-              ".codex/skills" = {
-                source = codexSkillFarm;
+              ".agents/skills" = {
+                source = mkDotsFile "/_ai/skills";
+                force = true;
+              };
+              ".codex/agents/explorer.toml" = {
+                source = mkDotsFile "/codex/agents/explorer.toml";
+                force = true;
+              };
+              ".codex/hooks.json" = {
+                source = codexHooksFile;
                 force = true;
               };
               ".gemini/skills" = {
-                source = sharedSkillFarm;
+                source = mkDotsFile "/_ai/skills";
                 force = true;
               };
               ".gemini/settings.json" = {
@@ -273,7 +445,7 @@ mkFeatureModule {
                 force = true;
               };
               ".gemini/config/skills" = {
-                source = sharedSkillFarm;
+                source = mkDotsFile "/_ai/skills";
                 force = true;
               };
               ".gemini/config/AGENTS.md".source = mkDotsFile "/claude/CLAUDE.md";
@@ -319,7 +491,14 @@ mkFeatureModule {
                 source = "${scriptPkgs.sinnix-mcp-sinex}/bin/sinnix-mcp-sinex";
                 force = true;
               };
-            };
+            }
+            // lib.mapAttrs' (
+              name: source:
+              lib.nameValuePair ".codex/${name}.config.toml" {
+                inherit source;
+                force = true;
+              }
+            ) codexConfigFiles;
           };
       }
     ];

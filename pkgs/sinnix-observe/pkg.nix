@@ -2,7 +2,6 @@
   python3Packages,
   lib,
   sinnix-lib,
-  defaultRuntimeInventoryJson,
   ...
 }:
 python3Packages.buildPythonApplication {
@@ -20,12 +19,6 @@ python3Packages.buildPythonApplication {
   dependencies = [ sinnix-lib ];
 
   nativeCheckInputs = [ python3Packages.pytest ];
-
-  postPatch = ''
-        cat > sinnix_observe/default_runtime_inventory.py <<'PY'
-    DEFAULT_RUNTIME_INVENTORY_JSON = r"""${defaultRuntimeInventoryJson}"""
-    PY
-  '';
 
   checkPhase = ''
     runHook preCheck

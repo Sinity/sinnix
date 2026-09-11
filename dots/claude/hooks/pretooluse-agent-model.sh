@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Claude Agent and Codex spawn_agent calls need deliberate dispatch inputs.
-# A hook can validate the request but cannot observe the effective child model.
+# Claude Agent and Codex spawn_agent calls can declare dispatch inputs. A hook
+# can validate syntax, but cannot observe the effective child model or effort.
 set -euo pipefail
 # Pass code with -c so stdin remains available for the hook payload.
 PY_SCRIPT=$(
@@ -46,12 +46,7 @@ if tool_name == "spawn_agent":
     has_model = isinstance(model, str) and bool(model.strip())
     has_effort = isinstance(effort, str) and bool(effort.strip())
 
-    if agent_type not in (None, "default"):
-        deny(
-            "spawn_agent named roles may replace requested model or effort; use the "
-            "existing role runner or AgentCTL route instead of native overrides."
-        )
-        sys.exit(0)
+    native_role = isinstance(agent_type, str) and bool(agent_type.strip()) and agent_type != "default"
 
     if fork_turns == "all":
         if has_model or has_effort:
@@ -75,6 +70,15 @@ if tool_name == "spawn_agent":
             "positive decimal string; use explicit fork_turns='all' only to inherit."
         )
         sys.exit(0)
+    # Native named roles such as explorer own their declared defaults. Their
+    # model and effort may be omitted, so do not turn a role invocation into a
+    # false requirement for a caller-supplied override.
+    if native_role:
+        message(
+            f"fresh spawn_agent selected native role '{agent_type}'; this hook cannot "
+            "observe the resolved role model, effort, or inherited settings."
+        )
+        sys.exit(0)
     if not has_model:
         deny("fresh spawn_agent requires a non-empty explicit model.")
         sys.exit(0)
@@ -90,10 +94,7 @@ if tool_name == "spawn_agent":
             "xhigh, max, or ultra."
         )
         sys.exit(0)
-    message(
-        "fresh spawn_agent requested model and reasoning_effort with bounded "
-        "context; effective child settings are not observed by this hook."
-    )
+    message("fresh spawn_agent supplied model and reasoning_effort; this hook cannot observe the resolved child settings.")
     sys.exit(0)
 
 # Claude's observed Agent payload exposes subagent_type and model in

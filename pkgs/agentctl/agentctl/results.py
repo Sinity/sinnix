@@ -17,12 +17,59 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 SHA_PATTERN = "^[0-9a-f]{40}$"
+RESULT_SCHEMA_VERSION = 2
+
+USAGE_SCHEMA: dict[str, Any] = {
+    "type": ["object", "null"],
+    "additionalProperties": False,
+    "properties": {
+        "input_tokens": {"type": "integer", "minimum": 0},
+        "output_tokens": {"type": "integer", "minimum": 0},
+        "total_tokens": {"type": "integer", "minimum": 0},
+        "duration_seconds": {"type": "number", "minimum": 0},
+    },
+}
 
 WORKER_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
     "required": ["candidate_sha", "beads", "unresolved", "verification"],
     "properties": {
+        # Version one is intentionally still accepted: old results carry
+        # unknown provenance rather than invented evidence. Version two makes
+        # machine-readable campaign evidence explicit below.
+        "schema_version": {"type": "integer", "enum": [RESULT_SCHEMA_VERSION]},
+        "planned_model": {"type": "string", "minLength": 1},
+        # Absent means the executor did not report a model; never infer it
+        # from a launch's requested model.
+        "actual_executor_model": {"type": "string", "minLength": 1},
+        "actual_executor_observed_by": {
+            "type": "string",
+            "enum": ["runner", "external_harness", "native"],
+        },
+        "execution": {"type": "string", "enum": ["queued", "external", "native"]},
+        "parent_session_ref": {"type": "string", "minLength": 1},
+        "child_session_ref": {"type": "string", "minLength": 1},
+        "attempt": {"type": "integer", "minimum": 1},
+        "model_segments": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["attempt"],
+                "properties": {
+                    "attempt": {"type": "integer", "minimum": 1},
+                    "planned_model": {"type": "string", "minLength": 1},
+                    "actual_executor_model": {"type": "string", "minLength": 1},
+                    "actual_executor_observed_by": {
+                        "type": "string",
+                        "enum": ["runner", "external_harness", "native"],
+                    },
+                    "measured_usage": USAGE_SCHEMA,
+                },
+            },
+        },
+        "measured_usage": USAGE_SCHEMA,
         "candidate_sha": {"type": "string", "pattern": SHA_PATTERN},
         "beads": {
             "type": "array",
@@ -33,6 +80,7 @@ WORKER_SCHEMA: dict[str, Any] = {
                 "required": ["id", "criteria"],
                 "properties": {
                     "id": {"type": "string", "minLength": 1},
+                    "bead_revision": {"type": "string", "minLength": 1},
                     "criteria": {
                         "type": "array",
                         "items": {
@@ -40,6 +88,7 @@ WORKER_SCHEMA: dict[str, Any] = {
                             "additionalProperties": False,
                             "required": ["text", "status", "evidence"],
                             "properties": {
+                                "ac_id": {"type": "string", "minLength": 1},
                                 "text": {"type": "string", "minLength": 1},
                                 "status": {
                                     "type": "string",
@@ -62,6 +111,24 @@ WORKER_SCHEMA: dict[str, Any] = {
                 "properties": {
                     "command": {"type": "string", "minLength": 1},
                     "receipt": {"type": "string"},
+                    "tested_sha": {"type": "string", "pattern": SHA_PATTERN},
+                    "status": {
+                        "type": "string",
+                        "enum": ["passed", "failed", "skipped"],
+                    },
+                    "coverage": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["ac_ids", "scope"],
+                        "properties": {
+                            "ac_ids": {
+                                "type": "array",
+                                "minItems": 1,
+                                "items": {"type": "string", "minLength": 1},
+                            },
+                            "scope": {"type": "string", "minLength": 1},
+                        },
+                    },
                 },
             },
         },
@@ -100,10 +167,13 @@ _TYPES: dict[str, tuple[type, ...]] = {
     "number": (int, float),
     "integer": (int,),
     "boolean": (bool,),
+    "null": (type(None),),
 }
 
 
-def _type_ok(value: Any, name: str) -> bool:
+def _type_ok(value: Any, name: str | Sequence[str]) -> bool:
+    if isinstance(name, Sequence) and not isinstance(name, str):
+        return any(_type_ok(value, candidate) for candidate in name)
     if name in {"number", "integer"} and isinstance(value, bool):
         return False
     return isinstance(value, _TYPES[name])
@@ -113,7 +183,7 @@ def validate(schema: Mapping[str, Any], value: Any, *, path: str = "$") -> list[
     """Every violation of ``schema`` in ``value`` as a ``<path>: <reason>`` line."""
     errors: list[str] = []
     expected = schema.get("type")
-    if isinstance(expected, str) and not _type_ok(value, expected):
+    if isinstance(expected, (str, list)) and not _type_ok(value, expected):
         return [f"{path}: expected {expected}, got {type(value).__name__}"]
     if "enum" in schema and value not in schema["enum"]:
         errors.append(f"{path}: must be one of {schema['enum']}")
@@ -151,7 +221,62 @@ def validate(schema: Mapping[str, Any], value: Any, *, path: str = "$") -> list[
 
 def validate_worker_result(obj: Any) -> list[str]:
     """Errors against the worker result schema; an empty list means valid."""
-    return validate(WORKER_SCHEMA, obj)
+    errors = validate(WORKER_SCHEMA, obj)
+    # Never add semantic diagnostics by traversing an object that structural
+    # validation already proved malformed.
+    if errors:
+        return errors
+    if (
+        not isinstance(obj, Mapping)
+        or obj.get("schema_version") != RESULT_SCHEMA_VERSION
+    ):
+        return errors
+    for field in ("execution", "attempt", "model_segments", "measured_usage"):
+        if field not in obj:
+            errors.append(f"$: version {RESULT_SCHEMA_VERSION} missing {field}")
+    if "actual_executor_model" in obj and "actual_executor_observed_by" not in obj:
+        errors.append(
+            f"$: version {RESULT_SCHEMA_VERSION} actual_executor_model missing actual_executor_observed_by"
+        )
+    for bead_index, bead in enumerate(obj.get("beads") or ()):
+        if not isinstance(bead, Mapping):
+            continue
+        if "bead_revision" not in bead:
+            errors.append(
+                f"$.beads[{bead_index}]: version {RESULT_SCHEMA_VERSION} missing bead_revision"
+            )
+        ac_ids: set[str] = set()
+        for criterion_index, criterion in enumerate(bead.get("criteria") or ()):
+            if isinstance(criterion, Mapping) and "ac_id" not in criterion:
+                errors.append(
+                    f"$.beads[{bead_index}].criteria[{criterion_index}]: version {RESULT_SCHEMA_VERSION} missing ac_id"
+                )
+            elif isinstance(criterion, Mapping):
+                ac_id = criterion.get("ac_id")
+                if isinstance(ac_id, str) and ac_id in ac_ids:
+                    errors.append(
+                        f"$.beads[{bead_index}].criteria[{criterion_index}]: duplicate ac_id {ac_id}"
+                    )
+                elif isinstance(ac_id, str):
+                    ac_ids.add(ac_id)
+    for verification_index, verification in enumerate(obj.get("verification") or ()):
+        if not isinstance(verification, Mapping):
+            continue
+        for field in ("tested_sha", "status", "coverage"):
+            if field not in verification:
+                errors.append(
+                    f"$.verification[{verification_index}]: version {RESULT_SCHEMA_VERSION} missing {field}"
+                )
+    for segment_index, segment in enumerate(obj.get("model_segments") or ()):
+        if (
+            isinstance(segment, Mapping)
+            and "actual_executor_model" in segment
+            and "actual_executor_observed_by" not in segment
+        ):
+            errors.append(
+                f"$.model_segments[{segment_index}]: actual_executor_model missing actual_executor_observed_by"
+            )
+    return errors
 
 
 def validate_judge_verdict(obj: Any) -> list[str]:

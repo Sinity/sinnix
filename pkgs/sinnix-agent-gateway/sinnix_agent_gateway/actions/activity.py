@@ -429,10 +429,25 @@ class SessionsSearchOp(GatewayModel):
     max_results: int = Field(default=100, ge=1, le=500)
 
 
-class SessionsInput(RequestControls):
-    request: SessionsListOp | SessionsReadOp | SessionsSearchOp = Field(
-        discriminator="operation"
+class SessionsStructuredOp(GatewayModel):
+    operation: Literal["structured"] = "structured"
+    expression: str | None = Field(
+        default=None,
+        max_length=1000,
+        description="Owner-ranked free-text search; omit for exhaustive filtered listing.",
     )
+    origin: str | None = None
+    repo: str | None = None
+    since: str | None = None
+    until: str | None = None
+    sort: str | None = None
+    limit: int = Field(default=100, ge=1, le=500)
+
+
+class SessionsInput(RequestControls):
+    request: (
+        SessionsListOp | SessionsReadOp | SessionsSearchOp | SessionsStructuredOp
+    ) = Field(discriminator="operation")
 
 
 class SessionRow(GatewayModel):
@@ -449,7 +464,7 @@ class SessionMatch(GatewayModel):
 
 
 class SessionsResult(GatewayModel):
-    operation: Literal["list", "read", "search"]
+    operation: Literal["list", "read", "search", "structured"]
     provider: str
     sessions: list[SessionRow] | None = None
     matches: list[SessionMatch] | None = None
@@ -459,7 +474,10 @@ class SessionsResult(GatewayModel):
     next_offset: int | None = None
     content: str | None = None
     scanned_bytes: int | None = None
-    truncated: bool
+    truncated: bool | None = Field(
+        description="Null when the structured owner has not declared truncation; consult its coverage envelope."
+    )
+    owner_product: dict[str, Any] | None = None
     affordances: list[str] = Field(default_factory=list)
 
 
@@ -507,8 +525,31 @@ def _session_list(
     )
 
 
-def _sessions(runtime: Runtime, inp: SessionsInput) -> ActionResult:
+async def _sessions(runtime: Runtime, inp: SessionsInput) -> ActionResult:
     op = inp.request
+    if isinstance(op, SessionsStructuredOp):
+        from .products import owner_product
+
+        runtime.principal.require(Capability.SESSION_READ)
+        product = await owner_product(
+            runtime,
+            "polylogue",
+            "query",
+            {
+                **op.model_dump(exclude={"operation"}, exclude_none=True),
+                "projection": "sessions",
+            },
+            deadline_at=inp.deadline_at,
+        )
+        return ActionResult(
+            SessionsResult(
+                operation="structured",
+                provider="polylogue",
+                truncated=(product.data or {}).get("truncated"),
+                owner_product=product.model_dump(),
+                affordances=["sessions.orchestration", "sessions.query"],
+            )
+        )
     page = None
     try:
         if isinstance(op, SessionsListOp):
@@ -683,7 +724,7 @@ ACTIONS: tuple[Action, ...] = (
         name="sessions.query",
         family=VerbFamily.QUERY,
         owner="sessions",
-        summary="Find recent coding sessions, read transcripts or search local session JSONL files per provider.",
+        summary="Query structured Polylogue session evidence or use compatible local transcript list, read and search operations.",
         Input=SessionsInput,
         Output=SessionsResult,
         handler=_sessions,
@@ -697,8 +738,18 @@ ACTIONS: tuple[Action, ...] = (
             "session log",
             "recent work",
         ),
-        documentation="page.next_cursor continues a newest-first snapshot for one hour; omit cursor to refresh. Reads return next_offset. Search hits carry byte offsets and matching snippets; truncated marks incomplete coverage.",
+        documentation="operation=structured queries Polylogue's sessions projection and retains owner coverage and provenance. The owner does not support sessions continuation. Legacy list cursors continue a newest-first snapshot for one hour; legacy reads return next_offset and legacy searches expose their bounded file coverage.",
         examples=(
+            Example(
+                title="Structured project sessions",
+                input={
+                    "request": {
+                        "operation": "structured",
+                        "repo": "sinnix",
+                        "limit": 20,
+                    }
+                },
+            ),
             Example(
                 title="Recent Claude Code sessions",
                 input={
