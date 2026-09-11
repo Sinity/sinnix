@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Provably fails when: a Claude policy hook stops enforcing explicit models or
-# destructive-command protection, fails shellcheck, or blocks on malformed
-# input.
+# Provably fails when: the Claude/Codex dispatch guard stops requiring explicit
+# fresh-dispatch inputs, permits contradictory inheritance, interferes with a
+# non-dispatch tool, fails shellcheck, or blocks on malformed input.
 set -euo pipefail
 
 hooks_dir=$1
@@ -28,19 +28,55 @@ run_hook() {
   printf '%s' "$payload" | HOME="$test_root/home" XDG_STATE_HOME="$test_root/state" "$hook"
 }
 
-model_deny=$(run_hook "$hooks_dir/pretooluse-agent-model.sh" '{"tool_input":{"subagent_type":"general-purpose","prompt":"fixture"}}')
+model_deny=$(run_hook "$hooks_dir/pretooluse-agent-model.sh" '{"tool_name":"Agent","tool_input":{"subagent_type":"general-purpose","prompt":"fixture"}}')
 printf '%s' "$model_deny" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
-# Named agent-definition types are no longer exempt: omitting model at the
-# call site is now a hard deny for every subagent_type except fork.
-model_deny_named=$(run_hook "$hooks_dir/pretooluse-agent-model.sh" '{"tool_input":{"subagent_type":"review"}}')
+# Named Claude role types are no longer exempt: omitting model at the call site
+# is a hard deny, while role/runner-owned effort remains unknown to this hook.
+model_deny_named=$(run_hook "$hooks_dir/pretooluse-agent-model.sh" '{"tool_name":"Agent","tool_input":{"subagent_type":"review"}}')
 printf '%s' "$model_deny_named" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
-# fork is still exempt (no output at all, allow silently).
-test -z "$(run_hook "$hooks_dir/pretooluse-agent-model.sh" '{"tool_input":{"subagent_type":"fork"}}')"
-# Any dispatch that DOES carry model gets a visible confirmation systemMessage.
-model_confirm=$(run_hook "$hooks_dir/pretooluse-agent-model.sh" '{"tool_input":{"subagent_type":"general-purpose","model":"sonnet"}}')
-printf '%s' "$model_confirm" | jq -e '.hookSpecificOutput.permissionDecision != "deny" and (.systemMessage | contains("sonnet"))' >/dev/null
-model_confirm_named=$(run_hook "$hooks_dir/pretooluse-agent-model.sh" '{"tool_input":{"subagent_type":"review","model":"opus"}}')
-printf '%s' "$model_confirm_named" | jq -e '.hookSpecificOutput.permissionDecision != "deny" and (.systemMessage | contains("opus"))' >/dev/null
+# An explicit unoverridden Claude fork is deliberate inheritance, not a silent
+# allow; requesting a model override is rejected because the hook cannot prove
+# it was honored.
+claude_fork=$(run_hook "$hooks_dir/pretooluse-agent-model.sh" '{"tool_name":"Agent","tool_input":{"subagent_type":"fork"}}')
+printf '%s' "$claude_fork" | jq -e '.systemMessage | type == "string" and length > 0' >/dev/null
+claude_fork_override=$(run_hook "$hooks_dir/pretooluse-agent-model.sh" '{"tool_name":"Agent","tool_input":{"subagent_type":"fork","model":"sonnet"}}')
+printf '%s' "$claude_fork_override" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+# A valid Claude role asks for a model, while the notification makes clear that
+# requested fields are not the observed child identity.
+model_confirm=$(run_hook "$hooks_dir/pretooluse-agent-model.sh" '{"tool_name":"Agent","tool_input":{"subagent_type":"general-purpose","model":"sonnet"}}')
+printf '%s' "$model_confirm" | jq -e '(.hookSpecificOutput.permissionDecision? != "deny") and (.systemMessage | type == "string" and length > 0)' >/dev/null
+model_confirm_named=$(run_hook "$hooks_dir/pretooluse-agent-model.sh" '{"tool_name":"Agent","tool_input":{"subagent_type":"review","model":"opus"}}')
+printf '%s' "$model_confirm_named" | jq -e '(.hookSpecificOutput.permissionDecision? != "deny") and (.systemMessage | type == "string" and length > 0)' >/dev/null
+
+# Codex fresh spawns must select model and supported effort with an explicit,
+# bounded context. Missing fork_turns refuses the native default-all path.
+codex_missing=$(run_hook "$hooks_dir/pretooluse-agent-model.sh" '{"tool_name":"spawn_agent","tool_input":{"model":"gpt-5.6-terra","reasoning_effort":"high"}}')
+printf '%s' "$codex_missing" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+codex_missing_model=$(run_hook "$hooks_dir/pretooluse-agent-model.sh" '{"tool_name":"spawn_agent","tool_input":{"fork_turns":"none","reasoning_effort":"high"}}')
+printf '%s' "$codex_missing_model" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+codex_missing_effort=$(run_hook "$hooks_dir/pretooluse-agent-model.sh" '{"tool_name":"spawn_agent","tool_input":{"fork_turns":"2","model":"future-model"}}')
+printf '%s' "$codex_missing_effort" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+codex_bad_effort=$(run_hook "$hooks_dir/pretooluse-agent-model.sh" '{"tool_name":"spawn_agent","tool_input":{"fork_turns":"none","model":"future-model","reasoning_effort":"critical"}}')
+printf '%s' "$codex_bad_effort" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+codex_full_named_role=$(run_hook "$hooks_dir/pretooluse-agent-model.sh" '{"tool_name":"spawn_agent","tool_input":{"fork_turns":"all","agent_type":"reviewer"}}')
+printf '%s' "$codex_full_named_role" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+codex_fresh_named_role=$(run_hook "$hooks_dir/pretooluse-agent-model.sh" '{"tool_name":"spawn_agent","tool_input":{"fork_turns":"none","model":"gpt-5.6-luna","reasoning_effort":"high","agent_type":"reviewer"}}')
+printf '%s' "$codex_fresh_named_role" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+codex_inherit_model=$(run_hook "$hooks_dir/pretooluse-agent-model.sh" '{"tool_name":"spawn_agent","tool_input":{"fork_turns":"none","model":"inherit","reasoning_effort":"high"}}')
+printf '%s' "$codex_inherit_model" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+codex_fresh=$(run_hook "$hooks_dir/pretooluse-agent-model.sh" '{"tool_name":"spawn_agent","tool_input":{"fork_turns":"none","model":"future-model","reasoning_effort":"ultra"}}')
+printf '%s' "$codex_fresh" | jq -e '.systemMessage | type == "string" and length > 0' >/dev/null
+codex_bounded=$(run_hook "$hooks_dir/pretooluse-agent-model.sh" '{"tool_name":"spawn_agent","tool_input":{"fork_turns":"2","model":"future-model","reasoning_effort":"high"}}')
+printf '%s' "$codex_bounded" | jq -e '.systemMessage | type == "string" and length > 0' >/dev/null
+# An explicit full fork is the only inheritance path. Contradictory override
+# intent is denied instead of pretending the selected model can be rewritten.
+codex_inherit=$(run_hook "$hooks_dir/pretooluse-agent-model.sh" '{"tool_name":"spawn_agent","tool_input":{"fork_turns":"all"}}')
+printf '%s' "$codex_inherit" | jq -e '.systemMessage | type == "string" and length > 0' >/dev/null
+codex_contradictory=$(run_hook "$hooks_dir/pretooluse-agent-model.sh" '{"tool_name":"spawn_agent","tool_input":{"fork_turns":"all","model":"gpt-5.6-terra"}}')
+printf '%s' "$codex_contradictory" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+# The config matcher is exact, and the shared script leaves other lifecycle
+# tools alone when invoked directly.
+test -z "$(run_hook "$hooks_dir/pretooluse-agent-model.sh" '{"tool_name":"followup_task","tool_input":{"target":"worker"}}')"
 test -z "$(run_hook "$hooks_dir/pretooluse-agent-model.sh" 'not-json')"
 
 bash_deny=$(run_hook "$hooks_dir/pretooluse-bash.sh" '{"tool_input":{"command":"git push --force origin master"}}')
@@ -83,7 +119,7 @@ PATH="$test_root/bin" SINEX_SESSIONSTART_RECALL_TIMEOUT_SECS=1 \
 mutated="$test_root/mutated-agent-model.sh"
 cp "$hooks_dir/pretooluse-agent-model.sh" "$mutated"
 sed -i 's/"permissionDecision": "deny"/"permissionDecision": "allow"/' "$mutated"
-if printf '%s' '{"tool_input":{"subagent_type":"general-purpose"}}' | HOME="$test_root/home" XDG_STATE_HOME="$test_root/state" "$mutated" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null; then
+if printf '%s' '{"tool_name":"Agent","tool_input":{"subagent_type":"general-purpose"}}' | HOME="$test_root/home" XDG_STATE_HOME="$test_root/state" "$mutated" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null; then
   echo 'deny-to-allow mutation unexpectedly passed' >&2
   exit 1
 fi

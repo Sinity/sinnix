@@ -61,8 +61,11 @@ Use `bd create` from the owning project's checkout — filing from the wrong
 cwd lands the bead in the wrong project. Follow [[bead-authoring]] for content: a
 follow-up filed in ten seconds with a ritual title is negative-value; a
 two-minute mission-first bead with real edges is how the queue stays
-workable. Discovered follow-ups get filed at discovery time, linked to the
-originating bead, never held in session memory.
+workable. Put task prose containing Markdown, backticks, or shell
+metacharacters in an input file created with `apply_patch` and pass it with
+`bd --file`, or use structured argv with no shell interpolation. Discovered
+follow-ups get filed at discovery time, linked to the originating bead, never
+held in session memory.
 
 ## Drift
 

@@ -76,9 +76,8 @@ before parallel agent work. Consult `agentctl --help` for current verbs.
 - Act on recorded task IDs and worktree paths, not inferred process names.
   For standalone process searches, bracket a character in `pgrep -f` patterns
   so the search cannot match its own shell command.
-- Every dispatch names backend, model, and effort explicitly. Model allocation
-  and recovery decisions follow `orchestrate`; a strong coordinator may
-  delegate bounded architecture as well as implementation.
+- Dispatch and model inheritance follow the `orchestrate` skill; verify
+  launch/session metadata.
 - One accountable supervisor owns each concern. Automate evidence collection;
   delegate routine supervision; retain explicit decisions for retries,
   conflicting evidence, acceptance, and destructive actions. Do not repeat a
