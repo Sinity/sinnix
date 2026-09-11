@@ -19,6 +19,7 @@ from agentctl.batch import BatchError, BatchRefusal
 from agentctl.config import Config
 from agentctl.projects import ProjectAdapter, load_project_adapter
 from agentctl.pueue import PueueError
+from agentctl.run import TIMEOUT_EXIT_CODE
 from agentctl.worktrunk import Worktree, WorktrunkError
 from conftest import FakeBd, FakePueue, bead, read_launch
 
@@ -1066,11 +1067,41 @@ def test_a_verification_that_never_finishes_is_verify_failed_after_its_timeout(
     with pytest.raises(BatchRefusal, match="verify_failed") as refused:
         harness.land(run["run_id"])
 
-    assert "running" in refused.value.detail
+    assert "timeout" in refused.value.detail
+    assert str(timeout) in refused.value.detail
+    assert "running" not in refused.value.detail
     assert harness.pueue.clock == pytest.approx(timeout, abs=1)
     stored = manifest.load(harness.config, run["run_id"])
     assert stored.landing["failure"]["code"] == "verify_failed"
     assert stored.landing["review_verdict"] is None and stored.acceptance is None
+
+
+def test_a_terminal_verification_timeout_reports_outcome_exit_and_duration(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(launch, "wait", REAL_WAIT)
+    run = prepared_run(harness, "fx-solo")
+    timeout = harness.project.operation("check").timeout_seconds
+
+    def timeout_when_waited(job_id: int, **kwargs: Any) -> None:
+        harness.pueue.finish_when_waited(
+            job_id, lambda fake: fake.fail(job_id, exit_code=TIMEOUT_EXIT_CODE)
+        )
+
+    original_wait = launch.wait
+
+    def wait_and_timeout(job_id: int, **kwargs: Any) -> dict[str, Any]:
+        timeout_when_waited(job_id, **kwargs)
+        return original_wait(job_id, **kwargs)
+
+    monkeypatch.setattr(launch, "wait", wait_and_timeout)
+    with pytest.raises(BatchRefusal, match="verify_failed") as refused:
+        harness.land(run["run_id"])
+
+    detail = refused.value.detail
+    assert "timeout" in detail and "exit 124" in detail
+    assert "duration" in detail and f"budget {timeout}s" in detail
+    assert "running" not in detail
 
 
 def test_a_rejected_review_records_the_failure_and_closes_nothing(
