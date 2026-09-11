@@ -19,6 +19,7 @@ from agentctl.batch import BatchError, BatchRefusal
 from agentctl.config import Config
 from agentctl.projects import ProjectAdapter, load_project_adapter
 from agentctl.pueue import PueueError
+from agentctl.run import TIMEOUT_EXIT_CODE
 from agentctl.worktrunk import Worktree, WorktrunkError
 from conftest import FakeBd, FakePueue, bead, read_launch
 
@@ -1066,11 +1067,41 @@ def test_a_verification_that_never_finishes_is_verify_failed_after_its_timeout(
     with pytest.raises(BatchRefusal, match="verify_failed") as refused:
         harness.land(run["run_id"])
 
-    assert "running" in refused.value.detail
+    assert "timeout" in refused.value.detail
+    assert str(timeout) in refused.value.detail
+    assert "running" not in refused.value.detail
     assert harness.pueue.clock == pytest.approx(timeout, abs=1)
     stored = manifest.load(harness.config, run["run_id"])
     assert stored.landing["failure"]["code"] == "verify_failed"
     assert stored.landing["review_verdict"] is None and stored.acceptance is None
+
+
+def test_a_terminal_verification_timeout_reports_outcome_exit_and_duration(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(launch, "wait", REAL_WAIT)
+    run = prepared_run(harness, "fx-solo")
+    timeout = harness.project.operation("check").timeout_seconds
+
+    def timeout_when_waited(job_id: int, **kwargs: Any) -> None:
+        harness.pueue.finish_when_waited(
+            job_id, lambda fake: fake.fail(job_id, exit_code=TIMEOUT_EXIT_CODE)
+        )
+
+    original_wait = launch.wait
+
+    def wait_and_timeout(job_id: int, **kwargs: Any) -> dict[str, Any]:
+        timeout_when_waited(job_id, **kwargs)
+        return original_wait(job_id, **kwargs)
+
+    monkeypatch.setattr(launch, "wait", wait_and_timeout)
+    with pytest.raises(BatchRefusal, match="verify_failed") as refused:
+        harness.land(run["run_id"])
+
+    detail = refused.value.detail
+    assert "timeout" in detail and "exit 124" in detail
+    assert "duration" in detail and f"budget {timeout}s" in detail
+    assert "running" not in detail
 
 
 def test_a_rejected_review_records_the_failure_and_closes_nothing(
@@ -1619,6 +1650,99 @@ def test_a_clean_merge_is_scanned_for_markers_too(harness: Harness) -> None:
     landed = harness.land(run["run_id"])
     assert landed["acceptance"]["candidate_sha"] == SHA
     assert any(call[0] == "grep" for call in harness.git.greps)
+
+
+def _marker_repository(
+    tmp_path: Path, filename: str, initial: str, updated: str
+) -> tuple[Path, str, str]:
+    root = tmp_path / "repo"
+    subprocess.run(["git", "init", "-q", "-b", "master", str(root)], check=True)
+    (root / filename).write_text(initial)
+    subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(root),
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.test",
+            "commit",
+            "-q",
+            "-m",
+            "base",
+        ],
+        check=True,
+    )
+    base = subprocess.check_output(
+        ["git", "-C", str(root), "rev-parse", "HEAD"], text=True
+    ).strip()
+    (root / filename).write_text(updated)
+    subprocess.run(["git", "-C", str(root), "add", filename], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(root),
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.test",
+            "commit",
+            "-q",
+            "-m",
+            "updated",
+        ],
+        check=True,
+    )
+    candidate = subprocess.check_output(
+        ["git", "-C", str(root), "rev-parse", "HEAD"], text=True
+    ).strip()
+    return root, base, candidate
+
+
+def test_conflict_marker_scan_ignores_restructuredtext_table_underlines(
+    tmp_path: Path,
+) -> None:
+    root, base, candidate = _marker_repository(
+        tmp_path,
+        "table.rst",
+        "===================== ======================\n",
+        "===================== ======================\n"
+        "Column                Value\n"
+        "===================== ======================\n",
+    )
+
+    landing_module._refuse_conflict_markers(root, base, candidate)
+
+
+def test_conflict_marker_scan_catches_diff3_and_larger_git_markers(
+    tmp_path: Path,
+) -> None:
+    root, base, candidate = _marker_repository(
+        tmp_path,
+        "changed.txt",
+        "before\n",
+        "<<<<<<<< ours\n"
+        "ours\n"
+        "|||||||| base\n"
+        "base\n"
+        "========\n"
+        "theirs\n"
+        ">>>>>>>> theirs\n",
+    )
+
+    with pytest.raises(BatchRefusal) as refused:
+        landing_module._refuse_conflict_markers(root, base, candidate)
+
+    assert refused.value.code == "integration_conflict_markers"
+    assert refused.value.to_dict()["markers"] == [
+        f"{candidate}:changed.txt:1:<<<<<<<< ours",
+        f"{candidate}:changed.txt:3:|||||||| base",
+        f"{candidate}:changed.txt:5:========",
+        f"{candidate}:changed.txt:7:>>>>>>>> theirs",
+    ]
 
 
 def test_a_failing_verdict_is_recorded_and_a_hand_fix_lands_with_keep_integration(

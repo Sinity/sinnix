@@ -97,7 +97,8 @@ in
             -D
             Hyprland
             --
-            ${hyprland}/bin/Hyprland
+            ${hyprland}/bin/start-hyprland
+            --
             --config
             $PWD/home/.config/hypr/hyprland.lua
             EOF_ARGS
