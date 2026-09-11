@@ -35,8 +35,8 @@ command, the run manifest of a batch, and one operator screen.
 | `view [p]`                                                                                                | queue groups, what needs attention (failures of the last six hours), active jobs, open runs with each worker's stage, ready beads (epics and decisions left out)                                                                           |
 | `events tail [--lines N] [--follow] [--project p]`                                                        | the event spool (`/realm/state/agentctl/events.jsonl`)                                                                                                                                                                                     |
 | `schedule apply`                                                                                          | make the transient timer set equal the declared schedules                                                                                                                                                                                  |
-| `pools apply`                                                                                             | write the declared parallelism of every pueue group into the running daemon                                                                                                                                                                |
-| `backpressure tick`                                                                                       | pause or resume one pool against host stall                                                                                                                                                                                                |
+| `pools apply`                                                                                             | write the declared parallelism of every pueue group into the running daemon, and report the pools declared exclusive of each other                                                                                                         |
+| `backpressure tick`                                                                                       | one admission pass: pause or resume one pool against host stall, and release the launches an excluded pool has stopped blocking                                                                                                            |
 
 The project is `--project`, a leading positional naming a configured project
 or a checkout path, or the checkout enclosing the working directory. A run
@@ -143,9 +143,9 @@ real one, plus `AGENTCTL_CONFIG` set to the configuration file this process
 read, so the agentctl calls inside a task (`batch result`, `batch land`) see
 the same projects, state directory and event spool.
 
-Groups admit work: `agent:8 land-agent:2 pytest:1 pytest-quick:2 bulk:1
+Groups admit work: `agent:12 land-agent:2 pytest:2 pytest-quick:2 bulk:2
 normal:2 interactive:4`, plus `<project>-land` of parallelism 1 per
-configured project, declared by
+configured project (`polylogue-land:3`), declared by
 `sinnix.services.agentctl.pools` and carried in `/etc/sinnix/agentctl.json`.
 pueued keeps its groups in its own state, so `agentctl pools apply` writes
 that declaration into the daemon that is already running: it creates a
@@ -154,6 +154,50 @@ missing group, resizes a drifted one, leaves a group nothing declares alone
 pueued instead would mark every running task Killed. Every part of a unit
 name comes from `pueue status`, from a command that is the wrapper and one
 launch input and nothing else.
+
+A pool may also declare the pools it must not run beside
+(`pools.pytest.exclusiveWith = [ "agent" ]`, rendered as `exclusive_with`).
+The declaration lives with the pools, not in a project descriptor: pueue
+groups are one host-wide set, the pair binds launches from every project, and
+two descriptors could otherwise disagree about the same pair.
+pueued schedules each group on its own and has no notion of the pair, so
+agentctl enforces it at admission: a launch into either pool while the other
+has unfinished tasks is added `--stashed`, with `hold` in its launch input
+naming the reason, the excluded pools and the tasks it found. The minute
+`backpressure tick` enqueues every held task whose excluded pools have
+drained, so a hold outlives the process that placed it. Order is the pueue
+task id — a held task blocks a later launch in an excluded pool but not an
+earlier one — which is what keeps two exclusive pools from holding each
+other forever. A task stashed for any other reason (an external harness's
+landing) carries no `hold` and is never released by that pass. `agentctl
+view` shows a held task's state as `held for <pools>` and counts it under its
+group; `job cancel` drops it like any other task that has not started.
+
+The rule applies to every launch, an agent's included; what varies is the
+pool the launcher itself occupies, which `agentctl-run` exports as
+`AGENTCTL_POOL`. A launch from inside a queued task into a pool that excludes
+that task's own pool is refused, not held: holding it could only wait for its
+own launcher, and a batch worker does not start the corpus its wave is the
+reason to hold. A worker's own verification is untouched by this, because it
+runs in pools nothing excludes (`pytest-quick` for a bounded selection,
+`normal` for the static gates); a launch from a pool the target does not
+exclude — a landing in `<project>-land` — is held like any other and runs at
+the drain.
+
+Reading the queue and joining it is one step, under a host-wide advisory lock
+(`<state dir>/admission.lock`, `flock`): `pueue add` cannot be made
+conditional, so two launches into mutually exclusive pools would otherwise
+each read a queue the other had not entered yet and both be admitted. The
+release pass takes the same lock, because releasing a hold is admitting work.
+A launch that cannot take the lock within a minute refuses instead of
+starting out of turn.
+
+The declaration on this host is `pytest` exclusive with `agent`: the corpus
+pytest run and a wave of workers do not fit in 32 GB together, and the
+nightly `verify_all` was OOM-killed, then cancelled at 8% after 85 minutes,
+which left every landing wave without its backstop. A scheduled launch
+follows the same rule — `job fire` skips while the operation is still held,
+so the corpus starts at the next drain instead of firing again.
 
 `job cancel` drops a queued task out of the queue (`removed`); for a running
 task it writes the cancel marker, runs `systemctl --user stop <unit>`, then
@@ -173,9 +217,11 @@ and bulk slices have fixed memory, swap, CPU and IO budgets,
 `MemorySwapMax=0`, and are killed by systemd-oomd at their own memory
 pressure; they do not choose capacity from instantaneous free RAM.
 
-`agentctl-backpressure.timer` runs `agentctl backpressure tick`, which
-pauses one eligible group per minute while the host's `full` IO or memory
-stall stays above threshold and resumes once the closing signal clears.
+`agentctl-backpressure.timer` runs `agentctl backpressure tick`, the
+admission pass: it pauses one eligible group per minute while the host's
+`full` IO or memory stall stays above threshold and resumes once the closing
+signal clears, then releases the exclusivity holds whose excluded pools have
+drained (`released` and `held` in its output).
 The bounded `pytest-quick` pool remains admissible under IO pressure; memory
 pressure can still close it. Pausing admission leaves running tasks active.
 Every pause event carries `"owner": "agentctl"` and
@@ -628,7 +674,8 @@ or running, so a slow build does not accumulate duplicate jobs.
 
 `modules/services/agentctl.nix` renders `/etc/sinnix/agentctl.json`
 (`project_roots`, `agent_runner`, `worker_contract`, `event_spool`,
-`agentctl`, `pools`), installs `agentctl`, `wt`, `pueue` and `gh` as system
+`agentctl`, `pools`, each pool a `parallel` and its `exclusive_with`; a bare
+integer is still read as the parallelism), installs `agentctl`, `wt`, `pueue` and `gh` as system
 packages, persists `~/.local/state/agentctl`, and declares the timers:
 `agentctl-backpressure` (every minute) and `agentctl-schedule` (every
 fifteen minutes, and two minutes after login). `agentctl-pools.service`

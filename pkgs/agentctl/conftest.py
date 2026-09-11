@@ -345,6 +345,20 @@ def _no_inherited_queue_group(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("PUEUE_GROUP", raising=False)
 
 
+@pytest.fixture(autouse=True)
+def _no_inherited_launcher(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Nor the identity of the queued task that runs it.
+
+    This suite is itself run from inside a batch worker, whose task exports
+    `AGENTCTL_POOL=agent` and `AGENTCTL_PRINCIPAL=agent-control`: inherited,
+    the first would refuse every launch into a pool that excludes `agent` and
+    the second would appear in the environments tests compare. A test that
+    wants either sets it itself.
+    """
+    monkeypatch.delenv("AGENTCTL_POOL", raising=False)
+    monkeypatch.delenv("AGENTCTL_PRINCIPAL", raising=False)
+
+
 @pytest.fixture
 def recording_systemctl(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

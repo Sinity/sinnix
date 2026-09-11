@@ -111,11 +111,14 @@ list [project]`.
 
 ## The screen
 
-`agentctl view <project>`: queue groups (running/queued/paused), what needs
-attention (failed jobs, workers and landings of the last six hours), active
-jobs with start time and elapsed, every open run with each worker's stage,
-since and job, the landing task and what follows next, and the ready beads
-(epics and decisions left out).
+`agentctl view <project>`: queue groups (running/queued/paused/held), what
+needs attention (failed jobs, workers and landings of the last six hours),
+active jobs with start time and elapsed, every open run with each worker's
+stage, since and job, the landing task and what follows next, and the ready
+beads (epics and decisions left out).
+A job whose state reads `held for <pool>` is waiting for a pool declared
+exclusive of its own to drain (the corpus pytest run and the agent wave never
+run together); it needs nothing from you and starts at the drain.
 `agentctl events tail [--follow] [--project p]` is the same over time.
 
 ## Worker toolbelt
@@ -124,7 +127,11 @@ Agents have `lane` on PATH:
 
 - `lane task` prints the dispatch packet (`.agentctl/prompt.md`).
 - `lane verify` runs the descriptor's focused verification through
-  `agentctl job start <project> <focused> --workspace . --wait`.
+  `agentctl job start <project> <focused> --workspace . --wait`. A worker may
+  not start a launch into a pool declared exclusive of its own (the corpus
+  pytest run while its wave is live): that launch is refused, because holding
+  it would wait for the worker itself. The corpus runs from the coordinator or
+  its schedule, once the wave drains.
 - `lane done <result.json>` requires a clean tree, validates the document
   against `.agentctl/worker.schema.json` with `candidate_sha` equal to HEAD, and
   prints it as the final message. It never pushes; the landing task

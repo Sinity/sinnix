@@ -13,7 +13,9 @@ let
   eventSpool = "${config.sinnix.paths.stateRoot}/agentctl/events.jsonl";
   # One landing slot per project: `agentctl batch land` serializes through
   # <project>-land.
-  landPools = lib.mapAttrs' (id: _: lib.nameValuePair "${id}-land" 1) config.sinnix.projects.entries;
+  landPools = lib.mapAttrs' (
+    id: _: lib.nameValuePair "${id}-land" { parallel = 1; }
+  ) config.sinnix.projects.entries;
 in
 mkServiceModule {
   name = "agentctl";
@@ -37,24 +39,47 @@ mkServiceModule {
     description = "The backend adapter agentctl queues for batch workers and reviewers; it turns a prompt file into one backend invocation.";
   };
   extraOptions.pools = lib.mkOption {
-    type = lib.types.attrsOf lib.types.ints.positive;
+    type = lib.types.attrsOf (
+      lib.types.submodule {
+        options = {
+          parallel = lib.mkOption {
+            type = lib.types.ints.positive;
+            description = "How many tasks this pueue group admits at once.";
+          };
+          exclusiveWith = lib.mkOption {
+            type = lib.types.listOf lib.types.str;
+            default = [ ];
+            description = "Pools whose tasks must never run while this pool's do. pueue schedules each group on its own, so agentctl enforces the pair at admission: a launch into either pool is held while the other is live and runs once that pool has drained.";
+          };
+        };
+      }
+    );
     default = {
-      agent = 12;
+      agent.parallel = 12;
       # The agents a landing owns (integration, review): a pool of their own so
       # a paused `agent` pool holds back new workers without stalling landings.
-      land-agent = 2;
-      pytest = 2;
-      pytest-quick = 2;
-      bulk = 2;
-      normal = 2;
-      interactive = 4;
+      land-agent.parallel = 2;
+      pytest = {
+        parallel = 2;
+        # A corpus run and a wave of workers do not fit in 32 GB together: the
+        # nightly corpus was OOM-killed, then cancelled at 8% after 85 minutes,
+        # which left every landing wave without its backstop. Whichever of the
+        # two is queued second now waits for the first to drain.
+        exclusiveWith = [ "agent" ];
+      };
+      # Bounded selections stay admissible beside a wave: a worker runs its own
+      # focused tests here while its own task occupies the agent pool.
+      pytest-quick.parallel = 2;
+      bulk.parallel = 2;
+      normal.parallel = 2;
+      interactive.parallel = 4;
     }
     // landPools
     // {
       # Polylogue lands several runs at once; each run still lands one at a time.
-      polylogue-land = 3;
+      polylogue-land.parallel = 3;
     };
-    description = "How many tasks each pueue group admits at once; `agentctl pools apply` writes this into the running daemon.";
+    description = "Each pueue group's admission policy: its parallelism, which `agentctl pools apply` writes into the running daemon, and the pools it must not run beside, which agentctl holds at admission.";
   };
   extraOptions.workerContract = lib.mkOption {
     type = lib.types.str;
@@ -73,7 +98,10 @@ mkServiceModule {
           worker_contract = cfg.workerContract;
           event_spool = eventSpool;
           agentctl = "${scriptPkgs.agentctl}/bin/agentctl";
-          pools = cfg.pools;
+          pools = lib.mapAttrs (_name: pool: {
+            inherit (pool) parallel;
+            exclusive_with = pool.exclusiveWith;
+          }) cfg.pools;
         }
       );
     in
@@ -82,7 +110,7 @@ mkServiceModule {
         {
           inherit config;
           unitName = "agentctl-backpressure";
-          description = "Freeze the job queue while the host is stalled";
+          description = "Reconcile queue admission against host stall and pool exclusivity";
         }
         {
           manager = "user";
@@ -98,9 +126,11 @@ mkServiceModule {
             # Full-stall averages are 60-second means, so sampling faster reads
             # the same number twice. One group is paused or resumed per tick,
             # with the signal-specific order defined by `agentctl backpressure tick`.
+            # The same pass releases the launches an exclusive pool was running
+            # when they were queued, so a hold outlives the process that placed it.
             onUnitActiveSec = 60;
             onBootSec = 60;
-            description = "Freeze the job queue while the host is stalled";
+            description = "Reconcile queue admission against host stall and pool exclusivity";
           };
         }
       )
