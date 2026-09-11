@@ -1,5 +1,5 @@
 {
-  "action_catalog_hash": "9f49432feb3f30b07b9eb865f4941f0150e3f4b0cb404eca11ea0e55fbfd9109",
+  "action_catalog_hash": "b8df6639b882d2cc6cd0d67984526741a92445a25c67c7ff2eac3f423b3310e5",
   "examples": [
     {
       "action": "gateway.status",
@@ -232,6 +232,38 @@
         }
       },
       "title": "Read CLAUDE.md"
+    },
+    {
+      "action": "projects.read_many",
+      "family": "query",
+      "input": {
+        "files": [
+          {
+            "end_line": 40,
+            "path": "README.md"
+          },
+          {
+            "end_line": 80,
+            "path": "flake.nix"
+          }
+        ],
+        "target": {
+          "project": "sinnix"
+        }
+      },
+      "title": "Read two files"
+    },
+    {
+      "action": "projects.export",
+      "family": "query",
+      "input": {
+        "max_bytes": 8000000,
+        "max_files": 500,
+        "target": {
+          "project": "sinnix"
+        }
+      },
+      "title": "Export a bounded checkout"
     },
     {
       "action": "projects.diff",

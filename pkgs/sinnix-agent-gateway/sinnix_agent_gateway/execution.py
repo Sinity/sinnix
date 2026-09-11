@@ -377,8 +377,23 @@ class LocalJobs:
         workspace = (
             None if workspace_id is None else self._worktree(project, workspace_id)
         )
+        parameters = arguments.get("parameters") or {}
+        if not isinstance(parameters, Mapping):
+            raise _Refusal(ErrorCode.INVALID_ARGUMENT, "parameters must be an object")
+        extra_argv = parameters.get("argv", [])
+        if not isinstance(extra_argv, list) or not all(
+            isinstance(item, str) and item for item in extra_argv
+        ):
+            raise _Refusal(
+                ErrorCode.INVALID_ARGUMENT,
+                "parameters.argv must be a list of non-empty strings",
+            )
         job = launch.start_operation(
-            self.config, project, operation, workspace=workspace
+            self.config,
+            project,
+            operation,
+            workspace=workspace,
+            extra_argv=extra_argv,
         )
         return job_payload(job)
 

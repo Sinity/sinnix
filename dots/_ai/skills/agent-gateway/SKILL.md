@@ -5,7 +5,7 @@ description: Use when invoking, inspecting, or documenting Sinnix Agent Gateway 
 
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: 9f49432feb3f30b07b9eb865f4941f0150e3f4b0cb404eca11ea0e55fbfd9109 -->
+<!-- gateway-catalog-sha256: b8df6639b882d2cc6cd0d67984526741a92445a25c67c7ff2eac3f423b3310e5 -->
 
 # Agent Gateway
 
@@ -47,10 +47,12 @@ Effectful actions (families change, operate, run) require `idempotency_key`; rep
 - `projects.list` — List the projects this principal may read, with canonical refs.
 - `projects.tree` — List files under a project-relative directory without following symlinks.
 - `projects.read` — Read a bounded line range of one project file.
+- `projects.read_many` — Read several bounded project files from one checkout observation.
+- `projects.export` — Sensitive, local-only, hidden, and symlinked paths are excluded. The export is bounded and includes a manifest with file hashes and the checkout revision.
 - `projects.diff` — Show uncommitted changes in a checkout, optionally against a git ref.
 - `projects.search` — Search project file contents with ripgrep.
 - `beads.closure` — Read a bounded dependency closure, cycles, declared gates and decisions, readiness and incomplete frontier at one revision.
-- `beads.query` — The owner filters, projects and counts before serialization. limit sizes pages of one immutable snapshot (10,000 matching rows per project maximum); cursors never reread live rows. at pins historical reads to an exact resolved Dolt revision. aggregate counts or groups without fetching issue bodies.
+- `beads.query` — The owner filters, projects and counts before serialization. limit sizes pages of one immutable snapshot of all matching rows; cursors never reread live rows. Snapshot storage and memory scale with the matching data, so use projection or aggregate for broad queries. at pins historical reads to an exact resolved Dolt revision. aggregate counts or groups without fetching issue bodies.
 - `jobs.list` — List queued jobs (pueue tasks) newest first, optionally for one project.
 - `batches.list` — List batch runs newest first, with each worker's stage and task.
 - `desktop.screenshot` — full captures the focused output through the HDR-aware screenshot owner; window/rect/monitor targets capture with grim. On HDR outputs a corrected SDR variant is produced and preferred for the image block.
@@ -109,7 +111,7 @@ Effectful actions (families change, operate, run) require `idempotency_key`; rep
 
 - `files.patch` — Pass expected_sha256 from the prior read so a concurrent change is refused instead of overwritten. Unified hunks are applied individually; rejected hunks are reported.
 - `files.change` — Copy and move never overwrite an existing destination. Remove supports regular files only.
-- `projects.change` — Paths stay project-relative and policy-excluded paths (.git, secrets, local-only agent state) are refused. Take expected_dirty_sha256 or expected_head from projects.get.
+- `projects.change` — Paths stay project-relative and policy-excluded paths (.git, secrets, local-only agent state) are refused. Take expected_dirty_sha256 or expected_head from projects.get, or expected_file_sha256 from projects.read.
 - `beads.change` — expected.expected_task_revision/expected_etag come from beads.get. Use mode=preview to see the compiled command and a preview_digest before applying.
 - `beads.changeset` — No global rollback: each applied step reports its outcome and a compensation hint. Preview first, then apply with the returned preview_digest.
 - `mcp.change` — Invoke an upstream request not admitted as read-only by annotation or trusted registry selectors.
@@ -140,4 +142,4 @@ Effectful actions (families change, operate, run) require `idempotency_key`; rep
 
 The complete schemas and examples are in `docs/generated/agent-gateway-reference.md`.
 
-Catalog revision: `v3-typed-actions`. Catalog SHA-256: `9f49432feb3f30b07b9eb865f4941f0150e3f4b0cb404eca11ea0e55fbfd9109`.
+Catalog revision: `v3-typed-actions`. Catalog SHA-256: `b8df6639b882d2cc6cd0d67984526741a92445a25c67c7ff2eac3f423b3310e5`.

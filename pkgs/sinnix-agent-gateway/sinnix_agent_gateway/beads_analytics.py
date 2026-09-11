@@ -462,7 +462,7 @@ class Analytics:
         order: Mapping[str, Any],
         projection: str,
         aggregate: Mapping[str, Any] | None,
-        max_rows: int,
+        max_rows: int | None,
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         predicates = [self.ast(filters), *self.native(native)]
         if expression:
@@ -553,15 +553,15 @@ class Analytics:
                     if columns
                     else ""
                 )
-                + f" LIMIT {max_rows + 1}"
+                + (f" LIMIT {max_rows + 1}" if max_rows is not None else "")
             )
             return rows[:max_rows], {
                 "total": total,
                 "total_exact": True,
-                "truncated": len(rows) > max_rows,
+                "truncated": max_rows is not None and len(rows) > max_rows,
                 "aggregate": True,
             }
-        if total > max_rows:
+        if max_rows is not None and total > max_rows:
             raise BeadsError(
                 f"query has {total} rows; narrow filters or use aggregate (snapshot bound {max_rows})",
                 "response_bound",
@@ -595,9 +595,9 @@ class Analytics:
             + COLUMNS[field]
             + (" DESC" if descending else " ASC")
             + ", i.id ASC"
-            + f" LIMIT {max_rows + 1}"
+            + (f" LIMIT {max_rows + 1}" if max_rows is not None else "")
         )
-        if len(rows) > max_rows:
+        if max_rows is not None and len(rows) > max_rows:
             raise BeadsError(
                 "owner changed beyond snapshot row bound", "source_changed"
             )
@@ -607,7 +607,7 @@ class Analytics:
         result = {}
         for name in sorted(names):
             if name == "comments":
-                statement = f"SELECT * FROM {self.table('comments')} WHERE issue_id={literal(bead_id)} ORDER BY created_at, id LIMIT 201"
+                statement = f"SELECT * FROM {self.table('comments')} WHERE issue_id={literal(bead_id)} ORDER BY created_at, id"
             elif name in {"dependencies", "dependents", "children", "blockers"}:
                 reverse = name in {"dependents", "children"}
                 source, target = (
@@ -620,7 +620,7 @@ class Analytics:
                     statement += " AND d.type='parent-child'"
                 if name == "blockers":
                     statement += " AND d.type='blocks' AND (i.id IS NULL OR i.status NOT IN ('closed','tombstone'))"
-                statement += " ORDER BY i.id LIMIT 201"
+                statement += " ORDER BY i.id"
             else:
                 result[name] = {
                     "state": "unavailable",
@@ -631,10 +631,10 @@ class Analytics:
             try:
                 rows = self.sql(statement)
                 result[name] = {
-                    "state": "complete" if len(rows) <= 200 else "partial",
-                    "items": rows[:200],
-                    "count": len(rows[:200]),
-                    "truncated": len(rows) > 200,
+                    "state": "complete",
+                    "items": rows,
+                    "count": len(rows),
+                    "truncated": False,
                     "revision": self.revision,
                 }
             except BeadsError as exc:
@@ -956,6 +956,12 @@ class Analytics:
                         + source
                     )
                 except BeadsError as exc:
+                    if exc.code != "owner_failed" or not re.search(
+                        r"(?:unknown column[^\n]*row_lock|column[^\n]*row_lock[^\n]*(?:not found|could not be found|does not exist|absent)|row_lock[^\n]*(?:unknown column|column not found|does not exist))",
+                        str(exc),
+                        re.IGNORECASE,
+                    ):
+                        raise
                     revision_unavailable_reason = str(exc)
                     records = self.sql("SELECT " + columns + source)
             else:

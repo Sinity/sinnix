@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import mimetypes
 import uuid
@@ -17,6 +18,14 @@ from .redaction import redact
 
 class ArtifactError(ValueError):
     pass
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1_048_576), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 class ArtifactService:
@@ -151,6 +160,7 @@ class ArtifactService:
             "principal": self.principal.name,
             "source": str(source),
             "bytes": source.stat().st_size,
+            "sha256": _sha256(source),
             "content_type": mimetypes.guess_type(source.name)[0]
             or "application/octet-stream",
         }

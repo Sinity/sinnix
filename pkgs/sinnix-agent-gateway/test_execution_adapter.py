@@ -100,7 +100,11 @@ def test_job_start_launches_the_declared_operation(
     payload = _call(
         adapter, "job.start", {"project_id": "fixture", "operation": "verify"}
     )
-    assert seen == {"project_id": "fixture", "operation": "verify", "workspace": None}
+    assert seen == {
+        "project_id": "fixture",
+        "operation": "verify",
+        "workspace": None,
+    }
     assert payload["job_id"] == "41"
     assert payload["kind"] == "declared-operation"
     assert payload["state"] == {
@@ -110,6 +114,28 @@ def test_job_start_launches_the_declared_operation(
         "dependencies": None,
     }
     assert set(payload).isdisjoint({"contract", "principal", "artifacts"})
+
+
+def test_job_start_forwards_declared_operation_arguments(
+    adapter: LocalJobs, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: dict[str, Any] = {}
+
+    def fake_start(config, project, operation, *, workspace=None, extra_argv=()):
+        seen["extra_argv"] = extra_argv
+        return JOB_ROW
+
+    monkeypatch.setattr(launch, "start_operation", fake_start)
+    _call(
+        adapter,
+        "job.start",
+        {
+            "project_id": "fixture",
+            "operation": "verify",
+            "parameters": {"argv": ["--changed-only", "src/main.py"]},
+        },
+    )
+    assert seen["extra_argv"] == ["--changed-only", "src/main.py"]
 
 
 def test_unknown_operation_is_an_error(adapter: LocalJobs) -> None:

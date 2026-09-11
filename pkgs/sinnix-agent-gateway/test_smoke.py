@@ -843,7 +843,16 @@ def test_stdio_transport_negotiates_typed_tools(tmp_path: Path) -> None:
         command = executable or sys.executable
         args = [] if executable else ["-m", "sinnix_agent_gateway.cli"]
         args.extend(["--config", str(config_path), "--principal", "observer", "serve"])
-        async with stdio_client(StdioServerParameters(command=command, args=args)) as (
+        child_env = dict(os.environ)
+        if not executable:
+            source_root = str(Path(__file__).resolve().parent)
+            existing_pythonpath = child_env.get("PYTHONPATH")
+            child_env["PYTHONPATH"] = os.pathsep.join(
+                part for part in (source_root, existing_pythonpath) if part
+            )
+        async with stdio_client(
+            StdioServerParameters(command=command, args=args, env=child_env)
+        ) as (
             read_stream,
             write_stream,
         ):
