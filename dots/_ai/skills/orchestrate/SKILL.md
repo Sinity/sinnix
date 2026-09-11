@@ -30,8 +30,10 @@ packet expresses intent; check execution against owning launch/session metadata.
 3. Use one event watch per concern for queued work and wait for completion;
    native work is observed directly. Do not poll.
 4. Read the result and acceptance evidence, then commit native changes or land
-   the external candidate. Select focused checks for the changed contract;
-   affected or full-corpus runs require an explicit request.
+   the external candidate. For task-bound native delivery, file the result
+   through `agentctl evidence file` after publication; `docs/agentctl.md` owns
+   its contract. Select focused checks for the changed contract; affected or
+   full-corpus runs require an explicit request.
 
 ## Model selection
 

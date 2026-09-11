@@ -668,7 +668,10 @@ def result(
     path = _artifact(config, task, ".result")
     raw = read_bounded(path, MAX_RESULT_BYTES + 1) if path is not None else None
     if raw is None:
-        return {**view, "kind": "exit", "value": None}
+        # Exit-only operations still have a wrapper outcome.  Preserve that
+        # bounded receipt so consumers can inspect execution observations
+        # without requiring a typed stdout artifact.
+        return {**view, "kind": "exit", "value": None, **_outcome(config, task)}
     if len(raw) > MAX_RESULT_BYTES:
         raise JobError(
             f"result artifact for task {task.task_id} exceeds {MAX_RESULT_BYTES} bytes"

@@ -91,6 +91,11 @@ UNIT_STEM_BYTES = 100
 # larger than this is reported as a lower bound, never walked without end.
 MAX_SCRATCH_ENTRIES = 100_000
 
+# Git is probed for execution evidence, independently of the descriptor's
+# cache policy.  These probes are deliberately bounded and read-only; failure
+# is recorded as unavailable rather than changing the command's outcome.
+GIT_OBSERVATION_TIMEOUT_SECONDS = 5.0
+
 
 def unit_pool(group: str | None) -> str | None:
     """A pueue group as a unit name component."""
@@ -137,6 +142,90 @@ def cancel_marker_for(log_path: object) -> Path:
 def outcome_path_for(log_path: object) -> Path:
     """``<jobs_dir>/<ref>.outcome``: the wrapper's own record of how the run ended."""
     return _sibling(log_path, ".outcome")
+
+
+def _git_probe(
+    cwd: Path, *arguments: str, allow_empty: bool = False
+) -> tuple[str | None, str | None]:
+    """Return one read-only Git value and a stable failure token, if any."""
+    try:
+        completed = subprocess.run(
+            ["git", "-C", str(cwd), *arguments],
+            capture_output=True,
+            text=True,
+            timeout=GIT_OBSERVATION_TIMEOUT_SECONDS,
+            env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"},
+        )
+    except subprocess.TimeoutExpired:
+        return None, "timeout"
+    except OSError:
+        return None, "unavailable"
+    value = (completed.stdout or "").strip()
+    if completed.returncode != 0 or (not value and not allow_empty):
+        return None, "unavailable"
+    return value, None
+
+
+def git_observation(cwd: Path, *, observed_at: str | None = None) -> dict[str, Any]:
+    """Observe checkout identity at one bounded point in the job.
+
+    The three values are retained when available, while ``status`` and
+    ``reason`` make partial or failed probes explicit.  Matching start/end
+    observations establish only unchanged endpoints; they cannot prove that a
+    command did not modify and then restore the checkout between probes.
+    """
+    head, head_error = _git_probe(cwd, "rev-parse", "HEAD")
+    tree, tree_error = _git_probe(cwd, "rev-parse", "HEAD^{tree}")
+    dirty_value, dirty_error = _git_probe(
+        cwd, "status", "--porcelain=v1", "--untracked-files=all", allow_empty=True
+    )
+    dirty: bool | None = None if dirty_error else bool(dirty_value)
+    errors = [
+        name
+        for name, error in (
+            ("head", head_error),
+            ("tree", tree_error),
+            ("dirty", dirty_error),
+        )
+        if error is not None
+    ]
+    return {
+        "observed_at": observed_at
+        or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "head": head,
+        "tree": tree,
+        "dirty": dirty,
+        "status": "observed" if not errors else "unavailable",
+        "reason": None if not errors else "git_" + "_".join(errors) + "_unavailable",
+    }
+
+
+def execution_receipt(
+    start: Mapping[str, Any], end: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Bind two endpoint observations without claiming interval immutability."""
+    available = all(
+        observation.get("status") == "observed" for observation in (start, end)
+    )
+    same = all(
+        start.get(field) == end.get(field) for field in ("head", "tree", "dirty")
+    )
+    if not available:
+        binding = "unavailable"
+        reason = "git_observation_unavailable"
+    elif not same:
+        binding = "changed"
+        reason = "checkout_identity_changed_between_observations"
+    else:
+        binding = "unchanged_endpoints"
+        reason = None
+    return {
+        "schema_version": 1,
+        "start": dict(start),
+        "end": dict(end),
+        "binding": binding,
+        "reason": reason,
+    }
 
 
 def remove_scratch(path: Path | None) -> None:
@@ -421,6 +510,9 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
             f"working directory is gone: {launch['working_directory']}\n"
         )
         return REFUSED_EXIT_CODE
+    # This is execution evidence, not the cache key captured by `job start`.
+    # It is therefore collected for every operation, including cache=none.
+    start_git = git_observation(Path(launch["working_directory"]))
     scratch = launch.get("scratch")
     scratch_dir = Path(scratch["path"]) if scratch else None
     if scratch_dir is not None:
@@ -524,12 +616,15 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
             log.write(f"timed out after {launch['timeout_seconds']} seconds\n".encode())
     marker.unlink(missing_ok=True)
 
+    end_git = git_observation(Path(launch["working_directory"]))
+
     record: dict[str, Any] = {
         "outcome": outcome.value,
         "exit_code": status,
         "unit": unit,
         "pool": pool,
         "systemd_result": properties.get("Result"),
+        "execution_receipt": execution_receipt(start_git, end_git),
     }
     if scratch_dir is not None:
         # Measured now, while the unit has exited and nothing else writes
