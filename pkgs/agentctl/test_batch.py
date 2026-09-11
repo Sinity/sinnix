@@ -342,7 +342,12 @@ class Harness:
         path.parent.mkdir(exist_ok=True)
         path.write_text(json.dumps(document))
         return batch.result(
-            self.config, run["run_id"], worker_id, path, reader=self.beads
+            self.config,
+            run["run_id"],
+            worker_id,
+            path,
+            project=self.project,
+            reader=self.beads,
         )
 
 

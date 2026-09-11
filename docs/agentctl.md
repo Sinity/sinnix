@@ -17,26 +17,27 @@ command, the run manifest of a batch, and one operator screen.
 
 ## Verbs
 
-| Verb                                                                                                      | Does                                                                                                                                                                                                                                       |
-| --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `project list \| get [p] \| operations [p]`                                                               | the configured descriptors (`/etc/sinnix/agentctl.json` lists the roots)                                                                                                                                                                   |
-| `job start [p] <op> [--workspace <path>] [--wait] [-- args…]`                                             | `pueue add` in the operation's pool, label `<p>:<op>`, running `agentctl-run <launch.json>`; each argument after `--` is appended to the declared `exec` as its own word                                                                   |
-| `job fire [p] <op>`                                                                                       | what a schedule timer runs: `job start` on the main checkout, skipped while the same label is queued or running                                                                                                                            |
-| `job list [--project p] [--active] [--all]`                                                               | `pueue status --json` reduced to job rows, newest first, the newest 40 unless `--all`; the date shows on a task that started on another day                                                                                                |
-| `job get \| logs \| result \| cancel \| retry \| wait <id>`                                               | one task by pueue id; `logs` reads the bounded log, `result` the typed artifact, `cancel` drops a queued task or stops a running task's unit, `retry` is `pueue restart --in-place`                                                        |
-| `job clean <id> \| --all-terminal \| --daemon-era`                                                        | delete a terminal task's launch input, log, result, outcome and cancel marker, then `pueue remove`; a task pueue has already forgotten is found by its launch input; `--daemon-era` deletes the state subtrees no verb reads; never by age |
-| `batch start [p] <bead>… [--worker a,b]… [--workers queued\|external] [--backend B --model M --effort E]` | validate the members, write the run manifest, claim the beads, create one worktree per worker, queue the workers (or write their packets) and the landing task behind them                                                                 |
-| `batch land <run>`                                                                                        | the landing task's body: integrate, verify, review, publish, record acceptance, close satisfied beads and release the claim on the rest, remove worktrees; re-runnable                                                                     |
-| `batch clean [p]`                                                                                         | remove the worktrees of runs that are over -- landed, abandoned, or with no manifest left -- keeping any that holds uncommitted or unmerged work; never by age                                                                             |
-| `batch status <run>` / `batch list [p]`                                                                   | the manifest joined with pueue task state and the landing PR; `status` prints each worker's prompt path and, for an external worker without a result, the exact `batch result` line to run                                                 |
-| `batch result <run> <worker> <result.json>`                                                               | file a schema-validated result for a worker another harness ran; releases the stashed landing task once every worker has one                                                                                                               |
-| `batch scope-correct <run> <worker> <candidate> --authorize <bead>=<glob>…`                               | replace a malformed stored worker scope with candidate-bound, per-bead authority while retaining the correction history                                                                                                                    |
-| `batch resume <run> --worker <w>`                                                                         | queue a fresh agent into the worker's existing worktree with a resume packet (`.agentctl/resume-<n>.md`) carrying the original                                                                                                             |
-| `view [p]`                                                                                                | queue groups, what needs attention (failures of the last six hours), active jobs, open runs with each worker's stage, ready beads (epics and decisions left out)                                                                           |
-| `events tail [--lines N] [--follow] [--project p]`                                                        | the event spool (`/realm/state/agentctl/events.jsonl`)                                                                                                                                                                                     |
-| `schedule apply`                                                                                          | make the transient timer set equal the declared schedules                                                                                                                                                                                  |
-| `pools apply`                                                                                             | write the declared parallelism of every pueue group into the running daemon                                                                                                                                                                |
-| `backpressure tick`                                                                                       | pause or resume one pool against host stall                                                                                                                                                                                                |
+| Verb                                                                                                      | Does                                                                                                                                                                                                                                                       |
+| --------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `project list \| get [p] \| operations [p]`                                                               | the configured descriptors (`/etc/sinnix/agentctl.json` lists the roots)                                                                                                                                                                                   |
+| `job start [p] <op> [--workspace <path>] [--wait] [-- args…]`                                             | `pueue add` in the operation's pool, label `<p>:<op>`, running `agentctl-run <launch.json>`; each argument after `--` is appended to the declared `exec` as its own word                                                                                   |
+| `job fire [p] <op>`                                                                                       | what a schedule timer runs: `job start` on the main checkout, skipped while the same label is queued or running                                                                                                                                            |
+| `job list [--project p] [--active] [--all]`                                                               | `pueue status --json` reduced to job rows, newest first, the newest 40 unless `--all`; the date shows on a task that started on another day                                                                                                                |
+| `job get \| logs \| result \| cancel \| retry \| wait <id>`                                               | one task by pueue id; `logs` reads the bounded log, `result` the typed artifact, `cancel` drops a queued task or stops a running task's unit, `retry` is `pueue restart --in-place`                                                                        |
+| `job clean <id> \| --all-terminal \| --daemon-era`                                                        | delete a terminal task's launch input, log, result, outcome and cancel marker, then `pueue remove`; a task pueue has already forgotten is found by its launch input; `--daemon-era` deletes the state subtrees no verb reads; never by age                 |
+| `batch start [p] <bead>… [--worker a,b]… [--workers queued\|external] [--backend B --model M --effort E]` | validate the members, write the run manifest, claim the beads, create one worktree per worker, queue the workers (or write their packets) and the landing task behind them                                                                                 |
+| `batch land <run>`                                                                                        | the landing task's body: integrate, verify, review, publish, record acceptance, close satisfied beads and release the claim on the rest, remove worktrees; re-runnable                                                                                     |
+| `batch queue <run>`                                                                                       | queue the landing as a job instead of running it here, for a caller that cannot hold a process for the whole landing, or a run whose landing task the queue lost                                                                                           |
+| `batch clean [p]`                                                                                         | remove the worktrees of runs that are over -- landed, abandoned, or with no manifest left -- keeping any that holds uncommitted or unmerged work; never by age                                                                                             |
+| `batch status <run>` / `batch list [p]`                                                                   | the manifest joined with pueue task state and the landing PR; `status` prints each worker's prompt path, for an external worker without a result the exact `batch result` line to run, and for a task the queue no longer has the exact `batch queue` line |
+| `batch result <run> <worker> <result.json>`                                                               | file a schema-validated result for a worker another harness ran; releases the stashed landing task once every worker has one, and queues a replacement for one the queue has lost                                                                          |
+| `batch scope-correct <run> <worker> <candidate> --authorize <bead>=<glob>…`                               | replace a malformed stored worker scope with candidate-bound, per-bead authority while retaining the correction history                                                                                                                                    |
+| `batch resume <run> --worker <w>`                                                                         | queue a fresh agent into the worker's existing worktree with a resume packet (`.agentctl/resume-<n>.md`) carrying the original                                                                                                                             |
+| `view [p]`                                                                                                | queue groups, what needs attention (failures of the last six hours, and jobs a live run recorded that the queue no longer has, at any age), active jobs, open runs with each worker's stage, ready beads (epics and decisions left out)                    |
+| `events tail [--lines N] [--follow] [--project p]`                                                        | the event spool (`/realm/state/agentctl/events.jsonl`)                                                                                                                                                                                                     |
+| `schedule apply`                                                                                          | make the transient timer set equal the declared schedules                                                                                                                                                                                                  |
+| `pools apply`                                                                                             | write the declared parallelism of every pueue group into the running daemon                                                                                                                                                                                |
+| `backpressure tick`                                                                                       | pause or resume one pool against host stall                                                                                                                                                                                                                |
 
 The project is `--project`, a leading positional naming a configured project
 or a checkout path, or the checkout enclosing the working directory. A run
@@ -309,19 +310,42 @@ the last result enqueues the landing task. `batch start` on an existing
 manifest completes whatever step is missing and never starts a second
 graph.
 
+### A queue that lost a task
+
+A task id is a queue position and pueued's state is a file it can lose: a
+reset restarts ids at zero, so every id a live run recorded then names
+nothing, or another task. `batch status`, `batch list` and `view` resolve a
+run's jobs by launch reference and report an identity the queue cannot
+resolve as vanished rather than as a stage nothing is waiting for:
+`landing.vanished` carries the recorded id, a worker with no result reads
+`vanished`, and the run's stage is `landing vanished` whose next step is
+`batch queue <run>`. A landed or abandoned run is exempt, because `job
+clean` is free to remove its tasks, and an unreadable queue is not evidence
+of loss.
+
+`batch result` queues a replacement landing itself — behind the worker tasks
+still running, stashed while an external run has results outstanding — and
+reports `landing_vanished` with the id it lost; `batch resume` already
+replaces a landing that is not running. A worker's filed result remains the
+evidence, so a run whose worker tasks were lost after they filed still
+lands.
+
 ### Landing
 
 `batch land <run>` is the landing task's body and can be run by hand; every
 step is recorded in `landing` before the next starts, and a repeat run
 resumes from the manifest. The whole landing holds
 `runs/<run>.land.lock`; a second landing of the same run is refused with
-`landing_in_progress`. `batch.queue` re-queues the landing task instead of
-running it, for a caller that cannot hold a process for the whole landing;
-it refuses `landing_in_progress` while the recorded landing task is still
-queued or running.
+`landing_in_progress`. `batch queue <run>` re-queues the landing task
+instead of running it, for a caller that cannot hold a process for the whole
+landing; it refuses `landing_in_progress` while the recorded landing task is
+still queued or running, and creates the landing groups the daemon lacks.
 
-1. Refuse unless every worker task succeeded with a valid result, and
-   refuse a run that already has an acceptance record or was abandoned. A
+1. Refuse unless every worker filed a valid result, and refuse a run that
+   already has an acceptance record or was abandoned. The result is the
+   evidence: how its task ended afterwards, and whether the queue still has
+   that task, decide nothing. A worker with no result refuses on its task's
+   state (`worker_not_done`) or on the missing result. A
    worker whose result carries no commit (`kind` `verified` or `no_op`) is
    left out of the integration; when no worker carries one the run accepts
    on the results alone, with no candidate, verification or publication.

@@ -147,6 +147,16 @@ class FakePueue:
             task, status="Queued", result=None, exit_code=None
         )
 
+    def reset_state(self) -> None:
+        """pueued restarted without its state file: no tasks, ids from one again.
+
+        Every id a manifest recorded then names nothing, or the next task the
+        daemon hands that id to. Groups survive: `pools apply` writes them
+        into the running daemon, which is a different loss.
+        """
+        self._tasks.clear()
+        self.next_id = 1
+
     def remove(self, task_ids: Sequence[int]) -> None:
         for task_id in task_ids:
             self._tasks.pop(task_id, None)

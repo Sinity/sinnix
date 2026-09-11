@@ -20,6 +20,7 @@ from .agents import (
     PUSH_TIMEOUT_SECONDS,
     WORKTREE_STATE_DIR,
     binding,
+    ensure_landing_groups,
     other_worktrees,
     queue_agent,
     queue_landing,
@@ -77,24 +78,30 @@ def _refuse_unless_workers_done(run: Run) -> None:
     _refuse_unless_live(run)
     tasks = pueue.tasks() if run.harness == "queued" else {}
     for worker in run.workers:
+        # The result document is the evidence; how the task ended after
+        # writing it (cancelled, timed out, killed, or lost with the queue's
+        # own state) is not.
+        if worker.get("result"):
+            continue
         if run.harness == "queued":
             task_id = worker.get("task_id")
             task = launch.find_task(tasks, task_id, worker.get("task_reference"))
             if task is None:
                 raise BatchRefusal(
-                    "worker_not_done", f"worker {worker['id']} has no task"
+                    "worker_not_done",
+                    f"worker {worker['id']} has no task"
+                    if task_id is None
+                    else f"worker {worker['id']} task {task_id} is gone from pueue "
+                    "and filed no result",
                 )
-            # The result document is the evidence; how the task ended after
-            # writing it (cancelled, timed out, killed) is not.
-            if not task.terminal and not worker.get("result"):
+            if not task.terminal:
                 raise BatchRefusal(
                     "worker_not_done",
                     f"worker {worker['id']} task {task_id} is {task.status.lower()}",
                 )
-        if not worker.get("result"):
-            raise BatchRefusal(
-                "worker_result_missing", f"worker {worker['id']} filed no valid result"
-            )
+        raise BatchRefusal(
+            "worker_result_missing", f"worker {worker['id']} filed no valid result"
+        )
 
 
 def _worker_results(run: Run) -> list[dict[str, Any]]:
@@ -987,6 +994,7 @@ def queue(config: Config, project: ProjectAdapter, run_id: str) -> dict[str, Any
             "landing_in_progress",
             f"landing task {task_id} is {current.status.lower()}",
         )
+    ensure_landing_groups(project.project_id)
     queued = queue_landing(config, project, run, after=(), stashed=False)
     queued_task = pueue.task(queued)
     return {
