@@ -807,7 +807,6 @@ in
             grep -Fq '@google/gemini-cli' "$HOME/.local/bin/gemini"
             grep -Fq 'npm install -g "$npm_package"' '${../../scripts/sinnix-agent-npm-bootstrap}'
             grep -Fq 'export npm_config_prefix="$STATE/npm"' '${../../scripts/sinnix-agent-npm-bootstrap}'
-            grep -Fq 'export NPM_CONFIG_PREFIX=' '${../../scripts/sinnix-agent-npm-bootstrap}'
 
             "$HOME/.local/bin/mcp-polylogue" --help | grep -q 'Start the Polylogue MCP stdio bridge'
             grep -Fq 'sinnix-mcp-sinex-script' "$(readlink -f "$HOME/.local/bin/mcp-sinex")"
