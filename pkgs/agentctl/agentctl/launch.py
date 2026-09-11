@@ -22,7 +22,7 @@ import uuid
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Mapping, Sequence
 
-from . import gitcmd, manifest, pueue
+from . import gitcmd, manifest, pools, pueue
 from .config import Config
 from .launch_input import scratch_path, write_input
 from .limits import CALL_TIMEOUT_SECONDS, SHORT_ID, SYSTEMCTL_TIMEOUT_SECONDS
@@ -37,6 +37,7 @@ from .run import (
     TIMEOUT_EXIT_CODE,
     VANISHED_EXIT_CODE,
     Outcome,
+    append_event,
     cancel_marker_for,
     outcome_path_for,
     systemd_environment,
@@ -51,6 +52,15 @@ QUEUE_RUN_EXECUTABLE = "agentctl-run"
 MAX_LAUNCH_INPUT_BYTES = 1_048_576
 # The label kinds under which a batch queues agents rather than declared operations.
 AGENT_OPERATIONS = frozenset({"worker", "resume", "integrate", "review"})
+# What a stashed task's launch input says when agentctl, not an operator,
+# stashed it: the queue has no field for why a task is held, and only a hold
+# agentctl placed may be released by draining an excluded pool.
+HOLD_REASON = "pool-exclusivity"
+# A launch from inside a queued agent is never held: the agent's own task
+# already occupies its pool, so holding its child against that pool would wait
+# for a task that is waiting for the child. A worker's focused verification
+# runs beside its worker, whatever the declaration says.
+AGENT_PRINCIPAL = "agent-control"
 # How long a wait blocks on one task id before re-reading which id the job
 # it waits for is at.
 WAIT_SLICE_SECONDS = 5.0
@@ -205,6 +215,9 @@ def enqueue(
         launch["environment_receipt"] = dict(environment_receipt)
     if binding:
         launch["binding"] = dict(binding)
+    hold = None if stashed else _admission_hold(config, group)
+    if hold is not None:
+        launch["hold"] = hold
     scratch_dir = scratch_path(scratch, reference)
     if scratch_dir is not None:
         launch["scratch"] = {"kind": scratch, "path": str(scratch_dir)}
@@ -219,7 +232,7 @@ def enqueue(
             command=(QUEUE_RUN_EXECUTABLE, str(input_path)),
             working_directory=working_directory,
             after=after,
-            stashed=stashed,
+            stashed=stashed or hold is not None,
         )
     except PueueError:
         input_path.unlink(missing_ok=True)
@@ -228,8 +241,125 @@ def enqueue(
     # after pueue has forgotten the task.
     launch["queue_task_id"] = task_id
     write_input(input_path, launch)
+    if hold is not None:
+        append_event(
+            config.event_spool,
+            {"kind": "pool-hold", "action": "held", "task_id": task_id, **hold},
+        )
     task = pueue.task(task_id)
     return job_view(task) if task is not None else {"job_id": task_id, "label": label}
+
+
+def _admission_hold(config: Config, group: str) -> dict[str, Any] | None:
+    """Why this launch must wait, or None when its pool may run now.
+
+    Held rather than refused: the launch keeps its place and runs at the next
+    drain, which is the whole difference between a nightly corpus that starts
+    late and one that never starts.
+    """
+    partners = pools.exclusive_partners(config.pools, group)
+    if not partners or os.environ.get("AGENTCTL_PRINCIPAL") == AGENT_PRINCIPAL:
+        return None
+    blocking = pools.blocking_tasks(config.pools, group, pueue.tasks())
+    if not blocking:
+        return None
+    return {
+        "reason": HOLD_REASON,
+        "pool": group,
+        "excluded_by": list(partners),
+        "waiting_for": list(blocking),
+        "held_at": manifest.now(),
+    }
+
+
+def hold_of(config: Config, task: Task) -> dict[str, Any] | None:
+    """The exclusivity hold a stashed task carries, if agentctl placed it.
+
+    A task stashed for any other reason — an external harness's landing, an
+    operator's `pueue stash` — carries no such record and is never released
+    by the pass below.
+    """
+    if task.status != "Stashed":
+        return None
+    launch_input = _launch_input(config, task)
+    hold = launch_input.get("hold") if launch_input else None
+    if not isinstance(hold, Mapping) or hold.get("reason") != HOLD_REASON:
+        return None
+    return dict(hold)
+
+
+def holds(config: Config, tasks: Mapping[int, Task]) -> dict[int, dict[str, Any]]:
+    """Every held task, with what it is currently waiting for.
+
+    The pools and the blockers are recomputed from the declaration and the
+    tasks as they are now, not read back from the record written at admission:
+    a hold is a live fact about the queue, and the screen shows what still has
+    to drain rather than what once did.
+    """
+    current = {
+        task.task_id: hold
+        for task in tasks.values()
+        if (hold := hold_of(config, task)) is not None
+    }
+    held = frozenset(current)
+    return {
+        task_id: {
+            **hold,
+            "excluded_by": list(
+                pools.exclusive_partners(config.pools, tasks[task_id].group)
+            ),
+            "waiting_for": list(
+                pools.blocking_tasks(
+                    config.pools,
+                    tasks[task_id].group,
+                    tasks,
+                    task_id=task_id,
+                    held=held,
+                )
+            ),
+        }
+        for task_id, hold in current.items()
+    }
+
+
+def release_holds(config: Config) -> dict[str, Any]:
+    """Enqueue every held task whose excluded pools have drained.
+
+    One pass, no loop and no waiting: a hold outlives any process that placed
+    it, so it is released by whatever runs next, and a task whose pools are
+    still busy is simply left where it is.
+
+    The pass runs whatever the declaration currently says, so withdrawing an
+    exclusion releases what it is holding instead of stranding it.
+    """
+    try:
+        tasks = pueue.tasks()
+    except PueueError as error:
+        return {"released": [], "waiting": [], "error": str(error)}
+    released: list[dict[str, Any]] = []
+    waiting: list[dict[str, Any]] = []
+    for task_id, hold in sorted(holds(config, tasks).items()):
+        row = {
+            "task_id": task_id,
+            "label": tasks[task_id].label,
+            "pool": tasks[task_id].group,
+            "excluded_by": hold["excluded_by"],
+            "waiting_for": hold["waiting_for"],
+        }
+        if row["waiting_for"]:
+            waiting.append(row)
+            continue
+        try:
+            pueue.enqueue(task_id)
+        except PueueError as error:
+            waiting.append({**row, "error": str(error)})
+            continue
+        released.append(row)
+        append_event(
+            config.event_spool,
+            {"kind": "pool-hold", "action": "released", **row},
+        )
+    return {"released": released, "waiting": waiting}
 
 
 def start_operation(

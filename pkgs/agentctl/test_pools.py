@@ -15,7 +15,13 @@ from pathlib import Path
 
 import pytest
 from agentctl import cli, pools, pueue
+from agentctl.config import PoolPolicy
 from conftest import FakePueue
+
+
+def declared(**widths: int) -> dict[str, PoolPolicy]:
+    """The declaration as `/etc/sinnix/agentctl.json` parses into it."""
+    return {name: PoolPolicy(parallel=parallel) for name, parallel in widths.items()}
 
 
 def _groups(home: str) -> dict[str, dict]:
@@ -58,7 +64,7 @@ def test_a_drifted_group_is_resized_without_restarting_the_daemon(
     )
     assert _groups(live_pueue)["pytest"]["parallel_tasks"] == 3
 
-    applied = pools.apply({"pytest": 1, "bulk": 1})
+    applied = pools.apply(declared(pytest=1, bulk=1))
 
     after = _groups(live_pueue)
     assert after["pytest"]["parallel_tasks"] == 1
@@ -80,7 +86,7 @@ def test_a_matching_daemon_is_left_alone(fake_pueue: FakePueue) -> None:
     fake_pueue.groups.clear()
     fake_pueue.groups.update({"pytest": 1, "agent": 8})
 
-    applied = pools.apply({"pytest": 1, "agent": 8})
+    applied = pools.apply(declared(pytest=1, agent=8))
 
     assert applied["unchanged"] == ["agent", "pytest"]
     assert applied["resized"] == [] and applied["created"] == []
@@ -91,8 +97,8 @@ def test_applying_twice_changes_nothing_the_second_time(fake_pueue: FakePueue) -
     fake_pueue.groups.clear()
     fake_pueue.groups.update({"pytest": 3})
 
-    first = pools.apply({"pytest": 1})
-    second = pools.apply({"pytest": 1})
+    first = pools.apply(declared(pytest=1))
+    second = pools.apply(declared(pytest=1))
 
     assert [entry["group"] for entry in first["resized"]] == ["pytest"]
     assert second["resized"] == [] and second["unchanged"] == ["pytest"]
@@ -118,7 +124,7 @@ def test_a_daemon_that_is_not_up_yet_is_waited_for(
     monkeypatch.setattr(pools.pueue, "groups", groups)
     monkeypatch.setattr(pools, "_POLL_SECONDS", 0.0)
 
-    assert pools.apply({"pytest": 1})["unchanged"] == ["pytest"]
+    assert pools.apply(declared(pytest=1))["unchanged"] == ["pytest"]
     assert answers == []
 
 
@@ -132,7 +138,29 @@ def test_a_daemon_that_never_answers_fails_the_job(
     monkeypatch.setattr(pools, "_POLL_SECONDS", 0.0)
 
     with pytest.raises(pools.PueueError):
-        pools.apply({"pytest": 1}, wait_seconds=0.0)
+        pools.apply(declared(pytest=1), wait_seconds=0.0)
+
+
+def test_the_pass_reports_the_exclusions_the_daemon_cannot_hold(
+    fake_pueue: FakePueue,
+) -> None:
+    """pueued has nowhere to keep an exclusion, so the pass is where it shows.
+
+    Anti-vacuity: a report built from the declaration's own side alone would
+    say `agent` excludes nothing while agentctl holds its launches.
+    """
+    fake_pueue.groups.clear()
+    fake_pueue.groups.update({"pytest": 1, "agent": 6})
+
+    applied = pools.apply(
+        {
+            "pytest": PoolPolicy(parallel=1, exclusive_with=("agent",)),
+            "agent": PoolPolicy(parallel=6),
+        }
+    )
+
+    assert applied["exclusive"] == {"agent": ["pytest"], "pytest": ["agent"]}
+    assert pools.apply(declared(pytest=1, agent=6))["exclusive"] == {}
 
 
 def test_the_cli_applies_the_configured_pools(

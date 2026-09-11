@@ -632,6 +632,12 @@ def _event_line(event: Mapping[str, Any]) -> str:
         return f"{stamp} {label} finished {outcome}{f' exit {exit_code}' if exit_code not in (None, '', '0', 0) else ''}{task}"
     if kind == "backpressure":
         return f"{stamp} backpressure {event.get('action')} {event.get('group') or ''}".rstrip()
+    if kind == "pool-hold":
+        excluded = ", ".join(str(pool) for pool in event.get("excluded_by") or ())
+        return (
+            f"{stamp} {event.get('label')} {event.get('action')} "
+            f"(task {event.get('task_id')}, {event.get('pool')} excluded by {excluded})"
+        )
     detail = " ".join(
         f"{key}={value}"
         for key, value in sorted(event.items())
@@ -755,16 +761,37 @@ def _dispatch(arguments: argparse.Namespace, config: Config, out: Output) -> int
         if not config.pools:
             raise ConfigError(f"{config.config_path} declares no pools")
         applied = pools.apply(config.pools)
+        exclusive = "; ".join(
+            f"{group} excludes {', '.join(partners)}"
+            for group, partners in applied["exclusive"].items()
+        )
         out.write(
             applied,
             f"pools: created {len(applied['created'])}, "
             f"resized {len(applied['resized'])}, "
-            f"unchanged {len(applied['unchanged'])}",
+            f"unchanged {len(applied['unchanged'])}"
+            + (f"; {exclusive}" if exclusive else ""),
         )
         return EXIT_OK
     if verb == "backpressure":
+        # One admission pass: the host's pressure against the pools, then the
+        # holds an excluded pool was still running when they were queued.
         decision = backpressure.tick(spool=config.event_spool)
-        out.write(decision, f"backpressure {decision.get('action')}")
+        holds = launch.release_holds(config)
+        decision = {
+            **decision,
+            "released": holds["released"],
+            "held": holds["waiting"],
+            # The queue answering one call and not the other is worth seeing.
+            **({"holds_error": holds["error"]} if "error" in holds else {}),
+        }
+        summary = f"backpressure {decision.get('action')}"
+        if holds["released"] or holds["waiting"]:
+            summary += (
+                f"; holds: released {len(holds['released'])}, "
+                f"waiting {len(holds['waiting'])}"
+            )
+        out.write(decision, summary)
         return EXIT_OK
     raise AssertionError(verb)
 
