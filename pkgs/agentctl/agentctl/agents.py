@@ -7,7 +7,7 @@ import shlex
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from . import launch, results
+from . import launch, pueue, results
 from .config import Config
 from .limits import MAX_AGENT_TIMEOUT_SECONDS
 from .manifest import BatchRefusal, Run
@@ -99,6 +99,19 @@ def worktree_path(project: ProjectAdapter, branch: str) -> Path:
 
 def landing_group(project_id: str) -> str:
     return f"{project_id}-land"
+
+
+def ensure_landing_groups(project_id: str) -> None:
+    """Create the groups a landing needs where the daemon lacks them.
+
+    The landing task takes the project's single land slot and queues its own
+    agents into `land-agent`, whatever `pools apply` has reached the daemon:
+    a landing must not depend on the `agent` pool being open. A daemon that
+    lost its state lost its groups with its tasks, so every path that queues
+    a landing asks for them rather than assuming an earlier start's.
+    """
+    pueue.group_add(landing_group(project_id), 1)
+    pueue.group_add(LANDING_AGENT_GROUP, LANDING_AGENT_PARALLELISM)
 
 
 def write_prompt(worktree: Path, name: str, prompt: str) -> Path:

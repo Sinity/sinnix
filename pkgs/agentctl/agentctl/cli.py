@@ -243,6 +243,14 @@ def parser() -> argparse.ArgumentParser:
     )
     _project_option(batch_land)
     _output_arguments(batch_land)
+    batch_queue = batch_verbs.add_parser(
+        "queue",
+        help="queue the landing as a job instead of running it here; "
+        "recovers a run whose landing task the queue lost",
+    )
+    batch_queue.add_argument("run_id", help="a run id or its 8-character suffix")
+    _project_option(batch_queue)
+    _output_arguments(batch_queue)
     batch_status = batch_verbs.add_parser(
         "status",
         help="one run: the manifest joined with pueue task state and the landing PR",
@@ -478,6 +486,21 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
     raise AssertionError(verb)
 
 
+def _landing_recovery(run_id: str, filed: Mapping[str, Any]) -> str:
+    """What `batch result` did about a landing task the queue no longer has."""
+    lost = filed.get("landing_vanished")
+    if lost is None:
+        return ""
+    text = f"\npueue no longer has landing task {lost}"
+    if filed.get("landing_requeued") is not None:
+        return f"{text}; queued {filed['landing_requeued']} in its place"
+    error = filed.get("landing_requeue_error")
+    return (
+        f"{text}{' (' + str(error) + ')' if error else ''}; "
+        f"queue one with `agentctl batch queue {run_id}`"
+    )
+
+
 def _batch(arguments: argparse.Namespace, config: Config, out: Output) -> int:
     verb = arguments.batch_verb
     if verb == "start":
@@ -526,6 +549,17 @@ def _batch(arguments: argparse.Namespace, config: Config, out: Output) -> int:
                 if acceptance.get("residual")
                 else ""
             ),
+        )
+        return EXIT_OK
+    if verb == "queue":
+        run_id = resolve_run_id(config, arguments.run_id)
+        project = resolve_project(
+            config, arguments.project or load(config, run_id).project
+        )
+        queued = batch.queue(config, project, run_id)
+        out.write(
+            queued,
+            f"queued landing task {queued['landing_task_id']} for {out.run(run_id)}",
         )
         return EXIT_OK
     if verb == "status":
@@ -582,7 +616,8 @@ def _batch(arguments: argparse.Namespace, config: Config, out: Output) -> int:
                 " and released the landing task"
                 if filed.get("landing_released")
                 else ""
-            ),
+            )
+            + _landing_recovery(run_id, filed),
         )
         return EXIT_OK
     if verb == "resume":

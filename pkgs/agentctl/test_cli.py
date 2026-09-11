@@ -473,3 +473,35 @@ def test_an_unknown_operation_is_a_refusal_and_a_key_error_is_not(
     monkeypatch.setattr(cli.launch, "list_jobs", broken)
     with pytest.raises(KeyError):
         cli.main(["job", "list"])
+
+
+def test_batch_status_names_a_lost_landing_and_queue_replaces_it(
+    fake_pueue: FakePueue, cli_config: Config, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """mzw2: the phantom stage read `ready to land` and named a task pueue lost."""
+    run_id = "fixture-20260903-080000-0123abcd"
+    _manifest(cli_config, run_id)
+    path = manifest.manifest_path(cli_config, run_id)
+    document = json.loads(path.read_text())
+    document["landing"]["task_id"] = 4547
+    document["landing"]["task_reference"] = "land-4547"
+    path.write_text(json.dumps(document))
+
+    assert cli.main(["batch", "status", "0123abcd"]) == 0
+    text = capsys.readouterr().out
+    assert "stage landing vanished" in text
+    assert "landing: task 4547 (pueue no longer has it)" in text
+    assert f"  next: agentctl batch queue {run_id}\n" in text
+    assert cli.main(["--json", "batch", "status", "0123abcd"]) == 0
+    assert json.loads(capsys.readouterr().out)["landing"]["vanished"] == 4547
+
+    assert cli.main(["batch", "queue", "0123abcd"]) == 0
+    printed, summary = capsys.readouterr()
+    queued = json.loads(printed)["landing_task_id"]
+    assert fake_pueue.task(queued).label == f"fixture:land:{run_id}"
+    assert summary == f"queued landing task {queued} for 0123abcd\n"
+    stored = json.loads(path.read_text())["landing"]
+    assert stored["task_id"] == queued and stored["task_reference"] is not None
+
+    assert cli.main(["batch", "status", "0123abcd"]) == 0
+    assert "pueue no longer has it" not in capsys.readouterr().out
