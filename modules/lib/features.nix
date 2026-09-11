@@ -16,7 +16,7 @@ let
   #   meta.dotfiles.configFile = { "rel/in/xdg" = "rel/in/dots"; ... };
   #   meta.dotfiles.dataFile = { ... };
   # Entries may be strings (simple recursive symlink) or attrsets with
-  # source/recursive/force/onChange keys (full HM file declaration).
+  # source/recursive/force/onChange/executable keys (full HM file declaration).
   mkMetaOption =
     metaValue:
     lib.mkOption {
@@ -187,6 +187,7 @@ let
       meta = meta // {
         ai = {
           inherit backendKind requiresCuda;
+          socketProxy = (activation.mode or null) == "socket-proxy";
         };
       };
       surface = {

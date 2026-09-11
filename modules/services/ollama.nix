@@ -15,6 +15,11 @@ mkServiceModule {
   name = "ollama";
   description = "Ollama local LLM/VLM inference hub (CUDA)";
   docs = "docs/local-ai-activation.md";
+  meta.ai = {
+    backendKind = "native";
+    requiresCuda = true;
+    socketProxy = true;
+  };
   surface = {
     unit = "ollama.service";
     resourceClass = "interactive-agent"; # uncapped memory — required for RAM offload

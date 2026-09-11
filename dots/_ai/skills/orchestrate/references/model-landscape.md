@@ -30,10 +30,12 @@ comparing dispatch choices.
   config needs its owning install or activation, and a fresh context may still
   be required. Source edits alone are not proof of loaded state. Do not stop or
   restart an in-flight agent solely to reattribute its model.
-- Use queued AgentCTL workers for durable isolated implementation/publication
-  with explicit launch fields. Use native dispatch for bounded interactive
-  analysis or shared integration only when the selected model is controllable;
-  trivial read-only work need not become a batch. Do not add wrappers or ledgers.
+- Use queued AgentCTL external workers for independent durable implementation or
+  publication with explicit launch fields, unattended queueing, or a required
+  backend choice. Use native agents for bounded interactive analysis, help, and
+  cohesive implementation in the shared checkout; keep write scopes disjoint
+  and let the coordinator commit. Trivial read-only work need not become a
+  batch. Do not add wrappers or ledgers.
 
 ## Before dispatch
 

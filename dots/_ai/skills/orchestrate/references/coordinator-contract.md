@@ -28,7 +28,9 @@ get|logs|result <id>` is one job. Job ids are pueue task ids; a run id is
 The operator or the coordinating agent starts every batch; `agentctl` does
 what it is told and reports. A started batch lands itself: the landing task
 is queued behind its workers and runs when they all succeed. A run's "next"
-on the view describes its state.
+on the view describes its state. Native agents remain under the coordinator's
+direct supervision in the shared checkout; keep their write scopes disjoint and
+let the coordinator commit the integrated result.
 
 For several live workers, assign one accountable supervisor per concern for the
 event watch, result collection, routine in-scope recovery, and one consolidated,
@@ -46,7 +48,7 @@ Look for the verb before writing any procedure: `agentctl <verb> --help`.
 | see the runs, queue and ready work             | `agentctl view <p>`                                                                   |
 | watch what happens                             | `agentctl events tail --follow --project <p>`                                         |
 | start a batch of workers                       | `agentctl batch start <p> <bead>… [--worker a,b]… [--backend B --model M --effort E]` |
-| start a batch that Claude subagents will work  | `agentctl batch start <p> <bead>… --workers external`                                 |
+| start an external batch                         | `agentctl batch start <p> <bead>… --workers external`                                 |
 | file an external worker's result               | `agentctl batch result <run> <worker> <result.json>`                                  |
 | land a run by hand after resolving its failure | `agentctl batch land <run>`                                                           |
 | land a hand fix made on the integration tree   | `agentctl batch land <run> --keep-integration`                                        |
@@ -80,18 +82,19 @@ candidate. Hosted review comments are handled as `docs/agentctl.md` states.
 
 1. Inventory: `agentctl view <p>`, active jobs, open manifests,
    `git worktree list`, `bd ready`, and the project's rules.
-2. Finish existing candidates, then start one coherent set as a batch, two to
-   four workers: `agentctl batch start <p> <bead>…`. Each seed bead's open
-   dispatch group is one worker; `--worker a,b` names one explicitly.
+2. Finish existing candidates, then choose native work for bounded/cohesive
+   changes or start an external batch for independent ownership groups:
+   `agentctl batch start <p> <bead>…`. The number of workers follows the
+   dependency graph and host capacity; each seed bead's open dispatch group is
+   one worker and `--worker a,b` names one explicitly.
 3. Wait for the `<p>:land:<run>` finished event on the watch; do not poll.
 4. `agentctl batch status <run>`: `landed` with an acceptance record, or a
    named failure.
 5. Next set.
 
-For Claude-subagent workers: `batch start … --workers external`, run one
-`lane` subagent per worker in the worktree the manifest names, file each
-result with `batch result` (the last one enqueues the landing task), then
-step 3.
+For external workers: `batch start … --workers external`, arrange one worker
+per manifest worktree, file each result with `batch result` (the last one
+enqueues the landing task), then step 3.
 
 **Stages on the view** and the next evidence to check:
 
@@ -107,12 +110,11 @@ step 3.
 | `unprepared`                | inspect the preparation refusal; correct its cause before starting the same members again             |
 | `landed`, `abandoned`       | nothing                                                                                               |
 
-**Verification**: workers run the descriptor's focused operation; the landing
-task runs the `candidate` profile once on the integrated tree (a hosted check
-where the descriptor names one); the `corpus` operation runs once at the
-master boundary, as a declared operation or its schedule. A selected green
-proves the selected scope only. Read `.cache/verify/runs/<id>/run.json`
-receipts where the project writes them.
+**Verification**: run the checks named by the task or descriptor. A candidate
+profile, including a hosted check, runs when the project declares one; focused
+or broad profiles are optional and manual unless the task explicitly selects
+them. A selected green proves the selected scope only. Read
+`.cache/verify/runs/<id>/run.json` receipts where the project writes them.
 
 **Fix loops preserve batch ownership.** A finding isolated to one worker's
 change goes back to that worker (`batch resume`). Integration conflicts and

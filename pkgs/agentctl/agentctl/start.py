@@ -164,9 +164,11 @@ def _attempt(
     backend: str,
     model: str,
     effort: str,
+    number: int,
 ) -> dict[str, Any]:
     """The immutable facts agentctl knows for one worker launch."""
     return {
+        "number": number,
         "task_id": task_id,
         "task_reference": task_reference,
         "prompt_path": str(prompt_path),
@@ -174,6 +176,67 @@ def _attempt(
         "backend": backend,
         "model": model,
         "effort": effort,
+    }
+
+
+def _bead_revisions(beads: Beads, bead_ids: Sequence[str]) -> dict[str, str | None]:
+    """The dispatch-time revisions, without inventing one when Beads omits it."""
+    revisions: dict[str, str | None] = {}
+    for bead_id in bead_ids:
+        value = beads.show(bead_id).get("revision")
+        if isinstance(value, str) and value:
+            revisions[bead_id] = value
+        elif isinstance(value, int) and not isinstance(value, bool):
+            revisions[bead_id] = str(value)
+        else:
+            revisions[bead_id] = None
+    return revisions
+
+
+def result_provenance(
+    run: Run, worker: Mapping[str, Any], value: Mapping[str, Any]
+) -> dict[str, Any]:
+    """One consumer projection: requested dispatch vs untrusted worker claims.
+
+    The runner currently stores only a structured worker result, not a signed
+    backend receipt, so executor identity, usage and sessions are never
+    promoted from that result into an observed fact.
+    """
+    attempts = (
+        worker.get("attempts") if isinstance(worker.get("attempts"), list) else []
+    )
+    latest = attempts[-1] if attempts and isinstance(attempts[-1], Mapping) else {}
+    worker_claim = {
+        key: value.get(key)
+        for key in (
+            "planned_model",
+            "actual_executor_model",
+            "actual_executor_observed_by",
+            "measured_usage",
+            "parent_session_ref",
+            "child_session_ref",
+            "model_segments",
+        )
+        if key in value
+    }
+    return {
+        "schema_version": 1,
+        "dispatch": {
+            "execution": run.harness,
+            "requested": {
+                key: latest.get(key) for key in ("backend", "model", "effort")
+            },
+            "attempt": latest.get("number"),
+            "task_id": latest.get("task_id"),
+            "launch_reference": latest.get("task_reference"),
+        },
+        "bead_revisions": dict(worker.get("bead_revisions") or {}),
+        "result_schema_version": value.get("schema_version"),
+        "worker_claim": worker_claim or None,
+        "observed_executor": None,
+        "actual_executor_model": None,
+        "measured_usage": None,
+        "session_correlation": None,
     }
 
 
@@ -286,6 +349,7 @@ def _prepare(
                 effort=snapshot.dimensions.effort,
                 write_scope=list(snapshot.write_scope),
                 scope_authority=list(scope_authority(snapshot.beads)),
+                bead_revisions=_bead_revisions(beads, worker["beads"]),
             )
             worker = run.workers[index]
         if run.harness == "queued" and worker.get("task_id") is None:
@@ -320,6 +384,7 @@ def _prepare(
                         backend=worker["backend"],
                         model=worker["model"],
                         effort=worker["effort"],
+                        number=1,
                     )
                 ],
             )
@@ -669,6 +734,7 @@ def result(
         for entry in document["workers"]:
             if entry["id"] == worker_id:
                 entry["result"] = value
+                entry["provenance"] = result_provenance(run, entry, value)
                 entry["result_path"] = str(path)
                 entry["result_recorded_at"] = now()
                 entry.update(scope)
@@ -762,7 +828,15 @@ def resume(
         effort=effective_effort,
         schema="worker",
         then=worker_then(config, run_id, worker_id, resume_result),
-        binding=binding(run, worker_id),
+        binding={
+            **binding(run, worker_id),
+            "requested": {
+                "backend": effective_backend,
+                "model": effective_model,
+                "effort": effective_effort,
+            },
+            "attempt": attempt,
+        },
         inaccessible=other_worktrees(project, run, worker_id),
     )
     task_id = job["job_id"]
@@ -794,6 +868,7 @@ def resume(
                         backend=effective_backend,
                         model=effective_model,
                         effort=effective_effort,
+                        number=attempt,
                     ),
                 ]
         document["landing"]["failure"] = None

@@ -35,16 +35,9 @@ class ConfigError(ValueError):
 
 @dataclass(frozen=True)
 class PoolPolicy:
-    """One pueue group's declared admission policy.
-
-    ``exclusive_with`` names the pools whose tasks must never run beside this
-    pool's. pueue admits each group independently, so the relation is agentctl's
-    to enforce: it holds a launch whose partner pool is live and releases it
-    once that pool has drained.
-    """
+    """One pueue group's declared parallelism."""
 
     parallel: int
-    exclusive_with: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -57,10 +50,8 @@ class Config:
     event_spool: Path
     state_dir: Path
     agentctl_executable: str
-    # Each pueue group's declared admission policy: its width, which `pools
-    # apply` writes into the running daemon because pueued keeps its groups in
-    # its own state, and the pools it must never run beside, which pueue has
-    # no notion of and agentctl holds at admission.
+    # Each pueue group's declared width. `pools apply` writes it into the
+    # running daemon, whose queue remains the admission authority.
     pools: Mapping[str, PoolPolicy] = field(default_factory=dict)
     # The file this configuration was read from. Every task agentctl queues
     # carries it as AGENTCTL_CONFIG, so the agentctl calls inside a task read
@@ -126,22 +117,8 @@ def _parallel(name: str, value: Any) -> int:
     return value
 
 
-def _exclusive_with(name: str, value: Any) -> tuple[str, ...]:
-    if value is None:
-        return ()
-    if not isinstance(value, list) or any(
-        not isinstance(item, str) or POOL_NAME.fullmatch(item) is None for item in value
-    ):
-        raise ConfigError(f"pools.{name}.exclusive_with must list pueue group names")
-    if name in value:
-        raise ConfigError(f"pools.{name}.exclusive_with must not name its own pool")
-    return tuple(dict.fromkeys(value))
-
-
 def _pools(value: Any) -> dict[str, PoolPolicy]:
-    """The declared groups. A group is its parallelism, or a table adding the
-    pools it is exclusive with; the bare integer is what an agentctl.json
-    written before exclusivity existed still says."""
+    """The declared groups and their widths."""
     if value is None:
         return {}
     if not isinstance(value, Mapping):
@@ -151,31 +128,17 @@ def _pools(value: Any) -> dict[str, PoolPolicy]:
         if not isinstance(name, str) or POOL_NAME.fullmatch(name) is None:
             raise ConfigError(f"pools has an invalid pueue group name: {name!r}")
         if isinstance(declaration, Mapping):
-            unknown = set(declaration) - {"parallel", "exclusive_with"}
+            unknown = set(declaration) - {"parallel"}
             if unknown:
                 raise ConfigError(
                     f"pools.{name} declares unknown field(s): "
                     + ", ".join(sorted(unknown))
                 )
             parsed[name] = PoolPolicy(
-                parallel=_parallel(name, declaration.get("parallel")),
-                exclusive_with=_exclusive_with(name, declaration.get("exclusive_with")),
+                parallel=_parallel(name, declaration.get("parallel"))
             )
         else:
             parsed[name] = PoolPolicy(parallel=_parallel(name, declaration))
-    undeclared = {
-        partner
-        for policy in parsed.values()
-        for partner in policy.exclusive_with
-        if partner not in parsed
-    }
-    if undeclared:
-        # A typo here would silently admit exactly the pair the declaration
-        # exists to keep apart.
-        raise ConfigError(
-            "pools exclusive_with names undeclared pool(s): "
-            + ", ".join(sorted(undeclared))
-        )
     return parsed
 
 

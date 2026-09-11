@@ -19,6 +19,11 @@ mkServiceModule {
   name = "qwen38-vram";
   description = "Qwen3.8 27B VRAM-resident llama.cpp inference";
   docs = "docs/local-ai-activation.md";
+  meta.ai = {
+    backendKind = "native";
+    requiresCuda = true;
+    socketProxy = true;
+  };
   surface = {
     unit = "qwen38-vram.service";
     resourceClass = "interactive-agent";

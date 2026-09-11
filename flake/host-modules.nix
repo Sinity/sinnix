@@ -33,6 +33,9 @@ in
   # mkServiceModule, helpers.data, and the sinnix-extended `lib`).
   specialArgs = mkSharedSpecialArgs inputs // {
     lib = extendedLib;
+    # The private deployment manifest is the declaration authority. Missing
+    # declarations must fail host evaluation rather than install zero secrets.
+    secretDeclarations = import /realm/state/secrets/sinnix/runtime.nix;
   };
 
   hosts = {

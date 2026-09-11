@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @sinnix-package
 # description: Wallpaper corpus + Noctalia palette CLI (current/next/prev/pin/import/status)
-# runtimeInputs: bash coreutils gnused gawk jq imagemagick @sinnix-wallpaper-generate
+# runtimeInputs: bash coreutils jq imagemagick @sinnix-wallpaper-generate
 set -euo pipefail
 
 export LC_ALL=C
@@ -12,7 +12,6 @@ if [[ "$CORPUS" == /realm/library/media/wallpaper ]]; then
   CORPUS=/realm/library/images/wallpaper
 fi
 WALLPAPER_DIR="${HOME}/wallpaper"
-CONFIG_TOML="${XDG_CONFIG_HOME:-$HOME/.config}/noctalia/config.toml"
 NOCTALIA_BIN="${SINNIX_NOCTALIA_BIN:-noctalia}"
 
 usage() {
@@ -86,22 +85,15 @@ cmd_next()   { require_daemon; "$NOCTALIA_BIN" msg wallpaper-next; }
 cmd_prev()   { require_daemon; "$NOCTALIA_BIN" msg wallpaper-previous; }
 cmd_random() { require_daemon; "$NOCTALIA_BIN" msg wallpaper-random; }
 
-# Automation enable/disable is not exposed over IPC (verified: absent from
-# `noctalia msg --help`); config.toml's [wallpaper.automation] enabled key is
-# the only lever, so pin/unpin edit that one line in-place, scoped to the
-# [wallpaper.automation] table only so nothing else in the GUI-managed file
-# is touched.
+# Automation is app-owned state.  In particular config.toml is an out-of-store
+# managed symlink, so replacing it through a temporary file would silently
+# destroy the managed link.  The native IPC validates and persists this narrow
+# setting to Noctalia's settings.toml overlay instead.
 set_automation() {
   local value="$1"
-  [[ -w "$CONFIG_TOML" ]] || { echo "sinnix-wallpaper: $CONFIG_TOML not writable" >&2; exit 1; }
-  awk -v val="$value" '
-    /^\[wallpaper\.automation\]/ { insection=1; print; next }
-    /^\[/ { insection=0; print; next }
-    insection && /^enabled[[:space:]]*=/ { print "enabled = " val; next }
-    { print }
-  ' "$CONFIG_TOML" > "${CONFIG_TOML}.tmp"
-  mv "${CONFIG_TOML}.tmp" "$CONFIG_TOML"
-  "$NOCTALIA_BIN" msg config-reload >/dev/null 2>&1 || true
+  case "$value" in true|false) ;; *) echo "sinnix-wallpaper: invalid automation value" >&2; exit 1 ;; esac
+  require_daemon
+  "$NOCTALIA_BIN" msg wallpaper-automation-set "$value"
 }
 
 cmd_pin() {

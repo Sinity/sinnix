@@ -13,7 +13,17 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from agentctl import batch, gitcmd, github, launch, manifest, prompts, start, worktrunk
+from agentctl import (
+    batch,
+    gitcmd,
+    github,
+    launch,
+    manifest,
+    operator_view,
+    prompts,
+    start,
+    worktrunk,
+)
 from agentctl import landing as landing_module
 from agentctl.batch import BatchError, BatchRefusal
 from agentctl.config import Config
@@ -348,7 +358,11 @@ class Harness:
 
 
 def worker_result(
-    bead_ids: list[str], *, unsatisfied: set[str] = frozenset(), sha: str = SHA
+    bead_ids: list[str],
+    *,
+    unsatisfied: set[str] = frozenset(),
+    sha: str = SHA,
+    **extra: Any,
 ) -> dict[str, Any]:
     return {
         "candidate_sha": sha,
@@ -369,6 +383,7 @@ def worker_result(
         ],
         "unresolved": [],
         "verification": [{"command": "pytest -q", "receipt": "3 passed"}],
+        **extra,
     }
 
 
@@ -528,7 +543,97 @@ def test_start_claims_creates_worktrees_and_queues_workers_then_the_landing(
         "beads": ["fx-lead", "fx-member"],
         "run_id": run["run_id"],
         "worker": "fx-lead",
+        "execution": "queued",
+        "attempt": 1,
+        "requested": {key: lead[key] for key in ("backend", "model", "effort")},
     }
+
+
+def test_result_read_projection_separates_dispatch_from_worker_claims(
+    harness: Harness,
+) -> None:
+    run = harness.start("fx-solo")
+    filed = harness.file_result(run, "fx-solo")
+    provenance = filed["provenance"]
+
+    assert provenance["dispatch"] == {
+        "execution": "queued",
+        "requested": {
+            key: run["workers"][0][key] for key in ("backend", "model", "effort")
+        },
+        "attempt": 1,
+        "task_id": run["workers"][0]["task_id"],
+        "launch_reference": run["workers"][0]["task_reference"],
+    }
+    assert provenance["bead_revisions"] == {"fx-solo": None}
+    assert provenance["worker_claim"] is None
+    assert provenance["observed_executor"] is None
+    assert provenance["actual_executor_model"] is None
+    assert provenance["measured_usage"] is None
+    read = operator_view.status(harness.config, run["run_id"])
+    assert read["workers"][0]["provenance"] == provenance
+
+
+def test_result_read_projection_preserves_integer_bead_revision(
+    harness: Harness,
+) -> None:
+    revision = 7773497739344011640
+    harness.beads.beads["fx-solo"]["revision"] = revision
+
+    run = harness.start("fx-solo")
+    filed = harness.file_result(run, "fx-solo")
+
+    assert run["workers"][0]["bead_revisions"] == {"fx-solo": str(revision)}
+    assert filed["provenance"]["bead_revisions"] == {"fx-solo": str(revision)}
+
+
+def test_versioned_worker_claim_never_becomes_observed_executor_fact(
+    harness: Harness,
+) -> None:
+    run = harness.start("fx-solo")
+    filed = harness.file_result(
+        run,
+        "fx-solo",
+        schema_version=2,
+        execution="native",
+        planned_model="gpt-5.6-luna",
+        actual_executor_model="gpt-5.6-luna",
+        actual_executor_observed_by="runner",
+        attempt=1,
+        model_segments=[{"attempt": 1, "measured_usage": None}],
+        measured_usage={"input_tokens": 1},
+        parent_session_ref="parent",
+        child_session_ref="child",
+        beads=[
+            {
+                "id": "fx-solo",
+                "bead_revision": "claim-revision",
+                "criteria": [
+                    {
+                        "ac_id": "fx-solo/ac-1",
+                        "text": "done",
+                        "status": "satisfied",
+                        "evidence": "e",
+                    }
+                ],
+            }
+        ],
+        verification=[
+            {
+                "command": "pytest -q",
+                "receipt": "3 passed",
+                "tested_sha": SHA,
+                "status": "passed",
+                "coverage": {"ac_ids": ["fx-solo/ac-1"], "scope": "unit"},
+            }
+        ],
+    )
+    provenance = filed["provenance"]
+    assert provenance["worker_claim"]["actual_executor_model"] == "gpt-5.6-luna"
+    assert provenance["worker_claim"]["measured_usage"] == {"input_tokens": 1}
+    assert provenance["observed_executor"] is None
+    assert provenance["actual_executor_model"] is None
+    assert provenance["measured_usage"] is None
 
 
 def test_start_is_idempotent_for_the_same_members(harness: Harness) -> None:
@@ -788,6 +893,9 @@ def test_resume_requeues_the_worker_and_a_landing_behind_it(
         "beads": ["fx-lead", "fx-member"],
         "run_id": run["run_id"],
         "worker": "fx-lead",
+        "execution": "queued",
+        "attempt": 2,
+        "requested": {key: worker[key] for key in ("backend", "model", "effort")},
     }
     assert harness.pueue.removed == [run["landing"]["task_id"]]
     landing = harness.pueue.task(resumed["landing"]["task_id"])
@@ -857,6 +965,12 @@ def test_land_integrates_verifies_reviews_publishes_and_closes_satisfied_members
     assert harness.git.merges == [f"batch/{run_id}/fx-lead", f"batch/{run_id}/fx-solo"]
     verify = landed["landing"]["verify_run"]
     assert verify["operation"] == "check" and verify["candidate_sha"] == SHA
+    assert verify["requested_sha"] == SHA and verify["tested_sha"] == SHA
+    assert verify["git_dirty"] is False and verify["status"] == "passed"
+    assert verify["receipt"] == f"agentctl://jobs/{verify['job_id']}"
+    assert verify["reference"] == launch.launch_reference(
+        harness.pueue.task(verify["job_id"])
+    )
     verify_task = harness.pueue.task(verify["job_id"])
     assert verify_task.label == "fixture:check"
     assert verify_task.path.endswith(f"fixture-batch-{run_id}-integration")
@@ -871,6 +985,9 @@ def test_land_integrates_verifies_reviews_publishes_and_closes_satisfied_members
         "beads": ["fx-lead", "fx-member", "fx-solo"],
         "run_id": run_id,
         "worker": None,
+        "execution": "queued",
+        "attempt": None,
+        "requested": {},
     }
     assert harness.git.pushes == [
         (
@@ -1301,13 +1418,17 @@ def test_pr_policy_pushes_the_branch_waits_for_required_checks_and_merges_the_he
     assert created[0][3] == "fix: Solo"
     assert "**fx-solo** Solo\n- [x] done" in created[0][4]
     assert landed["landing"]["pr_number"] == 41
-    assert landed["landing"]["verify_run"] == {
+    verify = landed["landing"]["verify_run"]
+    assert verify == {
         "kind": "hosted",
         "check": "verify",
         "pr": 41,
         "candidate_sha": SHA,
+        "requested_sha": SHA,
         "phase": "succeeded",
+        "status": "passed",
         "checks": [],
+        "recorded_at": verify["recorded_at"],
     }
     assert [call for call in calls if call[0] in {"merge", "delete", "advisory"}] == [
         ("merge", 41, SHA),
@@ -1411,6 +1532,11 @@ def test_attach_bindings_reads_each_row_binding_from_its_launch_input(
         "beads": ["fx-lead", "fx-member"],
         "run_id": run["run_id"],
         "worker": "fx-lead",
+        "execution": "queued",
+        "attempt": 1,
+        "requested": {
+            key: run["workers"][0][key] for key in ("backend", "model", "effort")
+        },
     }
     assert "binding" not in by_label[f"fixture:land:{run['run_id']}"]
 
@@ -2393,11 +2519,10 @@ def test_a_required_check_never_reported_is_check_missing_after_ten_minutes(
     assert stored.landing["failure"]["code"] == "check_missing"
 
 
-def test_a_merged_pr_is_the_acceptance_when_its_check_never_reports(
+def test_a_merged_pr_remains_publication_not_unobserved_check_success(
     harness: Harness, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Breaks if a landing whose PR the repository already merged still fails on
-    `check_missing`: the merge is the acceptance, and no runner will report."""
+    """A merged PR can publish a candidate, but cannot invent a check receipt."""
     pr_project(harness)
     clock = [0.0]
     monkeypatch.setattr(landing_module.time, "monotonic", lambda: clock[0])
@@ -2436,16 +2561,72 @@ def test_a_merged_pr_is_the_acceptance_when_its_check_never_reports(
         sleep=sleep,
     )
 
-    assert landed["acceptance"]["verify_run"] == {
+    verify = landed["acceptance"]["verify_run"]
+    assert verify == {
         "kind": "merged",
         "check": "verify",
         "pr": 7,
         "candidate_sha": SHA,
-        "phase": "succeeded",
+        "requested_sha": SHA,
+        "phase": "unknown",
+        "status": "unknown",
         "merge_commit": MERGED,
+        "recorded_at": verify["recorded_at"],
     }
+    assert "tested_sha" not in verify and "git_dirty" not in verify
     assert landed["acceptance"]["published"]["merge_commit"] == MERGED
     assert landed["acceptance"]["beads"]["fx-solo"]["state"] == "closed"
+
+
+def test_local_verification_never_attests_a_dirty_or_moved_checkout(
+    harness: Harness, tmp_path: Path
+) -> None:
+    """The operation result alone cannot turn an unclean checkout into evidence."""
+    run = manifest.Run.from_dict(prepared_run(harness, "fx-solo"))
+    checkout = tmp_path / "dirty-candidate"
+    checkout.mkdir()
+    harness.git.heads[str(checkout)] = SHA
+    harness.git.status[str(checkout)] = " M evidence.py"
+
+    _run, dirty = landing_module._verify(
+        harness.config,
+        harness.project,
+        run,
+        checkout,
+        SHA,
+        lambda _seconds: None,
+        harness.beads,
+    )
+    assert dirty["git_dirty"] is True
+    assert dirty["head_before"] == SHA and dirty["head_after"] == SHA
+    assert "tested_sha" not in dirty
+
+    harness.git.status[str(checkout)] = ""
+    harness.git.heads[str(checkout)] = MOVED
+    _run, moved = landing_module._verify(
+        harness.config,
+        harness.project,
+        run,
+        checkout,
+        SHA,
+        lambda _seconds: None,
+        harness.beads,
+    )
+    assert moved["git_dirty"] is None
+    assert "tested_sha" not in moved
+
+
+def test_hosted_verification_attests_only_explicit_check_sha_and_reference() -> None:
+    pull = {
+        "statusCheckRollup": [
+            {"name": "verify", "headSha": MOVED, "detailsUrl": "wrong"},
+            {"name": "verify", "headSha": SHA, "detailsUrl": "https://checks/7"},
+        ]
+    }
+    assert landing_module._hosted_check_attestation(pull, "verify", SHA) == {
+        "tested_sha": SHA,
+        "reference": "https://checks/7",
+    }
 
 
 def test_a_merge_the_branch_policy_refuses_is_armed_as_auto_merge_and_awaited(

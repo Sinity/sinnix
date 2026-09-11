@@ -1,5 +1,5 @@
 {
-  "action_catalog_hash": "3f50f79721ff50338c130d143c28296a60b63b2af45cda42b963e35df25dacd1",
+  "action_catalog_hash": "b917f073440a06ea6bb0d5462fe6209e13e21a4a292092cb0f2a154a16087721",
   "examples": [
     {
       "action": "gateway.status",
@@ -309,6 +309,20 @@
         }
       },
       "title": "Triage"
+    },
+    {
+      "action": "beads.closure",
+      "family": "query",
+      "input": {
+        "at": "2026-09-01T12:00:00Z",
+        "max_nodes": 100,
+        "project": "sinnix",
+        "relation": "blocks",
+        "roots": [
+          "sinnix-abc1"
+        ]
+      },
+      "title": "Blocking closure at a historical time"
     },
     {
       "action": "beads.query",
@@ -1533,6 +1547,18 @@
       "input": {
         "request": {
           "limit": 20,
+          "operation": "structured",
+          "repo": "sinnix"
+        }
+      },
+      "title": "Structured project sessions"
+    },
+    {
+      "action": "sessions.query",
+      "family": "query",
+      "input": {
+        "request": {
+          "limit": 20,
           "operation": "list",
           "provider": "claude-code"
         }
@@ -1570,6 +1596,29 @@
         "start": "2026-09-04T00:00:00Z"
       },
       "title": "Yesterday's sessions"
+    },
+    {
+      "action": "campaign.progress",
+      "family": "query",
+      "input": {
+        "project": {
+          "project": "sinnix"
+        },
+        "roots": [
+          "sinnix-1"
+        ]
+      },
+      "title": "Campaign evidence"
+    },
+    {
+      "action": "sessions.orchestration",
+      "family": "query",
+      "input": {
+        "session_refs": [
+          "session:example"
+        ]
+      },
+      "title": "Session orchestration"
     },
     {
       "action": "audit.verify",

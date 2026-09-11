@@ -6,9 +6,42 @@
     let
       pkgs = inputs.nixpkgs.legacyPackages.${system};
       noctalia = inputs.noctalia.packages.${system}.default;
+      noctaliaThemeDefaultsMigration = noctalia.overrideAttrs (old: {
+        # Match the deployed source, but opt into Meson's test targets only for
+        # this check. The production package deliberately keeps tests disabled.
+        patches = (old.patches or [ ]) ++ [
+          ../../modules/features/desktop/noctalia-notification-prewarm.patch
+          ../../modules/features/desktop/noctalia-automation-ipc.patch
+        ];
+        postPatch = (old.postPatch or "") + ''
+          patch -p1 < ${../../modules/features/desktop/noctalia-pipewire-reconnect.patch}
+        '';
+        mesonFlags = builtins.filter (flag: flag != "-Dtests=disabled") (old.mesonFlags or [ ]) ++ [
+          "-Dtests=enabled"
+        ];
+        # Do not compile Noctalia's complete upstream suite: this target pulls
+        # in the core library plus the one migration executable under test.
+        buildPhase = ''
+          runHook preBuild
+              meson compile theme_defaults_migration_test
+          runHook postBuild
+        '';
+        doCheck = true;
+        checkPhase = ''
+          runHook preCheck
+              meson test --no-rebuild --print-errorlogs theme_defaults_migration
+          runHook postCheck
+        '';
+        installPhase = ''
+          mkdir -p "$out"
+          touch "$out/passed"
+        '';
+        postFixup = "";
+      });
     in
     {
       checks = {
+        noctalia-theme-defaults-migration = noctaliaThemeDefaultsMigration;
         noctalia-ops-bridge =
           pkgs.runCommand "noctalia-ops-bridge-check"
             {
@@ -61,6 +94,27 @@
             }
             ''
               ${pkgs.bash}/bin/bash ${../../flake/tests/noctalia-config.sh} ${../../dots/noctalia}
+              touch "$out"
+            '';
+        noctalia-patches-apply =
+          pkgs.runCommand "noctalia-patches-apply-check"
+            {
+              nativeBuildInputs = [
+                pkgs.bash
+                pkgs.coreutils
+                pkgs.git
+                pkgs.patch
+                pkgs.ripgrep
+              ];
+            }
+            ''
+              ${pkgs.bash}/bin/bash ${../../flake/tests/noctalia-patches.sh} \
+                ${inputs.noctalia.outPath} \
+                ${../../modules/features/desktop/noctalia-automation-ipc.patch} \
+                ${../../modules/features/desktop/noctalia-pipewire-reconnect.patch} \
+                ${../../scripts/sinnix-wallpaper} \
+                ${../../scripts/sinnix-wallpaper-timeofday} \
+                ${../../flake/tests/noctalia-wallpaper-timeofday.sh}
               touch "$out"
             '';
       };

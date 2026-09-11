@@ -135,8 +135,8 @@
   # Claude Code variants (mkClaudeCodeWrapper). `binName` is explicit data
   # because the family is not regular: every wrapper is `claude-<lane>`, but
   # the bare `claude` name is unsafe to own (the upstream installer clobbers
-  # it, see clis.nix), so the default lane's file is `claude-lean` with a
-  # `claude` shell alias pointing at it.
+  # it, see clis.nix), so the managed default is explicitly `claude-lean`.
+  # Bare `claude` remains upstream-owned in interactive and noninteractive use.
   #
   # `mcpProfile` selects both the mcp-registry.nix tier and the
   # `~/.config/claude/<mcp file>.json` basename ("full" -> "mcp", otherwise

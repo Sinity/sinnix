@@ -46,6 +46,7 @@ class JobState(GatewayModel):
     phase: str | None = None
     terminal: bool | None = None
     exit_code: int | None = None
+    dependencies: list[int] | None = None
 
 
 class JobBinding(GatewayModel):
@@ -55,6 +56,9 @@ class JobBinding(GatewayModel):
     bead_refs: list[str] = Field(default_factory=list)
     run_id: str | None = None
     worker_id: str | None = None
+    execution: str | None = None
+    requested: dict[str, Any] | None = None
+    attempt: int | None = None
 
 
 class JobView(GatewayModel):
@@ -94,6 +98,9 @@ def _binding(payload: Mapping[str, Any]) -> JobBinding | None:
         bead_refs=[bead_ref(project_id, bead) for bead in beads] if project_id else [],
         run_id=str(run_id) if run_id else None,
         worker_id=str(raw["worker"]) if raw.get("worker") else None,
+        execution=raw.get("execution"),
+        requested=raw.get("requested"),
+        attempt=raw.get("attempt"),
     )
 
 
@@ -130,6 +137,7 @@ def _job_view(payload: Mapping[str, Any]) -> JobView:
             phase=state.get("phase"),
             terminal=terminal,
             exit_code=state.get("exit_code"),
+            dependencies=state.get("dependencies"),
         ),
         enqueued_at=payload.get("enqueued_at"),
         started_at=payload.get("started_at"),
@@ -395,9 +403,9 @@ async def _wait(runtime: Runtime, inp: JobWaitInput) -> JobWait:
         timed_out=timed_out,
         job=view,
         detail=raw.get("detail"),
-        affordances=["jobs.wait", "jobs.cancel"]
-        if timed_out
-        else ["jobs.get", "jobs.logs"],
+        affordances=(
+            ["jobs.wait", "jobs.cancel"] if timed_out else ["jobs.get", "jobs.logs"]
+        ),
     )
 
 
@@ -560,9 +568,18 @@ class ShellRunInput(MutationControls):
         description="Relative to the checkout; may not leave it.",
     )
     timeout_seconds: int = Field(default=3_600, ge=1, le=3_600)
+    wait: bool = False
+    wait_timeout_seconds: int = Field(default=5, ge=1, le=30)
+    max_output_bytes: int = Field(default=64_000, ge=1, le=262_144)
 
 
-def _run_shell(runtime: Runtime, inp: ShellRunInput) -> JobView:
+class ShellRunResult(JobView):
+    outcome: Literal["queued", "terminal", "timeout"] = "queued"
+    output: JobLog | None = None
+    continuation: JobLocator | None = None
+
+
+async def _run_shell(runtime: Runtime, inp: ShellRunInput) -> ShellRunResult:
     project_id, workspace, _ = _workspace(runtime, inp.checkout)
     if any(not argument for argument in inp.argv):
         raise ProtocolError("invalid_request", "argv entries must be non-empty")
@@ -575,7 +592,30 @@ def _run_shell(runtime: Runtime, inp: ShellRunInput) -> JobView:
         cwd=inp.cwd,
         timeout_seconds=inp.timeout_seconds,
     )
-    return _job_view(result)
+    view = _job_view(result)
+    if not inp.wait:
+        return ShellRunResult(**view.model_dump())
+    target = JobLocator(job_id=view.job_id, launch_reference=view.launch_reference)
+    waited = await _wait(
+        runtime, JobWaitInput(target=target, timeout_seconds=inp.wait_timeout_seconds)
+    )
+    view = waited.job
+    output = await anyio.to_thread.run_sync(
+        lambda: _log(
+            runtime, view.job_id, 0, inp.max_output_bytes, view.launch_reference
+        ),
+        abandon_on_cancel=True,
+    )
+    return ShellRunResult(
+        **view.model_dump(),
+        outcome=waited.outcome,
+        output=output,
+        continuation=(
+            JobLocator(job_id=view.job_id, launch_reference=view.launch_reference)
+            if waited.timed_out
+            else None
+        ),
+    )
 
 
 # --------------------------------------------------------------- actions
@@ -774,13 +814,13 @@ ACTIONS: tuple[Action, ...] = (
         owner="systemd-jobs",
         summary="Queue one argv in the interactive pool inside a checkout's declared environment.",
         Input=ShellRunInput,
-        Output=JobView,
+        Output=ShellRunResult,
         handler=_run_shell,
         principals=OPERATOR_ONLY,
         resource_kinds=("project", "checkout", "job"),
         affordances=("jobs.wait", "jobs.logs", "jobs.cancel"),
         aliases=("exec", "command", "bash", "run command"),
-        documentation="cwd is confined to the checkout; the job's log carries the output.",
+        documentation="cwd is confined to the checkout. Default execution is asynchronous. wait=true waits up to wait_timeout_seconds (default 5, maximum 30) on the same job and returns bounded output; a timeout returns a continuation locator without cancelling the job.",
         examples=(
             Example(
                 title="git status in sinnix",

@@ -61,9 +61,17 @@ mkFeatureModule {
       ];
       description = ''
         Time-of-day mood buckets under corpusRoot/sets/. Controls which
-        directories get created; the hour boundaries themselves are hardcoded
-        in scripts/sinnix-wallpaper-timeofday, so changing this list from the
-        default four also means updating that script's mood selection.
+        directories get created and which moods may occur in timeOfDay.schedule.
+      '';
+    };
+    timeOfDay.schedule = lib.mkOption {
+      type = lib.types.str;
+      default = "0:night,5:morning,11:day,17:evening,21:night";
+      description = ''
+        Comma-separated hour:mood transitions for the time-of-day wallpaper
+        selector. Hours must be strictly increasing, begin at 0, and use a
+        mood declared by moods. Repeating a mood is valid for a late-day
+        transition back to it.
       '';
     };
     timeOfDay.onCalendar = lib.mkOption {
@@ -119,6 +127,7 @@ mkFeatureModule {
           environment = {
             SINNIX_WALLPAPER_CORPUS = cfg.corpusRoot;
             SINNIX_WALLPAPER_MOODS = lib.concatStringsSep "," cfg.moods;
+            SINNIX_WALLPAPER_TIME_OF_DAY_SCHEDULE = cfg.timeOfDay.schedule;
             SINNIX_NOCTALIA_BIN = "${noctaliaPkg}/bin/noctalia";
           };
           timer = {
@@ -165,6 +174,7 @@ mkFeatureModule {
             home.sessionVariables = {
               SINNIX_WALLPAPER_CORPUS = cfg.corpusRoot;
               SINNIX_WALLPAPER_MOODS = lib.concatStringsSep "," cfg.moods;
+              SINNIX_WALLPAPER_TIME_OF_DAY_SCHEDULE = cfg.timeOfDay.schedule;
             };
           };
       }

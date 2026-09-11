@@ -125,6 +125,7 @@ def test_resume_of_a_legacy_manifest_does_not_invent_historical_selection(
 
     assert latest["attempts"] == [
         {
+            "number": 2,
             "task_id": resumed["job"]["job_id"],
             "task_reference": resumed["job"]["reference"],
             "prompt_path": latest["prompt_path"],

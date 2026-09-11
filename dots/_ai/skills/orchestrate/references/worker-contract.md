@@ -21,12 +21,13 @@ names, and exits with one result document.
    fix needs, and name any file outside it in the result so the reviewer
    sees it. Other workers' branches merge at landing; a real conflict is
    found there.
-3. **Verify the candidate.** Run the snapshot's `verification_commands` and
-   `batch.focused_verification` (the descriptor's argumentless check) in the
-   foreground. Exact test selectors belong in `verification_commands`;
+3. **Verify the change.** Run the snapshot's `verification_commands` when the
+   task names them, using the declared operation or job for any shared/heavy
+   work. Exact test selectors belong in `verification_commands`;
    `affected_paths` describes code scope. A quick/static green is not test
-   evidence. Bug fixes show red before green. Record the actual selection and
-   receipt; a selected green proves that scope only. Capture the exit status.
+   evidence. Record the actual selection and receipt; a selected green proves
+   that scope only. Capture the exit status. Broader verification is an
+   explicit task or coordinator decision, not an automatic worker step.
 4. **Do not publish, do not claim beads.** No push, no PR, no merge, no
    rebase onto a newer base, no rebuild of the host. No `bd update`,
    `claim`, `close` or `comment`: `batch start` claimed the beads and

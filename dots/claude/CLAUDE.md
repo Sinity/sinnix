@@ -67,10 +67,16 @@ before parallel agent work. Consult `agentctl --help` for current verbs.
 - Short foreground checks run directly. Detached, queued, resource-heavy,
   and shared work runs through declared project operations:
   `agentctl job start <project> <operation> [--workspace <path>] [--wait]`.
-- `agentctl` is an in-process CLI. pueue owns queued jobs and terminal results;
-  Git/worktrunk own commits/worktrees; GitHub owns hosted publication; Beads
-  owns task state. Systemd owns fixed services and timer wake-ups. Reconcile
-  these sources instead of maintaining another ledger.
+- Native agents handle investigation, bounded help, and cohesive implementation
+  in the shared checkout with disjoint write scopes; the coordinator commits
+  the result. AgentCTL batches integrate independent isolated groups; external
+  workers use native agents and queued workers support unattended execution
+  and explicit backends.
+- `agentctl` is an in-process CLI. pueue owns queued jobs, pause/resume, and
+  terminal results; Git/worktrunk own commits/worktrees; GitHub owns hosted
+  publication; Beads owns task state. Systemd owns fixed services, timer wake-ups
+  and transient units, not queue state. Reconcile these sources instead of
+  maintaining another ledger.
 - Check `agentctl job list --active` before heavy work. Do not duplicate jobs
   or construct background reapers, `systemd-run`, or resource envelopes by hand.
 - Act on recorded task IDs and worktree paths, not inferred process names.
@@ -95,9 +101,9 @@ state. The coordinator contract at
 `/realm/project/sinnix/dots/_ai/skills/orchestrate/references/coordinator-contract.md`
 owns takeover, dispatch, recovery, and landing procedures.
 
-- A batch has isolated workers on one base and one integrated candidate.
-  Start coherent, non-overlapping work; its queued landing task owns
-  integration, verification, review, and publication.
+- A batch has isolated workers on one base and one integrated
+  candidate. Start independent, non-overlapping work; its queued landing task
+  owns integration, the declared checks, review, and publication.
 - Read the repository rules and memory index before dispatch. Task readiness
   includes its dependencies, remaining design decisions, and required live
   authority. A ready queue entry alone does not establish executability.
@@ -106,11 +112,12 @@ owns takeover, dispatch, recovery, and landing procedures.
   mature their specification through `bead-authoring`.
 - Checkpoint before risky integration or recovery. Stage explicit paths and
   inspect the complete staged diff. Never bypass hooks or branch protections.
-- Publish through `agentctl batch land <run>` under the repository's declared
-  publication policy; load `review-land`. A published partial result does not
+- Publish batches through `agentctl batch land <run>` and native work through
+  the repository's normal publication route; load `review-land`. A partial result does not
   close unmet acceptance criteria.
-- Run the corpus once at the deliberate batch/master boundary, not per worker.
-  Selected tests, static gates, review, and a full corpus are different evidence.
+- Run focused checks for the changed contract. Affected/full suites require
+  an explicit operator request. These are different kinds of evidence;
+  none is an automatic per-worker or per-wave ritual.
 - Tests exercise behavior, invariants, and reproduced failures. Do not enforce
   natural-language wording or preserve obsolete refactoring details as tests.
 - Fix inherited failures forward. Do not turn a transient regression into a

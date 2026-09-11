@@ -48,8 +48,9 @@ printf '%s' "$model_confirm" | jq -e '(.hookSpecificOutput.permissionDecision? !
 model_confirm_named=$(run_hook "$hooks_dir/pretooluse-agent-model.sh" '{"tool_name":"Agent","tool_input":{"subagent_type":"review","model":"opus"}}')
 printf '%s' "$model_confirm_named" | jq -e '(.hookSpecificOutput.permissionDecision? != "deny") and (.systemMessage | type == "string" and length > 0)' >/dev/null
 
-# Codex fresh spawns must select model and supported effort with an explicit,
-# bounded context. Missing fork_turns refuses the native default-all path.
+# Codex default fresh spawns must select model and supported effort with an
+# explicit bounded context. Native roles and full forks may inherit their
+# declared settings, which this hook cannot observe.
 codex_missing=$(run_hook "$hooks_dir/pretooluse-agent-model.sh" '{"tool_name":"spawn_agent","tool_input":{"model":"gpt-5.6-terra","reasoning_effort":"high"}}')
 printf '%s' "$codex_missing" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
 codex_missing_model=$(run_hook "$hooks_dir/pretooluse-agent-model.sh" '{"tool_name":"spawn_agent","tool_input":{"fork_turns":"none","reasoning_effort":"high"}}')
@@ -59,9 +60,9 @@ printf '%s' "$codex_missing_effort" | jq -e '.hookSpecificOutput.permissionDecis
 codex_bad_effort=$(run_hook "$hooks_dir/pretooluse-agent-model.sh" '{"tool_name":"spawn_agent","tool_input":{"fork_turns":"none","model":"future-model","reasoning_effort":"critical"}}')
 printf '%s' "$codex_bad_effort" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
 codex_full_named_role=$(run_hook "$hooks_dir/pretooluse-agent-model.sh" '{"tool_name":"spawn_agent","tool_input":{"fork_turns":"all","agent_type":"reviewer"}}')
-printf '%s' "$codex_full_named_role" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
-codex_fresh_named_role=$(run_hook "$hooks_dir/pretooluse-agent-model.sh" '{"tool_name":"spawn_agent","tool_input":{"fork_turns":"none","model":"gpt-5.6-luna","reasoning_effort":"high","agent_type":"reviewer"}}')
-printf '%s' "$codex_fresh_named_role" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+printf '%s' "$codex_full_named_role" | jq -e '(.hookSpecificOutput.permissionDecision? != "deny") and (.systemMessage | type == "string" and length > 0)' >/dev/null
+codex_fresh_named_role=$(run_hook "$hooks_dir/pretooluse-agent-model.sh" '{"tool_name":"spawn_agent","tool_input":{"fork_turns":"none","agent_type":"explorer"}}')
+printf '%s' "$codex_fresh_named_role" | jq -e '(.hookSpecificOutput.permissionDecision? != "deny") and (.systemMessage | contains("cannot observe"))' >/dev/null
 codex_inherit_model=$(run_hook "$hooks_dir/pretooluse-agent-model.sh" '{"tool_name":"spawn_agent","tool_input":{"fork_turns":"none","model":"inherit","reasoning_effort":"high"}}')
 printf '%s' "$codex_inherit_model" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
 codex_fresh=$(run_hook "$hooks_dir/pretooluse-agent-model.sh" '{"tool_name":"spawn_agent","tool_input":{"fork_turns":"none","model":"future-model","reasoning_effort":"ultra"}}')

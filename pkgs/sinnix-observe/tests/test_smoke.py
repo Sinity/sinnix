@@ -91,18 +91,25 @@ def test_noctalia_health_fixture(monkeypatch) -> None:
     assert row["health"]["plugin_compatibility"] == "compatible"
 
 
-def test_runtime_inventory_fallback_excludes_retired_slices(monkeypatch) -> None:
+def test_runtime_inventory_missing_is_explicitly_unavailable(monkeypatch) -> None:
     monkeypatch.setenv("SINNIX_RUNTIME_INVENTORY_FILE", "/does/not/exist")
     inventory = runtime_inventory.load_inventory()
-    assert inventory["schema"] == "sinnix-runtime-inventory-v1"
-    assert inventory["classes"]
-    assert ("system", "system-critical.slice") in runtime_inventory.observed_slices()
-    assert (
-        "system",
-        "sinnix-maintenance.slice",
-    ) not in runtime_inventory.observed_slices()
-    sshd_class = runtime_inventory.resource_class_for_unit("sshd.service")
-    assert sshd_class in inventory["classes"]
+    assert inventory == {
+        "available": False,
+        "reason": "runtime inventory missing",
+    }
+    assert runtime_inventory.observed_slices() == []
+    assert runtime_inventory.resource_class_for_unit("sshd.service") is None
+
+
+def test_runtime_inventory_malformed_is_explicitly_unavailable(monkeypatch, tmp_path) -> None:
+    inventory_path = tmp_path / "runtime-inventory.json"
+    inventory_path.write_text("{")
+    monkeypatch.setenv("SINNIX_RUNTIME_INVENTORY_FILE", str(inventory_path))
+    assert runtime_inventory.load_inventory() == {
+        "available": False,
+        "reason": "runtime inventory malformed",
+    }
 
 
 def test_workload_identity_prefers_registered_unit(monkeypatch, tmp_path) -> None:

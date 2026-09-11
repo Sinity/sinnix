@@ -60,7 +60,9 @@ in
     ./tests/earlyoom.nix
     ./tests/tmp-sweep.nix
     ./tests/activitywatch.nix
+    ./tests/config-boundaries.nix
     ./tests/workflows.nix
+    ./tests/check-discovery.nix
   ];
 
   perSystem =

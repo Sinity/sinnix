@@ -26,7 +26,7 @@ ACTIONS = validate_actions(
 )
 
 FAKE_BD = """#!{python}
-import json, pathlib, sys
+import json, pathlib, re, sys
 log = pathlib.Path({log!r}); log.open('a').write(json.dumps(sys.argv[1:]) + '\\n')
 project = {project!r}
 state_path = pathlib.Path({state!r})
@@ -48,6 +48,20 @@ elif 'sql' in args:
     query = args[-1]
     if 'DOLT_HASHOF_DB' in query:
         print(json.dumps([{{'state_hash': 'working-%d' % state['writes']}}]))
+    elif query.startswith('SELECT COUNT(*) AS count FROM issues i WHERE ') or query.startswith('SELECT i.id, i.title,'):
+        selected = rows
+        if "i.status='open'" in query:
+            selected = [row for row in selected if row['status'] == 'open']
+        title = re.search(r"LOWER[(]COALESCE[(]i.title, ''[)][)] LIKE CONVERT[(]0x([0-9a-f]+) USING utf8mb4[)]", query)
+        if title:
+            needle = bytes.fromhex(title.group(1)).decode().strip('%').lower()
+            selected = [row for row in selected if needle in row['title'].lower()]
+        selected = sorted(selected, key=lambda row: (row['priority'], row['id']))
+        if query.startswith('SELECT COUNT(*)'):
+            print(json.dumps([{{'count': len(selected)}}]))
+        else:
+            fields = [column.strip().removeprefix('i.') for column in query.removeprefix('SELECT ').split(' FROM issues', 1)[0].split(',')]
+            print(json.dumps([{{key: value for key, value in row.items() if key in fields}} for row in selected]))
     else:
         raise SystemExit('unexpected SQL query')
 elif 'export' in args:
@@ -164,7 +178,7 @@ def test_actions_publish_honest_schemas(tmp_path: Path) -> None:
     } <= set(filters)
 
 
-def test_query_passes_limit_to_the_owner_and_pages(tmp_path: Path) -> None:
+def test_query_projects_at_owner_and_pages_immutable_snapshot(tmp_path: Path) -> None:
     config, log = fixture(tmp_path)
     server = create_server(config, "observer")
     first = ok(
@@ -175,11 +189,34 @@ def test_query_passes_limit_to_the_owner_and_pages(tmp_path: Path) -> None:
     ]
     assert [row["id"] for row in first["items"]] == ["fixture-1"]
     assert first["items"][0]["ref"] == "sinnix://projects/fixture/beads/fixture-1"
-    listing = next(c for c in commands(log) if "list" in c)
-    assert listing[listing.index("--limit") + 1] == "1"
+    listing = next(
+        c
+        for c in commands(log)
+        if "sql" in c and c[-1].startswith("SELECT i.id, i.title,")
+    )
+    assert "i.description" not in listing[-1] and "i.notes" not in listing[-1]
+    assert any(
+        "sql" in c and c[-1].startswith("SELECT COUNT(*) AS count")
+        for c in commands(log)
+    )
     assert first["coverage"]["fixture"]["state"] == "complete"
-    assert first["page"]["next_cursor"] is None
+    assert first["page"]["total"] == 2 and first["page"]["next_cursor"] is not None
     assert "beads.get" in first["affordances"]
+
+    first_reads = len(commands(log))
+    second = ok(
+        server,
+        "beads.query",
+        {
+            "projects": ["fixture"],
+            "view": "open",
+            "limit": 1,
+            "cursor": first["page"]["next_cursor"],
+        },
+    )
+    assert [row["id"] for row in second["items"]] == ["fixture-2"]
+    assert second["page"]["next_cursor"] is None
+    assert len(commands(log)) == first_reads
 
     filtered = ok(
         server,
@@ -191,14 +228,12 @@ def test_query_passes_limit_to_the_owner_and_pages(tmp_path: Path) -> None:
             "limit": 10,
         },
     )
-    assert [row["id"] for row in filtered["items"]] == ["fixture-1", "fixture-3"]
+    assert [row["id"] for row in filtered["items"]] == ["fixture-1"]
 
-    unfiltered = ok(server, "beads.query", {"projects": ["fixture"], "view": "query"})
     assert (
-        unfiltered["items"] == []
-        and unfiltered["coverage"]["fixture"]["state"] == "partial"
+        error(server, "beads.query", {"projects": ["fixture"], "view": "query"})
+        == "invalid_request"
     )
-    assert unfiltered["warnings"] == ["partial_source"]
     assert (
         error(server, "beads.query", {"projects": ["missing"], "view": "open"})
         == "not_found"

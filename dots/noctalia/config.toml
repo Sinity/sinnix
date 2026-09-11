@@ -33,9 +33,12 @@ freeze_screen = false
 confirm_region = false
 
 [theme]
+# These are defaults, not a service-start policy.  Noctalia's app-owned
+# settings.toml remains the overlay for a later deliberate GUI change.
 mode = "dark"
 source = "wallpaper"
 wallpaper_scheme = "vibrant"
+pure_black_dark = true
 
 [theme.templates]
 enable_builtin_templates = true

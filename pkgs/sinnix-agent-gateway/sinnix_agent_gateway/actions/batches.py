@@ -106,6 +106,14 @@ class WorkerView(GatewayModel):
     backend: str | None = None
     model: str | None = None
     effort: str | None = None
+    provenance: dict[str, Any] | None = Field(
+        default=None,
+        description="Agentctl dispatch and worker claims; absent measured executor fields remain unknown.",
+    )
+    attempts: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Retained native retry history, if supplied by agentctl.",
+    )
     result_filed: bool = False
     state: JobState | None = None
 
@@ -153,6 +161,7 @@ def _state(raw: Any) -> JobState | None:
         phase=raw.get("phase"),
         terminal=raw.get("terminal"),
         exit_code=raw.get("exit_code"),
+        dependencies=raw.get("dependencies"),
     )
 
 
@@ -190,6 +199,8 @@ def _worker_view(project_id: str, payload: Mapping[str, Any]) -> WorkerView:
         backend=payload.get("backend"),
         model=payload.get("model"),
         effort=payload.get("effort"),
+        provenance=payload.get("provenance"),
+        attempts=payload.get("attempts"),
         result_filed=bool(payload.get("result_filed")),
         state=_state(payload.get("state")),
     )

@@ -149,6 +149,7 @@ def job_payload(job: Mapping[str, Any]) -> dict[str, Any]:
             "phase": job.get("phase"),
             "terminal": job.get("terminal"),
             "exit_code": job.get("exit_code"),
+            "dependencies": job.get("dependencies"),
         },
         "enqueued_at": job.get("enqueued_at"),
         "started_at": job.get("started_at"),
@@ -181,11 +182,14 @@ def worker_payload(worker: Mapping[str, Any]) -> dict[str, Any]:
         "backend": worker.get("backend"),
         "model": worker.get("model"),
         "effort": worker.get("effort"),
+        "provenance": worker.get("provenance"),
+        "attempts": worker.get("attempts"),
         "result_filed": bool(worker.get("result")),
         "state": {
             "phase": task.get("phase"),
             "terminal": task.get("terminal"),
             "exit_code": task.get("exit_code"),
+            "dependencies": task.get("dependencies"),
         }
         if task
         else None,

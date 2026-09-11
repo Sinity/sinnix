@@ -190,6 +190,36 @@ let
     ];
   };
 
+  # Codex's native `--profile` layers. MCP membership comes from profileTiers;
+  # endpoint profiles are derived from agent-lanes.nix below.
+  codexProfileNames = [
+    "lean"
+    "evidence"
+    "full"
+    "browser"
+  ];
+
+  codexEndpoints = {
+    deepseek = {
+      model = "deepseek-chat";
+      model_provider = "deepseek";
+      model_providers.deepseek = {
+        name = "DeepSeek";
+        base_url = "https://api.deepseek.com/v1";
+        env_key = "DEEPSEEK_API_KEY";
+      };
+    };
+    local = {
+      model = "local-chat";
+      model_provider = "local";
+      model_providers.local = {
+        name = "Local (LiteLLM)";
+        base_url = "http://127.0.0.1:4000/v1";
+        env_key = "LITELLM_LOCAL_KEY";
+      };
+    };
+  };
+
   selectClientServersForProfile =
     profile: client:
     let
@@ -331,6 +361,8 @@ in
   inherit
     registry
     profileTiers
+    codexProfileNames
+    codexEndpoints
     selectClientServers
     selectClientServersForProfile
     renderClaudeServer

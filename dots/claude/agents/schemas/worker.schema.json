@@ -3,6 +3,75 @@
   "additionalProperties": false,
   "required": ["candidate_sha", "beads", "unresolved", "verification"],
   "properties": {
+    "schema_version": {
+      "type": "integer",
+      "enum": [2]
+    },
+    "planned_model": {
+      "type": "string",
+      "minLength": 1
+    },
+    "actual_executor_model": {
+      "type": "string",
+      "minLength": 1
+    },
+    "actual_executor_observed_by": {
+      "type": "string",
+      "enum": ["runner", "external_harness", "native"]
+    },
+    "execution": {
+      "type": "string",
+      "enum": ["queued", "external", "native"]
+    },
+    "parent_session_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "child_session_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "attempt": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "model_segments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["attempt"],
+        "properties": {
+          "attempt": {"type": "integer", "minimum": 1},
+          "planned_model": {"type": "string", "minLength": 1},
+          "actual_executor_model": {"type": "string", "minLength": 1},
+          "actual_executor_observed_by": {
+            "type": "string",
+            "enum": ["runner", "external_harness", "native"]
+          },
+          "measured_usage": {
+            "type": ["object", "null"],
+            "additionalProperties": false,
+            "properties": {
+              "input_tokens": {"type": "integer", "minimum": 0},
+              "output_tokens": {"type": "integer", "minimum": 0},
+              "total_tokens": {"type": "integer", "minimum": 0},
+              "duration_seconds": {"type": "number", "minimum": 0}
+            }
+          }
+        }
+      }
+    },
+    "measured_usage": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "input_tokens": {"type": "integer", "minimum": 0},
+        "output_tokens": {"type": "integer", "minimum": 0},
+        "total_tokens": {"type": "integer", "minimum": 0},
+        "duration_seconds": {"type": "number", "minimum": 0}
+      }
+    },
     "candidate_sha": {
       "type": "string",
       "pattern": "^[0-9a-f]{40}$"
@@ -19,6 +88,10 @@
             "type": "string",
             "minLength": 1
           },
+          "bead_revision": {
+            "type": "string",
+            "minLength": 1
+          },
           "criteria": {
             "type": "array",
             "items": {
@@ -26,6 +99,10 @@
               "additionalProperties": false,
               "required": ["text", "status", "evidence"],
               "properties": {
+                "ac_id": {
+                  "type": "string",
+                  "minLength": 1
+                },
                 "text": {
                   "type": "string",
                   "minLength": 1
@@ -63,6 +140,27 @@
           },
           "receipt": {
             "type": "string"
+          },
+          "tested_sha": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["passed", "failed", "skipped"]
+          },
+          "coverage": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["ac_ids", "scope"],
+            "properties": {
+              "ac_ids": {
+                "type": "array",
+                "minItems": 1,
+                "items": {"type": "string", "minLength": 1}
+              },
+              "scope": {"type": "string", "minLength": 1}
+            }
           }
         }
       }

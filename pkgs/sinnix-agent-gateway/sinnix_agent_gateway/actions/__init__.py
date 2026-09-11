@@ -23,6 +23,7 @@ from . import (
     machine,
     mcp_tools,
     processes,
+    products,
     projects,
     terminals,
     waits,
@@ -48,6 +49,7 @@ ALL_ACTIONS: tuple[Action, ...] = validate_actions(
         *mcp_tools.ACTIONS,
         *artifacts.ACTIONS,
         *activity.ACTIONS,
+        *products.ACTIONS,
         *audit.ACTIONS,
     ),
 )

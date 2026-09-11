@@ -196,6 +196,16 @@ in
               inherit (surface) activation;
             }) proxySurfaces;
             proxyNames = map (proxy: proxy.name) proxies;
+            declaredAiSocketBackends = lib.naturalSort (
+              lib.attrNames (
+                lib.filterAttrs (
+                  name: service:
+                  config.sinnix.services.${name}.enable
+                  && (lib.attrByPath [ "meta" "ai" ] null service) != null
+                  && (lib.attrByPath [ "meta" "ai" "socketProxy" ] false service)
+                ) config.sinnix.services
+              )
+            );
             execStartOf = name: config.systemd.services.${name}.serviceConfig.ExecStart;
             backendUnitsOf =
               proxyName:
@@ -243,6 +253,13 @@ in
             conflictsOf = unit: config.systemd.services.${lib.removeSuffix ".service" unit}.conflicts or [ ];
           in
           [
+            {
+              # ai-control must discover the owning service declarations,
+              # rather than carry another backend-name list. Every marked
+              # enabled socket backend therefore gets exactly one front door.
+              assertion = lib.naturalSort proxyNames == map (name: "${name}-proxy") declaredAiSocketBackends;
+              message = "Every AI service that declares socket-proxy activation must receive exactly one derived front door";
+            }
             {
               # Guards the PartOf-not-BindsTo invariant from ai-control's
               # mkProxy (see there for the mechanism): the edge must never

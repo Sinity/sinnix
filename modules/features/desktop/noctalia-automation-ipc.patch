@@ -1,0 +1,284 @@
+diff --git a/src/cli/schema_msg.h b/src/cli/schema_msg.h
+index 15cb2b11..41c072d9 100644
+--- a/src/cli/schema_msg.h
++++ b/src/cli/schema_msg.h
+@@ -224,6 +224,10 @@ namespace noctalia::cli {
+   inline constexpr std::array kMsgWallpaperGetPositionals{
+       Positional{"connector", {}, {}, false, false, false},
+   };
++  inline constexpr std::array<std::string_view, 2> kMsgWallpaperAutomationSetEnabledChoices{"true", "false"};
++  inline constexpr std::array kMsgWallpaperAutomationSetPositionals{
++      Positional{"enabled", {}, kMsgWallpaperAutomationSetEnabledChoices, true, false, false},
++  };
+   inline constexpr std::array kMsgWallpaperNextPositionals{
+       Positional{"connector", {}, {}, false, false, false},
+   };
+@@ -722,6 +726,19 @@ namespace noctalia::cli {
+         {},
+         false
+     };
++    inline constexpr Command wallpaperAutomationGet{
++        "wallpaper-automation-get", "Print whether wallpaper automation is enabled", {}, {}, {}, {}, {}, false
++    };
++    inline constexpr Command wallpaperAutomationSet{
++        "wallpaper-automation-set",
++        "Enable or disable wallpaper automation and persist the override",
++        {},
++        {},
++        {},
++        kMsgWallpaperAutomationSetPositionals,
++        {},
++        false
++    };
+     inline constexpr Command wallpaperNext{"wallpaper-next",
+                                            "Switch to the next wallpaper immediately",
+                                            {},
+@@ -908,6 +925,8 @@ namespace noctalia::cli {
+       msg::volumeOsd,
+       msg::volumeSet,
+       msg::volumeUp,
++      msg::wallpaperAutomationGet,
++      msg::wallpaperAutomationSet,
+       msg::wallpaperGet,
+       msg::wallpaperNext,
+       msg::wallpaperPrevious,
+diff --git a/src/config/config_service.h b/src/config/config_service.h
+index a7141ac0..a126b5f2 100644
+--- a/src/config/config_service.h
++++ b/src/config/config_service.h
+@@ -181,6 +181,10 @@ public:
+   static void deepMerge(toml::table& base, const toml::table& overlay);
+ 
+ private:
++  // Once per profile migration, retain a backup then remove only the stale
++  // theme defaults from settings.toml. Later GUI theme choices remain private
++  // overrides and are never touched again.
++  bool reconcileThemeDefaults();
+   void loadAll();
+   [[nodiscard]] static Config makeDefaultConfig();
+   static void
+diff --git a/src/config/config_service.cpp b/src/config/config_service.cpp
+index 8dad6b86..210dbbe5 100644
+--- a/src/config/config_service.cpp
++++ b/src/config/config_service.cpp
+@@ -562,6 +562,10 @@ ConfigService::ConfigService() {
+   loadOverridesFromFile();
+   m_stateStore.load();
+   loadAll();
++  // A one-time native migration clears only stale theme policy overrides after
++  // configuration has been loaded. It writes a backup/marker before mutation;
++  // subsequent GUI changes keep using settings.toml normally.
++  (void)reconcileThemeDefaults();
+   setupWatch();
+ }
+ 
+diff --git a/src/config/config_overrides.cpp b/src/config/config_overrides.cpp
+index 10d03c11..6e337776 100644
+--- a/src/config/config_overrides.cpp
++++ b/src/config/config_overrides.cpp
+@@ -1049,6 +1049,82 @@ void ConfigService::setThemeMode(ThemeMode mode) {
+   fireReloadCallbacks();
+ }
+ 
++bool ConfigService::reconcileThemeDefaults() {
++  if (m_overridesPath.empty()) {
++    return false;
++  }
++
++  const std::filesystem::path settingsPath(m_overridesPath);
++  const std::filesystem::path markerPath = settingsPath.string() + ".sinnix-theme-defaults-v1";
++  const std::filesystem::path pendingPath = markerPath.string() + ".pending";
++  std::error_code ec;
++  if (std::filesystem::exists(markerPath, ec)) {
++    return !ec;
++  }
++  if (ec) {
++    kLog.warn("could not inspect theme-default migration marker {}: {}", markerPath.string(), ec.message());
++    return false;
++  }
++  if (std::filesystem::exists(pendingPath, ec)) {
++    // The mutation may have completed just before marker promotion failed.
++    // Conservatively never retry it: a later GUI choice must not be cleared.
++    return !ec;
++  }
++  if (ec) {
++    kLog.warn("could not inspect pending theme-default migration marker {}: {}", pendingPath.string(), ec.message());
++    return false;
++  }
++
++  // Keep the entire app-owned overlay recoverable before changing two stale
++  // policy keys. This preserves wallpaper history/favorites and every unrelated
++  // GUI setting exactly as Noctalia wrote them.
++  if (std::filesystem::exists(settingsPath, ec)) {
++    if (ec) {
++      kLog.warn("could not inspect {}: {}", settingsPath.string(), ec.message());
++      return false;
++    }
++    const std::filesystem::path backupPath = settingsPath.string() + ".before-sinnix-theme-defaults.toml";
++    if (!std::filesystem::exists(backupPath, ec)) {
++      std::filesystem::copy_file(settingsPath, backupPath, std::filesystem::copy_options::none, ec);
++      if (ec) {
++        kLog.warn("could not back up {}: {}", settingsPath.string(), ec.message());
++        return false;
++      }
++    } else if (ec) {
++      kLog.warn("could not inspect theme-default backup {}: {}", backupPath.string(), ec.message());
++      return false;
++    }
++  } else if (ec) {
++    kLog.warn("could not inspect {}: {}", settingsPath.string(), ec.message());
++    return false;
++  }
++
++  const std::string markerContents =
++      "Noctalia theme defaults reconciled by Sinnix; remove this marker only to explicitly rerun the migration.\n";
++  if (!writeTextFileAtomic(pendingPath, markerContents)) {
++    kLog.warn("could not write pending theme-default migration marker {}", pendingPath.string());
++    return false;
++  }
++
++  bool changed = false;
++  if (!clearOverrides({{"theme", "mode"}, {"theme", "pure_black_dark"}}, &changed)) {
++    kLog.warn("could not reconcile stale theme defaults: {}", lastMutationError());
++    // clearOverrides did not commit; allow a later clean start to retry.
++    std::filesystem::remove(pendingPath, ec);
++    if (ec) {
++      kLog.warn("could not remove pending theme-default migration marker {}: {}", pendingPath.string(), ec.message());
++    }
++    return false;
++  }
++  std::filesystem::rename(pendingPath, markerPath, ec);
++  if (ec) {
++    // Leave pending in place. Retrying could erase a later GUI choice.
++    kLog.warn("could not finalize theme-default migration marker {}: {}", markerPath.string(), ec.message());
++    return false;
++  }
++  return true;
++}
++
+ bool ConfigService::setThemeColorScheme(PaletteSource source, std::string_view valueRaw) {
+   if (m_overridesPath.empty()) {
+     return false;
+diff --git a/src/shell/wallpaper/wallpaper.cpp b/src/shell/wallpaper/wallpaper.cpp
+index 944c6a35..cbc89d21 100644
+--- a/src/shell/wallpaper/wallpaper.cpp
++++ b/src/shell/wallpaper/wallpaper.cpp
+@@ -667,6 +667,45 @@ bool Wallpaper::applyWallpaperImage(const std::optional<std::string>& connector,
+ }
+ 
+ void Wallpaper::registerIpc(IpcService& ipc) {
++  // This intentionally owns only the automation toggle. Generic config IPC
++  // reloads configuration but does not provide a safe mutation surface; callers
++  // must never rewrite a managed config.toml symlink just to pin a wallpaper.
++  ipc.bind(
++      noctalia::cli::msg::wallpaperAutomationGet,
++      [this](const std::string& args) -> std::string {
++        if (m_config == nullptr) {
++          return "error: wallpaper service not initialized\n";
++        }
++        if (!StringUtils::trim(args).empty()) {
++          return "error: wallpaper-automation-get accepts no arguments\n";
++        }
++        return m_config->config().wallpaper.automation.enabled ? "true\n" : "false\n";
++      },
++      IpcService::HandlerOptions{.actionEditorVisibility = IpcService::ActionEditorVisibility::Hidden}
++  );
++  ipc.bind(
++      noctalia::cli::msg::wallpaperAutomationSet,
++      [this](const std::string& args) -> std::string {
++        if (m_config == nullptr) {
++          return "error: wallpaper service not initialized\n";
++        }
++        const std::string value = StringUtils::trim(args);
++        bool enabled = false;
++        if (value == "true") {
++          enabled = true;
++        } else if (value != "false") {
++          return "error: wallpaper-automation-set requires true or false\n";
++        }
++        bool changed = false;
++        if (!m_config->setOverride({"wallpaper", "automation", "enabled"}, enabled, &changed)) {
++          return "error: failed to persist wallpaper automation override\n";
++        }
++        resetAutomationState();
++        return changed ? "ok\n" : "unchanged\n";
++      },
++      IpcService::HandlerOptions{.actionEditorVisibility = IpcService::ActionEditorVisibility::Hidden}
++  );
++
+   auto validateOutputConnector = [this](std::string_view outputConnector) -> std::string {
+     if (m_wayland == nullptr || isConnectorKnown(outputConnector)) {
+       return {};
+diff --git a/meson.build b/meson.build
+index 62162efd..c21dc7eb 100644
+--- a/meson.build
++++ b/meson.build
+@@ -1148,6 +1148,7 @@ if build_tests
+     'clipboard_storage_permissions',
+     'config_migration',
+     'config_override_mutation',
++    'theme_defaults_migration',
+     'config_path_resolution',
+     'config_schema_roundtrip',
+     'config_wallpaper_precedence',
+diff --git a/tests/theme_defaults_migration_test.cpp b/tests/theme_defaults_migration_test.cpp
+new file mode 100644
+index 00000000..c2e4addd
+--- /dev/null
++++ b/tests/theme_defaults_migration_test.cpp
+@@ -0,0 +1,55 @@
++#include "config/config_service.h"
++#include "config/config_types.h"
++#include "tests/test_check.h"
++
++#include <cstdlib>
++#include <filesystem>
++#include <fstream>
++#include <string>
++#include <unistd.h>
++#include <vector>
++
++int main() {
++  const auto root = std::filesystem::temp_directory_path() / ("noctalia-theme-defaults-" + std::to_string(::getpid()));
++  std::filesystem::remove_all(root);
++  std::filesystem::create_directories(root / "config" / "noctalia");
++  std::filesystem::create_directories(root / "state" / "noctalia");
++  std::filesystem::create_directories(root / "data");
++  ::setenv("NOCTALIA_CONFIG_HOME", (root / "config").c_str(), 1);
++  ::setenv("NOCTALIA_STATE_HOME", (root / "state").c_str(), 1);
++  ::setenv("NOCTALIA_DATA_HOME", (root / "data").c_str(), 1);
++
++  const auto settings = root / "state" / "noctalia" / "settings.toml";
++  {
++    std::ofstream out(settings, std::ios::trunc);
++    out << "[theme]\nmode = \"light\"\npure_black_dark = false\n\n[wallpaper.automation]\nenabled = false\n";
++  }
++  const std::vector<std::string> modePath{"theme", "mode"};
++  const std::vector<std::string> pureBlackPath{"theme", "pure_black_dark"};
++  const std::vector<std::string> automationPath{"wallpaper", "automation", "enabled"};
++
++  {
++    ConfigService config;
++    TEST_CHECK(!config.hasOverride(modePath));
++    TEST_CHECK(!config.hasOverride(pureBlackPath));
++    TEST_CHECK(config.hasOverride(automationPath));
++    TEST_CHECK(std::filesystem::exists(settings.string() + ".before-sinnix-theme-defaults.toml"));
++    TEST_CHECK(std::filesystem::exists(settings.string() + ".sinnix-theme-defaults-v1"));
++
++    // This is the subsequent private GUI choice that the next startup must preserve.
++    config.setThemeMode(ThemeMode::Light);
++    TEST_CHECK(config.hasOverride(modePath));
++  }
++  {
++    ConfigService restarted;
++    TEST_CHECK(restarted.hasOverride(modePath));
++    TEST_CHECK(restarted.config().theme.mode == ThemeMode::Light);
++    TEST_CHECK(restarted.hasOverride(automationPath));
++  }
++
++  ::unsetenv("NOCTALIA_CONFIG_HOME");
++  ::unsetenv("NOCTALIA_STATE_HOME");
++  ::unsetenv("NOCTALIA_DATA_HOME");
++  std::filesystem::remove_all(root);
++  return 0;
++}

@@ -27,7 +27,6 @@
               clients = [ "codex" ];
             }
           ];
-          skills = [ "fixture-skill" ];
         }
       );
       skills = pkgs.runCommand "agent-environment-fixture-skills" { } ''

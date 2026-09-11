@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -26,7 +25,6 @@ SKILLS_ROOT = SKILL_DIR.parent
 REPO_ROOT = Path(os.environ.get("SINNIX_REPO_ROOT", SKILLS_ROOT.parents[2]))
 RANK = REPO_ROOT / "scripts" / "sinnix-rank"
 RANK_CORE = REPO_ROOT / "pkgs" / "sinnix-rank-core"
-ROSTER = REPO_ROOT / "flake" / "data" / "shared-agent-skills.nix"
 VALIDATOR = SKILLS_ROOT / "skill-authoring" / "scripts" / "validate_skill.py"
 
 FOUR_OPTIONS = [
@@ -383,34 +381,18 @@ def test_status_text_output_names_the_unsettled_reasons(rank: Rank):
     assert "disconnected comparison components" in text
 
 
-# -- criterion 5: installed through the shared roster ------------------------
+# -- criterion 5: discoverable from the live root ---------------------------
 
 
-def roster_names(roster: Path) -> list[str]:
-    """The roster is a Nix list of bare strings, one per line."""
-    return re.findall(r'^\s*"([^"]+)"\s*$', roster.read_text(), flags=re.MULTILINE)
-
-
-def test_skill_is_installed_through_the_shared_roster(tmp_path: Path):
+def test_skill_is_discoverable_from_the_live_root():
     assert SKILL_DIR.is_dir(), "the skill source directory must exist"
-    assert "rank-options" in roster_names(ROSTER), (
-        f"{ROSTER} does not list rank-options; the shared skill farm installs "
-        f"only rostered names, so the directory alone ships nothing"
-    )
-
-    # The membership predicate reads the roster, not the directory: with the
-    # entry dropped it reports absence even though the source tree is intact.
-    dropped = tmp_path / "shared-agent-skills.nix"
-    dropped.write_text(
-        "\n".join(
-            line
-            for line in ROSTER.read_text().splitlines()
-            if line.strip() != '"rank-options"'
-        )
-    )
-    assert dropped.read_text() != ROSTER.read_text()
-    assert "rank-options" not in roster_names(dropped)
-    assert SKILL_DIR.is_dir()
+    assert (SKILL_DIR / "SKILL.md").is_file()
+    discovered = {
+        path.name
+        for path in SKILLS_ROOT.iterdir()
+        if path.is_dir() and (path / "SKILL.md").is_file()
+    }
+    assert "rank-options" in discovered
 
 
 def test_skill_passes_package_validation():

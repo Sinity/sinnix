@@ -14,6 +14,11 @@
 mkServiceModule {
   name = "ocr";
   description = "OCR / document understanding (containerized, CDI GPU)";
+  meta.ai = {
+    backendKind = "container";
+    requiresCuda = true;
+    socketProxy = true;
+  };
   surface = {
     unit = "podman-ocr.service";
     resourceClass = "interactive-agent";

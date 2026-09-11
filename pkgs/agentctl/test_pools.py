@@ -141,28 +141,6 @@ def test_a_daemon_that_never_answers_fails_the_job(
         pools.apply(declared(pytest=1), wait_seconds=0.0)
 
 
-def test_the_pass_reports_the_exclusions_the_daemon_cannot_hold(
-    fake_pueue: FakePueue,
-) -> None:
-    """pueued has nowhere to keep an exclusion, so the pass is where it shows.
-
-    Anti-vacuity: a report built from the declaration's own side alone would
-    say `agent` excludes nothing while agentctl holds its launches.
-    """
-    fake_pueue.groups.clear()
-    fake_pueue.groups.update({"pytest": 1, "agent": 6})
-
-    applied = pools.apply(
-        {
-            "pytest": PoolPolicy(parallel=1, exclusive_with=("agent",)),
-            "agent": PoolPolicy(parallel=6),
-        }
-    )
-
-    assert applied["exclusive"] == {"agent": ["pytest"], "pytest": ["agent"]}
-    assert pools.apply(declared(pytest=1, agent=6))["exclusive"] == {}
-
-
 def test_the_cli_applies_the_configured_pools(
     fake_pueue: FakePueue, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -6,11 +6,13 @@ description: Orchestrate parallel implementation, research, or queue work with e
 # Orchestrate
 
 The root session owns priorities, scope, allocation, and consequential
-decisions. Delegate bounded supervision and implementation; automate mechanics
-through `agentctl`. Each concern has one accountable supervisor: consolidate
-normal successes, but report terminal failures and decision blockers promptly
-before unrelated queue work continues. A completed worker checkpoints its work,
-files its result, and exits; it does not need a perpetual status turn.
+decisions. Use native agents for investigation, bounded help, and cohesive
+implementation: they work in the shared checkout with disjoint write scopes,
+while the coordinator commits the result. Use an AgentCTL external batch when
+independent ownership groups need isolated worktrees and one integrated
+candidate. Queued workers handle unattended work or execution through another
+backend. Shared heavy commands are declared jobs. Each concern has
+one accountable supervisor; a completed worker reports its result and exits.
 
 ## Dispatch and evidence
 
@@ -21,19 +23,15 @@ packet expresses intent; check execution against owning launch/session metadata.
 
 ## The operating loop
 
-1. Inventory: `agentctl view <project>`, active jobs, manifests,
-   `git worktree list`, `bd ready`, and the project's rules.
-2. Finish or recover existing candidates before starting new work. Start one
-   coherent, non-overlapping set of two to four workers only when it has a
-   concrete delivery:
-   `agentctl batch start <project> <bead>… [--worker a,b]…`.
-3. Use one event watch per campaign concern and wait for the
-   `<project>:land:<run>` completion event; do not poll.
-4. Read `agentctl batch status <run>`: landed with an acceptance record, or a
-   named failure with its next owner.
-
-The corpus runs once at the master boundary through the descriptor's
-`corpus` operation or its schedule, never per worker.
+1. Inventory the relevant rules, task state, active jobs/runs, and checkout.
+2. Choose native work for a bounded or cohesive change, or an external AgentCTL
+   batch for independent isolated groups. Allocate only as many owners as the
+   dependency graph and host capacity justify; there is no fixed worker count.
+3. Use one event watch per concern for queued work and wait for completion;
+   native work is observed directly. Do not poll.
+4. Read the result and acceptance evidence, then commit native changes or land
+   the external candidate. Select focused checks for the changed contract;
+   affected or full-corpus runs require an explicit request.
 
 ## Model selection
 
@@ -52,13 +50,15 @@ Use additional independent analysis for a named unresolved question involving
 irreversible action, destructive-data risk, no executable oracle, or concrete
 disagreement. One accountable reviewer decides from the evidence.
 
-References: [worker contract](references/worker-contract.md) (compiled into
-every worker prompt), [coordinator contract](references/coordinator-contract.md)
-(takeover, verbs, stages). Run `scripts/defect_priors.py` before a hunt wave.
+References: [worker contract](references/worker-contract.md) (for external
+batch workers), [coordinator contract](references/coordinator-contract.md)
+(takeover, verbs, stages). Run `scripts/defect_priors.py` when a hunt needs
+that prior evidence.
 
 ## Dispatch mechanics
 
-- A batch is several workers on one base commit landed as one candidate.
+- An external batch is several independent workers on one base commit landed as
+  one candidate.
   `batch start` validates the members, writes the run manifest
   (`~/.local/state/agentctl/runs/<run>.json`), claims the beads, creates one
   worktree per worker, queues the workers in group `agent` and the landing
@@ -67,18 +67,15 @@ every worker prompt), [coordinator contract](references/coordinator-contract.md)
   `dispatch_group` members, or `--worker a,b` named explicitly. Beads that
   share files, evidence, or a verification boundary go in one worker; write
   scopes must be disjoint across workers.
-- Claude subagents as workers: `batch start … --workers external` makes the
-  same manifest, claims and worktrees and stashes the landing task. Run one
-  `lane` subagent per worker in the worktree the manifest names, with the
-  packet at `.agentctl/prompt.md`; file each result with
-  `agentctl batch result <run> <worker> <result.json>`. The last result
-  enqueues the landing task. Before trusting a subagent's output, confirm its
-  worktree is the linked one the manifest names and is on the worker branch.
+- External workers use `batch start … --workers external`; the manifest names
+  their worktrees and packets. File each result with `batch result`; the last
+  result enqueues landing. Confirm each result is bound to the manifest's
+  worktree and branch before landing.
 - Continue, recover, and land through the verbs and stages in the
   [coordinator contract](references/coordinator-contract.md); it owns watches,
   resumes, result filing, and publication mechanics.
 
-## Worker contract
+## External batch worker contract
 
 - A worker = one agent + one worktree + one ownership group. It may complete
   several closely related beads. Its branch is a candidate; the landing task
@@ -87,16 +84,16 @@ every worker prompt), [coordinator contract](references/coordinator-contract.md)
   selector). Standing rules live in `references/worker-contract.md` and the
   `lane` agent definition. Communicate by pointer — bead ids, spec paths,
   commit SHAs.
-- Workers commit every logical chunk in the foreground, run the focused
-  selector, and exit with the result document: `candidate_sha`, each
+- External workers commit their logical chunks, run the verification selected
+  by the task, and exit with the result document: `candidate_sha`, each
   acceptance criterion marked with evidence, `unresolved`, `verification`.
 
 ## Verification
 
-The descriptor's `focused` operation runs without extra arguments. Use an
-argumentless check such as `verify_quick`; put exact test selectors in the
-beads' `verification_commands`. Static checks, selected tests and a full
-corpus prove different scopes; retain the command and receipt for each.
+Use the descriptor's declared operation when a task selects one; put exact
+test selectors in the bead's `verification_commands`. Static checks, selected
+tests, and broad suites prove different scopes; retain the command and receipt
+for each check that actually ran.
 For Polylogue's graph and selection behavior, use the `polylogue` skill.
 
 ## Structural review
@@ -108,16 +105,17 @@ independent review, report that fact. Model tier does not establish correctness.
 
 ## Continuous queue mode
 
-Use [[task-backend]] to select the highest-value ready ownership groups, then
-let each useful batch land. Prioritize finishing candidates over filling slots;
-heavy verification remains independently bounded by its own groups.
+Use [[task-backend]] to select ready ownership groups, then choose native work
+or an external batch according to cohesion, isolation, unattended execution,
+and backend needs. Prioritize finishing work over filling slots; heavy
+verification remains independently bounded by its declared job group.
 
 ## Runtime architecture
 
-pueue executes and observes every job: it owns the queue, the process, the
-terminal result, and cancellation (`pueue pause -g <group>` freezes a group;
-the backpressure timer does this under host stall). worktrunk owns worktree
-creation and removal. GitHub owns review, required checks, and merge where the
-project publishes through PRs. Beads owns tasks and claims. Systemd owns only
-calendar-timer wake-ups for declared `schedule` operations. `agentctl` is
-in-process: no daemon, no socket, no judgment.
+pueue owns each queued job's queue state, process, terminal result, and
+cancellation. A pause is a pueue group operation; a systemd timer only wakes
+`agentctl` to request that operation when backpressure policy calls for it.
+worktrunk owns batch worktrees. GitHub owns review, required checks, and merge
+where the project publishes through PRs. Beads owns tasks and claims. Systemd
+owns fixed services and timer wake-ups, not queued-job state. `agentctl` is in-process: no daemon, socket,
+or independent scheduler.

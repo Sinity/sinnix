@@ -5,166 +5,43 @@ description: Interactive codebase analysis with user steering (survey → narrat
 
 # Interactive Code Analysis
 
-Step-by-step codebase analysis with user steering. Unlike an autonomous
-parallel exploration coordinated through `orchestrate`, this pauses for input
-between phases.
+Analyze a target in three useful phases: survey its structure, narrate the
+selected areas, then synthesize evidence-backed findings. Pause for steering
+when the next phase or scope is genuinely user-owned; a user may say `focus on
+X`, `skip X`, `go deeper on X`, `check X vs Y`, `write findings`, or `fix issue
+N`.
 
-Persist the phase state in a project-local `.agent/scratch/` analysis ledger.
-The ledger is the resume handle after compaction. It records the target,
-source survey, selected narration items, evidence paths, open questions,
-findings, and the current phase. Do not create a second process launcher or
-duplicate the shared agent-definition and receipt contracts from
-`orchestrate` and `agent-runtime`.
+At each phase, state the files and commands examined, expected versus observed
+behavior, and concrete file:line evidence. Keep findings separate from
+speculation and note suspicious-looking code that is actually sound. Use the
+existing global agent definitions and model choices for any delegated bounded
+narration; do not create another launcher or receipt contract.
+
+## Survey
+
+List the target's items, size, purpose, and concern (high/medium/low). Recommend
+the smallest useful narration scope. Large or dependency-heavy code is a
+reason to inspect it first, not a mandate to scan unrelated directories.
+
+## Narrate
+
+Read the selected files systematically and cross-check related call paths.
+Classify concrete findings as critical, structural, style, algorithmic, or
+debt. For each, name the input, wrong or surprising outcome, and evidence that
+would disprove it. Exact tests or live probes are preferred to broad suites.
+
+## Synthesize
+
+Cross-reference the findings, remove duplicates, and prioritize by impact,
+scope, and fixability. Return high/medium/low findings, recurring patterns,
+cross-checks performed, open questions, and the next action. Persist findings
+only when requested or when the repository's normal evidence record requires
+it; use the existing tracker/report rather than a new ledger.
+
+If the analysis spans turns or is interrupted, a project-local scratch note may
+hold the target, completed phase, selections, evidence paths, findings, and
+open questions. It is a resume aid, not a mandatory per-phase ritual. Never
+start implementation, destructive action, or publication without the user's
+direction when it would materially change scope or risk.
 
 **Target**: $ARGUMENTS
-
----
-
-## Workflow
-
-```
-survey → >>> user input → narrate → >>> user input → synthesize → >>> (write|fix|continue)
-```
-
-At the start of each phase, read the existing ledger if present and append a
-phase transition with the exact files and commands used. If compaction or an
-interruption occurs, resume from the last completed transition instead of
-restarting the survey. Use explicit global agent definitions and model/effort
-choices for any delegated narration lane.
-
----
-
-## Phase 1: Survey
-
-**Goal**: List all items at current level without deep-diving.
-
-```
-FOR EACH item IN target:
-  → name, path, size (LOC)
-  → brief purpose (from docs/structure)
-  → concern: High | Medium | Low
-```
-
-**Concern indicators**:
-
-- **High**: >500 LOC, many deps, complex error handling, concurrent/distributed, macros
-- **Medium**: moderate size, some complexity, non-trivial logic
-- **Low**: small, straightforward, well-tested, stable
-
-**Output**:
-
-```markdown
-## Survey: [target]
-
-| Item | LOC | Purpose | Concern |
-| ---- | --- | ------- | ------- |
-
-**Recommended focus**: [highest-concern items]
-```
-
-```
-ECHO(>>> Which item(s) to narrate? "all high" | "skip to synthesis" | specific selection)
-```
-
----
-
-## Phase 2: Narrate
-
-**Goal**: Line-by-line verbalization of selected items.
-
-```
-FOR EACH selected_item:
-  → read file
-  → walk through systematically:
-      - what each struct/function does
-      - expected vs actual behavior
-      - cross-reference checks (do related functions match?)
-  → call out issues with categories:
-      🚨 [Critical] file:line - description
-      🏗️ [Structural] file:line - description
-      📝 [Style] file:line - description
-      ⚡ [Algorithmic] file:line - description
-      🔧 [Debt] file:line - description
-  → note non-issues that looked suspicious but are fine
-```
-
-```
-ECHO(>>> Found N issues. Continue to more files? | Go deeper? | Move to synthesis?)
-```
-
----
-
-## Phase 3: Synthesize
-
-**Goal**: Cross-reference and prioritize findings.
-
-```
-SEQUENTIAL:
-  → collect all issues
-  → check: do related components have same problems?
-  → prioritize by:
-      severity: data_integrity > logic_errors > code_smells
-      scope: widespread > isolated
-      fixability: clear_fix > needs_discussion
-```
-
-**Output**:
-
-```markdown
-## Synthesis
-
-### High Priority (fix now)
-
-1. [Issue] - [location] - [why urgent]
-
-### Medium Priority (fix soon)
-
-...
-
-### Low Priority (tech debt)
-
-...
-
-### Patterns Observed
-
-- [recurring patterns]
-
-### Cross-Reference Checks
-
-- [x] checked: [what was verified consistent]
-- [!] inconsistent: [what doesn't match]
-```
-
-```
-ECHO(>>> Write to file? | Start fixing? | Analyze more?)
-```
-
----
-
-## User Steering Commands
-
-At any point:
-
-- **"focus on X"** → narrow to specific area
-- **"skip X"** → exclude from analysis
-- **"go deeper on X"** → more detailed narration
-- **"check X vs Y"** → cross-reference two things
-- **"write findings"** → persist to markdown
-- **"fix issue N"** → switch to implementation
-
----
-
-## Comparison: interactive analysis vs orchestrated analysis
-
-| Aspect       | analyze skill                    | orchestrated lanes     |
-| ------------ | -------------------------------- | ---------------------- |
-| Execution    | Interactive, pausable            | Autonomous, parallel   |
-| User input   | After each phase                 | Only at start          |
-| Best for     | Learning, targeted investigation | Broad coverage         |
-| Context cost | Lower (you steer)                | Higher (full autonomy) |
-
----
-
-## Begin
-
-Starting Phase 1: Survey of **$ARGUMENTS**

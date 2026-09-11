@@ -1,11 +1,11 @@
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: 3f50f79721ff50338c130d143c28296a60b63b2af45cda42b963e35df25dacd1 -->
+<!-- gateway-catalog-sha256: b917f073440a06ea6bb0d5462fe6209e13e21a4a292092cb0f2a154a16087721 -->
 # Sinnix Agent Gateway reference
 
 Generated from `sinnix_agent_gateway.actions`. Every action is one MCP tool whose `tools/list` input schema is the one below; the catalog hash changes when any principal-visible action catalog row changes, including its schema, principal set, example or affordance.
 
-Revision: `v3-typed-actions`. Catalog SHA-256: `3f50f79721ff50338c130d143c28296a60b63b2af45cda42b963e35df25dacd1`.
+Revision: `v3-typed-actions`. Catalog SHA-256: `b917f073440a06ea6bb0d5462fe6209e13e21a4a292092cb0f2a154a16087721`.
 
 ## Invocation
 
@@ -13,118 +13,121 @@ MCP: call the tool named after the action. CLI: `sinnix-agent-gateway call <acti
 
 ## Resources
 
-| Resource            | Owner              | Canonical reference                                      | Actions                                                                                                                                                                                                                                                                                                           |
-| ------------------- | ------------------ | -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `project`           | `projects`         | `sinnix://projects/{project_id}`                         | `batches.list`, `batches.start`, `beads.change`, `beads.changeset`, `beads.operate`, `beads.query`, `context.compose`, `events.tail`, `operations.run`, `projects.change`, `projects.context`, `projects.diff`, `projects.get`, `projects.list`, `projects.read`, `projects.search`, `projects.tree`, `shell.run` |
-| `checkout`          | `projects`         | `sinnix://projects/{project_id}/checkouts/{checkout_id}` | `context.compose`, `operations.run`, `projects.change`, `projects.diff`, `projects.get`, `projects.read`, `projects.search`, `projects.tree`, `shell.run`                                                                                                                                                         |
-| `bead`              | `beads`            | `sinnix://projects/{project_id}/beads/{bead_id}`         | `batches.start`, `batches.status`, `beads.change`, `beads.changeset`, `beads.get`, `beads.query`, `wait.for`                                                                                                                                                                                                      |
-| `task_authority`    | `beads`            | `sinnix://projects/{project_id}/task-authority`          | `beads.change`, `beads.changeset`, `beads.operate`, `beads.query`                                                                                                                                                                                                                                                 |
-| `run`               | `batches`          | `sinnix://projects/{project_id}/runs/{run_id}`           | `batches.land`, `batches.list`, `batches.resume`, `batches.start`, `batches.status`                                                                                                                                                                                                                               |
-| `job`               | `jobs`             | `sinnix://jobs/{job_id}`                                 | `batches.land`, `batches.list`, `batches.resume`, `batches.start`, `batches.status`, `context.compose`, `events.tail`, `jobs.cancel`, `jobs.clean`, `jobs.get`, `jobs.list`, `jobs.logs`, `jobs.retry`, `jobs.wait`, `machine.operate`, `operations.run`, `shell.run`, `wait.for`                                 |
-| `artifact`          | `artifacts`        | `sinnix://artifacts/{artifact_id}`                       | `artifacts.get`, `artifacts.list`, `artifacts.read`, `browser.screenshot`, `desktop.screenshot`                                                                                                                                                                                                                   |
-| `receipt`           | `audit`            | `sinnix://receipts/{receipt_id}`                         | `audit.receipt`, `audit.verify`, `events.tail`, `wait.for`                                                                                                                                                                                                                                                        |
-| `result`            | `results`          | `sinnix://results/{result_id}`                           | `results.get`                                                                                                                                                                                                                                                                                                     |
-| `machine_unit`      | `machine`          | `sinnix://machine/units/{manager}/{unit}`                | `machine.operate`, `machine.query`, `machine.snapshot`, `machine.units.get`, `machine.units.list`, `machine.units.logs`, `machine.units.operate`, `wait.for`                                                                                                                                                      |
-| `browser_page`      | `browser`          | `sinnix://browser/pages/{page_id}`                       | `browser.operate`, `browser.page`, `browser.pages`, `browser.screenshot`                                                                                                                                                                                                                                          |
-| `browser_workspace` | `browser`          | `sinnix://browser/agent-workspace`                       | `browser.operate`, `browser.pages`                                                                                                                                                                                                                                                                                |
-| `process`           | `machine`          | `sinnix://processes/{pid}/{start_ticks}`                 | `machine.operate`, `machine.query`, `processes.get`, `processes.list`, `processes.signal`, `processes.tree`, `processes.wait`                                                                                                                                                                                     |
-| `terminal`          | `terminals`        | `sinnix://terminals/{terminal_id}`                       | `terminals.focus`, `terminals.get`, `terminals.list`, `terminals.open`, `terminals.processes`, `terminals.run`, `terminals.screen`, `terminals.scrollback`, `terminals.send`, `terminals.wait`, `wait.for`                                                                                                        |
-| `desktop`           | `desktop`          | `sinnix://desktop/current`                               | `desktop.operate`, `desktop.screenshot`, `desktop.snapshot`, `desktop.tree`                                                                                                                                                                                                                                       |
-| `host_file`         | `files`            | `sinnix://files/{file_token}`                            | `files.change`, `files.list`, `files.patch`, `files.read`, `files.search`, `files.stat`, `wait.for`                                                                                                                                                                                                               |
-| `mcp_tool`          | `mcp-broker`       | `sinnix://mcp/{server}/tools/{tool}`                     | `mcp.call`, `mcp.change`, `mcp.servers`, `mcp.tools`                                                                                                                                                                                                                                                              |
-| `capture_lane`      | `captures`         | `sinnix://captures/{lane}`                               | `activity.query`, `captures.query`, `wait.for`                                                                                                                                                                                                                                                                    |
-| `capability`        | `capability-index` | `sinnix://capabilities/{name}`                           | `capabilities.query`                                                                                                                                                                                                                                                                                              |
-| `session`           | `sessions`         | `sinnix://sessions/{provider}/{session_id}`              | `memory.query`, `sessions.query`, `timeline.query`                                                                                                                                                                                                                                                                |
-| `context_snapshot`  | `context`          | `sinnix://contexts/{snapshot_id}`                        | `context.compose`                                                                                                                                                                                                                                                                                                 |
+| Resource            | Owner              | Canonical reference                                      | Actions                                                                                                                                                                                                                                                                                                                                                 |
+| ------------------- | ------------------ | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `project`           | `projects`         | `sinnix://projects/{project_id}`                         | `batches.list`, `batches.start`, `beads.change`, `beads.changeset`, `beads.closure`, `beads.operate`, `beads.query`, `campaign.progress`, `context.compose`, `events.tail`, `operations.run`, `projects.change`, `projects.context`, `projects.diff`, `projects.get`, `projects.list`, `projects.read`, `projects.search`, `projects.tree`, `shell.run` |
+| `checkout`          | `projects`         | `sinnix://projects/{project_id}/checkouts/{checkout_id}` | `context.compose`, `operations.run`, `projects.change`, `projects.diff`, `projects.get`, `projects.read`, `projects.search`, `projects.tree`, `shell.run`                                                                                                                                                                                               |
+| `bead`              | `beads`            | `sinnix://projects/{project_id}/beads/{bead_id}`         | `batches.start`, `batches.status`, `beads.change`, `beads.changeset`, `beads.closure`, `beads.get`, `beads.query`, `campaign.progress`, `wait.for`                                                                                                                                                                                                      |
+| `task_authority`    | `beads`            | `sinnix://projects/{project_id}/task-authority`          | `beads.change`, `beads.changeset`, `beads.closure`, `beads.operate`, `beads.query`                                                                                                                                                                                                                                                                      |
+| `run`               | `batches`          | `sinnix://projects/{project_id}/runs/{run_id}`           | `batches.land`, `batches.list`, `batches.resume`, `batches.start`, `batches.status`                                                                                                                                                                                                                                                                     |
+| `job`               | `jobs`             | `sinnix://jobs/{job_id}`                                 | `batches.land`, `batches.list`, `batches.resume`, `batches.start`, `batches.status`, `context.compose`, `events.tail`, `jobs.cancel`, `jobs.clean`, `jobs.get`, `jobs.list`, `jobs.logs`, `jobs.retry`, `jobs.wait`, `machine.operate`, `operations.run`, `shell.run`, `wait.for`                                                                       |
+| `artifact`          | `artifacts`        | `sinnix://artifacts/{artifact_id}`                       | `artifacts.get`, `artifacts.list`, `artifacts.read`, `browser.screenshot`, `desktop.screenshot`                                                                                                                                                                                                                                                         |
+| `receipt`           | `audit`            | `sinnix://receipts/{receipt_id}`                         | `audit.receipt`, `audit.verify`, `events.tail`, `wait.for`                                                                                                                                                                                                                                                                                              |
+| `result`            | `results`          | `sinnix://results/{result_id}`                           | `results.get`                                                                                                                                                                                                                                                                                                                                           |
+| `machine_unit`      | `machine`          | `sinnix://machine/units/{manager}/{unit}`                | `machine.operate`, `machine.query`, `machine.snapshot`, `machine.units.get`, `machine.units.list`, `machine.units.logs`, `machine.units.operate`, `wait.for`                                                                                                                                                                                            |
+| `browser_page`      | `browser`          | `sinnix://browser/pages/{page_id}`                       | `browser.operate`, `browser.page`, `browser.pages`, `browser.screenshot`                                                                                                                                                                                                                                                                                |
+| `browser_workspace` | `browser`          | `sinnix://browser/agent-workspace`                       | `browser.operate`, `browser.pages`                                                                                                                                                                                                                                                                                                                      |
+| `process`           | `machine`          | `sinnix://processes/{pid}/{start_ticks}`                 | `machine.operate`, `machine.query`, `processes.get`, `processes.list`, `processes.signal`, `processes.tree`, `processes.wait`                                                                                                                                                                                                                           |
+| `terminal`          | `terminals`        | `sinnix://terminals/{terminal_id}`                       | `terminals.focus`, `terminals.get`, `terminals.list`, `terminals.open`, `terminals.processes`, `terminals.run`, `terminals.screen`, `terminals.scrollback`, `terminals.send`, `terminals.wait`, `wait.for`                                                                                                                                              |
+| `desktop`           | `desktop`          | `sinnix://desktop/current`                               | `desktop.operate`, `desktop.screenshot`, `desktop.snapshot`, `desktop.tree`                                                                                                                                                                                                                                                                             |
+| `host_file`         | `files`            | `sinnix://files/{file_token}`                            | `files.change`, `files.list`, `files.patch`, `files.read`, `files.search`, `files.stat`, `wait.for`                                                                                                                                                                                                                                                     |
+| `mcp_tool`          | `mcp-broker`       | `sinnix://mcp/{server}/tools/{tool}`                     | `mcp.call`, `mcp.change`, `mcp.servers`, `mcp.tools`                                                                                                                                                                                                                                                                                                    |
+| `capture_lane`      | `captures`         | `sinnix://captures/{lane}`                               | `activity.query`, `captures.query`, `wait.for`                                                                                                                                                                                                                                                                                                          |
+| `capability`        | `capability-index` | `sinnix://capabilities/{name}`                           | `capabilities.query`                                                                                                                                                                                                                                                                                                                                    |
+| `session`           | `sessions`         | `sinnix://sessions/{provider}/{session_id}`              | `memory.query`, `sessions.orchestration`, `sessions.query`, `timeline.query`                                                                                                                                                                                                                                                                            |
+| `context_snapshot`  | `context`          | `sinnix://contexts/{snapshot_id}`                        | `context.compose`                                                                                                                                                                                                                                                                                                                                       |
 
 ## Actions
 
-| Action                  | Family    | Owner              | Principals                          | Summary                                                                                                                                                                                                                                                           |
-| ----------------------- | --------- | ------------------ | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `gateway.status`        | `status`  | `gateway`          | `agent-control, observer, operator` | Report the principal, contract hashes, tool count and per-route availability.                                                                                                                                                                                     |
-| `gateway.catalog`       | `catalog` | `gateway`          | `agent-control, observer, operator` | Every action is also an MCP tool with its full schema in tools/list; the catalog adds aliases, affordances, resource kinds and the brokered MCP tool inventory (lynchpin, sinex, polylogue).                                                                      |
-| `files.stat`            | `query`   | `files`            | `observer, operator`                | Describe one host path: kind, size, mode, owner, timestamps, MIME, hash.                                                                                                                                                                                          |
-| `files.list`            | `query`   | `files`            | `observer, operator`                | List a directory with a canonical ref for every child.                                                                                                                                                                                                            |
-| `files.read`            | `query`   | `files`            | `observer, operator`                | Read a file: text inline, images as an image block, other binary as a resource block.                                                                                                                                                                             |
-| `files.search`          | `query`   | `files`            | `observer, operator`                | Without content_regex the search is over paths (fd); with it, matching lines are returned (ripgrep --json). Results are bounded by limit and timeout.                                                                                                             |
-| `files.patch`           | `change`  | `files`            | `operator`                          | Pass expected_sha256 from the prior read so a concurrent change is refused instead of overwritten. Unified hunks are applied individually; rejected hunks are reported.                                                                                           |
-| `files.change`          | `change`  | `files`            | `operator`                          | Copy and move never overwrite an existing destination. Remove supports regular files only.                                                                                                                                                                        |
-| `projects.list`         | `query`   | `projects`         | `agent-control, observer, operator` | List the projects this principal may read, with canonical refs.                                                                                                                                                                                                   |
-| `projects.get`          | `get`     | `projects`         | `agent-control, observer, operator` | The checkout row carries head and dirty_sha256, the preconditions projects.change requires.                                                                                                                                                                       |
-| `projects.tree`         | `query`   | `projects`         | `agent-control, observer, operator` | List files under a project-relative directory without following symlinks.                                                                                                                                                                                         |
-| `projects.read`         | `query`   | `projects`         | `agent-control, observer, operator` | Read a bounded line range of one project file.                                                                                                                                                                                                                    |
-| `projects.diff`         | `query`   | `projects`         | `agent-control, observer, operator` | Show uncommitted changes in a checkout, optionally against a git ref.                                                                                                                                                                                             |
-| `projects.search`       | `query`   | `projects`         | `agent-control, observer, operator` | Search project file contents with ripgrep.                                                                                                                                                                                                                        |
-| `projects.change`       | `change`  | `projects`         | `operator`                          | Paths stay project-relative and policy-excluded paths (.git, secrets, local-only agent state) are refused. Take expected_dirty_sha256 or expected_head from projects.get.                                                                                         |
-| `projects.context`      | `context` | `projects`         | `agent-control, observer, operator` | Components are budgeted independently; an unavailable component names its reason and source ref so the caller can follow the direct route.                                                                                                                        |
-| `beads.query`           | `query`   | `beads`            | `agent-control, observer, operator` | limit is passed to the owner so at most limit rows per project are read; page.next_cursor continues the same snapshot.                                                                                                                                            |
-| `beads.get`             | `get`     | `beads`            | `agent-control, observer, operator` | Read one bead by ref, id or title fragment, with optional comments, history, dependencies or graph.                                                                                                                                                               |
-| `beads.change`          | `change`  | `beads`            | `operator`                          | expected.expected_task_revision/expected_etag come from beads.get. Use mode=preview to see the compiled command and a preview_digest before applying.                                                                                                             |
-| `beads.changeset`       | `change`  | `beads`            | `operator`                          | No global rollback: each applied step reports its outcome and a compensation hint. Preview first, then apply with the returned preview_digest.                                                                                                                    |
-| `beads.operate`         | `operate` | `beads`            | `operator`                          | Beads maintenance: publish the export snapshot, push or pull sync, create, list or restore backups.                                                                                                                                                               |
-| `jobs.list`             | `query`   | `systemd-jobs`     | `agent-control, observer, operator` | List queued jobs (pueue tasks) newest first, optionally for one project.                                                                                                                                                                                          |
-| `jobs.get`              | `get`     | `systemd-jobs`     | `agent-control, observer, operator` | One job's state and bead binding, with its log range or typed result on request.                                                                                                                                                                                  |
-| `jobs.logs`             | `get`     | `systemd-jobs`     | `agent-control, observer, operator` | A byte range of a job's bounded log (workload output, then the wrapper's stderr).                                                                                                                                                                                 |
-| `jobs.wait`             | `wait`    | `systemd-jobs`     | `agent-control, observer, operator` | The wait runs in a worker thread; cancelling the MCP request abandons it without stopping the job. A task id is a queue position: pass the launch_reference the start returned and the wait follows its job across a reorder, answering with the id it is at now. |
-| `jobs.cancel`           | `operate` | `systemd-jobs`     | `agent-control, operator`           | Pass expected_phase to refuse when the job already moved on. Survivors lists PIDs that outlived the reap.                                                                                                                                                         |
-| `jobs.retry`            | `operate` | `systemd-jobs`     | `agent-control, operator`           | Re-run a terminal job in place with the same launch input and id (pueue restart).                                                                                                                                                                                 |
-| `jobs.clean`            | `operate` | `systemd-jobs`     | `agent-control, operator`           | Refused while the job is still queued or running; cancel it first.                                                                                                                                                                                                |
-| `operations.run`        | `run`     | `systemd-jobs`     | `agent-control, operator`           | Queue one project-declared operation in its declared pool on the root or a worktree.                                                                                                                                                                              |
-| `shell.run`             | `run`     | `systemd-jobs`     | `operator`                          | cwd is confined to the checkout; the job's log carries the output.                                                                                                                                                                                                |
-| `batches.list`          | `query`   | `systemd-jobs`     | `agent-control, observer, operator` | List batch runs newest first, with each worker's stage and task.                                                                                                                                                                                                  |
-| `batches.status`        | `get`     | `systemd-jobs`     | `agent-control, observer, operator` | Every id is a pueue task id: pass a worker's or the landing's job_id to jobs.logs, jobs.wait or jobs.cancel, with its job_launch_reference so the call survives a reorder.                                                                                        |
-| `batches.start`         | `run`     | `systemd-jobs`     | `agent-control, operator`           | backend, model and effort default to the project descriptor's packet defaults. Refused when a bead is claimed or already in a live run. The landing task is queued behind the workers and runs itself.                                                            |
-| `batches.land`          | `run`     | `systemd-jobs`     | `agent-control, operator`           | batches.start already queues the first landing behind the workers; this re-queues one after a landing failed. The landing runs as a job, so wait on landing_job_id rather than on this call.                                                                      |
-| `batches.resume`        | `run`     | `systemd-jobs`     | `agent-control, operator`           | backend, model and effort default to the worker's own. Refused while the worker's task is still queued or running.                                                                                                                                                |
-| `wait.for`              | `wait`    | `waits`            | `agent-control, observer, operator` | Conditions: job_terminal, bead_status, bead_revision, unit_state, file_hash, file_exists, capture_freshness, receipt_appearance, terminal_output. A timeout returns the current evidence and a continuation token.                                                |
-| `events.tail`           | `events`  | `events`           | `agent-control, observer, operator` | Pass next_cursor back to continue; a cursor from another principal or project scope fails stale_cursor.                                                                                                                                                           |
-| `context.compose`       | `context` | `context`          | `agent-control, observer, operator` | Each component is budgeted and isolated: an unavailable owner marks its component unavailable with a reason instead of failing the call. The snapshot is persisted under snapshot_ref.                                                                            |
-| `desktop.snapshot`      | `status`  | `desktop`          | `observer, operator`                | One observation of the desktop: monitors, workspaces, focus, every window with geometry, and a generation stamp.                                                                                                                                                  |
-| `desktop.screenshot`    | `query`   | `desktop`          | `observer, operator`                | full captures the focused output through the HDR-aware screenshot owner; window/rect/monitor targets capture with grim. On HDR outputs a corrected SDR variant is produced and preferred for the image block.                                                     |
-| `desktop.tree`          | `query`   | `desktop`          | `observer, operator`                | Fails unavailable when the pyatspi bindings are absent from the gateway environment; Chromium apps expose a tree only when launched with accessibility forced on.                                                                                                 |
-| `desktop.operate`       | `operate` | `desktop`          | `operator`                          | Pointer clicks, drags and scrolls need a virtual pointer tool (ydotool) on the host and fail unavailable without one; cursor moves always work. Window targets are natural locators; ambiguity returns candidates.                                                |
-| `terminals.list`        | `catalog` | `terminals`        | `observer, operator`                | Every kitty window with its ref, title, cwd, shell pid, focus and foreground processes.                                                                                                                                                                           |
-| `terminals.get`         | `get`     | `terminals`        | `observer, operator`                | Resolve one terminal by ref, kitty id, title, cwd, pid or focus.                                                                                                                                                                                                  |
-| `terminals.screen`      | `query`   | `terminals`        | `observer, operator`                | The visible screen text of one terminal.                                                                                                                                                                                                                          |
-| `terminals.scrollback`  | `query`   | `terminals`        | `observer, operator`                | The last N lines of a terminal's history, screen, or last command output.                                                                                                                                                                                         |
-| `terminals.processes`   | `query`   | `terminals`        | `observer, operator`                | Foreground processes of one terminal and whether its shell is at a prompt.                                                                                                                                                                                        |
-| `terminals.send`        | `operate` | `terminals`        | `operator`                          | Send text (optionally with Enter or bracketed paste) or key presses to one terminal.                                                                                                                                                                              |
-| `terminals.run`         | `run`     | `terminals`        | `operator`                          | Completion and output rely on kitty shell integration (at_prompt, last_cmd_output). exit_status is reported only with capture_exit_status, which appends a visible marker to the command line.                                                                    |
-| `terminals.wait`        | `wait`    | `terminals`        | `observer, operator`                | Wait until a terminal is at its prompt, shows a regex, finishes a process, or changes title.                                                                                                                                                                      |
-| `terminals.focus`       | `operate` | `terminals`        | `operator`                          | Focus one kitty window.                                                                                                                                                                                                                                           |
-| `terminals.open`        | `operate` | `terminals`        | `operator`                          | Open a new kitty window (OS window, split or tab) with an optional cwd and command; returns its ref.                                                                                                                                                              |
-| `browser.pages`         | `catalog` | `browser`          | `observer, operator`                | List every open Chrome page with its ref; flags the gateway-owned pages that can be read, captured or operated.                                                                                                                                                   |
-| `browser.page`          | `get`     | `browser`          | `observer, operator`                | Element refs (g<generation>e<n>) are attached to the DOM for this snapshot; a later snapshot or reload replaces them, and a stale ref fails not_found.                                                                                                            |
-| `browser.screenshot`    | `query`   | `browser`          | `observer, operator`                | Screenshot a gateway-owned page through CDP; the image rides in an image block and is retained as an artifact.                                                                                                                                                    |
-| `browser.operate`       | `operate` | `browser`          | `operator`                          | Operator tabs are never accepted as targets, even when a locator matches one. Element targets take a snapshot ref or a CSS selector.                                                                                                                              |
-| `machine.snapshot`      | `status`  | `machine`          | `agent-control, observer, operator` | Each section carries its own availability and source; GPU and network report unavailable because no owner exposes them.                                                                                                                                           |
-| `machine.query`         | `query`   | `machine`          | `agent-control, observer, operator` | Read one sinnix-observe section with cursor paging, or the ops-reducer revision (operation=actions).                                                                                                                                                              |
-| `machine.units.list`    | `query`   | `machine`          | `agent-control, observer, operator` | List systemd units of one manager with load/active/sub state and a canonical ref each.                                                                                                                                                                            |
-| `machine.units.get`     | `get`     | `machine`          | `agent-control, observer, operator` | Describe one unit via systemctl show: states, main pid, cgroup, restarts, timestamps.                                                                                                                                                                             |
-| `machine.units.logs`    | `query`   | `machine`          | `agent-control, observer, operator` | Journal entries for one unit (journalctl -o json), bounded by line count and bytes.                                                                                                                                                                               |
-| `machine.operate`       | `operate` | `ops-reducer`      | `operator`                          | expected_revision must match machine.query operation=actions; the reducer receipt is verified against the submitted action and target.                                                                                                                            |
-| `machine.units.operate` | `operate` | `ops-reducer`      | `operator`                          | Start, stop or restart one unit through the ops reducer (reload and wait are not reducer actions).                                                                                                                                                                |
-| `processes.list`        | `query`   | `machine`          | `agent-control, observer, operator` | List live processes filtered by name, pid, unit, cgroup or user, with a canonical ref each.                                                                                                                                                                       |
-| `processes.get`         | `get`     | `machine`          | `agent-control, observer, operator` | Describe one process: cmdline, cwd, exe, redacted env, cgroup/unit, parent, children, sockets, cpu and memory.                                                                                                                                                    |
-| `processes.tree`        | `query`   | `machine`          | `agent-control, observer, operator` | Parent/child process tree from one root or from every top-level process, bounded by depth and node count.                                                                                                                                                         |
-| `processes.signal`      | `operate` | `machine`          | `operator`                          | The reducer path is the attested one and needs expected_revision; the direct path is receipted by the gateway audit chain only.                                                                                                                                   |
-| `processes.wait`        | `wait`    | `machine`          | `agent-control, observer, operator` | Wait until a process (same pid and start ticks) exits, or the bounded timeout elapses.                                                                                                                                                                            |
-| `mcp.servers`           | `status`  | `mcp-broker`       | `observer, operator`                | Each probe runs initialize + tools/list with a 5 s bound; a timeout stores the upstream stderr as an artifact and returns its ref.                                                                                                                                |
-| `mcp.tools`             | `catalog` | `mcp-broker`       | `observer, operator`                | Catalog of every admitted upstream tool with its namespaced ref, input schema and read/change effect.                                                                                                                                                             |
-| `mcp.call`              | `query`   | `mcp-broker`       | `observer, operator`                | Tools without a read-only annotation are refused here; use mcp.change (operator only).                                                                                                                                                                            |
-| `mcp.change`            | `change`  | `mcp-broker`       | `operator`                          | Invoke one upstream tool that is not declared read-only.                                                                                                                                                                                                          |
-| `artifacts.list`        | `catalog` | `artifacts`        | `agent-control, observer, operator` | List principal-visible artifacts with kind, owner, size and canonical ref.                                                                                                                                                                                        |
-| `artifacts.get`         | `get`     | `artifacts`        | `agent-control, observer, operator` | Metadata of one artifact without its bytes.                                                                                                                                                                                                                       |
-| `artifacts.read`        | `query`   | `artifacts`        | `agent-control, observer, operator` | Read an artifact: text inline with offsets, images as an image block, other binary as a resource block.                                                                                                                                                           |
-| `captures.query`        | `query`   | `captures`         | `agent-control, observer, operator` | List runtime-declared capture lanes, describe one, or read per-lane record deltas since a time.                                                                                                                                                                   |
-| `activity.query`        | `query`   | `captures`         | `agent-control, observer, operator` | Reads sinnix-capture-v1 envelope files under each lane path within the time window; coverage lists which lanes contributed and which have no envelope files.                                                                                                      |
-| `sessions.query`        | `query`   | `sessions`         | `observer, operator`                | page.next_cursor continues a newest-first snapshot for one hour; omit cursor to refresh. Reads return next_offset. Search hits carry byte offsets and matching snippets; truncated marks incomplete coverage.                                                     |
-| `memory.query`          | `query`   | `memory`           | `observer, operator`                | Search session-derived memory across providers or fetch one object by reference, with source provenance.                                                                                                                                                          |
-| `timeline.query`        | `query`   | `timeline`         | `observer, operator`                | Session evidence ordered by file mtime within an RFC 3339 window, per provider, without claiming unavailable upstreams.                                                                                                                                           |
-| `audit.verify`          | `status`  | `audit`            | `agent-control, observer, operator` | Verify the tamper-evident audit hash chain end to end.                                                                                                                                                                                                            |
-| `audit.receipt`         | `get`     | `audit`            | `agent-control, observer, operator` | Read one principal-scoped audit receipt by ref or id.                                                                                                                                                                                                             |
-| `results.get`           | `get`     | `results`          | `agent-control, observer, operator` | Read one immutable stored response snapshot by ref or id.                                                                                                                                                                                                         |
-| `capabilities.query`    | `catalog` | `capability-index` | `agent-control, observer, operator` | Search the generated machine capability index or describe one capability exactly.                                                                                                                                                                                 |
+| Action                   | Family    | Owner              | Principals                          | Summary                                                                                                                                                                                                                                                                                                              |
+| ------------------------ | --------- | ------------------ | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `gateway.status`         | `status`  | `gateway`          | `agent-control, observer, operator` | Report the principal, contract hashes, tool count and per-route availability.                                                                                                                                                                                                                                        |
+| `gateway.catalog`        | `catalog` | `gateway`          | `agent-control, observer, operator` | Every action is also an MCP tool with its full schema in tools/list; the catalog adds aliases, affordances, resource kinds and the brokered MCP tool inventory (lynchpin, sinex, polylogue).                                                                                                                         |
+| `files.stat`             | `query`   | `files`            | `observer, operator`                | Describe one host path: kind, size, mode, owner, timestamps, MIME, hash.                                                                                                                                                                                                                                             |
+| `files.list`             | `query`   | `files`            | `observer, operator`                | List a directory with a canonical ref for every child.                                                                                                                                                                                                                                                               |
+| `files.read`             | `query`   | `files`            | `observer, operator`                | Read a file: text inline, images as an image block, other binary as a resource block.                                                                                                                                                                                                                                |
+| `files.search`           | `query`   | `files`            | `observer, operator`                | Without content_regex the search is over paths (fd); with it, matching lines are returned (ripgrep --json). Results are bounded by limit and timeout.                                                                                                                                                                |
+| `files.patch`            | `change`  | `files`            | `operator`                          | Pass expected_sha256 from the prior read so a concurrent change is refused instead of overwritten. Unified hunks are applied individually; rejected hunks are reported.                                                                                                                                              |
+| `files.change`           | `change`  | `files`            | `operator`                          | Copy and move never overwrite an existing destination. Remove supports regular files only.                                                                                                                                                                                                                           |
+| `projects.list`          | `query`   | `projects`         | `agent-control, observer, operator` | List the projects this principal may read, with canonical refs.                                                                                                                                                                                                                                                      |
+| `projects.get`           | `get`     | `projects`         | `agent-control, observer, operator` | The checkout row carries head and dirty_sha256, the preconditions projects.change requires.                                                                                                                                                                                                                          |
+| `projects.tree`          | `query`   | `projects`         | `agent-control, observer, operator` | List files under a project-relative directory without following symlinks.                                                                                                                                                                                                                                            |
+| `projects.read`          | `query`   | `projects`         | `agent-control, observer, operator` | Read a bounded line range of one project file.                                                                                                                                                                                                                                                                       |
+| `projects.diff`          | `query`   | `projects`         | `agent-control, observer, operator` | Show uncommitted changes in a checkout, optionally against a git ref.                                                                                                                                                                                                                                                |
+| `projects.search`        | `query`   | `projects`         | `agent-control, observer, operator` | Search project file contents with ripgrep.                                                                                                                                                                                                                                                                           |
+| `projects.change`        | `change`  | `projects`         | `operator`                          | Paths stay project-relative and policy-excluded paths (.git, secrets, local-only agent state) are refused. Take expected_dirty_sha256 or expected_head from projects.get.                                                                                                                                            |
+| `projects.context`       | `context` | `projects`         | `agent-control, observer, operator` | Components are budgeted independently; an unavailable component names its reason and source ref so the caller can follow the direct route.                                                                                                                                                                           |
+| `beads.closure`          | `query`   | `beads`            | `agent-control, observer, operator` | Read a bounded dependency closure, cycles, declared gates and decisions, readiness and incomplete frontier at one revision.                                                                                                                                                                                          |
+| `beads.query`            | `query`   | `beads`            | `agent-control, observer, operator` | The owner filters, projects and counts before serialization. limit sizes pages of one immutable snapshot (10,000 matching rows per project maximum); cursors never reread live rows. at pins historical reads to an exact resolved Dolt revision. aggregate counts or groups without fetching issue bodies.          |
+| `beads.get`              | `get`     | `beads`            | `agent-control, observer, operator` | Read one bead by ref, id or title fragment, with optional comments, history, dependencies or graph.                                                                                                                                                                                                                  |
+| `beads.change`           | `change`  | `beads`            | `operator`                          | expected.expected_task_revision/expected_etag come from beads.get. Use mode=preview to see the compiled command and a preview_digest before applying.                                                                                                                                                                |
+| `beads.changeset`        | `change`  | `beads`            | `operator`                          | No global rollback: each applied step reports its outcome and a compensation hint. Preview first, then apply with the returned preview_digest.                                                                                                                                                                       |
+| `beads.operate`          | `operate` | `beads`            | `operator`                          | Beads maintenance: publish the export snapshot, push or pull sync, create, list or restore backups.                                                                                                                                                                                                                  |
+| `jobs.list`              | `query`   | `systemd-jobs`     | `agent-control, observer, operator` | List queued jobs (pueue tasks) newest first, optionally for one project.                                                                                                                                                                                                                                             |
+| `jobs.get`               | `get`     | `systemd-jobs`     | `agent-control, observer, operator` | One job's state and bead binding, with its log range or typed result on request.                                                                                                                                                                                                                                     |
+| `jobs.logs`              | `get`     | `systemd-jobs`     | `agent-control, observer, operator` | A byte range of a job's bounded log (workload output, then the wrapper's stderr).                                                                                                                                                                                                                                    |
+| `jobs.wait`              | `wait`    | `systemd-jobs`     | `agent-control, observer, operator` | The wait runs in a worker thread; cancelling the MCP request abandons it without stopping the job. A task id is a queue position: pass the launch_reference the start returned and the wait follows its job across a reorder, answering with the id it is at now.                                                    |
+| `jobs.cancel`            | `operate` | `systemd-jobs`     | `agent-control, operator`           | Pass expected_phase to refuse when the job already moved on. Survivors lists PIDs that outlived the reap.                                                                                                                                                                                                            |
+| `jobs.retry`             | `operate` | `systemd-jobs`     | `agent-control, operator`           | Re-run a terminal job in place with the same launch input and id (pueue restart).                                                                                                                                                                                                                                    |
+| `jobs.clean`             | `operate` | `systemd-jobs`     | `agent-control, operator`           | Refused while the job is still queued or running; cancel it first.                                                                                                                                                                                                                                                   |
+| `operations.run`         | `run`     | `systemd-jobs`     | `agent-control, operator`           | Queue one project-declared operation in its declared pool on the root or a worktree.                                                                                                                                                                                                                                 |
+| `shell.run`              | `run`     | `systemd-jobs`     | `operator`                          | cwd is confined to the checkout. Default execution is asynchronous. wait=true waits up to wait_timeout_seconds (default 5, maximum 30) on the same job and returns bounded output; a timeout returns a continuation locator without cancelling the job.                                                              |
+| `batches.list`           | `query`   | `systemd-jobs`     | `agent-control, observer, operator` | List batch runs newest first, with each worker's stage and task.                                                                                                                                                                                                                                                     |
+| `batches.status`         | `get`     | `systemd-jobs`     | `agent-control, observer, operator` | Every id is a pueue task id: pass a worker's or the landing's job_id to jobs.logs, jobs.wait or jobs.cancel, with its job_launch_reference so the call survives a reorder.                                                                                                                                           |
+| `batches.start`          | `run`     | `systemd-jobs`     | `agent-control, operator`           | backend, model and effort default to the project descriptor's packet defaults. Refused when a bead is claimed or already in a live run. The landing task is queued behind the workers and runs itself.                                                                                                               |
+| `batches.land`           | `run`     | `systemd-jobs`     | `agent-control, operator`           | batches.start already queues the first landing behind the workers; this re-queues one after a landing failed. The landing runs as a job, so wait on landing_job_id rather than on this call.                                                                                                                         |
+| `batches.resume`         | `run`     | `systemd-jobs`     | `agent-control, operator`           | backend, model and effort default to the worker's own. Refused while the worker's task is still queued or running.                                                                                                                                                                                                   |
+| `wait.for`               | `wait`    | `waits`            | `agent-control, observer, operator` | Conditions: job_terminal, bead_status, bead_revision, unit_state, file_hash, file_exists, capture_freshness, receipt_appearance, terminal_output. A timeout returns the current evidence and a continuation token.                                                                                                   |
+| `events.tail`            | `events`  | `events`           | `agent-control, observer, operator` | Pass next_cursor back to continue; a cursor from another principal or project scope fails stale_cursor.                                                                                                                                                                                                              |
+| `context.compose`        | `context` | `context`          | `agent-control, observer, operator` | Each component is budgeted and isolated: an unavailable owner marks its component unavailable with a reason instead of failing the call. The snapshot is persisted under snapshot_ref.                                                                                                                               |
+| `desktop.snapshot`       | `status`  | `desktop`          | `observer, operator`                | One observation of the desktop: monitors, workspaces, focus, every window with geometry, and a generation stamp.                                                                                                                                                                                                     |
+| `desktop.screenshot`     | `query`   | `desktop`          | `observer, operator`                | full captures the focused output through the HDR-aware screenshot owner; window/rect/monitor targets capture with grim. On HDR outputs a corrected SDR variant is produced and preferred for the image block.                                                                                                        |
+| `desktop.tree`           | `query`   | `desktop`          | `observer, operator`                | Fails unavailable when the pyatspi bindings are absent from the gateway environment; Chromium apps expose a tree only when launched with accessibility forced on.                                                                                                                                                    |
+| `desktop.operate`        | `operate` | `desktop`          | `operator`                          | Pointer clicks, drags and scrolls need a virtual pointer tool (ydotool) on the host and fail unavailable without one; cursor moves always work. Window targets are natural locators; ambiguity returns candidates.                                                                                                   |
+| `terminals.list`         | `catalog` | `terminals`        | `observer, operator`                | Every kitty window with its ref, title, cwd, shell pid, focus and foreground processes.                                                                                                                                                                                                                              |
+| `terminals.get`          | `get`     | `terminals`        | `observer, operator`                | Resolve one terminal by ref, kitty id, title, cwd, pid or focus.                                                                                                                                                                                                                                                     |
+| `terminals.screen`       | `query`   | `terminals`        | `observer, operator`                | The visible screen text of one terminal.                                                                                                                                                                                                                                                                             |
+| `terminals.scrollback`   | `query`   | `terminals`        | `observer, operator`                | The last N lines of a terminal's history, screen, or last command output.                                                                                                                                                                                                                                            |
+| `terminals.processes`    | `query`   | `terminals`        | `observer, operator`                | Foreground processes of one terminal and whether its shell is at a prompt.                                                                                                                                                                                                                                           |
+| `terminals.send`         | `operate` | `terminals`        | `operator`                          | Send text (optionally with Enter or bracketed paste) or key presses to one terminal.                                                                                                                                                                                                                                 |
+| `terminals.run`          | `run`     | `terminals`        | `operator`                          | Completion and output rely on kitty shell integration (at_prompt, last_cmd_output). exit_status is reported only with capture_exit_status, which appends a visible marker to the command line.                                                                                                                       |
+| `terminals.wait`         | `wait`    | `terminals`        | `observer, operator`                | Wait until a terminal is at its prompt, shows a regex, finishes a process, or changes title.                                                                                                                                                                                                                         |
+| `terminals.focus`        | `operate` | `terminals`        | `operator`                          | Focus one kitty window.                                                                                                                                                                                                                                                                                              |
+| `terminals.open`         | `operate` | `terminals`        | `operator`                          | Open a new kitty window (OS window, split or tab) with an optional cwd and command; returns its ref.                                                                                                                                                                                                                 |
+| `browser.pages`          | `catalog` | `browser`          | `observer, operator`                | List every open Chrome page with its ref; flags the gateway-owned pages that can be read, captured or operated.                                                                                                                                                                                                      |
+| `browser.page`           | `get`     | `browser`          | `observer, operator`                | Element refs (g<generation>e<n>) are attached to the DOM for this snapshot; a later snapshot or reload replaces them, and a stale ref fails not_found.                                                                                                                                                               |
+| `browser.screenshot`     | `query`   | `browser`          | `observer, operator`                | Screenshot a gateway-owned page through CDP; the image rides in an image block and is retained as an artifact.                                                                                                                                                                                                       |
+| `browser.operate`        | `operate` | `browser`          | `operator`                          | Operator tabs are never accepted as targets, even when a locator matches one. Element targets take a snapshot ref or a CSS selector.                                                                                                                                                                                 |
+| `machine.snapshot`       | `status`  | `machine`          | `agent-control, observer, operator` | Each section carries its own availability and source; GPU and network report unavailable because no owner exposes them.                                                                                                                                                                                              |
+| `machine.query`          | `query`   | `machine`          | `agent-control, observer, operator` | Read one sinnix-observe section with cursor paging, or the ops-reducer revision (operation=actions).                                                                                                                                                                                                                 |
+| `machine.units.list`     | `query`   | `machine`          | `agent-control, observer, operator` | List systemd units of one manager with load/active/sub state and a canonical ref each.                                                                                                                                                                                                                               |
+| `machine.units.get`      | `get`     | `machine`          | `agent-control, observer, operator` | Describe one unit via systemctl show: states, main pid, cgroup, restarts, timestamps.                                                                                                                                                                                                                                |
+| `machine.units.logs`     | `query`   | `machine`          | `agent-control, observer, operator` | Journal entries for one unit (journalctl -o json), bounded by line count and bytes.                                                                                                                                                                                                                                  |
+| `machine.operate`        | `operate` | `ops-reducer`      | `operator`                          | expected_revision must match machine.query operation=actions; the reducer receipt is verified against the submitted action and target.                                                                                                                                                                               |
+| `machine.units.operate`  | `operate` | `ops-reducer`      | `operator`                          | Start, stop or restart one unit through the ops reducer (reload and wait are not reducer actions).                                                                                                                                                                                                                   |
+| `processes.list`         | `query`   | `machine`          | `agent-control, observer, operator` | List live processes filtered by name, pid, unit, cgroup or user, with a canonical ref each.                                                                                                                                                                                                                          |
+| `processes.get`          | `get`     | `machine`          | `agent-control, observer, operator` | Describe one process: cmdline, cwd, exe, redacted env, cgroup/unit, parent, children, sockets, cpu and memory.                                                                                                                                                                                                       |
+| `processes.tree`         | `query`   | `machine`          | `agent-control, observer, operator` | Parent/child process tree from one root or from every top-level process, bounded by depth and node count.                                                                                                                                                                                                            |
+| `processes.signal`       | `operate` | `machine`          | `operator`                          | The reducer path is the attested one and needs expected_revision; the direct path is receipted by the gateway audit chain only.                                                                                                                                                                                      |
+| `processes.wait`         | `wait`    | `machine`          | `agent-control, observer, operator` | Wait until a process (same pid and start ticks) exits, or the bounded timeout elapses.                                                                                                                                                                                                                               |
+| `mcp.servers`            | `status`  | `mcp-broker`       | `observer, operator`                | Each probe runs initialize + tools/list with a 5 s bound; a timeout stores the upstream stderr as an artifact and returns its ref.                                                                                                                                                                                   |
+| `mcp.tools`              | `catalog` | `mcp-broker`       | `observer, operator`                | Catalog of every admitted upstream tool with its namespaced ref, input schema and read/change effect.                                                                                                                                                                                                                |
+| `mcp.call`               | `query`   | `mcp-broker`       | `observer, operator`                | Tools without a read-only annotation are refused here; use mcp.change (operator only).                                                                                                                                                                                                                               |
+| `mcp.change`             | `change`  | `mcp-broker`       | `operator`                          | Invoke one upstream tool that is not declared read-only.                                                                                                                                                                                                                                                             |
+| `artifacts.list`         | `catalog` | `artifacts`        | `agent-control, observer, operator` | List principal-visible artifacts with kind, owner, size and canonical ref.                                                                                                                                                                                                                                           |
+| `artifacts.get`          | `get`     | `artifacts`        | `agent-control, observer, operator` | Metadata of one artifact without its bytes.                                                                                                                                                                                                                                                                          |
+| `artifacts.read`         | `query`   | `artifacts`        | `agent-control, observer, operator` | Read an artifact: text inline with offsets, images as an image block, other binary as a resource block.                                                                                                                                                                                                              |
+| `captures.query`         | `query`   | `captures`         | `agent-control, observer, operator` | List runtime-declared capture lanes, describe one, or read per-lane record deltas since a time.                                                                                                                                                                                                                      |
+| `activity.query`         | `query`   | `captures`         | `agent-control, observer, operator` | Reads sinnix-capture-v1 envelope files under each lane path within the time window; coverage lists which lanes contributed and which have no envelope files.                                                                                                                                                         |
+| `sessions.query`         | `query`   | `sessions`         | `observer, operator`                | operation=structured queries Polylogue's sessions projection and retains owner coverage and provenance. The owner does not support sessions continuation. Legacy list cursors continue a newest-first snapshot for one hour; legacy reads return next_offset and legacy searches expose their bounded file coverage. |
+| `memory.query`           | `query`   | `memory`           | `observer, operator`                | Search session-derived memory across providers or fetch one object by reference, with source provenance.                                                                                                                                                                                                             |
+| `timeline.query`         | `query`   | `timeline`         | `observer, operator`                | Session evidence ordered by file mtime within an RFC 3339 window, per provider, without claiming unavailable upstreams.                                                                                                                                                                                              |
+| `campaign.progress`      | `query`   | `beads+lynchpin`   | `observer, operator`                | Task closure, verified delivery and acceptance remain separate. Missing evidence is unknown; bounded closure cannot establish an exact denominator. Historical task state is read at its resolved owner revision.                                                                                                    |
+| `sessions.orchestration` | `query`   | `polylogue`        | `observer, operator`                | Native parent, model and token fields remain unknown when absent from stored evidence. Each owner product retains its coverage, provenance and ingestion watermark.                                                                                                                                                  |
+| `audit.verify`           | `status`  | `audit`            | `agent-control, observer, operator` | Verify the tamper-evident audit hash chain end to end.                                                                                                                                                                                                                                                               |
+| `audit.receipt`          | `get`     | `audit`            | `agent-control, observer, operator` | Read one principal-scoped audit receipt by ref or id.                                                                                                                                                                                                                                                                |
+| `results.get`            | `get`     | `results`          | `agent-control, observer, operator` | Read one immutable stored response snapshot by ref or id.                                                                                                                                                                                                                                                            |
+| `capabilities.query`     | `catalog` | `capability-index` | `agent-control, observer, operator` | Search the generated machine capability index or describe one capability exactly.                                                                                                                                                                                                                                    |
 
 ### `gateway.status`
 
@@ -3181,9 +3184,161 @@ Triage:
 }
 ```
 
+### `beads.closure`
+
+Read a bounded dependency closure, cycles, declared gates and decisions, readiness and incomplete frontier at one revision.
+
+Family: `query`. Owner: `beads`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+
+Aliases: dependency closure, campaign closure.
+
+Follow-up actions: `beads.get`, `beads.query`.
+
+Input schema:
+
+```json
+{
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "at": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "deadline_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Unix timestamp after which the call is refused."
+    },
+    "direction": {
+      "default": "prerequisites",
+      "enum": [
+        "prerequisites",
+        "dependents",
+        "both"
+      ],
+      "type": "string"
+    },
+    "max_depth": {
+      "default": 50,
+      "maximum": 100,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "max_nodes": {
+      "default": 500,
+      "maximum": 1000,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "project": {
+      "maxLength": 128,
+      "minLength": 1,
+      "type": "string"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "relation": {
+      "anyOf": [
+        {
+          "maxLength": 64,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": "blocks"
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Caller-chosen correlation id."
+    },
+    "roots": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 100,
+      "minItems": 1,
+      "type": "array"
+    }
+  },
+  "required": [
+    "project",
+    "roots"
+  ],
+  "type": "object"
+}
+```
+
+Output: the response envelope's `data` field is `ClosureOutput`; the full envelope schema is the `sinnix://gateway/v2/actions/beads.closure` resource and `sinnix-agent-gateway catalog beads.closure --schema`.
+
+Examples:
+
+Blocking closure at a historical time:
+
+```json
+{
+  "at": "2026-09-01T12:00:00Z",
+  "max_nodes": 100,
+  "project": "sinnix",
+  "relation": "blocks",
+  "roots": [
+    "sinnix-abc1"
+  ]
+}
+```
+
 ### `beads.query`
 
-limit is passed to the owner so at most limit rows per project are read; page.next_cursor continues the same snapshot.
+The owner filters, projects and counts before serialization. limit sizes pages of one immutable snapshot (10,000 matching rows per project maximum); cursors never reread live rows. at pins historical reads to an exact resolved Dolt revision. aggregate counts or groups without fetching issue bodies.
 
 Family: `query`. Owner: `beads`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
@@ -3979,6 +4134,32 @@ Input schema:
       ],
       "default": null
     },
+    "aggregate": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Count matching records; optional group_by status/type/priority/assignee/owner."
+    },
+    "at": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Exact revision or RFC3339 timestamp with timezone; all reads use the resolved revision."
+    },
     "cursor": {
       "anyOf": [
         {
@@ -4016,7 +4197,7 @@ Input schema:
         }
       ],
       "default": null,
-      "description": "Native Beads query, e.g. status=open AND priority<=1."
+      "description": "Beads-compatible comparison/AND/OR/NOT expression compiled to read-only owner SQL. Supports RFC3339/date and h/d/w relative dates; natural-language dates are unavailable."
     },
     "filters": {
       "anyOf": [
@@ -4062,7 +4243,7 @@ Input schema:
     },
     "limit": {
       "default": 50,
-      "description": "Applied at the owner before any row is materialized.",
+      "description": "Page size within an immutable snapshot; matching rows are projected at the owner, with a 10,000-row snapshot bound.",
       "maximum": 200,
       "minimum": 1,
       "type": "integer"
@@ -4100,6 +4281,14 @@ Input schema:
         }
       ],
       "default": null
+    },
+    "projection": {
+      "default": "summary",
+      "enum": [
+        "summary",
+        "full"
+      ],
+      "type": "string"
     },
     "projects": {
       "anyOf": [
@@ -4335,7 +4524,7 @@ Input schema:
         }
       ],
       "default": null,
-      "description": "Owner history point (bd show --as-of)."
+      "description": "Exact owner revision or RFC3339 timestamp with timezone, resolved to the latest reachable revision at or before it."
     },
     "deadline_at": {
       "anyOf": [
@@ -7626,7 +7815,7 @@ Run on a worktree:
 
 ### `shell.run`
 
-cwd is confined to the checkout; the job's log carries the output.
+cwd is confined to the checkout. Default execution is asynchronous. wait=true waits up to wait_timeout_seconds (default 5, maximum 30) on the same job and returns bounded output; a timeout returns a continuation locator without cancelling the job.
 
 Family: `run`. Owner: `systemd-jobs`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
@@ -7752,6 +7941,12 @@ Input schema:
       "minLength": 1,
       "type": "string"
     },
+    "max_output_bytes": {
+      "default": 64000,
+      "maximum": 262144,
+      "minimum": 1,
+      "type": "integer"
+    },
     "preconditions": {
       "anyOf": [
         {
@@ -7796,6 +7991,16 @@ Input schema:
       "maximum": 3600,
       "minimum": 1,
       "type": "integer"
+    },
+    "wait": {
+      "default": false,
+      "type": "boolean"
+    },
+    "wait_timeout_seconds": {
+      "default": 5,
+      "maximum": 30,
+      "minimum": 1,
+      "type": "integer"
     }
   },
   "required": [
@@ -7807,7 +8012,7 @@ Input schema:
 }
 ```
 
-Output: the response envelope's `data` field is `JobView`; the full envelope schema is the `sinnix://gateway/v2/actions/shell.run` resource and `sinnix-agent-gateway catalog shell.run --schema`.
+Output: the response envelope's `data` field is `ShellRunResult`; the full envelope schema is the `sinnix://gateway/v2/actions/shell.run` resource and `sinnix-agent-gateway catalog shell.run --schema`.
 
 Examples:
 
@@ -9501,6 +9706,38 @@ Input schema:
 ```json
 {
   "$defs": {
+    "HistoricalSelector": {
+      "additionalProperties": false,
+      "properties": {
+        "revision": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "timestamp": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "type": "object"
+    },
     "JobLocator": {
       "additionalProperties": false,
       "description": "A queued job by canonical ref or pueue task id, and the job's own name.\n\nA task id is a position in the queue: `pueue switch` exchanges the ids of\ntwo queued tasks, so an id addresses whatever the queue keeps there. The\nlaunch reference every job response carries addresses the job itself, and\na locator that includes one follows its job across a reorder.",
@@ -9613,6 +9850,28 @@ Input schema:
       ],
       "default": null
     },
+    "at": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/HistoricalSelector"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "baseline": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/HistoricalSelector"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "deadline_at": {
       "anyOf": [
         {
@@ -9630,7 +9889,11 @@ Input schema:
         "project.orientation",
         "project.triage",
         "job.review",
-        "incident"
+        "incident",
+        "campaign.progress",
+        "session.orchestration",
+        "verification.regression",
+        "project.trajectory"
       ],
       "type": "string"
     },
@@ -9671,6 +9934,17 @@ Input schema:
       ],
       "default": null
     },
+    "refresh_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "request_id": {
       "anyOf": [
         {
@@ -9683,6 +9957,20 @@ Input schema:
       ],
       "default": null,
       "description": "Caller-chosen correlation id."
+    },
+    "roots": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 100,
+      "type": "array"
+    },
+    "session_refs": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 20,
+      "type": "array"
     }
   },
   "required": [
@@ -17993,7 +18281,7 @@ Last hour of clipboard and notifications:
 
 ### `sessions.query`
 
-page.next_cursor continues a newest-first snapshot for one hour; omit cursor to refresh. Reads return next_offset. Search hits carry byte offsets and matching snippets; truncated marks incomplete coverage.
+operation=structured queries Polylogue's sessions projection and retains owner coverage and provenance. The owner does not support sessions continuation. Legacy list cursors continue a newest-first snapshot for one hour; legacy reads return next_offset and legacy searches expose their bounded file coverage.
 
 Family: `query`. Owner: `sessions`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
@@ -18112,6 +18400,91 @@ Input schema:
         "query"
       ],
       "type": "object"
+    },
+    "SessionsStructuredOp": {
+      "additionalProperties": false,
+      "properties": {
+        "expression": {
+          "anyOf": [
+            {
+              "maxLength": 1000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Owner-ranked free-text search; omit for exhaustive filtered listing."
+        },
+        "limit": {
+          "default": 100,
+          "maximum": 500,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "operation": {
+          "const": "structured",
+          "default": "structured",
+          "type": "string"
+        },
+        "origin": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "repo": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "since": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "sort": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "until": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "type": "object"
     }
   },
   "additionalProperties": false,
@@ -18159,7 +18532,8 @@ Input schema:
         "mapping": {
           "list": "#/$defs/SessionsListOp",
           "read": "#/$defs/SessionsReadOp",
-          "search": "#/$defs/SessionsSearchOp"
+          "search": "#/$defs/SessionsSearchOp",
+          "structured": "#/$defs/SessionsStructuredOp"
         },
         "propertyName": "operation"
       },
@@ -18172,6 +18546,9 @@ Input schema:
         },
         {
           "$ref": "#/$defs/SessionsSearchOp"
+        },
+        {
+          "$ref": "#/$defs/SessionsStructuredOp"
         }
       ]
     },
@@ -18199,6 +18576,18 @@ Input schema:
 Output: the response envelope's `data` field is `SessionsResult`; the full envelope schema is the `sinnix://gateway/v2/actions/sessions.query` resource and `sinnix-agent-gateway catalog sessions.query --schema`.
 
 Examples:
+
+Structured project sessions:
+
+```json
+{
+  "request": {
+    "limit": 20,
+    "operation": "structured",
+    "repo": "sinnix"
+  }
+}
+```
 
 Recent Claude Code sessions:
 
@@ -18558,6 +18947,346 @@ Yesterday's sessions:
 {
   "end": "2026-09-05T00:00:00Z",
   "start": "2026-09-04T00:00:00Z"
+}
+```
+
+### `campaign.progress`
+
+Task closure, verified delivery and acceptance remain separate. Missing evidence is unknown; bounded closure cannot establish an exact denominator. Historical task state is read at its resolved owner revision.
+
+Family: `query`. Owner: `beads+lynchpin`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+
+Follow-up actions: `beads.query`, `beads.get`, `context.compose`.
+
+Input schema:
+
+```json
+{
+  "$defs": {
+    "HistoricalSelector": {
+      "additionalProperties": false,
+      "properties": {
+        "revision": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "timestamp": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "type": "object"
+    },
+    "ProjectLocator": {
+      "additionalProperties": false,
+      "description": "A configured project by canonical ref, project id, or a path inside it.",
+      "properties": {
+        "path": {
+          "anyOf": [
+            {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Absolute host path inside a project checkout."
+        },
+        "project": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Project id."
+        },
+        "ref": {
+          "anyOf": [
+            {
+              "pattern": "^sinnix://projects/[^/]+(?:/checkouts/[^/]+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Canonical project or checkout ref."
+        }
+      },
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "at": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/HistoricalSelector"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "baseline": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/HistoricalSelector"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "deadline_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Unix timestamp after which the call is refused."
+    },
+    "direction": {
+      "default": "prerequisites",
+      "enum": [
+        "prerequisites",
+        "dependents"
+      ],
+      "type": "string"
+    },
+    "max_depth": {
+      "default": 50,
+      "maximum": 100,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "max_nodes": {
+      "default": 500,
+      "maximum": 1000,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "project": {
+      "$ref": "#/$defs/ProjectLocator"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "refresh_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "relation": {
+      "default": "blocks",
+      "enum": [
+        "blocks",
+        "parent-child"
+      ],
+      "type": "string"
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Caller-chosen correlation id."
+    },
+    "roots": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 100,
+      "minItems": 1,
+      "type": "array"
+    }
+  },
+  "required": [
+    "project",
+    "roots"
+  ],
+  "type": "object"
+}
+```
+
+Output: the response envelope's `data` field is `CampaignResult`; the full envelope schema is the `sinnix://gateway/v2/actions/campaign.progress` resource and `sinnix-agent-gateway catalog campaign.progress --schema`.
+
+Examples:
+
+Campaign evidence:
+
+```json
+{
+  "project": {
+    "project": "sinnix"
+  },
+  "roots": [
+    "sinnix-1"
+  ]
+}
+```
+
+### `sessions.orchestration`
+
+Native parent, model and token fields remain unknown when absent from stored evidence. Each owner product retains its coverage, provenance and ingestion watermark.
+
+Family: `query`. Owner: `polylogue`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+
+Follow-up actions: `sessions.query`, `context.compose`.
+
+Input schema:
+
+```json
+{
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "deadline_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Unix timestamp after which the call is refused."
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Caller-chosen correlation id."
+    },
+    "session_refs": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 20,
+      "minItems": 1,
+      "type": "array"
+    }
+  },
+  "required": [
+    "session_refs"
+  ],
+  "type": "object"
+}
+```
+
+Output: the response envelope's `data` field is `OrchestrationResult`; the full envelope schema is the `sinnix://gateway/v2/actions/sessions.orchestration` resource and `sinnix-agent-gateway catalog sessions.orchestration --schema`.
+
+Examples:
+
+Session orchestration:
+
+```json
+{
+  "session_refs": [
+    "session:example"
+  ]
 }
 ```
 

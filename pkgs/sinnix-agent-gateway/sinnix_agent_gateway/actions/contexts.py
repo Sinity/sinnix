@@ -10,11 +10,22 @@ from ..action import ALL_PRINCIPALS, Action, Example, RequestControls
 from ..contracts import VerbFamily
 from ..locators import JobLocator, ProjectLocator, project_ref
 from ..schemas import GatewayModel
+from ..results import ProtocolError
+from .products import HistoricalSelector
 
 if TYPE_CHECKING:
     from ..runtime import Runtime
 
-Intent = Literal["project.orientation", "project.triage", "job.review", "incident"]
+Intent = Literal[
+    "project.orientation",
+    "project.triage",
+    "job.review",
+    "incident",
+    "campaign.progress",
+    "session.orchestration",
+    "verification.regression",
+    "project.trajectory",
+]
 
 
 class ComposeInput(RequestControls):
@@ -24,6 +35,11 @@ class ComposeInput(RequestControls):
         description="Required for project.orientation, project.triage and incident.",
     )
     job: JobLocator | None = Field(default=None, description="Required for job.review.")
+    roots: list[str] = Field(default_factory=list, max_length=100)
+    session_refs: list[str] = Field(default_factory=list, max_length=20)
+    at: HistoricalSelector | None = None
+    baseline: HistoricalSelector | None = None
+    refresh_id: str | None = None
 
     @model_validator(mode="after")
     def target_matches_intent(self) -> ComposeInput:
@@ -32,6 +48,10 @@ class ComposeInput(RequestControls):
             raise ValueError("job.review takes job and no project")
         if not wants_job and (self.project is None or self.job is not None):
             raise ValueError(f"{self.intent} takes project and no job")
+        if self.intent == "campaign.progress" and not self.roots:
+            raise ValueError("campaign.progress requires explicit roots")
+        if self.intent == "session.orchestration" and not self.session_refs:
+            raise ValueError("session.orchestration requires session_refs")
         return self
 
 
@@ -73,6 +93,10 @@ class ComposedContext(GatewayModel):
 
 
 _AFFORDANCES: dict[str, list[str]] = {
+    "campaign.progress": ["campaign.progress", "beads.get"],
+    "session.orchestration": ["sessions.orchestration", "sessions.query"],
+    "verification.regression": ["campaign.progress", "jobs.get"],
+    "project.trajectory": ["campaign.progress", "sessions.query"],
     "project.orientation": ["batches.start", "jobs.list", "events.tail"],
     "project.triage": ["batches.start", "jobs.list", "events.tail"],
     "job.review": ["jobs.logs", "jobs.retry", "jobs.cancel"],
@@ -80,16 +104,113 @@ _AFFORDANCES: dict[str, list[str]] = {
 }
 
 
-def _compose(runtime: Runtime, inp: ComposeInput) -> ComposedContext:
+async def _compose(runtime: Runtime, inp: ComposeInput) -> ComposedContext:
     launch_reference = None
     if inp.job is not None:
         _, ref, launch_reference = inp.job.resolve()
     else:
         assert inp.project is not None
         ref = project_ref(inp.project.resolve(runtime))
-    context = runtime.compose_context(
-        ref, inp.intent, launch_reference=launch_reference
-    )
+    if inp.intent in {
+        "campaign.progress",
+        "session.orchestration",
+        "verification.regression",
+        "project.trajectory",
+    }:
+        from .products import (
+            CampaignInput,
+            OrchestrationInput,
+            _campaign,
+            _orchestration,
+            owner_product,
+        )
+        from ..contexts import ComponentResult, ComponentSpec
+
+        assert inp.project is not None
+        project = inp.project.resolve(runtime)
+        runtime.projects._project(project)
+        if inp.intent == "campaign.progress":
+            try:
+                value = (
+                    await _campaign(
+                        runtime,
+                        CampaignInput(
+                            project=inp.project,
+                            roots=inp.roots,
+                            at=inp.at,
+                            baseline=inp.baseline,
+                            refresh_id=inp.refresh_id,
+                            deadline_at=inp.deadline_at,
+                        ),
+                    )
+                ).model_dump()
+                result = ComponentResult.available("campaign", value, source_ref=ref)
+            except ProtocolError as exc:
+                if exc.code not in {
+                    "unavailable",
+                    "owner_failed",
+                    "unsupported_capability",
+                }:
+                    raise
+                result = ComponentResult.unavailable(
+                    "campaign", str(exc), source_ref=ref
+                )
+        elif inp.intent == "session.orchestration":
+            value = (
+                await _orchestration(
+                    runtime,
+                    OrchestrationInput(
+                        session_refs=inp.session_refs, deadline_at=inp.deadline_at
+                    ),
+                )
+            ).model_dump()
+            if any(row["availability"] == "available" for row in value["sessions"]):
+                result = ComponentResult.available(
+                    "orchestration", value, source_ref="sinnix://mcp/polylogue"
+                )
+            else:
+                result = ComponentResult.unavailable(
+                    "orchestration",
+                    "; ".join(
+                        row.get("reason") or "Owner unavailable"
+                        for row in value["sessions"]
+                    ),
+                    source_ref="sinnix://mcp/polylogue",
+                )
+        else:
+            product = await owner_product(
+                runtime,
+                "lynchpin",
+                "lynchpin_project",
+                {
+                    "action": inp.intent.replace(".", "_"),
+                    "project": project,
+                    **({"refresh_id": inp.refresh_id} if inp.refresh_id else {}),
+                },
+                deadline_at=inp.deadline_at,
+            )
+            result = (
+                ComponentResult.available(
+                    "evidence", product.data, source_ref=product.source_ref
+                )
+                if product.availability == "available"
+                else ComponentResult.unavailable(
+                    "evidence",
+                    product.reason or "Owner unavailable",
+                    source_ref=product.source_ref,
+                )
+            )
+        context = runtime.context_composer.compose(
+            inp.intent, ref, [ComponentSpec(result.name, 56000, lambda: result)]
+        )
+        if runtime.context_snapshots is None:
+            raise ProtocolError("unavailable", "Context snapshot store is unavailable")
+        runtime.context_snapshots.put(context)
+        context = {"ref": ref, **context}
+    else:
+        context = runtime.compose_context(
+            ref, inp.intent, launch_reference=launch_reference
+        )
     return ComposedContext(
         ref=context["ref"],
         intent=context["intent"],
@@ -125,7 +246,7 @@ ACTIONS: tuple[Action, ...] = (
         name="context.compose",
         family=VerbFamily.CONTEXT,
         owner="context",
-        summary="Compose a bounded snapshot for one intent: project orientation or triage, job review, or an incident.",
+        summary="Compose bounded project, job, incident, campaign, orchestration, regression or trajectory evidence from its owners.",
         Input=ComposeInput,
         Output=ComposedContext,
         handler=_compose,

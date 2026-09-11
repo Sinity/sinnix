@@ -158,9 +158,8 @@ let
       mcpRegistry,
       # helpers.data.agentLanes
       agentLanes,
-      # dots/_ai/skills, and flake/data/shared-agent-skills.nix's roster.
+      # dots/_ai/skills, the live root shared by native clients.
       skillsRoot,
-      sharedSkills,
     }:
     let
       relative =
@@ -370,8 +369,8 @@ let
               throw "capability-index: dots/_ai/skills/${name}/SKILL.md frontmatter has no description"
             else
               description;
-          # In the shared roster ⇒ linked into every agent's skill tree.
-          enabled = builtins.elem name sharedSkills;
+          # Native discovery points directly at this live root.
+          enabled = true;
           owner = "dots/_ai/skills/${name}/SKILL.md";
           docs = frontmatterDocs lines;
         }

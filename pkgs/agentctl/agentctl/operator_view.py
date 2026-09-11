@@ -12,7 +12,6 @@ import sys
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from types import MappingProxyType
 from typing import Any, Mapping, Sequence
 
 from . import github, launch, pueue
@@ -123,9 +122,6 @@ class Snapshot:
     runs: tuple[Run, ...]
     ready: tuple[Mapping[str, Any], ...]
     errors: tuple[str, ...] = field(default_factory=tuple)
-    # Task id -> the exclusivity hold keeping it out of its pool, with the
-    # pools it is still waiting on as they are now.
-    holds: Mapping[int, Mapping[str, Any]] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -135,16 +131,13 @@ class Snapshot:
             "groups": {
                 name: {
                     "status": status,
-                    **_group_counts(self.tasks, name, self.holds),
+                    **_group_counts(self.tasks, name),
                 }
                 for name, status in sorted(self.groups.items())
             },
             "jobs": [
                 {
                     **job_view(task),
-                    **(
-                        {"hold": hold} if (hold := self.holds.get(task.task_id)) else {}
-                    ),
                 }
                 for task in self.tasks
             ],
@@ -282,7 +275,6 @@ def run_next(
 def _group_counts(
     tasks: Sequence[Task],
     group: str,
-    holds: Mapping[int, Mapping[str, Any]] = MappingProxyType({}),
 ) -> dict[str, int]:
     counts = Counter(
         task.status.lower()
@@ -293,21 +285,12 @@ def _group_counts(
         "running": counts.get("running", 0),
         "queued": counts.get("queued", 0),
         "paused": counts.get("paused", 0),
-        # Stashed by agentctl because an excluded pool was live: the pool is
-        # idle but the work is not gone.
-        "held": sum(
-            1 for task in tasks if task.group == group and task.task_id in holds
-        ),
     }
 
 
-def job_state(task: Task, holds: Mapping[int, Mapping[str, Any]]) -> str:
-    """A task's state as the screen says it, naming what a hold waits for."""
-    hold = holds.get(task.task_id)
-    if hold is None:
-        return task.status.lower()
-    excluded = ", ".join(str(pool) for pool in hold.get("excluded_by") or ())
-    return f"held for {excluded}" if excluded else "held"
+def job_state(task: Task) -> str:
+    """Pueue's actual state, including normal dependencies and stashes."""
+    return task.status.lower()
 
 
 def collect(
@@ -315,7 +298,6 @@ def collect(
 ) -> Snapshot:
     errors: list[str] = []
     prefix = f"{project.project_id}:"
-    holds: dict[int, Mapping[str, Any]] = {}
     try:
         every = pueue.tasks()
         tasks = tuple(
@@ -324,14 +306,6 @@ def collect(
             if task.label.startswith(prefix)
         )
         groups = pueue.groups_status()
-        # Computed over the whole queue — what holds this project's task is
-        # usually another project's — and then shown for this project's own.
-        shown = {task.task_id for task in tasks}
-        holds = {
-            task_id: hold
-            for task_id, hold in launch.holds(config, every).items()
-            if task_id in shown
-        }
     except PueueError as error:
         tasks, groups = (), {}
         errors.append(f"pueue: {error}")
@@ -354,7 +328,6 @@ def collect(
         runs=runs,
         ready=ready,
         errors=tuple(errors),
-        holds=holds,
     )
 
 
@@ -385,7 +358,7 @@ def render(snapshot: Snapshot) -> str:
 
     group_text = []
     for group, status in sorted(snapshot.groups.items()):
-        counts = _group_counts(snapshot.tasks, group, snapshot.holds)
+        counts = _group_counts(snapshot.tasks, group)
         detail = " ".join(
             f"{count} {state}" for state, count in counts.items() if count
         )
@@ -440,7 +413,7 @@ def render(snapshot: Snapshot) -> str:
                     (
                         task.task_id,
                         task.label,
-                        job_state(task, snapshot.holds),
+                        job_state(task),
                         local_clock(task.started_at or task.enqueued_at),
                         age(task.started_at or task.enqueued_at, now),
                     )
