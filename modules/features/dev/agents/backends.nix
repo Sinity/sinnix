@@ -363,11 +363,25 @@ let
           # command by this wrapper.
           while [ "$#" -gt 0 ]; do
             case "$1" in
-              -c|--config|--enable|--disable|--remote|--remote-auth-token-env|-m|--model|--local-provider|-p|--profile|-s|--sandbox|-C|--cd|--add-dir|-a|--ask-for-approval)
+              -p|--profile)
+                if [ "$#" -ge 2 ]; then
+                  export SINNIX_CODEX_PROFILE="$2"
+                fi
+                return 1
+                ;;
+              --profile=*)
+                export SINNIX_CODEX_PROFILE="''${1#--profile=}"
+                return 1
+                ;;
+              -p?*)
+                export SINNIX_CODEX_PROFILE="''${1#-p}"
+                return 1
+                ;;
+              -c|--config|--enable|--disable|--remote|--remote-auth-token-env|-m|--model|--local-provider|-s|--sandbox|-C|--cd|--add-dir|-a|--ask-for-approval)
                 [ "$#" -ge 2 ] || return 0
                 shift 2
                 ;;
-              --config=*|--enable=*|--disable=*|--remote=*|--remote-auth-token-env=*|--model=*|--local-provider=*|--profile=*|--sandbox=*|--cd=*|--add-dir=*|--ask-for-approval=*)
+              --config=*|--enable=*|--disable=*|--remote=*|--remote-auth-token-env=*|--model=*|--local-provider=*|--sandbox=*|--cd=*|--add-dir=*|--ask-for-approval=*)
                 shift
                 ;;
               --strict-config|--oss|--approve-for-me|--dangerously-bypass-approvals-and-sandbox|--dangerously-bypass-hook-trust|--worktree|--search|--no-alt-screen)
