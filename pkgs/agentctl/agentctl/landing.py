@@ -11,6 +11,7 @@ import shutil
 import stat
 import subprocess
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
@@ -560,6 +561,47 @@ def _required_checks(project: ProjectAdapter, run: Run) -> tuple[str, ...]:
     return (profile.removeprefix("hosted:"),) if profile.startswith("hosted:") else ()
 
 
+def _job_duration_seconds(job: Mapping[str, Any]) -> int | None:
+    """Return a task's observed wall duration when its timestamps are usable."""
+    started = job.get("started_at") or job.get("enqueued_at")
+    ended = job.get("ended_at")
+    if not isinstance(started, str) or not isinstance(ended, str):
+        return None
+    try:
+        start = datetime.fromisoformat(started.replace("Z", "+00:00"))
+        finish = datetime.fromisoformat(ended.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return max(0, int((finish - start).total_seconds()))
+
+
+def _verification_failure_detail(
+    profile: str, job: Mapping[str, Any], timeout_seconds: float
+) -> str:
+    """Describe the observed terminal outcome, never the stale wait phase."""
+    phase = str(job.get("phase") or "vanished")
+    # A wait that consumed the operation budget can return the pre-terminal
+    # queue view.  That is a timeout observation, not evidence that verification
+    # is still running; a later queue read above may replace it with the wrapper
+    # outcome (timeout, failed, cancelled, or vanished).
+    if job.get("wait_timed_out") and not job.get("terminal"):
+        phase = "timeout"
+    exit_code = job.get("exit_code")
+    duration = _job_duration_seconds(job)
+    if phase == "timeout" and duration is None:
+        duration = int(timeout_seconds)
+    detail = f"{profile} task {job.get('job_id')} {phase}"
+    facts: list[str] = []
+    if exit_code is not None:
+        facts.append(f"exit {exit_code}")
+    facts.append(
+        f"duration {duration}s" if duration is not None else "duration unknown"
+    )
+    if phase == "timeout":
+        facts.append(f"budget {timeout_seconds:g}s")
+    return f"{detail} ({', '.join(facts)})"
+
+
 def _verify(
     config: Config,
     project: ProjectAdapter,
@@ -636,9 +678,26 @@ def _verify(
         timeout_seconds=operation.timeout_seconds,
         reference=started.get("reference"),
     )
+    # `launch.wait` can return the last non-terminal view at the exact instant
+    # the wrapper's descriptor timeout expires.  Reconcile against pueue's
+    # current record before deciding, so a terminal timeout is reported as such
+    # instead of being mislabelled `running`.
+    try:
+        task = launch.find_task(
+            pueue.tasks(), waited.get("job_id", job_id), started.get("reference")
+        )
+    except PueueError:
+        task = None
+    if task is not None and (
+        task.terminal or waited.get("phase") in {"running", "queued", "stashed"}
+    ):
+        waited = {**waited, **launch.job_view(task)}
     if waited.get("phase") != "succeeded":
         raise BatchRefusal(
-            "verify_failed", f"{profile} task {waited['job_id']} {waited.get('phase')}"
+            "verify_failed",
+            _verification_failure_detail(profile, waited, operation.timeout_seconds),
+            timed_out=waited.get("phase") == "timeout"
+            or waited.get("wait_timed_out") is True,
         )
     receipt = {
         "kind": "operation",
