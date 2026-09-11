@@ -90,6 +90,24 @@ no business holding. The idle window is 300 s rather than the GPU services'
 30 s, because nothing scarce is being held and reloading the encoder between
 the turns of one conversation would be the only real cost.
 
+## Review transcription
+
+For selected recordings that need a more detailed transcript, `scripts/sinnix-stt-review` calls ElevenLabs Scribe v2 with an explicit language (`pol` by default), speaker diarization and word timestamps. This uploads the named audio files to ElevenLabs and uses the account's transcription credits. It processes the full recordings without the local VAD gate. The automatic local capture pass keeps its existing engine.
+
+```bash
+agentctl job start sinnix transcribe_review -- \
+  --api-key-file /path/to/private/elevenlabs-key \
+  --output-dir /path/to/private/transcription-output recording.m4a
+```
+
+The operation runs the source script from the selected checkout, so it is usable without host activation. Direct invocation also accepts `ELEVENLABS_API_KEY`. Keep credentials outside the checkout and pass only their file path to queued jobs.
+
+Each output directory holds the unedited API responses, source paths and SHA-256 hashes, request settings, a readable `transcript.md`, `review-spans.json`, and `alignment-review.json`. The score review selects spans containing a word with log probability below -1 as a review heuristic. The alignment review flags words lasting over two seconds, which can expose timestamps stretched over quiet intervals. Scores are not calibrated correctness probabilities, and a confident error can escape the list. Speaker IDs are local to each input file. Filenames containing a UTC recording timestamp are displayed in Warsaw time; other inputs use relative seconds. Rerunning the same command reuses completed responses; changed audio or settings require a new output directory.
+
+Scribe v2 supports Polish conditioning together with word evidence. Voxtral Mini Transcribe 2's published language list does not include Polish, and Mistral currently documents language conditioning and timestamps as incompatible. This makes Scribe the supported choice for this review path, without establishing a universal accuracy ranking. Keep inferred wording in a separate review document with source times and alternatives; do not rewrite raw recognizer evidence.
+
+References: [Scribe languages](https://elevenlabs.io/docs/overview/capabilities/speech-to-text), [Scribe API](https://elevenlabs.io/docs/api-reference/speech-to-text/convert), [Voxtral languages](https://mistral.ai/news/voxtral-transcribe-2/), [Voxtral timestamp constraints](https://docs.mistral.ai/studio/audio/speech_to_text/offline_transcription).
+
 ## Lanes
 
 Discovered from disk, not hard-coded — the desktop capture root holds three

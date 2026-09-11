@@ -108,6 +108,14 @@ result = "exit"
 cache = "none"
 timeout_seconds = 3600
 
+[operations.transcribe_review]
+description = "Transcribe selected recordings with Scribe v2 and retain word evidence"
+exec = ["python3", "scripts/sinnix-stt-review"]
+pool = "normal"
+result = "exit"
+cache = "none"
+timeout_seconds = 3600
+
 [operations.diarize]
 description = "Identify speaker turns in a selected audio file"
 exec = ["sinnix-stt", "diarize"]
