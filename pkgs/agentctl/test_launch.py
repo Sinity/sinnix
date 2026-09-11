@@ -281,6 +281,31 @@ def test_result_of_an_exit_operation_is_the_status_alone(
     assert outcome["exit_code"] == 0
 
 
+def test_result_of_an_exit_operation_keeps_the_wrapper_execution_receipt(
+    fake_pueue: FakePueue, config: Config, project_root: Path
+) -> None:
+    project = load_project_adapter(project_root)
+    started = launch.start_operation(config, project, project.operation("check"))
+    task = fake_pueue.task(started["job_id"])
+    written = read_launch(config, task)
+    Path(written["log_path"]).parent.mkdir(parents=True, exist_ok=True)
+    outcome_path_for(written["log_path"]).write_text(
+        json.dumps(
+            {
+                "outcome": "success",
+                "exit_code": 0,
+                "execution_receipt": {"binding": "unchanged_endpoints"},
+            }
+        )
+    )
+    fake_pueue.succeed(started["job_id"])
+
+    result = launch.result(config, started["job_id"])
+
+    assert result["kind"] == "exit"
+    assert result["outcome"]["execution_receipt"]["binding"] == "unchanged_endpoints"
+
+
 def test_cancel_marks_then_stops_the_unit_then_kills_the_task(
     fake_pueue: FakePueue,
     config: Config,

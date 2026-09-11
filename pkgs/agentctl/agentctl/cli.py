@@ -34,7 +34,16 @@ import time
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from . import backpressure, batch, launch, operator_view, pools, schedule
+from . import (
+    backpressure,
+    batch,
+    evidence,
+    evidence_history,
+    launch,
+    operator_view,
+    pools,
+    schedule,
+)
 from .config import Config, ConfigError, load_config, resolve_project
 from .github import GithubError
 from .launch import JobError
@@ -75,6 +84,7 @@ _REFUSALS = (
     PromptError,
     ProjectConfigError,
     ProjectEnvironmentError,
+    evidence_history.GitHistoryError,
 )
 _SUBSTRATE_ERRORS = (BatchError, GithubError, PueueError, TimerError, WorktrunkError)
 
@@ -308,6 +318,36 @@ def parser() -> argparse.ArgumentParser:
     _project_option(batch_resume)
     _agent_arguments(batch_resume)
     _output_arguments(batch_resume)
+
+    native_evidence = verbs.add_parser(
+        "evidence", help="file and read immutable native-work evidence"
+    )
+    evidence_verbs = native_evidence.add_subparsers(dest="evidence_verb", required=True)
+    evidence_file = evidence_verbs.add_parser(
+        "file",
+        help="validate and retain one native worker-result claim with observations",
+    )
+    evidence_file.add_argument("path", type=Path)
+    _project_option(evidence_file)
+    _output_arguments(evidence_file)
+    evidence_list = evidence_verbs.add_parser(
+        "list", help="retained native-work evidence for one project"
+    )
+    evidence_list.add_argument(
+        "selector", nargs="?", metavar="project", help=PROJECT_HELP
+    )
+    _project_option(evidence_list)
+    _output_arguments(evidence_list)
+    evidence_discover = evidence_verbs.add_parser(
+        "discover", help="find bounded explicit Beads links in reachable Git history"
+    )
+    evidence_discover.add_argument("--bead", required=True)
+    _project_option(evidence_discover)
+    evidence_discover.add_argument("--ref", dest="reference", default="HEAD")
+    evidence_discover.add_argument(
+        "--limit", type=int, default=evidence_history.DEFAULT_HISTORY_LIMIT
+    )
+    _output_arguments(evidence_discover)
 
     view = verbs.add_parser("view", help="the operator screen")
     view.add_argument("selector", nargs="?", metavar="project", help=PROJECT_HELP)
@@ -584,7 +624,7 @@ def _batch(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         )
         return EXIT_OK
     if verb == "clean":
-        project = _select_project(config, arguments.project, arguments.selector)
+        project = resolve_project(config, arguments.project)
         cleaned = batch.clean(config, project)
         kept = [f"{row['branch']}: {row['reason']}" for row in cleaned["kept"]]
         out.write(
@@ -652,6 +692,31 @@ def _batch(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         )
         return EXIT_OK
     raise AssertionError(verb)
+
+
+def _evidence(arguments: argparse.Namespace, config: Config, out: Output) -> int:
+    if arguments.evidence_verb == "file":
+        project = resolve_project(config, arguments.project)
+        filed = evidence.file(config, project, arguments.path)
+        out.write(filed, f"recorded native evidence {filed['evidence_id']}")
+        return EXIT_OK
+    if arguments.evidence_verb == "list":
+        project = _select_project(config, arguments.project, arguments.selector)
+        records = evidence.list_records(config, project.project_id)
+        out.read(records, json.dumps(records, indent=2, sort_keys=True))
+        return EXIT_OK
+    if arguments.evidence_verb == "discover":
+        project = resolve_project(config, arguments.project)
+        discovered = evidence_history.discover_git_history(
+            project.root,
+            project=project.project_id,
+            bead=arguments.bead,
+            reference=arguments.reference,
+            limit=arguments.limit,
+        )
+        out.read(discovered, json.dumps(discovered, indent=2, sort_keys=True))
+        return EXIT_OK
+    raise AssertionError(arguments.evidence_verb)
 
 
 def _event_line(event: Mapping[str, Any]) -> str:
@@ -776,6 +841,8 @@ def _dispatch(arguments: argparse.Namespace, config: Config, out: Output) -> int
         return _job(arguments, config, out)
     if verb == "batch":
         return _batch(arguments, config, out)
+    if verb == "evidence":
+        return _evidence(arguments, config, out)
     if verb == "view":
         project = _select_project(config, arguments.project, arguments.selector)
         snapshot = operator_view.collect(config, project, now=out.now)

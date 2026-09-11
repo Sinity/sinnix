@@ -78,6 +78,12 @@ markers — grep for them before continuing.
 
 ## After landing
 
+For native task-bound work, use `agentctl evidence file` to retain the result
+with owner-checked publication and job references. Follow `docs/agentctl.md`;
+missing historical receipts remain unknown rather than being reconstructed
+from a successful commit or a worker assertion. This does not create a batch
+or require another checkout.
+
 `batch land` closes the beads whose criteria its worker results satisfy,
 comments the residual on the rest, and removes the worker worktrees; read
 the acceptance record in `batch status <run>`. Close beads you landed by

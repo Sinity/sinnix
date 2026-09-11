@@ -11,6 +11,7 @@ from typing import Any
 
 import pytest
 from agentctl import pueue
+from agentctl import run as run_module
 from agentctl.run import (
     CANCELLED_EXIT_CODE,
     MAX_LOG_BYTES,
@@ -66,6 +67,92 @@ def log_of(tmp_path: Path) -> str:
 
 def outcome_of(tmp_path: Path) -> dict[str, Any]:
     return json.loads(outcome_path_for(tmp_path / "job-a.log").read_text())
+
+
+def test_git_observation_is_read_only_and_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[list[str]] = []
+
+    def probe(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        assert kwargs["env"]["GIT_OPTIONAL_LOCKS"] == "0"
+        output = {
+            "rev-parse": "head\n" if command[-1] == "HEAD" else "tree\n",
+            "status": " M changed.py\n",
+        }[command[3]]
+        return subprocess.CompletedProcess(command, 0, stdout=output, stderr="")
+
+    monkeypatch.setattr(run_module.subprocess, "run", probe)
+
+    observed = run_module.git_observation(tmp_path, observed_at="2026-09-11T00:00:00Z")
+
+    assert observed == {
+        "observed_at": "2026-09-11T00:00:00Z",
+        "head": "head",
+        "tree": "tree",
+        "dirty": True,
+        "status": "observed",
+        "reason": None,
+    }
+    assert [command[3:] for command in calls] == [
+        ["rev-parse", "HEAD"],
+        ["rev-parse", "HEAD^{tree}"],
+        ["status", "--porcelain=v1", "--untracked-files=all"],
+    ]
+
+
+def test_execution_receipt_distinguishes_changed_and_unavailable_endpoints() -> None:
+    start = {
+        "observed_at": "start",
+        "head": "a",
+        "tree": "b",
+        "dirty": False,
+        "status": "observed",
+        "reason": None,
+    }
+    changed = {**start, "observed_at": "end", "tree": "c"}
+
+    assert run_module.execution_receipt(start, changed)["binding"] == "changed"
+    unavailable = {**changed, "status": "unavailable", "reason": "git_tree_unavailable"}
+    receipt = run_module.execution_receipt(start, unavailable)
+    assert receipt["binding"] == "unavailable"
+    assert receipt["reason"] == "git_observation_unavailable"
+
+
+def test_run_records_execution_receipt_even_without_cache_policy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    launch = write_launch(tmp_path, argv=["true"])
+    observations = iter(
+        [
+            {
+                "observed_at": "start",
+                "head": "a",
+                "tree": "b",
+                "dirty": False,
+                "status": "observed",
+                "reason": None,
+            },
+            {
+                "observed_at": "end",
+                "head": "a",
+                "tree": "b",
+                "dirty": False,
+                "status": "observed",
+                "reason": None,
+            },
+        ]
+    )
+    monkeypatch.setattr(
+        run_module, "git_observation", lambda *_args: next(observations)
+    )
+
+    assert main([str(launch)]) == 0
+    receipt = outcome_of(tmp_path)["execution_receipt"]
+    assert receipt["binding"] == "unchanged_endpoints"
+    assert receipt["start"]["head"] == "a"
+    assert events(tmp_path)[-1]["execution_receipt"] == receipt
 
 
 def described(pool: str, task: object) -> str:
@@ -428,13 +515,18 @@ def test_a_failing_command_reports_its_own_exit_status(tmp_path: Path) -> None:
     launch = write_launch(tmp_path, argv=["sh", "-c", "exit 3"])
 
     assert main([str(launch)]) == 3
-    assert outcome_of(tmp_path) == {
+    outcome = outcome_of(tmp_path)
+    assert {
+        key: outcome[key]
+        for key in ("outcome", "exit_code", "unit", "pool", "systemd_result")
+    } == {
         "outcome": "failed",
         "exit_code": 3,
         "unit": None,
         "pool": None,
         "systemd_result": None,
     }
+    assert outcome["execution_receipt"]["binding"] == "unavailable"
 
 
 def test_a_failing_service_reports_the_main_process_status(
@@ -896,13 +988,18 @@ def test_a_restarted_task_accounts_its_outcome_again(
     fake_systemd.terminal()
     assert main([str(launch)]) == 0
 
-    assert outcome_of(tmp_path) == {
+    outcome = outcome_of(tmp_path)
+    assert {
+        key: outcome[key]
+        for key in ("outcome", "exit_code", "unit", "pool", "systemd_result")
+    } == {
         "outcome": "success",
         "exit_code": 0,
         "unit": unit_for(launch, "pytest"),
         "pool": "pytest",
         "systemd_result": "success",
     }
+    assert outcome["execution_receipt"]["binding"] == "unavailable"
     spooled = events(tmp_path)
     assert [(e["phase"], e.get("outcome")) for e in spooled] == [
         ("started", None),
@@ -911,3 +1008,8 @@ def test_a_restarted_task_accounts_its_outcome_again(
         ("finished", "success"),
     ]
     assert {e["task_id"] for e in spooled if e["phase"] == "finished"} == {task_id}
+    assert [
+        event["execution_receipt"]["binding"]
+        for event in spooled
+        if event["phase"] == "finished"
+    ] == ["unavailable", "unavailable"]
