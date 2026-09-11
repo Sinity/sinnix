@@ -384,3 +384,77 @@ def test_to_dict_carries_stage_next_timing_and_group_counts() -> None:
         and runs["run-1"]["landing"]["phase"] == "queued"
     )
     json.dumps(payload)
+
+
+def test_a_landing_the_queue_no_longer_has_is_named_not_ready_to_land() -> None:
+    """mzw2: a task id pueue lost with its state is not a stage anyone waits for."""
+    lost = run("run-6", [worker("fx-8", task_id=4, result=True)], landing_task=99)
+
+    row = operator_view.run_dict(lost, snapshot().tasks, NOW)
+
+    assert (row["stage"], row["next"]) == ("landing vanished", "batch queue")
+    assert row["landing"]["vanished"] == 99 and row["landing"]["job"] is None
+    text = operator_view.render(snapshot(runs=(lost,)))
+    assert (
+        "! run run-6 landing vanished (landing task 99 gone from pueue): batch queue"
+        in text
+    )
+    assert "#99 gone" in text
+
+
+def test_a_worker_task_lost_with_the_queue_state_asks_for_a_resume() -> None:
+    lost = run("run-7", [worker("fx-8", task_id=42)], landing_task=None)
+
+    row = operator_view.run_dict(lost, snapshot().tasks, NOW)
+
+    assert row["workers"][0]["stage"] == "vanished"
+    assert (row["stage"], row["next"]) == ("awaiting workers", "batch resume --worker")
+    assert "! run run-7 awaiting workers (worker fx-8 gone from pueue)" in (
+        operator_view.render(snapshot(runs=(lost,)))
+    )
+
+
+def test_a_finished_run_and_an_unreadable_queue_lose_nothing() -> None:
+    """Anti-vacuity: cleanup after acceptance and a pueue outage are not losses."""
+    cleaned = run(
+        "run-8",
+        [worker("fx-8", task_id=99, result=True)],
+        landing_task=99,
+        accepted=True,
+    )
+    row = operator_view.run_dict(cleaned, snapshot().tasks, NOW)
+    assert row["landing"]["vanished"] is None and row["stage"] == "landed"
+
+    live = run("run-9", [worker("fx-8", task_id=4, result=True)], landing_task=99)
+    blind = operator_view.run_dict(live, (), NOW, queue_read=False)
+    assert blind["landing"]["vanished"] is None and blind["stage"] == "ready to land"
+    assert blind["workers"][0]["stage"] == "done"
+
+
+def test_a_lost_landing_with_a_result_outstanding_asks_for_the_result() -> None:
+    """mzw2 review: `batch queue` here buys a task that refuses `worker_not_done`.
+
+    The landing is the last step, not the missing one: filing the outstanding
+    result queues the replacement landing on its own.
+    """
+    external = run(
+        "run-10", [worker("fx-8", task_id=None)], landing_task=99, harness="external"
+    )
+
+    row = operator_view.run_dict(external, snapshot().tasks, NOW)
+
+    assert (row["stage"], row["next"]) == ("landing vanished", "batch result")
+    assert row["landing"]["vanished"] == 99
+
+    # A reset that took the landing took the worker task with it; only a
+    # fresh agent can file what that worker still owes.
+    queued = run("run-11", [worker("fx-8", task_id=77)], landing_task=99)
+
+    row = operator_view.run_dict(queued, snapshot().tasks, NOW)
+
+    assert (row["stage"], row["next"]) == ("landing vanished", "batch resume --worker")
+    assert row["workers"][0]["stage"] == "vanished"
+    assert (
+        "! run run-11 landing vanished (landing task 99; worker fx-8 gone from pueue)"
+        ": batch resume --worker" in operator_view.render(snapshot(runs=(queued,)))
+    )
