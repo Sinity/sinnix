@@ -1,0 +1,234 @@
+#!/usr/bin/env python3
+# @sinnix-package
+# description: Transcribe selected recordings with Polish-conditioned Scribe v2 and retain word evidence
+# runtimeInputs: python3
+# pythonPackages: tzdata
+# docs: docs/speech.md
+"""Explicit cloud transcription with raw word evidence, independent of the capture pass."""
+
+import argparse
+import datetime as dt
+import fcntl
+import hashlib
+import json
+import os
+import re
+import sys
+import urllib.error
+import urllib.request
+import uuid
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+
+def write_json(path, value):
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n")
+    temporary.replace(path)
+
+
+def request_transcript(path, key, parameters):
+    boundary = uuid.uuid4().hex
+    parts = []
+    for name, value in parameters.items():
+        parts.append(
+            f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'.encode()
+        )
+    parts.extend(
+        [
+            f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="audio{path.suffix}"\r\nContent-Type: application/octet-stream\r\n\r\n'.encode(),
+            path.read_bytes(),
+            f"\r\n--{boundary}--\r\n".encode(),
+        ]
+    )
+    request = urllib.request.Request(
+        "https://api.elevenlabs.io/v1/speech-to-text",
+        data=b"".join(parts),
+        headers={
+            "xi-api-key": key,
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=900) as response:
+        return json.load(response)
+
+
+def clock_label(path, seconds):
+    match = re.search(r"(\d{8}T\d{6}Z)", path.name)
+    if match:
+        start = dt.datetime.strptime(match[1], "%Y%m%dT%H%M%SZ").replace(
+            tzinfo=dt.timezone.utc
+        )
+        return (
+            (start + dt.timedelta(seconds=seconds))
+            .astimezone(ZoneInfo("Europe/Warsaw"))
+            .strftime("%H:%M:%S")
+        )
+    return f"{seconds:.2f}s"
+
+
+def turns(words):
+    current = []
+    for word in words:
+        if word.get("type") == "spacing":
+            continue
+        if current and (
+            word.get("speaker_id") != current[-1].get("speaker_id")
+            or word["start"] - current[-1]["end"] > 2
+            or word["end"] - current[0]["start"] > 25
+        ):
+            yield current
+            current = []
+        current.append(word)
+    if current:
+        yield current
+
+
+def render(records, output):
+    lines = [
+        "# Review transcript",
+        "",
+        "Engine: ElevenLabs Scribe v2. Language: "
+        + records[0]["parameters"]["language_code"]
+        + ".",
+        "",
+        "Times are Europe/Warsaw when a UTC recording timestamp is present in the filename; otherwise relative seconds. Speaker IDs apply within each file only and are model estimates.",
+        "",
+        "Recognizer output is reproduced without inferred corrections. Full words, audio-event labels, timestamps and available log probabilities are retained in each raw JSON response. Low log probability flags are review hints, not measured error probabilities.",
+        "",
+    ]
+    uncertain = []
+    alignment = []
+    for record in records:
+        path = Path(record["source"])
+        raw_path = output / record["raw_file"]
+        raw = json.loads(raw_path.read_text())
+        lines.extend(
+            [
+                f"## {path.name}",
+                "",
+                f"[Audio]({path}) · [Raw response]({raw_path.name})",
+                "",
+            ]
+        )
+        words = raw.get("words", [])
+        alignment.extend(
+            {"source": str(path), "word": word}
+            for word in words
+            if word.get("type") == "word" and word["end"] - word["start"] > 2
+        )
+        for group in turns(words):
+            text = " ".join(w["text"] for w in group)
+            speaker = group[0].get("speaker_id") or "unassigned"
+            lines.append(
+                f"- **{clock_label(path, group[0]['start'])}** ({speaker}): {text}"
+            )
+            low = [
+                w
+                for w in group
+                if isinstance(w.get("logprob"), (int, float)) and w["logprob"] < -1
+            ]
+            if low:
+                uncertain.append(
+                    {
+                        "source": str(path),
+                        "start": group[0]["start"],
+                        "end": group[-1]["end"],
+                        "text": text,
+                        "low_logprob_words": low,
+                    }
+                )
+        if not words:
+            lines.append(raw.get("text") or "*No speech returned by the model.*")
+        lines.append("")
+    (output / "transcript.md").write_text("\n".join(lines))
+    write_json(output / "review-spans.json", uncertain)
+    write_json(output / "alignment-review.json", alignment)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("files", nargs="+", type=Path)
+    parser.add_argument("--output-dir", required=True, type=Path)
+    parser.add_argument("--language", default="pol")
+    parser.add_argument(
+        "--api-key-file",
+        type=Path,
+        help="Read credential at execution time; otherwise use ELEVENLABS_API_KEY",
+    )
+    args = parser.parse_args()
+    key = (
+        args.api_key_file.read_text().strip()
+        if args.api_key_file
+        else os.environ.get("ELEVENLABS_API_KEY", "")
+    )
+    if not key:
+        parser.error("ELEVENLABS_API_KEY or --api-key-file is required")
+    paths = [path.resolve(strict=True) for path in args.files]
+    if len({p.name for p in paths}) != len(paths):
+        parser.error("Input basenames must be unique")
+    os.umask(0o077)
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    lock = (args.output_dir / ".lock").open("a")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        parser.error("Another transcription is using this output directory")
+    parameters = {
+        "model_id": "scribe_v2",
+        "language_code": args.language,
+        "diarize": "true",
+        "timestamps_granularity": "word",
+        "tag_audio_events": "true",
+        "temperature": "0",
+    }
+    records = []
+    for index, path in enumerate(paths, 1):
+        with path.open("rb") as source:
+            digest = hashlib.file_digest(source, "sha256").hexdigest()
+        raw_name = path.name + ".scribe.json"
+        raw_path = args.output_dir / raw_name
+        meta_path = args.output_dir / (path.name + ".source.json")
+        identity = {
+            "source": str(path),
+            "sha256": digest,
+            "parameters": parameters,
+            "raw_file": raw_name,
+        }
+        if raw_path.exists() or meta_path.exists():
+            if not meta_path.exists() or json.loads(meta_path.read_text()) != identity:
+                parser.error(
+                    f"Existing output does not match input/settings: {path.name}; use a new output directory"
+                )
+        if not raw_path.exists():
+            write_json(meta_path, identity)
+            try:
+                raw = request_transcript(path, key, parameters)
+            except urllib.error.HTTPError as error:
+                print(
+                    f"Scribe request failed: HTTP {error.code}; {path.name}. Completed responses remain resumable.",
+                    file=sys.stderr,
+                )
+                return 1
+            except (urllib.error.URLError, TimeoutError):
+                print(
+                    f"Scribe request failed: network error; {path.name}. Completed responses remain resumable.",
+                    file=sys.stderr,
+                )
+                return 1
+            if (
+                not isinstance(raw, dict)
+                or not isinstance(raw.get("text"), str)
+                or not isinstance(raw.get("words"), list)
+            ):
+                raise ValueError("Unexpected Scribe response; expected text and words")
+            write_json(raw_path, raw)
+        records.append(identity)
+        write_json(args.output_dir / "manifest.json", records)
+        render(records, args.output_dir)
+        print(f"{index}/{len(paths)} completed: {path.name}", flush=True)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

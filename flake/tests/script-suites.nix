@@ -130,6 +130,12 @@
           suiteDir = ../../pkgs/lake-lint/tests;
           scripts = [ "lake-lint" ];
         };
+        stt-review-suite = mkScriptSuite {
+          name = "sinnix-stt-review";
+          suiteDir = ../../pkgs/sinnix-stt-review/tests;
+          scripts = [ "sinnix-stt-review" ];
+          pythonPackages = [ "tzdata" ];
+        };
         speaker-verify-suite = mkScriptSuite {
           name = "sinnix-speaker-verify";
           suiteDir = ../../pkgs/sinnix-speaker-verify/tests;
