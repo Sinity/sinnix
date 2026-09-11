@@ -543,9 +543,11 @@ in
             test -L "$HOME/.codex/full.config.toml"
             test -L "$HOME/.codex/lean.config.toml"
             test -L "$HOME/.agents/skills"
-            test "$(readlink -f "$HOME/.agents/skills")" = ${agentToolsRuntimeConfig.sinnix.paths.dotsRoot}/_ai/skills
+            # The live checkout is intentionally absent from the Nix sandbox;
+            # resolve the declared link without requiring its target to exist.
+            test "$(readlink -m "$HOME/.agents/skills")" = ${agentToolsRuntimeConfig.sinnix.paths.dotsRoot}/_ai/skills
             test -L "$HOME/.config/claude/skills"
-            test "$(readlink -f "$HOME/.config/claude/skills")" = ${agentToolsRuntimeConfig.sinnix.paths.dotsRoot}/_ai/skills
+            test "$(readlink -m "$HOME/.config/claude/skills")" = ${agentToolsRuntimeConfig.sinnix.paths.dotsRoot}/_ai/skills
             # Home Manager's dry-run helper must be the sole mutation path for
             # the skills migration. It must neither replace existing app state
             # nor create its declared links in a synthetic home.
