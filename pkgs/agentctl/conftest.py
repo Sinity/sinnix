@@ -346,14 +346,16 @@ def _no_inherited_queue_group(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _no_inherited_principal(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Nor the principal of an agent that runs it.
+def _no_inherited_launcher(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Nor the identity of the queued task that runs it.
 
-    `AGENTCTL_PRINCIPAL=agent-control` exempts a launch from the pool holds an
-    operator's launch takes, so a suite run inside a batch worker would prove
-    the exemption over and over and never the hold. A test that wants the
-    principal sets it itself.
+    This suite is itself run from inside a batch worker, whose task exports
+    `AGENTCTL_POOL=agent` and `AGENTCTL_PRINCIPAL=agent-control`: inherited,
+    the first would refuse every launch into a pool that excludes `agent` and
+    the second would appear in the environments tests compare. A test that
+    wants either sets it itself.
     """
+    monkeypatch.delenv("AGENTCTL_POOL", raising=False)
     monkeypatch.delenv("AGENTCTL_PRINCIPAL", raising=False)
 
 

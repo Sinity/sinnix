@@ -157,6 +157,9 @@ launch input and nothing else.
 
 A pool may also declare the pools it must not run beside
 (`pools.pytest.exclusiveWith = [ "agent" ]`, rendered as `exclusive_with`).
+The declaration lives with the pools, not in a project descriptor: pueue
+groups are one host-wide set, the pair binds launches from every project, and
+two descriptors could otherwise disagree about the same pair.
 pueued schedules each group on its own and has no notion of the pair, so
 agentctl enforces it at admission: a launch into either pool while the other
 has unfinished tasks is added `--stashed`, with `hold` in its launch input
@@ -165,13 +168,29 @@ naming the reason, the excluded pools and the tasks it found. The minute
 drained, so a hold outlives the process that placed it. Order is the pueue
 task id — a held task blocks a later launch in an excluded pool but not an
 earlier one — which is what keeps two exclusive pools from holding each
-other forever. A launch made from inside a queued agent
-(`AGENTCTL_PRINCIPAL=agent-control`) is never held: its own task already
-occupies the agent pool, so a worker's focused verification runs beside it.
-A task stashed for any other reason (an external harness's landing) carries
-no `hold` and is never released by that pass. `agentctl view` shows a held
-task's state as `held for <pools>` and counts it under its group; `job
-cancel` drops it like any other task that has not started.
+other forever. A task stashed for any other reason (an external harness's
+landing) carries no `hold` and is never released by that pass. `agentctl
+view` shows a held task's state as `held for <pools>` and counts it under its
+group; `job cancel` drops it like any other task that has not started.
+
+The rule applies to every launch, an agent's included; what varies is the
+pool the launcher itself occupies, which `agentctl-run` exports as
+`AGENTCTL_POOL`. A launch from inside a queued task into a pool that excludes
+that task's own pool is refused, not held: holding it could only wait for its
+own launcher, and a batch worker does not start the corpus its wave is the
+reason to hold. A worker's own verification is untouched by this, because it
+runs in pools nothing excludes (`pytest-quick` for a bounded selection,
+`normal` for the static gates); a launch from a pool the target does not
+exclude — a landing in `<project>-land` — is held like any other and runs at
+the drain.
+
+Reading the queue and joining it is one step, under a host-wide advisory lock
+(`<state dir>/admission.lock`, `flock`): `pueue add` cannot be made
+conditional, so two launches into mutually exclusive pools would otherwise
+each read a queue the other had not entered yet and both be admitted. The
+release pass takes the same lock, because releasing a hold is admitting work.
+A launch that cannot take the lock within a minute refuses instead of
+starting out of turn.
 
 The declaration on this host is `pytest` exclusive with `agent`: the corpus
 pytest run and a wave of workers do not fit in 32 GB together, and the
