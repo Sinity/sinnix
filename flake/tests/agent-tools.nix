@@ -145,8 +145,18 @@ in
               message = "Codex defaults must be deployed to /etc/codex as a live dots link.";
             }
             {
+              assertion =
+                (config.environment.etc."codex/agents/explorer.toml".source or null)
+                == "${config.sinnix.paths.dotsRoot}/codex/agents/explorer.toml";
+              message = "The explorer role must resolve relative to the system Codex config through a live dots link.";
+            }
+            {
               assertion = builtins.hasAttr ".agents/skills" hm.home.file;
               message = "Native Codex skill discovery must link ~/.agents/skills to the live shared root.";
+            }
+            {
+              assertion = !(hm.home.file ? ".codex/lean.config.toml");
+              message = "Codex profiles must be private writable files, not Home Manager links into the store.";
             }
             {
               assertion =
@@ -228,32 +238,29 @@ in
           pkgs.python3
           pkgs.zsh
         ];
-        homeFiles =
-          laneWrapperFiles
-          ++ [
-            ".local/bin/claude-clodex"
-            ".local/bin/clodex"
-            ".local/bin/clodex-claude"
-            ".local/bin/sinnix-clodex-server"
-            ".gemini/settings.json"
-            ".gemini/config/mcp_config.json"
-            ".gemini/config/skills"
-            ".gemini/config/AGENTS.md"
-            ".local/bin/gemini"
-            ".local/bin/grok-sinnix"
-            ".local/bin/agy-sinnix"
-            ".local/bin/hermes"
-            ".local/bin/mcp-firecrawl"
-            ".local/bin/mcp-chrome-devtools"
-            ".local/bin/mcp-polylogue"
-            ".local/bin/mcp-sinex"
-            ".config/hermes/skills"
-            ".config/claude/agents"
-            ".agents/skills"
-            ".codex/agents/explorer.toml"
-            ".codex/hooks.json"
-          ]
-          ++ map (name: ".codex/${name}.config.toml") codexProfileNames;
+        homeFiles = laneWrapperFiles ++ [
+          ".local/bin/claude-clodex"
+          ".local/bin/clodex"
+          ".local/bin/clodex-claude"
+          ".local/bin/sinnix-clodex-server"
+          ".gemini/settings.json"
+          ".gemini/config/mcp_config.json"
+          ".gemini/config/skills"
+          ".gemini/config/AGENTS.md"
+          ".local/bin/gemini"
+          ".local/bin/grok-sinnix"
+          ".local/bin/agy-sinnix"
+          ".local/bin/hermes"
+          ".local/bin/mcp-firecrawl"
+          ".local/bin/mcp-chrome-devtools"
+          ".local/bin/mcp-polylogue"
+          ".local/bin/mcp-sinex"
+          ".config/hermes/skills"
+          ".config/claude/agents"
+          ".agents/skills"
+          ".codex/agents/explorer.toml"
+          ".codex/hooks.json"
+        ];
         fixtureAssets = [
           {
             target = ".local/bin/sinnix-chrome-control";
@@ -331,6 +338,11 @@ in
       agentToolsCodexMigrationActivation = pkgs.writeText "codex-system-defaults-migration.sh" (
         agentToolsRuntimeConfig.home-manager.users.${agentToolsRuntimeConfig.sinnix.user.name}.home.activation.codexSystemDefaultsMigration.data
       );
+      agentToolsCodexProfilesActivation = pkgs.writeText "codex-native-profiles.sh" (
+        agentToolsRuntimeConfig.home-manager.users.${agentToolsRuntimeConfig.sinnix.user.name}.home.activation.codexNativeProfiles.data
+      );
+      agentToolsCodexLeanConfigSource =
+        agentToolsRuntimeConfig.sinnix.features.dev.mcp-servers.codexLeanConfigSource;
 
       # Provably fails when: a generic runtime, browser, shell or agent binary
       # is added to the earlyoom emergency avoid list (verified by adding
@@ -497,6 +509,19 @@ in
           setup = agentToolsFixture.setup + ''
             mkdir -p "$HOME/.codex"
             printf '[private]\nkeep = true\n\n[features]\nmulti_agent_v2 = true\n' > "$HOME/.codex/config.toml"
+            # An old native profile is a store link; the backup is the only
+            # private state available while that link is installed.
+            mkdir -p "$HOME/.codex/.sinnix-before-native-layers-v1"
+            ln -s ${agentToolsCodexLeanConfigSource} "$HOME/.codex/lean.config.toml"
+            cat > "$HOME/.codex/.sinnix-before-native-layers-v1/lean.config.toml" <<'EOF_CODEX_LEAN_BACKUP'
+            model = "private-test-model"
+
+            [mcp_servers.unmanaged]
+            command = "must-not-survive"
+
+            [hooks.state."test-hook"]
+            trusted_hash = "sha256:test-private-trust"
+            EOF_CODEX_LEAN_BACKUP
             test "$(readlink -f "$HOME/.gemini/config/mcp_config.json")" = ${agentToolsAntigravityMcpConfigSource}
             mkdir -p "$HOME/.hermes"
             cp ${agentToolsHermesConfigSource} "$HOME/.hermes/config.yaml"
@@ -528,6 +553,7 @@ in
             # migration here with the same `run` contract used by activation.
             run() { "$@"; }
             source ${agentToolsCodexMigrationActivation}
+            source ${agentToolsCodexProfilesActivation}
             unset -f run
 
             test -f "$HOME/.codex/config.toml"
@@ -541,8 +567,31 @@ in
             test -f "$HOME/.codex/.sinnix-system-defaults-v1"
             test ! -e "$HOME/.codex/.sinnix-system-defaults-v1.pending"
             test -L "$HOME/.codex/hooks.json"
-            test -L "$HOME/.codex/full.config.toml"
-            test -L "$HOME/.codex/lean.config.toml"
+            for profile in full lean evidence browser deepseek local; do
+              test -f "$HOME/.codex/$profile.config.toml"
+              test ! -L "$HOME/.codex/$profile.config.toml"
+              test "$(stat -c '%a' "$HOME/.codex/$profile.config.toml")" = 600
+            done
+            lean_inode="$(stat -c '%i' "$HOME/.codex/lean.config.toml")"
+            run() { "$@"; }
+            source ${agentToolsCodexProfilesActivation}
+            unset -f run
+            test "$(stat -c '%i' "$HOME/.codex/lean.config.toml")" = "$lean_inode"
+            # A non-store symlink can be deliberate private state. It must
+            # never be silently replaced as though it were an old HM layer.
+            unknown_link_home="$TMPDIR/codex-unknown-profile-link"
+            mkdir -p "$unknown_link_home/.codex"
+            printf '[hooks.state]\nchoice = "keep"\n' > "$unknown_link_home/private-profile.toml"
+            ln -s "$unknown_link_home/private-profile.toml" "$unknown_link_home/.codex/full.config.toml"
+            if (
+              export HOME="$unknown_link_home"
+              run() { "$@" || exit $?; }
+              source ${agentToolsCodexProfilesActivation}
+            ); then
+              echo "native profile migration replaced an unknown private link" >&2
+              exit 1
+            fi
+            test -L "$unknown_link_home/.codex/full.config.toml"
             test -L "$HOME/.agents/skills"
             # The live checkout is intentionally absent from the Nix sandbox;
             # resolve the declared link without requiring its target to exist.
@@ -702,6 +751,10 @@ in
                 assert actual == set(expected[profile_name]), (
                     f"codex {profile_name} servers {sorted(actual)} != registry selection {sorted(expected[profile_name])}"
                 )
+            lean_data = tomllib.loads(pathlib.Path.home().joinpath('.codex/lean.config.toml').read_text())
+            assert lean_data['model'] == 'private-test-model'
+            assert lean_data['hooks']['state']['test-hook']['trusted_hash'] == 'sha256:test-private-trust'
+            assert 'unmanaged' not in lean_data['mcp_servers']
 
             # Alternate-backend profiles must layer a provider override while
             # retaining the full MCP surface; model names remain ordinary config.
