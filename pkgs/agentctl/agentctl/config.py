@@ -34,6 +34,20 @@ class ConfigError(ValueError):
 
 
 @dataclass(frozen=True)
+class PoolPolicy:
+    """One pueue group's declared admission policy.
+
+    ``exclusive_with`` names the pools whose tasks must never run beside this
+    pool's. pueue admits each group independently, so the relation is agentctl's
+    to enforce: it holds a launch whose partner pool is live and releases it
+    once that pool has drained.
+    """
+
+    parallel: int
+    exclusive_with: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class Config:
     project_roots: tuple[Path, ...]
     agent_runner: Path
@@ -43,10 +57,11 @@ class Config:
     event_spool: Path
     state_dir: Path
     agentctl_executable: str
-    # How many tasks each pueue group admits at once. pueued keeps its groups
-    # in its own state, so this declaration is what `pools apply` writes into
-    # the running daemon.
-    pools: Mapping[str, int] = field(default_factory=dict)
+    # Each pueue group's declared admission policy: its width, which `pools
+    # apply` writes into the running daemon because pueued keeps its groups in
+    # its own state, and the pools it must never run beside, which pueue has
+    # no notion of and agentctl holds at admission.
+    pools: Mapping[str, PoolPolicy] = field(default_factory=dict)
     # The file this configuration was read from. Every task agentctl queues
     # carries it as AGENTCTL_CONFIG, so the agentctl calls inside a task read
     # the same projects, state directory and event spool as the one that
@@ -105,18 +120,62 @@ def _paths(value: Any, field: str) -> tuple[Path, ...]:
     return tuple(Path(item) for item in value)
 
 
-def _pools(value: Any) -> dict[str, int]:
+def _parallel(name: str, value: Any) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+        raise ConfigError(f"pools.{name} must run at least one task at a time")
+    return value
+
+
+def _exclusive_with(name: str, value: Any) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, list) or any(
+        not isinstance(item, str) or POOL_NAME.fullmatch(item) is None for item in value
+    ):
+        raise ConfigError(f"pools.{name}.exclusive_with must list pueue group names")
+    if name in value:
+        raise ConfigError(f"pools.{name}.exclusive_with must not name its own pool")
+    return tuple(dict.fromkeys(value))
+
+
+def _pools(value: Any) -> dict[str, PoolPolicy]:
+    """The declared groups. A group is its parallelism, or a table adding the
+    pools it is exclusive with; the bare integer is what an agentctl.json
+    written before exclusivity existed still says."""
     if value is None:
         return {}
     if not isinstance(value, Mapping):
         raise ConfigError("pools must map a pueue group name to its parallelism")
-    parsed: dict[str, int] = {}
-    for name, slots in value.items():
+    parsed: dict[str, PoolPolicy] = {}
+    for name, declaration in value.items():
         if not isinstance(name, str) or POOL_NAME.fullmatch(name) is None:
             raise ConfigError(f"pools has an invalid pueue group name: {name!r}")
-        if not isinstance(slots, int) or isinstance(slots, bool) or slots < 1:
-            raise ConfigError(f"pools.{name} must run at least one task at a time")
-        parsed[name] = slots
+        if isinstance(declaration, Mapping):
+            unknown = set(declaration) - {"parallel", "exclusive_with"}
+            if unknown:
+                raise ConfigError(
+                    f"pools.{name} declares unknown field(s): "
+                    + ", ".join(sorted(unknown))
+                )
+            parsed[name] = PoolPolicy(
+                parallel=_parallel(name, declaration.get("parallel")),
+                exclusive_with=_exclusive_with(name, declaration.get("exclusive_with")),
+            )
+        else:
+            parsed[name] = PoolPolicy(parallel=_parallel(name, declaration))
+    undeclared = {
+        partner
+        for policy in parsed.values()
+        for partner in policy.exclusive_with
+        if partner not in parsed
+    }
+    if undeclared:
+        # A typo here would silently admit exactly the pair the declaration
+        # exists to keep apart.
+        raise ConfigError(
+            "pools exclusive_with names undeclared pool(s): "
+            + ", ".join(sorted(undeclared))
+        )
     return parsed
 
 

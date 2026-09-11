@@ -111,11 +111,14 @@ list [project]`.
 
 ## The screen
 
-`agentctl view <project>`: queue groups (running/queued/paused), what needs
-attention (failed jobs, workers and landings of the last six hours), active
-jobs with start time and elapsed, every open run with each worker's stage,
-since and job, the landing task and what follows next, and the ready beads
-(epics and decisions left out).
+`agentctl view <project>`: queue groups (running/queued/paused/held), what
+needs attention (failed jobs, workers and landings of the last six hours),
+active jobs with start time and elapsed, every open run with each worker's
+stage, since and job, the landing task and what follows next, and the ready
+beads (epics and decisions left out).
+A job whose state reads `held for <pool>` is waiting for a pool declared
+exclusive of its own to drain (the corpus pytest run and the agent wave never
+run together); it needs nothing from you and starts at the drain.
 `agentctl events tail [--follow] [--project p]` is the same over time.
 
 ## Worker toolbelt

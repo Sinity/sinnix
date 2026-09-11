@@ -345,6 +345,18 @@ def _no_inherited_queue_group(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("PUEUE_GROUP", raising=False)
 
 
+@pytest.fixture(autouse=True)
+def _no_inherited_principal(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Nor the principal of an agent that runs it.
+
+    `AGENTCTL_PRINCIPAL=agent-control` exempts a launch from the pool holds an
+    operator's launch takes, so a suite run inside a batch worker would prove
+    the exemption over and over and never the hold. A test that wants the
+    principal sets it itself.
+    """
+    monkeypatch.delenv("AGENTCTL_PRINCIPAL", raising=False)
+
+
 @pytest.fixture
 def recording_systemctl(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
