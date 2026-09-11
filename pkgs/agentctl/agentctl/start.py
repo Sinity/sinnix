@@ -33,6 +33,7 @@ from .manifest import (
     Run,
     create,
     land_update,
+    landing_recovery_locked,
     list_runs,
     load,
     manifest_path,
@@ -669,35 +670,42 @@ def result(
                 entry.update(scope)
 
     run = update(config, run_id, record)
-    landing_id = run.landing.get("task_id")
-    reference = run.landing.get("task_reference")
     released = False
     lost: int | None = None
     requeued: int | None = None
     requeue_error: str | None = None
-    if run.live and isinstance(landing_id, int):
-        tasks = pueue.tasks()
-        task = launch.find_task(tasks, landing_id, reference)
-        if task is None:
-            # The queue lost the landing task with its state. Nothing else
-            # would queue another, and the manifest would keep naming a task
-            # id that resolves to nothing, so the run would wait forever.
-            lost = landing_id
-            if project is not None:
-                try:
-                    run, requeued = requeue_landing(config, project, run, tasks)
-                except (PueueError, JobError) as error:
-                    # Filing the result is this verb's work; a recovery that
-                    # the queue refuses is reported, never raised over it.
-                    requeue_error = str(error)
-        elif task.status == "Stashed" and all(
-            item.get("result") for item in run.workers
-        ):
-            # A landing is stashed exactly while a result is outstanding, in
-            # an external run from the start and in any run from a requeue.
-            # The last result is what it was waiting for.
-            pueue.enqueue(task.task_id)
-            released = True
+    # The manifest update above makes this result durable. The recovery itself
+    # needs one broader lock: concurrent final results otherwise both read the
+    # lost landing, then each enqueue a replacement and race to relink it.
+    # Reload after acquiring it so a waiter acts on every result and relink
+    # made by the process ahead of it.
+    with landing_recovery_locked(config, run_id):
+        run = load(config, run_id)
+        landing_id = run.landing.get("task_id")
+        reference = run.landing.get("task_reference")
+        if run.live and isinstance(landing_id, int):
+            tasks = pueue.tasks()
+            task = launch.find_task(tasks, landing_id, reference)
+            if task is None:
+                # The queue lost the landing task with its state. Nothing else
+                # would queue another, and the manifest would keep naming a task
+                # id that resolves to nothing, so the run would wait forever.
+                lost = landing_id
+                if project is not None:
+                    try:
+                        run, requeued = requeue_landing(config, project, run, tasks)
+                    except (PueueError, JobError) as error:
+                        # Filing the result is this verb's work; a recovery that
+                        # the queue refuses is reported, never raised over it.
+                        requeue_error = str(error)
+            elif task.status == "Stashed" and all(
+                item.get("result") for item in run.workers
+            ):
+                # A landing is stashed exactly while a result is outstanding,
+                # in an external run from the start and in any run from a
+                # requeue. The last result is what it was waiting for.
+                pueue.enqueue(task.task_id)
+                released = True
     return {
         **run.worker(worker_id),
         "landing_task": run.landing.get("task_id"),
