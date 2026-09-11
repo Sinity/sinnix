@@ -341,31 +341,11 @@ mkFeatureModule {
             ) claudeMcpConfigFilesByProfile;
 
             home.activation.claudeSymlink = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
-              mkdir -p $HOME/.config/claude
-              ln -sfn .config/claude $HOME/.claude
-              # settings.json is a plain writable file: the harness persists UI
-              # state (model, effort, plugin toggles) into it, so a repo symlink
-              # would keep the tracked tree dirty. Durable policy lives in
-              # /etc/claude-code/managed-settings.json instead. If a symlink is
-              # found, its content is kept minus exactly the keys the managed
-              # file carries (derived from that file, so the two layers cannot
-              # drift into double-firing hooks). The seed is the fresh-machine
-              # case only.
-              _claude_settings="$HOME/.config/claude/settings.json"
-              _claude_managed="${sinnixCfg.paths.dotsRoot}/claude/managed-settings.json"
-              if [ -L "$_claude_settings" ]; then
-                _claude_old="$(readlink -f "$_claude_settings" || true)"
-                rm "$_claude_settings"
-                if [ -f "$_claude_old" ]; then
-                  ${pkgs.jq}/bin/jq --slurpfile m "$_claude_managed" \
-                    'delpaths([$m[0] | keys[] | [.]])' "$_claude_old" \
-                    > "$_claude_settings"
-                fi
-              fi
-              if [ ! -f "$_claude_settings" ]; then
-                cp ${sinnixCfg.paths.dotsRoot}/claude/settings-seed.json "$_claude_settings"
-              fi
-              chmod 600 "$_claude_settings"
+              run ${pkgs.python3}/bin/python ${./claude-state.py} \
+                "$HOME" \
+                ${lib.escapeShellArg "${sinnixCfg.paths.dotsRoot}/claude/managed-settings.json"} \
+                ${lib.escapeShellArg "${sinnixCfg.paths.dotsRoot}/claude/settings-seed.json"} \
+                ${lib.escapeShellArg "${sinnixCfg.paths.dotsRoot}/claude/hooks/sessionstart-beads-prime.sh"}
             '';
             home.activation.hermesConfig = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
               mkdir -p "$HOME/.hermes"
