@@ -9,6 +9,7 @@ typed result back by the launch reference embedded in the task's command.
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
@@ -19,8 +20,9 @@ import stat
 import subprocess
 import time
 import uuid
+from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Iterator, Mapping, Sequence
 
 from . import gitcmd, manifest, pools, pueue
 from .config import Config
@@ -56,11 +58,18 @@ AGENT_OPERATIONS = frozenset({"worker", "resume", "integrate", "review"})
 # stashed it: the queue has no field for why a task is held, and only a hold
 # agentctl placed may be released by draining an excluded pool.
 HOLD_REASON = "pool-exclusivity"
-# A launch from inside a queued agent is never held: the agent's own task
-# already occupies its pool, so holding its child against that pool would wait
-# for a task that is waiting for the child. A worker's focused verification
-# runs beside its worker, whatever the declaration says.
-AGENT_PRINCIPAL = "agent-control"
+# The pueue group of the task this process runs inside, exported by
+# `agentctl-run` for every queued task. It is what tells a nested launch which
+# pool its own launcher already occupies: a worker in `agent` may start its
+# focused selection in a pool nothing excludes, but holding a launch against
+# the pool its launcher sits in would wait for that launcher.
+LAUNCHER_POOL_VARIABLE = "AGENTCTL_POOL"
+# The host-wide lock serializing read-the-queue-then-add. pueue has no
+# conditional add, so without it two launches into mutually exclusive pools
+# each read a queue the other had not joined yet and both are admitted.
+ADMISSION_LOCK_NAME = "admission.lock"
+ADMISSION_LOCK_SECONDS = 60.0
+ADMISSION_LOCK_POLL_SECONDS = 0.05
 # How long a wait blocks on one task id before re-reading which id the job
 # it waits for is at.
 WAIT_SLICE_SECONDS = 5.0
@@ -215,28 +224,32 @@ def enqueue(
         launch["environment_receipt"] = dict(environment_receipt)
     if binding:
         launch["binding"] = dict(binding)
-    hold = None if stashed else _admission_hold(config, group)
-    if hold is not None:
-        launch["hold"] = hold
     scratch_dir = scratch_path(scratch, reference)
     if scratch_dir is not None:
         launch["scratch"] = {"kind": scratch, "path": str(scratch_dir)}
     if result_kind != "exit":
         launch["result_path"] = str(config.jobs_dir / f"{reference}.result")
     input_path = config.inputs_dir / f"{reference}.json"
-    write_input(input_path, launch)
-    try:
-        task_id = pueue.add(
-            group=group,
-            label=label,
-            command=(QUEUE_RUN_EXECUTABLE, str(input_path)),
-            working_directory=working_directory,
-            after=after,
-            stashed=stashed or hold is not None,
-        )
-    except PueueError:
-        input_path.unlink(missing_ok=True)
-        raise
+    # Reading the queue and joining it is one step: pueue offers no
+    # conditional add, so a decision taken outside this lock is a decision
+    # about a queue that another launch may already have joined.
+    with admission_lock(config):
+        hold = None if stashed else _admission_hold(config, group, label=label)
+        if hold is not None:
+            launch["hold"] = hold
+        write_input(input_path, launch)
+        try:
+            task_id = pueue.add(
+                group=group,
+                label=label,
+                command=(QUEUE_RUN_EXECUTABLE, str(input_path)),
+                working_directory=working_directory,
+                after=after,
+                stashed=stashed or hold is not None,
+            )
+        except PueueError:
+            input_path.unlink(missing_ok=True)
+            raise
     # The task id goes back into the input so its artifacts can be found
     # after pueue has forgotten the task.
     launch["queue_task_id"] = task_id
@@ -250,16 +263,66 @@ def enqueue(
     return job_view(task) if task is not None else {"job_id": task_id, "label": label}
 
 
-def _admission_hold(config: Config, group: str) -> dict[str, Any] | None:
+@contextmanager
+def admission_lock(config: Config) -> Iterator[None]:
+    """Serialize admission across every agentctl process on this host.
+
+    `pueue add` cannot be made conditional, so agentctl decides a hold from a
+    status it read a moment earlier and only then joins the queue. Two launches
+    into mutually exclusive pools would each read a queue the other had not
+    entered yet and both be admitted — the one outcome the declaration exists
+    to prevent. One advisory file lock makes the read and the add a single
+    step; the section holds for two pueue calls, and a launch that cannot take
+    it within the deadline refuses rather than waiting out of turn.
+    """
+    path = config.state_dir / ADMISSION_LOCK_NAME
+    path.parent.mkdir(parents=True, exist_ok=True)
+    deadline = time.monotonic() + ADMISSION_LOCK_SECONDS
+    # Appended to, never truncated: the file is only ever a lock, and another
+    # holder has it open.
+    with open(path, "a", encoding="utf-8") as handle:
+        while True:
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise JobError(
+                        f"another launch has held {path} for over "
+                        f"{ADMISSION_LOCK_SECONDS:.0f}s"
+                    ) from None
+                time.sleep(ADMISSION_LOCK_POLL_SECONDS)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+
+
+def _admission_hold(config: Config, group: str, *, label: str) -> dict[str, Any] | None:
     """Why this launch must wait, or None when its pool may run now.
 
     Held rather than refused: the launch keeps its place and runs at the next
     drain, which is the whole difference between a nightly corpus that starts
     late and one that never starts.
+
+    Who launches is not what decides this — what pool the launcher itself
+    occupies is. A launch from inside a queued task into a pool that excludes
+    that task's own pool could only be held against its launcher, so it is
+    refused: a batch worker does not start the corpus its own wave is the
+    reason to hold. Its focused selection runs in a pool nothing excludes and
+    is never touched by this.
     """
     partners = pools.exclusive_partners(config.pools, group)
-    if not partners or os.environ.get("AGENTCTL_PRINCIPAL") == AGENT_PRINCIPAL:
+    if not partners:
         return None
+    launcher = os.environ.get(LAUNCHER_POOL_VARIABLE)
+    if launcher in partners:
+        raise JobError(
+            f"{label} runs in pool {group!r}, which excludes pool {launcher!r}, "
+            f"and this launch comes from a task in {launcher!r}: holding it "
+            "would wait for its own launcher. Start it from outside that pool "
+            "(its schedule, or an operator launch), where it waits for the drain."
+        )
     blocking = pools.blocking_tasks(config.pools, group, pueue.tasks())
     if not blocking:
         return None
@@ -330,12 +393,20 @@ def release_holds(config: Config) -> dict[str, Any]:
     still busy is simply left where it is.
 
     The pass runs whatever the declaration currently says, so withdrawing an
-    exclusion releases what it is holding instead of stranding it.
+    exclusion releases what it is holding instead of stranding it. It takes the
+    admission lock for the same reason a launch does: releasing a hold is
+    admitting work, and two passes or a pass and a launch must not decide from
+    the same stale queue.
     """
     try:
-        tasks = pueue.tasks()
-    except PueueError as error:
+        with admission_lock(config):
+            return _released(config)
+    except (JobError, PueueError) as error:
         return {"released": [], "waiting": [], "error": str(error)}
+
+
+def _released(config: Config) -> dict[str, Any]:
+    tasks = pueue.tasks()
     released: list[dict[str, Any]] = []
     waiting: list[dict[str, Any]] = []
     for task_id, hold in sorted(holds(config, tasks).items()):

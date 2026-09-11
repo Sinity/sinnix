@@ -10,14 +10,16 @@ pool is stashed with its reason, and released once that pool has drained.
 
 from __future__ import annotations
 
+import fcntl
 import json
+import threading
 import time
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from agentctl import agents, cli, launch, operator_view, pools
+from agentctl import agents, cli, launch, operator_view, pools, pueue
 from agentctl.config import Config, ConfigError, PoolPolicy, load_config
 from agentctl.projects import ProjectAdapter, load_project_adapter
 from conftest import FakeBd, FakePueue, bead, read_launch
@@ -180,24 +182,239 @@ def test_an_agent_queued_while_the_corpus_waits_runs_after_it(
     assert fake_pueue.task(later).status == "Queued"
 
 
-def test_a_launch_from_inside_an_agent_is_never_held(
+def test_a_corpus_launched_from_inside_the_wave_is_refused(
     fake_pueue: FakePueue,
     exclusive: Config,
     project: ProjectAdapter,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A worker's own verification must not wait for the worker to finish.
+    """A worker does not start the run its own wave is the reason to hold.
 
-    The agent's task already occupies the excluded pool, so holding what it
-    started against that pool would wait for a task that is waiting for it.
+    Every batch worker runs with `AGENTCTL_PRINCIPAL=agent-control`, so keying
+    the exemption on the principal exempted exactly the launch the declaration
+    exists to stop: a corpus run started from inside a wave ran beside it.
+    Holding it instead would wait for the worker that started it, so it is
+    refused, and nothing is queued.
     """
     monkeypatch.setenv("AGENTCTL_PRINCIPAL", "agent-control")
+    monkeypatch.setenv("AGENTCTL_POOL", "agent")
+    worker = agent_task(fake_pueue, project.root, "fixture:worker:run-1:fx-1")
+
+    with pytest.raises(launch.JobError) as refusal:
+        corpus(exclusive, project)
+
+    assert "excludes pool 'agent'" in str(refusal.value)
+    assert list(fake_pueue.tasks()) == [worker]
+
+
+def test_a_workers_focused_selection_runs_beside_its_own_wave(
+    fake_pueue: FakePueue,
+    exclusive: Config,
+    project: ProjectAdapter,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The refusal is the corpus pool's, not the agent's.
+
+    A worker's bounded selection runs in a pool nothing excludes, which is
+    what keeps the rule from stopping the verification every worker owes its
+    own candidate.
+    """
+    monkeypatch.setenv("AGENTCTL_PRINCIPAL", "agent-control")
+    monkeypatch.setenv("AGENTCTL_POOL", "agent")
     agent_task(fake_pueue, project.root, "fixture:worker:run-1:fx-1")
 
-    started = corpus(exclusive, project)
+    focused = launch.start_operation(exclusive, project, project.operation("check"))[
+        "job_id"
+    ]
 
-    assert fake_pueue.task(started).status == "Running"
-    assert "hold" not in read_launch(exclusive, fake_pueue.task(started))
+    assert fake_pueue.task(focused).group == "normal"
+    assert fake_pueue.task(focused).status == "Running"
+    assert "hold" not in read_launch(exclusive, fake_pueue.task(focused))
+
+
+def test_a_launch_from_a_pool_the_target_does_not_exclude_is_held(
+    fake_pueue: FakePueue,
+    exclusive: Config,
+    project: ProjectAdapter,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A landing's own pool is not excluded, so its corpus launch waits its turn.
+
+    Anti-vacuity: refusing every nested launch would turn a hold that resolves
+    at the drain into a failure, and the wave's backstop would go unrun.
+    """
+    monkeypatch.setenv("AGENTCTL_PRINCIPAL", "agent-control")
+    monkeypatch.setenv("AGENTCTL_POOL", "fixture-land")
+    worker = agent_task(fake_pueue, project.root, "fixture:worker:run-1:fx-1")
+
+    held = corpus(exclusive, project)
+
+    assert fake_pueue.task(held).status == "Stashed"
+    assert read_launch(exclusive, fake_pueue.task(held))["hold"]["waiting_for"] == [
+        worker
+    ]
+
+
+def lock_is_held(config: Config) -> bool:
+    """Whether some open file description holds the host's admission lock.
+
+    flock associates a lock with the open file description, so a second open
+    of the same path is denied even inside the process that holds it.
+    """
+    path = config.state_dir / launch.ADMISSION_LOCK_NAME
+    with open(path, "a", encoding="utf-8") as probe:
+        try:
+            fcntl.flock(probe, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+        fcntl.flock(probe, fcntl.LOCK_UN)
+        return False
+
+
+def test_the_queue_is_read_and_joined_under_one_lock(
+    fake_pueue: FakePueue,
+    exclusive: Config,
+    project: ProjectAdapter,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Admission is one step, not a read and a later add.
+
+    pueue has no conditional add: agentctl decides the hold from a status it
+    read, and two launches into mutually exclusive pools would otherwise each
+    read a queue the other had not joined and both be admitted. The lock is
+    the proof, so the test watches it across both calls.
+    """
+    inside: list[tuple[str, bool]] = []
+    read, add = pueue.tasks, pueue.add
+
+    def watched_tasks() -> dict[int, object]:
+        inside.append(("tasks", lock_is_held(exclusive)))
+        return read()
+
+    def watched_add(**arguments: object) -> int:
+        inside.append(("add", lock_is_held(exclusive)))
+        return add(**arguments)
+
+    monkeypatch.setattr(pueue, "tasks", watched_tasks)
+    monkeypatch.setattr(pueue, "add", watched_add)
+    agent_task(fake_pueue, project.root, "fixture:worker:run-1:fx-1")
+
+    held = corpus(exclusive, project)
+
+    assert inside == [("tasks", True), ("add", True)]
+    assert fake_pueue.task(held).status == "Stashed"
+    # And the lock is a section, not a leak: the next launch can take it.
+    assert lock_is_held(exclusive) is False
+
+
+def test_a_launch_refuses_rather_than_admitting_itself_without_the_lock(
+    fake_pueue: FakePueue,
+    exclusive: Config,
+    project: ProjectAdapter,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A lock it cannot take stops the launch; it does not fall through to add."""
+    monkeypatch.setattr(launch, "ADMISSION_LOCK_SECONDS", 0.2)
+    path = exclusive.state_dir / launch.ADMISSION_LOCK_NAME
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    with open(path, "w", encoding="utf-8") as blocker:
+        fcntl.flock(blocker, fcntl.LOCK_EX)
+
+        with pytest.raises(launch.JobError) as refusal:
+            corpus(exclusive, project)
+
+    assert "admission.lock" in str(refusal.value)
+    assert fake_pueue.tasks() == {}
+
+
+def test_two_launches_into_exclusive_pools_cannot_both_be_admitted(
+    fake_pueue: FakePueue,
+    exclusive: Config,
+    project: ProjectAdapter,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The race the lock exists for, run.
+
+    Both pools are idle, and the corpus launch is held inside its own
+    admission — long enough for a second launch into the excluded pool to
+    arrive. Without the lock that second launch reads the very status the
+    first read, finds the pool empty and starts: the corpus and the wave run
+    together, which is the one outcome the declaration forbids.
+    """
+    read = pueue.tasks
+    inside = threading.Event()
+
+    def slow_tasks() -> dict[int, object]:
+        status = read()
+        if not inside.is_set():
+            inside.set()
+            time.sleep(0.5)
+        return status
+
+    monkeypatch.setattr(pueue, "tasks", slow_tasks)
+
+    def launch_into(pool: str, label: str) -> int:
+        return launch.enqueue(
+            exclusive,
+            project=project,
+            operation=label.split(":", 1)[1],
+            label=label,
+            group=pool,
+            argv=("true",),
+            working_directory=project.root,
+            timeout_seconds=60,
+            result_kind="exit",
+            environment={},
+        )["job_id"]
+
+    admitted: dict[str, int] = {}
+    first = threading.Thread(
+        target=lambda: admitted.__setitem__(
+            "corpus", launch_into("pytest", "fixture:verify")
+        )
+    )
+    first.start()
+    assert inside.wait(10), "the first launch never reached the queue"
+
+    worker = launch_into("agent", "fixture:worker")
+    first.join(30)
+
+    assert not first.is_alive()
+    assert fake_pueue.task(admitted["corpus"]).status == "Running"
+    assert fake_pueue.task(worker).status == "Stashed"
+    assert read_launch(exclusive, fake_pueue.task(worker))["hold"]["waiting_for"] == [
+        admitted["corpus"]
+    ]
+
+
+def test_the_release_pass_holds_the_admission_lock(
+    fake_pueue: FakePueue,
+    exclusive: Config,
+    project: ProjectAdapter,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Releasing a hold is admitting work, so it takes the same lock.
+
+    A pass that decided from a queue a concurrent launch was already joining
+    would enqueue against the wave it was meant to wait for.
+    """
+    worker = agent_task(fake_pueue, project.root, "fixture:worker:run-1:fx-1")
+    corpus(exclusive, project)
+    fake_pueue.succeed(worker)
+    seen: list[bool] = []
+    enqueue = pueue.enqueue
+
+    def watched_enqueue(task_id: int) -> None:
+        seen.append(lock_is_held(exclusive))
+        enqueue(task_id)
+
+    monkeypatch.setattr(pueue, "enqueue", watched_enqueue)
+
+    released = launch.release_holds(exclusive)
+
+    assert seen == [True]
+    assert len(released["released"]) == 1
 
 
 def test_a_task_stashed_for_another_reason_is_never_released(

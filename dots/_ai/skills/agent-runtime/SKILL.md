@@ -127,7 +127,11 @@ Agents have `lane` on PATH:
 
 - `lane task` prints the dispatch packet (`.agentctl/prompt.md`).
 - `lane verify` runs the descriptor's focused verification through
-  `agentctl job start <project> <focused> --workspace . --wait`.
+  `agentctl job start <project> <focused> --workspace . --wait`. A worker may
+  not start a launch into a pool declared exclusive of its own (the corpus
+  pytest run while its wave is live): that launch is refused, because holding
+  it would wait for the worker itself. The corpus runs from the coordinator or
+  its schedule, once the wave drains.
 - `lane done <result.json>` requires a clean tree, validates the document
   against `.agentctl/worker.schema.json` with `candidate_sha` equal to HEAD, and
   prints it as the final message. It never pushes; the landing task
