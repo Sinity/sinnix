@@ -51,6 +51,7 @@ let
       args = profile.args or server.args or [ ];
       env = server.env or { };
       observerWritablePaths = mcpBrokerObserverWritablePaths.${name} or [ ];
+      readOnlyRoutes = server.gatewayReadOnlyRoutes or [ ];
     }
     // lib.optionalAttrs (!brokered) {
       reason =

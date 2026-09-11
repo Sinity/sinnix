@@ -298,6 +298,7 @@ class McpBrokerService:
         args = server.get("args", [])
         environment = server.get("env", {})
         observer_writable_paths = server.get("observerWritablePaths", [])
+        read_only_routes = server.get("readOnlyRoutes", [])
         if (
             not isinstance(command, str)
             or not command
@@ -313,9 +314,41 @@ class McpBrokerService:
                 not isinstance(path, str) or not path.startswith(("/", "%t/"))
                 for path in observer_writable_paths
             )
+            or not isinstance(read_only_routes, list)
+            or len(read_only_routes) > 64
+            or any(
+                not isinstance(route, dict)
+                or set(route) != {"tool", "arguments"}
+                or not isinstance(route["tool"], str)
+                or not route["tool"]
+                or not isinstance(route["arguments"], dict)
+                or not route["arguments"]
+                or any(
+                    not isinstance(key, str)
+                    or not key
+                    or not isinstance(value, str)
+                    or not value
+                    for key, value in route["arguments"].items()
+                )
+                for route in read_only_routes
+            )
         ):
             raise McpBrokerError("MCP broker server configuration is malformed")
         return server
+
+    @staticmethod
+    def _request_is_read_only(
+        server: dict[str, Any], tool: Any, arguments: dict[str, Any]
+    ) -> bool:
+        if getattr(getattr(tool, "annotations", None), "read_only_hint", None) is True:
+            return True
+        return any(
+            route["tool"] == tool.name
+            and all(
+                arguments.get(key) == value for key, value in route["arguments"].items()
+            )
+            for route in server.get("readOnlyRoutes", [])
+        )
 
     @staticmethod
     def _tool(tools: list[Any], name: str) -> Any | None:
@@ -525,10 +558,8 @@ class McpBrokerService:
                         await session.initialize()
                         tool = self._tool((await session.list_tools()).tools, tool_name)
                         if tool is not None:
-                            read_only = getattr(
-                                getattr(tool, "annotations", None),
-                                "read_only_hint",
-                                None,
+                            read_only = self._request_is_read_only(
+                                server, tool, arguments
                             )
                             if (not write and read_only is True) or (
                                 write and read_only is not True
@@ -537,9 +568,7 @@ class McpBrokerService:
 
             if tool is None:
                 raise McpBrokerError(f"MCP server does not expose tool {tool_name!r}")
-            read_only = getattr(
-                getattr(tool, "annotations", None), "read_only_hint", None
-            )
+            read_only = self._request_is_read_only(server, tool, arguments)
             if not write and read_only is not True:
                 raise McpBrokerError(
                     "MCP tool is not explicitly declared read-only; select mcp.change through change"

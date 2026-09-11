@@ -5,7 +5,7 @@ description: Use when invoking, inspecting, or documenting Sinnix Agent Gateway 
 
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: b917f073440a06ea6bb0d5462fe6209e13e21a4a292092cb0f2a154a16087721 -->
+<!-- gateway-catalog-sha256: 9f49432feb3f30b07b9eb865f4941f0150e3f4b0cb404eca11ea0e55fbfd9109 -->
 
 # Agent Gateway
 
@@ -64,7 +64,7 @@ Effectful actions (families change, operate, run) require `idempotency_key`; rep
 - `machine.units.logs` — Journal entries for one unit (journalctl -o json), bounded by line count and bytes.
 - `processes.list` — List live processes filtered by name, pid, unit, cgroup or user, with a canonical ref each.
 - `processes.tree` — Parent/child process tree from one root or from every top-level process, bounded by depth and node count.
-- `mcp.call` — Tools without a read-only annotation are refused here; use mcp.change (operator only).
+- `mcp.call` — Reads require an owner read-only annotation or an exact match to trusted registry selectors. Other requests require mcp.change (operator only).
 - `artifacts.read` — Read an artifact: text inline with offsets, images as an image block, other binary as a resource block.
 - `captures.query` — List runtime-declared capture lanes, describe one, or read per-lane record deltas since a time.
 - `activity.query` — Reads sinnix-capture-v1 envelope files under each lane path within the time window; coverage lists which lanes contributed and which have no envelope files.
@@ -112,7 +112,7 @@ Effectful actions (families change, operate, run) require `idempotency_key`; rep
 - `projects.change` — Paths stay project-relative and policy-excluded paths (.git, secrets, local-only agent state) are refused. Take expected_dirty_sha256 or expected_head from projects.get.
 - `beads.change` — expected.expected_task_revision/expected_etag come from beads.get. Use mode=preview to see the compiled command and a preview_digest before applying.
 - `beads.changeset` — No global rollback: each applied step reports its outcome and a compensation hint. Preview first, then apply with the returned preview_digest.
-- `mcp.change` — Invoke one upstream tool that is not declared read-only.
+- `mcp.change` — Invoke an upstream request not admitted as read-only by annotation or trusted registry selectors.
 
 ### operate
 
@@ -140,4 +140,4 @@ Effectful actions (families change, operate, run) require `idempotency_key`; rep
 
 The complete schemas and examples are in `docs/generated/agent-gateway-reference.md`.
 
-Catalog revision: `v3-typed-actions`. Catalog SHA-256: `b917f073440a06ea6bb0d5462fe6209e13e21a4a292092cb0f2a154a16087721`.
+Catalog revision: `v3-typed-actions`. Catalog SHA-256: `9f49432feb3f30b07b9eb865f4941f0150e3f4b0cb404eca11ea0e55fbfd9109`.

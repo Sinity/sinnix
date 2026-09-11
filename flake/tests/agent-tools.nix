@@ -824,6 +824,10 @@ in
             ! codex_uses_profile app-server
             ! codex_uses_profile doctor
             ! codex_uses_profile debug
+            ! codex_uses_profile -C /realm/project/sinnix app-server --stdio
+            ! codex_uses_profile -c features.hooks=true app-server --stdio
+            codex_uses_profile -C /realm/project/sinnix exec
+            codex_uses_profile "app-server please help"
 
             "$HOME/.local/bin/mcp-polylogue" --help | grep -q 'Start the Polylogue MCP stdio bridge'
             grep -Fq 'sinnix-mcp-sinex-script' "$(readlink -f "$HOME/.local/bin/mcp-sinex")"

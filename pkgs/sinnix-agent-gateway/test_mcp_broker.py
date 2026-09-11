@@ -365,6 +365,75 @@ def test_broker_enforces_live_read_only_tool_metadata(
         )
 
 
+@pytest.mark.parametrize("annotation", [None, False])
+def test_read_only_subroute_requires_exact_tool_and_explicit_selector(
+    tmp_path, monkeypatch, annotation
+):
+    broker = broker_service(tmp_path, "operator")
+    broker.config.mcp_broker_servers["fixture"]["readOnlyRoutes"] = [
+        {"tool": "lookup", "arguments": {"projection": "sessions"}}
+    ]
+    calls = []
+
+    class UnannotatedSession(FakeSession):
+        async def list_tools(self):
+            response = await super().list_tools()
+            response.tools[0].annotations = (
+                None
+                if annotation is None
+                else SimpleNamespace(read_only_hint=annotation)
+            )
+            return response
+
+        async def call_tool(self, name, arguments):
+            calls.append((name, arguments))
+            return await super().call_tool(name, arguments)
+
+    monkeypatch.setattr(
+        "sinnix_agent_gateway.mcp_broker.stdio_client",
+        lambda *args, **kwargs: FakeTransport(),
+    )
+    monkeypatch.setattr(
+        "sinnix_agent_gateway.mcp_broker.ClientSession", UnannotatedSession
+    )
+    safe = {"query": "fixture", "projection": "sessions"}
+    result = anyio.run(lambda: broker.call("fixture", "lookup", safe, write=False))
+    assert result["response"]["content"][0]["text"] == "lookup:fixture"
+    for arguments in (
+        {"query": "fixture"},
+        {"query": "fixture", "projection": "write"},
+    ):
+        with pytest.raises(McpBrokerError, match="not explicitly declared read-only"):
+            anyio.run(
+                lambda arguments=arguments: broker.call(
+                    "fixture", "lookup", arguments, write=False
+                )
+            )
+    with pytest.raises(McpBrokerError, match="declared read-only"):
+        anyio.run(lambda: broker.call("fixture", "lookup", safe, write=True))
+    with pytest.raises(McpBrokerError, match="does not expose tool"):
+        anyio.run(lambda: broker.call("fixture", "another-tool", safe, write=False))
+    assert calls == [("lookup", safe)]
+
+
+@pytest.mark.parametrize(
+    "routes",
+    [
+        True,
+        [{"tool": "lookup", "arguments": {}}],
+        [{"tool": "lookup", "arguments": {"projection": True}}],
+        [{"tool": "lookup"}],
+    ],
+)
+def test_read_only_subroute_rejects_unbounded_or_malformed_configuration(
+    tmp_path, routes
+):
+    broker = broker_service(tmp_path, "operator")
+    broker.config.mcp_broker_servers["fixture"]["readOnlyRoutes"] = routes
+    with pytest.raises(McpBrokerError, match="configuration is malformed"):
+        broker._server("fixture")
+
+
 def test_observer_broker_runs_upstream_in_read_only_unit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
