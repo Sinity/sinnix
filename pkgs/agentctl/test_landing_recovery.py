@@ -457,7 +457,9 @@ def test_concurrent_results_replace_a_lost_landing_once(
     assert not any(thread.is_alive() for thread in threads)
     assert not errors
     replacement = [
-        task for task in harness.pueue.tasks().values() if task.label.endswith(f":{run['run_id']}")
+        task
+        for task in harness.pueue.tasks().values()
+        if task.label.endswith(f":{run['run_id']}")
     ]
     assert len(replacement) == 1
     task = replacement[0]
