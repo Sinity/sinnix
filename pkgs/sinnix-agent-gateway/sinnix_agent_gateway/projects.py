@@ -6,6 +6,8 @@ import os
 import re
 import stat
 import tempfile
+import uuid
+import zipfile
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
@@ -61,6 +63,43 @@ def _is_excluded(path: Path) -> bool:
     if parts in LOCAL_ONLY_FILES:
         return True
     return any(parts[: len(prefix)] == prefix for prefix in LOCAL_ONLY_PATHS)
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1_048_576), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _content_revision(root: Path) -> str:
+    """Hash the visible checkout bytes, not merely Git's status text."""
+    digest = hashlib.sha256()
+    files: list[Path] = []
+    for current, dirs, names in os.walk(root, followlinks=False):
+        current_path = Path(current)
+        dirs[:] = sorted(
+            name
+            for name in dirs
+            if not _is_excluded((current_path / name).relative_to(root))
+            and not (current_path / name).is_symlink()
+        )
+        for name in names:
+            path = current_path / name
+            relative = path.relative_to(root)
+            if path.is_symlink() or _is_excluded(relative) or not path.is_file():
+                continue
+            files.append(path)
+    for path in sorted(files, key=lambda item: item.relative_to(root).as_posix()):
+        relative = path.relative_to(root).as_posix().encode()
+        digest.update(len(relative).to_bytes(8, "big"))
+        digest.update(relative)
+        digest.update((stat.S_IMODE(path.stat().st_mode)).to_bytes(4, "big"))
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1_048_576), b""):
+                digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _mutation_parts(project: ProjectConfig, relative: str) -> tuple[str, ...]:
@@ -312,7 +351,7 @@ class ProjectService:
                     "head": head,
                     "branch": branch,
                     "upstream": upstream,
-                    "dirty_sha256": hashlib.sha256(status.encode()).hexdigest(),
+                    "dirty_sha256": _content_revision(path),
                     "lifecycle": "configured-root"
                     if path == configured_root
                     else "linked-worktree",
@@ -452,7 +491,79 @@ class ProjectService:
             "content": "".join(content),
             "bytes": used,
             "truncated": truncated,
+            "content_sha256": _file_sha256(target),
+            "checkout_revision": _content_revision(project.path),
         }
+
+    def export(
+        self,
+        project_id: str,
+        checkout_id: str | None = None,
+        max_files: int = 2_000,
+        max_bytes: int = 16 * 1024 * 1024,
+    ) -> dict[str, Any]:
+        """Create a bounded, policy-filtered ZIP snapshot in attested state."""
+        project = self.code_checkout(
+            project_id, checkout_id, write=False, require_explicit=False
+        )
+        max_files = max(1, min(max_files, 10_000))
+        max_bytes = max(1, min(max_bytes, 64 * 1024 * 1024))
+        before = _content_revision(project.path)
+        files: list[tuple[str, bytes, str]] = []
+        total = 0
+        truncated = False
+        for current, dirs, names in os.walk(project.path, followlinks=False):
+            current_path = Path(current)
+            dirs[:] = sorted(
+                name
+                for name in dirs
+                if not _is_excluded((current_path / name).relative_to(project.path))
+                and not (current_path / name).is_symlink()
+            )
+            for name in sorted(names):
+                path = current_path / name
+                relative = path.relative_to(project.path)
+                if path.is_symlink() or _is_excluded(relative) or not path.is_file():
+                    continue
+                if len(files) >= max_files:
+                    truncated = True
+                    break
+                data = path.read_bytes()
+                if total + len(data) > max_bytes:
+                    truncated = True
+                    break
+                files.append(
+                    (relative.as_posix(), data, hashlib.sha256(data).hexdigest())
+                )
+                total += len(data)
+            if truncated:
+                break
+        after = _content_revision(project.path)
+        if before != after:
+            raise ProjectPreconditionError("project changed while export was collected")
+        capture = self.config.state_dir / "captures" / uuid.uuid4().hex
+        capture.mkdir(mode=0o700, parents=True)
+        archive = capture / "project-export.zip"
+        manifest = {
+            "schema": "sinnix.project-export.v1",
+            "project_id": project_id,
+            "checkout_id": checkout_id or "default",
+            "checkout_revision": before,
+            "files": [
+                {"path": path, "bytes": len(data), "sha256": digest}
+                for path, data, digest in files
+            ],
+            "file_count": len(files),
+            "bytes": total,
+            "truncated": truncated,
+        }
+        with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
+            for path, data, _digest in files:
+                bundle.writestr(path, data)
+            bundle.writestr(
+                "MANIFEST.json", json.dumps(manifest, sort_keys=True, indent=2) + "\n"
+            )
+        return {"directory": capture, "archive": archive, "manifest": manifest}
 
     def _run_bounded_result(
         self, command: list[str], cwd: Path, timeout: int = 15
@@ -487,6 +598,50 @@ class ProjectService:
     def _run_bounded(self, command: list[str], cwd: Path, timeout: int = 15) -> str:
         return self._run_bounded_result(command, cwd, timeout)[0]
 
+    def _run_spooled(self, command: list[str], cwd: Path, timeout: int = 15) -> str:
+        """Read a complete owner response without retaining its stdout in memory.
+
+        V2 result recording turns a completed oversized response into an
+        attested artifact.  The temporary spool prevents the execution kernel's
+        transport buffer from cutting a valid project diff short before that
+        result-layer continuation can run.
+        """
+        safe_env = {
+            "HOME": str(Path.home()),
+            "LANG": os.environ.get("LANG", "C.UTF-8"),
+            "PATH": os.environ.get("PATH", "/run/current-system/sw/bin"),
+            "GIT_OPTIONAL_LOCKS": "0",
+        }
+        captures = self.config.state_dir / "captures"
+        captures.mkdir(mode=0o700, parents=True, exist_ok=True)
+        captures.chmod(0o700)
+        with tempfile.TemporaryDirectory(
+            prefix="sinnix-gateway-project-read-", dir=captures
+        ) as directory:
+            spool = Path(directory) / "stdout"
+            with spool.open("xb") as handle:
+                spool.chmod(0o600)
+                result = OwnerExecution(safe_env).run(
+                    command,
+                    ExecutionProfile(
+                        route=OwnerRoute("project-read"),
+                        cwd=cwd,
+                        timeout_seconds=timeout,
+                        max_stdout_bytes=self.config.max_result_bytes,
+                        max_stderr_bytes=self.config.max_result_bytes,
+                        environment={"GIT_OPTIONAL_LOCKS": "0"},
+                    ),
+                    stdout_chunk_callback=handle.write,
+                )
+            if result.timed_out:
+                raise ProjectError("project operation timed out")
+            if result.output_exceeded:
+                raise ProjectError("project operation exceeded its output bound")
+            if result.exit_status not in (0, 1):
+                diagnostic = result.stderr.decode("utf-8", errors="replace").strip()
+                raise ProjectError(diagnostic or "project operation failed")
+            return spool.read_text(encoding="utf-8", errors="replace")
+
     @contextmanager
     def _locked_mutation(
         self,
@@ -504,15 +659,34 @@ class ProjectService:
                     raise ProjectPreconditionError(
                         "preconditioned mutation requires checkout_id"
                     )
-                if set(preconditions) - {"head", "dirty_sha256"}:
+                if set(preconditions) - {
+                    "head",
+                    "dirty_sha256",
+                    "file_sha256",
+                    "file_path",
+                }:
                     raise ProjectError(
                         "project mutation preconditions are not recognized"
                     )
                 checkout = self.checkout(project_id, checkout_id)["checkout"]
                 for name, expected in preconditions.items():
+                    if name in {"file_sha256", "file_path"}:
+                        continue
                     if not isinstance(expected, str) or checkout.get(name) != expected:
                         raise ProjectPreconditionError(
                             f"project checkout {name} no longer matches"
+                        )
+                file_path = preconditions.get("file_path")
+                expected_file_sha = preconditions.get("file_sha256")
+                if file_path is not None or expected_file_sha is not None:
+                    if not isinstance(file_path, str) or not isinstance(
+                        expected_file_sha, str
+                    ):
+                        raise ProjectError("file_sha256 requires file_path")
+                    target = self._safe_path(project, file_path, existing=True)
+                    if _file_sha256(target) != expected_file_sha:
+                        raise ProjectPreconditionError(
+                            f"project file {file_path} no longer matches"
                         )
             yield project
 
@@ -583,11 +757,11 @@ class ProjectService:
         if resolved_ref is not None:
             command.append(resolved_ref)
         command.append("--")
-        output, output_truncated = self._run_bounded_result(command, project.path)
+        output = self._run_spooled(command, project.path)
         return {
             "project_id": project_id,
             "diff": output,
-            "truncated": output_truncated,
+            "truncated": False,
         }
 
     def commit_range(

@@ -145,8 +145,7 @@ class QueryInput(RequestControls):
     limit: int = Field(
         default=50,
         ge=1,
-        le=200,
-        description="Page size within an immutable snapshot; matching rows are projected at the owner, with a 10,000-row snapshot bound.",
+        description="Page size within an immutable snapshot; all matching rows are projected at the owner before paging. Use aggregate for counts without fetching issue rows.",
     )
     cursor: str | None = Field(default=None, min_length=1, max_length=256)
     graph: GraphQuery | None = Field(
@@ -925,7 +924,7 @@ ACTIONS: tuple[Action, ...] = (
             "bd ready",
             "backlog",
         ),
-        documentation="The owner filters, projects and counts before serialization. limit sizes pages of one immutable snapshot (10,000 matching rows per project maximum); cursors never reread live rows. at pins historical reads to an exact resolved Dolt revision. aggregate counts or groups without fetching issue bodies.",
+        documentation="The owner filters, projects and counts before serialization. limit sizes pages of one immutable snapshot of all matching rows; cursors never reread live rows. Snapshot storage and memory scale with the matching data, so use projection or aggregate for broad queries. at pins historical reads to an exact resolved Dolt revision. aggregate counts or groups without fetching issue bodies.",
         examples=(
             Example(
                 title="Ready work in one project",

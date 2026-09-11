@@ -248,7 +248,7 @@ def test_query_projects_before_owner_serialization_and_pages_complete_snapshot(
         for command in commands(log)
         if "sql" in command and command[-1].startswith("SELECT i.id")
     )
-    assert "i.description" not in command[-1] and "LIMIT 10001" in command[-1]
+    assert "i.description" not in command[-1]
 
 
 def test_get_graph_and_memory_keep_owner_features_explicit(tmp_path: Path) -> None:

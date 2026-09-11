@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import subprocess
@@ -184,6 +185,50 @@ def test_runtime_v2_replaces_an_oversized_owner_payload_with_an_artifact(
     assert response["data"]["artifact"]["ref"].startswith("sinnix://artifacts/")
     assert response["meta"]["artifact_refs"] == [response["data"]["artifact"]["ref"]]
     assert response["receipt"]["ref"].startswith("sinnix://receipts/")
+
+
+def test_large_snapshot_row_survives_paging_and_artifact_transport(tmp_path) -> None:
+    runtime = Runtime.create(config(tmp_path), "observer")
+    results = runtime.results
+    query_sha = hashlib.sha256(b"large-snapshot-row").hexdigest()
+    row = {"id": "large", "body": "x" * 300_000}
+    writer = results.start_snapshot(
+        query_sha256=query_sha, source_revision="revision-one", page_size=1
+    )
+    writer.append(row)
+    writer.append({"id": "next"})
+    metadata = writer.finish()
+    cursor = results._cursor(
+        {
+            "snapshot_id": metadata["snapshot_id"],
+            "principal": "observer",
+            "query_sha256": query_sha,
+            "source_revision": "revision-one",
+            "offset": 0,
+            "page_size": 1,
+            "expires_at": metadata["expires_at"],
+        }
+    )
+    page = results.continue_snapshot(cursor, query_sha256=query_sha)
+    assert page["rows"] == [row]
+    assert page["next_cursor"] is not None
+    response = _execute(
+        runtime, ACTIONS["gateway.catalog"], lambda: page, {"text": "large-row"}
+    )
+    assert response["result"]["outcome"] == "ok"
+    artifact = response["data"]["artifact"]
+    chunks = []
+    offset = 0
+    while offset is not None:
+        chunk = results.artifacts.read(artifact["artifact_id"], offset=offset)
+        chunks.append(base64.b64decode(chunk["base64"]))
+        offset = chunk["next_offset"]
+    assert json.loads(b"".join(chunks)) == page
+    continuation = results.continue_snapshot(
+        page["next_cursor"], query_sha256=query_sha
+    )
+    assert continuation["rows"] == [{"id": "next"}]
+    assert continuation["next_cursor"] is None
 
 
 def test_accepted_failure_classes_are_exactly_the_rendered_envelope_enum() -> None:

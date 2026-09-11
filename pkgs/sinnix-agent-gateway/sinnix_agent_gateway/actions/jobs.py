@@ -543,6 +543,11 @@ class OperationRunInput(MutationControls):
     operation: str = Field(
         min_length=1, max_length=128, description="A declared operation name."
     )
+    operation_args: list[str] = Field(
+        default_factory=list,
+        max_length=32,
+        description="Validated positional arguments accepted by the declared operation.",
+    )
 
 
 def _run_operation(runtime: Runtime, inp: OperationRunInput) -> JobView:
@@ -553,7 +558,7 @@ def _run_operation(runtime: Runtime, inp: OperationRunInput) -> JobView:
         project_id=project_id,
         operation=inp.operation,
         workspace_id=workspace,
-        parameters=None,
+        parameters={"argv": inp.operation_args} if inp.operation_args else None,
     )
     return _job_view(result)
 

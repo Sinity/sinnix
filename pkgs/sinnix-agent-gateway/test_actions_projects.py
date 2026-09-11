@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import json
 import subprocess
 from pathlib import Path
 
@@ -180,6 +182,26 @@ def test_tree_read_diff_and_search_keep_authority_checks(tmp_path: Path) -> None
     )
     assert read["content"] == "line two\n" and read["truncated"] is False
     assert read["path"] == "README.md" and read["project_id"] == "fixture"
+    assert len(read["content_sha256"]) == 64
+    assert len(read["checkout_revision"]) == 64
+    many = ok(
+        server,
+        "projects.read_many",
+        {
+            **target,
+            "files": [{"path": "README.md"}, {"path": "src/main.py"}],
+        },
+    )
+    assert [row["path"] for row in many["files"]] == ["README.md", "src/main.py"]
+    assert many["checkout_revision"] == read["checkout_revision"]
+    export = ok(
+        server,
+        "projects.export",
+        {**target, "max_files": 20, "max_bytes": 100_000},
+    )
+    assert export["manifest"]["file_count"] >= 2
+    assert export["manifest"]["truncated"] is False
+    assert export["artifact"]["ref"].startswith("sinnix://artifacts/")
     assert error(server, "projects.read", {**target, "path": ".env"}) == "policy_denied"
     assert (
         error(server, "projects.read", {**target, "path": "../outside"})
@@ -217,6 +239,36 @@ def test_tree_read_diff_and_search_keep_authority_checks(tmp_path: Path) -> None
         {"path": "src/main.py", "line": 1, "text": "def mkServiceModule():"}
     ]
     assert search["truncated"] is False and search["query"] == "mkServiceModule"
+
+
+def test_diff_spools_complete_output_before_result_artifact(tmp_path: Path) -> None:
+    config, project, _ = fixture(tmp_path)
+    config = GatewayConfig(
+        state_dir=config.state_dir,
+        projects=config.projects,
+        max_result_bytes=1_024,
+        approved_manifest_hash=config.approved_manifest_hash,
+    )
+    server = create_server(config, "observer")
+    (project / "README.md").write_text("changed " + "x" * 5_000 + "\n")
+
+    response = call(server, "projects.diff", {"target": {"project": "fixture"}})
+    assert response["result"]["outcome"] == "ok", response
+    data = response["data"]
+    assert data["truncated"] is True
+    artifact_id = data["artifact"]["artifact_id"]
+    runtime = server._sinnix_revision_publisher.runtime
+    offset = 0
+    chunks = []
+    while True:
+        page = runtime.artifacts.read(artifact_id, offset=offset, max_bytes=1_024)
+        chunks.append(base64.b64decode(page["base64"]))
+        if page["next_offset"] is None:
+            break
+        offset = page["next_offset"]
+    retained = json.loads(b"".join(chunks))
+    assert retained["truncated"] is False
+    assert "changed " + "x" * 5_000 in retained["diff"]
 
 
 def test_observer_cannot_see_hidden_projects(tmp_path: Path) -> None:
@@ -275,6 +327,31 @@ def test_change_requires_matching_preconditions_and_echoes_new_state(
     )
     assert written["checkout"]["dirty_sha256"] != before["dirty_sha256"]
     assert written["checkout_ref"] == "sinnix://projects/fixture/checkouts/default"
+
+    read_before = ok(
+        server,
+        "projects.read",
+        {**target, "path": "README.md"},
+    )
+    (project / "README.md").write_text("changed outside gateway\n")
+    guarded = call(
+        server,
+        "projects.change",
+        {
+            **target,
+            "change": {
+                "operation": "write",
+                "path": "README.md",
+                "content": "must not overwrite\n",
+            },
+            "expected_file_path": "README.md",
+            "expected_file_sha256": read_before["content_sha256"],
+            "idempotency_key": "w-file-stale",
+        },
+    )
+    assert guarded["error"]["code"] == "precondition_failed"
+    assert (project / "README.md").read_text() == "changed outside gateway\n"
+    (project / "README.md").write_text("fixture\nline two\nline three\n")
 
     stale = call(
         server,

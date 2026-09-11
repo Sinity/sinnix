@@ -147,10 +147,6 @@ class ResultSnapshotWriter:
             raise ResultError(
                 "JSONL owner row is not serializable", "owner_failed"
             ) from exc
-        if len(encoded) > self.service.config.max_result_bytes:
-            raise ResultError(
-                "JSONL owner row exceeded response bound", "response_bound"
-            )
         line = encoded + b"\n"
         self.handle.write(line)
         self.hasher.update(line)

@@ -10,10 +10,12 @@ from ..action import (
     ALL_PRINCIPALS,
     OPERATOR_ONLY,
     Action,
+    ActionResult,
     Example,
     MutationControls,
     RequestControls,
 )
+from ..content import Artifact, attach
 from ..contracts import VerbFamily
 from ..locators import CheckoutLocator, ProjectLocator, ResolvedCheckout, project_ref
 from ..projects import ProjectError, ProjectPreconditionError
@@ -239,6 +241,8 @@ class ProjectFile(Identity):
     content: str
     bytes: int
     truncated: bool
+    content_sha256: str
+    checkout_revision: str
     affordances: list[str] = Field(default_factory=list)
 
 
@@ -259,6 +263,95 @@ def _read(runtime: Runtime, inp: ReadInput) -> ProjectFile:
         **result,
         affordances=["projects.change", "projects.diff"],
     )
+
+
+class ReadRequest(GatewayModel):
+    path: str = Field(min_length=1, max_length=4_096)
+    start_line: int = Field(default=1, ge=1)
+    end_line: int | None = Field(default=None, ge=1)
+    max_bytes: int = Field(default=64_000, ge=1, le=262_144)
+
+
+class ReadManyInput(RequestControls):
+    target: CheckoutLocator
+    files: list[ReadRequest] = Field(min_length=1, max_length=32)
+
+
+class ReadMany(Identity):
+    files: list[ProjectFile]
+    checkout_revision: str | None = None
+
+
+def _read_many(runtime: Runtime, inp: ReadManyInput) -> ReadMany:
+    resolved = inp.target.resolve(runtime)
+    rows: list[ProjectFile] = []
+    for request in inp.files:
+        result = owner(
+            runtime.projects.read,
+            resolved.project_id,
+            request.path,
+            request.start_line,
+            request.end_line,
+            request.max_bytes,
+            resolved.checkout_id,
+        )
+        result.pop("project_id")
+        rows.append(
+            ProjectFile(
+                **_identity(resolved),
+                **result,
+                affordances=["projects.change", "projects.diff"],
+            )
+        )
+    revisions = {row.checkout_revision for row in rows}
+    return ReadMany(
+        **_identity(resolved),
+        files=rows,
+        checkout_revision=next(iter(revisions)) if len(revisions) == 1 else None,
+    )
+
+
+class ExportInput(RequestControls):
+    target: CheckoutLocator
+    max_files: int = Field(default=2_000, ge=1, le=10_000)
+    max_bytes: int = Field(default=16 * 1024 * 1024, ge=1, le=64 * 1024 * 1024)
+
+
+class ProjectExport(Identity):
+    checkout_revision: str
+    manifest: dict[str, Any]
+    artifact: Artifact
+
+
+def _export(runtime: Runtime, inp: ExportInput) -> ActionResult:
+    resolved = inp.target.resolve(runtime)
+    result = owner(
+        runtime.projects.export,
+        resolved.project_id,
+        resolved.checkout_id,
+        inp.max_files,
+        inp.max_bytes,
+    )
+    archive = result["archive"]
+    receipt = runtime.artifacts.attest_capture(
+        result["directory"],
+        source=f"projects.export:{resolved.ref}",
+        target=_identity(resolved),
+        files=[archive],
+    )
+    artifact_id = runtime.artifacts.register(
+        archive, kind="project-export", owner_id=resolved.ref
+    )
+    artifact, blocks = attach(
+        archive, ref=f"sinnix://artifacts/{artifact_id}", media_type="application/zip"
+    )
+    output = ProjectExport(
+        **_identity(resolved),
+        checkout_revision=result["manifest"]["checkout_revision"],
+        manifest={**result["manifest"], "receipt_id": receipt["capture_id"]},
+        artifact=artifact,
+    )
+    return ActionResult(output, blocks=blocks)
 
 
 # ----------------------------------------------------------------------- diff
@@ -360,6 +453,16 @@ class ChangeInput(MutationControls):
         pattern="^[0-9a-f]{64}$",
         description="dirty_sha256 from projects.get; at least one of expected_head or expected_dirty_sha256 is required.",
     )
+    expected_file_path: str | None = Field(
+        default=None,
+        max_length=4_096,
+        description="Project-relative file guarded by expected_file_sha256.",
+    )
+    expected_file_sha256: str | None = Field(
+        default=None,
+        pattern="^[0-9a-f]{64}$",
+        description="SHA-256 returned by projects.read for the file being written.",
+    )
 
 
 class ChangeResult(Identity):
@@ -376,14 +479,19 @@ class ChangeResult(Identity):
 def _change(runtime: Runtime, inp: ChangeInput) -> ChangeResult:
     resolved = inp.target.resolve(runtime)
     preconditions = dict(inp.preconditions or {})
-    if set(preconditions) - {"head", "dirty_sha256"}:
+    if set(preconditions) - {"head", "dirty_sha256", "file_path", "file_sha256"}:
         raise ProtocolError(
-            "invalid_request", "project preconditions are head and dirty_sha256"
+            "invalid_request",
+            "project preconditions are head, dirty_sha256, or file_sha256/file_path",
         )
     if inp.expected_head is not None:
         preconditions["head"] = inp.expected_head
     if inp.expected_dirty_sha256 is not None:
         preconditions["dirty_sha256"] = inp.expected_dirty_sha256
+    if inp.expected_file_path is not None:
+        preconditions["file_path"] = inp.expected_file_path
+    if inp.expected_file_sha256 is not None:
+        preconditions["file_sha256"] = inp.expected_file_sha256
     if not preconditions:
         raise ProtocolError(
             "precondition_failed",
@@ -394,6 +502,8 @@ def _change(runtime: Runtime, inp: ChangeInput) -> ChangeResult:
         "checkout"
     ]
     for name, expected in preconditions.items():
+        if name in {"file_path", "file_sha256"}:
+            continue
         if checkout.get(name) != expected:
             raise ProtocolError(
                 "precondition_failed",
@@ -604,6 +714,51 @@ ACTIONS: tuple[Action, ...] = (
         ),
     ),
     Action(
+        name="projects.read_many",
+        family=VerbFamily.QUERY,
+        owner="projects",
+        summary="Read several bounded project files from one checkout observation.",
+        Input=ReadManyInput,
+        Output=ReadMany,
+        handler=_read_many,
+        principals=ALL_PRINCIPALS,
+        resource_kinds=_KINDS,
+        affordances=("projects.read", "projects.change", "projects.diff"),
+        aliases=("bulk read", "read files", "batch files"),
+        examples=(
+            Example(
+                title="Read two files",
+                input={
+                    **_EXAMPLE,
+                    "files": [
+                        {"path": "README.md", "end_line": 40},
+                        {"path": "flake.nix", "end_line": 80},
+                    ],
+                },
+            ),
+        ),
+    ),
+    Action(
+        name="projects.export",
+        family=VerbFamily.QUERY,
+        owner="projects",
+        summary="Create a bounded policy-filtered ZIP snapshot of a project checkout.",
+        Input=ExportInput,
+        Output=ProjectExport,
+        handler=_export,
+        principals=ALL_PRINCIPALS,
+        resource_kinds=_KINDS,
+        affordances=("projects.get", "projects.read"),
+        aliases=("snapshot", "bundle", "download project", "portable export"),
+        documentation="Sensitive, local-only, hidden, and symlinked paths are excluded. The export is bounded and includes a manifest with file hashes and the checkout revision.",
+        examples=(
+            Example(
+                title="Export a bounded checkout",
+                input={**_EXAMPLE, "max_files": 500, "max_bytes": 8_000_000},
+            ),
+        ),
+    ),
+    Action(
         name="projects.diff",
         family=VerbFamily.QUERY,
         owner="projects",
@@ -644,7 +799,7 @@ ACTIONS: tuple[Action, ...] = (
         name="projects.change",
         family=VerbFamily.CHANGE,
         owner="projects",
-        summary="Write one project file or apply a patch, guarded by the checkout's head or dirty_sha256.",
+        summary="Write one project file or apply a patch, guarded by checkout or file content revisions.",
         Input=ChangeInput,
         Output=ChangeResult,
         handler=_change,
@@ -653,7 +808,7 @@ ACTIONS: tuple[Action, ...] = (
         affordances=("projects.diff", "projects.read", "projects.get"),
         aliases=("write file", "edit", "apply patch", "save"),
         supports_precondition=True,
-        documentation="Paths stay project-relative and policy-excluded paths (.git, secrets, local-only agent state) are refused. Take expected_dirty_sha256 or expected_head from projects.get.",
+        documentation="Paths stay project-relative and policy-excluded paths (.git, secrets, local-only agent state) are refused. Take expected_dirty_sha256 or expected_head from projects.get, or expected_file_sha256 from projects.read.",
         examples=(
             Example(
                 title="Write a file",

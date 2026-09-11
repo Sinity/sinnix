@@ -6,6 +6,7 @@ import os
 import re
 import tempfile
 import time
+from dataclasses import replace
 from datetime import datetime, timezone
 from difflib import unified_diff
 from pathlib import Path
@@ -146,14 +147,19 @@ class BeadsService:
         return value
 
     @staticmethod
-    def _limit(value: Any, default: int = 50, maximum: int = _MAX_PAGE) -> int:
+    def _limit(value: Any, default: int = 50, maximum: int | None = _MAX_PAGE) -> int:
         value = default if value is None else value
         if (
             isinstance(value, bool)
             or not isinstance(value, int)
-            or not 1 <= value <= maximum
+            or value < 1
+            or (maximum is not None and value > maximum)
         ):
-            raise BeadsError(f"limit must be 1-{maximum}")
+            raise BeadsError(
+                f"limit must be 1-{maximum}"
+                if maximum is not None
+                else "limit must be a positive integer"
+            )
         return value
 
     @staticmethod
@@ -203,46 +209,52 @@ class BeadsService:
         if not write:
             command.append("--readonly")
         command += args
-        result = self.execution.run(
-            command,
-            ExecutionProfile(
-                route=OwnerRoute("beads"),
-                timeout_seconds=30,
-                cwd=project.path,
-                max_stdout_bytes=self.config.max_result_bytes,
-                max_stderr_bytes=self.config.max_result_bytes,
-                environment={
-                    "HOME": str(Path.home()),
-                    "LANG": os.environ.get("LANG", "C.UTF-8"),
-                    "PATH": os.environ.get("PATH", "/run/current-system/sw/bin"),
-                    "BEADS_ACTOR": f"sinnix-gateway:{self.principal.name}",
-                },
-            ),
+        profile = ExecutionProfile(
+            route=OwnerRoute("beads"),
+            timeout_seconds=30,
+            cwd=project.path,
+            max_stdout_bytes=self.config.max_result_bytes,
+            max_stderr_bytes=self.config.max_result_bytes,
+            environment={
+                "HOME": str(Path.home()),
+                "LANG": os.environ.get("LANG", "C.UTF-8"),
+                "PATH": os.environ.get("PATH", "/run/current-system/sw/bin"),
+                "BEADS_ACTOR": f"sinnix-gateway:{self.principal.name}",
+            },
         )
+        # Owner output size is not a client-envelope limit or a transaction
+        # guard: writes may commit before emitting their response. Stream to
+        # managed scratch; final results use artifacts or snapshot pagination.
+        with tempfile.TemporaryFile() as output:
+            result = self.execution.run(
+                command, profile, stdout_chunk_callback=output.write
+            )
+            output.seek(0)
+            if result.failure_class is None:
+                if text:
+                    return output.read().decode("utf-8", "replace")
+                try:
+                    return json.load(output)
+                except json.JSONDecodeError as exc:
+                    raise BeadsError(
+                        "Beads did not return JSON", "owner_failed"
+                    ) from exc
+            result = replace(result, stdout=output.read(self.config.max_result_bytes))
         if result.failure_class == "command_timeout":
             raise BeadsError("Beads operation timed out", "deadline")
         if result.failure_class == "command_output_bound":
             raise BeadsError(
                 "Beads response exceeded configured bound", "response_bound"
             )
-        if result.failure_class:
-            error = (
-                (result.stdout + b"\n" + result.stderr)
-                .decode("utf-8", "replace")
-                .strip()
-            )
-            code = (
-                "precondition_failed"
-                if result.exit_status == 13 or "--if-" in error
-                else "owner_failed"
-            )
-            raise BeadsError(error or "Beads operation failed", code)
-        if text:
-            return result.stdout.decode("utf-8", "replace")
-        try:
-            return json.loads(result.stdout)
-        except json.JSONDecodeError as exc:
-            raise BeadsError("Beads did not return JSON", "owner_failed") from exc
+        error = (
+            (result.stdout + b"\n" + result.stderr).decode("utf-8", "replace").strip()
+        )
+        code = (
+            "precondition_failed"
+            if result.exit_status == 13 or "--if-" in error
+            else "owner_failed"
+        )
+        raise BeadsError(error or "Beads operation failed", code)
 
     def task_authority_status(self, project_id: str) -> dict[str, Any]:
         project, authority = self._authority(project_id, False)
@@ -302,9 +314,7 @@ class BeadsService:
         rows = (
             value
             if isinstance(value, list)
-            else value.get("issues")
-            if isinstance(value, Mapping)
-            else None
+            else value.get("issues") if isinstance(value, Mapping) else None
         )
         if (
             rows is None
@@ -417,8 +427,8 @@ class BeadsService:
     ) -> dict[str, Any]:
         commands = {
             "comments": ["comments", bead_id],
-            "history": ["history", bead_id, "--limit", "20"],
-            "events": ["history", bead_id, "--events", "--limit", "20"],
+            "history": ["history", bead_id, "--limit", "0"],
+            "events": ["history", bead_id, "--events", "--limit", "0"],
             "dependencies": ["dep", "list", bead_id, "--direction", "down"],
             "dependents": ["dep", "list", bead_id, "--direction", "up"],
             "children": [
@@ -427,9 +437,9 @@ class BeadsService:
                 bead_id,
                 "--flat",
                 "--limit",
-                str(_MAX_PAGE),
+                "0",
                 "--max-rows",
-                str(_MAX_PAGE),
+                "0",
             ],
             "refs": ["show", bead_id, "--refs"],
         }
@@ -748,7 +758,7 @@ class BeadsService:
         if projection not in {"summary", "full"}:
             raise BeadsError("projection must be summary or full")
         self._native_list_filters(native_filters or {}, view=view)
-        page_limit = self._limit(limit)
+        page_limit = self._limit(limit, maximum=None)
         request = {
             "principal": self.principal.name,
             "projects": sorted(projects),
@@ -784,7 +794,7 @@ class BeadsService:
                     order=order or {},
                     projection=projection,
                     aggregate=aggregate,
-                    max_rows=10000,
+                    max_rows=None,
                 )
                 normalized = (
                     [

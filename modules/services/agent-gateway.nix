@@ -78,7 +78,7 @@ mkServiceModule {
     maxResultBytes = lib.mkOption {
       type = lib.types.int;
       default = 262144;
-      description = "Maximum bytes returned by bounded project, observe, and artifact operations.";
+      description = "Client response byte budget. Larger successful payloads use artifacts; chunked read operations also use this budget. This is not a Beads owner-output limit.";
     };
     endpoints = lib.mkOption {
       type = lib.types.attrsOf (
