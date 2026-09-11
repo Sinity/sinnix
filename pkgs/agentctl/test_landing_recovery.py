@@ -1,11 +1,13 @@
 """Landing and cleanup preserve a live batch's inputs and recovery work."""
 
 import json
+import threading
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from agentctl import launch, manifest, prompts
+from agentctl import batch, launch, manifest, prompts
+from agentctl import start as start_module
 from agentctl.batch import BatchError, BatchRefusal
 from conftest import read_launch
 from test_batch import BASE, MOVED, SHA, Harness, labels, prepared_run, verdict
@@ -366,3 +368,256 @@ def test_bulk_cleanup_requires_a_complete_run_inventory(
     with pytest.raises(BatchRefusal, match="manifest"):
         launch.clean_terminal(harness.config)
     assert harness.pueue.removed == []
+
+
+# ------------------------------------------- a queue that lost its own state
+
+
+def test_the_last_result_requeues_a_landing_the_queue_lost(harness: Harness) -> None:
+    """mzw2: a landing id pueue reassigned to a stranger is not a landing task.
+
+    pueued's state was reset under a live external run: the manifest named
+    landing task 1 and the next task the daemon queued took that id, so an
+    id-resolved status reported a stage that nothing was waiting for.
+    """
+    run = harness.start(workers=[["fx-solo"]], harness="external")
+    stranded = run["landing"]["task_id"]
+    harness.pueue.reset_state()
+    unrelated = launch.start_operation(
+        harness.config, harness.project, harness.project.operation("check")
+    )
+    assert unrelated["job_id"] == stranded
+
+    filed = harness.file_result(run, "fx-solo")
+
+    assert filed["landing_vanished"] == stranded
+    assert not filed["landing_released"]
+    queued = filed["landing_requeued"]
+    task = harness.pueue.task(queued)
+    assert task.label == f"fixture:land:{run['run_id']}"
+    # Every result is in, so the replacement is released, not stashed again.
+    assert task.status != "Stashed" and task.dependencies == ()
+    assert read_launch(harness.config, task)["argv"][-3:] == [
+        "batch",
+        "land",
+        run["run_id"],
+    ]
+    stored = manifest.load(harness.config, run["run_id"])
+    assert stored.landing["task_id"] == queued
+    assert stored.landing["task_reference"] == launch.launch_reference(task)
+
+
+def test_concurrent_results_replace_a_lost_landing_once(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """mzw2: recovery locks its queue snapshot through the manifest relink.
+
+    Both workers preserve the same pre-recovery task snapshot behind this
+    barrier. Without the recovery lock they both see the missing landing and
+    enqueue one, leaving the first task orphaned; with it, the second sees the
+    replacement and releases it after reloading the first result.
+    """
+    run = harness.start(workers=[["fx-lead"], ["fx-solo"]], harness="external")
+    lost = run["landing"]["task_id"]
+    harness.pueue.reset_state()
+    original_tasks = harness.pueue.tasks
+    snapshots = threading.Barrier(2)
+
+    def concurrent_snapshots():
+        snapshot = original_tasks()
+        try:
+            # A recovery lock holds the second caller outside this function;
+            # timing out then lets the first proceed. Without that lock both
+            # callers return their identical stale snapshots together.
+            snapshots.wait(timeout=0.2)
+        except threading.BrokenBarrierError:
+            pass
+        return snapshot
+
+    monkeypatch.setattr(start_module.pueue, "tasks", concurrent_snapshots)
+    ready = threading.Barrier(2)
+    filed: list[dict[str, object]] = []
+    errors: list[BaseException] = []
+
+    def file(worker_id: str) -> None:
+        try:
+            ready.wait(timeout=2)
+            filed.append(harness.file_result(run, worker_id))
+        except BaseException as error:  # surface failures from both threads
+            errors.append(error)
+
+    threads = [
+        threading.Thread(target=file, args=(worker["id"],)) for worker in run["workers"]
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=3)
+
+    assert not any(thread.is_alive() for thread in threads)
+    assert not errors
+    replacement = [
+        task
+        for task in harness.pueue.tasks().values()
+        if task.label.endswith(f":{run['run_id']}")
+    ]
+    assert len(replacement) == 1
+    task = replacement[0]
+    assert task.status != "Stashed"
+    stored = manifest.load(harness.config, run["run_id"])
+    assert stored.landing["task_id"] == task.task_id
+    assert all(worker.get("result") for worker in stored.workers)
+    assert any(entry["landing_vanished"] == lost for entry in filed)
+
+
+def test_a_requeued_landing_waits_for_the_workers_still_running(
+    harness: Harness,
+) -> None:
+    """Breaks if recovery lands a run while a worker is still writing to it."""
+    run = harness.start("fx-lead", "fx-solo")
+    lead, solo = run["workers"]
+    harness.pueue.succeed(lead["task_id"])
+    stranded = run["landing"]["task_id"]
+    harness.pueue.remove([stranded])
+
+    filed = harness.file_result(run, "fx-lead")
+
+    assert filed["landing_vanished"] == stranded
+    task = harness.pueue.task(filed["landing_requeued"])
+    # The finished worker is answered by its result; the running one is not.
+    assert task.dependencies == (solo["task_id"],)
+
+
+def test_a_landing_the_queue_refuses_to_requeue_names_the_command(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Filing the result is the verb's work; a failed recovery is reported."""
+    run = harness.start(workers=[["fx-solo"]], harness="external")
+    stranded = run["landing"]["task_id"]
+    harness.pueue.reset_state()
+    harness.pueue.fail_add = True
+
+    filed = harness.file_result(run, "fx-solo")
+
+    assert filed["landing_vanished"] == stranded
+    assert filed["landing_requeued"] is None
+    assert "fixture pueue add failed" in filed["landing_requeue_error"]
+    assert manifest.load(harness.config, run["run_id"]).workers[0]["result"]
+
+
+def test_a_result_stays_recorded_when_the_queue_is_temporarily_unreadable(
+    harness: Harness,
+) -> None:
+    """A queue outage cannot undo the durable evidence this verb just filed."""
+    run = harness.start(workers=[["fx-solo"]], harness="external")
+    harness.pueue.fail_tasks = True
+
+    filed = harness.file_result(run, "fx-solo")
+
+    assert filed["landing_vanished"] is None
+    assert filed["landing_requeued"] is None
+    assert filed["landing_released"] is False
+    assert "fixture pueue status failed" in filed["landing_requeue_error"]
+    assert manifest.load(harness.config, run["run_id"]).workers[0]["result"]
+
+
+def test_a_result_filed_normally_reports_no_lost_landing(harness: Harness) -> None:
+    """Anti-vacuity: the recovery path must not fire on a healthy run."""
+    run = harness.start(workers=[["fx-solo"]], harness="external")
+    filed = harness.file_result(run, "fx-solo")
+    assert filed["landing_vanished"] is None
+    assert filed["landing_requeued"] is None
+    assert filed["landing_released"]
+    assert len([label for label in labels(harness.pueue) if ":land:" in label]) == 1
+
+
+def test_a_queued_landing_manually_stashed_by_the_operator_is_preserved(
+    harness: Harness,
+) -> None:
+    run = harness.start("fx-solo")
+    landing_id = run["landing"]["task_id"]
+    landing = harness.pueue.task(landing_id)
+    assert landing is not None
+    harness.pueue._tasks[landing_id] = replace(landing, status="Stashed")
+    harness.pueue.succeed(run["workers"][0]["task_id"])
+
+    filed = harness.file_result(run, "fx-solo")
+
+    assert filed["landing_released"] is False
+    assert harness.pueue.task(landing_id).status == "Stashed"
+    assert manifest.load(harness.config, run["run_id"]).landing[
+        "waiting_for_results"
+    ] is False
+
+
+def test_repeated_result_does_not_release_an_operator_restash_after_ours(
+    harness: Harness,
+) -> None:
+    run = harness.start(workers=[["fx-solo"]], harness="external")
+    landing_id = run["landing"]["task_id"]
+
+    first = harness.file_result(run, "fx-solo")
+    assert first["landing_released"] is True
+    landing = harness.pueue.task(landing_id)
+    assert landing is not None
+    harness.pueue._tasks[landing_id] = replace(landing, status="Stashed")
+
+    repeated = harness.file_result(run, "fx-solo")
+
+    assert repeated["landing_released"] is False
+    assert harness.pueue.task(landing_id).status == "Stashed"
+    assert manifest.load(harness.config, run["run_id"]).landing[
+        "waiting_for_results"
+    ] is False
+
+
+def test_a_queue_reset_does_not_strand_workers_that_filed_results(
+    harness: Harness,
+) -> None:
+    """A landing refuses on the results, not on the queue's memory of a task."""
+    run = prepared_run(harness, "fx-solo")
+    harness.pueue.reset_state()
+
+    landed = harness.land(run["run_id"])
+
+    assert landed["acceptance"]["candidate_sha"] == SHA
+    assert harness.beads.closed[0][0] == "fx-solo"
+
+
+def test_a_worker_with_no_result_and_no_task_still_refuses_to_land(
+    harness: Harness,
+) -> None:
+    """Anti-vacuity: losing the task is not evidence that the worker finished."""
+    run = harness.start("fx-solo")
+    harness.pueue.reset_state()
+    with pytest.raises(BatchRefusal, match="gone from pueue"):
+        harness.land(run["run_id"])
+
+
+def test_batch_queue_waits_for_the_worker_that_has_not_filed(
+    harness: Harness,
+) -> None:
+    """mzw2 review: a landing that can run at once refuses `worker_not_done`.
+
+    `batch queue` replaces a landing the queue lost, which is exactly when a
+    worker may still owe its result; the replacement waits for it instead of
+    ending as a failed task nobody is waiting on.
+    """
+    run = harness.start("fx-lead", "fx-solo")
+    lead, solo = run["workers"]
+    harness.pueue.succeed(lead["task_id"])
+    harness.pueue.remove([run["landing"]["task_id"]])
+
+    queued = batch.queue(harness.config, harness.project, run["run_id"])
+
+    task = harness.pueue.task(queued["landing_task_id"])
+    assert task.status == "Stashed" and task.dependencies == (solo["task_id"],)
+    harness.file_result(run, "fx-lead")
+    assert harness.pueue.task(task.task_id).status == "Stashed"
+
+    harness.pueue.succeed(solo["task_id"])
+    harness.file_result(run, "fx-solo")
+
+    # The last result is what the landing was waiting for, whatever harness
+    # the run uses: nothing else would ever release it.
+    assert harness.pueue.task(task.task_id).status != "Stashed"

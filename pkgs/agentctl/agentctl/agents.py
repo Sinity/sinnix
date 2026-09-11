@@ -7,10 +7,10 @@ import shlex
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from . import launch, results
+from . import launch, pueue, results
 from .config import Config
 from .limits import MAX_AGENT_TIMEOUT_SECONDS
-from .manifest import BatchRefusal, Run
+from .manifest import BatchRefusal, Run, land_update
 from .projects import ProjectAdapter, WorkspacePolicy
 from .pueue import PueueError
 
@@ -99,6 +99,19 @@ def worktree_path(project: ProjectAdapter, branch: str) -> Path:
 
 def landing_group(project_id: str) -> str:
     return f"{project_id}-land"
+
+
+def ensure_landing_groups(project_id: str) -> None:
+    """Create the groups a landing needs where the daemon lacks them.
+
+    The landing task takes the project's single land slot and queues its own
+    agents into `land-agent`, whatever `pools apply` has reached the daemon:
+    a landing must not depend on the `agent` pool being open. A daemon that
+    lost its state lost its groups with its tasks, so every path that queues
+    a landing asks for them rather than assuming an earlier start's.
+    """
+    pueue.group_add(landing_group(project_id), 1)
+    pueue.group_add(LANDING_AGENT_GROUP, LANDING_AGENT_PARALLELISM)
 
 
 def write_prompt(worktree: Path, name: str, prompt: str) -> Path:
@@ -317,3 +330,54 @@ def queue_landing(
     if not isinstance(task_id, int):
         raise PueueError("pueue returned no task id for the landing task")
     return task_id
+
+
+def requeue_landing(
+    config: Config,
+    project: ProjectAdapter,
+    run: Run,
+    tasks: Mapping[int, pueue.Task],
+) -> tuple[Run, int]:
+    """Queue a replacement landing for a live run and record it on the run.
+
+    One placement rule for every caller that queues a landing after the run
+    started: wait for the worker tasks pueue still has and has not finished,
+    and stay stashed while any worker still owes a result. A landing that can
+    run at once refuses `worker_not_done` and ends as a failed task nobody is
+    waiting on; `batch result` releases the stash once the last result is in.
+    A worker that already ended is answered by the result it filed, and
+    depending on an id the queue no longer has would strand the new task
+    exactly as the old one was stranded.
+    """
+    after = [
+        task.task_id
+        for worker in run.workers
+        if (
+            task := launch.find_task(
+                tasks, worker.get("task_id"), worker.get("task_reference")
+            )
+        )
+        is not None
+        and not task.terminal
+    ]
+    ensure_landing_groups(project.project_id)
+    waiting_for_results = not all(worker.get("result") for worker in run.workers)
+    landing_id = queue_landing(
+        config,
+        project,
+        run,
+        after=after,
+        stashed=waiting_for_results,
+    )
+    queued = pueue.task(landing_id)
+    return (
+        land_update(
+            config,
+            run.run_id,
+            task_id=landing_id,
+            task_reference=launch.launch_reference(queued) if queued else None,
+            waiting_for_results=waiting_for_results,
+            failure=None,
+        ),
+        landing_id,
+    )
