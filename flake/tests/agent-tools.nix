@@ -685,9 +685,11 @@ in
                 assert not missing, f"{name} missing {sorted(missing)}"
                 assert not unexpected, f"{name} unexpectedly has {sorted(unexpected)}"
 
-            config = tomllib.loads(pathlib.Path.home().joinpath('.codex/config.toml').read_text())
-            assert 'mcp_servers' not in config
-            assert config['features']['hooks'] is True
+            private_config = tomllib.loads(pathlib.Path.home().joinpath('.codex/config.toml').read_text())
+            assert 'mcp_servers' not in private_config
+            assert private_config['private']['keep'] is True
+            system_config = tomllib.loads(pathlib.Path('${agentToolsCodexConfigSource}').read_text())
+            assert system_config['features']['hooks'] is True
 
             full = keys(pathlib.Path.home().joinpath('.codex/full.config.toml'))
             lean = keys(pathlib.Path.home().joinpath('.codex/lean.config.toml'))
@@ -785,10 +787,7 @@ in
               "$HOME/.local/bin/codex" \
               "$HOME/.local/bin/gemini"; do
               grep -Fq 'npm/bin/' "$wrapper"
-              if grep -Fq 'launch.sh' "$wrapper"; then
-                echo "agent wrappers must execute installed npm binaries directly" >&2
-                exit 1
-              fi
+              grep -Fq 'exec "$STATE/npm/bin/' "$wrapper"
               grep -Fq '/proc/self/cgroup' "$wrapper"
               grep -Fq -- '--slice=agent.slice' "$wrapper"
               grep -Fq -- '${runtimeDefaults.agentContainedCasePattern}' "$wrapper"

@@ -9,8 +9,8 @@ from pydantic import Field, model_validator
 from ..action import ALL_PRINCIPALS, Action, Example, RequestControls
 from ..contracts import VerbFamily
 from ..locators import JobLocator, ProjectLocator, project_ref
-from ..schemas import GatewayModel
 from ..results import ProtocolError
+from ..schemas import GatewayModel
 from .products import HistoricalSelector
 
 if TYPE_CHECKING:
@@ -117,6 +117,7 @@ async def _compose(runtime: Runtime, inp: ComposeInput) -> ComposedContext:
         "verification.regression",
         "project.trajectory",
     }:
+        from ..contexts import ComponentResult, ComponentSpec
         from .products import (
             CampaignInput,
             OrchestrationInput,
@@ -124,7 +125,6 @@ async def _compose(runtime: Runtime, inp: ComposeInput) -> ComposedContext:
             _orchestration,
             owner_product,
         )
-        from ..contexts import ComponentResult, ComponentSpec
 
         assert inp.project is not None
         project = inp.project.resolve(runtime)

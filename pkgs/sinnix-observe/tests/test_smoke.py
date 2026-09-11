@@ -102,7 +102,9 @@ def test_runtime_inventory_missing_is_explicitly_unavailable(monkeypatch) -> Non
     assert runtime_inventory.resource_class_for_unit("sshd.service") is None
 
 
-def test_runtime_inventory_malformed_is_explicitly_unavailable(monkeypatch, tmp_path) -> None:
+def test_runtime_inventory_malformed_is_explicitly_unavailable(
+    monkeypatch, tmp_path
+) -> None:
     inventory_path = tmp_path / "runtime-inventory.json"
     inventory_path.write_text("{")
     monkeypatch.setenv("SINNIX_RUNTIME_INVENTORY_FILE", str(inventory_path))

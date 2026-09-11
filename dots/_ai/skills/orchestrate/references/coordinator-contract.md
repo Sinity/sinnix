@@ -48,7 +48,7 @@ Look for the verb before writing any procedure: `agentctl <verb> --help`.
 | see the runs, queue and ready work             | `agentctl view <p>`                                                                   |
 | watch what happens                             | `agentctl events tail --follow --project <p>`                                         |
 | start a batch of workers                       | `agentctl batch start <p> <bead>… [--worker a,b]… [--backend B --model M --effort E]` |
-| start an external batch                         | `agentctl batch start <p> <bead>… --workers external`                                 |
+| start an external batch                        | `agentctl batch start <p> <bead>… --workers external`                                 |
 | file an external worker's result               | `agentctl batch result <run> <worker> <result.json>`                                  |
 | land a run by hand after resolving its failure | `agentctl batch land <run>`                                                           |
 | land a hand fix made on the integration tree   | `agentctl batch land <run> --keep-integration`                                        |

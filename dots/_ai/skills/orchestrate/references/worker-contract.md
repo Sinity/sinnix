@@ -63,27 +63,42 @@ SHA.
   "planned_model": "<snapshot result_contract.planned_model>",
   "execution": "queued | external | native",
   "attempt": 1,
-  "model_segments": [{"attempt": 1, "planned_model": "<requested model>", "measured_usage": null}],
+  "model_segments": [
+    {
+      "attempt": 1,
+      "planned_model": "<requested model>",
+      "measured_usage": null
+    }
+  ],
   "measured_usage": null,
   "candidate_sha": "<40-hex HEAD of the worker branch>",
-  "beads": [{
-    "id": "<bead id>",
-    "bead_revision": "<snapshot evidence_binding.bead_revision>",
-    "criteria": [{
-      "ac_id": "<snapshot evidence_binding.criteria[].ac_id>",
-      "text": "<the exact snapshot criterion text>",
-      "status": "satisfied | unsatisfied | superseded",
-      "evidence": "<command and result line, path:line, or why superseded>"
-    }]
-  }],
+  "beads": [
+    {
+      "id": "<bead id>",
+      "bead_revision": "<snapshot evidence_binding.bead_revision>",
+      "criteria": [
+        {
+          "ac_id": "<snapshot evidence_binding.criteria[].ac_id>",
+          "text": "<the exact snapshot criterion text>",
+          "status": "satisfied | unsatisfied | superseded",
+          "evidence": "<command and result line, path:line, or why superseded>"
+        }
+      ]
+    }
+  ],
   "unresolved": ["<finding or follow-up not implemented>"],
-  "verification": [{
-    "command": "<exact command>",
-    "receipt": "<result line>",
-    "tested_sha": "<candidate SHA actually tested>",
-    "status": "passed | failed | skipped",
-    "coverage": {"ac_ids": ["<copied stable ac_id>"], "scope": "<what this command covers>"}
-  }]
+  "verification": [
+    {
+      "command": "<exact command>",
+      "receipt": "<result line>",
+      "tested_sha": "<candidate SHA actually tested>",
+      "status": "passed | failed | skipped",
+      "coverage": {
+        "ac_ids": ["<copied stable ac_id>"],
+        "scope": "<what this command covers>"
+      }
+    }
+  ]
 }
 ```
 
