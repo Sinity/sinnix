@@ -196,6 +196,11 @@ def test_files_actions_accept_paths_and_return_child_refs(tmp_path: Path) -> Non
     read = structured(call(server, "files.read", {"target": {"ref": child["ref"]}}))
     assert read["data"]["text"] == "beta\nline two\nline three\n"
     assert read["data"]["artifact"] is None
+    assert read["data"]["sha256"] is None
+    hashed = structured(
+        call(server, "files.read", {"target": {"ref": child["ref"]}, "with_sha256": True})
+    )
+    assert len(hashed["data"]["sha256"]) == 64
 
     lines = structured(
         call(
@@ -206,7 +211,7 @@ def test_files_actions_accept_paths_and_return_child_refs(tmp_path: Path) -> Non
     )
     assert lines["data"]["text"] == "line two"
     assert lines["data"]["line_start"] == 2 and lines["data"]["line_end"] == 2
-    assert lines["data"]["total_lines"] == 3 and lines["data"]["truncated"] is True
+    assert lines["data"]["total_lines"] is None and lines["data"]["truncated"] is True
 
     missing = call(server, "files.stat", {"target": {"path": str(root / "nope")}})
     assert isinstance(missing, CallToolResult) and missing.is_error
@@ -231,7 +236,7 @@ def test_image_read_returns_an_image_block(tmp_path: Path) -> None:
     assert data["text"] is None
     assert data["artifact"]["representation"] == "image"
     assert data["artifact"]["media_type"] == "image/png"
-    assert data["artifact"]["sha256"] == data["sha256"]
+    assert data["artifact"]["sha256"] is None and data["sha256"] is None
     encoded = json.dumps(structured(result))
     assert "�" not in encoded
 

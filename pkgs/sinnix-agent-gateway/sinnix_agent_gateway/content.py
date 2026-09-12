@@ -91,11 +91,13 @@ def attach(
     *,
     ref: str,
     media_type: str | None = None,
+    sha256: str | None = None,
+    compute_sha256: bool = True,
 ) -> tuple[Artifact, list[ContentBlock]]:
     """Describe a file and produce visual blocks without client attachments."""
     media_type = media_type or sniff_media_type(path)
     size = path.stat().st_size
-    digest = sha256_of(path)
+    digest = sha256 if sha256 is not None else (sha256_of(path) if compute_sha256 else None)
     base: dict[str, Any] = {
         "ref": ref,
         "media_type": media_type,

@@ -282,6 +282,10 @@ class ReadInput(RequestControls):
     target: FileLocator
     offset: int = Field(default=0, ge=0, description="Byte offset for raw reads.")
     max_bytes: int = Field(default=64_000, ge=1, description="Maximum inline text bytes.")
+    with_sha256: bool = Field(
+        default=False,
+        description="Compute a full-file SHA-256. Disabled by default for bounded reads.",
+    )
     line_start: int | None = Field(
         default=None, ge=1, description="First line (1-based) for text reads."
     )
@@ -297,7 +301,7 @@ class FileContent(GatewayModel):
     path: str
     media_type: str
     bytes: int = Field(description="Total size of the file.")
-    sha256: str
+    sha256: str | None = None
     text: str | None = Field(
         default=None, description="Inline text when the file is textual."
     )
@@ -322,7 +326,7 @@ def _read(runtime: Runtime, inp: ReadInput) -> ActionResult:
     ref = encode_file_ref(str(target))
     media = sniff_media_type(target)
     size = target.stat().st_size
-    digest = sha256_of(target)
+    digest = sha256_of(target) if inp.with_sha256 else None
     textual = inp.representation == "text" or (
         inp.representation == "auto" and is_text(media)
     )
@@ -342,23 +346,43 @@ def _read(runtime: Runtime, inp: ReadInput) -> ActionResult:
     if textual:
         if inp.line_start is not None:
             with target.open("rb") as handle:
-                lines = handle.read().split(b"\n")
-            total = len(lines) if lines[-1] else len(lines) - 1
-            start = inp.line_start
-            count = inp.line_count or 200
-            selected = lines[start - 1 : start - 1 + count]
-            data = b"\n".join(selected)
-            truncated = len(data) > max_bytes
+                start = inp.line_start
+                count = inp.line_count or 200
+                selected: list[bytes] = []
+                returned = 0
+                truncated = False
+                for number, line in enumerate(handle, start=1):
+                    if number < start:
+                        continue
+                    if len(selected) >= count:
+                        truncated = True
+                        break
+                    remaining = max_bytes + 1 - returned
+                    if remaining <= 0:
+                        truncated = True
+                        break
+                    selected.append(line[:remaining])
+                    returned += len(selected[-1])
+                    if len(line) > len(selected[-1]):
+                        truncated = True
+                        break
+                    if len(selected) >= count:
+                        truncated = bool(handle.read(1))
+                        break
+            data = b"".join(selected)
+            if data.endswith(b"\n"):
+                data = data[:-1]
+            truncated = truncated or len(data) > max_bytes
             data = data[:max_bytes]
             return ActionResult(
                 FileContent(
                     **base,
                     text=data.decode("utf-8", errors="replace"),
                     returned_bytes=len(data),
-                    truncated=truncated or start - 1 + count < total,
+                    truncated=truncated,
                     line_start=start,
-                    line_end=min(start - 1 + len(selected), total),
-                    total_lines=total,
+                    line_end=start + len(selected) - 1 if selected else None,
+                    total_lines=None,
                 )
             )
         with target.open("rb") as handle:
@@ -379,6 +403,8 @@ def _read(runtime: Runtime, inp: ReadInput) -> ActionResult:
         target,
         ref=ref,
         media_type=media,
+        sha256=digest,
+        compute_sha256=inp.with_sha256,
     )
     return ActionResult(
         FileContent(**base, artifact=artifact, returned_bytes=0),
