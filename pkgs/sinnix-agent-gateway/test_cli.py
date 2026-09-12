@@ -231,7 +231,7 @@ def test_cli_subprocess_keeps_binary_bytes_out_of_the_chat(tmp_path: Path) -> No
         "call",
         "files.read",
         "--input",
-        json.dumps({"target": {"path": str(fixture)}}),
+        json.dumps({"target": {"path": str(fixture)}, "with_sha256": True}),
     ]
 
     completed = subprocess.run(command, capture_output=True, text=True, check=False)

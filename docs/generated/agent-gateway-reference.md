@@ -1,11 +1,11 @@
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: 0af8323df7950f0120b55aa5262d084ac1aa2875d75dcc19ced317bae4fa17e8 -->
+<!-- gateway-catalog-sha256: b3c5597ef91e3c5946be22efb34577b37e8efb03c4712c85e3805c511625fea4 -->
 # Sinnix Agent Gateway reference
 
 Generated from `sinnix_agent_gateway.actions`. Every action is one MCP tool whose `tools/list` input schema is the one below; the catalog hash changes when any principal-visible action catalog row changes, including its schema, principal set, example or affordance.
 
-Revision: `v3-typed-actions`. Catalog SHA-256: `0af8323df7950f0120b55aa5262d084ac1aa2875d75dcc19ced317bae4fa17e8`.
+Revision: `v3-typed-actions`. Catalog SHA-256: `b3c5597ef91e3c5946be22efb34577b37e8efb03c4712c85e3805c511625fea4`.
 
 ## Invocation
 
@@ -833,6 +833,11 @@ Input schema:
     },
     "target": {
       "$ref": "#/$defs/FileLocator"
+    },
+    "with_sha256": {
+      "default": false,
+      "description": "Compute a full-file SHA-256. Disabled by default for bounded reads.",
+      "type": "boolean"
     }
   },
   "required": [
