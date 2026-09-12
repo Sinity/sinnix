@@ -5,7 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+import anyio
 import pytest
+from mcp.types import ImageContent
 from sinnix_agent_gateway.actions import mcp_tools
 from sinnix_agent_gateway.config import GatewayConfig
 from sinnix_agent_gateway.locators import McpToolLocator
@@ -191,3 +193,28 @@ def test_observer_cannot_change_and_timeout_is_diagnosable(
         ]
     }["fixture"]
     assert row["failure_class"] == "timeout" and row["last_successful_probe"] is None
+
+
+def test_self_broker_routes_direct_read_with_content_blocks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rt = runtime(tmp_path, "operator", monkeypatch)
+    image = tmp_path / "fixture.png"
+    image.write_bytes(
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+        b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\xcf\xc0\x00\x00\x03\x01\x01\x00\x18\xdd\x8d\xb7\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+
+    async def invoke() -> object:
+        return await mcp_tools._call(
+            rt,
+            mcp_tools.CallInput(
+                target={"server": "sinnix-agent-gateway", "tool": "files.read"},
+                arguments={"target": {"path": str(image)}},
+            ),
+        )
+
+    result = anyio.run(invoke)
+    assert isinstance(result, mcp_tools.ActionResult)
+    assert result.data.response["media_type"] == "image/png"
+    assert isinstance(result.blocks[0], ImageContent)

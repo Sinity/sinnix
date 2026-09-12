@@ -1,11 +1,11 @@
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: 647c7de05c55ffb94bc92bff7aa4eb50d186dcbd7be48dc0e8b7d9ac4c8689a1 -->
+<!-- gateway-catalog-sha256: d07a26f5625590cf20111bb15252ecd457e4403cac30d5a195deffce434940e4 -->
 # Sinnix Agent Gateway reference
 
 Generated from `sinnix_agent_gateway.actions`. Every action is one MCP tool whose `tools/list` input schema is the one below; the catalog hash changes when any principal-visible action catalog row changes, including its schema, principal set, example or affordance.
 
-Revision: `v3-typed-actions`. Catalog SHA-256: `647c7de05c55ffb94bc92bff7aa4eb50d186dcbd7be48dc0e8b7d9ac4c8689a1`.
+Revision: `v3-typed-actions`. Catalog SHA-256: `d07a26f5625590cf20111bb15252ecd457e4403cac30d5a195deffce434940e4`.
 
 ## Invocation
 
@@ -117,7 +117,7 @@ MCP: call the tool named after the action. CLI: `sinnix-agent-gateway call <acti
 | `processes.wait`         | `wait`    | `machine`          | `agent-control, observer, operator` | Wait until a process (same pid and start ticks) exits, or the bounded timeout elapses.                                                                                                                                                                                                                                                                                                            |
 | `mcp.servers`            | `status`  | `mcp-broker`       | `observer, operator`                | Each probe runs initialize + tools/list with a 5 s bound; a timeout stores the upstream stderr as an artifact and returns its ref.                                                                                                                                                                                                                                                                |
 | `mcp.tools`              | `catalog` | `mcp-broker`       | `observer, operator`                | Catalog of every admitted upstream tool with its namespaced ref, input schema and read/change effect.                                                                                                                                                                                                                                                                                             |
-| `mcp.call`               | `query`   | `mcp-broker`       | `observer, operator`                | Reads require an owner read-only annotation or an exact match to trusted registry selectors. Other requests require mcp.change (operator only).                                                                                                                                                                                                                                                   |
+| `mcp.call`               | `query`   | `mcp-broker`       | `observer, operator`                | Reads require an owner read-only annotation or an exact match to trusted registry selectors. Other requests require mcp.change (operator only). A target using server=sinnix-agent-gateway is routed to the named direct read action, preserving its native content blocks; changes stay direct-only.                                                                                             |
 | `mcp.change`             | `change`  | `mcp-broker`       | `operator`                          | Invoke an upstream request not admitted as read-only by annotation or trusted registry selectors.                                                                                                                                                                                                                                                                                                 |
 | `artifacts.list`         | `catalog` | `artifacts`        | `agent-control, observer, operator` | List principal-visible artifacts with kind, owner, size and canonical ref.                                                                                                                                                                                                                                                                                                                        |
 | `artifacts.get`          | `get`     | `artifacts`        | `agent-control, observer, operator` | Metadata of one artifact without its bytes.                                                                                                                                                                                                                                                                                                                                                       |
@@ -18084,7 +18084,7 @@ Read tools mentioning search:
 
 ### `mcp.call`
 
-Reads require an owner read-only annotation or an exact match to trusted registry selectors. Other requests require mcp.change (operator only).
+Reads require an owner read-only annotation or an exact match to trusted registry selectors. Other requests require mcp.change (operator only). A target using server=sinnix-agent-gateway is routed to the named direct read action, preserving its native content blocks; changes stay direct-only.
 
 Family: `query`. Owner: `mcp-broker`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
