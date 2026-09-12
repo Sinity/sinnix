@@ -53,6 +53,10 @@ LOCAL_ONLY_FILES = frozenset({(".mcp.json",)})
 _DIRECTORY_OPEN_FLAGS = (
     os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
 )
+# A search row may legitimately contain a source line larger than the normal
+# response budget.  It is still bounded independently so malformed producer
+# output cannot grow the streaming decoder without limit.
+_SEARCH_ROW_MAX_BYTES = 1_048_576
 
 
 def _is_excluded(path: Path) -> bool:
@@ -677,11 +681,43 @@ class ProjectService:
             raise ProjectError("query must contain 1-1000 characters")
         if max_matches < 1:
             raise ProjectError("max_matches must be positive")
-        with self._spooled_output(
+        matches: list[dict[str, Any]] = []
+
+        def collect(row: Any) -> bool | None:
+            match = self._search_match(row)
+            if match is None:
+                return None
+            matches.append(match)
+            # Keep one surplus row solely to report a truthful truncation flag;
+            # terminate rg before it scans the rest of a large checkout.
+            return len(matches) <= max_matches
+
+        safe_env = {
+            "HOME": str(Path.home()),
+            "LANG": os.environ.get("LANG", "C.UTF-8"),
+            "PATH": os.environ.get("PATH", "/run/current-system/sw/bin"),
+            "GIT_OPTIONAL_LOCKS": "0",
+        }
+        result = OwnerExecution(safe_env).run_jsonl(
             ["rg", "--json", "--hidden", "--glob", "!.git/**", "--", query, "."],
-            project.path,
-        ) as output:
-            matches = self._search_matches(output, max_matches)
+            ExecutionProfile(
+                route=OwnerRoute("project-read"),
+                cwd=project.path,
+                timeout_seconds=15,
+                max_stdout_bytes=self.config.max_result_bytes,
+                max_stderr_bytes=self.config.max_result_bytes,
+                environment={"GIT_OPTIONAL_LOCKS": "0"},
+            ),
+            collect,
+            max_row_bytes=max(self.config.max_result_bytes, _SEARCH_ROW_MAX_BYTES),
+        )
+        if result.timed_out:
+            raise ProjectError("project operation timed out")
+        if result.output_exceeded:
+            raise ProjectError("project operation exceeded its output bound")
+        if result.failure_class is not None or result.exit_status not in (0, 1):
+            diagnostic = result.stderr.decode("utf-8", errors="replace").strip()
+            raise ProjectError(diagnostic or "project operation failed")
         return {
             "matches": matches[:max_matches],
             "truncated": len(matches) > max_matches,
@@ -695,29 +731,33 @@ class ProjectService:
                 row = json.loads(line)
             except ValueError:
                 continue
-            if row.get("type") != "match":
-                continue
-            data = row["data"]
-            path_data = data["path"]
-            path_value = path_data.get("text")
-            if path_value is None:
-                path_value = os.fsdecode(base64.b64decode(path_data["bytes"]))
-            if _is_excluded(Path(path_value)):
-                continue
-            line_data = data["lines"]
-            text = line_data.get("text")
-            if text is None:
-                text = base64.b64decode(line_data["bytes"]).decode("utf-8", "replace")
-            matches.append(
-                {
-                    "path": path_value,
-                    "line": data.get("line_number"),
-                    "text": text.rstrip("\n"),
-                }
-            )
+            match = ProjectService._search_match(row)
+            if match is not None:
+                matches.append(match)
             if len(matches) > max_matches:
                 break
         return matches
+
+    @staticmethod
+    def _search_match(row: Any) -> dict[str, Any] | None:
+        if not isinstance(row, dict) or row.get("type") != "match":
+            return None
+        data = row["data"]
+        path_data = data["path"]
+        path_value = path_data.get("text")
+        if path_value is None:
+            path_value = os.fsdecode(base64.b64decode(path_data["bytes"]))
+        if _is_excluded(Path(path_value)):
+            return None
+        line_data = data["lines"]
+        text = line_data.get("text")
+        if text is None:
+            text = base64.b64decode(line_data["bytes"]).decode("utf-8", "replace")
+        return {
+            "path": path_value,
+            "line": data.get("line_number"),
+            "text": text.rstrip("\n"),
+        }
 
     def diff(
         self, project_id: str, ref: str | None = None, checkout_id: str | None = None

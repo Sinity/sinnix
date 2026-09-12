@@ -87,6 +87,24 @@ def test_owner_execution_streams_stdin_while_collecting_stdout() -> None:
     assert result.stdout == b"tupni hctap yawetag"
 
 
+def test_owner_execution_allows_a_stream_consumer_to_stop_a_command_early() -> None:
+    seen: list[bytes] = []
+
+    def stop_after_first(chunk: bytes) -> bool:
+        seen.append(chunk)
+        return False
+
+    result = OwnerExecution().run(
+        [sys.executable, "-u", "-c", "import time; print('first'); time.sleep(60)"],
+        ExecutionProfile(route=OwnerRoute("fixture"), timeout_seconds=2),
+        stdout_chunk_callback=stop_after_first,
+    )
+
+    assert seen == [b"first\n"]
+    assert result.stopped_early is True
+    assert result.available is True
+
+
 def test_owner_execution_handles_child_that_closes_stdin() -> None:
     result = OwnerExecution().run(
         [sys.executable, "-c", "import os; os.close(0); print('done')"],
