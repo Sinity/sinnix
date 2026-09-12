@@ -90,8 +90,9 @@ mkFeatureModule {
           enable = true;
           autoStart = false;
           openFirewall = false;
+          capSysAdmin = true;
           settings = {
-            capture = "wlr";
+            capture = "kms";
             encoder = "nvenc";
             nvenc_preset = 1;
           };
