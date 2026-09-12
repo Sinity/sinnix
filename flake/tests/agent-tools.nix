@@ -20,15 +20,6 @@ in
       runtimeDefaults = import ../data/runtime-defaults.nix { inherit lib; };
       mcpRegistry = import ../data/mcp-registry.nix { inherit lib; };
       agentLanes = import ../data/agent-lanes.nix;
-      codexProfileNames =
-        mcpRegistry.codexProfileNames
-        ++ lib.unique (
-          lib.mapAttrsToList (_: lane: lane.mcpProfile) (
-            lib.filterAttrs (
-              _: lane: lane ? env && !(builtins.elem lane.mcpProfile mcpRegistry.codexProfileNames)
-            ) agentLanes.codexLanes
-          )
-        );
       # Derived from the lane registry rather than hand-listed: every declared
       # lane must produce an installed wrapper, and adding or retiring a lane
       # must not require editing this file in several places.

@@ -22,6 +22,7 @@ from .agents import (
     WORKTREE_STATE_DIR,
     binding,
     other_worktrees,
+    pending_task,
     queue_agent,
     requeue_landing,
     workspace_of,
@@ -39,6 +40,7 @@ from .manifest import (
     Run,
     land_update,
     landing_locked,
+    landing_recovery_locked,
     list_runs,
     load,
     now,
@@ -63,10 +65,7 @@ POLL_INTERVAL_SECONDS = 15
 # a source line such as ``===================== =====`` cannot match the
 # opening seven equals.  The middle marker has no label and therefore gets
 # its own branch that only permits trailing whitespace.
-CONFLICT_MARKER = (
-    r"^(<{7,}|>{7,}|\|{7,})([[:space:]].*)?$"
-    r"|^={7,}[[:space:]]*$"
-)
+CONFLICT_MARKER = r"^(<{7,}|>{7,}|\|{7,})([[:space:]].*)?$" r"|^={7,}[[:space:]]*$"
 # How many times the default branch may move under a run before landing
 # stops with `target_moved_twice`.
 MAX_REFRESHES = 1
@@ -98,10 +97,12 @@ def _refuse_unless_workers_done(run: Run) -> None:
             if task is None:
                 raise BatchRefusal(
                     "worker_not_done",
-                    f"worker {worker['id']} has no task"
-                    if task_id is None
-                    else f"worker {worker['id']} task {task_id} is gone from pueue "
-                    "and filed no result",
+                    (
+                        f"worker {worker['id']} has no task"
+                        if task_id is None
+                        else f"worker {worker['id']} task {task_id} is gone from pueue "
+                        "and filed no result"
+                    ),
                 )
             if not task.terminal:
                 raise BatchRefusal(
@@ -853,9 +854,11 @@ def _verify(
         "command": list(operation.command),
         "head_before": before["head"],
         "head_after": after["head"],
-        "git_dirty": False
-        if clean_candidate
-        else (True if before["dirty"] is True or after["dirty"] is True else None),
+        "git_dirty": (
+            False
+            if clean_candidate
+            else (True if before["dirty"] is True or after["dirty"] is True else None)
+        ),
         "recorded_at": now(),
     }
     if clean_candidate:
@@ -1198,19 +1201,24 @@ def queue(config: Config, project: ProjectAdapter, run_id: str) -> dict[str, Any
     landing that runs before then only refuses `worker_not_done`.
     """
     run = load(config, run_id)
-    if run.project != project.project_id:
-        raise BatchRefusal("project", f"run {run_id} belongs to {run.project}")
-    _refuse_unless_live(run)
-    tasks = pueue.tasks()
-    task_id = run.landing.get("task_id")
-    current = launch.find_task(tasks, task_id, run.landing.get("task_reference"))
-    if current is not None and not current.terminal:
-        raise BatchRefusal(
-            "landing_in_progress",
-            f"landing task {task_id} is {current.status.lower()}",
-        )
-    run, queued = requeue_landing(config, project, run, tasks)
-    return {**run.to_dict(), "landing_task_id": queued}
+    with landing_recovery_locked(config, run.run_id):
+        run = load(config, run.run_id)
+        if run.project != project.project_id:
+            raise BatchRefusal("project", f"run {run_id} belongs to {run.project}")
+        _refuse_unless_live(run)
+        tasks = pueue.tasks()
+        task_id = run.landing.get("task_id")
+        if run.landing.get("pending_launch"):
+            run, queued = requeue_landing(config, project, run, tasks)
+            return {**run.to_dict(), "landing_task_id": queued}
+        current = launch.find_task(tasks, task_id, run.landing.get("task_reference"))
+        if current is not None and not current.terminal:
+            raise BatchRefusal(
+                "landing_in_progress",
+                f"landing task {task_id} is {current.status.lower()}",
+            )
+        run, queued = requeue_landing(config, project, run, tasks)
+        return {**run.to_dict(), "landing_task_id": queued}
 
 
 def land(
@@ -1231,7 +1239,8 @@ def land(
     if run.project != project.project_id:
         raise BatchRefusal("project", f"run {run_id} belongs to {run.project}")
     beads = beads or SubprocessBeads(project.root)
-    with landing_locked(config, run_id):
+    with landing_locked(config, run.run_id):
+        run = load(config, run.run_id)
         return _land_locked(
             config, project, run, beads, sleep=sleep, keep_integration=keep_integration
         )
@@ -1762,6 +1771,13 @@ def _drop_branch(
 def _drop_worktrees(
     config: Config, project: ProjectAdapter, run: Run, *, published: str | None = None
 ) -> list[str]:
+    with project_locked(config, project.project_id):
+        return _drop_worktrees_locked(config, project, run, published=published)
+
+
+def _drop_worktrees_locked(
+    config: Config, project: ProjectAdapter, run: Run, *, published: str | None = None
+) -> list[str]:
     """Drop the run's worker and integration worktrees; name the ones kept.
 
     ``published`` is the candidate a landing published. The integration
@@ -1788,18 +1804,17 @@ def _drop_worktrees(
         )
     )
     residual: list[str] = []
-    with project_locked(config, project.project_id):
-        for branch, base, recorded_path in branches:
-            kept = _drop_branch(
-                config,
-                project,
-                branch,
-                base=base,
-                recorded_path=recorded_path,
-                run_id=run.run_id,
-            )
-            if kept:
-                residual.append(f"{branch}: {kept}")
+    for branch, base, recorded_path in branches:
+        kept = _drop_branch(
+            config,
+            project,
+            branch,
+            base=base,
+            recorded_path=recorded_path,
+            run_id=run.run_id,
+        )
+        if kept:
+            residual.append(f"{branch}: {kept}")
     return residual
 
 
@@ -1818,20 +1833,36 @@ def abandon(
         raise BatchRefusal("project", f"run {run_id} belongs to {run.project}")
     _refuse_unless_live(run)
     beads = beads or SubprocessBeads(project.root)
-    landing_id = run.landing.get("task_id")
-    landing_task = launch.find_task(
-        pueue.tasks(), landing_id, run.landing.get("task_reference")
-    )
-    if landing_task is not None and landing_task.status == "Running":
-        raise BatchRefusal(
-            "landing_in_progress", f"landing task {landing_id} is running"
+    with (
+        landing_locked(config, run.run_id),
+        landing_recovery_locked(config, run.run_id),
+        project_locked(config, project.project_id),
+    ):
+        run = load(config, run.run_id)
+        _refuse_unless_live(run)
+        tasks = pueue.tasks()
+        for worker in run.workers:
+            if worker.get("pending_launch"):
+                pending_task(config, worker["pending_launch"], tasks)
+        if run.landing.get("pending_launch"):
+            pending_task(config, run.landing["pending_launch"], tasks)
+        landing_id = run.landing.get("task_id")
+        landing_task = launch.find_task(
+            tasks,
+            landing_id,
+            run.landing.get("pending_launch") or run.landing.get("task_reference"),
         )
-    with landing_locked(config, run_id):
+        if landing_task is not None and landing_task.status == "Running":
+            raise BatchRefusal(
+                "landing_in_progress", f"landing task {landing_id} is running"
+            )
         residual: list[str] = []
         for worker in run.workers:
             task_id = worker.get("task_id")
             task = launch.find_task(
-                pueue.tasks(), task_id, worker.get("task_reference")
+                pueue.tasks(),
+                task_id,
+                worker.get("pending_launch") or worker.get("task_reference"),
             )
             if task is not None and not task.terminal:
                 launch.cancel(config, task.task_id)
@@ -1842,7 +1873,7 @@ def abandon(
                 beads.unclaim(bead_id, actor=run.actor)
             except BatchError as error:
                 residual.append(f"{bead_id}: unclaim failed: {error}")
-        residual.extend(_drop_worktrees(config, project, run))
+        residual.extend(_drop_worktrees_locked(config, project, run))
         record = {"reason": reason, "at": now(), "residual": residual}
 
         def mark(document: dict[str, Any]) -> None:

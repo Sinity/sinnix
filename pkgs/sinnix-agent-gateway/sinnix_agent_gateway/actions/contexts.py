@@ -70,7 +70,7 @@ class ComposedContext(GatewayModel):
     intent: str
     target_ref: str
     snapshot_ref: str = Field(
-        description="sinnix://contexts/<id>; readable again by ref."
+        description="sinnix://results/<id>; readable through results.get or MCP resources."
     )
     context_schema: str | None = None
     components: list[ContextComponent]
@@ -203,10 +203,7 @@ async def _compose(runtime: Runtime, inp: ComposeInput) -> ComposedContext:
         context = runtime.context_composer.compose(
             inp.intent, ref, [ComponentSpec(result.name, 56000, lambda: result)]
         )
-        if runtime.context_snapshots is None:
-            raise ProtocolError("unavailable", "Context snapshot store is unavailable")
-        runtime.context_snapshots.put(context)
-        context = {"ref": ref, **context}
+        context = runtime.persist_context({"ref": ref, **context})
     else:
         context = runtime.compose_context(
             ref, inp.intent, launch_reference=launch_reference

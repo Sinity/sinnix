@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Callable
 
 import pytest
-from agentctl import launch
+from agentctl import launch, pueue
 from agentctl.config import Config, load_config
 from agentctl.launch import JobError
 from agentctl.projects import load_project_adapter
@@ -639,6 +639,35 @@ def test_a_binding_is_stored_in_the_launch_input_and_read_back_on_get(
     assert "binding" not in launch.get_job(started["job_id"])
 
 
+def test_enqueue_preserves_a_pending_launch_after_an_uncertain_add(
+    fake_pueue: FakePueue, config: Config, project_root: Path
+) -> None:
+    project = load_project_adapter(project_root)
+    fake_pueue.fail_add = True
+    pending: list[str] = []
+
+    with pytest.raises(launch.EnqueueUncertain) as raised:
+        launch.enqueue(
+            config,
+            project=project,
+            operation="check",
+            label="fixture:check",
+            group="normal",
+            argv=["true"],
+            working_directory=project_root,
+            timeout_seconds=10,
+            result_kind="exit",
+            environment={"PATH": os.environ["PATH"]},
+            reference="recovery-pending",
+            before_enqueue=pending.append,
+        )
+
+    assert pending == ["recovery-pending"]
+    assert raised.value.reference == "recovery-pending"
+    assert "fixture pueue add failed" in str(raised.value)
+    assert (config.inputs_dir / "recovery-pending.json").is_file()
+
+
 def test_a_declared_scratch_tier_reaches_the_launch_input_and_job_get(
     fake_pueue: FakePueue,
     config: Config,
@@ -963,6 +992,55 @@ def test_list_filters_by_project_prefix(
 
     assert [row["label"] for row in launch.list_jobs("fixture")] == ["fixture:check"]
     assert len(launch.list_jobs()) == 2
+
+
+def test_snapshot_projects_a_large_terminal_history_without_reading_artifacts(
+    config: Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    terminal_history = {
+        str(number): {
+            "id": number,
+            "label": "fixture:history:" + "x" * 300,
+            "group": "normal",
+            "path": "/realm/project/fixture",
+            "command": "x" * 240,
+            "dependencies": [],
+            "status": {"Done": {"result": "Success"}},
+        }
+        for number in range(5_000)
+    }
+    document = {
+        "groups": {
+            "agent": {"status": "Running", "parallel_tasks": 2},
+            "normal": {"status": "Running", "parallel_tasks": 1},
+        },
+        "tasks": {
+            **terminal_history,
+            "6001": {
+                "id": 6001, "label": "fixture:worker:run", "group": "agent",
+                "path": "/realm/project/fixture", "dependencies": [],
+                "status": {"Running": {}},
+            },
+        },
+    }
+    payload = json.dumps(document)
+    assert len(payload.encode()) > 1_048_576
+    calls: list[tuple[str, ...]] = []
+    monkeypatch.setattr(
+        pueue,
+        "_run",
+        lambda arguments, **_kwargs: (calls.append(tuple(arguments)) or payload),
+    )
+
+    snapshot = launch.snapshot_jobs(2)
+
+    assert calls == [("status", "--json")]
+    assert [row["job_id"] for row in snapshot["jobs"]] == [6001, 4999]
+    assert snapshot["groups"]["agent"]["running"] == 1
+    assert snapshot["groups"]["normal"]["terminal"] == 5_000
+    assert snapshot["omitted"] == {"total": 4_999, "active": 0, "terminal": 4_999}
+    assert snapshot["jobs"][1]["shortened"] == ["label", "operation"]
+    assert len(json.dumps(snapshot).encode()) <= 1_048_576
 
 
 def test_every_queued_task_carries_the_config_the_launch_was_started_with(

@@ -5,12 +5,12 @@ from __future__ import annotations
 import os
 import shlex
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from . import launch, pueue, results
 from .config import Config
 from .limits import MAX_AGENT_TIMEOUT_SECONDS
-from .manifest import BatchRefusal, Run, land_update
+from .manifest import BatchRefusal, Run, land_update, load
 from .projects import ProjectAdapter, WorkspacePolicy
 from .pueue import PueueError
 
@@ -180,6 +180,7 @@ def queue_agent(
     binding: Mapping[str, Any] | None = None,
     inaccessible: Sequence[Path] = (),
     group: str = AGENT_GROUP,
+    before_enqueue: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     """Queue one agent in ``group``; ``then`` runs after a successful agent.
 
@@ -248,6 +249,7 @@ def queue_agent(
             *path_properties(project, inaccessible=inaccessible),
         ),
         binding=binding,
+        before_enqueue=before_enqueue,
     )
 
 
@@ -257,9 +259,11 @@ def other_worktrees(
     """Every worker worktree of the run except ``worker_id``'s own; one not
     yet created is where `wt` will place it."""
     return tuple(
-        Path(worker["worktree"])
-        if worker.get("worktree")
-        else worktree_path(project, worker["branch"])
+        (
+            Path(worker["worktree"])
+            if worker.get("worktree")
+            else worktree_path(project, worker["branch"])
+        )
         for worker in run.workers
         if worker["id"] != worker_id
     )
@@ -304,6 +308,18 @@ def worker_then(
     )
 
 
+def pending_task(
+    config: Config, reference: str, tasks: Mapping[int, pueue.Task] | None = None
+) -> pueue.Task | None:
+    """Resolve an interrupted admission without treating a lost response as rejection."""
+    found = launch.find_task(pueue.tasks() if tasks is None else tasks, None, reference)
+    if found is None and (config.inputs_dir / f"{reference}.json").exists():
+        raise launch.JobError(
+            f"launch {reference} has uncertain admission; retained input and workspace require reconciliation"
+        )
+    return found
+
+
 def queue_landing(
     config: Config,
     project: ProjectAdapter,
@@ -312,6 +328,17 @@ def queue_landing(
     after: Sequence[int],
     stashed: bool,
 ) -> int:
+    pending = run.landing.get("pending_launch")
+    if pending:
+        task = pending_task(config, pending)
+        if task is not None:
+            return task.task_id
+
+    def record_pending(reference: str) -> None:
+        land_update(
+            config, run.run_id, pending_launch=reference, waiting_for_results=stashed
+        )
+
     started = launch.enqueue(
         config,
         project=project,
@@ -325,6 +352,7 @@ def queue_landing(
         environment=project.environment.values(),
         after=after,
         stashed=stashed,
+        before_enqueue=record_pending,
     )
     task_id = started.get("job_id")
     if not isinstance(task_id, int):
@@ -375,7 +403,12 @@ def requeue_landing(
             config,
             run.run_id,
             task_id=landing_id,
-            task_reference=launch.launch_reference(queued) if queued else None,
+            pending_launch=None,
+            task_reference=(
+                launch.launch_reference(queued)
+                if queued
+                else load(config, run.run_id).landing.get("pending_launch")
+            ),
             waiting_for_results=waiting_for_results,
             failure=None,
         ),

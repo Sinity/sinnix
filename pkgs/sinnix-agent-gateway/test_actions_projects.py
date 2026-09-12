@@ -7,6 +7,7 @@ import json
 import subprocess
 from pathlib import Path
 
+import anyio
 import pytest
 from conftest import call, error, ok
 from sinnix_agent_gateway import server as server_module
@@ -461,7 +462,7 @@ def test_context_composes_orientation_and_triage(tmp_path: Path) -> None:
         orientation["ref"] == "sinnix://projects/fixture"
         and orientation["intent"] == "project.orientation"
     )
-    assert orientation["snapshot_ref"].startswith("sinnix://contexts/")
+    assert orientation["snapshot_ref"].startswith("sinnix://results/")
     by_name = {row["name"]: row for row in orientation["components"]}
     assert by_name["project"]["status"] == "available"
     assert by_name["project"]["data"]["changes"]["unstaged"] == 1
@@ -478,6 +479,14 @@ def test_context_composes_orientation_and_triage(tmp_path: Path) -> None:
         "projects.context",
         {"target": {"ref": "sinnix://projects/fixture"}, "intent": "project.triage"},
     )
+    for context in (orientation, triage):
+        resource = anyio.run(server.read_resource, context["snapshot_ref"])
+        stored = json.loads(list(resource)[0].content)["rows"][0]
+        assert stored["intent"] == context["intent"]
+        assert stored["target_ref"] == context["target_ref"]
+        assert [row["source_revision"] for row in stored["components"]] == [
+            row["source_revision"] for row in context["components"]
+        ]
     names = [row["name"] for row in triage["components"]]
     assert names == ["project", "open_beads", "stale_claims", "changes"]
     changes = next(row for row in triage["components"] if row["name"] == "changes")

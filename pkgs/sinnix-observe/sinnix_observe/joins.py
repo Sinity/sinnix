@@ -218,42 +218,27 @@ def build_gateway_rows(
 ) -> list[dict[str, Any]]:
     rows = []
     for job in gateway.get("jobs", []):
-        state = job.get("state") if isinstance(job.get("state"), dict) else {}
-        systemd = state.get("systemd") if isinstance(state.get("systemd"), dict) else {}
-        cgroup = systemd.get("ControlGroup")
+        if not isinstance(job, dict):
+            continue
         rows.append(
             {
-                "workload_id": f"agent-gateway:{job.get('job_id')}",
-                "source": "agent-gateway",
-                "project": "agent-gateway",
-                "kind": "attested-job",
-                "name": job.get("job_id"),
+                "workload_id": f"agentctl:{job.get('job_id')}",
+                "source": "agentctl",
+                "project": job.get("project"),
+                "kind": job.get("kind"),
+                "name": job.get("label"),
                 "run_id": job.get("job_id"),
-                "status": state.get("phase"),
-                "unit": job.get("unit"),
-                "cgroup": cgroup,
-                "resource_class": infer_resource_class_from_cgroup(cgroup or ""),
-                "below": match_below(str(job.get("job_id")), cgroup, below),
+                "status": job.get("phase"),
+                "unit": None,
+                "cgroup": None,
+                "resource_class": None,
+                "below": match_below(str(job.get("job_id")), None, below),
                 "metrics": {
-                    "backend": job.get("backend"),
-                    "model": job.get("model"),
-                    "effort": job.get("effort"),
-                    "checkout": job.get("checkout", {}),
-                    "contract": job.get("contract", {}),
+                    "group": job.get("group"),
+                    "operation": job.get("operation"),
+                    "reference": job.get("reference"),
                 },
-                # Gap entries are stable category identifiers (gaps_summary
-                # counts them); the probes' reason strings stay on the
-                # agent_gateway state, not in the gap taxonomy.
-                "gaps": [
-                    gap
-                    for gap, reason in (
-                        (
-                            "agent_gateway.polylogue.unavailable",
-                            gateway.get("polylogue_error"),
-                        ),
-                    )
-                    if reason
-                ],
+                "gaps": [] if gateway.get("available") else ["agentctl.unavailable"],
             }
         )
     return rows

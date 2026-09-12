@@ -16,60 +16,30 @@ def response(value: object) -> subprocess.CompletedProcess[str]:
     return subprocess.CompletedProcess(["agentctl"], 0, stdout=json.dumps(value))
 
 
-PUEUE_STATUS = {
-    "groups": {
-        "agent": {"status": "Paused", "parallel_tasks": 4},
-        "pytest": {"status": "Running", "parallel_tasks": 1},
-    },
-    "tasks": {
-        "1": {"id": 1, "group": "agent", "status": {"Running": {}}},
-        "2": {"id": 2, "group": "agent", "status": {"Paused": {}}},
-        "3": {"id": 3, "group": "agent", "status": "Queued"},
-        "4": {"id": 4, "group": "pytest", "status": {"Done": {"result": "Success"}}},
-    },
-}
-
-
-def test_snapshot_reads_groups_from_pueue_and_jobs_from_agentctl_as_json() -> None:
-    """Red if `--json` is dropped (agentctl prints a table) or if the group
-    counts stop coming from pueue's own task states."""
-    jobs = [
-        {"job_id": number, "label": "p:op"} for number in range(MAX_SNAPSHOT_JOBS + 5)
-    ]
+def test_snapshot_reads_one_bounded_owner_projection() -> None:
+    jobs = [{"job_id": number, "label": "p:op"} for number in range(2)]
+    owner_snapshot = {
+        "schema": "sinnix.agentctl.job-snapshot.v1",
+        "limit": MAX_SNAPSHOT_JOBS,
+        "groups": {"agent": {"status": "Paused", "parallel": 4, "running": 1, "queued": 1, "paused": 1, "stashed": 0, "terminal": 99, "total": 102}},
+        "jobs": jobs,
+        "omitted": {"total": 100, "active": 0, "terminal": 100},
+        "coverage": {"active": {"total": 2, "returned": 2}, "terminal": {"total": 100, "returned": 0}},
+        "truncated": True,
+    }
     calls: list[list[str]] = []
 
     def runner(command, **_kwargs):
         calls.append(command)
-        if command[0] == "fixture-pueue":
-            return response(PUEUE_STATUS)
-        return response(jobs)
+        return response(owner_snapshot)
 
-    snapshot = AgentCtlClient(
-        "fixture-agentctl", pueue_command="fixture-pueue", runner=runner
-    ).snapshot()
+    snapshot = AgentCtlClient("fixture-agentctl", runner=runner).snapshot()
     assert calls == [
-        ["fixture-agentctl", "--json", "job", "list"],
-        ["fixture-pueue", "status", "--json"],
+        ["fixture-agentctl", "--json", "job", "snapshot", "--limit", "100"],
     ]
-    assert snapshot["groups"] == {
-        "agent": {
-            "status": "Paused",
-            "parallel": 4,
-            "running": 1,
-            "queued": 1,
-            "paused": 1,
-        },
-        "pytest": {
-            "status": "Running",
-            "parallel": 1,
-            "running": 0,
-            "queued": 0,
-            "paused": 0,
-        },
-    }
+    assert snapshot["groups"]["agent"]["terminal"] == 99
     assert snapshot["truncated"] is True
-    assert len(snapshot["jobs"]) == MAX_SNAPSHOT_JOBS
-    assert snapshot["jobs"][0]["job_id"] == 5
+    assert snapshot["omitted"]["terminal"] == 100
 
 
 @pytest.mark.parametrize("value", [{"jobs": []}, ["not-a-job"], "x"])
@@ -81,10 +51,10 @@ def test_list_rejects_anything_but_a_job_array(value: object) -> None:
         client.list()
 
 
-def test_groups_require_pueue_to_print_groups_and_tasks() -> None:
-    client = AgentCtlClient(runner=lambda *_a, **_k: response({"tasks": {}}))
-    with pytest.raises(AgentCtlError, match="groups and tasks"):
-        client.groups()
+def test_snapshot_requires_owner_metadata_and_bounded_rows() -> None:
+    client = AgentCtlClient(runner=lambda *_a, **_k: response({"jobs": []}))
+    with pytest.raises(AgentCtlError, match="bounded job document"):
+        client.snapshot()
 
 
 def test_get_and_cancel_require_a_job_object_with_an_id() -> None:

@@ -101,6 +101,19 @@ class Task:
         )
 
 
+@dataclass(frozen=True)
+class Status:
+    """One complete response from ``pueue status --json``.
+
+    Pueue currently publishes its full task history for this request.  Callers
+    that present it to people must reduce it before returning it, but the
+    groups and task states still come from this one coherent queue read.
+    """
+
+    tasks: dict[int, Task]
+    groups: dict[str, dict[str, Any]]
+
+
 def _stamp(value: Any) -> str | None:
     return value if isinstance(value, str) and value else None
 
@@ -225,15 +238,27 @@ def add(
         raise PueueError(f"pueue add did not print a task id: {printed!r}") from error
 
 
-def tasks() -> dict[int, Task]:
+def status() -> Status:
     document = _decode(_run(["status", "--json"]), "status")
     if not isinstance(document, Mapping):
         raise PueueError("pueue status did not print an object")
     entries = document.get("tasks")
     if not isinstance(entries, Mapping):
         raise PueueError("pueue status published no tasks")
+    raw_groups = document.get("groups")
+    if not isinstance(raw_groups, Mapping):
+        raise PueueError("pueue status published no groups")
     parsed = (Task.from_entry(entry) for entry in entries.values())
-    return {task.task_id: task for task in parsed}
+    groups = {
+        str(name): dict(detail)
+        for name, detail in raw_groups.items()
+        if isinstance(detail, Mapping)
+    }
+    return Status({task.task_id: task for task in parsed}, groups)
+
+
+def tasks() -> dict[int, Task]:
+    return status().tasks
 
 
 def task(task_id: int) -> Task | None:

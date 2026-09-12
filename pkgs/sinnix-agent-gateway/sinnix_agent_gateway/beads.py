@@ -16,7 +16,7 @@ from sinnix_mcp.execution import ExecutionProfile, OwnerExecution, OwnerRoute
 
 from .capabilities import Capability, Principal
 from .config import GatewayConfig, ProjectConfig, TaskAuthorityConfig
-from .results import ProtocolError
+from .results import ProtocolError, ResultError, ResultService
 
 
 class BeadsError(ProtocolError):
@@ -126,8 +126,14 @@ _PROJECT_REF_RE = re.compile(r"^sinnix://projects/([^/]+)(?:/beads/([^/]+))?$")
 class BeadsService:
     """Typed canonical owner adapter; response snapshots are not a task mirror."""
 
-    def __init__(self, config: GatewayConfig, principal: Principal):
+    def __init__(
+        self,
+        config: GatewayConfig,
+        principal: Principal,
+        results: ResultService | None = None,
+    ):
         self.config, self.principal = config, principal
+        self.results = results or ResultService(config, principal)
         self.execution = OwnerExecution(base_environment={})
 
     @staticmethod
@@ -664,69 +670,67 @@ class BeadsService:
         cursor: str | None,
         metadata: dict[str, Any] | None = None,
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-        directory = self.config.state_dir / "beads-snapshots"
-        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-        if cursor is None:
-            token = hashlib.sha256(
-                f"{key}:{source_revision}:{time.time_ns()}".encode()
-            ).hexdigest()
-            payload = {
-                "key": key,
-                "source_revision": source_revision,
-                "expires_at": time.time() + 300,
-                "rows": rows,
-                "metadata": metadata or {},
-            }
-            (directory / f"{token}.json").write_text(
-                json.dumps(payload, sort_keys=True, separators=(",", ":"))
-            )
-            offset = 0
-        else:
+        legacy_offset = None
+        if cursor is not None and re.fullmatch(r"[0-9a-f]{64}\.[0-9]+", cursor):
+            token, offset = cursor.split(".")
             try:
-                token, value = cursor.split(".", 1)
-                if not re.fullmatch(r"[0-9a-f]{64}", token) or not value.isdecimal():
-                    raise ValueError("offset is not a decimal integer")
-                offset = int(value)
-                payload = json.loads((directory / f"{token}.json").read_text())
-            except (OSError, ValueError, json.JSONDecodeError) as exc:
+                legacy = json.loads(
+                    (
+                        self.config.state_dir / "beads-snapshots" / f"{token}.json"
+                    ).read_text()
+                )
+                if legacy["key"] != key or time.time() >= legacy["expires_at"]:
+                    raise ValueError("expired or mismatched cursor")
+                rows = legacy["rows"]
+                legacy_offset = int(offset)
+                if not isinstance(rows, list) or not 0 <= legacy_offset < len(rows):
+                    raise ValueError("invalid snapshot offset")
+                source_revision = legacy["source_revision"]
+                metadata = legacy.get("metadata", {})
+            except (OSError, ValueError, KeyError, TypeError) as exc:
                 raise BeadsError(
                     "Beads snapshot cursor is unavailable", "stale_cursor"
                 ) from exc
-            if not isinstance(payload, Mapping):
-                raise BeadsError("Beads snapshot metadata is malformed", "stale_cursor")
-            expires_at = payload.get("expires_at")
-            if (
-                not isinstance(expires_at, (int, float))
-                or not isinstance(payload.get("key"), str)
-                or not isinstance(payload.get("source_revision"), str)
-            ):
-                raise BeadsError("Beads snapshot metadata is malformed", "stale_cursor")
-            if expires_at < time.time() or payload.get("key") != key:
-                raise BeadsError(
-                    "Beads snapshot cursor expired or belongs to another query",
-                    "stale_cursor",
+            cursor = None
+        try:
+            if cursor is not None:
+                page = self.results.continue_snapshot(
+                    cursor, query_sha256=key, page_size=limit
                 )
-            if not isinstance(payload.get("rows"), list):
-                raise BeadsError("Beads snapshot rows are malformed", "stale_cursor")
-            rows = payload["rows"]
-            if offset < 0 or (offset >= len(rows) and offset != 0):
-                raise BeadsError(
-                    "Beads snapshot cursor is beyond the snapshot", "stale_cursor"
+            else:
+                writer = self.results.start_snapshot(
+                    query_sha256=key,
+                    source_revision=source_revision,
+                    page_size=limit,
+                    metadata=metadata,
                 )
-        page = rows[offset : offset + limit]
-        next_cursor = (
-            f"{token}.{offset + limit}" if offset + limit < len(rows) else None
-        )
-        return page, {
+                try:
+                    for row in rows:
+                        writer.append(row)
+                    page = self.results.finish_snapshot(writer)
+                    if legacy_offset is not None:
+                        cursor = self.results._cursor(
+                            {
+                                "snapshot_id": writer.snapshot_id,
+                                "principal": self.principal.name,
+                                "query_sha256": key,
+                                "offset": legacy_offset,
+                                "page_size": limit,
+                                "expires_at": page["expires_at"],
+                            }
+                        )
+                        page = self.results.continue_snapshot(
+                            cursor, query_sha256=key, page_size=limit
+                        )
+                except Exception:
+                    writer.abort()
+                    raise
+        except ResultError as exc:
+            raise BeadsError(str(exc), exc.failure_class) from exc
+        return page.pop("rows"), {
             "kind": "snapshot",
-            "cursor": cursor,
-            "next_cursor": next_cursor,
-            "offset": offset,
-            "next_offset": offset + limit if next_cursor else None,
-            "total": len(rows),
-            "expires_at": payload["expires_at"],
-            "snapshot_ref": f"sinnix://results/beads-{token}",
-            "metadata": payload.get("metadata", {}),
+            "total": page.pop("row_count"),
+            **page,
         }
 
     def query(

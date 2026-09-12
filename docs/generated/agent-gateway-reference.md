@@ -1,11 +1,11 @@
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: b3c5597ef91e3c5946be22efb34577b37e8efb03c4712c85e3805c511625fea4 -->
+<!-- gateway-catalog-sha256: 0aead88fc7ca66ee7955e3f150bc27037a0158ff8c698ea944657d19e6aa21c9 -->
 # Sinnix Agent Gateway reference
 
 Generated from `sinnix_agent_gateway.actions`. Every action is one MCP tool whose `tools/list` input schema is the one below; the catalog hash changes when any principal-visible action catalog row changes, including its schema, principal set, example or affordance.
 
-Revision: `v3-typed-actions`. Catalog SHA-256: `b3c5597ef91e3c5946be22efb34577b37e8efb03c4712c85e3805c511625fea4`.
+Revision: `v3-typed-actions`. Catalog SHA-256: `0aead88fc7ca66ee7955e3f150bc27037a0158ff8c698ea944657d19e6aa21c9`.
 
 ## Invocation
 
@@ -35,7 +35,7 @@ MCP: call the tool named after the action. CLI: `sinnix-agent-gateway call <acti
 | `capture_lane`      | `captures`         | `sinnix://captures/{lane}`                               | `activity.query`, `captures.query`, `wait.for`                                                                                                                                                                                                                                                                                                                                                   |
 | `capability`        | `capability-index` | `sinnix://capabilities/{name}`                           | `capabilities.query`                                                                                                                                                                                                                                                                                                                                                                             |
 | `session`           | `sessions`         | `sinnix://sessions/{provider}/{session_id}`              | `memory.query`, `sessions.orchestration`, `sessions.query`, `timeline.query`                                                                                                                                                                                                                                                                                                                     |
-| `context_snapshot`  | `context`          | `sinnix://contexts/{snapshot_id}`                        | `context.compose`                                                                                                                                                                                                                                                                                                                                                                                |
+| `context_snapshot`  | `context`          | `sinnix://contexts/{snapshot_id}`                        | `context.compose`, `results.get`                                                                                                                                                                                                                                                                                                                                                                 |
 
 ## Actions
 
@@ -5039,7 +5039,7 @@ Input schema:
     "cursor": {
       "anyOf": [
         {
-          "maxLength": 256,
+          "maxLength": 4096,
           "minLength": 1,
           "type": "string"
         },
@@ -20512,7 +20512,7 @@ Input schema:
     "ref": {
       "anyOf": [
         {
-          "pattern": "^sinnix://results/[^/]{1,128}$",
+          "pattern": "^sinnix://(?:results|contexts)/[^/]{1,128}$",
           "type": "string"
         },
         {

@@ -241,7 +241,7 @@ def test_context_owner_failure_is_persisted_as_unavailable(tmp_path, monkeypatch
     )
     assert result.components[0].status == "unavailable"
     assert (
-        runtime.context_snapshots.get(result.snapshot_ref.rsplit("/", 1)[1])["intent"]
+        runtime.results.read(result.snapshot_ref.rsplit("/", 1)[1])["rows"][0]["intent"]
         == "verification.regression"
     )
 
@@ -284,7 +284,7 @@ def test_historical_context_owner_contract_preserves_partial_and_unknown(
         assert component.data == owner_data
         assert component.data["counts"]["exact"] is None
     assert (
-        runtime.context_snapshots.get(result.snapshot_ref.rsplit("/", 1)[1])["intent"]
+        runtime.results.read(result.snapshot_ref.rsplit("/", 1)[1])["rows"][0]["intent"]
         == intent
     )
 

@@ -12,11 +12,17 @@ local function label()
   if view.status == "snapshot" then base = "OPS ~" end
   if view.status == "source-stale" or view.status == "stale" then base = "OPS !" end
   if view.status == "aggregate" then base = "OPS ?" end
+  local sources = type(view.snapshot) == "table" and view.snapshot.sources or nil
+  local agentctl = type(sources) == "table" and sources.agentctl or nil
+  if type(agentctl) == "table" and agentctl.status == "unavailable" then base = "OPS !" end
   return base
 end
 
 local function render()
-  local color = view.status == "connected" and "primary" or (view.status == "stale" and "error" or "secondary")
+  local sources = type(view.snapshot) == "table" and view.snapshot.sources or nil
+  local agentctl = type(sources) == "table" and sources.agentctl or nil
+  local agentctlFailed = type(agentctl) == "table" and agentctl.status == "unavailable"
+  local color = (view.status == "stale" or agentctlFailed) and "error" or (view.status == "connected" and "primary" or "secondary")
   barWidget.render(ui.row({ gap = 5, align = "center" }, {
     ui.glyph({ name = "heartbeat", size = 14, color = color }),
     ui.label({ text = label(), color = color, fontWeight = "bold" }),

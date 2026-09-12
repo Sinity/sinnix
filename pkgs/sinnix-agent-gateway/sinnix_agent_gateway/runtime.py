@@ -26,7 +26,6 @@ from .contexts import (
     ComponentResult,
     ComponentSpec,
     ContextComposer,
-    ContextSnapshotStore,
     source_revision,
 )
 from .contracts import EffectMode
@@ -73,6 +72,7 @@ def _by_ref(field: str) -> Callable[[str, Mapping[str, str]], dict[str, Any]]:
 RESOURCE_READERS: dict[
     str, tuple[str, Callable[[str, Mapping[str, str]], dict[str, Any]]]
 ] = {
+    "context_snapshot": ("results.get", lambda reference, _values: {"ref": reference}),
     "project": ("projects.get", _by_ref("target")),
     "checkout": ("projects.get", _by_ref("target")),
     "task_authority": (
@@ -203,7 +203,6 @@ class Runtime:
     context_composer: ContextComposer = field(default_factory=ContextComposer)
     normalized_events: NormalizedEventService | None = None
     waits: BoundedWaitService | None = None
-    context_snapshots: ContextSnapshotStore | None = None
     tool_manifest: Callable[[], Awaitable[dict[str, Any]]] | None = None
 
     def principal_contract_hash(self) -> str:
@@ -215,7 +214,8 @@ class Runtime:
         artifacts = ArtifactService(config, principal)
         sessions = SessionLogService(config, principal)
         projects = ProjectService(config, principal)
-        beads = BeadsService(config, principal)
+        results = ResultService(config, principal, artifacts)
+        beads = BeadsService(config, principal, results)
         runtime = cls(
             principal_name=principal_name,
             principal=principal,
@@ -223,7 +223,7 @@ class Runtime:
             projects=projects,
             artifacts=artifacts,
             audit=AuditService(config, principal),
-            results=ResultService(config, principal, artifacts),
+            results=results,
             jobs=LocalJobs(),
             observe=ObserveService(config, principal, artifacts),
             machine_actions=MachineActionService(config, principal),
@@ -248,9 +248,6 @@ class Runtime:
             audit=runtime.audit,
             transitions_path=config.runtime_transitions,
             jobs=lambda limit, cursor: runtime._recent_jobs(limit, cursor),
-        )
-        runtime.context_snapshots = ContextSnapshotStore(
-            config.state_dir, principal_name
         )
         runtime.waits = BoundedWaitService(runtime._resolve_wait)
         return runtime
@@ -695,21 +692,31 @@ class Runtime:
                 <= context["total_budget_bytes"]
             ):
                 context = candidate
-        snapshot_body = {
-            key: value for key, value in context.items() if key != "snapshot_ref"
-        }
-        snapshot_body["components"] = [
-            {**component, "snapshot_ref": "pending"}
-            for component in context["components"]
-        ]
-        snapshot_ref = f"sinnix://contexts/{source_revision(snapshot_body)}"
-        context["snapshot_ref"] = snapshot_ref
+        return self.persist_context({"ref": target_ref, **context})
+
+    def persist_context(self, context: dict[str, Any]) -> dict[str, Any]:
+        revision = source_revision(context)
+        writer = self.results.start_snapshot(
+            query_sha256=revision,
+            source_revision=revision,
+            page_size=1,
+            metadata={
+                "kind": "context",
+                "intent": context["intent"],
+                "target_ref": context["target_ref"],
+            },
+        )
+        reference = f"sinnix://results/{writer.snapshot_id}"
+        context["snapshot_ref"] = reference
         for component in context["components"]:
-            component["snapshot_ref"] = snapshot_ref
-        if self.context_snapshots is None:
-            raise ProtocolError("unavailable", "context snapshot store is unavailable")
-        self.context_snapshots.put(context)
-        return {"ref": target_ref, **context}
+            component["snapshot_ref"] = reference
+        try:
+            writer.append(context)
+            self.results.finish_snapshot(writer)
+        except Exception:
+            writer.abort()
+            raise
+        return context
 
     async def v2_get(self, reference: str) -> dict[str, Any]:
         """Read one canonical resource through the action that owns its kind."""

@@ -105,6 +105,7 @@ class Run:
     # `{reason, at, residual}` once `batch abandon` released the run.
     abandoned: dict[str, Any] | None = None
     artifacts: tuple[dict[str, str], ...] = ()
+    preparation_error: dict[str, Any] | None = None
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> Run:
@@ -120,12 +121,13 @@ class Run:
                 review_profile=str(value.get("review_profile") or REVIEW_PROFILE),
                 workers=tuple(dict(item) for item in value["workers"]),
                 landing=dict(value["landing"]),
-                acceptance=dict(value["acceptance"])
-                if value.get("acceptance")
-                else None,
+                acceptance=(
+                    dict(value["acceptance"]) if value.get("acceptance") else None
+                ),
                 prepared=bool(value.get("prepared")),
                 abandoned=dict(value["abandoned"]) if value.get("abandoned") else None,
                 artifacts=tuple(dict(item) for item in value.get("artifacts") or ()),
+                preparation_error=value.get("preparation_error"),
             )
         except (KeyError, TypeError) as error:
             raise BatchRefusal(
@@ -146,6 +148,7 @@ class Run:
             "landing": dict(self.landing),
             "acceptance": dict(self.acceptance) if self.acceptance else None,
             "prepared": self.prepared,
+            "preparation_error": self.preparation_error,
             "abandoned": dict(self.abandoned) if self.abandoned else None,
             "artifacts": [dict(item) for item in self.artifacts],
         }

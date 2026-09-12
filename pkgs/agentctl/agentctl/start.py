@@ -13,6 +13,7 @@ from .agents import (
     binding,
     ensure_landing_groups,
     other_worktrees,
+    pending_task,
     queue_agent,
     queue_landing,
     requeue_landing,
@@ -36,7 +37,6 @@ from .manifest import (
     landing_recovery_locked,
     list_runs,
     load,
-    manifest_path,
     new_run_id,
     now,
     project_locked,
@@ -332,53 +332,33 @@ def _prepare(
     effort: str | None,
 ) -> Run:
     """Claim, create, enqueue — each step skipped where the manifest records it done."""
-    packets = PromptConfig.from_project(project, shared_template=config.worker_contract)
-    ensure_landing_groups(project.project_id)
-    for index, worker in enumerate(run.workers):
-        worker_id = worker["id"]
-        if not worker.get("claimed"):
-            # Each claim is recorded as it lands, so a failure part-way
-            # through a worker releases exactly the beads it took.
-            for bead_id in worker["beads"]:
-                if bead_id in (run.workers[index].get("claimed_beads") or []):
-                    continue
-                beads.claim(bead_id, actor=run.actor)
-                run = set_worker(
-                    config,
-                    run.run_id,
-                    index,
-                    claimed_beads=[
-                        *(run.workers[index].get("claimed_beads") or []),
-                        bead_id,
-                    ],
-                )
-            run = set_worker(config, run.run_id, index, claimed=True)
-        if not worker.get("worktree"):
-            branch = worker["branch"]
-            existing = worktrunk.worktrunk_find(project.root, branch)
-            created = (
-                existing
-                if existing and existing.path
-                else worktrunk.worktrunk_create(
-                    project.root,
-                    branch,
-                    path=worktree_path(project, branch),
-                    base=run.base_commit,
-                )
+    worker_id = None
+    stage = "validate"
+    try:
+        packets = PromptConfig.from_project(
+            project, shared_template=config.worker_contract
+        )
+        stage = "validate"
+        snapshots = {}
+        for index, worker in enumerate(run.workers):
+            worker_id = worker["id"]
+            if worker.get("prompt_path"):
+                continue
+            path = (
+                Path(worker["worktree"])
+                if worker.get("worktree")
+                else worktree_path(project, worker["branch"])
             )
-            if created.path is None:
-                raise WorktrunkError(f"wt created {branch} without a path")
-            path = created.path
-            snapshot = compile_worker_prompt(
+            snapshots[index] = compile_worker_prompt(
                 worker_id,
                 project_id=project.project_id,
                 reader=beads,
                 config=packets,
-                backend=backend,
-                model=model,
-                effort=effort,
+                backend=worker.get("backend") or backend,
+                model=worker.get("model") or model,
+                effort=worker.get("effort") or effort,
                 member_ids=worker["beads"],
-                branch=branch,
+                branch=worker["branch"],
                 batch={
                     "run_id": run.run_id,
                     "base_commit": run.base_commit,
@@ -391,117 +371,222 @@ def _prepare(
                     "focused_verification": focused_verification(config, project, path),
                 },
             )
-            prompt_path = write_prompt(path, "prompt.md", snapshot.prompt)
-            results.write_schema(
-                path / WORKTREE_STATE_DIR / "worker.schema.json", "worker"
+        if run.harness == "queued" and (
+            not config.agent_runner.is_file()
+            or not os.access(config.agent_runner, os.X_OK)
+        ):
+            raise BatchRefusal(
+                "runner", f"agent runner is unavailable: {config.agent_runner}"
             )
+        for index, snapshot in snapshots.items():
             run = set_worker(
                 config,
                 run.run_id,
                 index,
-                worktree=str(path),
-                prompt_path=str(prompt_path),
-                result_path=str(result_path(path)),
                 backend=snapshot.dimensions.backend,
                 model=snapshot.dimensions.model,
                 effort=snapshot.dimensions.effort,
-                write_scope=list(snapshot.write_scope),
-                scope_authority=list(scope_authority(snapshot.beads)),
-                bead_revisions=_bead_revisions(snapshot.beads),
-                evidence_binding=_evidence_binding(snapshot.beads),
             )
-            worker = run.workers[index]
-        if run.harness == "queued" and worker.get("task_id") is None:
-            path = Path(worker["worktree"])
-            job = queue_agent(
-                config,
-                project,
-                label=f"{project.project_id}:worker:{run.run_id}:{worker_id}",
-                worktree=path,
-                prompt=(path / WORKTREE_STATE_DIR / "prompt.md").read_text(),
-                prompt_name="prompt.md",
-                backend=worker["backend"],
-                model=worker["model"],
-                effort=worker["effort"],
-                schema="worker",
-                then=worker_then(config, run.run_id, worker_id, result_path(path)),
-                binding=binding(run, worker_id),
-                inaccessible=other_worktrees(project, run, worker_id),
-            )
-            run = set_worker(
-                config,
-                run.run_id,
-                index,
-                task_id=job["job_id"],
-                task_reference=job.get("reference"),
-                attempts=[
-                    _attempt(
-                        task_id=job["job_id"],
-                        task_reference=job.get("reference"),
-                        prompt_path=path / WORKTREE_STATE_DIR / "prompt.md",
-                        result_path=result_path(path),
+        stage = "groups"
+        ensure_landing_groups(project.project_id)
+        for index, worker in enumerate(run.workers):
+            worker_id = worker["id"]
+            stage = "claim"
+            if not worker.get("claimed"):
+                # Reconcile a successful claim whose manifest write was interrupted.
+                for bead_id in worker["beads"]:
+                    if bead_id in (run.workers[index].get("claimed_beads") or []):
+                        continue
+                    if beads.show(bead_id).get("assignee") != run.actor:
+                        beads.claim(bead_id, actor=run.actor)
+                    run = set_worker(
+                        config,
+                        run.run_id,
+                        index,
+                        claimed_beads=[
+                            *(run.workers[index].get("claimed_beads") or []),
+                            bead_id,
+                        ],
+                    )
+                run = set_worker(config, run.run_id, index, claimed=True)
+            stage = "worktree"
+            if not worker.get("worktree"):
+                branch = worker["branch"]
+                existing = worktrunk.worktrunk_find(project.root, branch)
+                created = (
+                    existing
+                    if existing and existing.path
+                    else worktrunk.worktrunk_create(
+                        project.root,
+                        branch,
+                        path=worktree_path(project, branch),
+                        base=run.base_commit,
+                    )
+                )
+                if created.path is None:
+                    raise WorktrunkError(f"wt created {branch} without a path")
+                path = created.path
+                run = set_worker(config, run.run_id, index, worktree=str(path))
+                worker = run.workers[index]
+            stage = "prompt"
+            if not worker.get("prompt_path"):
+                path = Path(worker["worktree"])
+                snapshot = snapshots[index]
+                prompt_path = write_prompt(path, "prompt.md", snapshot.prompt)
+                results.write_schema(
+                    path / WORKTREE_STATE_DIR / "worker.schema.json", "worker"
+                )
+                run = set_worker(
+                    config,
+                    run.run_id,
+                    index,
+                    worktree=str(path),
+                    prompt_path=str(prompt_path),
+                    result_path=str(result_path(path)),
+                    backend=snapshot.dimensions.backend,
+                    model=snapshot.dimensions.model,
+                    effort=snapshot.dimensions.effort,
+                    write_scope=list(snapshot.write_scope),
+                    scope_authority=list(scope_authority(snapshot.beads)),
+                    bead_revisions=_bead_revisions(snapshot.beads),
+                    evidence_binding=_evidence_binding(snapshot.beads),
+                )
+                worker = run.workers[index]
+            stage = "enqueue"
+            if run.harness == "queued" and worker.get("task_id") is None:
+                path = Path(worker["worktree"])
+                pending = worker.get("pending_launch")
+                task = pending_task(config, pending) if pending else None
+
+                def record_pending(reference: str) -> None:
+                    set_worker(config, run.run_id, index, pending_launch=reference)
+
+                if task is not None:
+                    job = {
+                        "job_id": task.task_id,
+                        "reference": launch.launch_reference(task),
+                    }
+                else:
+                    job = queue_agent(
+                        config,
+                        project,
+                        label=f"{project.project_id}:worker:{run.run_id}:{worker_id}",
+                        worktree=path,
+                        prompt=(path / WORKTREE_STATE_DIR / "prompt.md").read_text(),
+                        prompt_name="prompt.md",
                         backend=worker["backend"],
                         model=worker["model"],
                         effort=worker["effort"],
-                        number=1,
+                        schema="worker",
+                        then=worker_then(
+                            config, run.run_id, worker_id, result_path(path)
+                        ),
+                        binding=binding(run, worker_id),
+                        inaccessible=other_worktrees(project, run, worker_id),
+                        before_enqueue=record_pending,
                     )
-                ],
+                run = set_worker(
+                    config,
+                    run.run_id,
+                    index,
+                    task_id=job["job_id"],
+                    pending_launch=None,
+                    task_reference=job.get("reference"),
+                    attempts=[
+                        _attempt(
+                            task_id=job["job_id"],
+                            task_reference=job.get("reference"),
+                            prompt_path=path / WORKTREE_STATE_DIR / "prompt.md",
+                            result_path=result_path(path),
+                            backend=worker["backend"],
+                            model=worker["model"],
+                            effort=worker["effort"],
+                            number=1,
+                        )
+                    ],
+                )
+        worker_id = None
+        stage = "landing"
+        if run.landing.get("task_id") is None:
+            after = [
+                worker["task_id"]
+                for worker in run.workers
+                if worker.get("task_id") is not None
+            ]
+            landing_id = queue_landing(
+                config, project, run, after=after, stashed=run.harness == "external"
             )
-    if run.landing.get("task_id") is None:
-        after = [
-            worker["task_id"]
-            for worker in run.workers
-            if worker.get("task_id") is not None
-        ]
-        landing_id = queue_landing(
-            config, project, run, after=after, stashed=run.harness == "external"
-        )
-        landing_task = pueue.task(landing_id)
-        run = land_update(
-            config,
-            run.run_id,
-            task_id=landing_id,
-            task_reference=launch.launch_reference(landing_task)
-            if landing_task is not None
-            else None,
-            # Only the external harness starts its landing stashed for result
-            # filing. A normal queued landing can later be stashed by an
-            # operator, which is not ours to release.
-            waiting_for_results=run.harness == "external",
-        )
+            landing_task = pueue.task(landing_id)
+            run = land_update(
+                config,
+                run.run_id,
+                task_id=landing_id,
+                pending_launch=None,
+                task_reference=(
+                    launch.launch_reference(landing_task)
+                    if landing_task is not None
+                    else None
+                ),
+                # Only the external harness starts its landing stashed for result
+                # filing. A normal queued landing can later be stashed by an
+                # operator, which is not ours to release.
+                waiting_for_results=run.harness == "external",
+            )
 
-    def mark_prepared(document: dict[str, Any]) -> None:
-        document["prepared"] = True
+        def mark_prepared(document: dict[str, Any]) -> None:
+            document["prepared"] = True
+            document["preparation_error"] = None
 
-    return update(config, run.run_id, mark_prepared)
+        return update(config, run.run_id, mark_prepared)
+    except Exception as error:
 
+        def record_failure(document: dict[str, Any]) -> None:
+            document["preparation_error"] = {
+                "worker": worker_id,
+                "stage": stage,
+                "error": str(error),
+            }
 
-def _rollback(
-    config: Config, project: ProjectAdapter, run_id: str, beads: Beads
-) -> None:
-    try:
-        run = load(config, run_id)
-    except BatchRefusal:
-        return
-    for worker in run.workers:
-        claimed = worker.get("claimed_beads") or (
-            worker["beads"] if worker.get("claimed") else []
-        )
-        for bead_id in claimed:
-            try:
-                beads.unclaim(bead_id, actor=run.actor)
-            except BatchError:
-                pass
-        # By branch, not by the recorded worktree: provisioning that failed
-        # between `wt` creating one and the manifest recording it would
-        # otherwise leave the worktree behind with nothing naming it.
         try:
-            if worktrunk.worktrunk_find(project.root, worker["branch"]) is not None:
-                worktrunk.worktrunk_remove(project.root, worker["branch"], force=True)
-        except WorktrunkError:
+            update(config, run.run_id, record_failure)
+        except OSError:
             pass
-    manifest_path(config, run_id).unlink(missing_ok=True)
-    manifest_path(config, run_id).with_suffix(".lock").unlink(missing_ok=True)
+        error.add_note(
+            f"Batch {run.run_id} retained; repeat batch start with the same members to resume."
+        )
+        error.run_id = run.run_id
+        try:
+            error.unprovisioned = unprovisioned(load(config, run.run_id))
+        except (OSError, BatchRefusal):
+            error.unprovisioned = []
+        raise
+
+
+def unprovisioned(run: Run) -> list[dict[str, Any]]:
+    """Preparation still owed, including an admitted launch awaiting recording."""
+    failures = run.preparation_error or {}
+    outstanding = []
+    for worker in run.workers:
+        reason = None
+        if failures.get("worker") == worker["id"]:
+            reason = failures.get("error")
+        elif not worker.get("claimed"):
+            reason = "not yet claimed"
+        elif not worker.get("worktree"):
+            reason = "worktree not yet provisioned"
+        elif not worker.get("prompt_path"):
+            reason = "prompt not yet prepared"
+        elif run.harness == "queued" and worker.get("task_id") is None:
+            reason = (
+                "launch awaiting reconciliation"
+                if worker.get("pending_launch")
+                else "not yet queued"
+            )
+        if reason:
+            outstanding.append(
+                {"worker": worker["id"], "beads": worker["beads"], "reason": reason}
+            )
+    return outstanding
 
 
 def start(
@@ -533,6 +618,13 @@ def start(
             if live.prepared:
                 return {**live.to_dict(), "resumed": False, "existing": True}
             with project_locked(config, project.project_id):
+                live = load(config, live.run_id)
+                if live.abandoned is not None:
+                    raise BatchRefusal("abandoned", f"run {live.run_id} was abandoned")
+                if live.acceptance is not None:
+                    raise BatchRefusal(
+                        "already_accepted", f"run {live.run_id} was accepted"
+                    )
                 completed = _prepare(
                     config,
                     project,
@@ -542,7 +634,12 @@ def start(
                     model=model,
                     effort=effort,
                 )
-            return {**completed.to_dict(), "resumed": True, "existing": True}
+            return {
+                **completed.to_dict(),
+                "resumed": True,
+                "existing": True,
+                "unprovisioned": unprovisioned(completed),
+            }
         claimed.update(live.beads)
     refusals = validate_members(
         beads, [members for _leader, members in member_sets], claimed=claimed
@@ -595,28 +692,16 @@ def start(
         prepared=False,
     )
     create(config, run)
-    try:
-        with project_locked(config, project.project_id):
-            prepared = _prepare(
-                config,
-                project,
-                run,
-                beads,
-                backend=backend,
-                model=model,
-                effort=effort,
-            )
-    except (
-        BatchRefusal,
-        BatchError,
-        PromptError,
-        PueueError,
-        WorktrunkError,
-        JobError,
-    ):
-        _rollback(config, project, run_id, beads)
-        raise
-    return {**prepared.to_dict(), "resumed": False, "existing": False}
+    with project_locked(config, project.project_id):
+        prepared = _prepare(
+            config, project, run, beads, backend=backend, model=model, effort=effort
+        )
+    return {
+        **prepared.to_dict(),
+        "resumed": False,
+        "existing": False,
+        "unprovisioned": unprovisioned(prepared),
+    }
 
 
 def _scope_check(
@@ -819,7 +904,7 @@ def result(
     # lost landing, then each enqueue a replacement and race to relink it.
     # Reload after acquiring it so a waiter acts on every result and relink
     # made by the process ahead of it.
-    with landing_recovery_locked(config, run_id):
+    with landing_recovery_locked(config, run.run_id):
         run = load(config, run_id)
         landing_id = run.landing.get("task_id")
         reference = run.landing.get("task_reference")
@@ -1029,8 +1114,11 @@ def resume(
                 document["landing"]["task_id"] = new_landing
                 task = pueue.task(new_landing)
                 document["landing"]["task_reference"] = (
-                    launch.launch_reference(task) if task is not None else None
+                    launch.launch_reference(task)
+                    if task is not None
+                    else document["landing"].get("pending_launch")
                 )
+                document["landing"]["pending_launch"] = None
                 document["landing"]["waiting_for_results"] = False
 
             run = update(config, run_id, relink)

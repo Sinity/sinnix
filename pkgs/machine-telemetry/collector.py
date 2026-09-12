@@ -107,7 +107,7 @@ def int_or_none(value: object) -> int | None:
         text = str(value).strip()
         if not text:
             return None
-        return int(float(text))
+        return int(text)
     except (TypeError, ValueError):
         return None
 

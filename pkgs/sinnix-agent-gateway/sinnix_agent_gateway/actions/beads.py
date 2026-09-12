@@ -147,7 +147,7 @@ class QueryInput(RequestControls):
         ge=1,
         description="Page size within an immutable snapshot; all matching rows are projected at the owner before paging. Use aggregate for counts without fetching issue rows.",
     )
-    cursor: str | None = Field(default=None, min_length=1, max_length=256)
+    cursor: str | None = Field(default=None, min_length=1, max_length=4_096)
     graph: GraphQuery | None = Field(
         default=None,
         description="Dependency graph walk from one bead instead of a list.",

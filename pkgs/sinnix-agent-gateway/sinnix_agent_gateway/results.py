@@ -121,6 +121,7 @@ class ResultSnapshotWriter:
         query_sha256: str,
         source_revision: str,
         page_size: int,
+        metadata: Mapping[str, Any] | None = None,
     ) -> None:
         if page_size < 1:
             raise ResultError("snapshot page size must be positive", "invalid_request")
@@ -128,6 +129,7 @@ class ResultSnapshotWriter:
         self.query_sha256 = query_sha256
         self.source_revision = source_revision
         self.page_size = page_size
+        self.metadata = dict(metadata or {})
         self.snapshot_id = str(uuid.uuid4())
         self.directory = service.snapshots_root / f".{self.snapshot_id}.writing"
         self.directory.mkdir(mode=0o700)
@@ -180,13 +182,20 @@ class ResultSnapshotWriter:
             "row_count": self.row_count,
             "expires_at": expires_at,
             "rows_sha256": self.hasher.hexdigest(),
+            "metadata": self.metadata,
         }
         metadata_path = self.directory / "metadata.json"
-        metadata_path.write_bytes(_canonical(metadata))
-        metadata_path.chmod(0o600)
         self.rows_path.chmod(0o600)
+        atomic_publish(metadata_path, _canonical(metadata), fsync=True)
         destination = self.service.snapshots_root / self.snapshot_id
         os.replace(self.directory, destination)
+        directory_fd = os.open(
+            self.service.snapshots_root, os.O_RDONLY | os.O_DIRECTORY
+        )
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
         return metadata
 
 
@@ -299,6 +308,7 @@ class ResultService:
         query_sha256: str,
         source_revision: str,
         page_size: int = 100,
+        metadata: Mapping[str, Any] | None = None,
     ) -> ResultSnapshotWriter:
         if not source_revision:
             raise ResultError("snapshot source revision is required", "invalid_request")
@@ -307,6 +317,7 @@ class ResultService:
             query_sha256=query_sha256,
             source_revision=source_revision,
             page_size=page_size,
+            metadata=metadata,
         )
 
     def _cursor(self, payload: Mapping[str, Any]) -> str:
@@ -393,19 +404,27 @@ class ResultService:
         *,
         query_sha256: str,
         source_revision: str | None = None,
+        page_size: int | None = None,
     ) -> dict[str, Any]:
+        if page_size is not None and (
+            isinstance(page_size, bool)
+            or not isinstance(page_size, int)
+            or page_size < 1
+        ):
+            raise ResultError("snapshot page size must be positive", "invalid_request")
         payload = self._decode_cursor(cursor)
         snapshot_id = payload.get("snapshot_id")
         offset = payload.get("offset")
-        page_size = payload.get("page_size")
+        cursor_page_size = payload.get("page_size")
         if (
             payload.get("principal") != self.principal.name
             or payload.get("query_sha256") != query_sha256
             or not isinstance(snapshot_id, str)
             or not isinstance(offset, int)
-            or not isinstance(page_size, int)
+            or not isinstance(cursor_page_size, int)
         ):
             raise ResultError("cursor does not match this request", "stale_cursor")
+        page_size = cursor_page_size if page_size is None else page_size
         metadata, directory = self._snapshot_metadata(snapshot_id)
         if (
             payload.get("expires_at") != metadata["expires_at"]
@@ -422,6 +441,7 @@ class ResultService:
         page = self._snapshot_page(metadata, directory, offset, page_size=page_size)
         page["snapshot_ref"] = f"sinnix://results/{snapshot_id}"
         page["expires_at"] = metadata["expires_at"]
+        page["metadata"] = metadata.get("metadata", {})
         page["cursor"] = cursor
         page["next_cursor"] = (
             self._cursor(
@@ -587,6 +607,7 @@ class ResultService:
             "next_cursor": next_cursor,
             "expires_at": metadata["expires_at"],
             "snapshot_ref": f"sinnix://results/{metadata['snapshot_id']}",
+            "metadata": metadata.get("metadata", {}),
         }
 
     def record_snapshot(
@@ -623,14 +644,32 @@ class ResultService:
             },
         )
 
+    def _read_snapshot(self, result_id: str) -> dict[str, Any]:
+        metadata, directory = self._snapshot_metadata(result_id)
+        rows = []
+        digest = hashlib.sha256()
+        try:
+            with (directory / "rows.jsonl").open("rb") as handle:
+                for line in handle:
+                    digest.update(line)
+                    rows.append(json.loads(line))
+        except (OSError, ValueError) as exc:
+            raise ResultError("malformed result snapshot") from exc
+        if (
+            digest.hexdigest() != metadata.get("rows_sha256")
+            or len(rows) != metadata["row_count"]
+        ):
+            raise ResultError("malformed result snapshot")
+        return {**metadata, "ref": self._result_ref(result_id), "rows": rows}
+
     def read(self, result_id: str) -> dict[str, Any]:
         self.principal.require(Capability.AUDIT_READ)
         result_id = self._normalized_id(result_id)
         path = self._path(result_id)
         try:
             envelope = json.loads(path.read_text())
-        except FileNotFoundError as exc:
-            raise ResultError("unknown result") from exc
+        except FileNotFoundError:
+            return self._read_snapshot(result_id)
         except (OSError, json.JSONDecodeError) as exc:
             raise ResultError("malformed result snapshot") from exc
         result = envelope.get("result")

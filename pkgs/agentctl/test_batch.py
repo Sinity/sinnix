@@ -8,9 +8,10 @@ import json
 import os
 import shutil
 import subprocess
+from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import pytest
 from agentctl import (
@@ -377,9 +378,9 @@ def worker_result(
                 "criteria": [
                     {
                         "text": "done",
-                        "status": "unsatisfied"
-                        if bead_id in unsatisfied
-                        else "satisfied",
+                        "status": (
+                            "unsatisfied" if bead_id in unsatisfied else "satisfied"
+                        ),
                         "evidence": "pytest -q: 3 passed",
                     }
                 ],
@@ -762,19 +763,22 @@ def test_start_completes_a_run_left_half_prepared(harness: Harness) -> None:
     assert len(harness.beads.claims) == 1
 
 
-def test_a_failed_start_releases_its_claims_and_removes_its_manifest(
+def test_a_failed_start_retains_claims_worktree_and_pending_launch(
     harness: Harness,
 ) -> None:
     harness.pueue.fail_add = True
-    with pytest.raises(PueueError):
+    with pytest.raises(launch.JobError):
         harness.start("fx-lead")
-    assert {item[0] for item in harness.beads.released} == {"fx-lead", "fx-member"}
-    assert harness.beads.beads["fx-lead"]["status"] == "open"
-    assert manifest.list_runs(harness.config) == []
-    assert harness.wt.trees == {} and len(harness.wt.removed) == 1
-    assert [path.name for path in manifest.runs_dir(harness.config).iterdir()] == [
-        "fixture.lock"
-    ]
+    run = manifest.list_runs(harness.config)[0]
+    assert run.live and not run.prepared
+    assert run.preparation_error["stage"] == "enqueue"
+    assert run.workers[0]["pending_launch"]
+    assert Path(run.workers[0]["worktree"]).is_dir()
+    assert {item[0] for item in harness.beads.claims} == {"fx-lead", "fx-member"}
+    assert not harness.beads.released and not harness.wt.removed
+    with pytest.raises(launch.JobError, match="uncertain admission"):
+        harness.start("fx-lead")
+    assert not harness.pueue.added
 
 
 def test_two_starts_on_the_same_member_are_refused_by_the_claim(
@@ -804,7 +808,7 @@ def test_two_starts_on_the_same_member_are_refused_by_the_claim(
     harness.beads.claim = race  # type: ignore[method-assign]
     with pytest.raises(BatchError, match="already claimed by racer"):
         harness.start("fx-other")
-    assert len(manifest.list_runs(harness.config)) == 1
+    assert len(manifest.list_runs(harness.config)) == 2
     assert not any(
         str(record.get("assignee") or "").startswith("agentctl-batch-")
         for bead_id, record in harness.beads.beads.items()
@@ -812,7 +816,7 @@ def test_two_starts_on_the_same_member_are_refused_by_the_claim(
     )
 
 
-def test_a_claim_failing_mid_worker_releases_the_beads_already_claimed(
+def test_a_claim_failing_mid_worker_retains_the_beads_already_claimed(
     harness: Harness,
 ) -> None:
     original = harness.beads.claim
@@ -826,11 +830,16 @@ def test_a_claim_failing_mid_worker_releases_the_beads_already_claimed(
     with pytest.raises(BatchError, match="already claimed by racer"):
         harness.start("fx-lead")
 
-    assert [item[0] for item in harness.beads.released] == ["fx-lead"]
-    assert harness.beads.beads["fx-lead"]["assignee"] is None
-    assert harness.beads.beads["fx-lead"]["status"] == "open"
+    run = manifest.list_runs(harness.config)[0]
+    assert not harness.beads.released
+    assert harness.beads.beads["fx-lead"]["assignee"] == run.actor
+    assert run.workers[0]["claimed_beads"] == ["fx-lead"]
     assert harness.beads.beads["fx-member"]["assignee"] == "racer"
-    assert manifest.list_runs(harness.config) == []
+    harness.beads.beads["fx-member"]["assignee"] = None
+    harness.beads.claim = original
+    resumed = harness.start("fx-lead")
+    assert resumed["prepared"] and resumed["run_id"] == run.run_id
+    assert len(harness.beads.claims) == 2
 
 
 def test_start_takes_the_project_lock_around_worktree_creation(
@@ -1057,7 +1066,9 @@ def test_land_integrates_verifies_reviews_publishes_and_closes_satisfied_members
     assert verify["operation"] == "check" and verify["candidate_sha"] == SHA
     assert verify["requested_sha"] == SHA and verify["tested_sha"] == SHA
     assert verify["git_dirty"] is False and verify["status"] == "passed"
-    assert verify["receipt"] == f"agentctl://jobs/{verify['job_id']}/{verify['reference']}"
+    assert (
+        verify["receipt"] == f"agentctl://jobs/{verify['job_id']}/{verify['reference']}"
+    )
     assert verify["reference"] == launch.launch_reference(
         harness.pueue.task(verify["job_id"])
     )
@@ -1825,9 +1836,9 @@ def test_resume_replaces_its_own_landing_after_the_queue_was_reordered(
         "the resume dropped the id the landing was queued at, where the "
         "switch had left an unrelated job"
     )
-    assert launch.launch_reference(harness.pueue.task(queued_landing_at)) == "other", (
-        "the unrelated job no longer holds the id the switch gave it"
-    )
+    assert (
+        launch.launch_reference(harness.pueue.task(queued_landing_at)) == "other"
+    ), "the unrelated job no longer holds the id the switch gave it"
     landing = harness.pueue.task(resumed["landing"]["task_id"])
     assert sorted(landing.dependencies) == sorted(
         worker["task_id"] for worker in resumed["workers"]
@@ -2082,23 +2093,23 @@ def test_abandon_releases_claims_removes_safe_worktrees_and_frees_the_members(
     assert again["run_id"] != run_id and not again["existing"]
 
 
-def test_a_start_that_fails_before_recording_a_worktree_still_removes_it(
+def test_start_validates_every_prompt_before_creating_worktrees(
     harness: Harness, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Anti-vacuity: `wt` has already made the worktree when the prompt fails,
-    and the manifest names no path yet, so a rollback that removes only what
-    the manifest records leaves a worktree nothing owns."""
+    original = start.compile_worker_prompt
 
-    def refuse(*arguments: Any, **keywords: Any) -> Any:
-        raise prompts.PromptError("bead body unreadable")
+    def refuse_second(worker_id: str, **keywords: Any) -> Any:
+        if worker_id == "fx-solo":
+            raise prompts.PromptError("bead body unreadable")
+        return original(worker_id, **keywords)
 
-    monkeypatch.setattr(start, "compile_worker_prompt", refuse)
-
+    monkeypatch.setattr(start, "compile_worker_prompt", refuse_second)
     with pytest.raises(prompts.PromptError):
-        harness.start("fx-solo")
-
-    assert harness.wt.removed and harness.wt.trees == {}
-    assert manifest.list_runs(harness.config) == []
+        harness.start("fx-lead", "fx-solo")
+    run = manifest.list_runs(harness.config)[0]
+    assert run.preparation_error["worker"] == "fx-solo"
+    assert not harness.wt.trees and not harness.wt.removed
+    assert not harness.beads.claims and not harness.pueue.added
 
 
 def test_clean_drops_the_worktrees_of_finished_runs_and_leaves_the_others(
@@ -3053,3 +3064,250 @@ def test_review_policy_none_lands_on_verification_and_says_so(harness: Harness) 
     assert review["candidate_sha"] == SHA
     assert review["verification"]["candidate_sha"] == SHA
     assert not any(":review:" in entry["label"] for entry in harness.pueue.added)
+
+
+def test_start_resumes_second_worktree_failure_without_disturbing_running_worker(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original = worktrunk.worktrunk_create
+
+    def refuse_second(root: Path, branch: str, **kwargs: Any) -> Worktree:
+        if branch.endswith("/fx-solo"):
+            raise WorktrunkError("second checkout failed")
+        return original(root, branch, **kwargs)
+
+    monkeypatch.setattr(worktrunk, "worktrunk_create", refuse_second)
+    with pytest.raises(WorktrunkError):
+        harness.start("fx-lead", "fx-solo")
+    run = manifest.list_runs(harness.config)[0]
+    first, missing = run.workers
+    assert harness.pueue.task(first["task_id"]).status == "Running"
+    assert Path(first["worktree"]).is_dir()
+    assert missing["claimed"] and not missing["worktree"]
+    assert start.unprovisioned(run) == [
+        {"worker": "fx-solo", "beads": ["fx-solo"], "reason": "second checkout failed"}
+    ]
+    assert not harness.wt.removed and not harness.beads.released
+    monkeypatch.setattr(worktrunk, "worktrunk_create", original)
+    resumed = harness.start("fx-lead", "fx-solo")
+    assert resumed["prepared"] and resumed["run_id"] == run.run_id
+    assert resumed["workers"][0]["task_id"] == first["task_id"]
+    assert len(harness.pueue.added) == 3
+    assert len(harness.beads.claims) == 3
+    assert len(harness.wt.trees) == 2
+
+
+def test_start_reconciles_worker_accepted_before_manifest_write(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original = start.set_worker
+
+    def lose_record(*args: Any, **kwargs: Any) -> Any:
+        if kwargs.get("task_id") is not None:
+            raise OSError("manifest disk unavailable")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(start, "set_worker", lose_record)
+    with pytest.raises(OSError):
+        harness.start("fx-solo")
+    run = manifest.list_runs(harness.config)[0]
+    assert run.workers[0]["task_id"] is None
+    assert run.workers[0]["pending_launch"]
+    assert len(harness.pueue.added) == 1
+    assert not harness.wt.removed and not harness.beads.released
+    monkeypatch.setattr(start, "set_worker", original)
+    resumed = harness.start("fx-solo")
+    assert resumed["prepared"] and len(harness.pueue.added) == 2
+    assert resumed["workers"][0]["task_id"] == harness.pueue.added[0]["task_id"]
+    assert resumed["workers"][0]["pending_launch"] is None
+    assert len(resumed["workers"][0]["attempts"]) == 1
+
+
+def test_queue_reconciles_landing_accepted_before_manifest_write(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = harness.start("fx-solo")
+    harness.pueue.succeed(run["landing"]["task_id"])
+    from agentctl import agents
+
+    original = agents.land_update
+
+    def lose_record(*args: Any, **kwargs: Any) -> Any:
+        if kwargs.get("task_id") is not None:
+            raise OSError("manifest disk unavailable")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(agents, "land_update", lose_record)
+    with pytest.raises(OSError):
+        batch.queue(harness.config, harness.project, run["run_id"])
+    pending = manifest.load(harness.config, run["run_id"])
+    assert pending.landing["pending_launch"]
+    assert len(harness.pueue.added) == 3
+    monkeypatch.setattr(agents, "land_update", original)
+    reconciled = batch.queue(harness.config, harness.project, run["run_id"])
+    assert reconciled["landing_task_id"] == harness.pueue.added[-1]["task_id"]
+    assert len(harness.pueue.added) == 3
+    assert reconciled["landing"]["pending_launch"] is None
+
+
+def test_abandon_cancels_worker_accepted_before_manifest_write(
+    harness: Harness,
+    monkeypatch: pytest.MonkeyPatch,
+    recording_systemctl: Callable[[], list[list[str]]],
+) -> None:
+    original = start.set_worker
+
+    def lose_record(*args: Any, **kwargs: Any) -> Any:
+        if kwargs.get("task_id") is not None:
+            raise OSError("manifest disk unavailable")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(start, "set_worker", lose_record)
+    with pytest.raises(OSError):
+        harness.start("fx-solo")
+    run = manifest.list_runs(harness.config)[0]
+    monkeypatch.setattr(start, "set_worker", original)
+    harness.abandon(run.run_id)
+    task_id = harness.pueue.added[0]["task_id"]
+    assert task_id in harness.pueue.killed
+    assert [
+        "systemctl",
+        "--user",
+        "stop",
+        launch.unit_of(harness.pueue.task(task_id)),
+    ] in recording_systemctl()
+    assert not harness.wt.trees
+
+
+@pytest.mark.parametrize("effect", ["claim", "worktree"])
+def test_start_reconciles_provisioning_effect_before_manifest_write(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch, effect: str
+) -> None:
+    original = start.set_worker
+
+    def lose_record(*args: Any, **kwargs: Any) -> Any:
+        if (effect == "claim" and kwargs.get("claimed_beads")) or (
+            effect == "worktree" and kwargs.get("worktree")
+        ):
+            raise OSError("manifest disk unavailable")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(start, "set_worker", lose_record)
+    with pytest.raises(OSError):
+        harness.start("fx-solo")
+    run = manifest.list_runs(harness.config)[0]
+    assert harness.beads.beads["fx-solo"]["assignee"] == run.actor
+    assert not harness.beads.released and not harness.wt.removed
+    if effect == "worktree":
+        assert (
+            harness.wt.find(harness.project.root, run.workers[0]["branch"]) is not None
+        )
+    monkeypatch.setattr(start, "set_worker", original)
+    resumed = harness.start("fx-solo")
+    assert resumed["prepared"] and resumed["run_id"] == run.run_id
+    assert len(harness.beads.claims) == 1 and len(harness.wt.trees) == 1
+    assert len(harness.pueue.added) == 2
+
+
+def test_start_reconciles_worker_accepted_before_queue_response(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from agentctl import pueue
+
+    original = pueue.add
+
+    def lose_response(**kwargs: Any) -> int:
+        original(**kwargs)
+        raise PueueError("queue reply lost")
+
+    monkeypatch.setattr(pueue, "add", lose_response)
+    with pytest.raises(launch.EnqueueUncertain):
+        harness.start("fx-solo")
+    run = manifest.list_runs(harness.config)[0]
+    assert run.workers[0]["pending_launch"] and len(harness.pueue.added) == 1
+    monkeypatch.setattr(pueue, "add", original)
+    resumed = harness.start("fx-solo")
+    assert resumed["prepared"] and len(harness.pueue.added) == 2
+    assert resumed["workers"][0]["task_id"] == harness.pueue.added[0]["task_id"]
+
+
+def test_queue_reconciles_landing_accepted_before_queue_response(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from agentctl import pueue
+
+    run = harness.start("fx-solo")
+    harness.pueue.succeed(run["landing"]["task_id"])
+    original = pueue.add
+
+    def lose_response(**kwargs: Any) -> int:
+        original(**kwargs)
+        raise PueueError("queue reply lost")
+
+    monkeypatch.setattr(pueue, "add", lose_response)
+    with pytest.raises(launch.EnqueueUncertain):
+        batch.queue(harness.config, harness.project, run["run_id"])
+    pending = manifest.load(harness.config, run["run_id"])
+    assert pending.landing["pending_launch"] and len(harness.pueue.added) == 3
+    monkeypatch.setattr(pueue, "add", original)
+    reconciled = batch.queue(harness.config, harness.project, run["run_id"])
+    assert reconciled["landing_task_id"] == harness.pueue.added[-1]["task_id"]
+    assert len(harness.pueue.added) == 3
+
+
+def test_abandon_refuses_unresolved_admission_without_releasing_claims(
+    harness: Harness,
+) -> None:
+    harness.pueue.fail_add = True
+    with pytest.raises(launch.EnqueueUncertain):
+        harness.start("fx-solo")
+    run = manifest.list_runs(harness.config)[0]
+    with pytest.raises(launch.JobError, match="uncertain admission"):
+        harness.abandon(run.run_id)
+    assert not harness.wt.removed and not harness.beads.released
+    assert manifest.load(harness.config, run.run_id).live
+
+
+@pytest.mark.parametrize("first", ["prepare", "abandon"])
+def test_abandon_and_prepare_serialize_and_reload(
+    harness: Harness,
+    monkeypatch: pytest.MonkeyPatch,
+    first: str,
+    recording_systemctl: Callable[[], list[list[str]]],
+) -> None:
+    original_create = worktrunk.worktrunk_create
+
+    def refuse(*args: Any, **kwargs: Any) -> Worktree:
+        raise WorktrunkError("checkout interrupted")
+
+    monkeypatch.setattr(worktrunk, "worktrunk_create", refuse)
+    with pytest.raises(WorktrunkError):
+        harness.start("fx-solo")
+    run = manifest.list_runs(harness.config)[0]
+    monkeypatch.setattr(worktrunk, "worktrunk_create", original_create)
+    original_lock = manifest.project_locked
+
+    @contextmanager
+    def interleaved_lock(config: Config, project_id: str) -> Any:
+        if first == "prepare":
+            harness.start("fx-solo")
+        else:
+            harness.abandon(run.run_id)
+        with original_lock(config, project_id):
+            yield True
+
+    if first == "prepare":
+        monkeypatch.setattr(landing_module, "project_locked", interleaved_lock)
+        abandoned = harness.abandon(run.run_id)
+        assert abandoned["abandoned"] and abandoned["prepared"]
+        assert len(harness.pueue.added) == 2
+        assert all(task.terminal for task in harness.pueue._tasks.values())
+        assert any("stop" in call for call in recording_systemctl())
+        assert not harness.wt.trees
+    else:
+        monkeypatch.setattr(start, "project_locked", interleaved_lock)
+        with pytest.raises(BatchRefusal, match="abandoned"):
+            harness.start("fx-solo")
+        assert manifest.load(harness.config, run.run_id).abandoned
+        assert not harness.pueue.added and not harness.wt.trees
+        assert harness.beads.beads["fx-solo"]["assignee"] is None

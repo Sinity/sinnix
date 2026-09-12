@@ -414,113 +414,80 @@ def test_cli_collect_report_offline() -> None:
         offline=True, limit=2, since="10 min ago", duration="10 min", format="json"
     )
     report = cli.collect_report(args)
-    assert report["agent_gateway"]["schema"] == "sinnix-observe-agentctl-v1"
+    assert report["agent_gateway"]["schema"] == "sinnix-observe-agentctl-v2"
     assert report["schema"] == "sinnix-observe-v1"
     assert report["live_pressure"] == {"offline": True}
     assert isinstance(report["workload_rows"], list)
     assert "gaps_summary" in report
 
 
-def test_agent_gateway_reads_canonical_agentctl_records(tmp_path, monkeypatch) -> None:
-    root = tmp_path / "agentctl"
-    jobs = root / "jobs"
-    jobs.mkdir(parents=True)
-    job_id = "00000000-0000-4000-8000-000000000001"
-    (jobs / f"{job_id}.json").write_text(
-        json.dumps(
-            {
-                "job_id": job_id,
-                "unit": f"agentctl-job-{job_id}.service",
-                "schema_version": 4,
-                "created_at": "2026-08-23T10:00:00Z",
-                "spec": {
-                    "kind": "attested-agent",
-                    "project_id": "sinnix",
-                    "timeout_seconds": 60,
-                    "checkout": {"path": "/realm/worktrees/fixture"},
-                    "contract": {
-                        "backend": "codex",
-                        "model": "fixture",
-                        "effort": "high",
-                    },
-                },
-                "state": {
-                    "phase": "succeeded",
-                    "terminal": True,
-                    "systemd": {"ControlGroup": "/agent.slice/x"},
-                },
-            }
-        )
+def test_agent_gateway_reads_the_bounded_agentctl_projection(monkeypatch) -> None:
+    monkeypatch.setattr(
+        agent_gateway,
+        "_snapshot",
+        lambda limit: {
+            "schema": "sinnix.agentctl.job-snapshot.v1",
+            "groups": {"agent": {"running": 1}},
+            "jobs": [{"job_id": 7, "label": "sinnix:worker:run", "project": "sinnix", "kind": "attested-agent", "phase": "running", "group": "agent"}],
+            "omitted": {"total": 1, "active": 0, "terminal": 1},
+            "coverage": {"active": {"total": 1, "returned": 1}},
+        },
     )
-    polylogue = root / "index.db"
-    history_db = sqlite3.connect(polylogue)
-    history_db.execute(
-        "create virtual table messages_fts using fts5(session_id unindexed, text)"
-    )
-    history_db.execute(
-        "insert into messages_fts values('codex-session:session-1', ?)",
-        (f"agent job {job_id}",),
-    )
-    history_db.commit()
-    history_db.close()
-    monkeypatch.setenv("AGENTCTL_STATE_DIR", str(root))
-    monkeypatch.setenv("SINNIX_POLYLOGUE_INDEX_DB", str(polylogue))
     out = agent_gateway.collect_agent_gateway()
-    assert out["schema"] == "sinnix-observe-agentctl-v1"
-    assert out["correlations"][0]["terminal"] is True
-    assert out["correlations"][0]["unit"] == f"agentctl-job-{job_id}.service"
-    assert out["correlations"][0]["cgroup"] == "/agent.slice/x"
-    assert out["jobs"][0]["backend"] == "codex"
-    assert (
-        out["correlations"][0]["polylogue"]["session_id"] == "codex-session:session-1"
-    )
+    assert out["schema"] == "sinnix-observe-agentctl-v2"
+    assert out["available"] is True
+    assert out["groups"]["agent"]["running"] == 1
+    assert out["jobs"][0]["job_id"] == 7
+    assert out["omitted"]["terminal"] == 1
 
 
-def test_agent_gateway_bounds_malformed_sources(tmp_path, monkeypatch) -> None:
-    root = tmp_path / "agentctl"
-    (root / "jobs").mkdir(parents=True)
-    (root / "jobs/broken.json").write_text("{")
-    (root / "jobs/declared.json").write_text(
-        json.dumps(
-            {
-                "job_id": "declared",
-                "unit": "agentctl-job-declared.service",
-                "schema_version": 4,
-                "spec": {"kind": "declared-operation"},
-                "state": {"phase": "succeeded"},
-            }
-        )
+def test_agent_gateway_keeps_owner_failure_visible(monkeypatch) -> None:
+    monkeypatch.setattr(
+        agent_gateway, "_snapshot", lambda _limit: (_ for _ in ()).throw(RuntimeError("socket unavailable"))
     )
-    monkeypatch.setenv("AGENTCTL_STATE_DIR", str(root))
     out = agent_gateway.collect_agent_gateway()
-    assert out["malformed_records"] == ["broken.json"]
+    assert out["available"] is False
     assert out["jobs"] == []
+    assert out["error"] == "socket unavailable"
 
 
-def test_gateway_rows_use_agentctl_record_fields() -> None:
+def test_human_render_reports_owner_queue_omissions() -> None:
+    rendered = render.render_human(
+        {
+            "generated_at": "2026-09-12T00:00:00Z",
+            "window": {"since": "10 min ago"},
+            "agent_gateway": {
+                "available": True,
+                "jobs": [{"job_id": 7, "label": "sinnix:worker", "phase": "running", "group": "agent"}],
+                "omitted": {"total": 50},
+                "error": None,
+            }
+        }
+    )
+    assert "jobs=1 omitted=50" in rendered
+    assert "7 sinnix:worker running group=agent" in rendered
+
+
+def test_gateway_rows_use_agentctl_snapshot_fields() -> None:
     rows = joins.build_gateway_rows(
         {
             "jobs": [
                 {
-                    "job_id": "j",
-                    "unit": "agentctl-job-j.service",
-                    "backend": "codex",
-                    "model": "fixture",
-                    "effort": "high",
-                    "checkout": {"path": "/realm/worktrees/j"},
-                    "contract": {"backend": "codex"},
-                    "state": {
-                        "phase": "running",
-                        "systemd": {"ControlGroup": "/agent.slice/j"},
-                    },
+                    "job_id": 7,
+                    "label": "sinnix:worker:run",
+                    "project": "sinnix",
+                    "kind": "attested-agent",
+                    "phase": "running",
+                    "group": "agent",
                 }
             ],
+            "available": True,
         },
         {},
     )
-    assert rows[0]["unit"] == "agentctl-job-j.service"
-    assert rows[0]["cgroup"] == "/agent.slice/j"
-    assert rows[0]["metrics"]["backend"] == "codex"
+    assert rows[0]["source"] == "agentctl"
+    assert rows[0]["project"] == "sinnix"
+    assert rows[0]["metrics"]["group"] == "agent"
 
 
 def test_sqlite_failure_is_recorded_not_swallowed(tmp_path):
@@ -565,15 +532,15 @@ def test_successful_read_records_no_error(tmp_path):
     assert sqlite_util.sqlite_errors() == []
 
 
-def test_gateway_polylogue_probe_failure_surfaces_as_a_gap_category() -> None:
+def test_gateway_failure_surfaces_as_a_gap_category() -> None:
     rows = joins.build_gateway_rows(
         {
-            "jobs": [{"job_id": "j", "state": {"phase": "running"}}],
-            "polylogue_error": "polylogue_index_unreadable",
+            "jobs": [{"job_id": "j", "phase": "running"}],
+            "available": False,
         },
         {},
     )
-    assert rows[0]["gaps"] == ["agent_gateway.polylogue.unavailable"]
+    assert rows[0]["gaps"] == ["agentctl.unavailable"]
 
 
 def test_report_header_stamps_one_utc_grammar_through_the_shared_helper(
