@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @sinnix-package
 # description: Launch or inspect the local PC-VR streaming stack
-# runtimeInputs: bash coreutils android-tools wivrn alvr
+# runtimeInputs: bash coreutils android-tools wivrn alvr systemd
 
 set -euo pipefail
 
@@ -10,10 +10,13 @@ usage() {
 Usage: sinnix xr <command>
 
 Commands:
-  status          show streaming tools, Quest transport, and paired clients
-  alvr            launch the ALVR dashboard
-  wivrn           launch the WiVRn dashboard
-  wivrn-wired     prepare USB forwarding and launch the WiVRn client
+  status              show streaming tools, Quest transport, and session state
+  alvr                launch the ALVR dashboard
+  wivrn               launch the WiVRn dashboard
+  wivrn-wired         prepare USB forwarding and launch the WiVRn client
+  start work|media|desktop
+                      start the selected attended XR or Moonlight session
+  stop                stop WiVRn and remove its USB forwarding
 
 Streaming services are launched only for an attended session. LAN firewall
 access is restricted to the host's physical LAN interface; do not forward
@@ -22,8 +25,13 @@ EOF
 }
 
 quest_target() {
-  sinnix quest adb get-state >/dev/null
-  sinnix quest adb get-serialno | tr -d '\r'
+  SINNIX_QUEST_TRANSPORT="${SINNIX_QUEST_TRANSPORT:-auto}" sinnix quest adb get-state >/dev/null
+  SINNIX_QUEST_TRANSPORT="${SINNIX_QUEST_TRANSPORT:-auto}" sinnix quest adb get-serialno | tr -d '\r'
+}
+
+quest_usb_target() {
+  SINNIX_QUEST_TRANSPORT=usb sinnix quest adb get-state >/dev/null
+  SINNIX_QUEST_TRANSPORT=usb sinnix quest adb get-serialno | tr -d '\r'
 }
 
 wivrn_client_package() {
@@ -47,20 +55,47 @@ status() {
   printf 'ALVR client: '
   adb -s "$target" shell pm list packages alvr.client.stable | tr -d '\r' \
     | sed -n 's/^package://p' | head -n 1
+  printf 'WiVRn service: '
+  systemctl --user is-active wivrn.service 2>/dev/null || true
 }
 
 wivrn_wired() {
   local target package
-  target="$(quest_target)"
+  target="$(quest_usb_target)"
   package="$(wivrn_client_package "$target")"
   [ -n "$package" ] || {
     echo "WiVRn client is not installed on $target" >&2
     return 1
   }
+  systemctl --user start wivrn.service
   adb -s "$target" reverse tcp:9757 tcp:9757
   adb -s "$target" shell am start -a android.intent.action.VIEW \
     -d 'wivrn+tcp://localhost' "$package"
-  echo "WiVRn wired launch requested through $target"
+  echo "WiVRn wired launch requested through USB headset $target"
+}
+
+start_session() {
+  case "${1:-}" in
+    work|media) ;;
+    desktop)
+      systemctl --user start sunshine.service
+      echo "Sunshine desktop server is ready for the paired Moonlight client."
+      return 0
+      ;;
+    *) echo "choose an XR session: work or media" >&2; return 2 ;;
+  esac
+  systemctl --user start wivrn.service
+  echo "WiVRn ${1} session server is ready; connect with the headset client."
+}
+
+stop_session() {
+  local target
+  target="$(quest_usb_target || true)"
+  if [ -n "$target" ]; then
+    adb -s "$target" reverse --remove tcp:9757 || true
+  fi
+  systemctl --user stop wivrn.service
+  echo "WiVRn session stopped"
 }
 
 case "${1:-}" in
@@ -68,6 +103,8 @@ case "${1:-}" in
   alvr) exec alvr_dashboard ;;
   wivrn) exec wivrn-dashboard ;;
   wivrn-wired) wivrn_wired ;;
+  start) shift; start_session "$@" ;;
+  stop) stop_session ;;
   help|-h|--help|"") usage ;;
   *) echo "unknown XR command: $1" >&2; usage >&2; exit 2 ;;
 esac

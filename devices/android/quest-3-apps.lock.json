@@ -1,6 +1,6 @@
 {
   "abi": "arm64-v8a",
-  "lockedAt": 1789194308,
+  "lockedAt": 1789201243,
   "packages": {
     "org.kde.kdeconnect_tp": {
       "versionCode": 13513,
@@ -12,6 +12,28 @@
         "79b50031486746dffbc746f48fb0eb62fc7bb0ae7b976e7d6507b2c078840d92"
       ],
       "preferredSigner": "79b50031486746dffbc746f48fb0eb62fc7bb0ae7b976e7d6507b2c078840d92"
+    },
+    "net.gsantner.markor": {
+      "versionCode": 163,
+      "versionName": "2.16.1",
+      "url": "https://f-droid.org/repo/net.gsantner.markor_163.apk",
+      "sha256": "3f9f260dc3e32a1281cb8803eea6f926eef897579f68a5d35f922523974b84b9",
+      "repoFingerprint": "43238d512c1e5eb2d6569f4a3afbf5523418b82e0a3ed1552770abb9a9c9ccab",
+      "signerSha256": [
+        "9c70033237dc46fe5052e420c665708de8b3105b89842843818981826b7eec9c"
+      ],
+      "preferredSigner": "9c70033237dc46fe5052e420c665708de8b3105b89842843818981826b7eec9c"
+    },
+    "org.koreader.launcher.fdroid": {
+      "versionCode": 119462,
+      "versionName": "v2026.07.1",
+      "url": "https://f-droid.org/repo/org.koreader.launcher.fdroid_119462.apk",
+      "sha256": "1e740b6a964032f67bd8235f98a3f12d229f3427d23e2486d6a0ede6dd3dba7c",
+      "repoFingerprint": "43238d512c1e5eb2d6569f4a3afbf5523418b82e0a3ed1552770abb9a9c9ccab",
+      "signerSha256": [
+        "8c86266c9e9191b7d02329606a5ecea7460958515462642ffec8664bb919da4d"
+      ],
+      "preferredSigner": "8c86266c9e9191b7d02329606a5ecea7460958515462642ffec8664bb919da4d"
     },
     "alvr.client.stable": {
       "versionCode": 18091521,
@@ -32,6 +54,16 @@
         "a871d5438f9c704096e935824d93a140d9ee149c806eaa922f84fbaced4403ed"
       ],
       "source": "github:WiVRn/WiVRn"
+    },
+    "com.Icosa.OpenBrush": {
+      "versionCode": 20320001,
+      "versionName": "2.32.0",
+      "url": "https://github.com/icosa-foundation/open-brush/releases/download/2.32.0/OpenBrush_Quest_2.32.0.apk",
+      "sha256": "62d5a1b18cfc55d592409f1cda3ee0f23cd6234c87eaa48f73815b2c1b0842b4",
+      "signerSha256": [
+        "c49db3c3e1ff24d2f1261c45537fa1b72bedc5cd2dde8af0153141ae22e83e92"
+      ],
+      "source": "url:https://github.com/icosa-foundation/open-brush/releases/download/2.32.0/OpenBrush_Quest_2.32.0.apk"
     },
     "com.github.catfriend1.syncthingfork": {
       "versionCode": 2010500,
@@ -62,6 +94,17 @@
         "d6ce3a4df15060fe488fe52441a549dee4ba199b36e2cb1ed9085cca8bfa1aca"
       ],
       "source": "url:https://github.com/moonlight-stream/moonlight-android/releases/download/v12.1/app-nonRoot-release.apk"
+    },
+    "com.tailscale.ipn": {
+      "versionCode": 298177930,
+      "versionName": "1.102.4-t3caf7d9e7-g1b32d3caa",
+      "url": "https://pkgs.tailscale.com/stable/tailscale-android-universal-1.102.4.apk",
+      "sha256": "7ecfb863e08f5fbd1ecd70235d8c34ba135a4124bdd8e166b9d6fb962782e0b5",
+      "signerSha256": [
+        "3257d599a49d2c961a471ca9843f59d341a405884583fc087df4237b733bbd6d",
+        "5cdb295551bfe1a087fed6acda07141c6c929fa7c29bd273a7092813acc434bf"
+      ],
+      "source": "url:https://pkgs.tailscale.com/stable/tailscale-android-universal-1.102.4.apk"
     },
     "com.termux": {
       "versionCode": 1002,

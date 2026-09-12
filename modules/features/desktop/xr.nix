@@ -9,7 +9,7 @@ mkFeatureModule {
     "desktop"
     "xr"
   ];
-  description = "PC VR streaming and headset management";
+  description = "PC VR, spatial desktop, and Quest management";
   subFeatures = {
     alvr = {
       description = "ALVR SteamVR streaming dashboard";
@@ -25,6 +25,10 @@ mkFeatureModule {
     };
     kdeconnect = {
       description = "KDE Connect LAN companion for headset file and input utilities";
+      default = true;
+    };
+    desktop = {
+      description = "WayVR spatial desktop and Sunshine/Moonlight fallback";
       default = true;
     };
   };
@@ -47,6 +51,8 @@ mkFeatureModule {
         home-manager.users.${user}.home.packages = with pkgs; [
           monado
           opencomposite
+          wayvr
+          xrizer
         ];
       }
       (lib.mkIf cfg.alvr.enable {
@@ -58,11 +64,17 @@ mkFeatureModule {
         };
       })
       (lib.mkIf cfg.wivrn.enable {
-        home-manager.users.${user}.home.packages = [ pkgs.wivrn ];
+        services.wivrn = {
+          enable = true;
+          autoStart = false;
+          openFirewall = false;
+          steam.enable = true;
+          steam.importOXRRuntimes = true;
+        };
         services.avahi = {
           enable = true;
           nssmdns4 = true;
-          openFirewall = true;
+          openFirewall = false;
           publish = {
             enable = true;
             userServices = true;
@@ -70,7 +82,28 @@ mkFeatureModule {
         };
         networking.firewall.interfaces.${lanInterface} = {
           allowedTCPPorts = [ 9757 ];
-          allowedUDPPorts = [ 9757 ];
+          allowedUDPPorts = [ 5353 9757 ];
+        };
+      })
+      (lib.mkIf cfg.desktop.enable {
+        services.sunshine = {
+          enable = true;
+          autoStart = false;
+          openFirewall = false;
+          # The desktop entry is deliberately minimal. Pairing and session
+          # credentials remain Sunshine-owned mutable state, not Nix text.
+          applications.apps = [
+            {
+              name = "Sinnix desktop";
+              auto-detach = "true";
+            }
+          ];
+        };
+        networking.firewall.interfaces.${lanInterface} = {
+          # Sunshine's default base port is 47989. Keep Moonlight traffic on
+          # the physical LAN instead of opening the service globally.
+          allowedTCPPorts = [ 47984 47989 47990 48010 ];
+          allowedUDPPorts = [ 47998 47999 48000 48002 48010 ];
         };
       })
       (lib.mkIf cfg.sidequest.enable {

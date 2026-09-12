@@ -9,6 +9,9 @@ STATE_DIR="${SINNIX_QUEST_STATE_DIR:-/realm/state/sinnix-quest}"
 HOST_CACHE="$STATE_DIR/last-host"
 QUEST_MODEL="${SINNIX_QUEST_MODEL:-Quest 3}"
 MEDIA_DIR="${SINNIX_QUEST_MEDIA_DIR:-/realm/photos/quest-3/videoshots}"
+ARCHIVE_DIR="${SINNIX_QUEST_ARCHIVE_DIR:-/realm/archive/quest-3/videoshots}"
+BACKUP_MARKER="${SINNIX_QUEST_BACKUP_MARKER:-/persist/root/.cache/borg-drain/realm.last-success}"
+TRANSPORT="${SINNIX_QUEST_TRANSPORT:-auto}"
 
 usage() {
   cat <<'EOF'
@@ -16,10 +19,15 @@ Usage: sinnix quest <command>
 
 Commands:
   status              show the selected ADB transport and headset state
+  doctor [--json]      report identity, transport, storage, battery, and core apps
   health              show battery, thermal, storage, and foreground-app state
   storage             show the largest shared-storage directories and files
   media list          list recorded Quest videos
   media pull FILE...  copy Videoshots to Sinnix with SHA-256 verification
+  media archive [FILE...]
+                      copy verified host ingress files into the permanent archive
+  media prune [--apply]
+                      show, or remove, verified archive copies older than 30 days
   sync                prepare a wired Syncthing pairing with Sinnix
   network-adb         enable TCP ADB from the authorized USB connection
   connect [HOST]      connect to HOST:5555, or the last known Quest address
@@ -36,12 +44,21 @@ TCP ADB survives only until the Quest reboots and listens on every network it
 joins. Use network-adb only on a trusted network; use stop-network-adb when it
 is no longer needed.
 
+Set SINNIX_QUEST_TRANSPORT=usb, network, or auto to select a transport. Auto
+prefers an authenticated USB headset and never silently uses network ADB for a
+wired workflow.
+
 Performance overrides are session-only. QuestOS clears them on reboot. `high`
 refuses to run when Android reports any thermal throttling.
 
 `media pull` keeps the headset originals and only accepts files below
 /sdcard/Oculus/Videoshots/. It writes verified copies under $MEDIA_DIR by
 default; set SINNIX_QUEST_MEDIA_DIR to choose another destination.
+
+`media archive` is additive and writes content-addressed originals under
+$ARCHIVE_DIR. `media prune` is dry-run by default. `--apply` removes only a
+headset recording older than 30 days whose hash is archived and whose archive
+copy predates the latest successful realm backup receipt.
 
 `sync` forwards Quest TCP port 22000 over the current ADB connection and
 prints Sinnix's Syncthing identity. Complete the app's onboarding, choose the
@@ -53,8 +70,13 @@ EOF
 usb_serial() {
   local serial state model found=""
   if [ -n "${SINNIX_QUEST_SERIAL:-}" ]; then
-    printf '%s\n' "$SINNIX_QUEST_SERIAL"
-    return
+    serial="$SINNIX_QUEST_SERIAL"
+    state="$(adb -s "$serial" get-state 2>/dev/null || true)"
+    [ "$state" = device ] || { echo "configured Quest USB serial is not authorized: $serial" >&2; return 1; }
+    model="$(adb -s "$serial" shell getprop ro.product.model 2>/dev/null | tr -d '\r')"
+    [ "$model" = "$QUEST_MODEL" ] || { echo "configured serial is $model, expected $QUEST_MODEL" >&2; return 1; }
+    printf '%s\n' "$serial"
+    return 0
   fi
   while read -r serial state; do
     [ "$state" = device ] || continue
@@ -89,19 +111,41 @@ network_target() {
   case "$host" in *:*) printf '%s\n' "$host" ;; *) printf '%s:5555\n' "$host" ;; esac
 }
 
-resolve_target() {
-  local target serial
-  target="$(network_target || true)"
-  if [ -n "$target" ] && ANDROID_SERIAL="$target" adb get-state >/dev/null 2>&1; then
-    printf '%s\n' "$target"
-    return
-  fi
-  serial="$(usb_serial || true)"
-  [ -n "$serial" ] || {
-    echo "Quest is unreachable over both cached network ADB and USB" >&2
+verify_network_target() {
+  local target model
+  target="$1"
+  ANDROID_SERIAL="$target" adb get-state >/dev/null 2>&1 || return 1
+  model="$(ANDROID_SERIAL="$target" adb shell getprop ro.product.model 2>/dev/null | tr -d '\r')"
+  [ "$model" = "$QUEST_MODEL" ] || {
+    echo "network ADB target $target is $model, expected $QUEST_MODEL" >&2
     return 1
   }
-  printf '%s\n' "$serial"
+}
+
+resolve_target() {
+  local target serial
+  case "$TRANSPORT" in
+    usb)
+      usb_serial
+      ;;
+    network)
+      target="$(network_target)"
+      verify_network_target "$target" || { echo "Quest network ADB is unavailable: $target" >&2; return 1; }
+      printf '%s\n' "$target"
+      ;;
+    auto)
+      serial="$(usb_serial || true)"
+      if [ -n "$serial" ]; then
+        printf '%s\n' "$serial"
+        return 0
+      fi
+      target="$(network_target || true)"
+      [ -n "$target" ] && verify_network_target "$target" && { printf '%s\n' "$target"; return 0; }
+      echo "Quest is unreachable over authenticated USB and cached network ADB" >&2
+      return 1
+      ;;
+    *) echo "invalid SINNIX_QUEST_TRANSPORT: $TRANSPORT (expected usb, network, or auto)" >&2; return 2 ;;
+  esac
 }
 
 enable_network_adb() {
@@ -131,7 +175,7 @@ connect_network_adb() {
 status() {
   local target
   target="$(resolve_target)"
-  echo "transport: $target"
+  echo "transport: $target (${TRANSPORT})"
   ANDROID_SERIAL="$target" adb shell '
     printf "model: "; getprop ro.product.model
     printf "android: "; getprop ro.build.version.release
@@ -139,6 +183,30 @@ status() {
     printf "usb config: "; getprop persist.sys.usb.config
     printf "wifi IPv4: "; ip -o -4 addr show wlan0 | awk "{ split(\$4, octets, \"/\"); print octets[1]; exit }"
   '
+}
+
+doctor() {
+  local json=0 target model android storage level temperature usb_powered wivrn alvr syncthing
+  [ "${1:-}" = --json ] && json=1
+  target="$(resolve_target)"
+  model="$(ANDROID_SERIAL="$target" adb shell getprop ro.product.model | tr -d '\r')"
+  android="$(ANDROID_SERIAL="$target" adb shell getprop ro.build.version.release | tr -d '\r')"
+  storage="$(ANDROID_SERIAL="$target" adb shell 'df -k /sdcard | awk "NR == 2 { print \$4 }"' | tr -d '\r')"
+  level="$(ANDROID_SERIAL="$target" adb shell 'dumpsys battery | awk "/level:/ { print \$2; exit }"' | tr -d '\r')"
+  temperature="$(ANDROID_SERIAL="$target" adb shell 'dumpsys battery | awk "/temperature:/ { print \$2; exit }"' | tr -d '\r')"
+  usb_powered="$(ANDROID_SERIAL="$target" adb shell 'dumpsys battery | awk -F": " "/USB powered:/ { print \$2; exit }"' | tr -d '\r')"
+  wivrn="$(ANDROID_SERIAL="$target" adb shell pm path org.meumeu.wivrn.github 2>/dev/null | grep -c '^package:' || true)"
+  alvr="$(ANDROID_SERIAL="$target" adb shell pm path alvr.client.stable 2>/dev/null | grep -c '^package:' || true)"
+  syncthing="$(ANDROID_SERIAL="$target" adb shell pm path com.github.catfriend1.syncthingfork 2>/dev/null | grep -c '^package:' || true)"
+  if [ "$json" = 1 ]; then
+    printf '{"serial":"%s","transport":"%s","model":"%s","android":"%s","storageKiB":%s,"batteryPercent":%s,"batteryTemperatureDeciC":%s,"usbPowered":%s,"apps":{"wivrn":%s,"alvr":%s,"syncthing":%s}}\n' \
+      "$target" "$TRANSPORT" "$model" "$android" "${storage:-0}" "${level:-0}" "${temperature:-0}" "${usb_powered:-false}" "$([ "$wivrn" -gt 0 ] && echo true || echo false)" "$([ "$alvr" -gt 0 ] && echo true || echo false)" "$([ "$syncthing" -gt 0 ] && echo true || echo false)"
+  else
+    printf 'Quest %s on Android %s via %s (%s)\n' "$model" "$android" "$TRANSPORT" "$target"
+    printf 'Battery: %s%%, %s deci-C, USB powered: %s\n' "$level" "$temperature" "$usb_powered"
+    printf 'Free shared storage: %s KiB\n' "$storage"
+    printf 'Core apps: WiVRn=%s ALVR=%s Syncthing=%s\n' "$wivrn" "$alvr" "$syncthing"
+  fi
 }
 
 health() {
@@ -170,15 +238,16 @@ storage() {
 }
 
 media() {
-  local action="${1:-list}" target remote local_path partial_path remote_hash local_hash
-  target="$(resolve_target)"
+  local action="${1:-list}" target remote local_path partial_path remote_hash local_hash archive_path source_path backup_epoch now epoch
   case "$action" in
     list)
+      target="$(resolve_target)"
       ANDROID_SERIAL="$target" adb shell '
         find /sdcard/Oculus/Videoshots -maxdepth 1 -type f -printf "%s %p\\n" 2>/dev/null | sort -nr
       '
       ;;
     pull)
+      target="$(resolve_target)"
       shift
       [ "$#" -gt 0 ] || {
         echo "provide one or more Videoshots paths to copy" >&2
@@ -217,6 +286,57 @@ media() {
         mv "$partial_path" "$local_path"
         echo "verified copy: $local_path"
       done
+      ;;
+    archive)
+      shift
+      mkdir -p "$ARCHIVE_DIR"
+      if [ "$#" -eq 0 ]; then
+        set -- "$MEDIA_DIR"/*
+      fi
+      for source_path in "$@"; do
+        [ -f "$source_path" ] || { echo "not a regular ingress file: $source_path" >&2; return 2; }
+        case "$source_path" in "$MEDIA_DIR"/*) ;; *) echo "refusing non-ingress archive source: $source_path" >&2; return 2 ;; esac
+        local_hash="$(sha256sum "$source_path" | awk '{ print $1 }')"
+        archive_path="$ARCHIVE_DIR/${local_hash}-${source_path##*/}"
+        if [ -e "$archive_path" ]; then
+          [ "$(sha256sum "$archive_path" | awk '{ print $1 }')" = "$local_hash" ] || { echo "archive collision: $archive_path" >&2; return 1; }
+          echo "already archived: $archive_path"
+          continue
+        fi
+        cp --reflink=auto --preserve=timestamps "$source_path" "$archive_path"
+        [ "$(sha256sum "$archive_path" | awk '{ print $1 }')" = "$local_hash" ] || { echo "archive hash mismatch: $archive_path" >&2; return 1; }
+        echo "archived: $archive_path"
+      done
+      ;;
+    prune)
+      shift
+      local apply=0
+      case "${1:-}" in
+        "") ;;
+        --apply) apply=1 ;;
+        *) echo "usage: sinnix quest media prune [--apply]" >&2; return 2 ;;
+      esac
+      target="$(resolve_target)"
+      [ -d "$ARCHIVE_DIR" ] || { echo "archive does not exist: $ARCHIVE_DIR" >&2; return 1; }
+      if [ "$apply" = 1 ]; then
+        [ -r "$BACKUP_MARKER" ] || { echo "refusing deletion without a successful realm backup receipt: $BACKUP_MARKER" >&2; return 1; }
+        backup_epoch="$(stat -c %Y "$BACKUP_MARKER")"
+      fi
+      now="$(date +%s)"
+      while IFS='|' read -r epoch remote; do
+        [ -n "$remote" ] || continue
+        [ $(( now - epoch )) -ge 2592000 ] || continue
+        remote_hash="$(ANDROID_SERIAL="$target" adb shell sha256sum "$remote" | awk '{ print $1 }' | tr -d '\r')"
+        [[ "$remote_hash" =~ ^[0-9a-f]{64}$ ]] || { echo "skip unhashable headset file: $remote" >&2; continue; }
+        archive_path="$(find "$ARCHIVE_DIR" -maxdepth 1 -type f -name "${remote_hash}-*" -print -quit)"
+        [ -n "$archive_path" ] || { echo "skip unarchived: $remote"; continue; }
+        if [ "$apply" = 1 ] && [ "$(stat -c %Y "$archive_path")" -le "$backup_epoch" ]; then
+          ANDROID_SERIAL="$target" adb shell rm -f "$remote"
+          echo "removed verified 30-day source copy: $remote"
+        else
+          echo "eligible: $remote"
+        fi
+      done < <(ANDROID_SERIAL="$target" adb shell 'find /sdcard/Oculus/Videoshots -maxdepth 1 -type f -printf "%T@|%p\\n" 2>/dev/null' | tr -d '\r' | awk -F'|' '{ print int($1) "|" $2 }')
       ;;
     *) echo "unknown media action: $action" >&2; return 2 ;;
   esac
@@ -311,6 +431,7 @@ performance() {
 command="${1:-}"
 case "$command" in
   status) status ;;
+  doctor) shift; doctor "$@" ;;
   health) health ;;
   storage) storage ;;
   media) shift; media "$@" ;;

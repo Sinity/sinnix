@@ -28,12 +28,23 @@
       # A conventional Android client is a useful fallback for remote desktop,
       # video and troubleshooting when an XR streaming runtime is not wanted.
       "com.limelight".url = "https://github.com/moonlight-stream/moonlight-android/releases/download/v12.1/app-nonRoot-release.apk";
+      # The official universal APK brings the headset onto Sinnix's existing
+      # tailnet. It is pinned here because the vendor notes that sideloaded
+      # APKs do not update themselves.
+      "com.tailscale.ipn".url = "https://pkgs.tailscale.com/stable/tailscale-android-universal-1.102.4.apk";
+      # Native, offline-capable creative tool. Use the formal Quest release,
+      # never a GitHub prerelease whose sketches may not open in the stable app.
+      "com.Icosa.OpenBrush".url = "https://github.com/icosa-foundation/open-brush/releases/download/2.32.0/OpenBrush_Quest_2.32.0.apk";
     };
 
     fdroid.packages = [
       # Local file transfer, clipboard, and remote-input companion for the
       # KDE Connect endpoint declared in desktop.xr.
       "org.kde.kdeconnect_tp"
+      # Plain-text notes and a document reader are useful as native Quest 2D
+      # windows and keep their files in explicit, syncable directories.
+      "net.gsantner.markor"
+      "org.koreader.launcher.fdroid"
     ];
 
     # Store and side-loaded utilities retained after the 2026-09 cleanup.
@@ -88,6 +99,7 @@
     "com.github.catfriend1.syncthingfork".grant = [
       "android.permission.POST_NOTIFICATIONS"
     ];
+    "com.tailscale.ipn".grant = [ "android.permission.POST_NOTIFICATIONS" ];
     "org.kde.kdeconnect_tp".grant = [
       "android.permission.POST_NOTIFICATIONS"
       # Android gates LAN discovery behind foreground location for this
