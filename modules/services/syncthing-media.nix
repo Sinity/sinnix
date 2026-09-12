@@ -65,6 +65,9 @@ mkServiceModule {
             globalAnnounceEnabled = false;
             localAnnounceEnabled = false;
             relaysEnabled = false;
+            # Peers use explicit tailnet addresses.  Do not probe or request
+            # router port mappings for a service intentionally confined there.
+            natEnabled = false;
             urAccepted = -1;
           };
         };
