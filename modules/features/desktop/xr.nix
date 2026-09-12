@@ -90,6 +90,11 @@ mkFeatureModule {
           enable = true;
           autoStart = false;
           openFirewall = false;
+          settings = {
+            capture = "wlr";
+            encoder = "nvenc";
+            nvenc_preset = 1;
+          };
           # The desktop entry is deliberately minimal. Pairing and session
           # credentials remain Sunshine-owned mutable state, not Nix text.
           applications.apps = [
@@ -99,6 +104,9 @@ mkFeatureModule {
             }
           ];
         };
+        # Sunshine dlopens NVENC at runtime. NixOS exposes the matched driver
+        # libraries here rather than in the package closure.
+        systemd.user.services.sunshine.environment.LD_LIBRARY_PATH = "/run/opengl-driver/lib";
         networking.firewall.interfaces.${lanInterface} = {
           # Sunshine's default base port is 47989. Keep Moonlight traffic on
           # the physical LAN instead of opening the service globally.
