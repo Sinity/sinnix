@@ -405,9 +405,11 @@ class ContextComposer:
             ],
             "total_budget_bytes": total_budget,
         }
-        digest_rows = [row.as_dict("pending") for row in rows]
-        digest = source_revision({**provisional, "components": digest_rows})
-        snapshot_ref = f"sinnix://contexts/{digest}"
+        # Keep the reference placeholder the same width as a final digest while
+        # deciding which payloads fit. The final digest is deliberately
+        # computed only after this reduction, otherwise a persisted snapshot
+        # can claim bytes that are no longer present.
+        snapshot_ref = f"sinnix://contexts/{'0' * 64}"
         provisional["snapshot_ref"] = snapshot_ref
         provisional["components"] = [row.as_dict(snapshot_ref) for row in rows]
         encoded = _canonical(provisional)
@@ -436,6 +438,14 @@ class ContextComposer:
                     break
         if len(_canonical(provisional)) > total_budget:
             raise ValueError("context metadata exceeds its total budget")
+        digest_rows = [row.as_dict("pending") for row in rows]
+        digest_input = {
+            key: value for key, value in provisional.items() if key != "snapshot_ref"
+        }
+        digest = source_revision({**digest_input, "components": digest_rows})
+        snapshot_ref = f"sinnix://contexts/{digest}"
+        provisional["snapshot_ref"] = snapshot_ref
+        provisional["components"] = [row.as_dict(snapshot_ref) for row in rows]
         return provisional
 
 

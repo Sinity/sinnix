@@ -9,6 +9,7 @@ from sinnix_agent_gateway.contexts import (
     ComponentResult,
     ComponentSpec,
     ContextComposer,
+    ContextIntentSpec,
     ContextSnapshotStore,
     RevisionReuseCache,
 )
@@ -169,6 +170,30 @@ def test_component_budget_marks_only_the_oversized_component_unavailable() -> No
     assert rows["open_beads"]["status"] == "unavailable"
     assert rows["project"]["status"] == "available"
     assert "data" not in rows["open_beads"]
+
+
+def test_total_budget_recomputes_snapshot_identity_after_dropping_payloads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setitem(
+        CONTEXT_INTENTS,
+        "fixture.overflow",
+        ContextIntentSpec("fixture.overflow", 900, (("first", 600), ("second", 600))),
+    )
+    result = ContextComposer().compose(
+        "fixture.overflow",
+        "sinnix://projects/fixture",
+        [
+            ComponentSpec(
+                "first", 600, lambda: ComponentResult.available("first", {"body": "a" * 500})
+            ),
+            ComponentSpec(
+                "second", 600, lambda: ComponentResult.available("second", {"body": "b" * 500})
+            ),
+        ],
+    )
+    assert any(row["status"] == "unavailable" for row in result["components"])
+    ContextSnapshotStore(tmp_path, "observer").put(result)
 
 
 def test_revision_cache_never_reuses_a_different_owner_revision() -> None:
