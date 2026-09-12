@@ -12,6 +12,10 @@
       # Official upstream releases. The lock records the exact APK hash and
       # signing certificate, so a headset wipe can restore these clients.
       "alvr.client.stable".github = "alvr-org/ALVR";
+      # Pair with Sinnix's receive-only media endpoint after selecting the
+      # Videoshots folder through Android's folder picker.  Do not pre-grant
+      # broad media access: the headset UI scopes the sync root.
+      "com.github.catfriend1.syncthingfork".url = "https://github.com/researchxxl/syncthing-android/releases/download/v2.1.5.0/com.github.catfriend1.syncthingfork_release_v2.1.5.0_arm64-v8a.apk";
       # A local shell makes the headset independently useful for diagnostics,
       # SSH and small automation.  Keep it on Termux's GitHub signing track so
       # any future addons can use the same source.
@@ -73,6 +77,9 @@
       "android.permission.RECORD_AUDIO"
     ];
     "com.termux".grant = [
+      "android.permission.POST_NOTIFICATIONS"
+    ];
+    "com.github.catfriend1.syncthingfork".grant = [
       "android.permission.POST_NOTIFICATIONS"
     ];
     "com.igalia.wolvic".grant = [
