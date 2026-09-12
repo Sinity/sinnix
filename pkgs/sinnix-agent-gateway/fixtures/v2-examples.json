@@ -1,5 +1,5 @@
 {
-  "action_catalog_hash": "7f96f482afd0829da20e7264475dab50157178267bd115e23d886108e24ed176",
+  "action_catalog_hash": "0af8323df7950f0120b55aa5262d084ac1aa2875d75dcc19ced317bae4fa17e8",
   "examples": [
     {
       "action": "gateway.status",
