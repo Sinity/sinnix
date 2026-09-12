@@ -97,6 +97,15 @@ mkFeatureModule {
             RestartSec = "5s";
           };
         };
+        systemd.user.services.sinnix-quest-player = {
+          description = "Authenticated native Quest video playback session";
+          path = [ scriptPkgs.sinnix-quest scriptPkgs.sinnix-quest-player pkgs.android-tools ];
+          environment.SINNIX_QUEST_ADB_COMMAND = "sinnix-quest adb";
+          serviceConfig = {
+            ExecStart = "${scriptPkgs.sinnix-quest-player}/bin/sinnix-quest-player serve";
+            Restart = "no";
+          };
+        };
         # Archives are retained until a later realm backup receipt exists;
         # the script exits successfully when the USB headset is absent, so a
         # daily timer is safe on an unattended workstation.

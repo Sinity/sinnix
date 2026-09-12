@@ -1,0 +1,336 @@
+#!/usr/bin/env python3
+# @sinnix-package
+# description: Launch and control native DeoVR playback from Sinnix through the selected Quest transport
+# runtimeInputs: python3 coreutils systemd
+"""Persistent, authenticated PC-to-Quest native video playback.
+
+The server binds only to loopback.  The Quest reaches it through the selected
+ADB connection's reverse tunnel, so neither the media file nor a LAN listener
+is exposed by a playback session.
+"""
+import argparse
+import json
+import math
+import mimetypes
+import os
+import pathlib
+import re
+import secrets
+import shlex
+import socket
+import struct
+import subprocess
+import tempfile
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+
+STATE_DIR = pathlib.Path(os.environ.get("SINNIX_QUEST_STATE_DIR", "/realm/state/sinnix-quest"))
+SESSION_FILE = STATE_DIR / "player-session.json"
+RUNTIME_FILE = STATE_DIR / "player-runtime.json"
+ADB_COMMAND = shlex.split(os.environ.get("SINNIX_QUEST_ADB_COMMAND", "sinnix quest adb"))
+
+
+def write_json(path, value):
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w") as destination:
+            json.dump(value, destination)
+            destination.write("\n")
+        os.replace(temporary, path)
+    except BaseException:
+        os.unlink(temporary)
+        raise
+
+
+def read_json(path):
+    with path.open() as source:
+        return json.load(source)
+
+
+def adb(*args):
+    return subprocess.check_output([*ADB_COMMAND, *args], text=True).strip()
+
+
+def packet(sock, data):
+    body = json.dumps(data).encode() if data else b""
+    sock.sendall(struct.pack("<I", len(body)) + body)
+
+
+def receive(sock):
+    def exact(size):
+        data = b""
+        while len(data) < size:
+            chunk = sock.recv(size - len(data))
+            if not chunk:
+                raise RuntimeError("DeoVR closed the remote-control connection")
+            data += chunk
+        return data
+
+    size = struct.unpack("<I", exact(4))[0]
+    if size > 1048576:
+        raise RuntimeError("invalid DeoVR packet length")
+    return json.loads(exact(size)) if size else {}
+
+
+def remote_state(update=None):
+    port = int(adb("forward", "tcp:0", "tcp:23554"))
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=2) as sock:
+            packet(sock, {})
+            state = {}
+            deadline = time.monotonic() + 5
+            while not state and time.monotonic() < deadline:
+                state = receive(sock)
+                packet(sock, {})
+            if not state:
+                raise RuntimeError("DeoVR has no active video or remote control is disabled")
+            if update is None:
+                return state
+            packet(sock, update)
+            for _ in range(4):
+                state = receive(sock)
+                packet(sock, {})
+                if state and all(
+                    abs(float(state.get(key, -999)) - value) < (2 if key == "currentTime" else 0.01)
+                    for key, value in update.items()
+                ):
+                    return state
+            raise RuntimeError("DeoVR did not confirm the requested playback state")
+    finally:
+        adb("forward", "--remove", f"tcp:{port}")
+
+
+def session_descriptor(path, args):
+    return {
+        "file": str(path),
+        "stereo": args.stereo,
+        "projection": args.projection,
+        "codec": args.codec,
+        "height": args.height,
+        "cold": args.cold,
+        "createdAt": int(time.time()),
+    }
+
+
+def open_session(args):
+    path = pathlib.Path(args.file).expanduser().resolve(strict=True)
+    if not path.is_file():
+        raise ValueError("expected a regular video file")
+    write_json(SESSION_FILE, session_descriptor(path, args))
+    RUNTIME_FILE.unlink(missing_ok=True)
+    subprocess.run(["systemctl", "--user", "restart", "sinnix-quest-player.service"], check=True)
+    deadline = time.monotonic() + 12
+    while time.monotonic() < deadline:
+        if RUNTIME_FILE.exists():
+            runtime = read_json(RUNTIME_FILE)
+            if runtime.get("status") == "ready":
+                print("Quest native playback is ready. DeoVR launch was requested.")
+                return
+        time.sleep(0.2)
+    raise RuntimeError("Quest player service did not become ready; inspect: systemctl --user status sinnix-quest-player")
+
+
+def choose_session(args):
+    root = pathlib.Path(args.root).expanduser().resolve(strict=True)
+    if not root.is_dir():
+        raise ValueError("picker root must be a directory")
+    extensions = {".mp4", ".mkv", ".webm", ".mov", ".avi", ".m4v"}
+    candidates = sorted(path for path in root.rglob("*") if path.is_file() and path.suffix.lower() in extensions)
+    if not candidates:
+        raise RuntimeError("no supported video files under picker root")
+    selection = subprocess.run(
+        ["noctalia", "dmenu", "-p", "Quest video"],
+        input="\n".join(str(path) for path in candidates) + "\n",
+        text=True,
+        stdout=subprocess.PIPE,
+        check=False,
+    )
+    if selection.returncode:
+        return
+    selected = selection.stdout.strip()
+    if not selected:
+        return
+    args.file = selected
+    open_session(args)
+
+
+def serve_session():
+    args = read_json(SESSION_FILE)
+    path = pathlib.Path(args["file"]).resolve(strict=True)
+    if not path.is_file():
+        raise ValueError("selected playback file is no longer a regular file")
+    token = secrets.token_urlsafe(20)
+    video_route = f"/{token}/video{path.suffix}"
+    descriptor_route = f"/{token}/video.json"
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *_):
+            pass
+
+        def do_HEAD(self):
+            self.respond(False)
+
+        def do_GET(self):
+            self.respond(True)
+
+        def respond(self, body):
+            if self.path == descriptor_route:
+                data = json.dumps(
+                    {
+                        "title": path.stem,
+                        "is3d": args["stereo"] != "off",
+                        "stereoMode": args["stereo"],
+                        "screenType": args["projection"],
+                        "encodings": [{"name": args["codec"], "videoSources": [{"resolution": args["height"], "url": f"http://127.0.0.1:{server.server_port}{video_route}"}]}],
+                    }
+                ).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                if body:
+                    self.wfile.write(data)
+                return
+            if self.path != video_route:
+                self.send_error(404)
+                return
+            size = path.stat().st_size
+            start, end = 0, size - 1
+            requested = self.headers.get("Range")
+            if requested:
+                match = re.fullmatch(r"bytes=(\d*)-(\d*)", requested)
+                if not match or not any(match.groups()):
+                    self.send_error(416)
+                    return
+                first, last = match.groups()
+                if first:
+                    start = int(first)
+                    end = min(int(last), end) if last else end
+                else:
+                    start = max(0, size - int(last))
+                if start > end or start >= size:
+                    self.send_response(416)
+                    self.send_header("Content-Range", f"bytes */{size}")
+                    self.end_headers()
+                    return
+            self.send_response(206 if requested else 200)
+            self.send_header("Content-Type", mimetypes.guess_type(path)[0] or "application/octet-stream")
+            self.send_header("Accept-Ranges", "bytes")
+            self.send_header("Content-Length", str(end - start + 1))
+            if requested:
+                self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+            self.end_headers()
+            if body:
+                with path.open("rb") as source:
+                    source.seek(start)
+                    remaining = end - start + 1
+                    try:
+                        while remaining:
+                            chunk = source.read(min(remaining, 262144))
+                            if not chunk:
+                                break
+                            self.wfile.write(chunk)
+                            remaining -= len(chunk)
+                    except (BrokenPipeError, ConnectionResetError):
+                        pass
+
+    with ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
+        port = server.server_port
+        adb("reverse", f"tcp:{port}", f"tcp:{port}")
+        write_json(RUNTIME_FILE, {"status": "ready", "startedAt": int(time.time()), "port": port})
+        link = f"deovr://http://127.0.0.1:{port}{descriptor_route}"
+        try:
+            adb("shell", "am start " + ("-S " if args.get("cold") else "") + "-a android.intent.action.VIEW -n com.deovr.gearvr/com.unity3d.player.UnityPlayerActivity -d " + shlex.quote(link))
+            server.serve_forever()
+        finally:
+            server.server_close()
+            adb("reverse", "--remove", f"tcp:{port}")
+            write_json(RUNTIME_FILE, {"status": "stopped", "stoppedAt": int(time.time())})
+
+
+def open_url(args):
+    if not args.url.startswith(("http://", "https://", "deovr://")):
+        raise ValueError("browser URL must use http, https, or deovr")
+    adb("shell", "am start -a android.intent.action.VIEW -n com.deovr.gearvr/com.unity3d.player.UnityPlayerActivity -d " + shlex.quote(args.url))
+    print("DeoVR browse request sent.")
+
+
+def control(args):
+    state = remote_state()
+    if args.action == "status":
+        print(json.dumps(state, indent=2))
+        return
+    if args.action == "seek":
+        value = float(args.value)
+        if not math.isfinite(value):
+            raise ValueError("seek must be finite")
+        if args.value.startswith(("+", "-")):
+            value += float(state["currentTime"])
+        update = {"currentTime": max(0, min(value, float(state["duration"])))}
+    elif args.action == "speed":
+        value = float(args.value)
+        if not math.isfinite(value) or not 0.1 <= value <= 4:
+            raise ValueError("speed must be between 0.1 and 4")
+        update = {"playbackSpeed": value}
+    elif args.action == "toggle":
+        update = {"playerState": 0 if int(state.get("playerState", 1)) else 1}
+    else:
+        update = {"playerState": 1 if args.action == "pause" else 0}
+    remote_state(update)
+    print(json.dumps(update))
+
+
+def stop(_args):
+    subprocess.run(["systemctl", "--user", "stop", "sinnix-quest-player.service"], check=True)
+    print("Quest player service stopped.")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    sub = parser.add_subparsers(dest="action", required=True)
+    play = sub.add_parser("open", help="serve a local file through ADB reverse and launch DeoVR")
+    play.add_argument("file")
+    play.add_argument("--stereo", choices=["sbs", "tb", "off"], default="sbs")
+    play.add_argument("--projection", choices=["flat", "dome", "sphere"], default="flat")
+    play.add_argument("--codec", choices=["h264", "h265", "av1"], default="h264")
+    play.add_argument("--height", type=int, default=1080)
+    play.add_argument("--cold", action="store_true")
+    choose = sub.add_parser("choose", help="choose a local video in the desktop menu and launch it in DeoVR")
+    choose.add_argument("root", nargs="?", default="/realm/library/videos")
+    choose.add_argument("--stereo", choices=["sbs", "tb", "off"], default="sbs")
+    choose.add_argument("--projection", choices=["flat", "dome", "sphere"], default="flat")
+    choose.add_argument("--codec", choices=["h264", "h265", "av1"], default="h264")
+    choose.add_argument("--height", type=int, default=1080)
+    choose.add_argument("--cold", action="store_true")
+    sub.add_parser("serve", help=argparse.SUPPRESS)
+    browse = sub.add_parser("browse", help="open an approved HTTP(S) player-native library URL in DeoVR")
+    browse.add_argument("url")
+    sub.add_parser("stop", help="stop the active file-serving session")
+    for name in ["status", "pause", "resume", "toggle", "seek", "speed"]:
+        command = sub.add_parser(name)
+        if name in ["seek", "speed"]:
+            command.add_argument("value")
+    args = parser.parse_args()
+    try:
+        if args.action == "open":
+            open_session(args)
+        elif args.action == "choose":
+            choose_session(args)
+        elif args.action == "serve":
+            serve_session()
+        elif args.action == "browse":
+            open_url(args)
+        elif args.action == "stop":
+            stop(args)
+        else:
+            control(args)
+    except (OSError, RuntimeError, ValueError, KeyError, subprocess.CalledProcessError, json.JSONDecodeError) as error:
+        parser.exit(1, f"{error}\nFor controls, enable DeoVR remote control and start a video first.\n")
+
+
+if __name__ == "__main__":
+    main()

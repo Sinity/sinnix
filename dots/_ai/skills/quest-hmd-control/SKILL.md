@@ -27,34 +27,37 @@ headset before mutating state.
 
 ## PC video commands
 
-The adjacent [player.py](player.py) runs directly from dots with Python 3;
-it uses `sinnix quest adb` for verified device selection. No system rebuild
-is required. Examples from this skill directory:
+Use the installed `sinnix quest player` command. `open` records one selected
+file in private runtime state, starts the fixed user service, and serves it on
+host loopback through an ADB reverse tunnel. It works through either the
+verified USB or authenticated network ADB transport without opening a media
+port on the LAN:
 
 ```sh
-python3 player.py open /path/movie.mp4 --stereo sbs --projection flat
-python3 player.py status
-python3 player.py seek +10
-python3 player.py speed 1.25
-python3 player.py pause
-python3 player.py resume
+sinnix quest player open /path/movie.mp4 --stereo sbs --projection flat
+sinnix quest player choose /realm/library/videos --stereo off
+sinnix quest player status
+sinnix quest player seek +10
+sinnix quest player speed 1.25
+sinnix quest player pause
+sinnix quest player resume
+sinnix quest player stop
 ```
 
-`open` stays foreground and serves only the chosen file on loopback with an
-ADB reverse. Stop it with Ctrl-C. Use `--projection dome` for 180-degree
-content, `sphere` for 360-degree content, and `--stereo off` for mono.
-Specify `--codec` and `--height` to match the file. `--cold` restarts DeoVR
-and may trigger the Quest app lock again.
+Use `--projection dome` for 180-degree content, `sphere` for 360-degree
+content, and `--stereo off` for mono. Specify `--codec` and `--height` to
+match the file. `--cold` restarts DeoVR and may trigger the Quest app lock.
+`browse URL` opens a player-native HTTP(S) library endpoint, including a
+private Stash-VR deployment managed outside this public repository.
 
 Remote commands require DeoVR's **Enable remote control** setting and an
 active video. Pause/resume are capability probes: they fail unless the
 requested state is observed. Do not substitute Android media keys: another
 app such as KDE Connect can own the active Android media session.
 
-Any command can be bound to a PC hotkey. Run `open` in a terminal so its
-server lifetime and errors remain visible. These helpers have transport
-tests, but live playback and remote mutation must still be verified on the
-headset. Protocol source: [DeoVR documentation](https://deovr.com/documentation).
+The desktop binds `Super+Alt+P`, arrows, and up/down to toggle, seek, and
+speed. These controls require live headset verification because DeoVR must
+first have remote control enabled. Protocol source: [DeoVR documentation](https://deovr.com/documentation).
 
 ## Session verification
 
