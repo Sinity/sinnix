@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Control the Quest 3 through its USB bootstrap or authenticated LAN ADB transport
+# runtimeInputs: bash coreutils android-tools scrcpy iproute2 gawk
+
+set -euo pipefail
+
+STATE_DIR="${SINNIX_QUEST_STATE_DIR:-/realm/state/sinnix-quest}"
+HOST_CACHE="$STATE_DIR/last-host"
+QUEST_MODEL="${SINNIX_QUEST_MODEL:-Quest 3}"
+
+usage() {
+  cat <<'EOF'
+Usage: sinnix quest <command>
+
+Commands:
+  status              show the selected ADB transport and headset state
+  network-adb         enable TCP ADB from the authorized USB connection
+  connect [HOST]      connect to HOST:5555, or the last known Quest address
+  stop-network-adb    return the connected headset to USB-only ADB
+  shell               open an ADB shell
+  screen [ARGS...]    mirror/control with scrcpy
+  adb [ARGS...]       run an explicit adb command against the headset
+
+TCP ADB survives only until the Quest reboots and listens on every network it
+joins. Use network-adb only on a trusted network; use stop-network-adb when it
+is no longer needed.
+EOF
+}
+
+usb_serial() {
+  local serial state model found=""
+  if [ -n "${SINNIX_QUEST_SERIAL:-}" ]; then
+    printf '%s\n' "$SINNIX_QUEST_SERIAL"
+    return
+  fi
+  while read -r serial state; do
+    [ "$state" = device ] || continue
+    case "$serial" in *:*) continue ;; esac
+    model="$(adb -s "$serial" shell getprop ro.product.model 2>/dev/null | tr -d '\r')"
+    [ "$model" = "$QUEST_MODEL" ] || continue
+    if [ -n "$found" ]; then
+      echo "multiple USB Quest devices found; set SINNIX_QUEST_SERIAL" >&2
+      return 1
+    fi
+    found="$serial"
+  done < <(adb devices | awk 'NR > 1 { print $1, $2 }')
+  [ -n "$found" ] || {
+    echo "no authorized USB Quest 3 found; set SINNIX_QUEST_SERIAL if its model differs" >&2
+    return 1
+  }
+  printf '%s\n' "$found"
+}
+
+cached_host() {
+  [ -r "$HOST_CACHE" ] || return 1
+  tr -d '[:space:]' < "$HOST_CACHE"
+}
+
+network_target() {
+  local host
+  host="${SINNIX_QUEST_IP:-$(cached_host || true)}"
+  [ -n "$host" ] || {
+    echo "no Quest network address known; attach USB and run: sinnix quest network-adb" >&2
+    return 1
+  }
+  case "$host" in *:*) printf '%s\n' "$host" ;; *) printf '%s:5555\n' "$host" ;; esac
+}
+
+resolve_target() {
+  local target serial
+  target="$(network_target || true)"
+  if [ -n "$target" ] && ANDROID_SERIAL="$target" adb get-state >/dev/null 2>&1; then
+    printf '%s\n' "$target"
+    return
+  fi
+  serial="$(usb_serial || true)"
+  [ -n "$serial" ] || {
+    echo "Quest is unreachable over both cached network ADB and USB" >&2
+    return 1
+  }
+  printf '%s\n' "$serial"
+}
+
+enable_network_adb() {
+  local serial host target
+  serial="$(usb_serial)"
+  host="$(adb -s "$serial" shell ip -o -4 addr show wlan0 2>/dev/null | awk '{ split($4, octets, "/"); print octets[1]; exit }')"
+  [ -n "$host" ] || { echo "Quest has no IPv4 address on wlan0" >&2; return 1; }
+  adb -s "$serial" tcpip 5555
+  target="$host:5555"
+  adb connect "$target" >/dev/null
+  ANDROID_SERIAL="$target" adb get-state >/dev/null
+  mkdir -p "$STATE_DIR"
+  printf '%s\n' "$host" > "$HOST_CACHE"
+  echo "Quest network ADB: $target"
+}
+
+connect_network_adb() {
+  local target
+  target="${1:-$(network_target)}"
+  case "$target" in *:*) ;; *) target="$target:5555" ;; esac
+  adb connect "$target"
+  ANDROID_SERIAL="$target" adb get-state >/dev/null
+  mkdir -p "$STATE_DIR"
+  printf '%s\n' "${target%:5555}" > "$HOST_CACHE"
+}
+
+status() {
+  local target
+  target="$(resolve_target)"
+  echo "transport: $target"
+  ANDROID_SERIAL="$target" adb shell '
+    printf "model: "; getprop ro.product.model
+    printf "android: "; getprop ro.build.version.release
+    printf "tcp port: "; getprop service.adb.tcp.port
+    printf "usb config: "; getprop persist.sys.usb.config
+    printf "wifi IPv4: "; ip -o -4 addr show wlan0 | awk "{ split(\$4, octets, \"/\"); print octets[1]; exit }"
+  '
+}
+
+command="${1:-}"
+case "$command" in
+  status) status ;;
+  network-adb) enable_network_adb ;;
+  connect) shift; connect_network_adb "${1:-}" ;;
+  stop-network-adb)
+    target="$(network_target)"
+    ANDROID_SERIAL="$target" adb usb
+    rm -f "$HOST_CACHE"
+    ;;
+  shell) target="$(resolve_target)"; ANDROID_SERIAL="$target" adb shell ;;
+  screen) shift; target="$(resolve_target)"; exec scrcpy --serial "$target" "$@" ;;
+  adb) shift; target="$(resolve_target)"; exec env ANDROID_SERIAL="$target" adb "$@" ;;
+  -h|--help|help|"") usage ;;
+  *) echo "unknown Quest command: $command" >&2; usage >&2; exit 2 ;;
+esac

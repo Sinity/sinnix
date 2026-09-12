@@ -8,7 +8,66 @@
   # System software remains Quest-owned.  This profile only preserves the
   # directly observed, USB-development settings; package drift is reported,
   # never removed.
-  apps.cleanup = "report";
+  apps = {
+    # Side-loaded or store apps observed on this headset.  They remain
+    # headset-managed: this profile documents their expected presence without
+    # claiming an install source or removing any of them.
+    attended = [
+      "chat.fluffy.fluffychat"
+      "com.aurora.store"
+      "com.apk.editor"
+      "com.beatgames.beatsaber"
+      "com.CarbonStudio.TheWizards"
+      "com.crytek.climb2"
+      "com.deovr.gearvr"
+      "com.DigitalLode.Espire2"
+      "com.EpicScapes.RealmsOfFlow"
+      "com.FunktronicLabs.TheLightBrigade"
+      "com.JorgeJGnz.PhysHand"
+      "com.LiminalVR.Liminal"
+      "com.MightyYellStudios.WobblyKnightMaster"
+      "com.OmnifariousStudiosLLC.ProjectDemigod"
+      "com.SchellGames.DieScreaming"
+      "com.SchellGames.LostRecipes"
+      "com.Trebuchet.PrisonBossVR"
+      "com.VirZOOM.FLY"
+      "com.google.android.apps.youtube.vr.oculus"
+      "com.holonautic.cybrix"
+      "com.meta.curio.ruler"
+      "com.meta.handseducationmodule"
+      "com.meta.shell.env.footprint.haven2025"
+      "com.meta.shell.env.vista.calming"
+      "com.oculus.accountscenter"
+      "com.oculus.fitnesstracker"
+      "com.oculus.paracosmaavalanche"
+      "com.oculus.vrprivacycheckup"
+      "com.onemt.and.kc"
+      "com.puddle.thrasher_release"
+      "com.qcxr.qcxr"
+      "com.rarlab.rar"
+      "com.resolutiongames.homesports"
+      "com.resolutiongames.trolin"
+      "com.streamlabs"
+      "com.threethan.launcher"
+      "com.threethan.launcher.metastore"
+      "com.truantpixel.Runner"
+      "com.valvesoftware.steamlinkvr"
+      "com.voidroom.TeaForGod"
+      "com.voidroom.TeaForGodEmperor"
+      "com.vrchat.oculus.quest"
+      "com.zerotier.one"
+      "com.ZeroTransform.VStreamer_Live"
+      "geniesoft.io.DancingArrow"
+      "github.paroj.dsub2000"
+      "org.fdroid.fdroid"
+      "org.godotengine.open_saber_plus"
+      "pupper.dev.barkvr"
+      "quest.side.vr"
+      "quest.eleven.forfunlabs"
+      "studio.NewFolderGames.TitansClinic"
+    ];
+    cleanup = "report";
+  };
 
   android.settings = {
     global = {
