@@ -300,6 +300,7 @@ _: {
         DRY_RUN=0
         WIFI_PSK_FILE="/run/agenix/wifi-psk"
         SINNIX_PRIME_MAC_FILE="/run/agenix/router-sinnix-prime-mac"
+        ROUTER_AUTHORIZED_KEY_FILE="/run/agenix/router-authorized-key"
 
         # Parse args
         for arg in "$@"; do
@@ -342,6 +343,29 @@ _: {
         else
           echo "⚠  $SINNIX_PRIME_MAC_FILE not found — static lease MAC will be a placeholder."
           echo "   Create it: echo -n 'aa:bb:cc:dd:ee:ff' | agenix -e secret/router-sinnix-prime-mac.age"
+        fi
+
+        if [ -f "$ROUTER_AUTHORIZED_KEY_FILE" ]; then
+          ROUTER_AUTHORIZED_KEY_FILE="$ROUTER_AUTHORIZED_KEY_FILE" \
+          ROUTER_CONFIGURE_SCRIPT="$CONFIG_DIR/configure.sh" \
+            ${pkgs.python3}/bin/python - <<'PY'
+          import os
+          from pathlib import Path
+
+          key = Path(os.environ["ROUTER_AUTHORIZED_KEY_FILE"]).read_text().strip()
+          if "\n" in key or not key.startswith(("ssh-ed25519 ", "ssh-rsa ", "ecdsa-sha2-")):
+              raise SystemExit("router SSH authorization must contain one OpenSSH public key")
+          script = Path(os.environ["ROUTER_CONFIGURE_SCRIPT"])
+          text = script.read_text()
+          marker = "@@ROUTER_AUTHORIZED_KEY@@"
+          if text.count(marker) != 1:
+              raise SystemExit("router SSH authorization marker is missing or duplicated")
+          script.write_text(text.replace(marker, key))
+          PY
+          echo "✓ router SSH authorization injected from agenix secret"
+        else
+          echo "✗ router SSH authorization is missing: $ROUTER_AUTHORIZED_KEY_FILE" >&2
+          exit 66
         fi
 
         if [ "$DRY_RUN" -eq 1 ]; then

@@ -118,37 +118,10 @@ in
               type = types.str;
               default = "/realm/project";
             };
-            lynchpin = mkOption {
+            privateCatalogFile = mkOption {
               type = types.str;
-              default = "${config.root}/sinity-lynchpin";
-            };
-            sinex = mkOption {
-              type = types.str;
-              default = "${config.root}/sinex";
-            };
-            polylogue = mkOption {
-              type = types.str;
-              default = "${config.root}/polylogue";
-            };
-            sinnix = mkOption {
-              type = types.str;
-              default = "${config.root}/sinnix";
-            };
-            stashbox = mkOption {
-              type = types.str;
-              default = "${config.root}/stashbox";
-            };
-            steering = mkOption {
-              type = types.str;
-              default = "${config.root}/steering";
-            };
-            scribeTap = mkOption {
-              type = types.str;
-              default = "${config.root}/scribe-tap";
-            };
-            interceptBounce = mkOption {
-              type = types.str;
-              default = "${config.root}/intercept-bounce";
+              default = cfg.secrets.paths.private-project-catalog;
+              description = "Optional runtime catalog for projects whose metadata is not tracked publicly.";
             };
             entries = mkOption {
               type = types.attrsOf (
@@ -212,10 +185,9 @@ in
                   };
                 }
               );
-              readOnly = true;
               default = {
                 sinnix = {
-                  path = config.sinnix;
+                  path = "${config.root}/sinnix";
                   remote = "https://github.com/Sinity/sinnix.git";
                   observerRead = true;
                   devtoolsEntrypoint = "nix develop";
@@ -226,7 +198,7 @@ in
                   };
                 };
                 sinex = {
-                  path = config.sinex;
+                  path = "${config.root}/sinex";
                   remote = "https://github.com/Sinity/sinex.git";
                   observerRead = true;
                   taskAuthority = {
@@ -236,7 +208,7 @@ in
                   };
                 };
                 polylogue = {
-                  path = config.polylogue;
+                  path = "${config.root}/polylogue";
                   remote = "https://github.com/Sinity/polylogue.git";
                   observerRead = true;
                   taskAuthority = {
@@ -246,7 +218,7 @@ in
                   };
                 };
                 lynchpin = {
-                  path = config.lynchpin;
+                  path = "${config.root}/sinity-lynchpin";
                   remote = "https://github.com/Sinity/sinity-lynchpin.git";
                   observerRead = true;
                   taskAuthority = {
@@ -255,42 +227,8 @@ in
                     publicationPolicy = "local";
                   };
                 };
-                genome = {
-                  # Private personal-genomics workspace.  It has a declared
-                  # agentctl descriptor, but must not be exposed to observer
-                  # reads or treated as a hosted publication repository.
-                  path = "/realm/health/genome";
-                  agentctl = true;
-                  taskAuthority = {
-                    workspace = "/realm/health/genome/.beads";
-                    database = "/realm/health/genome/.beads/embeddeddolt";
-                    publicationPolicy = "local";
-                  };
-                };
-                # These are active Beads authorities too, but deliberately do
-                # not masquerade as agentctl projects: neither checkout has a
-                # project descriptor and both contain private operator data.
-                stashbox = {
-                  path = config.stashbox;
-                  remote = "/realm/archive/code-history/repos/mine/stashbox.git";
-                  agentctl = false;
-                  taskAuthority = {
-                    workspace = "${cfg.paths.stateRoot}/tasks/stashbox/.beads";
-                    database = "${cfg.paths.stateRoot}/tasks/stashbox/.beads/dolt";
-                    publicationPolicy = "dolt-sync";
-                  };
-                };
-                steering = {
-                  path = config.steering;
-                  agentctl = false;
-                  taskAuthority = {
-                    workspace = "${cfg.paths.stateRoot}/tasks/steering/.beads";
-                    database = "${cfg.paths.stateRoot}/tasks/steering/.beads/dolt";
-                    publicationPolicy = "local";
-                  };
-                };
               };
-              description = "Canonical project metadata consumed by agent and evidence surfaces.";
+              description = "Public project metadata consumed by agent and evidence surfaces.";
             };
           };
         }
@@ -350,15 +288,15 @@ in
 
     # Global environment exports
     environment.variables = {
-      LYNCHPIN_REPO_ROOT = cfg.projects.lynchpin;
-      SINEX_ROOT = cfg.projects.sinex;
-      POLYLOGUE_ROOT = cfg.projects.polylogue;
+      LYNCHPIN_REPO_ROOT = cfg.projects.entries.lynchpin.path;
+      SINEX_ROOT = cfg.projects.entries.sinex.path;
+      POLYLOGUE_ROOT = cfg.projects.entries.polylogue.path;
       # Verification run history is the one polylogue artifact that outlives a
       # checkout, so it belongs in the data lake rather than per-checkout state.
       # Every worktree and lane inherits this, which is what makes cross-lane
       # comparison possible at all.
       POLYLOGUE_VERIFY_HISTORY_PATH = "/realm/activity/dev/polylogue/verify-history.jsonl";
-      SINNIX_ROOT = cfg.projects.sinnix;
+      SINNIX_ROOT = cfg.projects.entries.sinnix.path;
       RAWLOG_FILE = "${cfg.paths.journalRoot}/raw-log.md";
     };
   };

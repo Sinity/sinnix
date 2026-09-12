@@ -1,18 +1,5 @@
-# llama.cpp HTTP server — raw GGUF endpoint for experiments and for applying
-# steering / abliteration control vectors via --control-vector.
-#
-# On sinnix-prime this serves a 0.6B reranker (/v1/rerank — an API ollama
-# does not provide) with gpuLayers = 0, which keeps it CPU-only and outside
-# ai-control.nix's gpu-inference admission mesh, so it can sit resident
-# alongside ollama or koboldcpp. The package FOLLOWS gpuLayers (see below);
-# a future GGUF served here with gpuLayers > 0 gets the CUDA build
-# automatically and would need to opt back into the exclusivity mesh.
-#
-# Socket-activated behind the same idle-aware proxy pattern as
-# ollama/koboldcpp/muse-glimmer (modules/services/ai-control.nix): port 8081 is
-# the systemd socket front door, the backend runs on a private loopback port
-# and exits after idle. DynamicUser + ProtectSystem=strict is read-only, not
-# hidden, so it reads the model under /realm without extra bind mounts.
+# llama.cpp inference profiles rendered through one service plane. Profile
+# data owns model/fit arguments; this module owns units, lifecycle and policy.
 {
   mkServiceModule,
   lib,
@@ -20,71 +7,35 @@
   helpers,
   ...
 }@args:
+let
+  profileType = lib.types.submodule {
+    options = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+      };
+      description = lib.mkOption { type = lib.types.str; };
+      portKey = lib.mkOption { type = lib.types.str; };
+      model = lib.mkOption { type = lib.types.str; };
+      requiresCuda = lib.mkOption { type = lib.types.bool; };
+      dynamicUser = lib.mkOption { type = lib.types.bool; };
+      idleTimeout = lib.mkOption { type = lib.types.str; };
+      readinessTimeout = lib.mkOption { type = lib.types.ints.positive; };
+      arguments = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ ];
+      };
+    };
+  };
+in
 mkServiceModule {
   name = "llama-cpp";
-  description = "llama.cpp HTTP server (CUDA)";
+  description = "profiled llama.cpp inference plane";
   docs = "docs/local-ai-activation.md";
-  # The configured reranker has gpuLayers = 0, so it intentionally stays
-  # outside ai-control's GPU admission mesh.
-  meta.ai = {
-    backendKind = "native";
-    requiresCuda = false;
-    socketProxy = true;
-  };
-  surface = {
-    unit = "llama-cpp.service";
-    resourceClass = "ordinary";
-    activation = {
-      mode = "socket-proxy";
-      publicEndpoint = "127.0.0.1:${toString helpers.data.ports.llamaCpp.public}";
-      backendEndpoint = "127.0.0.1:${toString helpers.data.ports.llamaCpp.backend}";
-      # Cold /v1/rerank for the 0.6B reranker is ~1-3s; 30s is ~10-30x headroom
-      # for both timeouts.
-      idleTimeout = "30s";
-      readinessTimeout = 30;
-      dependsOn = [ "llama-cpp-proxy" ];
-    };
-    observe = {
-      enable = true;
-      restartable = true;
-    };
-  };
-  extraOptions = {
-    model = args.lib.mkOption {
-      type = args.lib.types.str;
-      default = "";
-      description = "GGUF filename under model/gguf to serve (required when enabled).";
-    };
-    gpuLayers = args.lib.mkOption {
-      type = args.lib.types.int;
-      default = 999;
-      description = "Layers offloaded to GPU; remainder runs on CPU/RAM.";
-    };
-    controlVector = args.lib.mkOption {
-      type = args.lib.types.str;
-      default = "";
-      description = "Control-vector GGUF filename under model/control-vectors to apply (empty = none).";
-    };
-    ctxSize = args.lib.mkOption {
-      type = args.lib.types.int;
-      default = 0;
-      description = ''
-        `--ctx-size` (KV-cache context window, tokens). 0 means the
-        model's own trained context -- llama-server's own default, and the
-        right one here: cropping a reranker's context silently truncates
-        long documents and scores only their head.
-
-        llama.cpp allocates the KV cache up front for whatever this is set
-        to; it does not grow on demand. That is affordable only because
-        gpuLayers = 0 puts the cache in system RAM rather than the 10 GB
-        card. Raise gpuLayers and this bound starts costing VRAM again.
-      '';
-    };
-    extraFlags = args.lib.mkOption {
-      type = args.lib.types.attrsOf args.lib.types.anything;
-      default = { };
-      description = "Extra llama-server settings merged verbatim (e.g. { reranking = true; }).";
-    };
+  extraOptions.profiles = args.lib.mkOption {
+    type = args.lib.types.attrsOf profileType;
+    default = helpers.data.localModels.llamaCppProfiles;
+    description = "Named llama.cpp endpoints rendered as systemd services.";
   };
   configFn =
     {
@@ -96,44 +47,121 @@ mkServiceModule {
       ...
     }:
     let
-      modelRoot = "${config.sinnix.paths.modelsRoot}";
+      user = config.sinnix.user.name;
+      modelRoot = config.sinnix.paths.modelsRoot;
+      enabledProfiles = lib.filterAttrs (_: profile: profile.enable) cfg.profiles;
+      portFor = profile: helpers.data.ports.${profile.portKey};
+      mkSurface = name: profile: {
+        unit = "${name}.service";
+        resourceClass = "ordinary";
+        ai = {
+          backendKind = "native";
+          inherit (profile) requiresCuda;
+        };
+        activation = {
+          mode = "socket-proxy";
+          publicEndpoint = "127.0.0.1:${toString (portFor profile).public}";
+          backendEndpoint = "127.0.0.1:${toString (portFor profile).backend}";
+          inherit (profile) idleTimeout readinessTimeout;
+          exclusiveResource = if profile.requiresCuda then "gpu-inference" else null;
+          dependsOn = [ "${name}-proxy" ];
+        };
+        observe = {
+          enable = true;
+          restartable = true;
+        };
+      };
+      mkExecStart =
+        profile:
+        lib.escapeShellArgs (
+          [
+            "${if profile.requiresCuda then pkgs.llama-cpp-cuda else pkgs.llama-cpp}/bin/llama-server"
+            "--model"
+            "${modelRoot}/gguf/${profile.model}"
+            "--host"
+            "127.0.0.1"
+            "--port"
+            (toString (portFor profile).backend)
+          ]
+          ++ profile.arguments
+        );
+      mkService = name: profile: {
+        description = profile.description;
+        wantedBy = [ ];
+        after = [ "network.target" ];
+        partOf = [ "${name}-proxy.service" ];
+        serviceConfig = lib.mkMerge [
+          { ExecStart = mkExecStart profile; }
+          (
+            if profile.dynamicUser then
+              {
+                DynamicUser = true;
+                StateDirectory = name;
+                CacheDirectory = name;
+                WorkingDirectory = "/var/lib/${name}";
+                Environment = [ "LLAMA_CACHE=/var/cache/${name}" ];
+                AmbientCapabilities = [ "" ];
+                CapabilityBoundingSet = [ "" ];
+                LockPersonality = true;
+                MemoryDenyWriteExecute = true;
+                NoNewPrivileges = true;
+                PrivateMounts = true;
+                PrivateTmp = true;
+                PrivateUsers = true;
+                ProcSubset = "pid";
+                ProtectClock = true;
+                ProtectControlGroups = true;
+                ProtectHome = true;
+                ProtectHostname = true;
+                ProtectKernelLogs = true;
+                ProtectKernelModules = true;
+                ProtectKernelTunables = true;
+                ProtectProc = "invisible";
+                ProtectSystem = "strict";
+                RemoveIPC = true;
+                RestrictAddressFamilies = [
+                  "AF_INET"
+                  "AF_INET6"
+                  "AF_UNIX"
+                ];
+                RestrictNamespaces = true;
+                RestrictRealtime = true;
+                RestrictSUIDSGID = true;
+                SystemCallArchitectures = "native";
+                SystemCallErrorNumber = "EPERM";
+                SystemCallFilter = [
+                  "@system-service"
+                  "~@privileged"
+                ];
+              }
+            else
+              {
+                User = user;
+                Group = "users";
+                SupplementaryGroups = [
+                  "video"
+                  "render"
+                ];
+              }
+          )
+          (lib.sinnix.mkRuntimeServiceConfig {
+            runtimeInventory = config.sinnix.runtime.inventory;
+            unit = "${name}.service";
+          })
+          (lib.sinnix.systemd.mkRestartPolicy {
+            strategy = "on-failure";
+            delaySec = if profile.dynamicUser then 300 else 30;
+          })
+        ];
+      };
     in
     {
-      services.llama-cpp = {
-        enable = true;
-        # The package must follow gpuLayers rather than being pinned to CUDA:
-        # a CUDA-linked binary allocates its context and compute buffers at
-        # build/link time, not per offload setting, so it still holds
-        # ~700 MiB of VRAM at --n-gpu-layers 0. On a 10 GB card that erases
-        # the headroom this service exists to preserve. At gpuLayers = 0 CUDA
-        # has nothing to do, so the CPU build is the same computation
-        # without the context.
-        package = if cfg.gpuLayers == 0 then pkgs.llama-cpp else pkgs.llama-cpp-cuda;
-        settings = {
-          host = "127.0.0.1";
-          # The public port is reserved for the socket-activated front door
-          # (llama-cpp-proxy). Keep the daemon on the private loopback backend
-          # port so clients cannot bypass lifecycle admission and idle
-          # teardown.
-          port = helpers.data.ports.llamaCpp.backend;
-          flash-attn = "on";
-          n-gpu-layers = cfg.gpuLayers;
-          ctx-size = cfg.ctxSize;
-        }
-        // lib.optionalAttrs (cfg.model != "") {
-          model = "${modelRoot}/gguf/${cfg.model}";
-        }
-        // lib.optionalAttrs (cfg.controlVector != "") {
-          control-vector = "${modelRoot}/control-vectors/${cfg.controlVector}";
-        }
-        // cfg.extraFlags;
-      };
-
-      systemd.services.llama-cpp = {
-        # On-demand, socket-activated via llama-cpp-proxy — never resident
-        # at boot, never holds VRAM while idle.
-        wantedBy = lib.mkForce [ ];
-        partOf = [ "llama-cpp-proxy.service" ];
+      sinnix.runtime.surfaces = lib.mapAttrs mkSurface enabledProfiles;
+      systemd.services = lib.mapAttrs mkService enabledProfiles;
+      systemd.tmpfiles.rules = [ "d ${modelRoot}/gguf 0755 ${user} users -" ];
+      sinnix.runtime.dataStores.llama-cpp-models = {
+        path = "${modelRoot}/gguf";
+        class = "cache";
       };
     };
 } args

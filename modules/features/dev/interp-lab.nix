@@ -13,7 +13,7 @@
 #
 #   sinnix-steer        builds a control / steering vector with repeng from a
 #                       contrastive dataset and exports it as a GGUF, ready for
-#                       llama.cpp / koboldcpp `--control-vector`. This is the
+#                       llama.cpp `--control-vector`. This is the
 #                       DIY-abliteration path: compute the refusal direction
 #                       yourself and ablate or amplify any behaviour.
 {
@@ -125,7 +125,7 @@ mkFeatureModule {
             For abliteration: positive = compliant continuations, negative =
             refusals. Apply the result with a NEGATIVE strength to suppress
             refusals, or POSITIVE to amplify the steered trait, via
-            koboldcpp/llama.cpp --control-vector.
+            llama.cpp --control-vector.
 
           Output is written under ${interpDir}/../control-vectors/.
           USAGE

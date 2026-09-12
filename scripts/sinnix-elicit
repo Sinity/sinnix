@@ -8,7 +8,7 @@
 
 Given a *domain* -- a named set of concrete items (wallpapers, theme
 directions, keybind conventions, anything) -- this tool runs the loop the
-stashbox ranker and Gwern's resorter already validated on media libraries:
+existing media rankers and Gwern's resorter already validated on libraries:
 
   1. ask the operator to compare pairs of items, choosing the *most
      informative* next pair through `rank_core.build_selector`;

@@ -70,6 +70,7 @@ mkServiceModule {
     };
     target = lib.mkOption {
       type = lib.types.str;
+      default = "";
       example = "DP-3";
       description = "gpu-screen-recorder -w capture target. Use the monitor connector name; \"focused\" means focused WINDOW in gsr 5.13.9 and hard-requires -s WxH, so it cannot be a working default for a whole-screen ring.";
     };
@@ -96,6 +97,12 @@ mkServiceModule {
   configFn =
     { cfg, config, ... }:
     {
+      assertions = [
+        {
+          assertion = cfg.target != "";
+          message = "sinnix.services.capture-replay.target must name the monitor connector when capture replay is enabled";
+        }
+      ];
       programs.gpu-screen-recorder.enable = true;
 
       systemd.tmpfiles.rules = [

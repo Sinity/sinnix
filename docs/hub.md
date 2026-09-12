@@ -28,7 +28,7 @@ the same nav, so the routes are reachable from each other rather than by URL.
 | `/terminals/`    | Live kitty terminal contents, control, and scrollback history       |
 
 The loopback web UIs get one port each rather than a subpath of the hub —
-`8881` Open WebUI, `8882` ComfyUI, `8883` KoboldCpp. They are single-page apps
+`8881` Open WebUI and `8882` ComfyUI. They are single-page apps
 that emit absolute asset URLs and have no base-path support, so a `/ui/comfyui/`
 mount would half-work in the way that wastes an afternoon. One port each costs
 one firewall entry and always works.
@@ -269,7 +269,7 @@ restartable" rather than with a button that would 403.
 **The backends are socket-activated.** They sit behind `systemd-socket-proxyd`
 and exit after a 30s idle timeout, so _idle_ is the normal resting state, not a
 fault, and connecting to the public endpoint starts one with no privileged
-action at all. Ollama and KoboldCpp hold the same `gpu-inference` admission key
+action at all. CUDA backends hold the same `gpu-inference` admission key
 and conflict by design. See `docs/local-ai-activation.md`.
 
 ## Unshackling the hub

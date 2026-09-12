@@ -9,13 +9,17 @@ This host keeps local AI services on demand. The public loopback port is a stabl
 | Ollama text and vision | `127.0.0.1:11434` | `local-chat`, `local-vision`, `local-coder`, `local-coder-moe`, `local-reasoner`, `local-thinker`, `local-multimodal-moe`, `local-reader` | on demand                        | CUDA, one GPU inference occupant                     |
 | LiteLLM gateway        | `127.0.0.1:4000`  | OpenAI `/v1/chat/completions` and Anthropic `/v1/messages`                                                                                | on demand                        | translates agent clients to local backends           |
 | Muse Glimmer           | `127.0.0.1:8083`  | direct llama.cpp model `muse-glimmer` (abliterated Q4_K_M)                                                                                | on demand, 15 minute idle window | CUDA plus CPU/RAM hybrid, one GPU inference occupant |
-| KoboldCpp              | `127.0.0.1:5001`  | configured GGUF, KoboldAI Lite UI, text/image APIs                                                                                        | on demand                        | CUDA, one GPU inference occupant                     |
-| Open WebUI             | `127.0.0.1:8080`  | browser chat over Ollama                                                                                                                  | configured startup policy        | frontend only; currently targets Ollama              |
+| Qwen VRAM profile      | `127.0.0.1:8085`  | direct llama.cpp fully resident Qwen profile                                                                                              | on demand, 15 minute idle window | CUDA, one GPU inference occupant                     |
+| Open WebUI             | `127.0.0.1:8080`  | browser chat over Ollama                                                                                                                  | on demand                        | frontend only; currently targets Ollama              |
 | llama.cpp reranker     | `127.0.0.1:8081`  | `/v1/rerank`                                                                                                                              | on demand                        | CPU resident by policy, outside GPU admission        |
 | Speech to text         | `127.0.0.1:8090`  | `/v1/audio/transcriptions` or `sinnix stt`                                                                                                | on demand                        | Parakeet CPU service                                 |
 | Kokoro TTS             | `127.0.0.1:8890`  | `/v1/audio/speech`                                                                                                                        | on demand                        | CPU service                                          |
 | OpenedAI Speech        | `127.0.0.1:8000`  | `/v1/audio/speech`                                                                                                                        | on demand                        | container, GPU admission                             |
 | ComfyUI                | `127.0.0.1:8188`  | browser and ComfyUI API                                                                                                                   | on demand                        | container, GPU admission                             |
+
+OpenedAI Speech and ComfyUI are part of the optional
+`sinnix.profiles.ai-media` aggregate and are absent by default. Model weights
+and application state remain on `/realm` while the profile is disabled.
 
 The canonical model roster is `flake/data/local-models.nix`. The canonical port and front-door map is `flake/data/ports.nix`. Edit those sources when changing the platform. Do not add a model only to LiteLLM or only to an agent wrapper.
 
@@ -37,7 +41,7 @@ sinnix ai unpin muse-glimmer
 
 `start` is useful when you want the cold load to happen before sending work. A first Glimmer load can take several minutes because the 17 GB GGUF is being mapped and the hybrid layer fit is computed. `pin` holds a connection to the public socket for a bounded period, so the backend remains resident during a work session. The pin is a transient user unit, releases automatically, and does not survive a reboot.
 
-The GPU services share an exclusive `gpu-inference` resource. Ollama, Glimmer, KoboldCpp, ComfyUI, and the GPU TTS service cannot use the card concurrently. Starting one can stop a conflicting resident service. Check before and after a switch with `sinnix ai status` and `sinnix ai gpu`.
+The GPU services share an exclusive `gpu-inference` resource. Ollama, the llama.cpp GPU profiles, ComfyUI, and the GPU TTS service cannot use the card concurrently. Starting one can stop a conflicting resident service. Check before and after a switch with `sinnix ai status` and `sinnix ai gpu`.
 
 ## Muse Glimmer
 
@@ -172,7 +176,7 @@ curl -F file=@recording.wav -F model=parakeet-tdt-0.6b-v3 \
   http://127.0.0.1:8090/v1/audio/transcriptions
 ```
 
-The reranker is the llama.cpp endpoint at `127.0.0.1:8081` and answers `/v1/rerank`. It runs with zero model layers on the GPU by policy, so it can coexist with a resident language model. Kokoro at `127.0.0.1:8890` and OpenedAI Speech at `127.0.0.1:8000` answer `/v1/audio/speech`. ComfyUI is at `http://127.0.0.1:8188`; KoboldCpp is at `http://127.0.0.1:5001` and includes its KoboldAI Lite interface. Start those services with `sinnix ai start <name>` and stop them when the generation is complete.
+The reranker is the llama.cpp endpoint at `127.0.0.1:8081` and answers `/v1/rerank`. It runs with zero model layers on the GPU by policy, so it can coexist with a resident language model. Kokoro at `127.0.0.1:8890` and OpenedAI Speech at `127.0.0.1:8000` answer `/v1/audio/speech`. ComfyUI is at `http://127.0.0.1:8188`. Start enabled services with `sinnix ai start <name>` and stop them when the generation is complete.
 
 ## Troubleshooting
 

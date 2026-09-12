@@ -139,21 +139,16 @@ mkServiceModule {
 
     aiServices = lib.mkOption {
       type = lib.types.listOf lib.types.str;
-      # Derived, not listed: every enabled sinnix.services entry that declares
-      # itself an AI backend (mkAiService's meta.ai marker). The hand-written
+      # Derived from the runtime registry. The hand-written
       # list this replaces had silently omitted kokoro and muse-glimmer since
       # it was written -- the drift class dies with the second registry.
       # Disabled services no longer appear at all: with nothing to drift, the
       # old "renders as not-registered rather than disappearing" visibility
       # hack has nothing left to reveal.
       default = lib.naturalSort (
-        lib.attrNames (
-          lib.filterAttrs (
-            _: service: (service.enable or false) && (lib.attrByPath [ "meta" "ai" ] null service) != null
-          ) config.sinnix.services
-        )
+        lib.attrNames (lib.filterAttrs (_: surface: surface.ai != null) config.sinnix.runtime.surfaces)
       );
-      defaultText = lib.literalExpression "every enabled service carrying meta.ai";
+      defaultText = lib.literalExpression "every runtime surface carrying ai metadata";
       description = ''
         Names of AI services the control panel offers. Names only: every unit,
         endpoint, idle timeout, admission key, and restartable flag is resolved
@@ -173,11 +168,6 @@ mkServiceModule {
           label = "ComfyUI";
           port = helpers.data.ports.hub.comfyui;
           upstream = "127.0.0.1:${toString helpers.data.ports.comfyui.public}";
-        };
-        koboldcpp = {
-          label = "KoboldCpp";
-          port = helpers.data.ports.hub.koboldcpp;
-          upstream = "127.0.0.1:${toString helpers.data.ports.koboldcpp.public}";
         };
       };
       description = ''

@@ -1,6 +1,6 @@
 # sinnix-ai — on-demand control plane for the local AI services
-# (stt, tts, kokoro, ollama, litellm, llama-cpp, muse-glimmer, qwen38-vram,
-# koboldcpp, comfyui, musicgen, ocr, open-webui). The module declares the live
+# (stt, tts, kokoro, ollama, litellm, llama-cpp profiles, comfyui, musicgen,
+# ocr, open-webui). The module declares the live
 # service and runtime surfaces; scripts/sinnix-ai is a thin inventory/action
 # reader.
 {
@@ -90,42 +90,18 @@ let
           Restart = "no";
         };
       };
-      runtimeSurface = {
-        unit = "${proxy}.socket";
-        kind = "socket";
-        resourceClass = "ordinary";
-        activation = {
-          mode = "socket-proxy";
-          inherit
-            publicEndpoint
-            backendEndpoint
-            idleTimeout
-            readinessTimeout
-            exclusiveResource
-            ;
-          dependsOn = [ name ];
-        };
-        observe = {
-          enable = true;
-          restartable = true;
-        };
-      };
     };
 
-  # Backends own their AI marker and socket-proxy declaration. Reading that
-  # source metadata avoids enumerating runtime surfaces, to which this module
-  # contributes proxy rows itself.
+  # AI membership and activation are both owned by the backend surface.
   backendNames = lib.naturalSort (
     lib.attrNames (
       lib.filterAttrs (
-        name: service:
-        (lib.attrByPath [ "meta" "ai" ] null service) != null
-        && (lib.attrByPath [ "meta" "ai" "socketProxy" ] false service)
-      ) config.sinnix.services
+        _: surface: surface.ai != null && surface.activation.mode == "socket-proxy"
+      ) config.sinnix.runtime.surfaces
     )
   );
   proxies = lib.genAttrs backendNames mkProxy;
-  enabledProxies = lib.filterAttrs (name: _: config.sinnix.services.${name}.enable) proxies;
+  enabledProxies = proxies;
 
   # Every rendered fragment is gated on its own backend's enable flag alone.
   forEachProxy = render: lib.mkMerge (lib.mapAttrsToList (_: render) enabledProxies);
@@ -175,7 +151,4 @@ in
     }))
     exclusivityConflicts
   ];
-  sinnix.runtime.surfaces = forEachProxy (proxy: {
-    ${proxy.proxy} = proxy.runtimeSurface;
-  });
 }

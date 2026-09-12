@@ -15,12 +15,11 @@ mkServiceModule {
   name = "ollama";
   description = "Ollama local LLM/VLM inference hub (CUDA)";
   docs = "docs/local-ai-activation.md";
-  meta.ai = {
-    backendKind = "native";
-    requiresCuda = true;
-    socketProxy = true;
-  };
   surface = {
+    ai = {
+      backendKind = "native";
+      requiresCuda = true;
+    };
     unit = "ollama.service";
     resourceClass = "ordinary"; # uncapped memory — required for RAM offload
     activation = {
@@ -53,7 +52,7 @@ mkServiceModule {
   extraOptions = {
     autoStart = args.lib.mkOption {
       type = args.lib.types.bool;
-      default = true;
+      default = false;
       description = "Start Ollama automatically at boot.";
     };
     loadModels = args.lib.mkOption {
@@ -187,6 +186,11 @@ mkServiceModule {
         "d ${config.sinnix.paths.modelsRoot} 0755 ${user} users -"
         "d ${modelsDir} 0755 ollama ollama -"
       ];
+
+      sinnix.runtime.dataStores.ollama-model-cache = {
+        path = modelsDir;
+        class = "cache";
+      };
 
       environment.systemPackages = [ pkgs.ollama-cuda ]; # `ollama` CLI on PATH
 

@@ -119,6 +119,8 @@
         DISCOVERY_JSON='["one","two"]' ${builtins.head commands} --no-build
         test ! -s "$BUILD_LOG"
         export SUDO_HOME="$TMPDIR" ACTIVATION_LOG="$TMPDIR/activation"
+        printf '{ }\n' > "$TMPDIR/secret-declarations.nix"
+        export SINNIX_SECRET_DECLARATIONS="$TMPDIR/secret-declarations.nix"
         export PATH="${fakeSudo}/bin:$PATH"
         check_activation() {
           name="$1"
@@ -129,6 +131,11 @@
           status=0
           AGENTCTL_PRINCIPAL=agent-control "$command" || status=$?
           test "$status" = 64
+          test ! -s "$ACTIVATION_LOG"
+
+          status=0
+          SINNIX_SECRET_DECLARATIONS="$TMPDIR/missing-secret-declarations.nix" "$command" || status=$?
+          test "$status" = 66
           test ! -s "$ACTIVATION_LOG"
 
           for expected in 7 130; do

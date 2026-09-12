@@ -96,6 +96,7 @@ mkServiceModule {
       configFile = pkgs.writeText "agentctl.json" (
         builtins.toJSON {
           project_roots = cfg.projectRoots;
+          private_project_catalog = config.sinnix.projects.privateCatalogFile;
           agent_runner = cfg.agentRunner;
           worker_contract = cfg.workerContract;
           event_spool = eventSpool;
@@ -105,6 +106,22 @@ mkServiceModule {
       );
     in
     lib.mkMerge [
+      {
+        sinnix.runtime.dataStores = {
+          agentctl-events = {
+            path = eventSpool;
+            class = "canonical";
+          };
+          agentctl-state = {
+            path = "${config.sinnix.paths.stateRoot}/agentctl";
+            class = "canonical";
+          };
+          task-authorities = {
+            path = taskStateRoot;
+            class = "canonical";
+          };
+        };
+      }
       (lib.sinnix.mkScheduledJob
         {
           inherit config;

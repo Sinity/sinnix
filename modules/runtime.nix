@@ -112,6 +112,80 @@ let
     drillLog = "${cfg.paths.machineRoot}/borg_drill.jsonl";
   };
 
+  dataPolicyModule =
+    { config, ... }:
+    {
+      options = {
+        class = lib.mkOption {
+          type = lib.types.enum [
+            "canonical"
+            "derived"
+            "cache"
+            "exact-copy"
+          ];
+          default = "canonical";
+          description = "Lifecycle class of the stored data.";
+        };
+        inputs = lib.mkOption {
+          type = lib.types.listOf lib.types.str;
+          default = [ ];
+          description = "Data-store or capture IDs used to rebuild or populate this representation.";
+        };
+        source = lib.mkOption {
+          type = lib.types.nullOr lib.types.str;
+          default = null;
+          description = "Single data-store or capture ID preserved by this exact copy.";
+        };
+        preservation = lib.mkOption {
+          type = lib.types.enum [
+            "indefinite"
+            "rebuildable"
+            "ephemeral"
+          ];
+          default =
+            {
+              canonical = "indefinite";
+              derived = "rebuildable";
+              cache = "ephemeral";
+              exact-copy = "ephemeral";
+            }
+            .${config.class};
+        };
+        fidelity = lib.mkOption {
+          type = lib.types.enum [
+            "source"
+            "lossless-transform"
+            "derived"
+          ];
+          default =
+            {
+              canonical = "source";
+              derived = "derived";
+              cache = "derived";
+              exact-copy = "lossless-transform";
+            }
+            .${config.class};
+        };
+        backup = lib.mkOption {
+          type = lib.types.enum [
+            "inherited"
+            "direct"
+            "none"
+          ];
+          default = if config.class == "canonical" then "inherited" else "none";
+        };
+      };
+    };
+
+  dataPolicyType = lib.types.submodule dataPolicyModule;
+  dataStoreType = lib.types.submodule {
+    imports = [ dataPolicyModule ];
+    options.path = lib.mkOption {
+      type = lib.types.str;
+      description = "Absolute path owned by this data store.";
+    };
+  };
+
   # One shape for a capture lane, used in two places: inline on a runtime
   # surface that owns its own lane, and standalone in sinnix.runtime.captures
   # for a lane whose writer is not a systemd unit at all. Those used to be the
@@ -226,6 +300,11 @@ let
           JSONL envelopes.
         '';
       };
+      data = lib.mkOption {
+        type = dataPolicyType;
+        default = { };
+        description = "Preservation policy for this capture lane.";
+      };
     };
   };
 
@@ -234,6 +313,7 @@ let
       hostname = config.networking.hostName;
       inherit surfaces;
       captures = config.sinnix.runtime.captures;
+      dataStores = config.sinnix.runtime.dataStores;
       mounts = mountMonitoring;
       backups = backupInventory;
     }
@@ -263,6 +343,12 @@ let
     };
 in
 {
+  options.sinnix.runtime.dataStores = lib.mkOption {
+    type = lib.types.attrsOf dataStoreType;
+    default = { };
+    description = "Canonical, derived, cached, and exact-copy data stores with explicit lifecycle policy.";
+  };
+
   options.sinnix.runtime.surfaces = lib.mkOption {
     type = lib.types.attrsOf (
       lib.types.submodule (
@@ -400,6 +486,27 @@ in
                 default = false;
                 description = "Whether operators may restart this surface directly.";
               };
+            };
+            ai = lib.mkOption {
+              type = lib.types.nullOr (
+                lib.types.submodule {
+                  options = {
+                    backendKind = lib.mkOption {
+                      type = lib.types.enum [
+                        "native"
+                        "container"
+                      ];
+                      default = "native";
+                    };
+                    requiresCuda = lib.mkOption {
+                      type = lib.types.bool;
+                      default = false;
+                    };
+                  };
+                }
+              );
+              default = null;
+              description = "AI backend classification carried by the owning runtime surface.";
             };
             # A machine-readable carrier for "yes, this is down, we know".
             # Without one, every fresh agent session rediscovers an intentional
@@ -568,31 +675,101 @@ in
       }
     )
     {
-      assertions = [
-        {
-          assertion = duplicateSurfaceUnitKeys == [ ];
-          message =
-            "sinnix.runtime.surfaces must not declare duplicate manager/unit pairs: "
-            + lib.concatStringsSep ", " duplicateSurfaceUnitKeys;
-        }
-        {
-          assertion = kindUnitMismatches == [ ];
-          message =
-            "sinnix.runtime.surfaces unit suffixes must match their kind: "
-            + lib.concatMapStringsSep ", " (
-              surface: "${surface.name}:${surface.kind}:${surface.unit}"
-            ) kindUnitMismatches;
-        }
-        {
-          # An acknowledgement without a reason and a tracking reference is
-          # just a mute, and a mute is how an intentional outage quietly
-          # becomes a forgotten one.
-          assertion = unreferencedAcknowledgements == [ ];
-          message =
-            "sinnix.runtime.surfaces acknowledged outages must carry reason, since and ref: "
-            + lib.concatStringsSep ", " unreferencedAcknowledgements;
-        }
-      ];
+      assertions =
+        let
+          captureRows = map (capture: {
+            id = capture.name;
+            inherit (capture) path;
+            inherit (capture) data;
+          }) runtimeInventory.captures;
+          storeRows = lib.mapAttrsToList (id: store: {
+            inherit id;
+            inherit (store) path;
+            data = store;
+          }) config.sinnix.runtime.dataStores;
+          rows = captureRows ++ storeRows;
+          ids = map (row: row.id) rows;
+          paths = map (row: row.path) rows;
+          duplicates =
+            values:
+            lib.unique (
+              builtins.filter (
+                value: builtins.length (builtins.filter (candidate: candidate == value) values) > 1
+              ) values
+            );
+          invalidRows = builtins.filter (
+            row:
+            let
+              policy = row.data;
+              references = policy.inputs ++ lib.optional (policy.source != null) policy.source;
+              referencesExist = builtins.all (reference: builtins.elem reference ids) references;
+              shapeIsValid =
+                if policy.class == "canonical" then
+                  policy.preservation == "indefinite"
+                  && policy.fidelity != "derived"
+                  && policy.inputs == [ ]
+                  && policy.source == null
+                else if policy.class == "derived" then
+                  policy.inputs != [ ]
+                  && policy.source == null
+                  && policy.preservation == "rebuildable"
+                  && policy.fidelity == "derived"
+                else if policy.class == "cache" then
+                  policy.source == null
+                  && policy.preservation != "indefinite"
+                  && policy.fidelity == "derived"
+                  && policy.backup == "none"
+                else
+                  (policy.source != null || policy.inputs != [ ])
+                  && !(policy.source != null && policy.inputs != [ ])
+                  && policy.fidelity != "derived";
+            in
+            !(shapeIsValid && referencesExist)
+          ) rows;
+        in
+        [
+          {
+            assertion = duplicateSurfaceUnitKeys == [ ];
+            message =
+              "sinnix.runtime.surfaces must not declare duplicate manager/unit pairs: "
+              + lib.concatStringsSep ", " duplicateSurfaceUnitKeys;
+          }
+          {
+            assertion = kindUnitMismatches == [ ];
+            message =
+              "sinnix.runtime.surfaces unit suffixes must match their kind: "
+              + lib.concatMapStringsSep ", " (
+                surface: "${surface.name}:${surface.kind}:${surface.unit}"
+              ) kindUnitMismatches;
+          }
+          {
+            assertion = unreferencedAcknowledgements == [ ];
+            message =
+              "sinnix.runtime.surfaces acknowledged outages must carry reason, since and ref: "
+              + lib.concatStringsSep ", " unreferencedAcknowledgements;
+          }
+          {
+            assertion = duplicates ids == [ ];
+            message = "sinnix.runtime capture and data-store IDs must be unique: ${lib.concatStringsSep ", " (duplicates ids)}";
+          }
+          {
+            assertion = duplicates paths == [ ];
+            message = "sinnix.runtime capture and data-store paths must be unique: ${lib.concatStringsSep ", " (duplicates paths)}";
+          }
+          {
+            assertion = invalidRows == [ ];
+            message = "sinnix.runtime data policies contain invalid lifecycle relationships: ${
+              lib.concatStringsSep ", " (map (row: row.id) invalidRows)
+            }";
+          }
+        ];
+
+      sinnix.runtime.dataStores = {
+        journal-raw = {
+          path = "${cfg.paths.journalRoot}/raw-log.md";
+          class = "canonical";
+        };
+      };
 
       sinnix.runtime.surfaces = runtimeDefaults.baseSurfaces // {
         # The drift probe itself is governed like everything else it audits:

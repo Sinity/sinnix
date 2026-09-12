@@ -22,12 +22,11 @@ mkServiceModule {
   name = "comfyui";
   description = "ComfyUI image/video generation (containerized, CDI GPU)";
   docs = "docs/local-ai-activation.md";
-  meta.ai = {
-    backendKind = "container";
-    requiresCuda = true;
-    socketProxy = true;
-  };
   surface = {
+    ai = {
+      backendKind = "container";
+      requiresCuda = true;
+    };
     unit = "podman-comfyui.service";
     resourceClass = "ordinary";
     activation = {
@@ -54,7 +53,7 @@ mkServiceModule {
   extraOptions = {
     autoStart = args.lib.mkOption {
       type = args.lib.types.bool;
-      default = true;
+      default = false;
       description = "Start the ComfyUI container automatically at boot.";
     };
     image = args.lib.mkOption {

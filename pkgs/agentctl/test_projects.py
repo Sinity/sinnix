@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
-from agentctl.config import Config, load_config, resolve_project
+from agentctl.config import Config, ConfigError, load_config, resolve_project
 from agentctl.projects import (
     ProjectCatalog,
     ProjectConfigError,
@@ -343,6 +344,73 @@ def test_an_absent_config_file_yields_the_defaults(
     assert config.project_roots == ()
     assert config.event_spool == Path("/realm/state/agentctl/events.jsonl")
     assert config.worker_contract.name == "worker-contract.md"
+
+
+def test_config_adds_agentctl_projects_from_private_runtime_catalog(
+    tmp_path: Path, project_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    private_root = write_project(tmp_path / "private-project")
+    descriptor = private_root / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text().replace('id = "fixture"', 'id = "private_fixture"', 1)
+    )
+    catalog = tmp_path / "private-projects.json"
+    catalog.write_text(
+        json.dumps(
+            {
+                "projects": {
+                    "private_fixture": {
+                        "path": str(private_root),
+                        "agentctl": True,
+                    },
+                    "task-only": {
+                        "path": str(tmp_path / "task-only"),
+                        "agentctl": False,
+                    },
+                },
+                "links": {"/home/fixture/.local/share/private": "/realm/state/private"},
+            }
+        )
+    )
+    location = tmp_path / "agentctl.json"
+    location.write_text(
+        json.dumps(
+            {
+                "project_roots": [str(project_root)],
+                "private_project_catalog": str(catalog),
+            }
+        )
+    )
+    monkeypatch.setenv("AGENTCTL_CONFIG", str(location))
+
+    config = load_config()
+
+    assert config.project_roots == (project_root, private_root)
+    assert config.catalog(tolerant=False).get("private_fixture").root == private_root
+
+
+def test_config_rejects_duplicate_private_project_roots(
+    tmp_path: Path, project_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    catalog = tmp_path / "private-projects.json"
+    catalog.write_text(
+        json.dumps(
+            {"projects": {"duplicate": {"path": str(project_root), "agentctl": True}}}
+        )
+    )
+    location = tmp_path / "agentctl.json"
+    location.write_text(
+        json.dumps(
+            {
+                "project_roots": [str(project_root)],
+                "private_project_catalog": str(catalog),
+            }
+        )
+    )
+    monkeypatch.setenv("AGENTCTL_CONFIG", str(location))
+
+    with pytest.raises(ConfigError, match="must be unique"):
+        load_config()
 
 
 def test_packets_review_names_the_reviewer_agent_completely(tmp_path: Path) -> None:

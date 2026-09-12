@@ -21,9 +21,8 @@ OPS_SOCKET="${XDG_RUNTIME_DIR:-/run/user/1000}/sinnix/ops.sock"
 # Every service fact below (unit, endpoint, idle timeout, admission key,
 # manager, restartability) is resolved live from the runtime inventory --
 # this script carries no second copy of ai-control.nix's registry. Exactly
-# two things identify a service by name at all: the deterministic
-# `<name>-proxy` unit ai-control.nix itself names every idle-aware backend's
-# front door with, and (for the one registered AI frontend with no such
+# two things identify a service by name at all: the surface's `ai` field and
+# (for the one registered AI frontend with no such
 # proxy -- open-webui, which fronts Ollama directly) the hub module's own
 # declared `aiServices` list, read out of the live reducer's ExecStart
 # rather than duplicated here. Neither is a private table: both are the
@@ -52,7 +51,7 @@ proxy_backed_services() {
   inventory_json | jq -r '
     .surfaces as $s
     | $s | keys[]
-    | select($s[. + "-proxy"] != null)
+    | select($s[.].ai != null and $s[.].activation.mode == "socket-proxy")
   '
 }
 

@@ -78,6 +78,15 @@ let
     capture:
     {
       inherit (capture) name path;
+      data =
+        capture.data or {
+          class = "canonical";
+          inputs = [ ];
+          source = null;
+          preservation = "indefinite";
+          fidelity = "source";
+          backup = "inherited";
+        };
     }
     // lib.optionalAttrs ((capture.cadenceSeconds or null) != null) {
       expectedCadenceSeconds = capture.cadenceSeconds;
@@ -470,6 +479,7 @@ rec {
       mounts ? [ ],
       backups ? { },
       captures ? [ ],
+      dataStores ? { },
     }:
     {
       schema = "sinnix-runtime-inventory-v1";
@@ -480,7 +490,7 @@ rec {
         ;
       earlyoomEmergencyAvoidPattern = earlyoomPatternFor (lib.mapAttrs (_: normalizeSurface) surfaces);
       surfaces = lib.mapAttrs (_: effectiveSurface classes) surfaces;
-      inherit mounts backups;
+      inherit mounts backups dataStores;
       observedServices = observedServiceRows surfaces;
       captures = captureRows surfaces captures;
     };

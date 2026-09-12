@@ -608,6 +608,60 @@ def test_config_rejects_retired_project_visibility_fields(tmp_path: Path) -> Non
         GatewayConfig.load(path)
 
 
+def test_config_merges_private_runtime_project_catalog(tmp_path: Path) -> None:
+    public = tmp_path / "public"
+    private = tmp_path / "private"
+    public.mkdir()
+    private.mkdir()
+    catalog = tmp_path / "private-projects.json"
+    catalog.write_text(
+        json.dumps(
+            {
+                "projects": {
+                    "private-fixture": {
+                        "path": str(private),
+                        "observerRead": False,
+                    }
+                },
+                "links": {"/home/fixture/.local/share/private": "/realm/state/private"},
+            }
+        )
+    )
+    path = tmp_path / "gateway.json"
+    path.write_text(
+        json.dumps(
+            {
+                "projects": {"public-fixture": {"path": str(public)}},
+                "privateProjectCatalogFile": str(catalog),
+            }
+        )
+    )
+
+    loaded = GatewayConfig.load(path)
+
+    assert set(loaded.projects) == {"public-fixture", "private-fixture"}
+    assert loaded.projects["private-fixture"].path == private
+
+
+def test_config_rejects_private_catalog_collision(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    catalog = tmp_path / "private-projects.json"
+    catalog.write_text(json.dumps({"projects": {"fixture": {"path": str(project)}}}))
+    path = tmp_path / "gateway.json"
+    path.write_text(
+        json.dumps(
+            {
+                "projects": {"fixture": {"path": str(project)}},
+                "privateProjectCatalogFile": str(catalog),
+            }
+        )
+    )
+
+    with pytest.raises(ValueError, match="duplicates public projects"):
+        GatewayConfig.load(path)
+
+
 def test_machine_query_selects_and_pages_large_collector_report(tmp_path: Path) -> None:
     report = {
         "schema": "sinnix.observe.v1",
