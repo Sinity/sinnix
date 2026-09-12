@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Launch or inspect the local PC-VR streaming stack
+# runtimeInputs: bash coreutils android-tools wivrn alvr
+
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: sinnix xr <command>
+
+Commands:
+  status          show streaming tools, Quest transport, and paired clients
+  alvr            launch the ALVR dashboard
+  wivrn           launch the WiVRn dashboard
+  wivrn-wired     prepare USB forwarding and launch the WiVRn client
+
+Streaming services are launched only for an attended session. LAN firewall
+access is restricted to the host's physical LAN interface; do not forward
+the ALVR or WiVRn ports through the router.
+EOF
+}
+
+quest_target() {
+  sinnix quest adb get-state >/dev/null
+  sinnix quest adb get-serialno | tr -d '\r'
+}
+
+wivrn_client_package() {
+  local target
+  target="$1"
+  adb -s "$target" shell pm list packages org.meumeu.wivrn | tr -d '\r' \
+    | sed -n 's/^package://p' | head -n 1
+}
+
+status() {
+  printf 'ALVR: '
+  alvr_dashboard --version 2>/dev/null || printf 'not on PATH\n'
+  printf 'WiVRn: '
+  wivrn-dashboard --version 2>/dev/null || printf 'not on PATH\n'
+  printf 'Quest: '
+  local target wivrn_package
+  target="$(quest_target)"
+  printf '%s\n' "$target"
+  wivrn_package="$(wivrn_client_package "$target")"
+  printf 'WiVRn client: %s\n' "${wivrn_package:-not installed}"
+  printf 'ALVR client: '
+  adb -s "$target" shell pm list packages alvr.client.stable | tr -d '\r' \
+    | sed -n 's/^package://p' | head -n 1
+}
+
+wivrn_wired() {
+  local target package
+  target="$(quest_target)"
+  package="$(wivrn_client_package "$target")"
+  [ -n "$package" ] || {
+    echo "WiVRn client is not installed on $target" >&2
+    return 1
+  }
+  adb -s "$target" reverse tcp:9757 tcp:9757
+  adb -s "$target" shell am start -a android.intent.action.VIEW \
+    -d 'wivrn+tcp://localhost' "$package"
+  echo "WiVRn wired launch requested through $target"
+}
+
+case "${1:-}" in
+  status) status ;;
+  alvr) exec alvr_dashboard ;;
+  wivrn) exec wivrn-dashboard ;;
+  wivrn-wired) wivrn_wired ;;
+  help|-h|--help|"") usage ;;
+  *) echo "unknown XR command: $1" >&2; usage >&2; exit 2 ;;
+esac
