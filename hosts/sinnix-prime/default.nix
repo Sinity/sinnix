@@ -63,6 +63,8 @@
               "sinex"
               "polylogue"
               "lynchpin"
+              "stashbox"
+              "steering"
             ];
             captures = [
               "activity"
