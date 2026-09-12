@@ -78,7 +78,9 @@ def test_context_snapshot_survives_store_recreation_and_rejects_tampering(
         ],
     )
     snapshot_id = snapshot["snapshot_ref"].rsplit("/", 1)[1]
-    ContextSnapshotStore(tmp_path, "observer").put(snapshot)
+    path = tmp_path / "contexts" / "observer" / f"{snapshot_id}.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps(snapshot, separators=(",", ":")))
 
     restarted = ContextSnapshotStore(tmp_path, "observer")
     assert restarted.get(snapshot_id) == snapshot
@@ -185,15 +187,19 @@ def test_total_budget_recomputes_snapshot_identity_after_dropping_payloads(
         "sinnix://projects/fixture",
         [
             ComponentSpec(
-                "first", 600, lambda: ComponentResult.available("first", {"body": "a" * 500})
+                "first",
+                600,
+                lambda: ComponentResult.available("first", {"body": "a" * 500}),
             ),
             ComponentSpec(
-                "second", 600, lambda: ComponentResult.available("second", {"body": "b" * 500})
+                "second",
+                600,
+                lambda: ComponentResult.available("second", {"body": "b" * 500}),
             ),
         ],
     )
     assert any(row["status"] == "unavailable" for row in result["components"])
-    ContextSnapshotStore(tmp_path, "observer").put(result)
+    assert len(json.dumps(result, separators=(",", ":")).encode()) <= 900
 
 
 def test_revision_cache_never_reuses_a_different_owner_revision() -> None:

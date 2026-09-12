@@ -33,85 +33,17 @@
       # of it per perSystem `pkgs`, shared via `_module.args` with every
       # perSystem module for this system, not just this one.
       inherit (commandRegistry)
+        activationPackages
         scriptPkgs
-        rebuildServicePath
-        localInputOverrideArgs
         resolveFlakeDir
-        avoidRepoCwdForActivation
         ;
-      mkNhCommand =
-        name: action:
-        pkgs.writeShellScriptBin name ''
-          set -euo pipefail
-          if [ "''${AGENTCTL_PRINCIPAL:-}" = agent-control ]; then
-            echo "sinnix $name: refused in a managed lane; declare a pueue operation and run it with agentctl" >&2
-            exit 64
-          fi
-          ${commandRegistry.rebuildLock name}
-          ${resolveFlakeDir}
-          ${avoidRepoCwdForActivation}
-          ${localInputOverrideArgs}
-          ${commandRegistry.rebuildDefaultArgs}
-          ${scriptPkgs.sinnix-preflight}/bin/sinnix-preflight switch
-
-          _rebuild_status=0
-          ${pkgs.systemd}/bin/systemd-run \
-            --user \
-            --quiet --collect --pipe --service-type=exec --wait \
-            --setenv=PATH="${rebuildServicePath}:$PATH" \
-            ${commandRegistry.rebuildContainmentFlags}
-            ${pkgs.coreutils}/bin/env -u FLAKE NH_FLAKE="''${_invoke_flake_dir}" \
-              ${pkgs.nh}/bin/nh os ${action} \
-              "''${_invoke_flake_dir}#sinnix-prime" \
-              --no-nom \
-              --max-jobs "$rebuild_jobs" \
-              --cores "$rebuild_cores" \
-              "''${nh_extra_args[@]}" || _rebuild_status=$?
-
-          if [ "${action}" = "switch" ]; then
-            ${commandRegistry.sinexCachePush}
-          fi
-
-          exit "$_rebuild_status"
-        '';
-
       # Devshell command wrappers — every listed command is directly typeable
-      devCommands = {
+      devCommands = activationPackages // {
         check = pkgs.writeShellScriptBin "check" ''
           set -euo pipefail
           ${commandRegistry.appCommands.check.script}
         '';
         format = pkgs.writeShellScriptBin "format" ''exec ${nix} fmt "$@"'';
-        switch = mkNhCommand "switch" "switch";
-        boot = mkNhCommand "boot" "boot";
-        test-system = mkNhCommand "test" "test";
-        # nh doesn't wrap build-vm; keep direct nixos-rebuild.
-        test-vm = pkgs.writeShellScriptBin "test-vm" ''
-          set -euo pipefail
-          if [ "''${AGENTCTL_PRINCIPAL:-}" = agent-control ]; then
-            echo "sinnix test-vm: refused in a managed lane; declare a pueue operation and run it with agentctl" >&2
-            exit 64
-          fi
-          ${commandRegistry.rebuildLock "test-vm"}
-          ${resolveFlakeDir}
-          ${localInputOverrideArgs}
-          ${commandRegistry.rebuildDefaultArgs}
-
-          # build-vm builds a separate guest and does not activate the live host.
-          # Not `exec`: sudo may close inherited fds (incl. the lock fd held
-          # above), so the lock must stay held by this shell until the build
-          # actually completes rather than being handed off across the hop.
-          sudo ${pkgs.systemd}/bin/systemd-run \
-            --quiet --collect --pipe --service-type=exec --wait \
-            --setenv=PATH="${rebuildServicePath}:$PATH" \
-            ${commandRegistry.rebuildContainmentFlags}
-            ${pkgs.nixos-rebuild}/bin/nixos-rebuild build-vm \
-              --flake "$_flake_dir#sinnix-prime" \
-              --max-jobs "$rebuild_jobs" \
-              --cores "$rebuild_cores" \
-              --impure \
-              "''${nix_override_args[@]}"
-        '';
         lint = pkgs.writeShellScriptBin "lint" ''exec ${nix} run .#lint -- "$@"'';
         check-heavy = pkgs.writeShellScriptBin "check-heavy" ''exec ${nix} run .#check-heavy -- "$@"'';
         check-all = pkgs.writeShellScriptBin "check-all" ''exec ${nix} run .#check-all -- "$@"'';

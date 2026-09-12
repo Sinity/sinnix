@@ -23,6 +23,7 @@ command, the run manifest of a batch, and one operator screen.
 | `job start [p] <op> [--workspace <path>] [--wait] [-- args…]`                                                   | `pueue add` in the operation's pool, label `<p>:<op>`, running `agentctl-run <launch.json>`; each argument after `--` is appended to the declared `exec` as its own word                                                                   |
 | `job fire [p] <op>`                                                                                             | what a schedule timer runs: `job start` on the main checkout, skipped while the same label is queued or running                                                                                                                            |
 | `job list [--project p] [--active] [--all]`                                                                     | `pueue status --json` reduced to job rows, newest first, the newest 40 unless `--all`; the date shows on a task that started on another day                                                                                                |
+| `job snapshot [--limit N]`                                                                                       | one `pueue status --json` response reduced to group state and counts plus bounded job rows; unfinished jobs have priority and `omitted` and `coverage` state what was not returned                                                           |
 | `job get \| logs \| result \| cancel \| retry \| wait <id>`                                                     | one task by pueue id; `logs` reads the bounded log, `result` the typed artifact, `cancel` drops a queued task or stops a running task's unit, `retry` is `pueue restart --in-place`                                                        |
 | `job clean <id> \| --all-terminal \| --daemon-era`                                                              | delete a terminal task's launch input, log, result, outcome and cancel marker, then `pueue remove`; a task pueue has already forgotten is found by its launch input; `--daemon-era` deletes the state subtrees no verb reads; never by age |
 | `batch start [p] <bead>… [--worker a,b]… [--workers queued\|external] [--backend B --model M --effort E]`       | validate the members, write the run manifest, claim the beads, create one worktree per worker, queue the workers (or write their packets) and the landing task behind them                                                                 |
@@ -98,6 +99,8 @@ It refuses before deleting anything when run manifests cannot be inventoried
 or read.
 A vanished working directory or an unresolvable command is refused before anything starts
 (exit 125).
+
+`job snapshot` is the queue projection for bounded consumers. Its limit is 1 through 100. Pueue currently returns its complete history for a status request, so agentctl makes one full read and returns only the requested number of rows. It includes every group's state, parallelism and task counts, puts queued, running, paused and stashed jobs before terminal history, and reports the returned and omitted active and terminal counts. A row shortens queue strings beyond 256 characters and marks the shortened fields. It does not retain or prune queue history.
 
 ### Executor outcomes
 
@@ -266,8 +269,11 @@ acceptance: {candidate_sha, verify_run, review_verdict,
              beads: {<bead>: {state: closed|open, evidence}},
              advisory, recorded_at, residual: [...]} | null
 prepared          every claim, worktree and task exists
+preparation_error {worker|null, stage, error} | null
 abandoned         {reason, at, residual: [...]} | null
 ```
+
+Failed preparation retains the run, claims, and worktrees. The error names the retained run and unprovisioned members; repeating `batch start` with the same members completes the missing steps. Worker and landing admissions record a `pending_launch` reference before submitting to pueue. Retries reconcile that exact reference before submitting again. If admission is uncertain and the task cannot be found, both retry and abandon refuse until it is reconciled, preserving the input and workspace.
 
 A worker's `prompt_path` is its current packet: `.agentctl/prompt.md` at
 start, `.agentctl/resume-<n>.md` after the n-th resume; `result_path` is the

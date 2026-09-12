@@ -562,3 +562,35 @@ def test_v2_operate_rejects_mismatched_owner_receipt(tmp_path) -> None:
     )
 
     assert response["error"]["code"] == "owner_failed"
+
+
+def test_snapshot_continuation_can_resize_pages_without_changing_position(
+    tmp_path,
+) -> None:
+    results = ResultService(config(tmp_path), Principal.for_name("observer"))
+    query_sha = hashlib.sha256(b"resized-snapshot").hexdigest()
+    writer = results.start_snapshot(
+        query_sha256=query_sha, source_revision="revision-one", page_size=1
+    )
+    for value in range(10):
+        writer.append(value)
+    first = results.finish_snapshot(writer)
+    enlarged = results.continue_snapshot(
+        first["next_cursor"], query_sha256=query_sha, page_size=3
+    )
+    assert enlarged["rows"] == [1, 2, 3]
+    continued = results.continue_snapshot(
+        enlarged["next_cursor"], query_sha256=query_sha
+    )
+    assert continued["rows"] == [4, 5, 6]
+    smaller = results.continue_snapshot(
+        continued["next_cursor"], query_sha256=query_sha, page_size=1
+    )
+    assert smaller["rows"] == [7]
+    assert smaller["snapshot_ref"] == first["snapshot_ref"]
+    for invalid_size in (0, -1, True, 1.5):
+        with pytest.raises(ResultError) as failure:
+            results.continue_snapshot(
+                first["next_cursor"], query_sha256=query_sha, page_size=invalid_size
+            )
+        assert failure.value.failure_class == "invalid_request"

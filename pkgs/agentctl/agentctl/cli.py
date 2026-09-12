@@ -184,6 +184,11 @@ def parser() -> argparse.ArgumentParser:
         "--all", action="store_true", help="every task, not just the newest"
     )
     _output_arguments(listing)
+    snapshot = job_verbs.add_parser(
+        "snapshot", help="bounded groups and jobs from one pueue status response"
+    )
+    snapshot.add_argument("--limit", type=int, default=DEFAULT_JOB_ROWS)
+    _output_arguments(snapshot)
     for name in ("get", "logs", "result", "cancel", "retry"):
         one = job_verbs.add_parser(name)
         one.add_argument("job_id", type=int)
@@ -464,6 +469,10 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         if not arguments.all:
             rows = rows[:DEFAULT_JOB_ROWS]
         out.read(rows, out.jobs_table(rows))
+        return EXIT_OK
+    if verb == "snapshot":
+        snapshot = launch.snapshot_jobs(arguments.limit)
+        out.read(snapshot, out.jobs_table(snapshot["jobs"]))
         return EXIT_OK
     if verb == "get":
         job = launch.get_job(arguments.job_id, config, arguments.reference)
@@ -911,11 +920,35 @@ def main(argv: Sequence[str] | None = None) -> int:
         config = load_config(arguments.config)
         return _dispatch(arguments, config, out)
     except _REFUSALS as error:
-        print(f"agentctl: {error}", file=sys.stderr)
+        _report_error(error, out)
         return EXIT_REFUSED
     except _SUBSTRATE_ERRORS as error:
-        print(f"agentctl: {error}", file=sys.stderr)
+        _report_error(error, out)
         return EXIT_SUBSTRATE
+
+
+def _report_error(error: Exception, out: Output) -> None:
+    """Keep retained recovery work visible in either CLI representation."""
+    run_id = getattr(error, "run_id", None)
+    unprovisioned = getattr(error, "unprovisioned", [])
+    rows = [row for row in unprovisioned if isinstance(row, Mapping)]
+    if out.as_json:
+        document: dict[str, Any] = {"error": str(error)}
+        if isinstance(run_id, str) and run_id:
+            document["retained_run"] = run_id
+        if rows:
+            document["unprovisioned"] = [dict(row) for row in rows]
+        print(json.dumps(document, sort_keys=True))
+        return
+    print(f"agentctl: {error}", file=sys.stderr)
+    if isinstance(run_id, str) and run_id:
+        print(f"agentctl: retained run {run_id}", file=sys.stderr)
+    for row in rows:
+        worker = row.get("worker") or row.get("id") or "worker"
+        beads = ", ".join(str(bead) for bead in row.get("beads") or [])
+        reason = row.get("reason") or "unprovisioned"
+        suffix = f" ({beads})" if beads else ""
+        print(f"agentctl: pending {worker}{suffix}: {reason}", file=sys.stderr)
 
 
 if __name__ == "__main__":  # pragma: no cover - console entry point

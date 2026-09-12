@@ -30,7 +30,7 @@ def test_project_orientation_composes_and_persists_a_snapshot(
     assert composed["result"]["outcome"] == "ok", composed
     data = composed["data"]
     assert data["ref"] == "sinnix://projects/fixture" == data["target_ref"]
-    assert data["snapshot_ref"].startswith("sinnix://contexts/")
+    assert data["snapshot_ref"].startswith("sinnix://results/")
     names = [row["name"] for row in data["components"]]
     assert names == ["project", "checkout", "tasks", "authority"]
     by_name = {row["name"]: row for row in data["components"]}
@@ -41,8 +41,9 @@ def test_project_orientation_composes_and_persists_a_snapshot(
     )
     assert "batches.start" in data["affordances"]
     snapshot_id = data["snapshot_ref"].rsplit("/", 1)[1]
-    assert runtime.context_snapshots is not None
-    assert runtime.context_snapshots.get(snapshot_id)["intent"] == "project.orientation"
+    assert (
+        runtime.results.read(snapshot_id)["rows"][0]["intent"] == "project.orientation"
+    )
 
 
 def test_project_orientation_reuses_revision_checked_project_payload(
@@ -156,7 +157,7 @@ def test_job_review_follows_launch_identity_across_reorders(
     assert components["result"]["source_ref"] == "sinnix://jobs/43"
     assert components["result"]["data"]["value"] == "original output"
     assert (
-        runtime.context_snapshots.get(data["snapshot_ref"].rsplit("/", 1)[1])[
+        runtime.results.read(data["snapshot_ref"].rsplit("/", 1)[1])["rows"][0][
             "target_ref"
         ]
         == data["target_ref"]

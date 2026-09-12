@@ -27,7 +27,7 @@ from .config import Config
 from .launch_input import scratch_path, write_input
 from .limits import CALL_TIMEOUT_SECONDS, SHORT_ID, SYSTEMCTL_TIMEOUT_SECONDS
 from .projects import ProjectAdapter, ProjectOperation
-from .pueue import PueueError, PueueTimeout, Task
+from .pueue import PueueError, PueueGroupError, PueueTimeout, Task
 from .run import (
     CANCELLED_EXIT_CODE,
     MAX_LOG_BYTES,
@@ -63,10 +63,21 @@ WAIT_SLICE_SECONDS = 5.0
 # unit is stopped before pueue kills the wrapper outright.
 CANCEL_SETTLE_SECONDS = 15.0
 CANCEL_POLL_SECONDS = 0.5
+MAX_SNAPSHOT_ROWS = 100
+MAX_SNAPSHOT_TEXT = 256
 
 
 class JobError(RuntimeError):
     """A launch or read that agentctl itself refuses; pueue's own refusals are PueueError."""
+
+
+class EnqueueUncertain(JobError):
+    """Pueue may have accepted a launch whose acknowledgement was lost."""
+
+    def __init__(self, reference: str, error: PueueError) -> None:
+        self.reference = reference
+        self.error = error
+        super().__init__(f"pueue acceptance is unknown for launch {reference}: {error}")
 
 
 def label_for(project_id: str, operation: str) -> str:
@@ -172,6 +183,8 @@ def enqueue(
     tree_receipt: Mapping[str, Any] | None = None,
     environment_receipt: Mapping[str, str] | None = None,
     binding: Mapping[str, Any] | None = None,
+    reference: str | None = None,
+    before_enqueue: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     """Write the launch input, add the pueue task, return the job view.
 
@@ -179,7 +192,9 @@ def enqueue(
     it is stored as written and read back on ``job get``. ``scratch`` names
     the tier of the job-owned directory the wrapper creates and removes.
     """
-    reference = _reference(label)
+    reference = reference or _reference(label)
+    if not REFERENCE.fullmatch(reference):
+        raise JobError(f"invalid launch reference: {reference!r}")
     log_path = config.jobs_dir / f"{reference}.log"
     environment = dict(environment)
     if config.config_path is not None:
@@ -217,6 +232,8 @@ def enqueue(
         launch["result_path"] = str(config.jobs_dir / f"{reference}.result")
     input_path = config.inputs_dir / f"{reference}.json"
     write_input(input_path, launch)
+    if before_enqueue is not None:
+        before_enqueue(reference)
     try:
         task_id = pueue.add(
             group=group,
@@ -226,15 +243,26 @@ def enqueue(
             after=after,
             stashed=stashed,
         )
-    except PueueError:
+    except PueueGroupError:
+        # `pueue add` checks the live group catalog before raising this typed
+        # error, so no task could have been admitted under the missing group.
         input_path.unlink(missing_ok=True)
         raise
+    except PueueError as error:
+        # The daemon can accept a task before its client loses the response.
+        # Keep the input so a caller can reconcile its exact launch reference
+        # against pueue before trying to submit another task.
+        raise EnqueueUncertain(reference, error) from error
     # The task id goes back into the input so its artifacts can be found
     # after pueue has forgotten the task.
     launch["queue_task_id"] = task_id
     write_input(input_path, launch)
     task = pueue.task(task_id)
-    return job_view(task) if task is not None else {"job_id": task_id, "label": label}
+    return (
+        job_view(task)
+        if task is not None
+        else {"job_id": task_id, "label": label, "reference": reference}
+    )
 
 
 def retire_legacy_holds(
@@ -583,6 +611,83 @@ def list_jobs(project_id: str | None = None) -> list[dict[str, Any]]:
     return rows
 
 
+def snapshot_jobs(limit: int) -> dict[str, Any]:
+    """A bounded operator projection of one Pueue status response.
+
+    Active tasks receive the available rows first.  Terminal history stays in
+    Pueue, with explicit coverage telling a caller what this view omitted.
+    """
+    if not 1 <= limit <= MAX_SNAPSHOT_ROWS:
+        raise JobError(f"job snapshot limit must be between 1 and {MAX_SNAPSHOT_ROWS}")
+    queue = pueue.status()
+    groups: dict[str, dict[str, Any]] = {}
+    for name, detail in queue.groups.items():
+        groups[name] = {
+            "status": str(detail.get("status") or ""),
+            "parallel": int(detail.get("parallel_tasks") or 0),
+            "running": 0,
+            "queued": 0,
+            "paused": 0,
+            "stashed": 0,
+            "terminal": 0,
+            "total": 0,
+        }
+    active: list[Task] = []
+    terminal: list[Task] = []
+    for task in queue.tasks.values():
+        group = groups.get(task.group)
+        if group is None:
+            group = groups.setdefault(
+                task.group,
+                {"status": "", "parallel": 0, "running": 0, "queued": 0,
+                 "paused": 0, "stashed": 0, "terminal": 0, "total": 0},
+            )
+        group["total"] += 1
+        if task.terminal:
+            group["terminal"] += 1
+            terminal.append(task)
+        else:
+            state = task.status.lower()
+            if state in {"running", "queued", "paused", "stashed"}:
+                group[state] += 1
+            active.append(task)
+    active.sort(key=lambda task: task.task_id, reverse=True)
+    terminal.sort(key=lambda task: task.task_id, reverse=True)
+    selected = [*active, *terminal][:limit]
+    returned_active = sum(not task.terminal for task in selected)
+    returned_terminal = len(selected) - returned_active
+    return {
+        "schema": "sinnix.agentctl.job-snapshot.v1",
+        "limit": limit,
+        "groups": groups,
+        "jobs": [_snapshot_row(task) for task in selected],
+        "omitted": {
+            "total": len(queue.tasks) - len(selected),
+            "active": len(active) - returned_active,
+            "terminal": len(terminal) - returned_terminal,
+        },
+        "coverage": {
+            "active": {"total": len(active), "returned": returned_active},
+            "terminal": {"total": len(terminal), "returned": returned_terminal},
+        },
+        "truncated": len(queue.tasks) > len(selected),
+    }
+
+
+def _snapshot_row(task: Task) -> dict[str, Any]:
+    """One snapshot row with foreign queue strings bounded for transport."""
+    row = job_view(task)
+    shortened = []
+    for key in ("label", "operation", "path", "reference"):
+        value = row.get(key)
+        if isinstance(value, str) and len(value) > MAX_SNAPSHOT_TEXT:
+            row[key] = value[: MAX_SNAPSHOT_TEXT - 1] + "…"
+            shortened.append(key)
+    if shortened:
+        row["shortened"] = shortened
+    return row
+
+
 def attach_bindings(
     config: Config, rows: Sequence[Mapping[str, Any]]
 ) -> list[dict[str, Any]]:
@@ -901,7 +1006,11 @@ def _live_run_jobs(config: Config, tasks: Mapping[int, Task]) -> set[int]:
             if isinstance(record := run.landing.get(key), dict)
         )
         for record in records:
-            reference = record.get("task_reference") or record.get("reference")
+            reference = (
+                record.get("pending_launch")
+                or record.get("task_reference")
+                or record.get("reference")
+            )
             task_id = record.get("task_id", record.get("job_id"))
             task = find_task(tasks, task_id, reference)
             if task is not None:

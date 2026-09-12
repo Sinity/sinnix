@@ -86,6 +86,8 @@ Campaign provenance points from the new task to its origin and does not expand c
 
 `shell.run` remains asynchronous by default. With `wait=true`, it waits on the same agentctl job for five seconds by default, capped at thirty seconds, and returns bounded log output. A timeout returns the job locator for continuation without cancelling execution.
 
+Beads query snapshots and composed contexts use the shared immutable result store. Their `sinnix://results/<id>` references remain readable after restart through `results.get` or MCP resource reads. Row snapshots expose frozen `rows` and query/source metadata; a composed context is the single row, with each component's provenance intact. Oversized reads use the existing artifact transport. Continuation cursors expire and bind the principal and query, while snapshot reference reads remain available. Historical `sinnix://contexts/<digest>` references use a read-only compatibility reader; no historical files are rewritten or evicted.
+
 Audit events live in a private SQLite WAL ledger; every call, including reads, appends a receipt and persists an immutable result snapshot. `events.tail` is principal-scoped and binds every row to `sinnix://receipts/{receipt_id}`; `audit.verify` checks the chain. `machine.snapshot` and `machine.query` delegate to `sinnix-observe`; `machine.operate` sends one typed request to the ops reducer with the revision it returned.
 
 ## NixOS configuration
@@ -138,7 +140,7 @@ the gateway action family cannot suppress a client-side approval policy.
 
 ## Generated reference
 
-This section is generated from the action set. Revision `v3-typed-actions`, catalog SHA-256 `b3c5597ef91e3c5946be22efb34577b37e8efb03c4712c85e3805c511625fea4`.
+This section is generated from the action set. Revision `v3-typed-actions`, catalog SHA-256 `0aead88fc7ca66ee7955e3f150bc27037a0158ff8c698ea944657d19e6aa21c9`.
 
 The full schemas and examples are in [the generated gateway reference](generated/agent-gateway-reference.md). The matching agent skill is [agent-gateway](../dots/_ai/skills/agent-gateway/SKILL.md).
 

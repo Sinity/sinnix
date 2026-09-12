@@ -134,60 +134,31 @@ local function governanceText()
   return "Governance: " .. tostring(surfaces) .. " surfaces, " .. tostring(captures) .. " capture lanes, " .. tostring(sliceCount) .. " slices live"
 end
 
--- ## Agents: jobs and quota ##
-
-local TERMINAL_LIFECYCLES = { completed = true, failed = true, cancelled = true, expired = true }
+-- ## Agents: owner queue snapshot ##
 
 local function agentLines()
-  local rows = stateValue("workload_rows")
-  if type(rows) ~= "table" then return { "Jobs: unavailable (no workload_rows in snapshot)" } end
-  local active, terminalCounts, terminalTotal = {}, {}, 0
-  for _, row in ipairs(rows) do
-    if type(row) == "table" and row.kind == "attested-job" then
-      local status = tostring(row.status)
-      if TERMINAL_LIFECYCLES[status] then
-        terminalTotal = terminalTotal + 1
-        terminalCounts[status] = (terminalCounts[status] or 0) + 1
-      else
-        table.insert(active, row)
-      end
+  local health = sourceHealth("agentctl")
+  local snapshot = stateValue("agentctl")
+  if type(snapshot) ~= "table" then
+    local reason = health ~= nil and (" -- " .. text(health.degradation)) or ""
+    return { "Jobs: unavailable" .. reason }
+  end
+  local coverage = type(snapshot.coverage) == "table" and snapshot.coverage or {}
+  local active = type(coverage.active) == "table" and coverage.active or {}
+  local omitted = type(snapshot.omitted) == "table" and snapshot.omitted or {}
+  local lines = { "Jobs: " .. text(active.returned) .. "/" .. text(active.total) .. " active rows, " .. text(omitted.terminal) .. " terminal rows omitted" }
+  local groups = type(snapshot.groups) == "table" and snapshot.groups or {}
+  for name, group in pairs(groups) do
+    if type(group) == "table" then
+      table.insert(lines, "  " .. tostring(name) .. ": " .. text(group.status) .. ", " .. text(group.running) .. " running, " .. text(group.queued) .. " queued")
     end
   end
-  local lines = {}
-  if #active == 0 and terminalTotal == 0 then return { "Jobs: none in the snapshot window" } end
-  if #active == 0 then
-    local parts = {}
-    for status, count in pairs(terminalCounts) do table.insert(parts, tostring(count) .. " " .. status) end
-    table.insert(lines, "Jobs: none active; " .. tostring(terminalTotal) .. " finished in window (" .. table.concat(parts, ", ") .. ")")
-    return lines
-  end
-  table.insert(lines, "Jobs: " .. tostring(#active) .. " active, " .. tostring(terminalTotal) .. " finished in window")
-  for index = 1, math.min(#active, 4) do
-    local row = active[index]
-    local metrics = row.metrics or {}
-    local identity = metrics.identity or {}
-    local delegation = metrics.delegation or {}
-    local parent = delegation.parent_job_id or delegation.coordinator_job_id or "root"
-    table.insert(lines, "  " .. text(row.name) .. " under " .. tostring(parent) .. ": " .. text(row.status) .. ", " .. text(identity.provider))
-  end
-  if #active > 4 then table.insert(lines, "  " .. tostring(#active - 4) .. " more active jobs in the snapshot") end
-  return lines
-end
-
-local function quotaLines()
-  local gateway = stateValue("agent_gateway")
-  if type(gateway) ~= "table" or type(gateway.quota) ~= "table" then
-    return { "Quota: unavailable (no agent_gateway in snapshot)" }
-  end
-  local quota = gateway.quota
-  if type(quota.values) ~= "table" or next(quota.values) == nil then
-    local reason = quota.reason ~= nil and (" -- " .. text(quota.reason)) or ""
-    return { "Quota: " .. text(quota.provenance) .. reason }
-  end
-  local lines = { "Quota: " .. text(quota.provenance) .. ", observed " .. text(quota.freshness) }
-  for key, value in pairs(quota.values) do
-    local item = type(value) == "table" and value or { value = value }
-    table.insert(lines, "  " .. tostring(item.kind or item.category or key) .. ": used " .. text(item.used) .. ", remaining " .. text(item.remaining))
+  local jobs = type(snapshot.jobs) == "table" and snapshot.jobs or {}
+  for index = 1, math.min(#jobs, 4) do
+    local job = jobs[index]
+    if type(job) == "table" then
+      table.insert(lines, "  " .. text(job.label) .. ": " .. text(job.phase))
+    end
   end
   return lines
 end
@@ -275,7 +246,6 @@ local function render()
   table.insert(rows, infoSection("Fleet", fleet))
   local agents = {}
   for _, line in ipairs(agentLines()) do table.insert(agents, line) end
-  for _, line in ipairs(quotaLines()) do table.insert(agents, line) end
   table.insert(rows, infoSection("Agents", agents))
   local signals = ambientLines()
   table.insert(signals, anchorText())

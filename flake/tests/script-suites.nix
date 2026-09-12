@@ -130,6 +130,12 @@
           suiteDir = ../../pkgs/lake-lint/tests;
           scripts = [ "lake-lint" ];
         };
+        stt-lake-suite = mkScriptSuite {
+          name = "sinnix-stt";
+          suiteDir = ../../pkgs/sinnix-stt/tests;
+          scripts = [ "sinnix-stt" ];
+          extraPythonPackages = [ sinnix-lib ];
+        };
         stt-review-suite = mkScriptSuite {
           name = "sinnix-stt-review";
           suiteDir = ../../pkgs/sinnix-stt-review/tests;

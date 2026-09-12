@@ -7,7 +7,9 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import Field, model_validator
 
 from ..action import ALL_PRINCIPALS, Action, Example, RequestControls
+from ..capabilities import Capability
 from ..capability_index import CapabilityIndexError
+from ..contexts import ContextSnapshotStore
 from ..contracts import VerbFamily
 from ..results import ProtocolError, ResultError
 from ..schemas import GatewayModel
@@ -75,7 +77,9 @@ def _receipt(runtime: Runtime, inp: ReceiptInput) -> Receipt:
 
 
 class ResultInput(RequestControls):
-    ref: str | None = Field(default=None, pattern=r"^sinnix://results/[^/]{1,128}$")
+    ref: str | None = Field(
+        default=None, pattern=r"^sinnix://(?:results|contexts)/[^/]{1,128}$"
+    )
     result_id: str | None = Field(default=None, min_length=1, max_length=128)
 
     @model_validator(mode="after")
@@ -88,17 +92,25 @@ class ResultInput(RequestControls):
 class ResultSnapshot(GatewayModel):
     ref: str
     envelope: dict[str, Any] = Field(
-        description="The immutable stored V2 response envelope."
+        description="The immutable V2 envelope, row snapshot, or historical context."
     )
 
 
 def _result(runtime: Runtime, inp: ResultInput) -> ResultSnapshot:
+    runtime.principal.require(Capability.AUDIT_READ)
     result_id = inp.result_id or (inp.ref or "").rsplit("/", 1)[1]
     try:
-        envelope = runtime.results.read(result_id)
-    except ResultError as exc:
+        if inp.ref and inp.ref.startswith("sinnix://contexts/"):
+            envelope = ContextSnapshotStore(
+                runtime.config.state_dir, runtime.principal_name
+            ).get(result_id)
+        else:
+            envelope = runtime.results.read(result_id)
+    except (ResultError, KeyError) as exc:
         raise ProtocolError("not_found", str(exc)) from exc
-    return ResultSnapshot(ref=envelope["result"]["ref"], envelope=envelope)
+    return ResultSnapshot(
+        ref=inp.ref or f"sinnix://results/{result_id}", envelope=envelope
+    )
 
 
 # ------------------------------------------------------------ capabilities
@@ -210,7 +222,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=ResultSnapshot,
         handler=_result,
         principals=ALL_PRINCIPALS,
-        resource_kinds=("result",),
+        resource_kinds=("result", "context_snapshot"),
         affordances=("audit.receipt",),
         aliases=("result snapshot", "replay response"),
         examples=(Example(title="By id", input={"result_id": "example-result"}),),

@@ -75,7 +75,7 @@
               "self"
             ];
           };
-          approvedManifestHash = "b717c40ee96e36eccf5a0e5b58f673778151d4a12aa5dfaff5121ef4ba1d4f50";
+          approvedManifestHash = "079a084f2fd12e695037bc4fb755d5b3edb882ea5ef5b7af620b64d243d6f946";
         };
       };
     };

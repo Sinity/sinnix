@@ -107,12 +107,14 @@ def render_human(report: dict[str, Any]) -> str:
 
     section("AgentCTL jobs")
     gateway = report.get("agent_gateway", {})
+    omitted = gateway.get("omitted") if isinstance(gateway.get("omitted"), dict) else {}
     lines.append(
-        f"available={gateway.get('available')} malformed_records={len(gateway.get('malformed_records', []))}"
+        f"available={gateway.get('available')} jobs={len(gateway.get('jobs', []))} "
+        f"omitted={omitted.get('total', 0)} error={gateway.get('error')}"
     )
-    for row in gateway.get("correlations", [])[:10]:
+    for row in gateway.get("jobs", [])[:10]:
         lines.append(
-            f"  {row.get('job_id')} unit={row.get('unit')} cgroup={row.get('cgroup')} terminal={row.get('terminal')}"
+            f"  {row.get('job_id')} {row.get('label')} {row.get('phase')} group={row.get('group')}"
         )
 
     section("resource slices")

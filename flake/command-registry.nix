@@ -115,12 +115,11 @@ let
     fi
   '';
   # Single source of truth for rebuild concurrency + resource containment, so
-  # `nix run .#switch` (this file's appCommands) and the devshell `switch`
-  # binary (flake/dev-shell.nix's mkNhCommand) can't drift apart: both must
-  # take the rebuild lock and run under the same idle scheduling, or one
-  # path becomes an escape hatch around containment. The lock is a
-  # correctness guard against two concurrent activations racing on the
-  # system profile, not a resource-serialization policy.
+  # Every activation executable takes this lock and runs under the same idle
+  # scheduling, so no app or devshell path becomes an escape hatch around
+  # containment. The lock is a correctness guard against two concurrent
+  # activations racing on the system profile, not a resource-serialization
+  # policy.
   rebuildLock = name: ''
     exec 9>/tmp/sinnix-switch.lock
     if ! ${pkgs.util-linux}/bin/flock --nonblock 9; then
@@ -155,6 +154,134 @@ let
       ${scriptPkgs.sinnix-sinex-cache-push}/bin/sinnix-sinex-cache-push /run/current-system || true
     fi
   '';
+  activationGuard = name: ''
+    if [ "''${AGENTCTL_PRINCIPAL:-}" = agent-control ]; then
+      echo "sinnix ${name}: refused in a managed lane; declare a pueue operation and run it with agentctl" >&2
+      exit 64
+    fi
+  '';
+  activationCommands = {
+    test-vm = {
+      description = "Build a QEMU VM from the current configuration (nixos-rebuild build-vm)";
+      script = ''
+        ${activationGuard "test-vm"}
+        ${resolveFlakeDir}
+        ${rebuildLock "test-vm"}
+        ${localInputOverrideArgs}
+        ${rebuildDefaultArgs}
+        # build-vm builds a separate guest and does not activate the live host.
+        # Not `exec`: sudo may close inherited fds (including the lock fd held
+        # above), so this shell retains the lock until the build completes.
+        sudo ${pkgs.systemd}/bin/systemd-run \
+          --quiet --collect --pipe --service-type=exec --wait \
+          --setenv=PATH="${rebuildServicePath}:$PATH" \
+          ${rebuildContainmentFlags}
+          ${pkgs.nixos-rebuild}/bin/nixos-rebuild build-vm \
+            --flake "$_flake_dir#sinnix-prime" \
+            --max-jobs "$rebuild_jobs" \
+            --cores "$rebuild_cores" \
+            --impure \
+            "''${nix_override_args[@]}"
+      '';
+    };
+
+    test-system = {
+      description = "Build and activate a temporary host configuration (nh os test)";
+      script = ''
+        ${activationGuard "test-system"}
+        ${resolveFlakeDir}
+        ${rebuildLock "test-system"}
+        ${avoidRepoCwdForActivation}
+        ${localInputOverrideArgs}
+        ${rebuildDefaultArgs}
+        ${pkgs.systemd}/bin/systemd-run \
+          --user \
+          --quiet --collect --pipe --service-type=exec --wait \
+          --setenv=PATH="${rebuildServicePath}:$PATH" \
+          ${rebuildContainmentFlags}
+          ${pkgs.coreutils}/bin/env -u FLAKE NH_FLAKE="$_invoke_flake_dir" \
+            ${pkgs.nh}/bin/nh os test \
+            "''${_invoke_flake_dir}#sinnix-prime" \
+            --no-nom \
+            --max-jobs "$rebuild_jobs" \
+            --cores "$rebuild_cores" \
+            "''${nh_extra_args[@]}"
+      '';
+    };
+
+    boot = {
+      description = "Build and set the boot default for activation on the next reboot (nh os boot)";
+      script = ''
+        ${activationGuard "boot"}
+        ${resolveFlakeDir}
+        ${rebuildLock "boot"}
+        ${avoidRepoCwdForActivation}
+        ${localInputOverrideArgs}
+        ${rebuildDefaultArgs}
+        ${scriptPkgs.sinnix-preflight}/bin/sinnix-preflight switch
+        _rebuild_status=0
+        ${pkgs.systemd}/bin/systemd-run \
+          --user \
+          --quiet --collect --pipe --service-type=exec --wait \
+          --setenv=PATH="${rebuildServicePath}:$PATH" \
+          ${rebuildContainmentFlags}
+          ${pkgs.coreutils}/bin/env -u FLAKE NH_FLAKE="$_invoke_flake_dir" \
+            ${pkgs.nh}/bin/nh os boot \
+            "''${_invoke_flake_dir}#sinnix-prime" \
+            --no-nom \
+            --max-jobs "$rebuild_jobs" \
+            --cores "$rebuild_cores" \
+            "''${nh_extra_args[@]}" || _rebuild_status=$?
+        exit "$_rebuild_status"
+      '';
+    };
+
+    switch = {
+      description = "Apply configuration changes to the system (nh os switch)";
+      script = ''
+        ${activationGuard "switch"}
+        ${resolveFlakeDir}
+        ${rebuildLock "switch"}
+        ${avoidRepoCwdForActivation}
+        ${localInputOverrideArgs}
+        ${rebuildDefaultArgs}
+        ${scriptPkgs.sinnix-preflight}/bin/sinnix-preflight switch
+        _rebuild_status=0
+        ${pkgs.systemd}/bin/systemd-run \
+          --user \
+          --quiet --collect --pipe --service-type=exec --wait \
+          --setenv=PATH="${rebuildServicePath}:$PATH" \
+          ${rebuildContainmentFlags}
+          ${pkgs.coreutils}/bin/env -u FLAKE NH_FLAKE="$_invoke_flake_dir" \
+            ${pkgs.nh}/bin/nh os switch \
+            "''${_invoke_flake_dir}#sinnix-prime" \
+            --no-nom \
+            --max-jobs "$rebuild_jobs" \
+            --cores "$rebuild_cores" \
+            "''${nh_extra_args[@]}" || _rebuild_status=$?
+        ${sinexCachePush}
+        exit "$_rebuild_status"
+      '';
+    };
+  };
+  activationPackages = lib.mapAttrs (
+    name: command:
+    pkgs.writeShellScriptBin name ''
+      set -euo pipefail
+      ${command.script}
+    ''
+  ) activationCommands;
+  activationCommandNames = [
+    "switch"
+    "boot"
+    "test-system"
+    "test-vm"
+  ];
+  activationCommandDocs = map (name: {
+    inherit name;
+    category = "Core";
+    description = activationCommands.${name}.description;
+  }) activationCommandNames;
   hostSmokeTerminalScript = ''
     session="sinnix-host-smoke-$$"
     artifact_dir="''${SINNIX_HOST_SMOKE_ARTIFACT_DIR:-}"
@@ -358,9 +485,11 @@ in
     localInputOverrideArgs
     avoidRepoCwdForActivation
     sinexCachePush
+    activationCommands
+    activationPackages
     ;
 
-  appCommands = {
+  appCommands = activationCommands // {
     check = {
       description = "Run the default semantic check tier, or evaluate it with --no-build";
       script = ''
@@ -503,111 +632,6 @@ in
       '';
     };
 
-    test-vm = {
-      description = "Build a QEMU VM from current configuration and launch it (nixos-rebuild build-vm)";
-      script = ''
-        if [ "''${AGENTCTL_PRINCIPAL:-}" = agent-control ]; then
-          echo "sinnix test-vm: refused in a managed lane; declare a pueue operation and run it with agentctl" >&2
-          exit 64
-        fi
-        ${resolveFlakeDir}
-        ${rebuildLock "test-vm"}
-        ${localInputOverrideArgs}
-        ${rebuildDefaultArgs}
-        # build-vm builds a separate guest and does not activate the live host.
-        sudo ${pkgs.systemd}/bin/systemd-run \
-          --quiet \
-          --collect \
-          --pipe \
-          --service-type=exec \
-          --wait \
-          --setenv=PATH="${rebuildServicePath}:$PATH" \
-          ${rebuildContainmentFlags}
-          ${pkgs.nixos-rebuild}/bin/nixos-rebuild build-vm --flake "$_flake_dir#sinnix-prime" \
-          --max-jobs "$rebuild_jobs" \
-          --cores "$rebuild_cores" \
-          --impure \
-          "''${nix_override_args[@]}"
-        exec ./result/bin/run-sinnix-prime-vm
-      '';
-    };
-
-    test-system = {
-      description = "Build and activate a temporary host configuration (nh os test)";
-      script = ''
-        ${resolveFlakeDir}
-        ${rebuildLock "test-system"}
-        ${avoidRepoCwdForActivation}
-        ${localInputOverrideArgs}
-        ${rebuildDefaultArgs}
-        ${pkgs.systemd}/bin/systemd-run \
-          --user \
-          --quiet --collect --pipe --service-type=exec --wait \
-          --setenv=PATH="${rebuildServicePath}:$PATH" \
-          ${rebuildContainmentFlags}
-          ${pkgs.coreutils}/bin/env -u FLAKE NH_FLAKE="$_invoke_flake_dir" \
-            ${pkgs.nh}/bin/nh os test \
-            "''${_invoke_flake_dir}#sinnix-prime" \
-            --no-nom \
-            --max-jobs "$rebuild_jobs" \
-            --cores "$rebuild_cores" \
-            "''${nh_extra_args[@]}"
-      '';
-    };
-
-    boot = {
-      description = "Build and set the boot default for activation on the next reboot (nh os boot)";
-      script = ''
-        ${resolveFlakeDir}
-        ${rebuildLock "boot"}
-        ${avoidRepoCwdForActivation}
-        ${localInputOverrideArgs}
-        ${rebuildDefaultArgs}
-        ${scriptPkgs.sinnix-preflight}/bin/sinnix-preflight switch
-        _rebuild_status=0
-        ${pkgs.systemd}/bin/systemd-run \
-          --user \
-          --quiet --collect --pipe --service-type=exec --wait \
-          --setenv=PATH="${rebuildServicePath}:$PATH" \
-          ${rebuildContainmentFlags}
-          ${pkgs.coreutils}/bin/env -u FLAKE NH_FLAKE="$_invoke_flake_dir" \
-            ${pkgs.nh}/bin/nh os boot \
-            "''${_invoke_flake_dir}#sinnix-prime" \
-            --no-nom \
-            --max-jobs "$rebuild_jobs" \
-            --cores "$rebuild_cores" \
-            "''${nh_extra_args[@]}" || _rebuild_status=$?
-        exit "$_rebuild_status"
-      '';
-    };
-
-    switch = {
-      description = "Apply configuration changes to the system (nh os switch)";
-      script = ''
-        ${resolveFlakeDir}
-        ${rebuildLock "switch"}
-        ${avoidRepoCwdForActivation}
-        ${localInputOverrideArgs}
-        ${rebuildDefaultArgs}
-        ${scriptPkgs.sinnix-preflight}/bin/sinnix-preflight switch
-        _rebuild_status=0
-        ${pkgs.systemd}/bin/systemd-run \
-          --user \
-          --quiet --collect --pipe --service-type=exec --wait \
-          --setenv=PATH="${rebuildServicePath}:$PATH" \
-          ${rebuildContainmentFlags}
-          ${pkgs.coreutils}/bin/env -u FLAKE NH_FLAKE="$_invoke_flake_dir" \
-            ${pkgs.nh}/bin/nh os switch \
-            "''${_invoke_flake_dir}#sinnix-prime" \
-            --no-nom \
-            --max-jobs "$rebuild_jobs" \
-            --cores "$rebuild_cores" \
-            "''${nh_extra_args[@]}" || _rebuild_status=$?
-        ${sinexCachePush}
-        exit "$_rebuild_status"
-      '';
-    };
-
     clean = {
       description = "Garbage collect + optimise nix store (nh clean all)";
       script = ''
@@ -661,26 +685,7 @@ in
       category = "Core";
       description = "Format via treefmt";
     }
-    {
-      name = "switch";
-      category = "Core";
-      description = "Apply host config (nh os switch)";
-    }
-    {
-      name = "boot";
-      category = "Core";
-      description = "Build and set the boot default for activation on the next reboot (nh os boot)";
-    }
-    {
-      name = "test-system";
-      category = "Core";
-      description = "Build and activate a temporary host configuration with nh os test";
-    }
-    {
-      name = "test-vm";
-      category = "Core";
-      description = "Build + launch QEMU VM for smoke-testing (nixos-rebuild build-vm)";
-    }
+  ] ++ activationCommandDocs ++ [
     {
       name = "lint";
       category = "Validate";

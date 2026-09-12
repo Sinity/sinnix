@@ -2,13 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping
-
-from sinnix_lib.atomic import atomic_publish
 
 
 def _canonical(value: Any) -> bytes:
@@ -29,19 +26,10 @@ def source_revision(value: Any) -> str:
 
 
 class ContextSnapshotStore:
-    """Persist a bounded set of immutable, principal-scoped context snapshots."""
+    """Read historical context snapshots without rewriting or evicting them."""
 
-    def __init__(
-        self, state_dir: Path, principal: str, *, max_entries: int = 64
-    ) -> None:
-        if not principal or max_entries < 1:
-            raise ValueError(
-                "context snapshot store requires a principal and positive bound"
-            )
+    def __init__(self, state_dir: Path, principal: str) -> None:
         self.root = state_dir / "contexts" / principal
-        self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
-        self.root.chmod(0o700)
-        self.max_entries = max_entries
 
     @staticmethod
     def _snapshot_id(snapshot: Mapping[str, Any]) -> str:
@@ -58,28 +46,6 @@ class ContextSnapshotStore:
             ]
         return source_revision(body)
 
-    def put(self, snapshot: Mapping[str, Any]) -> str:
-        snapshot_id = self._snapshot_id(snapshot)
-        snapshot_ref = f"sinnix://contexts/{snapshot_id}"
-        if snapshot.get("snapshot_ref") != snapshot_ref:
-            raise ValueError("context snapshot ref does not match its content")
-        destination = self.root / f"{snapshot_id}.json"
-        if not destination.exists():
-            # Durability: file and directory. The snapshot ref is handed back
-            # to the client as a handle it may resolve later, and eviction is
-            # this store's only legitimate way to lose one.
-            body = json.dumps(snapshot, sort_keys=True, separators=(",", ":")) + "\n"
-            atomic_publish(destination, body.encode("utf-8"), fsync=True)
-        os.utime(destination, None)
-        retained = sorted(
-            self.root.glob("*.json"),
-            key=lambda path: (path.stat().st_mtime_ns, path.name),
-            reverse=True,
-        )
-        for stale in retained[self.max_entries :]:
-            stale.unlink(missing_ok=True)
-        return snapshot_ref
-
     def get(self, snapshot_id: str) -> dict[str, Any]:
         if len(snapshot_id) != 64 or any(
             char not in "0123456789abcdef" for char in snapshot_id
@@ -92,7 +58,6 @@ class ContextSnapshotStore:
             raise KeyError(snapshot_id) from exc
         if not isinstance(snapshot, dict) or self._snapshot_id(snapshot) != snapshot_id:
             raise KeyError(snapshot_id)
-        os.utime(path, None)
         return snapshot
 
 

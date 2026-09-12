@@ -334,10 +334,8 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
     for prompt_spec in PROMPT_SPECS:
 
         def make_prompt(name: str):
-            def generated_prompt(
-                ref: str, job_ref: str | None = None
-            ) -> list[dict[str, Any]]:
-                return prompt_generator.generate(name, {"ref": ref, "job_ref": job_ref})
+            def generated_prompt(ref: str) -> list[dict[str, Any]]:
+                return prompt_generator.generate(name, {"ref": ref})
 
             generated_prompt.__name__ = name
             return generated_prompt

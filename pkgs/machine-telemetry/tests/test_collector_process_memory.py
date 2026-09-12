@@ -3,6 +3,8 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
+import pytest
+
 
 def _collector():
     path = Path(__file__).resolve().parents[1] / "collector.py"
@@ -23,6 +25,24 @@ def test_systemd_unescape_fragment_decodes_hex_escapes() -> None:
         )
         == "wayland-wm@hyprland-uwsm.desktop.service"
     )
+
+
+@pytest.mark.parametrize("value", [2**53 + 1, 2**63 - 1, -(2**53 + 1), 0])
+def test_integer_counter_retains_precision_in_sqlite(value) -> None:
+    collector = _collector()
+    with collector.sqlite3.connect(":memory:") as conn:
+        conn.execute("CREATE TABLE sample(counter INTEGER)")
+        conn.execute(
+            "INSERT INTO sample VALUES (?)", (collector.int_or_none(str(value)),)
+        )
+        assert conn.execute("SELECT counter FROM sample").fetchone() == (value,)
+
+
+@pytest.mark.parametrize(
+    "value", [None, "", " ", "max", "invalid", "1.5", "inf", "NaN"]
+)
+def test_integer_counter_unavailable_inputs(value) -> None:
+    assert _collector().int_or_none(value) is None
 
 
 def test_process_memory_rows_sort_and_limit(monkeypatch) -> None:

@@ -346,14 +346,14 @@ def default_lanes() -> list[str]:
 AUDIO_SUFFIXES = {".m4a", ".opus", ".wav", ".flac", ".mp3", ".ogg"}
 
 
-def ledger_seen() -> set[tuple[str, int]]:
-    """What has already been transcribed, keyed on name AND size.
+def ledger_seen() -> set[tuple[str, str, int]]:
+    """Completed recordings, identified within their source lane.
 
     Size is part of the key for the same reason the ambient audit keys on it: a
     chunk repaired from a truncated transfer keeps its name and is a different
     file, and its old transcript describes audio that was never fully there.
     """
-    seen: set[tuple[str, int]] = set()
+    seen: set[tuple[str, str, int]] = set()
     if not LEDGER.is_file():
         return seen
     for line in LEDGER.read_text(encoding="utf-8", errors="replace").splitlines():
@@ -361,7 +361,19 @@ def ledger_seen() -> set[tuple[str, int]]:
             o = json.loads(line)
         except json.JSONDecodeError:
             continue
-        seen.add((o.get("file", ""), int(o.get("bytes") or 0)))
+        if not isinstance(o, dict):
+            continue
+        lane, name, size = o.get("lane"), o.get("file"), o.get("bytes")
+        # Older rows without a lane cannot identify which source was processed.
+        if (
+            isinstance(lane, str)
+            and lane
+            and isinstance(name, str)
+            and name
+            and type(size) is int
+            and size >= 0
+        ):
+            seen.add((lane, name, size))
     return seen
 
 
@@ -399,7 +411,7 @@ def cmd_lake(args: argparse.Namespace) -> int:
         )
         for path in files:
             size = path.stat().st_size
-            if (path.name, size) in seen:
+            if (lane, path.name, size) in seen:
                 continue
             if args.limit and done >= args.limit:
                 break

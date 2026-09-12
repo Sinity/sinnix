@@ -652,8 +652,6 @@ in
               path = [
                 config.services.postgresql.package
                 pkgs.coreutils
-                pkgs.findutils
-                pkgs.gawk
               ];
               script = ''
                 set -euo pipefail
@@ -682,15 +680,6 @@ in
                 chmod 0600 "$tmp"
                 mv -f "$tmp" "$final"
                 trap - EXIT
-
-                find ${lib.escapeShellArg sinexPostgresDumpRoot} \
-                  -maxdepth 1 \
-                  -type f \
-                  -name ${lib.escapeShellArg "${databaseName}-*.dump"} \
-                  -printf '%T@ %p\n' \
-                  | sort -rn \
-                  | awk 'NR > 14 { print substr($0, index($0, $2)) }' \
-                  | xargs -r rm -f
               '';
             };
             # home-manager activation calls chmod 700 /home/${targetUserName}

@@ -130,6 +130,10 @@ def test_status_reads_each_task_state_result_and_exit_code(stub_pueue: Path) -> 
     assert passed.terminal and passed.succeeded
     assert passed.exit_code == 0
 
+    queue = pueue.status()
+    assert queue.groups["agent"] == {"status": "Running", "parallel_tasks": 6}
+    assert queue.tasks == tasks
+
 
 def test_add_names_the_group_label_directory_and_dependencies(
     stub_pueue: Path, tmp_path: Path
