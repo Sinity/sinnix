@@ -90,6 +90,10 @@
     ];
     "org.kde.kdeconnect_tp".grant = [
       "android.permission.POST_NOTIFICATIONS"
+      # Android gates LAN discovery behind foreground location for this
+      # client. It is used only while KDE Connect searches for nearby peers.
+      "android.permission.ACCESS_FINE_LOCATION"
+      "android.permission.ACCESS_COARSE_LOCATION"
     ];
     "com.igalia.wolvic".grant = [
       "android.permission.POST_NOTIFICATIONS"
