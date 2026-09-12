@@ -8,15 +8,20 @@
   # System software remains Quest-owned. This is a report baseline for the
   # retained utility set, not an install manifest or a deletion policy.
   apps = {
+    release = {
+      # Official upstream releases. The lock records the exact APK hash and
+      # signing certificate, so a headset wipe can restore these clients.
+      "alvr.client.stable".github = "alvr-org/ALVR";
+      "org.meumeu.wivrn.github".github = "WiVRn/WiVRn";
+    };
+
     # Store and side-loaded utilities retained after the 2026-09 cleanup.
     # `cleanup = "report"` only surfaces drift in `android-rebuild plan`.
     attended = [
-      "alvr.client.stable"
       "com.aurora.store"
       "com.apk.editor"
       "com.deovr.gearvr"
       "com.google.android.apps.youtube.vr.oculus"
-      "com.meta.curio.ruler"
       "com.meta.handseducationmodule"
       "com.meta.shell.env.footprint.haven2025"
       "com.meta.shell.env.vista.calming"
@@ -34,7 +39,6 @@
       "com.ZeroTransform.VStreamer_Live"
       "github.paroj.dsub2000"
       "org.fdroid.fdroid"
-      "org.meumeu.wivrn.github"
       "pupper.dev.barkvr"
       "quest.side.vr"
     ];
