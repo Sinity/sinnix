@@ -255,6 +255,18 @@ in
                     publicationPolicy = "local";
                   };
                 };
+                genome = {
+                  # Private personal-genomics workspace.  It has a declared
+                  # agentctl descriptor, but must not be exposed to observer
+                  # reads or treated as a hosted publication repository.
+                  path = "/realm/health/genome";
+                  agentctl = true;
+                  taskAuthority = {
+                    workspace = "/realm/health/genome/.beads";
+                    database = "/realm/health/genome/.beads/embeddeddolt";
+                    publicationPolicy = "local";
+                  };
+                };
                 # These are active Beads authorities too, but deliberately do
                 # not masquerade as agentctl projects: neither checkout has a
                 # project descriptor and both contain private operator data.
