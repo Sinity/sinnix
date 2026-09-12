@@ -19,10 +19,11 @@ let
 in
 mkServiceModule {
   name = "below";
+  defaultOnDesktop = true;
   description = "below time-traveling resource monitor";
   surface = {
     unit = "below.service";
-    resourceClass = "observability";
+    resourceClass = "critical";
     observe = {
       enable = true;
       restartable = true;

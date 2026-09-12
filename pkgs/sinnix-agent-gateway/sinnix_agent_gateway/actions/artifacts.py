@@ -155,7 +155,9 @@ def _get(runtime: Runtime, inp: GetInput) -> Metadata:
 class ReadInput(RequestControls):
     target: ArtifactLocator
     offset: int = Field(default=0, ge=0, description="Byte offset for text reads.")
-    max_bytes: int = Field(default=64_000, ge=1, description="Maximum inline text bytes.")
+    max_bytes: int = Field(
+        default=64_000, ge=1, description="Maximum inline text bytes."
+    )
     representation: Literal["auto", "text"] = "auto"
 
 

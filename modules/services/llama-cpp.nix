@@ -33,7 +33,7 @@ mkServiceModule {
   };
   surface = {
     unit = "llama-cpp.service";
-    resourceClass = "interactive-agent";
+    resourceClass = "ordinary";
     activation = {
       mode = "socket-proxy";
       publicEndpoint = "127.0.0.1:${toString helpers.data.ports.llamaCpp.public}";

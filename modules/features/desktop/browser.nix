@@ -83,7 +83,7 @@ mkFeatureModule {
         sinnix-nav-capture = {
           unit = "sinnix-nav-capture.service";
           manager = "user";
-          resourceClass = "capture-runtime";
+          resourceClass = "capture";
           observe = {
             enable = true;
             restartable = true;

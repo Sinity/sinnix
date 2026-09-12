@@ -129,7 +129,7 @@ let
   borgDrainMinIntervalSec = 4 * 60 * 60;
   # Every unit in this module is the same shape: a oneshot a timer wakes,
   # never restarted by activation (a switch mid-drain would abandon a bind
-  # mount and a held Borg lock), inside the backup-maintenance envelope. Only
+  # mount and a held Borg lock), inside the backup envelope. Only
   # the first two are stated here -- the envelope comes from the unit's own
   # registered surface, which mkScheduledJob resolves by unit lookup. A
   # module-local serviceConfig helper used to recompute exactly that lookup
@@ -768,7 +768,7 @@ in
       sinnix.runtime.surfaces = {
         btrbk = {
           unit = "btrbk.service";
-          resourceClass = "backup-maintenance";
+          resourceClass = "backup";
         };
         btrbk-timer = {
           unit = "btrbk.timer";
@@ -780,7 +780,7 @@ in
         };
         borgbackup-job-persist = {
           unit = "borgbackup-job-persist.service";
-          resourceClass = "backup-maintenance";
+          resourceClass = "backup";
           observe = {
             enable = true;
             restartable = false;
@@ -798,7 +798,7 @@ in
         };
         borgbackup-job-realm = {
           unit = "borgbackup-job-realm.service";
-          resourceClass = "backup-maintenance";
+          resourceClass = "backup";
           observe = {
             enable = true;
             restartable = false;
@@ -843,7 +843,7 @@ in
         };
         borgbackup-job-sinex-blobs = {
           unit = "borgbackup-job-sinex-blobs.service";
-          resourceClass = "backup-maintenance";
+          resourceClass = "backup";
           observe = {
             enable = true;
             restartable = false;
@@ -862,7 +862,7 @@ in
         };
         polylogue-sqlite-backup = {
           unit = "polylogue-sqlite-backup.service";
-          resourceClass = "backup-maintenance";
+          resourceClass = "backup";
           observe.enable = true;
         };
         polylogue-sqlite-backup-timer = {
@@ -871,7 +871,7 @@ in
         };
         borgbackup-job-polylogue-state = {
           unit = "borgbackup-job-polylogue-state.service";
-          resourceClass = "backup-maintenance";
+          resourceClass = "backup";
           observe = {
             enable = true;
             restartable = false;
@@ -888,7 +888,7 @@ in
         };
         borgbackup-job-machine-telemetry-dumps = {
           unit = "borgbackup-job-machine-telemetry-dumps.service";
-          resourceClass = "backup-maintenance";
+          resourceClass = "backup";
           observe = {
             enable = true;
             restartable = false;
@@ -906,7 +906,7 @@ in
         };
         borgbackup-verify = {
           unit = "borgbackup-verify.service";
-          resourceClass = "backup-maintenance";
+          resourceClass = "backup";
           observe = {
             enable = true;
             restartable = false;
@@ -943,7 +943,7 @@ in
         };
         borgbackup-maintenance = {
           unit = "borgbackup-maintenance.service";
-          resourceClass = "backup-maintenance";
+          resourceClass = "backup";
           observe = {
             enable = true;
             restartable = false;
@@ -951,7 +951,7 @@ in
         };
         btrfs-metadata-image-backup = {
           unit = "btrfs-metadata-image-backup.service";
-          resourceClass = "backup-maintenance";
+          resourceClass = "backup";
           # Was unset (default false), which meant the auto-attached OnFailure
           # hook (modules/runtime.nix, gated on observe.enable) was NEVER
           # wired for this unit -- it failed with status=1/FAILURE on
@@ -965,11 +965,11 @@ in
         };
         borgbackup-root-snapshots = {
           unit = "borgbackup-root-snapshots.service";
-          resourceClass = "backup-maintenance";
+          resourceClass = "backup";
         };
         sinnix-borg-beads-drill = {
           unit = "sinnix-borg-beads-drill.service";
-          resourceClass = "backup-maintenance";
+          resourceClass = "backup";
           captures = [
             {
               name = "borg-beads-drill";
@@ -1573,7 +1573,7 @@ in
           outerRealmMountUnit
         ];
       };
-      # backup-maintenance sizes MemoryHigh=2G around borg, but a btrfs-image
+      # The backup class sizes MemoryHigh=2G around borg, but a btrfs-image
       # walk of the root filesystem peaked at 2.2G on a run that SUCCEEDED
       # (measured 2026-08-18), so the class default sits below this job's
       # working set and every attempt spends its whole length in cgroup

@@ -98,7 +98,7 @@ mkServiceModule {
   surface = {
     unit = "sinnix-hub.service";
     manager = "user";
-    resourceClass = "interactive-agent";
+    resourceClass = "ordinary";
     observe = {
       enable = true;
       restartable = true;
@@ -515,7 +515,7 @@ mkServiceModule {
         phone-dispatcher = {
           unit = "sinnix-phone-dispatcher.service";
           manager = "user";
-          resourceClass = "interactive-agent";
+          resourceClass = "ordinary";
           observe = {
             enable = true;
             restartable = true;

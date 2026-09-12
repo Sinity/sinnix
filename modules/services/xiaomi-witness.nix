@@ -43,7 +43,7 @@ mkServiceModule {
   surface = {
     unit = "sinnix-xiaomi-witness.service";
     manager = "user";
-    resourceClass = "capture-runtime";
+    resourceClass = "capture";
     observe = {
       enable = true;
       restartable = true;

@@ -18,7 +18,7 @@ mkServiceModule {
   surface = {
     unit = "sinnix-clodex.service";
     manager = "user";
-    resourceClass = "interactive-agent";
+    resourceClass = "ordinary";
     observe = {
       enable = true;
       restartable = true;

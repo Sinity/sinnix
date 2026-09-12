@@ -22,7 +22,7 @@ mkServiceModule {
   };
   surface = {
     unit = "ollama.service";
-    resourceClass = "interactive-agent"; # uncapped memory — required for RAM offload
+    resourceClass = "ordinary"; # uncapped memory — required for RAM offload
     activation = {
       mode = "socket-proxy";
       publicEndpoint = "127.0.0.1:${toString helpers.data.ports.ollama.public}";

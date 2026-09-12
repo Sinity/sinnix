@@ -203,12 +203,6 @@ let
         ${pkgs.coreutils}/bin/install -d -m 0700 "$CLAUDE_CODE_TMPDIR"
 
         export SINNIX_CLAUDE_PROFILE=${lib.escapeShellArg profile}
-        # Clodex's proxy child route is opt-in.  Putting these in Claude's
-        # global managed settings silently routed ordinary native sessions
-        # through Clodex as well, obscuring the actual executor and coupling
-        # native work to the proxy's availability.
-        export CLAUDE_CODE_FORK_SUBAGENT=1
-        export CLAUDE_CODE_PROCESS_WRAPPER="$HOME/.local/bin/clodex-claude"
         mcp_args=()
         MCP_CONFIG="$HOME/.config/claude/${mcpConfigName}.json"
         if [ -r "$MCP_CONFIG" ]; then
@@ -269,6 +263,10 @@ let
         ${pkgs.coreutils}/bin/install -d -m 0700 "$CLAUDE_CODE_TMPDIR"
 
         export SINNIX_CLAUDE_PROFILE=${lib.escapeShellArg profile}
+        # Clodex's proxy child route is opt-in to this wrapper. Keeping these
+        # out of managed settings leaves ordinary native sessions independent.
+        export CLAUDE_CODE_FORK_SUBAGENT=1
+        export CLAUDE_CODE_PROCESS_WRAPPER="$HOME/.local/bin/clodex-claude"
         mcp_args=()
         MCP_CONFIG="$HOME/.config/claude/${mcpConfigName}.json"
         if [ -r "$MCP_CONFIG" ]; then

@@ -70,6 +70,7 @@ let
 in
 mkServiceModule {
   name = "capture-audio";
+  defaultOnDesktop = true;
   description = "Always-on PipeWire audio capture (every source and sink) with pw-mon topology + Silero VAD index";
   extraOptions = {
     excludeSourcePatterns = lib.mkOption {
@@ -143,7 +144,7 @@ mkServiceModule {
         }
         {
           manager = "user";
-          resourceClass = "capture-runtime";
+          resourceClass = "capture";
           execStart = "${audioPkg}/bin/sinnix-audio-capture index --capture-root ${lakeRoot} --ffmpeg-bin ${ffmpegBin}";
           serviceConfig = {
             ReadWritePaths = [
@@ -172,7 +173,7 @@ mkServiceModule {
           capture-audio-recorder-devices = {
             unit = "sinnix-audio-recorder-devices.service";
             manager = "user";
-            resourceClass = "capture-runtime";
+            resourceClass = "capture";
             observe = {
               enable = true;
               restartable = true;
@@ -202,7 +203,7 @@ mkServiceModule {
           capture-audio-topology = {
             unit = "sinnix-audio-topology.service";
             manager = "user";
-            resourceClass = "capture-runtime";
+            resourceClass = "capture";
             observe = {
               enable = true;
               restartable = true;
@@ -223,7 +224,7 @@ mkServiceModule {
           capture-audio-index = {
             unit = "sinnix-audio-index.service";
             manager = "user";
-            resourceClass = "capture-runtime";
+            resourceClass = "capture";
             observe = {
               enable = true;
               restartable = true;

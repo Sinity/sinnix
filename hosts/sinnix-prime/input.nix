@@ -130,7 +130,7 @@ in
 
   sinnix.runtime.surfaces.interception-tools = {
     unit = "interception-tools.service";
-    resourceClass = "interactive-access";
+    resourceClass = "critical";
     captures = [
       {
         name = "keylog";

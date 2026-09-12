@@ -22,10 +22,11 @@ let
 in
 mkServiceModule {
   name = "fs-index";
+  defaultOnDesktop = true;
   description = "Periodic filesystem inventory, content scan and judgment-ledger materialization";
   surface = {
     unit = "sinnix-fs-index.service";
-    resourceClass = "background-maintenance";
+    resourceClass = "background";
     observe.enable = true;
     workload = {
       class = "sacrificial";

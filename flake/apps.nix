@@ -40,24 +40,23 @@
           ;
       };
 
-      generatedApps = builtins.mapAttrs (
-        name: spec: mkApp name spec.script spec.description
-      ) (
+      generatedApps = builtins.mapAttrs (name: spec: mkApp name spec.script spec.description) (
         pkgs.lib.filterAttrs (
           name: _: !builtins.hasAttr name commandRegistry.activationPackages
         ) commandRegistry.appCommands
       );
-      activationApps = builtins.mapAttrs (
-        name: package: {
-          type = "app";
-          program = "${package}/bin/${name}";
-          meta.description = commandRegistry.activationCommands.${name}.description;
-        }
-      ) commandRegistry.activationPackages;
+      activationApps = builtins.mapAttrs (name: package: {
+        type = "app";
+        program = "${package}/bin/${name}";
+        meta.description = commandRegistry.activationCommands.${name}.description;
+      }) commandRegistry.activationPackages;
     in
     {
-      apps = generatedApps // activationApps // {
-        default = self'.apps.switch;
-      };
+      apps =
+        generatedApps
+        // activationApps
+        // {
+          default = self'.apps.switch;
+        };
     };
 }

@@ -105,7 +105,7 @@ mkAiService {
         # throws on an unknown unit (which is the contract working as intended).
         sinnix.runtime.surfaces.stt-lake = {
           unit = "sinnix-stt-lake.service";
-          resourceClass = "background-maintenance";
+          resourceClass = "background";
           observe = {
             enable = true;
             restartable = true;

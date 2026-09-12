@@ -45,10 +45,11 @@ let
 in
 mkServiceModule {
   name = "machine-telemetry";
+  defaultOnDesktop = true;
   description = "Canonical host machine telemetry capture for Lynchpin analysis";
   surface = {
     unit = "machine-telemetry.service";
-    resourceClass = "observability";
+    resourceClass = "critical";
     observe = {
       enable = true;
       restartable = true;
@@ -192,11 +193,6 @@ mkServiceModule {
           path = "/user.slice/user-${userUid}.slice/user@${userUid}.service/nix-build.slice";
         }
         {
-          label = "user.gpu-runtime";
-          scope = "user";
-          path = "/user.slice/user-${userUid}.slice/user@${userUid}.service/gpu-runtime.slice";
-        }
-        {
           label = "user.backup";
           scope = "user";
           path = "/user.slice/user-${userUid}.slice/user@${userUid}.service/backup.slice";
@@ -287,7 +283,7 @@ mkServiceModule {
             # The integrity walk must finish within its fixed time budget.
             IOReadBandwidthMax = map (
               limit: if lib.hasPrefix "${realmRoot} " limit then "${realmRoot} 100M" else limit
-            ) config.sinnix.runtime.inventory.classes.backup-maintenance.serviceConfig.IOReadBandwidthMax;
+            ) config.sinnix.runtime.inventory.classes.backup.serviceConfig.IOReadBandwidthMax;
           };
           unit = {
             after = [
@@ -421,7 +417,7 @@ mkServiceModule {
         sinnix.runtime.surfaces = {
           machine-telemetry-sqlite-backup = {
             unit = "machine-telemetry-sqlite-backup.service";
-            resourceClass = "backup-maintenance";
+            resourceClass = "backup";
             observe.enable = true;
           };
           machine-telemetry-sqlite-backup-timer = {

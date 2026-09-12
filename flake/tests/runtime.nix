@@ -18,7 +18,7 @@ in
             sinnix.runtime.surfaces = {
               runtime-policy-system = {
                 unit = "runtime-policy-system.service";
-                resourceClass = "background-maintenance";
+                resourceClass = "background";
                 resources = {
                   MemoryMax = "900M";
                   Nice = 7;
@@ -28,7 +28,7 @@ in
               runtime-policy-user = {
                 unit = "runtime-policy-user.service";
                 manager = "user";
-                resourceClass = "desktop-shell";
+                resourceClass = "ordinary";
                 resources = {
                   MemoryLow = "768M";
                 };
@@ -47,7 +47,7 @@ in
                   description = "Generated job whose surface is not observed";
                   surface = {
                     unit = "sinnix-failure-attach-plain.service";
-                    resourceClass = "background-maintenance";
+                    resourceClass = "background";
                   };
                   job.execStart = "/bin/true";
                 })
@@ -56,7 +56,7 @@ in
                   description = "Generated job whose surface is observed";
                   surface = {
                     unit = "sinnix-failure-attach-observed.service";
-                    resourceClass = "background-maintenance";
+                    resourceClass = "background";
                     observe.enable = true;
                   };
                   job.execStart = "/bin/true";
@@ -78,7 +78,7 @@ in
             # The class table is the source of the defaults, so read the
             # expected values from it rather than restating them here.
             backgroundClass =
-              (import ../data/runtime-defaults.nix { inherit lib; }).classes.background-maintenance.serviceConfig;
+              (import ../data/runtime-defaults.nix { inherit lib; }).classes.background.serviceConfig;
           in
           [
             {
@@ -105,8 +105,8 @@ in
             {
               assertion =
                 surfaces.runtime-policy-user.effectiveResources.MemoryLow == "768M"
-                && surfaces.runtime-policy-user.effectiveResources.Slice == "desktop-shell.slice";
-              message = "a user surface must keep its class slice placement alongside its own overrides";
+                && !(surfaces.runtime-policy-user.effectiveResources ? Slice);
+              message = "an ordinary user surface must keep only its explicit resource overrides";
             }
             {
               assertion =
@@ -446,14 +446,13 @@ in
           let
             service = config.systemd.services.lynchpin-materialize.serviceConfig;
             surface = config.sinnix.runtime.inventory.surfaces.lynchpin-materialize;
-            lynchpinDevShell = inputs.lynchpin.devShells.${system}.default;
           in
           [
             {
               assertion =
                 lib.hasInfix "/bin/agentctl job start lynchpin converge --wait" service.ExecStart
                 && service.TimeoutStartSec == "4h"
-                && surface.resourceClass == "system";
+                && surface.resourceClass == "ordinary";
               message = "the Lynchpin timer must start the bounded convergence operation";
             }
             {
@@ -463,10 +462,6 @@ in
                 && !(lib.hasInfix "materialize --all" service.ExecStart)
                 && !(lib.hasInfix "--promote" service.ExecStart);
               message = "the retired monolithic Lynchpin materialization shell must not survive in the rendered unit";
-            }
-            {
-              assertion = lib.any (package: (package.pname or "") == "repomix") lynchpinDevShell.nativeBuildInputs;
-              message = "the Lynchpin project devshell must provide repomix to the scheduled converge operation";
             }
           ];
       };

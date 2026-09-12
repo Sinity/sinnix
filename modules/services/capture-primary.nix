@@ -72,6 +72,7 @@ let
 in
 mkServiceModule (mkCaptureLane {
   name = "capture-primary";
+  defaultOnDesktop = true;
   description = "Continuous Wayland PRIMARY-selection capture lane (wl-paste --primary --watch -> sinnix-capture)";
   extraOptions = {
     debounceMs = lib.mkOption {

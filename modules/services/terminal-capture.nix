@@ -19,6 +19,7 @@ let
 in
 mkServiceModule {
   name = "terminal-capture";
+  defaultOnDesktop = true;
   description = "Advanced terminal session recording and telemetry";
   configFn =
     { pkgs, ... }:

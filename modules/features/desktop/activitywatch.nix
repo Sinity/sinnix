@@ -39,7 +39,7 @@ mkFeatureModule {
         activitywatch = {
           unit = "activitywatch.service";
           manager = "user";
-          resourceClass = "background-maintenance";
+          resourceClass = "background";
           observe = {
             enable = true;
             restartable = true;
@@ -65,7 +65,7 @@ mkFeatureModule {
         activitywatch-watcher-awatcher = {
           unit = "activitywatch-watcher-awatcher.service";
           manager = "user";
-          resourceClass = "background-maintenance";
+          resourceClass = "background";
           observe = {
             enable = true;
             restartable = true;
@@ -125,7 +125,7 @@ mkFeatureModule {
           systemd.user.services.activitywatch = {
             Service = lib.sinnix.mkRuntimeServiceConfig {
               runtimeInventory = nixosConfig.sinnix.runtime.inventory;
-              resourceClass = "background-maintenance";
+              resourceClass = "background";
               overrides = {
                 MemoryHigh = "1G";
                 MemoryMax = "2G";

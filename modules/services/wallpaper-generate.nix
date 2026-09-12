@@ -9,7 +9,7 @@
 # corpus's time-of-day/theme-mode sets
 # (modules/features/desktop/wallpaper.nix), and always stops ComfyUI again --
 # even on failure -- so a triggered batch never holds the GPU past its own
-# run. Runs under the "gpu-runtime" resource class so it never serializes
+# run. Its GPU-specific limits live directly on the surface so it never serializes
 # against builds.
 {
   mkServiceModule,
@@ -23,7 +23,15 @@ mkServiceModule {
   surface = {
     unit = "sinnix-wallpaper-generate.service";
     manager = "user";
-    resourceClass = "gpu-runtime";
+    resourceClass = "ordinary";
+    resources = {
+      Nice = 5;
+      IOSchedulingClass = "best-effort";
+      IOSchedulingPriority = 7;
+      IOWeight = 20;
+      MemoryHigh = "8G";
+      MemoryMax = "12G";
+    };
     observe = {
       enable = true;
       restartable = false;

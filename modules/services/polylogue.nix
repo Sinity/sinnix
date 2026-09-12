@@ -255,7 +255,7 @@ mkServiceModule {
         polylogued = {
           unit = "polylogued.service";
           manager = "user";
-          resourceClass = "capture-runtime";
+          resourceClass = "capture";
           resources = {
             MemoryHigh = polyloguedMemoryHigh;
             MemoryMax = polyloguedMemoryMax;

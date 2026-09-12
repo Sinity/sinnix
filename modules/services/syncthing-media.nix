@@ -13,7 +13,7 @@ mkServiceModule {
   description = "Syncthing endpoint for private phone-media ingress";
   surface = {
     unit = "syncthing.service";
-    resourceClass = "background-maintenance";
+    resourceClass = "background";
     observe = {
       enable = true;
       restartable = true;

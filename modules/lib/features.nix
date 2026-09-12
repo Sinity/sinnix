@@ -50,12 +50,10 @@ let
       subFeatures ? { },
       meta ? { },
       docs ? null,
-      # Features in modules/features/ are unconditionally part of a sinnix
-      # host's default character; hosts express exceptions via
-      # `sinnix.features.<path>.enable = false`. defaultOn is an explicit
-      # escape hatch, not routine tuning — optional background capabilities
-      # belong in the default-off service namespace instead.
+      # CLI, development, and system features are part of every host. Desktop
+      # features follow the machine role unless a host declares an exception.
       defaultOn ? true,
+      defaultOnDesktop ? builtins.head path == "desktop",
       configFn,
     }:
     args@{ config, ... }:
@@ -79,7 +77,7 @@ let
           lib.recursiveUpdate extraOptions subFeatureOpts
           // {
             enable = (lib.mkEnableOption description) // {
-              default = defaultOn;
+              default = if defaultOnDesktop then config.sinnix.machine.isDesktop else defaultOn;
             };
             meta = mkMetaOption meta;
             docs = mkDocsOption docs;
@@ -105,6 +103,7 @@ let
       surface ? null,
       meta ? { },
       docs ? null,
+      defaultOnDesktop ? false,
       # Declarative scheduled-oneshot job: sugar over
       # lib.sinnix.mkScheduledJob (modules/lib/scheduled-job.nix, where the
       # full spec-key reference lives). Attrset or function of the module
@@ -127,7 +126,9 @@ let
         name
       ];
       optionsForPath = extraOptions // {
-        enable = lib.mkEnableOption description;
+        enable = (lib.mkEnableOption description) // {
+          default = defaultOnDesktop && config.sinnix.machine.isDesktop;
+        };
         meta = mkMetaOption meta;
         docs = mkDocsOption docs;
       };
@@ -168,7 +169,7 @@ let
       description,
       unit,
       activation ? { },
-      resourceClass ? "interactive-agent",
+      resourceClass ? "ordinary",
       stateDirectories ? [ ],
       backendKind ? "native",
       requiresCuda ? false,

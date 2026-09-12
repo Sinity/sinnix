@@ -12,7 +12,6 @@ import os
 import subprocess
 from typing import Any
 
-
 MAX_RESPONSE_BYTES = 1_048_576
 
 

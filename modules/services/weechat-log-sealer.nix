@@ -16,6 +16,7 @@
 }@args:
 mkServiceModule {
   name = "weechat-log-sealer";
+  defaultOnDesktop = true;
   description = "Daily content-hash sealing of WeeChat IRC logs";
   extraOptions = {
     onCalendar = lib.mkOption {
@@ -62,7 +63,7 @@ mkServiceModule {
       description = "Hash-seal weechat IRC logs older than 2 days";
       # The registered surface unit is the *timer*, so the service resolves
       # its class directly rather than by unit lookup.
-      resourceClass = "background-maintenance";
+      resourceClass = "background";
       execStart = "${pkgs.python3}/bin/python3 ${./weechat-log-sealer/seal_logs.py} ${ircRoot}";
       serviceConfig = {
         # Bound runtime so a stuck mount doesn't pin a stale unit.

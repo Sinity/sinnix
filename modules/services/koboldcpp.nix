@@ -26,7 +26,7 @@ mkServiceModule {
   };
   surface = {
     unit = "koboldcpp.service";
-    resourceClass = "interactive-agent";
+    resourceClass = "ordinary";
     activation = {
       mode = "socket-proxy";
       publicEndpoint = "127.0.0.1:${toString helpers.data.ports.koboldcpp.public}";

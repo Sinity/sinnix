@@ -19,10 +19,11 @@ let
 in
 mkServiceModule {
   name = "url-ledger";
+  defaultOnDesktop = true;
   description = "Daily URL visit x archive-snapshot coverage ledger";
   surface = {
     unit = "sinnix-url-ledger.service";
-    resourceClass = "background-maintenance";
+    resourceClass = "background";
     observe.enable = true;
     workload = {
       class = "sacrificial";

@@ -30,19 +30,13 @@
   # "igpu"        = Intel UHD 770, discrete GPU physically absent
   sinnix.gpu.mode = "nvidia";
 
-  # Interactive workstation posture: isDesktop=true plus the resource-
-  # governance stack (slices, earlyoom, io.cost init, RAPL caps, memory
-  # sysctls) — see modules/profiles/workstation.nix.
-  sinnix.profiles.workstation.enable = true;
-
-  # Every capability in modules/features/ is default-on; this host expresses
-  # only configuration detail (subfeatures and option values), not enables.
+  # Desktop features and workstation resource policy follow the default
+  # isDesktop=true machine role. Keep only host-specific choices here.
   sinnix.features.dev.editors.vscode.enable = true;
   sinnix.features.dev.editors.antigravity.enable = true;
 
   sinnix.persistence.enable = true;
   sinnix.services = {
-    agentctl.enable = true;
     github-runner-polylogue.enable = true;
     agent-gateway = {
       enable = true;
@@ -79,7 +73,6 @@
         };
       };
     };
-    ops-reducer.enable = true;
     # Clodex remains inactive until its one-time device-code OAuth has created
     # ~/.clodex/providers.json. See docs/clodex.md.
     clodex.enable = true;
@@ -96,7 +89,6 @@
       enable = true;
       autoStart = true;
     };
-    terminal-capture.enable = true;
     # Remote access over the tailnet. tag:workstation must be authorized in the
     # tailnet ACL tagOwners; the auth key lives in agenix (tailscale-authkey).
     # Plain node: no exit-node or subnet-router role.
@@ -132,12 +124,6 @@
     hub.enable = true;
     netdata-monitor.enable = true;
     # ── Capture machinery ───────────────────────────────────────────────────
-    capture-notifications.enable = true;
-    capture-mpris.enable = true;
-    capture-clipboard.enable = true;
-    capture-primary.enable = true;
-    capture-a11y.enable = true;
-    capture-audio.enable = true;
     # Per-window screen frames. The always-on replay ring is off: on the
     # 2026-08-14 reboot it was the only user unit to miss its stop timeout,
     # and its SIGKILL at the 90s mark is the log line that immediately
@@ -147,14 +133,12 @@
     # it was introduced, so it was costing a minute and a half of every
     # reboot for a feature that is not being used. Re-enable when the
     # save-on-hotkey path is something the day actually reaches for.
-    capture-screen.enable = true;
     capture-replay = {
       enable = false;
       # Single panel on this host; gsr needs the connector name (see the
       # target option's description for why "focused" cannot work).
       target = "DP-3";
     };
-    capture-kitty-scrollback.enable = true;
     # Room air quality from the Awair Element's local API.
     capture-awair.enable = true;
     # Logitech battery/DPI + BT audio (AVRCP volume/codec) + BT battery
@@ -183,11 +167,9 @@
     # leases, wifi associations with signal, and nlbwmon per-device bandwidth.
     # Nothing runs on the router.
     capture-router.enable = true;
-    url-ledger.enable = true;
     # Weekly re-walk of /realm and /outer-realm into the queryable
     # inventory/content/judgment-ledger index at data/derived/inventory.
     # Was a manual one-shot from 2026-08-16 until this; see fs-index.nix.
-    fs-index.enable = true;
     # Daily run at the Xiaomi quota reset (sinnix-9tc). Self-terminating:
     # stops for good once the unlock is granted. Disabled 2026-08-19: the
     # parallel HyperOS account-bind route (sinnix-9tc.1) succeeded directly
@@ -198,9 +180,7 @@
     # Video special-case over the ledger: yt-dlp resolves video-hosting URLs
     # into a real archived copy. Wayback/Common Crawl CDX coverage does not
     # preserve video.
-    video-resolve.enable = true;
     below = {
-      enable = true;
       collectIntervalSec = 5;
       # Keep telemetry on /realm so the root filesystem stays slim. Same
       # subtree as machine-telemetry and activitywatch captures.
@@ -243,7 +223,6 @@
       # (sinnix-qh6s, sinnix-8f6y).
       daemon.autoStart = false;
     };
-    machine-telemetry.enable = true;
     # Operator steering: store + rituals + read-only cockpit at
     # http://127.0.0.1:8791.
     steering.enable = true;
@@ -257,8 +236,6 @@
     enrichment-loop.enable = false;
     # Kernel audit capture plus the check that no unit is sandboxed out of
     # writing its own declared output.
-    sandbox-audit.enable = true;
-    weechat-log-sealer.enable = true;
     # Backstop reaper for orphaned per-checkout sinex dev-postgres instances;
     # primary cleanup is sinnix-direnvrc's owner-watcher.
     sinex-dev-db-reaper.enable = true;

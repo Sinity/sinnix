@@ -198,7 +198,9 @@ def test_files_actions_accept_paths_and_return_child_refs(tmp_path: Path) -> Non
     assert read["data"]["artifact"] is None
     assert read["data"]["sha256"] is None
     hashed = structured(
-        call(server, "files.read", {"target": {"ref": child["ref"]}, "with_sha256": True})
+        call(
+            server, "files.read", {"target": {"ref": child["ref"]}, "with_sha256": True}
+        )
     )
     assert len(hashed["data"]["sha256"]) == 64
 

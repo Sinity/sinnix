@@ -44,7 +44,8 @@ mkFeatureModule {
       sinnix.runtime.surfaces.noctalia = {
         unit = "noctalia.service";
         manager = "user";
-        resourceClass = "desktop-shell";
+        resourceClass = "ordinary";
+        resources.Slice = "desktop-shell.slice";
         workload = {
           class = "interactive";
           rationale = "Visible desktop shell must remain responsive while remaining cgroup-containable.";

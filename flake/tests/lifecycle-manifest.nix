@@ -36,7 +36,7 @@
               unit = "example.service";
               manager = "system";
               kind = "service";
-              resourceClass = "system";
+              resourceClass = "ordinary";
               workload = {
                 lifecycle = "persistent";
               };
@@ -49,7 +49,7 @@
               unit = "example.socket";
               manager = "system";
               kind = "socket";
-              resourceClass = "system";
+              resourceClass = "ordinary";
               workload = {
                 lifecycle = "transient";
               };

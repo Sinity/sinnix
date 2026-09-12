@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # @sinnix-package
 # description: Launch and control native DeoVR playback from Sinnix through the selected Quest transport
-# runtimeInputs: python3 coreutils systemd
-"""Persistent, authenticated PC-to-Quest native video playback.
+# runtimeInputs: python3 coreutils systemd wl-clipboard playerctl
+"""Authenticated PC-to-Quest native video playback and media controls.
 
 The server binds only to loopback.  The Quest reaches it through the selected
 ADB connection's reverse tunnel, so neither the media file nor a LAN listener
@@ -23,6 +23,7 @@ import subprocess
 import tempfile
 import threading
 import time
+import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
@@ -116,18 +117,40 @@ def session_descriptor(path, args):
     }
 
 
+def clipboard_path():
+    value = subprocess.check_output(["wl-paste", "--no-newline"], text=True)
+    if "\x00" in value or "\n" in value or "\r" in value:
+        raise ValueError("clipboard must contain one local path or file URI")
+    if value.startswith("file:"):
+        parsed = urllib.parse.urlsplit(value)
+        if parsed.scheme != "file" or parsed.netloc not in {"", "localhost"}:
+            raise ValueError("clipboard file URI must refer to this machine")
+        value = urllib.parse.unquote(parsed.path)
+    elif "://" in value:
+        raise ValueError("clipboard video launch accepts only local paths and file URIs")
+    if not value:
+        raise ValueError("clipboard is empty")
+    return value
+
+
 def open_session(args):
+    if args.clipboard:
+        args.file = clipboard_path()
     path = pathlib.Path(args.file).expanduser().resolve(strict=True)
     if not path.is_file():
         raise ValueError("expected a regular video file")
     write_json(SESSION_FILE, session_descriptor(path, args))
     RUNTIME_FILE.unlink(missing_ok=True)
+    if not args.detach:
+        print("Serving the selected video to Quest; press Ctrl-C to stop.", flush=True)
+        serve_session()
+        return
     subprocess.run(["systemctl", "--user", "restart", "sinnix-quest-player.service"], check=True)
     deadline = time.monotonic() + 12
     while time.monotonic() < deadline:
         if RUNTIME_FILE.exists():
             runtime = read_json(RUNTIME_FILE)
-            if runtime.get("status") == "ready":
+            if runtime.get("status") in {"listening", "active"}:
                 print("Quest native playback is ready. DeoVR launch was requested.")
                 return
         time.sleep(0.2)
@@ -166,6 +189,12 @@ def serve_session():
     token = secrets.token_urlsafe(20)
     video_route = f"/{token}/video{path.suffix}"
     descriptor_route = f"/{token}/video.json"
+    active = threading.Event()
+
+    def mark_active():
+        if not active.is_set():
+            active.set()
+            write_json(RUNTIME_FILE, {"status": "active", "startedAt": int(time.time()), "port": server.server_port, "pid": os.getpid()})
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_):
@@ -225,6 +254,7 @@ def serve_session():
                 self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
             self.end_headers()
             if body:
+                mark_active()
                 with path.open("rb") as source:
                     source.seek(start)
                     remaining = end - start + 1
@@ -241,7 +271,7 @@ def serve_session():
     with ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
         port = server.server_port
         adb("reverse", f"tcp:{port}", f"tcp:{port}")
-        write_json(RUNTIME_FILE, {"status": "ready", "startedAt": int(time.time()), "port": port})
+        write_json(RUNTIME_FILE, {"status": "listening", "startedAt": int(time.time()), "port": port, "pid": os.getpid()})
         link = f"deovr://http://127.0.0.1:{port}{descriptor_route}"
         try:
             adb("shell", "am start " + ("-S " if args.get("cold") else "") + "-a android.intent.action.VIEW -n com.deovr.gearvr/com.unity3d.player.UnityPlayerActivity -d " + shlex.quote(link))
@@ -284,8 +314,32 @@ def control(args):
     print(json.dumps(update))
 
 
+def media_key(args):
+    try:
+        runtime = read_json(RUNTIME_FILE)
+    except (OSError, json.JSONDecodeError):
+        runtime = {}
+    if runtime.get("status") == "active":
+        mapped = {"toggle": "toggle", "next": "seek", "previous": "seek"}
+        args.action = mapped[args.key]
+        if args.key in {"next", "previous"}:
+            args.value = "+10" if args.key == "next" else "-10"
+        control(args)
+        return
+    playerctl = {"toggle": "play-pause", "next": "next", "previous": "previous"}[args.key]
+    subprocess.run(["playerctl", playerctl], check=True)
+
+
 def stop(_args):
-    subprocess.run(["systemctl", "--user", "stop", "sinnix-quest-player.service"], check=True)
+    subprocess.run(["systemctl", "--user", "stop", "sinnix-quest-player.service"], check=False)
+    try:
+        runtime = read_json(RUNTIME_FILE)
+        pid = int(runtime.get("pid", 0))
+        if pid and pid != os.getpid():
+            os.kill(pid, 2)
+    except (OSError, ValueError, json.JSONDecodeError):
+        pass
+    write_json(RUNTIME_FILE, {"status": "stopped", "stoppedAt": int(time.time())})
     print("Quest player service stopped.")
 
 
@@ -293,7 +347,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="action", required=True)
     play = sub.add_parser("open", help="serve a local file through ADB reverse and launch DeoVR")
-    play.add_argument("file")
+    play.add_argument("file", nargs="?")
+    play.add_argument("--clipboard", action="store_true")
+    play.add_argument("--detach", action="store_true", help="leave the playback server in its user service")
     play.add_argument("--stereo", choices=["sbs", "tb", "off"], default="sbs")
     play.add_argument("--projection", choices=["flat", "dome", "sphere"], default="flat")
     play.add_argument("--codec", choices=["h264", "h265", "av1"], default="h264")
@@ -310,6 +366,8 @@ def main():
     browse = sub.add_parser("browse", help="open an approved HTTP(S) player-native library URL in DeoVR")
     browse.add_argument("url")
     sub.add_parser("stop", help="stop the active file-serving session")
+    key = sub.add_parser("media-key", help=argparse.SUPPRESS)
+    key.add_argument("key", choices=["toggle", "next", "previous"])
     for name in ["status", "pause", "resume", "toggle", "seek", "speed"]:
         command = sub.add_parser(name)
         if name in ["seek", "speed"]:
@@ -317,6 +375,8 @@ def main():
     args = parser.parse_args()
     try:
         if args.action == "open":
+            if bool(args.file) == bool(args.clipboard):
+                raise ValueError("open requires exactly one FILE or --clipboard")
             open_session(args)
         elif args.action == "choose":
             choose_session(args)
@@ -326,6 +386,8 @@ def main():
             open_url(args)
         elif args.action == "stop":
             stop(args)
+        elif args.action == "media-key":
+            media_key(args)
         else:
             control(args)
     except (OSError, RuntimeError, ValueError, KeyError, subprocess.CalledProcessError, json.JSONDecodeError) as error:

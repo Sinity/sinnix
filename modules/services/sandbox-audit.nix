@@ -24,6 +24,7 @@ let
 in
 mkServiceModule {
   name = "sandbox-audit";
+  defaultOnDesktop = true;
   description = "Kernel denial auditing and confinement-vs-declared-output checks";
   extraOptions = {
     kernelAudit = lib.mkOption {
@@ -110,7 +111,7 @@ mkServiceModule {
           sandbox-audit-drain = {
             unit = "sinnix-audit-drain.service";
             manager = "system";
-            resourceClass = "observability";
+            resourceClass = "critical";
             observe.enable = true;
             captures = [
               {
@@ -123,7 +124,7 @@ mkServiceModule {
           sandbox-audit-check = {
             unit = "sinnix-sandbox-audit.service";
             manager = "system";
-            resourceClass = "observability";
+            resourceClass = "critical";
             observe.enable = true;
           };
         };

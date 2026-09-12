@@ -36,7 +36,7 @@ mkServiceModule {
   surface = {
     unit = "sinnix-phone-logcat.service";
     manager = "user";
-    resourceClass = "capture-runtime";
+    resourceClass = "capture";
     observe = {
       enable = true;
       restartable = true;

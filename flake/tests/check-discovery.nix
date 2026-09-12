@@ -64,23 +64,30 @@
       activationExecutables = builtins.mapAttrs (
         name: package: "${package}/bin/${name}"
       ) activationRegistry.activationPackages;
-      activationCases = pkgs.lib.concatMapStringsSep "\n" (
-        name:
-        let
-          expectedArgv = {
-            switch = "nh os switch";
-            boot = "nh os boot";
-            test-system = "nh os test";
-            test-vm = "nixos-rebuild build-vm";
-          }.${name};
-        in
-        ''check_activation ${pkgs.lib.escapeShellArg name} ${pkgs.lib.escapeShellArg activationExecutables.${name}} ${pkgs.lib.escapeShellArg expectedArgv}''
-      ) [
-        "switch"
-        "boot"
-        "test-system"
-        "test-vm"
-      ];
+      activationCases =
+        pkgs.lib.concatMapStringsSep "\n"
+          (
+            name:
+            let
+              expectedArgv =
+                {
+                  switch = "nh os switch";
+                  boot = "nh os boot";
+                  test-system = "nh os test";
+                  test-vm = "nixos-rebuild build-vm";
+                }
+                .${name};
+            in
+            "check_activation ${pkgs.lib.escapeShellArg name} ${
+              pkgs.lib.escapeShellArg activationExecutables.${name}
+            } ${pkgs.lib.escapeShellArg expectedArgv}"
+          )
+          [
+            "switch"
+            "boot"
+            "test-system"
+            "test-vm"
+          ];
     in
     {
       checks.check-discovery = pkgs.runCommand "check-discovery" { } ''

@@ -159,7 +159,7 @@ mkServiceModule {
             {
               sinnix.runtime.surfaces = lib.mapAttrs (unitName: job: {
                 unit = "${unitName}.service";
-                resourceClass = "system";
+                resourceClass = "ordinary";
                 observe.enable = true;
                 workload = {
                   class = "sacrificial";

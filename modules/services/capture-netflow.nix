@@ -122,7 +122,7 @@ mkServiceModule {
   surface = {
     unit = "sinnix-capture-netflow.service";
     manager = "system";
-    resourceClass = "capture-runtime";
+    resourceClass = "capture";
     observe = {
       enable = true;
       restartable = true;

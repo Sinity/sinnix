@@ -19,10 +19,11 @@ let
 in
 mkServiceModule {
   name = "video-resolve";
+  defaultOnDesktop = true;
   description = "yt-dlp resolution of video-hosting URLs found in the URL ledger";
   surface = {
     unit = "sinnix-video-resolve.service";
-    resourceClass = "background-maintenance";
+    resourceClass = "background";
     observe.enable = true;
     workload = {
       class = "sacrificial";

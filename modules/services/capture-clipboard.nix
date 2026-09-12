@@ -64,6 +64,7 @@ let
 in
 mkServiceModule (mkCaptureLane {
   name = "capture-clipboard";
+  defaultOnDesktop = true;
   description = "Continuous Wayland clipboard capture lane (wl-paste --watch -> sinnix-capture)";
   inherit username laneDir;
   mode = "stream";

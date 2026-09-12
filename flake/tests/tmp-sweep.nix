@@ -16,7 +16,7 @@ in
 
       spec = testLib.mkFeatureTest {
         name = "tmp-sweep-placement";
-        feature = "sinnix.profiles.workstation.enable";
+        feature = "sinnix.machine.isDesktop";
         assertions =
           config:
           let

@@ -33,13 +33,6 @@ let
     "sinex-nats-client-nkey"
     "sinex-nats-server-cert"
     "sinex-nats-server-key"
-    # Minted by `sinnix spotify-auth` (one interactive browser-authorized
-    # bootstrap), not shipped as ciphertext. Declaring the contract here lets
-    # capture-spotify.nix reference config.sinnix.secrets.paths.<name> and
-    # stay enabled before the token exists -- the unit itself fails loudly
-    # with a one-line instruction until the operator runs the auth flow and
-    # `agenix -e secret/spotify-refresh-token.age`s the printed value in.
-    "spotify-refresh-token"
     # Shared by capture-mail (mbsync IMAP) and capture-calendar (vdirsyncer
     # CalDAV) -- same account, one app-specific password, one agenix secret.
     # Neither module ships ciphertext; both stay default-off until the
@@ -110,7 +103,6 @@ let
     # Account-linked bearer credentials, read directly from /run/agenix by
     # their owning capture lane -- no reason to widen their blast radius to
     # every login shell.
-    "spotify-refresh-token".exportEnv = false;
     "mail-app-password".exportEnv = false;
     # Retired registration token; the runner registers with github-token.
     # Ciphertext retirement is the operator's call, so keep it out of shells.

@@ -11,7 +11,7 @@ mkServiceModule {
   description = "Tailnet-only real-time resource dashboard";
   surface = {
     unit = "netdata.service";
-    resourceClass = "observability";
+    resourceClass = "critical";
     observe = {
       enable = true;
       restartable = true;
