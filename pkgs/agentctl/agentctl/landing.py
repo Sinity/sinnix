@@ -777,7 +777,13 @@ def _verify(
                     "checks": checks,
                     "recorded_at": now(),
                 }
-                receipt.update(_hosted_check_attestation(pull, check, candidate))
+                attestation = _hosted_check_attestation(pull, check, candidate)
+                if not attestation:
+                    receipt["status"] = "unknown"
+                    receipt["detail"] = (
+                        f"hosted check {check} succeeded without a candidate-bound tested SHA"
+                    )
+                receipt.update(attestation)
                 return run, receipt
             if state == "failure":
                 raise BatchRefusal(
@@ -828,6 +834,12 @@ def _verify(
         and before["dirty"] is False
         and after["dirty"] is False
     )
+    reference = started.get("reference")
+    if not isinstance(reference, str) or not reference:
+        raise BatchRefusal(
+            "verify_failed",
+            f"verification {profile} succeeded without an AgentCTL launch reference",
+        )
     receipt = {
         "kind": "operation",
         "operation": profile,
@@ -836,8 +848,8 @@ def _verify(
         "requested_sha": candidate,
         "phase": "succeeded",
         "status": "passed",
-        "reference": started.get("reference"),
-        "receipt": f"agentctl://jobs/{waited['job_id']}",
+        "reference": reference,
+        "receipt": f"agentctl://jobs/{waited['job_id']}/{reference}",
         "command": list(operation.command),
         "head_before": before["head"],
         "head_after": after["head"],

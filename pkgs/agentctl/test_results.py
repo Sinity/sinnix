@@ -224,6 +224,12 @@ def test_load_result_reads_a_file_or_the_claude_envelope(tmp_path: Path) -> None
     value, errors = results.load_result(wrapped, kind="worker")
     assert errors == [] and value["candidate_sha"] == SHA
 
+    incomplete_v2 = tmp_path / "incomplete-v2.json"
+    incomplete_v2.write_text(json.dumps(worker_result(schema_version=2)))
+    value, errors = results.load_result(incomplete_v2, kind="worker")
+    assert value["schema_version"] == 2
+    assert any("missing execution" in error for error in errors)
+
     bad = tmp_path / "bad.json"
     bad.write_text("not json")
     value, errors = results.load_result(bad, kind="worker")
