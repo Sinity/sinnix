@@ -34,10 +34,10 @@ wivrn_client_package() {
 }
 
 status() {
-  printf 'ALVR: '
-  alvr_dashboard --version 2>/dev/null || printf 'not on PATH\n'
-  printf 'WiVRn: '
-  wivrn-dashboard --version 2>/dev/null || printf 'not on PATH\n'
+  printf 'ALVR dashboard: '
+  command -v alvr_dashboard || printf 'not on PATH\n'
+  printf 'WiVRn dashboard: '
+  command -v wivrn-dashboard || printf 'not on PATH\n'
   printf 'Quest: '
   local target wivrn_package
   target="$(quest_target)"
