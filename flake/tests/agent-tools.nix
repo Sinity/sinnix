@@ -827,6 +827,12 @@ in
             grep -Fq 'claude-code/bin/claude.exe' "$HOME/.local/bin/claude-clodex"
             grep -Fq 'MCP_CONFIG="$HOME/.config/claude/mcp.json"' "$HOME/.local/bin/claude-clodex"
             grep -Fq 'export SINNIX_CLAUDE_PROFILE=full' "$HOME/.local/bin/claude-clodex"
+            grep -Fq 'export CLAUDE_CODE_FORK_SUBAGENT=1' "$HOME/.local/bin/claude-clodex"
+            grep -Fq 'export CLAUDE_CODE_PROCESS_WRAPPER="$HOME/.local/bin/clodex-claude"' "$HOME/.local/bin/claude-clodex"
+            if grep -Fq 'CLAUDE_CODE_PROCESS_WRAPPER' "$HOME/.local/bin/claude-full"; then
+              echo "native Claude wrapper must not route children through Clodex" >&2
+              exit 1
+            fi
             grep -Fq '@bman654/clodex' "$HOME/.local/bin/clodex"
             grep -Fq 'CLODEX_CLAUDE_PATH="$claude_binary"' "$HOME/.local/bin/clodex"
             grep -Fq 'TWEAKCC_CC_INSTALLATION_PATH="$claude_binary"' "$HOME/.local/bin/clodex"
@@ -835,7 +841,7 @@ in
             grep -Fq 'CLODEX_CREDENTIAL_HELPER=' "$HOME/.local/bin/clodex-claude"
             grep -Fq 'server --proxy' "$HOME/.local/bin/sinnix-clodex-server"
             grep -Fq 'CLODEX_CREDENTIAL_HELPER=' "$HOME/.local/bin/sinnix-clodex-server"
-            jq -e '.env.CLAUDE_CODE_PROCESS_WRAPPER == "/home/sinity/.local/bin/clodex-claude"' ${inputs.self}/dots/claude/managed-settings.json >/dev/null
+            jq -e '(.env | has("CLAUDE_CODE_PROCESS_WRAPPER") | not) and (.env | has("CLAUDE_CODE_FORK_SUBAGENT") | not)' ${inputs.self}/dots/claude/managed-settings.json >/dev/null
 
             # Every outer agent wrapper must enter agent.slice before its
             # bootstrap runs. A missing scope launch leaves npm/bootstrap work

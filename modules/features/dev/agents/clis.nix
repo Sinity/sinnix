@@ -319,13 +319,10 @@ mkFeatureModule {
             ];
 
             xdg.configFile = {
-              # Claude hooks are NOT registered here: settings.json references
-              # them dots-direct (dots/claude/hooks/*.sh), so a new hook file
-              # is live the moment it exists — no rebuild, no registration.
-              "claude/CLAUDE.md".source = mkDotsFile "/claude/CLAUDE.md";
-              # Claude has no client-specific skill subtree. Link its root to
-              # the live source directory so adding, removing, or editing a
-              # shared skill takes effect without another system activation.
+              "claude/CLAUDE.md" = {
+                source = mkDotsFile "/claude/CLAUDE.md";
+                force = true;
+              };
               "claude/skills" = {
                 source = mkDotsFile "/_ai/skills";
                 force = true;
