@@ -83,8 +83,19 @@ mkFeatureModule {
           };
         };
         networking.firewall.interfaces.${lanInterface} = {
-          allowedTCPPorts = [ 9757 ];
+          # 9790 serves private Quest video archives with HTTP byte ranges.
+          # DeoVR uses those ranges for direct LAN playback; the port stays
+          # scoped to the physical LAN and the user service starts on demand.
+          allowedTCPPorts = [ 9757 9790 ];
           allowedUDPPorts = [ 5353 9757 ];
+        };
+        systemd.user.services.sinnix-quest-media = {
+          description = "Private Quest video archive HTTP server";
+          serviceConfig = {
+            ExecStart = "${pkgs.python3}/bin/python3 -m http.server 9790 --bind 0.0.0.0 --directory /realm/archive/quest-3/videoshots";
+            Restart = "on-failure";
+            RestartSec = "5s";
+          };
         };
         # Archives are retained until a later realm backup receipt exists;
         # the script exits successfully when the USB headset is absent, so a

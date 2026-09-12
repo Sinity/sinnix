@@ -11,6 +11,7 @@ QUEST_MODEL="${SINNIX_QUEST_MODEL:-Quest 3}"
 MEDIA_DIR="${SINNIX_QUEST_MEDIA_DIR:-/realm/photos/quest-3/videoshots}"
 ARCHIVE_DIR="${SINNIX_QUEST_ARCHIVE_DIR:-/realm/archive/quest-3/videoshots}"
 BACKUP_MARKER="${SINNIX_QUEST_BACKUP_MARKER:-/persist/root/.cache/borg-drain/realm.last-success}"
+MEDIA_PORT="${SINNIX_QUEST_MEDIA_PORT:-9790}"
 TRANSPORT="${SINNIX_QUEST_TRANSPORT:-auto}"
 
 usage() {
@@ -28,6 +29,8 @@ Commands:
                       copy verified host ingress files into the permanent archive
   media prune [--apply]
                       show, or remove, verified archive copies older than 30 days
+  media serve         serve the archive to DeoVR over LAN and USB ADB reverse
+  media stop-serving  stop the archive service and remove USB forwarding
   sync                prepare a wired Syncthing pairing with Sinnix
   network-adb         enable TCP ADB from the authorized USB connection
   connect [HOST]      connect to HOST:5555, or the last known Quest address
@@ -342,6 +345,19 @@ media() {
           echo "eligible: $remote"
         fi
       done < <(ANDROID_SERIAL="$target" adb shell 'find /sdcard/Oculus/Videoshots -maxdepth 1 -type f -printf "%T@|%p\\n" 2>/dev/null' | tr -d '\r' | awk -F'|' '{ print int($1) "|" $2 }')
+      ;;
+    serve)
+      target="$(usb_serial)"
+      systemctl --user start sinnix-quest-media.service
+      adb -s "$target" reverse "tcp:$MEDIA_PORT" "tcp:$MEDIA_PORT"
+      echo "DeoVR LAN URL: http://$(ip -o -4 addr show dev enp4s0 | awk '{ split($4, octets, "/"); print octets[1]; exit }'):$MEDIA_PORT/"
+      echo "DeoVR USB URL: http://localhost:$MEDIA_PORT/"
+      ;;
+    stop-serving)
+      target="$(usb_serial)"
+      adb -s "$target" reverse --remove "tcp:$MEDIA_PORT" || true
+      systemctl --user stop sinnix-quest-media.service
+      echo "Quest archive server stopped"
       ;;
     *) echo "unknown media action: $action" >&2; return 2 ;;
   esac
