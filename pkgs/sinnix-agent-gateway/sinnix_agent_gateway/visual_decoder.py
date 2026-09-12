@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import io
 import json
-import math
 import resource
 import sys
 import warnings
@@ -63,85 +62,11 @@ def decode(request: dict) -> dict:
     path = Path(request["path"])
     render = request["render"]
     pages = request["pages"]
-    with path.open("rb") as handle:
-        is_pdf = b"%PDF-" in handle.read(1024)
-    if is_pdf:
-        import pymupdf
-
-        with pymupdf.open(path) as document:
-            if document.needs_pass:
-                raise DecodeError(
-                    "invalid_request", "PDF is encrypted; supply an unlocked copy"
-                )
-            if not document.is_pdf:
-                raise DecodeError("invalid_request", "source is not a PDF")
-            if not pages:
-                if render:
-                    raise DecodeError(
-                        "invalid_request",
-                        "PDF rendering requires explicit 1-based pages",
-                    )
-                pages = [1] if document.page_count else []
-            if any(page < 1 or page > document.page_count for page in pages):
-                raise DecodeError("invalid_request", "page is outside the document")
-            if render and (request["mode"] == "original" or request["crop"]):
-                raise DecodeError(
-                    "invalid_request",
-                    "PDF pages use fit or thumbnail mode without image crop",
-                )
-            result = {
-                "kind": "pdf",
-                "page_count": document.page_count,
-                "pages": [],
-                "renders": [],
-            }
-            total_pixels = 0
-            for number in pages:
-                page = document[number - 1]
-                width, height = page.rect.width, page.rect.height
-                if not all(math.isfinite(v) and v > 0 for v in (width, height)):
-                    raise DecodeError(
-                        "invalid_request", "PDF page has invalid dimensions"
-                    )
-                result["pages"].append(
-                    {
-                        "page": number,
-                        "width": width,
-                        "height": height,
-                        "unit": "pt",
-                        "rotation": page.rotation,
-                    }
-                )
-                if render:
-                    edge = (
-                        min(request["max_edge"], 512)
-                        if request["mode"] == "thumbnail"
-                        else request["max_edge"]
-                    )
-                    scale = edge / max(width, height)
-                    total_pixels += math.ceil(width * scale) * math.ceil(height * scale)
-                    if total_pixels > OUTPUT_PIXELS:
-                        raise DecodeError(
-                            "response_bound",
-                            "selected pages exceed 16 million output pixels; reduce pages or max_edge",
-                        )
-                    pixmap = page.get_pixmap(
-                        matrix=pymupdf.Matrix(scale, scale),
-                        alpha=False,
-                        colorspace=pymupdf.csRGB,
-                    )
-                    image = Image.frombytes(
-                        "RGB", (pixmap.width, pixmap.height), pixmap.samples
-                    )
-                    row = _encode(
-                        image,
-                        Path(request["directory"]) / f"page-{number}",
-                        request["budget"] // len(pages),
-                        original=False,
-                    )
-                    row["page"] = number
-                    result["renders"].append(row)
-            return result
+    if pages:
+        raise DecodeError(
+            "invalid_request",
+            "pages applies only to PDFs, which travel as binary resources",
+        )
     with Image.open(path) as image:
         if image.width * image.height > SOURCE_PIXELS:
             raise DecodeError(
@@ -154,7 +79,6 @@ def decode(request: dict) -> dict:
         if orientation in (5, 6, 7, 8):
             width, height = height, width
         result = {
-            "kind": "image",
             "width": width,
             "height": height,
             "frame_count": getattr(image, "n_frames", 1),
@@ -224,7 +148,7 @@ def main() -> None:
             json.dumps(
                 {
                     "error": "unavailable",
-                    "message": "visual decoding requires Pillow and PyMuPDF",
+                    "message": "visual image decoding requires Pillow",
                 }
             )
         )

@@ -128,7 +128,6 @@ python3Packages.buildPythonApplication {
     agentctl
     python3Packages.psutil
     python3Packages.pillow
-    python3Packages.pymupdf
   ];
 
   nativeCheckInputs = [

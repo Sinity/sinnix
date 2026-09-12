@@ -66,14 +66,6 @@ def _authorized(runtime: Runtime, locator: FileLocator, *, existing: bool) -> Pa
         raise ProtocolError(code, str(exc)) from exc
 
 
-def _document_affordances(media_type: str | None) -> list[str]:
-    if media_type == "application/pdf" or (
-        media_type is not None and media_type.startswith("image/")
-    ):
-        return ["documents.inspect", "documents.render"]
-    return []
-
-
 def _secret_descendant_globs(runtime: Runtime, roots: list[Path]) -> list[str]:
     """Return ripgrep exclusions for observer-visible roots where possible."""
     if runtime.principal.name == "operator":
@@ -168,11 +160,7 @@ def _stat(runtime: Runtime, inp: StatInput) -> FileStat:
         owner = pwd.getpwuid(details.st_uid).pw_name
     except (KeyError, ImportError):
         owner = None
-    affordances = (
-        ["files.read", "files.change", *_document_affordances(media)]
-        if kind == "file"
-        else []
-    )
+    affordances = ["files.read", "files.change"] if kind == "file" else []
     if kind == "directory":
         affordances = ["files.list", "files.search", "files.change"]
     return FileStat(
@@ -349,7 +337,6 @@ def _read(runtime: Runtime, inp: ReadInput) -> ActionResult:
             "files.change",
             "files.patch",
             "files.stat",
-            *_document_affordances(media),
         ],
     }
     if textual:

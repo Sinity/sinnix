@@ -148,14 +148,8 @@ def _get(runtime: Runtime, inp: GetInput) -> Metadata:
     return Metadata(
         **_row(raw).model_dump(),
         source_name=source.name,
-        affordances=["artifacts.read", *_visual_actions(raw.get("content_type"))],
+        affordances=["artifacts.read"],
     )
-
-
-def _visual_actions(media: str | None) -> list[str]:
-    if media == "application/pdf" or (media and media.startswith("image/")):
-        return ["documents.inspect", "documents.render"]
-    return []
 
 
 class ReadInput(RequestControls):
@@ -196,7 +190,7 @@ def _read(runtime: Runtime, inp: ReadInput) -> ActionResult:
         "owner_id": raw.get("owner_id"),
         "content_type": media,
         "bytes": size,
-        "affordances": ["artifacts.get", "artifacts.list", *_visual_actions(media)],
+        "affordances": ["artifacts.get", "artifacts.list"],
     }
     textual = inp.representation == "text" or (
         inp.representation == "auto" and is_text(media) and media not in IMAGE_TYPES

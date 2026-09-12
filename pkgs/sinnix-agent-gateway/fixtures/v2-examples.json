@@ -1,5 +1,5 @@
 {
-  "action_catalog_hash": "daa7e61046c0ca022806a018d4552421504da37a3a86e57a491645a7a951383e",
+  "action_catalog_hash": "647c7de05c55ffb94bc92bff7aa4eb50d186dcbd7be48dc0e8b7d9ac4c8689a1",
   "examples": [
     {
       "action": "gateway.status",
@@ -213,46 +213,6 @@
         ]
       },
       "title": "Find one old path"
-    },
-    {
-      "action": "documents.inspect",
-      "family": "query",
-      "input": {
-        "target": {
-          "path": "/realm/documents/example.pdf"
-        }
-      },
-      "title": "Inspect a PDF"
-    },
-    {
-      "action": "documents.render",
-      "family": "query",
-      "input": {
-        "pages": [
-          1,
-          2
-        ],
-        "target": {
-          "path": "/realm/documents/example.pdf"
-        }
-      },
-      "title": "View PDF pages"
-    },
-    {
-      "action": "documents.render",
-      "family": "query",
-      "input": {
-        "crop": {
-          "height": 600,
-          "width": 800,
-          "x": 100,
-          "y": 100
-        },
-        "target": {
-          "path": "/realm/photos/example.jpg"
-        }
-      },
-      "title": "View an image crop"
     },
     {
       "action": "projects.list",

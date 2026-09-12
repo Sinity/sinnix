@@ -212,6 +212,49 @@ let
           self = inputs.beads;
           buildGoModule = pkgs.buildGo126Module;
         };
+        # bd's upstream --directory flag chooses the requested checkout only
+        # while finding its configuration, then a redirect can send the
+        # command back to the caller's cwd authority.  Normalize the flag at
+        # the outer boundary instead: change cwd once and leave upstream no
+        # ambiguous routing instruction.  This applies equally to -C.
+        cwdWrapper = pkgs.writeShellScript "bd-cwd-wrapper" ''
+          set -euo pipefail
+          directory=""
+          args=()
+          parse_options=1
+          while (( $# )); do
+            if (( parse_options )) && [[ "$1" == "--" ]]; then
+              args+=("$1")
+              parse_options=0
+              shift
+              continue
+            fi
+            if (( parse_options )) && [[ "$1" == "--directory" || "$1" == "-C" ]]; then
+              if (( $# < 2 )); then
+                exec "$BD_UPSTREAM" "''${args[@]}" "$@"
+              fi
+              directory="$2"
+              shift 2
+              continue
+            fi
+            if (( parse_options )) && [[ "$1" == --directory=* ]]; then
+              directory="''${1#--directory=}"
+              shift
+              continue
+            fi
+            if (( parse_options )) && [[ "$1" == -C?* ]]; then
+              directory="''${1#-C}"
+              shift
+              continue
+            fi
+            args+=("$1")
+            shift
+          done
+          if [[ -n "$directory" ]]; then
+            cd -- "$directory"
+          fi
+          exec "$BD_UPSTREAM" "''${args[@]}"
+        '';
       in
       pkgs.symlinkJoin {
         name = "beads-with-dolt";
@@ -223,7 +266,10 @@ let
         };
         nativeBuildInputs = [ pkgs.makeWrapper ];
         postBuild = ''
-          wrapProgram $out/bin/bd --prefix PATH : ${pkgs.lib.makeBinPath [ doltPackage ]}
+          mv "$out/bin/bd" "$out/bin/.bd-upstream"
+          makeWrapper ${cwdWrapper} "$out/bin/bd" \
+            --set BD_UPSTREAM "$out/bin/.bd-upstream" \
+            --prefix PATH : ${pkgs.lib.makeBinPath [ doltPackage ]}
         '';
       };
 

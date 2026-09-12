@@ -26,8 +26,6 @@ ACTIONS = validate_actions(
         "beads.change",
         "beads.changeset",
         "beads.operate",
-        "documents.inspect",
-        "documents.render",
     ),
 )
 

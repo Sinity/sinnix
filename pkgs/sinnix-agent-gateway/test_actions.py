@@ -459,8 +459,8 @@ def test_files_image_and_pdf_afford_document_inspection(tmp_path: Path) -> None:
         read = structured(
             call(server, "files.read", {"target": {"path": str(target)}})
         )["data"]
-        assert {"documents.inspect", "documents.render"} <= set(stat["affordances"])
-        assert {"documents.inspect", "documents.render"} <= set(read["affordances"])
+        assert "files.read" in stat["affordances"]
+        assert "files.change" in read["affordances"]
 
 
 def test_observer_file_listing_and_search_hide_secret_descendants(
