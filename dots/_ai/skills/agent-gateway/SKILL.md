@@ -5,7 +5,7 @@ description: Use when invoking, inspecting, or documenting Sinnix Agent Gateway 
 
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: 7f96f482afd0829da20e7264475dab50157178267bd115e23d886108e24ed176 -->
+<!-- gateway-catalog-sha256: 0af8323df7950f0120b55aa5262d084ac1aa2875d75dcc19ced317bae4fa17e8 -->
 
 # Agent Gateway
 
@@ -69,7 +69,7 @@ Effectful actions (families change, operate, run) require `idempotency_key`; rep
 - `processes.list` — List live processes filtered by name, pid, unit, cgroup or user, with a canonical ref each.
 - `processes.tree` — Parent/child process tree from one root or from every top-level process, bounded by depth and node count.
 - `mcp.call` — Reads require an owner read-only annotation or an exact match to trusted registry selectors. Other requests require mcp.change (operator only). A target using server=sinnix-agent-gateway is routed to the named direct read action, preserving its native content blocks; changes stay direct-only.
-- `artifacts.read` — Read an artifact: text inline with offsets, images as an image block, other binary as a resource block.
+- `artifacts.read` — Read an artifact: text inline with offsets, images as image blocks, other binary as read-only links.
 - `captures.query` — List runtime-declared capture lanes, describe one, or read per-lane record deltas since a time.
 - `activity.query` — Reads sinnix-capture-v1 envelope files under each lane path within the time window; coverage lists which lanes contributed and which have no envelope files.
 - `sessions.query` — operation=structured queries Polylogue's sessions projection and retains owner coverage and provenance. The owner does not support sessions continuation. Legacy list cursors continue a newest-first snapshot for one hour; legacy reads return next_offset and legacy searches expose their bounded file coverage.
@@ -145,4 +145,4 @@ Effectful actions (families change, operate, run) require `idempotency_key`; rep
 
 The complete schemas and examples are in `docs/generated/agent-gateway-reference.md`.
 
-Catalog revision: `v3-typed-actions`. Catalog SHA-256: `7f96f482afd0829da20e7264475dab50157178267bd115e23d886108e24ed176`.
+Catalog revision: `v3-typed-actions`. Catalog SHA-256: `0af8323df7950f0120b55aa5262d084ac1aa2875d75dcc19ced317bae4fa17e8`.
