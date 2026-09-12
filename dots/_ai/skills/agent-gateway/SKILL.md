@@ -5,7 +5,7 @@ description: Use when invoking, inspecting, or documenting Sinnix Agent Gateway 
 
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: b8df6639b882d2cc6cd0d67984526741a92445a25c67c7ff2eac3f423b3310e5 -->
+<!-- gateway-catalog-sha256: daa7e61046c0ca022806a018d4552421504da37a3a86e57a491645a7a951383e -->
 
 # Agent Gateway
 
@@ -44,6 +44,10 @@ Effectful actions (families change, operate, run) require `idempotency_key`; rep
 - `files.list` — List a directory with a canonical ref for every child.
 - `files.read` — Read a file: text inline, images as an image block, other binary as a resource block.
 - `files.search` — Without content_regex the search is over paths (fd); with it, matching lines are returned (ripgrep --json). Results are bounded by limit and timeout.
+- `files.plan` — The caller supplies every mapping. The plan hashes each regular source file and records collision, parent and filesystem facts without changing host files.
+- `files.references` — Runs the existing bounded files.search text primitive once for each supplied old path. It only reports provenance and never rewrites references.
+- `documents.inspect` — Inspect an authorized image or PDF: dimensions, page count and selected page geometry.
+- `documents.render` — PDF pages are explicit and 1-based. Image crop coordinates follow EXIF orientation; only the first frame is rendered. Each view has page/source provenance and travels in ImageContent, independently of text read budgets. Original file bytes remain in a principal-scoped artifact. Decoder bounds: 80 million source image pixels, 16 million total output pixels, 2 GiB address space, 30 seconds and 3 MiB encoded images (4 MiB base64). Reduce pages or dimensions after response_bound. Client display depends on MCP image support.
 - `projects.list` — List the projects this principal may read, with canonical refs.
 - `projects.tree` — List files under a project-relative directory without following symlinks.
 - `projects.read` — Read a bounded line range of one project file.
@@ -111,6 +115,7 @@ Effectful actions (families change, operate, run) require `idempotency_key`; rep
 
 - `files.patch` — Pass expected_sha256 from the prior read so a concurrent change is refused instead of overwritten. Unified hunks are applied individually; rejected hunks are reported.
 - `files.change` — Copy and move never overwrite an existing destination. Remove supports regular files only.
+- `files.changeset` — All planned sources, destinations and parents are revalidated before the first mutation. Transfers never overwrite. Results are honest about partial completion and no global atomicity is claimed.
 - `projects.change` — Paths stay project-relative and policy-excluded paths (.git, secrets, local-only agent state) are refused. Take expected_dirty_sha256 or expected_head from projects.get, or expected_file_sha256 from projects.read.
 - `beads.change` — expected.expected_task_revision/expected_etag come from beads.get. Use mode=preview to see the compiled command and a preview_digest before applying.
 - `beads.changeset` — No global rollback: each applied step reports its outcome and a compensation hint. Preview first, then apply with the returned preview_digest.
@@ -142,4 +147,4 @@ Effectful actions (families change, operate, run) require `idempotency_key`; rep
 
 The complete schemas and examples are in `docs/generated/agent-gateway-reference.md`.
 
-Catalog revision: `v3-typed-actions`. Catalog SHA-256: `b8df6639b882d2cc6cd0d67984526741a92445a25c67c7ff2eac3f423b3310e5`.
+Catalog revision: `v3-typed-actions`. Catalog SHA-256: `daa7e61046c0ca022806a018d4552421504da37a3a86e57a491645a7a951383e`.

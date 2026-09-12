@@ -26,6 +26,8 @@ ACTIONS = validate_actions(
         "beads.change",
         "beads.changeset",
         "beads.operate",
+        "documents.inspect",
+        "documents.render",
     ),
 )
 
@@ -43,6 +45,33 @@ def git(path: Path, *arguments: str) -> str:
     return subprocess.run(
         ["git", "-C", str(path), *arguments], check=True, capture_output=True, text=True
     ).stdout.strip()
+
+
+def test_search_large_lines_and_requested_count(tmp_path: Path) -> None:
+    config, project, _ = fixture(tmp_path)
+    server = create_server(config, "operator")
+    rt = server._sinnix_revision_publisher.runtime
+    long_line = "needle " + "x" * 300_000
+    (project / "large.txt").write_text(long_line + "\n" + "needle\n" * 1100)
+    result = rt.projects.search("fixture", "needle", 1200)
+    assert not result["truncated"]
+    assert len(result["matches"]) == 1101
+    assert result["matches"][0]["text"] == long_line
+    assert projects.SearchInput(
+        target={"project": "fixture"}, query="needle", max_matches=1200
+    )
+
+
+def test_tree_exact_limit_and_large_requested_read(tmp_path: Path) -> None:
+    config, project, _ = fixture(tmp_path)
+    server = create_server(config, "operator")
+    rt = server._sinnix_revision_publisher.runtime
+    assert rt.projects.tree("fixture", max_entries=3)["truncated"] is False
+    content = "large " + "x" * 300_000
+    (project / "large.txt").write_text(content)
+    result = rt.projects.read("fixture", "large.txt", max_bytes=400_000)
+    assert result["content"] == content
+    assert not result["truncated"]
 
 
 def fixture(

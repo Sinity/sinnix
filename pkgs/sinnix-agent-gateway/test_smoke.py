@@ -95,21 +95,21 @@ def test_project_read_applies_late_line_range_before_byte_bound(tmp_path: Path) 
     assert "line-0251" in result["content"]
 
 
-def test_project_subprocess_output_is_bounded_before_storage(tmp_path: Path) -> None:
+def test_project_subprocess_output_reaches_result_storage(tmp_path: Path) -> None:
     cfg = dataclasses.replace(config(tmp_path), max_result_bytes=4096)
     runtime = Runtime.create(cfg, "observer")
-    output = runtime.projects._run_bounded(
+    output = runtime.projects._run_spooled(
         [sys.executable, "-c", "import sys; sys.stdout.write('x' * 10000000)"],
         cfg.projects["fixture"].path,
     )
-    assert len(output.encode()) == 4096
+    assert len(output.encode()) == 10000000
 
 
 def test_project_subprocess_failure_surfaces_bounded_stderr(tmp_path: Path) -> None:
     runtime = Runtime.create(config(tmp_path), "observer")
 
     with pytest.raises(ProjectError, match="project diagnostic"):
-        runtime.projects._run_bounded(
+        runtime.projects._run_spooled(
             [
                 sys.executable,
                 "-c",

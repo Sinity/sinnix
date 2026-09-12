@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -11,7 +12,7 @@ import zipfile
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Iterator, Mapping
+from typing import Any, Iterator, Mapping, TextIO
 
 from sinnix_lib.lock import flock
 from sinnix_mcp.execution import ExecutionProfile, OwnerExecution, OwnerRoute
@@ -321,7 +322,7 @@ class ProjectService:
         if project.checkout_discovery != "git-worktree":
             raise ProjectError("project checkout discovery is unsupported")
         configured_root = project.path.resolve(strict=True)
-        output = self._run_bounded(
+        output = self._run_spooled(
             ["git", "worktree", "list", "--porcelain"], project.path
         )
         rows: list[dict[str, Any]] = []
@@ -333,7 +334,7 @@ class ProjectService:
             path = Path(raw_path).resolve()
             if not path.is_dir():
                 continue
-            status = self._run_bounded(
+            status = self._run_spooled(
                 ["git", "-C", str(path), "status", "--porcelain=v2", "--branch"],
                 project.path,
             )
@@ -419,7 +420,8 @@ class ProjectService:
         root = self._safe_path(project, path, existing=True)
         if not root.is_dir():
             raise ProjectError("tree path must be a directory")
-        max_entries = max(1, min(max_entries, 2000))
+        if max_entries < 1:
+            raise ProjectError("max_entries must be positive")
         entries: list[dict[str, Any]] = []
         for current, dirs, files in os.walk(root, followlinks=False):
             current_path = Path(current)
@@ -441,8 +443,8 @@ class ProjectService:
                         "bytes": target.stat().st_size if target.is_file() else None,
                     }
                 )
-                if len(entries) >= max_entries:
-                    return {"entries": entries, "truncated": True}
+                if len(entries) > max_entries:
+                    return {"entries": entries[:max_entries], "truncated": True}
         return {"entries": entries, "truncated": False}
 
     def read(
@@ -460,7 +462,8 @@ class ProjectService:
         target = self._safe_path(project, path, existing=True)
         if not target.is_file() or target.is_symlink():
             raise ProjectError("path must identify a regular project file")
-        max_bytes = max(1, min(max_bytes, self.config.max_result_bytes))
+        if max_bytes < 1:
+            raise ProjectError("max_bytes must be positive")
         if end_line is not None and end_line < start_line:
             raise ProjectError("end_line must be greater than or equal to start_line")
         content: list[str] = []
@@ -528,7 +531,8 @@ class ProjectService:
                 if len(files) >= max_files:
                     truncated = True
                     break
-                data = path.read_bytes()
+                with path.open("rb") as handle:
+                    data = handle.read(max_bytes - total + 1)
                 if total + len(data) > max_bytes:
                     truncated = True
                     break
@@ -565,47 +569,15 @@ class ProjectService:
             )
         return {"directory": capture, "archive": archive, "manifest": manifest}
 
-    def _run_bounded_result(
-        self, command: list[str], cwd: Path, timeout: int = 15
-    ) -> tuple[str, bool]:
-        safe_env = {
-            "HOME": str(Path.home()),
-            "LANG": os.environ.get("LANG", "C.UTF-8"),
-            "PATH": os.environ.get("PATH", "/run/current-system/sw/bin"),
-            "GIT_OPTIONAL_LOCKS": "0",
-        }
-        result = OwnerExecution(safe_env).run(
-            command,
-            ExecutionProfile(
-                route=OwnerRoute("project-read"),
-                cwd=cwd,
-                timeout_seconds=timeout,
-                max_stdout_bytes=self.config.max_result_bytes,
-                max_stderr_bytes=self.config.max_result_bytes,
-                environment={"GIT_OPTIONAL_LOCKS": "0"},
-            ),
-        )
-        text = result.stdout.decode("utf-8", errors="replace")
-        if result.timed_out:
-            raise ProjectError("project operation timed out")
-        if result.output_exceeded:
-            return text, True
-        if result.exit_status not in (0, 1):
-            diagnostic = result.stderr.decode("utf-8", errors="replace").strip()
-            raise ProjectError(diagnostic or text.strip() or "project operation failed")
-        return text, False
-
-    def _run_bounded(self, command: list[str], cwd: Path, timeout: int = 15) -> str:
-        return self._run_bounded_result(command, cwd, timeout)[0]
-
     def _run_spooled(self, command: list[str], cwd: Path, timeout: int = 15) -> str:
-        """Read a complete owner response without retaining its stdout in memory.
+        with self._spooled_output(command, cwd, timeout) as output:
+            return output.read()
 
-        V2 result recording turns a completed oversized response into an
-        attested artifact.  The temporary spool prevents the execution kernel's
-        transport buffer from cutting a valid project diff short before that
-        result-layer continuation can run.
-        """
+    @contextmanager
+    def _spooled_output(
+        self, command: list[str], cwd: Path, timeout: int = 15
+    ) -> Iterator[TextIO]:
+        """Keep owner output on disk until consumers select the requested rows."""
         safe_env = {
             "HOME": str(Path.home()),
             "LANG": os.environ.get("LANG", "C.UTF-8"),
@@ -640,7 +612,8 @@ class ProjectService:
             if result.exit_status not in (0, 1):
                 diagnostic = result.stderr.decode("utf-8", errors="replace").strip()
                 raise ProjectError(diagnostic or "project operation failed")
-            return spool.read_text(encoding="utf-8", errors="replace")
+            with spool.open(encoding="utf-8", errors="replace") as output:
+                yield output
 
     @contextmanager
     def _locked_mutation(
@@ -702,13 +675,22 @@ class ProjectService:
         )
         if not query or len(query) > 1000:
             raise ProjectError("query must contain 1-1000 characters")
-        max_matches = max(1, min(max_matches, 1000))
-        output, output_truncated = self._run_bounded_result(
+        if max_matches < 1:
+            raise ProjectError("max_matches must be positive")
+        with self._spooled_output(
             ["rg", "--json", "--hidden", "--glob", "!.git/**", "--", query, "."],
             project.path,
-        )
+        ) as output:
+            matches = self._search_matches(output, max_matches)
+        return {
+            "matches": matches[:max_matches],
+            "truncated": len(matches) > max_matches,
+        }
+
+    @staticmethod
+    def _search_matches(output: TextIO, max_matches: int) -> list[dict[str, Any]]:
         matches: list[dict[str, Any]] = []
-        for line in output.splitlines():
+        for line in output:
             try:
                 row = json.loads(line)
             except ValueError:
@@ -716,20 +698,26 @@ class ProjectService:
             if row.get("type") != "match":
                 continue
             data = row["data"]
-            path_value = data["path"]["text"]
+            path_data = data["path"]
+            path_value = path_data.get("text")
+            if path_value is None:
+                path_value = os.fsdecode(base64.b64decode(path_data["bytes"]))
             if _is_excluded(Path(path_value)):
                 continue
+            line_data = data["lines"]
+            text = line_data.get("text")
+            if text is None:
+                text = base64.b64decode(line_data["bytes"]).decode("utf-8", "replace")
             matches.append(
                 {
                     "path": path_value,
                     "line": data.get("line_number"),
-                    "text": data["lines"]["text"].rstrip("\n"),
+                    "text": text.rstrip("\n"),
                 }
             )
-        return {
-            "matches": matches[:max_matches],
-            "truncated": output_truncated or len(matches) > max_matches,
-        }
+            if len(matches) > max_matches:
+                break
+        return matches
 
     def diff(
         self, project_id: str, ref: str | None = None, checkout_id: str | None = None
@@ -741,7 +729,7 @@ class ProjectService:
         if ref is not None:
             if ref.startswith("-") or not re.fullmatch(r"[A-Za-z0-9_./-]{1,200}", ref):
                 raise ProjectError("invalid git ref")
-            resolved_ref = self._run_bounded(
+            resolved_ref = self._run_spooled(
                 [
                     "git",
                     "rev-parse",
@@ -779,7 +767,7 @@ class ProjectService:
         def resolve(revision: str) -> str:
             if not re.fullmatch(r"[0-9a-f]{40,64}", revision):
                 raise ProjectError("commit revision is malformed")
-            resolved = self._run_bounded(
+            resolved = self._run_spooled(
                 [
                     "git",
                     "rev-parse",
@@ -795,12 +783,12 @@ class ProjectService:
 
         base = resolve(base_revision)
         head = resolve(head_revision)
-        merge_base = self._run_bounded(
+        merge_base = self._run_spooled(
             ["git", "merge-base", base, head], project.path
         ).strip()
         if not re.fullmatch(r"[0-9a-f]{40,64}", merge_base):
             raise ProjectError("commit range has no merge base")
-        content, truncated = self._run_bounded_result(
+        content = self._run_spooled(
             ["git", "diff", "--no-ext-diff", "--no-textconv", f"{base}..{head}", "--"],
             project.path,
         )
@@ -811,12 +799,12 @@ class ProjectService:
             "relation": "base_is_ancestor" if merge_base == base else "diverged",
             "merge_base": merge_base,
             "diff": content,
-            "truncated": truncated,
+            "truncated": False,
         }
 
     def summary(self, project_id: str) -> dict[str, Any]:
         project = self._project(project_id)
-        status = self._run_bounded(
+        status = self._run_spooled(
             ["git", "status", "--porcelain=v2", "--branch"], project.path
         )
         branch: dict[str, Any] = {
@@ -853,12 +841,12 @@ class ProjectService:
                 continue
             if line.startswith("? "):
                 changes["untracked"] += 1
-        head_id = self._run_bounded(
+        head_id = self._run_spooled(
             ["git", "rev-parse", "--verify", "--quiet", "HEAD"], project.path
         ).strip()
         commit: dict[str, str] | None = None
         if head_id:
-            latest = self._run_bounded(
+            latest = self._run_spooled(
                 ["git", "log", "-1", "--format=%H%x09%cI%x09%s"], project.path
             ).rstrip("\n")
             commit_id, committed_at, subject = latest.split("\t", maxsplit=2)
@@ -879,7 +867,7 @@ class ProjectService:
     def summary_revision(self, project_id: str) -> str:
         """Return the semantic inputs that determine ``summary``."""
         project = self._project(project_id)
-        status = self._run_bounded(
+        status = self._run_spooled(
             ["git", "status", "--porcelain=v2", "--branch"], project.path
         )
         head = next(

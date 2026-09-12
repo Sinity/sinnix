@@ -95,3 +95,50 @@ def test_principal_scoping(tmp_path: Path) -> None:
         observer, "artifacts.read", {"target": {"artifact_id": artifact_id}}, BY_NAME
     )
     assert denied["error"]["code"] == "policy_denied"
+
+
+def test_text_chunks_preserve_utf8(tmp_path: Path) -> None:
+    rt = runtime(tmp_path)
+    original = "a🙂ż日" * 12
+    artifact_id = register(rt, "unicode.txt", original.encode(), "note")
+    parts = []
+    offset = 0
+    while True:
+        data = call(
+            rt,
+            "artifacts.read",
+            {
+                "target": {"artifact_id": artifact_id},
+                "offset": offset,
+                "max_bytes": 4,
+            },
+            BY_NAME,
+        )["data"]
+        parts.append(data["text"])
+        assert data["returned_bytes"] == len(data["text"].encode())
+        if data["next_offset"] is None:
+            break
+        assert data["next_offset"] > offset
+        offset = data["next_offset"]
+    assert "".join(parts) == original
+
+
+def test_filtered_listing_continues_immutable_snapshot(tmp_path: Path) -> None:
+    rt = runtime(tmp_path)
+    expected = {register(rt, f"note-{i}.txt", b"note", "note") for i in range(3)}
+    for i in range(4):
+        register(rt, f"other-{i}.txt", b"other", "other")
+    request = {"kind": "note", "limit": 1}
+    result = call(rt, "artifacts.list", request, BY_NAME)
+    assert result["page"]["total"] == 3
+    found = {result["data"]["artifacts"][0]["artifact_id"]}
+    register(rt, "late.txt", b"late", "note")
+    while result["page"]["next_cursor"]:
+        result = call(
+            rt,
+            "artifacts.list",
+            {**request, "cursor": result["page"]["next_cursor"]},
+            BY_NAME,
+        )
+        found.update(row["artifact_id"] for row in result["data"]["artifacts"])
+    assert found == expected

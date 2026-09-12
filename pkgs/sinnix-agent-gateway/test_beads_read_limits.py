@@ -65,7 +65,8 @@ def test_large_write_response_confirms_one_applied_mutation(tmp_path):
     state['writes'] += 1; state['revision'] += 1
     pathlib.Path(state_path).write_text(json.dumps(state))
     print(json.dumps({'id':'fixture-1','notes':'x'*300000}))
-""" + marker,
+"""
+            + marker,
         )
     )
     result = service.change(

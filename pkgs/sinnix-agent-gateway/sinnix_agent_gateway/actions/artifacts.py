@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import codecs
+import hashlib
+import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -38,7 +41,8 @@ class ListInput(RequestControls):
         description="Exact artifact kind, e.g. mcp-stderr, machine-query.",
     )
     owner_id: str | None = Field(default=None, max_length=256)
-    limit: int = Field(default=100, ge=1, le=1_000)
+    limit: int = Field(default=100, ge=1)
+    cursor: str | None = Field(default=None, max_length=8192)
 
 
 class Listing(GatewayModel):
@@ -64,13 +68,50 @@ def _row(raw: dict[str, Any]) -> ArtifactRow:
     )
 
 
-def _list(runtime: Runtime, inp: ListInput) -> Listing:
-    rows = [_row(raw) for raw in runtime.artifacts.list(inp.limit)["artifacts"]]
-    if inp.kind is not None:
-        rows = [row for row in rows if row.kind == inp.kind]
-    if inp.owner_id is not None:
-        rows = [row for row in rows if row.owner_id == inp.owner_id]
-    return Listing(artifacts=rows, affordances=["artifacts.get", "artifacts.read"])
+def _list(runtime: Runtime, inp: ListInput) -> ActionResult:
+    runtime.principal.require(Capability.ARTIFACT_READ)
+    query = {
+        "action": "artifacts.list",
+        "kind": inp.kind,
+        "owner_id": inp.owner_id,
+        "limit": inp.limit,
+    }
+    query_hash = hashlib.sha256(json.dumps(query, sort_keys=True).encode()).hexdigest()
+    if inp.cursor:
+        snapshot = runtime.results.continue_snapshot(
+            inp.cursor, query_sha256=query_hash
+        )
+    else:
+        rows = [
+            _row(raw).model_dump()
+            for raw in runtime.artifacts.list(
+                None, kind=inp.kind, owner_id=inp.owner_id
+            )["artifacts"]
+        ]
+        revision = hashlib.sha256(json.dumps(rows, sort_keys=True).encode()).hexdigest()
+        writer = runtime.results.start_snapshot(
+            query_sha256=query_hash, source_revision=revision, page_size=inp.limit
+        )
+        try:
+            for row in rows:
+                writer.append(row)
+            snapshot = runtime.results.finish_snapshot(writer)
+        except Exception:
+            writer.abort()
+            raise
+    return ActionResult(
+        Listing(
+            artifacts=snapshot["rows"], affordances=["artifacts.get", "artifacts.read"]
+        ),
+        page={
+            "kind": "snapshot",
+            "cursor": snapshot["cursor"],
+            "next_cursor": snapshot["next_cursor"],
+            "total": snapshot["row_count"],
+            "expires_at": snapshot["expires_at"],
+            "snapshot_ref": snapshot["snapshot_ref"],
+        },
+    )
 
 
 class GetInput(RequestControls):
@@ -107,14 +148,20 @@ def _get(runtime: Runtime, inp: GetInput) -> Metadata:
     return Metadata(
         **_row(raw).model_dump(),
         source_name=source.name,
-        affordances=["artifacts.read"],
+        affordances=["artifacts.read", *_visual_actions(raw.get("content_type"))],
     )
+
+
+def _visual_actions(media: str | None) -> list[str]:
+    if media == "application/pdf" or (media and media.startswith("image/")):
+        return ["documents.inspect", "documents.render"]
+    return []
 
 
 class ReadInput(RequestControls):
     target: ArtifactLocator
     offset: int = Field(default=0, ge=0, description="Byte offset for text reads.")
-    max_bytes: int = Field(default=64_000, ge=1, le=4_194_304)
+    max_bytes: int = Field(default=64_000, ge=1)
     representation: Literal["auto", "text", "binary"] = "auto"
 
 
@@ -141,7 +188,7 @@ def _read(runtime: Runtime, inp: ReadInput) -> ActionResult:
     raw, source, ref = _metadata(runtime, inp.target)
     media = raw.get("content_type") or "application/octet-stream"
     size = source.stat().st_size
-    max_bytes = min(inp.max_bytes, runtime.config.max_result_bytes)
+    max_bytes = inp.max_bytes
     base = {
         "ref": ref,
         "artifact_id": raw["artifact_id"],
@@ -149,7 +196,7 @@ def _read(runtime: Runtime, inp: ReadInput) -> ActionResult:
         "owner_id": raw.get("owner_id"),
         "content_type": media,
         "bytes": size,
-        "affordances": ["artifacts.get", "artifacts.list"],
+        "affordances": ["artifacts.get", "artifacts.list", *_visual_actions(media)],
     }
     textual = inp.representation == "text" or (
         inp.representation == "auto" and is_text(media) and media not in IMAGE_TYPES
@@ -160,13 +207,21 @@ def _read(runtime: Runtime, inp: ReadInput) -> ActionResult:
             data = handle.read(max_bytes + 1)
         truncated = len(data) > max_bytes
         data = data[:max_bytes]
+        decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        text = decoder.decode(data, final=not truncated)
+        consumed = len(data) - len(decoder.getstate()[0])
+        if truncated and consumed == 0:
+            raise ProtocolError(
+                "invalid_request",
+                "max_bytes cannot fit the next UTF-8 character; retry with at least 4",
+            )
         return ActionResult(
             Content(
                 **base,
-                text=data.decode("utf-8", "replace"),
+                text=text,
                 offset=inp.offset,
-                returned_bytes=len(data),
-                next_offset=inp.offset + len(data) if truncated else None,
+                returned_bytes=consumed,
+                next_offset=inp.offset + consumed if truncated else None,
                 truncated=truncated,
             )
         )
