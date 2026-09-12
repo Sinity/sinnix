@@ -12,7 +12,7 @@ from pathlib import Path
 
 import anyio
 import pytest
-from mcp.types import CallToolResult, ImageContent
+from mcp.types import CallToolResult, ImageContent, ResourceLink
 from sinnix_agent_gateway import files as host_files
 from sinnix_agent_gateway.action import Action, MutationControls, RequestControls
 from sinnix_agent_gateway.actions import ALL_ACTIONS, files, visible
@@ -103,11 +103,7 @@ def test_tools_list_carries_typed_actions_next_to_verbs(tmp_path: Path) -> None:
     read = tools["files.read"]
     locator = read.input_schema["$defs"]["FileLocator"]["properties"]
     assert "path" in locator and "ref" in locator
-    assert read.input_schema["properties"]["representation"]["enum"] == [
-        "auto",
-        "text",
-        "binary",
-    ]
+    assert read.input_schema["properties"]["representation"]["enum"] == ["auto", "text"]
     assert read.annotations is not None and read.annotations.read_only_hint is True
 
 
@@ -238,6 +234,26 @@ def test_image_read_returns_an_image_block(tmp_path: Path) -> None:
     assert data["artifact"]["sha256"] == data["sha256"]
     encoded = json.dumps(structured(result))
     assert "�" not in encoded
+
+
+def test_binary_read_never_attaches_bytes_to_the_chat(tmp_path: Path) -> None:
+    server = create_server(config(tmp_path), "operator")
+    pdf = tmp_path / "page.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF\n")
+
+    linked = call(server, "files.read", {"target": {"path": str(pdf)}})
+    assert isinstance(linked, CallToolResult) and not linked.is_error
+    assert any(isinstance(block, ResourceLink) for block in linked.content)
+    assert structured(linked)["data"]["artifact"]["representation"] == "link"
+
+    rejected = structured(
+        call(
+            server,
+            "files.read",
+            {"target": {"path": str(pdf)}, "representation": "binary"},
+        )
+    )
+    assert rejected["error"]["code"] == "invalid_request"
 
 
 def test_unknown_input_field_is_typed_before_file_mutation(tmp_path: Path) -> None:

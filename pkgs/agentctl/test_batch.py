@@ -1192,6 +1192,17 @@ def test_a_conflict_runs_one_integration_agent_and_requires_every_branch_merged(
     task = next(t for t in harness.pueue.tasks().values() if t.label == integrate[0])
     prompt = (Path(task.path) / ".agentctl" / "integrate.md").read_text()
     assert "- a.py" in prompt and f"batch/{run['run_id']}/fx-solo" in prompt
+    attempt = next(
+        item
+        for item in landed["landing"]["agent_attempts"]
+        if item["kind"] == "integration"
+    )
+    assert attempt["kind"] == "integration"
+    assert attempt["job_id"] == task.task_id
+    assert attempt["launch_reference"] == launch.launch_reference(task)
+    assert attempt["requested"] == {
+        key: run["workers"][0][key] for key in ("backend", "model", "effort")
+    }
     assert landed["acceptance"]["candidate_sha"] == SHA
 
 
@@ -1967,6 +1978,13 @@ def test_a_failing_verdict_is_recorded_and_a_hand_fix_lands_with_keep_integratio
     assert stored.landing["review_verdict"]["verdict"] == "fail"
     assert stored.landing["review_verdict"]["evidence"] == ["off by one in a.py:3"]
     assert stored.landing["review_verdict"]["candidate_sha"] == SHA
+    attempt = stored.landing["agent_attempts"][-1]
+    assert attempt["kind"] == "review"
+    assert attempt["job_id"] == stored.landing["review_verdict"]["job_id"]
+    assert attempt["launch_reference"] == stored.landing["review_verdict"]["reference"]
+    assert attempt["requested"] == {
+        key: run["workers"][0][key] for key in ("backend", "model", "effort")
+    }
 
     # The operator fixes the integration worktree by hand: a new commit on it.
     integration = stored.landing["integration_worktree"]

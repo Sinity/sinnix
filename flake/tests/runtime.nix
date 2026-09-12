@@ -446,6 +446,7 @@ in
           let
             service = config.systemd.services.lynchpin-materialize.serviceConfig;
             surface = config.sinnix.runtime.inventory.surfaces.lynchpin-materialize;
+            lynchpinDevShell = inputs.lynchpin.devShells.${system}.default;
           in
           [
             {
@@ -462,6 +463,10 @@ in
                 && !(lib.hasInfix "materialize --all" service.ExecStart)
                 && !(lib.hasInfix "--promote" service.ExecStart);
               message = "the retired monolithic Lynchpin materialization shell must not survive in the rendered unit";
+            }
+            {
+              assertion = lib.any (package: (package.pname or "") == "repomix") lynchpinDevShell.nativeBuildInputs;
+              message = "the Lynchpin project devshell must provide repomix to the scheduled converge operation";
             }
           ];
       };

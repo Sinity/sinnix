@@ -260,9 +260,7 @@ mkFeatureModule {
       {
         sinnix.features.dev.agentTools.hermesConfigSource = hermesConfigFile;
         sinnix.features.dev.agentTools.hermesProfileConfigSources = hermesProfileConfigFiles;
-        # Durable Claude Code policy (hooks, permissions, env) ships as the
-        # top-precedence managed settings file. The source is the live dots
-        # checkout, not a store copy, so policy edits propagate instantly.
+        # Durable Claude policy links directly to the live dots source.
         environment.etc."claude-code/managed-settings.json".source =
           "${sinnixCfg.paths.dotsRoot}/claude/managed-settings.json";
         sinnix.persistence.home = {
@@ -361,9 +359,7 @@ mkFeatureModule {
                 chmod 600 "$HOME/.hermes/profiles/${name}/config.yaml"
               '') (lib.attrNames hermesProfileConfigFiles)}
             '';
-            # Codex/Gemini read the global instruction file directly; CLAUDE.md is
-            # flat (no @-transclusion), so a symlink suffices and can never go
-            # stale between activations.
+            # Codex and Gemini share the live global instruction source.
             home.activation.linkGlobalAgentInstructions = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
               mkdir -p "$HOME/.codex" "$HOME/.gemini"
               ln -sfn "$HOME/.config/claude/CLAUDE.md" "$HOME/.codex/AGENTS.md"

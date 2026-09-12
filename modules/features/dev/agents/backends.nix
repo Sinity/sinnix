@@ -35,10 +35,15 @@ let
       STATE="$HOME/.local/state/${stateDir}"
       # The bootstrap is a subprocess. Keep the npm prefix and runtime PATH in
       # this wrapper too, because the final direct exec must not depend on the
-      # removed launch.sh to reconstruct them.
+      # removed launch.sh to reconstruct them. Keep the managed command
+      # directory ahead of the private npm prefix: Codex can launch further
+      # interactive app processes, and their `codex` lookup must re-enter the
+      # lean wrapper instead of bypassing its selected profile. The wrapper
+      # invokes the private binary by its absolute path below, so this does
+      # not affect its own final exec or the writable ~/.codex overlay.
       export npm_config_prefix="$STATE/npm"
       export NPM_CONFIG_PREFIX="$STATE/npm"
-      export PATH="${agentRuntimePath}:$STATE/npm/bin:$PATH"
+      export PATH="$HOME/.local/bin:${agentRuntimePath}:$STATE/npm/bin:$PATH"
       # Guarantee the NVMe scratch TMPDIR rather than trusting inheritance:
       # environment.sessionVariables.TMPDIR (profiles/workstation.nix) only
       # reaches processes whose session imported it, so an agent CLI started

@@ -281,14 +281,14 @@ def _list(runtime: Runtime, inp: ListInput) -> DirectoryListing:
 class ReadInput(RequestControls):
     target: FileLocator
     offset: int = Field(default=0, ge=0, description="Byte offset for raw reads.")
-    max_bytes: int = Field(default=64_000, ge=1)
+    max_bytes: int = Field(default=64_000, ge=1, description="Maximum inline text bytes.")
     line_start: int | None = Field(
         default=None, ge=1, description="First line (1-based) for text reads."
     )
     line_count: int | None = Field(default=None, ge=1)
-    representation: Literal["auto", "text", "binary"] = Field(
+    representation: Literal["auto", "text"] = Field(
         default="auto",
-        description="auto returns text inline for text types and a typed content block for binary types.",
+        description="auto returns text inline and binary files as canonical read-only links.",
     )
 
 
@@ -309,7 +309,7 @@ class FileContent(GatewayModel):
     total_lines: int | None = None
     artifact: Artifact | None = Field(
         default=None,
-        description="Set for binary files; the bytes travel in a content block.",
+        description="Set for binary files; bytes are represented by a canonical read-only link.",
     )
     affordances: list[str] = Field(default_factory=list)
 
@@ -376,10 +376,12 @@ def _read(runtime: Runtime, inp: ReadInput) -> ActionResult:
             )
         )
     artifact, blocks = attach(
-        target, ref=ref, media_type=media, max_inline_bytes=max_bytes
+        target,
+        ref=ref,
+        media_type=media,
     )
     return ActionResult(
-        FileContent(**base, artifact=artifact, returned_bytes=min(size, max_bytes)),
+        FileContent(**base, artifact=artifact, returned_bytes=0),
         blocks=blocks,
     )
 
@@ -421,7 +423,7 @@ ACTIONS: tuple[Action, ...] = (
         name="files.read",
         family=VerbFamily.QUERY,
         owner="files",
-        summary="Read a file: text inline, images as an image block, other binary as a resource block.",
+        summary="Read a file: text inline, images as image blocks, other binary as read-only links.",
         Input=ReadInput,
         Output=FileContent,
         handler=_read,

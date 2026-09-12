@@ -698,9 +698,7 @@ def _operate(runtime: Runtime, inp: BrowserOperateInput) -> ActionResult:
                 media_type=media or None,
             )
         else:
-            artifact, _ = attach(
-                destination, ref=op.destination.resolve()[1], max_inline_bytes=1
-            )
+            artifact, _ = attach(destination, ref=op.destination.resolve()[1])
     elif isinstance(op, UploadOp):
         arguments = ["upload-files", page_id, "--selector", op.element.css()]
         for locator in op.files:

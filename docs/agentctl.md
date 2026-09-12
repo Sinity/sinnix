@@ -29,7 +29,7 @@ command, the run manifest of a batch, and one operator screen.
 | `batch land <run>`                                                                                              | the landing task's body: integrate, verify, review, publish, record acceptance, close satisfied beads and release the claim on the rest, remove worktrees; re-runnable                                                                     |
 | `batch queue <run>`                                                                                             | queue the landing as a job instead of running it here, for a caller that cannot hold a process for the whole landing, or a run whose landing task the queue lost                                                                           |
 | `batch clean [p]`                                                                                               | remove the worktrees of runs that are over -- landed, abandoned, or with no manifest left -- keeping any that holds uncommitted or unmerged work; never by age                                                                             |
-| `batch status <run>` / `batch list [p]`                                                                         | the manifest joined with pueue task state and the landing PR; `status` prints each worker's prompt path, the exact command each worker still owing a result needs, and for a landing the queue no longer has the step that replaces it     |
+| `batch status <run>` / `batch list [p]`                                                                         | the manifest joined with pueue task state and the landing PR; `status` prints worker and landing launch identities with their requested selections, each worker's prompt path, the exact command each worker still owing a result needs, and an abandonment reason and residual work when recorded |
 | `batch result <run> <worker> <result.json>`                                                                     | file a schema-validated result for a worker another harness ran; releases the stashed landing task once every worker has one, and queues a replacement for one the queue has lost                                                          |
 | `batch scope-correct <run> <worker> <candidate> --authorize <bead>=<glob>…`                                     | replace a malformed stored worker scope with candidate-bound, per-bead authority while retaining the correction history                                                                                                                    |
 | `batch resume <run> --worker <w>`                                                                               | queue a fresh agent into the worker's existing worktree with a resume packet (`.agentctl/resume-<n>.md`) carrying the original                                                                                                             |
@@ -250,11 +250,15 @@ project, base_commit, created_at, harness (queued|external)
 runtime_revision  the agentctl store path that started the run
 verify_profile    the descriptor's [workspace].verify.candidate
 review_profile    "review"
-workers: [{id, beads: [...], branch, worktree, task_id|null, task_ids,
+workers: [{id, beads: [...], branch, worktree, task_id|null, task_reference|null,
+           task_ids, attempts: [{number, task_id, task_reference, prompt_path,
+           result_path, backend, model, effort}], provenance|null,
            write_scope, scope_authority, scope_corrections,
            result|null, result_path, result_recorded_at, claimed,
            claimed_beads, backend, model, effort}]
 landing: {task_id|null, integration_branch, integration_worktree,
+          task_reference|null, agent_attempts: [{kind, job_id, launch_reference,
+          requested, prompt_path}],
           candidate_sha|null, pr_number|null, verify_run, review_verdict,
           failure|null, refreshes, refreshed_base, inputs_digest}
 acceptance: {candidate_sha, verify_run, review_verdict,
@@ -274,6 +278,8 @@ Record-only fields, written for the audit trail and read by no verb:
 `result_recorded_at`, and the acceptance's `verify_run`, `review_verdict`,
 `published`, `advisory` and `recorded_at`. Everything else steers a later
 `start`, `result`, `resume`, `land` or `status`.
+
+`batch status` renders a dispatch selection as requested provenance. It does not claim that a backend or model actually executed unless an attested runner can provide that fact. Pueue's phase and elapsed time remain the evidence for queued or running work; AgentCTL does not infer a separate `stalled` state from elapsed time.
 
 ### Start
 

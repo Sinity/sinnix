@@ -111,13 +111,3 @@ Use [[task-backend]] to select ready ownership groups, then choose native work
 or an external batch according to cohesion, isolation, unattended execution,
 and backend needs. Prioritize finishing work over filling slots; heavy
 verification remains independently bounded by its declared job group.
-
-## Runtime architecture
-
-pueue owns each queued job's queue state, process, terminal result, and
-cancellation. A pause is a pueue group operation; a systemd timer only wakes
-`agentctl` to request that operation when backpressure policy calls for it.
-worktrunk owns batch worktrees. GitHub owns review, required checks, and merge
-where the project publishes through PRs. Beads owns tasks and claims. Systemd
-owns fixed services and timer wake-ups, not queued-job state. `agentctl` is in-process: no daemon, socket,
-or independent scheduler.

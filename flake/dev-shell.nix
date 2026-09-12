@@ -195,6 +195,19 @@
         ${helpLines}
         echo ""
       '';
+
+      # Keep package-specific Python test dependencies out of the general
+      # development shell.  This shell is the lightweight source-test entry
+      # point for focused gateway tests; inputsFrom carries the gateway
+      # package's runtime and native check inputs (including mcp and pytest).
+      gatewayTestShell = pkgs.mkShellNoCC {
+        name = "sinnix-agent-gateway-tests";
+        inputsFrom = [ scriptPkgs.sinnix-agent-gateway ];
+        shellHook = ''
+          _gateway_source="''${PRJ_ROOT:-$(${pkgs.git}/bin/git rev-parse --show-toplevel 2>/dev/null || pwd)}/pkgs/sinnix-agent-gateway"
+          export PYTHONPATH="$_gateway_source:''${PYTHONPATH:-}"
+        '';
+      };
     in
     {
       devShells.default = pkgs.mkShellNoCC {
@@ -244,5 +257,7 @@
           echo ""
         '';
       };
+
+      devShells.gateway-tests = gatewayTestShell;
     };
 }
