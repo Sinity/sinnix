@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import os
 import re
 from pathlib import Path
 from typing import Any, Literal
@@ -50,7 +51,7 @@ def not_found(kind: str, locator: Any) -> ProtocolError:
 
 
 def encode_file_ref(path: str) -> str:
-    token = base64.urlsafe_b64encode(path.encode()).decode().rstrip("=")
+    token = base64.urlsafe_b64encode(os.fsencode(path)).decode().rstrip("=")
     return f"{FILE_REF_PREFIX}{token}"
 
 
@@ -60,10 +61,10 @@ def decode_file_ref(ref: str) -> str:
     token = ref[len(FILE_REF_PREFIX) :]
     try:
         padded = token + "=" * (-len(token) % 4)
-        path = base64.b64decode(padded.encode(), altchars=b"-_", validate=True).decode(
-            "utf-8"
+        path = os.fsdecode(
+            base64.b64decode(padded.encode(), altchars=b"-_", validate=True)
         )
-    except (ValueError, UnicodeDecodeError, binascii.Error) as exc:
+    except (ValueError, binascii.Error) as exc:
         raise ProtocolError("invalid_request", "file reference is malformed") from exc
     if not path or len(path) > 4_096 or not path.startswith("/"):
         raise ProtocolError("invalid_request", "file reference is malformed")

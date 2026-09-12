@@ -221,22 +221,41 @@ class ArtifactService:
         metadata["_source"] = source
         return metadata
 
-    def list(self, limit: int = 100) -> dict[str, Any]:
+    def list(
+        self,
+        limit: int | None = 100,
+        *,
+        kind: str | None = None,
+        owner_id: str | None = None,
+    ) -> dict[str, Any]:
         self.principal.require(Capability.ARTIFACT_READ)
         rows = []
-        for path in sorted(self.root.glob("*/metadata.json"), reverse=True):
-            if len(rows) >= max(1, min(limit, 1000)):
+        paths = sorted(
+            self.root.glob("*/metadata.json"),
+            key=lambda path: (path.stat().st_mtime_ns, path.parent.name),
+            reverse=True,
+        )
+        for path in paths:
+            if limit is not None and len(rows) >= max(1, limit):
                 break
             try:
                 row = json.loads(path.read_text())
             except json.JSONDecodeError:
-                if self.principal.name == "operator":
+                if (
+                    self.principal.name == "operator"
+                    and kind is None
+                    and owner_id is None
+                ):
                     rows.append({"artifact_id": path.parent.name, "malformed": True})
                 continue
             if (
                 self.principal.name != "operator"
                 and row.get("principal") != self.principal.name
             ):
+                continue
+            if kind is not None and row.get("kind") != kind:
+                continue
+            if owner_id is not None and row.get("owner_id") != owner_id:
                 continue
             row.pop("source", None)
             rows.append(row)

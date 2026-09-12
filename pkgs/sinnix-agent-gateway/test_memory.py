@@ -81,3 +81,26 @@ def test_memory_limit_can_be_filled_by_one_matching_provider(tmp_path: Path) -> 
 
     assert len(result["matches"]) == 2
     assert {match["source"] for match in result["matches"]} == {"claude-code"}
+
+
+def test_memory_search_exposes_per_source_continuations(tmp_path: Path) -> None:
+    memory = memory_service(tmp_path, "observer")
+    (tmp_path / "claude" / "fixture.jsonl").write_bytes(
+        b"x" * (64 * 1_024 - 1) + "éneedle\n".encode()
+    )
+    key = b"m" * 32
+    first = memory.search(
+        "éneedle",
+        providers=["claude-code"],
+        scan_bytes=64 * 1_024,
+        cursor_key=key,
+    )
+    assert first["matches"] == [] and first["next_cursors"]["claude-code"]
+    second = memory.search(
+        "éneedle",
+        providers=["claude-code"],
+        source_cursors=first["next_cursors"],
+        scan_bytes=64 * 1_024,
+        cursor_key=key,
+    )
+    assert "éneedle" in second["matches"][0]["text"]

@@ -40,6 +40,10 @@ def _owner_error(exc: ValueError) -> ProtocolError:
     message = str(exc)
     if isinstance(exc, PolicyError):
         return ProtocolError("policy_denied", message)
+    if "cursor" in message and ("stale" in message or "malformed" in message):
+        return ProtocolError("stale_cursor", message)
+    if "source changed" in message:
+        return ProtocolError("source_changed", message)
     if "unavailable" in message or "not declared" in message:
         return ProtocolError(
             "not_found" if "not declared" in message else "unavailable", message
@@ -392,7 +396,7 @@ def _activity(runtime: Runtime, inp: ActivityInput) -> Activity:
 class SessionsListOp(GatewayModel):
     operation: Literal["list"] = "list"
     provider: Provider
-    limit: int = Field(default=100, ge=1, le=500)
+    limit: int = Field(default=100, ge=1)
     cursor: str | None = Field(
         default=None,
         max_length=8_192,
@@ -413,7 +417,6 @@ class SessionsReadOp(GatewayModel):
     max_bytes: int = Field(
         default=64_000,
         ge=1,
-        le=262_144,
         description="Source byte limit; pages stop at UTF-8 boundaries. If a character cannot fit, increase this limit. Malformed bytes are replaced with U+FFFD.",
     )
 
@@ -424,9 +427,29 @@ class SessionsSearchOp(GatewayModel):
     query: str = Field(
         min_length=1,
         max_length=1_000,
-        description="Literal text. Searches the first 64 KB of the newest 1000 files within an 8 MiB total budget.",
+        description="Literal text. Searches every session file through bounded resumable scan pages.",
     )
-    max_results: int = Field(default=100, ge=1, le=500)
+    max_results: int = Field(
+        default=100,
+        ge=1,
+        description="Maximum matches in this page; response byte bounds may return fewer.",
+    )
+    reference: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=8_192,
+        description="Optional session reference to search instead of the provider's full history.",
+    )
+    cursor: str | None = Field(
+        default=None,
+        max_length=8_192,
+        description="Continuation returned by the preceding identical search.",
+    )
+    scan_bytes: int = Field(
+        default=8 * 1_024 * 1_024,
+        ge=1,
+        description="Maximum transcript bytes to inspect in this call; continue to cover more.",
+    )
 
 
 class SessionsStructuredOp(GatewayModel):
@@ -474,6 +497,7 @@ class SessionsResult(GatewayModel):
     next_offset: int | None = None
     content: str | None = None
     scanned_bytes: int | None = None
+    next_cursor: str | None = None
     truncated: bool | None = Field(
         description="Null when the structured owner has not declared truncation; consult its coverage envelope."
     )
@@ -557,7 +581,15 @@ async def _sessions(runtime: Runtime, inp: SessionsInput) -> ActionResult:
         elif isinstance(op, SessionsReadOp):
             payload = runtime.sessions.read(op.reference, op.offset, op.max_bytes)
         else:
-            payload = runtime.sessions.search(op.provider, op.query, op.max_results)
+            payload = runtime.sessions.search(
+                op.provider,
+                op.query,
+                op.max_results,
+                cursor=op.cursor,
+                cursor_key=runtime.results.cursor_key,
+                scan_bytes=op.scan_bytes,
+                reference=op.reference,
+            )
     except (SessionError, PolicyError) as exc:
         raise _owner_error(exc) from exc
     return ActionResult(
@@ -566,7 +598,16 @@ async def _sessions(runtime: Runtime, inp: SessionsInput) -> ActionResult:
             **payload,
             affordances=["sessions.query", "memory.query", "timeline.query"],
         ),
-        page=page,
+        page=page
+        or (
+            {
+                "kind": "cursor",
+                "cursor": op.cursor,
+                "next_cursor": payload["next_cursor"],
+            }
+            if isinstance(op, SessionsSearchOp)
+            else None
+        ),
     )
 
 
@@ -577,7 +618,12 @@ class MemorySearchOp(GatewayModel):
     operation: Literal["search"] = "search"
     query: str = Field(min_length=1, max_length=1_000)
     providers: list[MemorySource] | None = Field(default=None, min_length=1)
-    limit: int = Field(default=100, ge=1, le=500)
+    limit: int = Field(default=100, ge=1)
+    source_cursors: dict[Provider, str | None] | None = Field(
+        default=None,
+        description="Per-provider continuations returned by the preceding identical memory search.",
+    )
+    scan_bytes: int = Field(default=8 * 1_024 * 1_024, ge=1)
 
 
 class MemoryGetOp(GatewayModel):
@@ -604,6 +650,7 @@ class MemoryResult(GatewayModel):
     bytes: int | None = None
     content: str | None = None
     truncated: bool
+    next_cursors: dict[str, str | None] | None = None
     affordances: list[str] = Field(default_factory=list)
 
 
@@ -612,7 +659,12 @@ def _memory(runtime: Runtime, inp: MemoryInput) -> MemoryResult:
     try:
         if isinstance(op, MemorySearchOp):
             payload = runtime.memory.search(
-                op.query, list(op.providers) if op.providers else None, op.limit
+                op.query,
+                list(op.providers) if op.providers else None,
+                op.limit,
+                source_cursors=op.source_cursors,
+                cursor_key=runtime.results.cursor_key,
+                scan_bytes=op.scan_bytes,
             )
         else:
             payload = runtime.memory.get(op.reference, op.offset, op.max_bytes)
@@ -635,7 +687,13 @@ class TimelineInput(RequestControls):
     end: str | None = Field(default=None, max_length=64)
     query: str | None = Field(default=None, min_length=1, max_length=1_000)
     providers: list[MemorySource] | None = Field(default=None, min_length=1)
-    limit: int = Field(default=100, ge=1, le=500)
+    limit: int = Field(default=100, ge=1)
+    cursor: str | None = Field(
+        default=None,
+        max_length=8_192,
+        description="Continuation returned by the preceding identical timeline query.",
+    )
+    scan_bytes: int = Field(default=8 * 1_024 * 1_024, ge=1, le=64 * 1_024 * 1_024)
 
 
 class TimelineResult(GatewayModel):
@@ -648,10 +706,11 @@ class TimelineResult(GatewayModel):
     sources: list[dict[str, Any]] | None = None
     entries: list[dict[str, Any]] | None = None
     truncated: bool = False
+    next_cursor: str | None = None
     affordances: list[str] = Field(default_factory=list)
 
 
-def _timeline(runtime: Runtime, inp: TimelineInput) -> TimelineResult:
+def _timeline(runtime: Runtime, inp: TimelineInput) -> ActionResult:
     try:
         payload = runtime.timeline.query(
             inp.start,
@@ -659,11 +718,21 @@ def _timeline(runtime: Runtime, inp: TimelineInput) -> TimelineResult:
             inp.query,
             list(inp.providers) if inp.providers else None,
             inp.limit,
+            cursor=inp.cursor,
+            cursor_key=runtime.results.cursor_key,
+            scan_bytes=inp.scan_bytes,
         )
     except (TimelineError, PolicyError) as exc:
         raise _owner_error(exc) from exc
-    return TimelineResult(
-        **payload, affordances=["sessions.query", "memory.query", "activity.query"]
+    return ActionResult(
+        TimelineResult(
+            **payload, affordances=["sessions.query", "memory.query", "activity.query"]
+        ),
+        page={
+            "kind": "cursor",
+            "cursor": inp.cursor,
+            "next_cursor": payload.get("next_cursor"),
+        },
     )
 
 

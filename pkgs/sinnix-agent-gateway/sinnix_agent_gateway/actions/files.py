@@ -2,14 +2,24 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import os
 import stat as stat_module
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from pydantic import Field
+from sinnix_mcp.execution import (
+    ExecutionProfile,
+    ExecutionResult,
+    OwnerExecution,
+    OwnerRoute,
+)
 
+from .. import files as host_files
 from ..action import (
     OBSERVER_OPERATOR,
     OPERATOR_ONLY,
@@ -56,6 +66,30 @@ def _authorized(runtime: Runtime, locator: FileLocator, *, existing: bool) -> Pa
         raise ProtocolError(code, str(exc)) from exc
 
 
+def _document_affordances(media_type: str | None) -> list[str]:
+    if media_type == "application/pdf" or (
+        media_type is not None and media_type.startswith("image/")
+    ):
+        return ["documents.inspect", "documents.render"]
+    return []
+
+
+def _secret_descendant_globs(runtime: Runtime, roots: list[Path]) -> list[str]:
+    """Return ripgrep exclusions for observer-visible roots where possible."""
+    if runtime.principal.name == "operator":
+        return []
+    globs: list[str] = []
+    for root in roots:
+        for secret_root in host_files._SECRET_ROOTS:
+            try:
+                relative = secret_root.resolve(strict=False).relative_to(root)
+            except (ValueError, binascii.Error):
+                continue
+            if relative != Path("."):
+                globs.append(f"!{relative.as_posix()}/**")
+    return globs
+
+
 class FileEntry(GatewayModel):
     ref: str
     path: str
@@ -75,6 +109,10 @@ class FileStat(FileEntry):
     ctime: str
     media_type: str | None = None
     sha256: str | None = None
+    sha256_status: Literal[
+        "computed", "not_requested", "not_applicable", "skipped_size"
+    ]
+    sha256_reason: str | None = None
     inode: int
     device: int
     affordances: list[str] = Field(default_factory=list)
@@ -84,7 +122,12 @@ class StatInput(RequestControls):
     target: FileLocator
     follow_symlinks: bool = True
     with_sha256: bool = Field(
-        default=True, description="Hash regular files; skipped above 256 MiB."
+        default=True, description="Hash a regular file within max_hash_bytes."
+    )
+    max_hash_bytes: int = Field(
+        default=256 * 1024 * 1024,
+        ge=0,
+        description="Largest regular file hashed by this stat request; raise deliberately for larger files.",
     )
 
 
@@ -103,15 +146,33 @@ def _stat(runtime: Runtime, inp: StatInput) -> FileStat:
     kind = _kind(target, follow=inp.follow_symlinks)
     media = sniff_media_type(target) if kind == "file" else None
     digest = None
-    if inp.with_sha256 and kind == "file" and details.st_size <= 256 * 1024 * 1024:
+    if kind != "file":
+        hash_status = "not_applicable"
+        hash_reason = "only regular files have a SHA-256 digest"
+    elif not inp.with_sha256:
+        hash_status = "not_requested"
+        hash_reason = "with_sha256 is false"
+    elif details.st_size > inp.max_hash_bytes:
+        hash_status = "skipped_size"
+        hash_reason = (
+            f"file is {details.st_size} bytes, above max_hash_bytes "
+            f"({inp.max_hash_bytes} bytes)"
+        )
+    else:
         digest = sha256_of(target)
+        hash_status = "computed"
+        hash_reason = None
     try:
         import pwd
 
         owner = pwd.getpwuid(details.st_uid).pw_name
     except (KeyError, ImportError):
         owner = None
-    affordances = ["files.read", "files.change"] if kind == "file" else []
+    affordances = (
+        ["files.read", "files.change", *_document_affordances(media)]
+        if kind == "file"
+        else []
+    )
     if kind == "directory":
         affordances = ["files.list", "files.search", "files.change"]
     return FileStat(
@@ -130,6 +191,8 @@ def _stat(runtime: Runtime, inp: StatInput) -> FileStat:
         symlink_target=os.readlink(target) if target.is_symlink() else None,
         media_type=media,
         sha256=digest,
+        sha256_status=hash_status,
+        sha256_reason=hash_reason,
         inode=details.st_ino,
         device=details.st_dev,
         affordances=affordances,
@@ -138,7 +201,7 @@ def _stat(runtime: Runtime, inp: StatInput) -> FileStat:
 
 class ListInput(RequestControls):
     target: FileLocator
-    limit: int = Field(default=200, ge=1, le=5_000)
+    limit: int = Field(default=200, ge=1)
     offset: int = Field(default=0, ge=0)
     include_hidden: bool = False
     sort: Literal["name", "mtime", "size"] = "name"
@@ -155,7 +218,13 @@ class DirectoryListing(GatewayModel):
     truncated: bool
 
 
-def _entry(child: Path) -> FileEntry | None:
+def _entry(runtime: Runtime, child: Path) -> FileEntry | None:
+    try:
+        # Resolve each result, not just the requested root.  This rejects
+        # secret descendants and symlinks that escape the authorized view.
+        runtime.files._resolve(str(child), existing=True)
+    except FileError:
+        return None
     try:
         details = child.lstat()
     except OSError:
@@ -197,7 +266,11 @@ def _list(runtime: Runtime, inp: ListInput) -> DirectoryListing:
         ]
     except PermissionError as exc:
         raise ProtocolError("policy_denied", "directory is not readable") from exc
-    entries = [entry for entry in map(_entry, children) if entry is not None]
+    entries = [
+        entry
+        for entry in (_entry(runtime, child) for child in children)
+        if entry is not None
+    ]
     keys = {
         "name": lambda entry: entry.name.casefold(),
         "mtime": lambda entry: entry.mtime or "",
@@ -220,11 +293,11 @@ def _list(runtime: Runtime, inp: ListInput) -> DirectoryListing:
 class ReadInput(RequestControls):
     target: FileLocator
     offset: int = Field(default=0, ge=0, description="Byte offset for raw reads.")
-    max_bytes: int = Field(default=64_000, ge=1, le=4_194_304)
+    max_bytes: int = Field(default=64_000, ge=1)
     line_start: int | None = Field(
         default=None, ge=1, description="First line (1-based) for text reads."
     )
-    line_count: int | None = Field(default=None, ge=1, le=10_000)
+    line_count: int | None = Field(default=None, ge=1)
     representation: Literal["auto", "text", "binary"] = Field(
         default="auto",
         description="auto returns text inline for text types and a typed content block for binary types.",
@@ -265,14 +338,19 @@ def _read(runtime: Runtime, inp: ReadInput) -> ActionResult:
     textual = inp.representation == "text" or (
         inp.representation == "auto" and is_text(media)
     )
-    max_bytes = min(inp.max_bytes, runtime.config.max_result_bytes)
+    max_bytes = inp.max_bytes
     base = {
         "ref": ref,
         "path": str(target),
         "media_type": media,
         "bytes": size,
         "sha256": digest,
-        "affordances": ["files.change", "files.patch", "files.stat"],
+        "affordances": [
+            "files.change",
+            "files.patch",
+            "files.stat",
+            *_document_affordances(media),
+        ],
     }
     if textual:
         if inp.line_start is not None:
@@ -413,7 +491,7 @@ class SearchInput(RequestControls):
     )
     case_insensitive: bool = False
     context_lines: int = Field(default=0, ge=0, le=5)
-    limit: int = Field(default=100, ge=1, le=2_000)
+    limit: int = Field(default=100, ge=1)
     timeout_seconds: int = Field(default=30, ge=1, le=300)
 
 
@@ -438,26 +516,49 @@ class SearchResult(GatewayModel):
     warnings: list[str] = Field(default_factory=list)
 
 
-_OUTPUT_CAP = 8 * 1024 * 1024
+def _run(
+    argv: list[str],
+    timeout: int,
+    *,
+    max_stderr_bytes: int,
+    on_stdout: Callable[[bytes], None],
+) -> ExecutionResult:
+    """Stream a declared search owner without retaining aggregate stdout.
+
+    Search output is parsed as it arrives.  The typed result layer applies the
+    client response bound afterwards and, when needed, retains the complete
+    structured result as an attested artifact.
+    """
+    return OwnerExecution().run(
+        argv,
+        ExecutionProfile(
+            route=OwnerRoute("files-search"),
+            timeout_seconds=timeout,
+            max_stdout_bytes=1,
+            max_stderr_bytes=max_stderr_bytes,
+        ),
+        stdout_chunk_callback=on_stdout,
+    )
 
 
-def _run(argv: list[str], timeout: int) -> tuple[bytes, bool, int, bool, bytes]:
-    import subprocess
-
-    try:
-        completed = subprocess.run(
-            argv, capture_output=True, timeout=timeout, check=False
-        )
-    except subprocess.TimeoutExpired as exc:
-        return (exc.stdout or b"")[:_OUTPUT_CAP], True, -1, True, exc.stderr or b""
-    except FileNotFoundError as exc:
-        raise ProtocolError("unavailable", f"{argv[0]} is not installed") from exc
-    return (
-        completed.stdout[:_OUTPUT_CAP],
-        False,
-        completed.returncode,
-        len(completed.stdout) > _OUTPUT_CAP,
-        completed.stderr,
+def _raise_search_failure(argv: list[str], result: ExecutionResult) -> None:
+    if result.timed_out:
+        return
+    if result.failure_class and result.failure_class.startswith("command_unavailable"):
+        raise ProtocolError("unavailable", f"{argv[0]} is not installed")
+    if result.exit_status in (0, 1) and not result.output_exceeded:
+        return
+    diagnostic = result.stderr.decode("utf-8", "replace").strip()
+    code = (
+        "invalid_request"
+        if "regex parse error" in diagnostic.lower()
+        else "owner_failed"
+    )
+    raise ProtocolError(
+        code,
+        diagnostic
+        or f"{argv[0]} failed with {result.failure_class or f'exit status {result.exit_status}'}",
+        details={"command": argv[0], "exit_status": result.exit_status},
     )
 
 
@@ -479,6 +580,8 @@ def _search(runtime: Runtime, inp: SearchInput) -> SearchResult:
         path_pattern = None
     if inp.content_regex is not None:
         argv = ["rg", "--json", "--no-messages"]
+        for glob in _secret_descendant_globs(runtime, roots):
+            argv.extend(["--glob", glob])
         if inp.fixed_string:
             argv.append("--fixed-strings")
         if inp.case_insensitive:
@@ -498,85 +601,134 @@ def _search(runtime: Runtime, inp: SearchInput) -> SearchResult:
         if inp.max_bytes is not None:
             argv.append(f"--max-filesize={inp.max_bytes}")
         argv.extend(["--regexp", inp.content_regex, "--", *map(str, roots)])
-        output, timed_out, returncode, output_exceeded, stderr = _run(
-            argv, inp.timeout_seconds
-        )
-        if returncode not in (0, 1) and not timed_out:
-            diagnostic = stderr.decode("utf-8", "replace").strip()
-            code = (
-                "invalid_request"
-                if "regex parse error" in diagnostic.lower()
-                else "owner_failed"
-            )
-            raise ProtocolError(
-                code,
-                diagnostic or f"rg failed with exit status {returncode}",
-                details={"command": argv[0], "exit_status": returncode},
-            )
         import json as json_module
         import time
 
         by_path: dict[str, FileMatch] = {}
         limit_reached = False
-        for raw in output.split(b"\n"):
+        pending = bytearray()
+
+        def warn_once(message: str) -> None:
+            if message not in warnings:
+                warnings.append(message)
+
+        def rg_text(value: object, *, field: str, path: bool = False) -> str | None:
+            if not isinstance(value, dict):
+                warn_once(f"ripgrep emitted malformed {field} data")
+                return None
+            text = value.get("text")
+            if isinstance(text, str):
+                return text
+            encoded = value.get("bytes")
+            if not isinstance(encoded, str):
+                warn_once(f"ripgrep omitted {field} text")
+                return None
+            try:
+                raw = base64.b64decode(encoded, validate=True)
+            except ValueError:
+                warn_once(f"ripgrep emitted invalid base64 {field} data")
+                return None
+            if path:
+                decoded = os.fsdecode(raw)
+                if any("\udc80" <= character <= "\udcff" for character in decoded):
+                    warn_once("ripgrep emitted a non-UTF-8 path; decoded losslessly")
+                return decoded
+            decoded = raw.decode("utf-8", "replace")
+            if "\ufffd" in decoded:
+                warn_once(
+                    "ripgrep emitted non-UTF-8 line content; replacement characters were used"
+                )
+            return decoded
+
+        def consume_record(raw: bytes) -> None:
+            nonlocal limit_reached
             if not raw:
-                continue
+                return
             try:
                 event = json_module.loads(raw)
             except ValueError:
-                continue
+                return
             kind = event.get("type")
             data = event.get("data", {})
-            path_text = data.get("path", {}).get("text")
+            if not isinstance(data, dict):
+                warn_once("ripgrep emitted malformed match data")
+                return
+            path_text = rg_text(data.get("path"), field="path", path=True)
             if not path_text or kind not in {"match", "context"}:
-                continue
+                return
             candidate = Path(path_text)
+            try:
+                runtime.files._resolve(str(candidate), existing=True)
+            except FileError:
+                return
             try:
                 details = candidate.stat()
             except OSError:
-                continue
+                return
             candidate_kind = _kind(candidate, follow=False)
             if inp.kind != "any" and candidate_kind != inp.kind:
-                continue
+                return
             if inp.min_bytes is not None and details.st_size < inp.min_bytes:
-                continue
+                return
             if inp.max_bytes is not None and details.st_size > inp.max_bytes:
-                continue
+                return
             if (
                 inp.modified_within_seconds is not None
                 and time.time() - details.st_mtime > inp.modified_within_seconds
             ):
-                continue
+                return
             if path_pattern is not None and not path_pattern.search(str(candidate)):
-                continue
+                return
             entry = by_path.get(path_text)
             if entry is None:
                 if len(by_path) >= inp.limit:
                     limit_reached = True
-                    continue
-                base = _entry(candidate)
+                    return
+                base = _entry(runtime, candidate)
                 if base is None:
-                    continue
+                    return
                 entry = FileMatch(**base.model_dump(), match_count=0)
                 by_path[path_text] = entry
-            line = data.get("lines", {}).get("text", "")
+            line = rg_text(data.get("lines"), field="line")
+            if line is None:
+                return
             entry.lines.append(
                 MatchLine(
                     line_number=int(data.get("line_number") or 0),
-                    text=line.rstrip("\n")[:2_000],
+                    text=line.rstrip("\n"),
                     is_match=kind == "match",
                 )
             )
             if kind == "match":
                 entry.match_count = (entry.match_count or 0) + 1
+
+        def consume(chunk: bytes) -> None:
+            pending.extend(chunk)
+            while (newline := pending.find(b"\n")) >= 0:
+                raw = bytes(pending[:newline])
+                del pending[: newline + 1]
+                consume_record(raw)
+
+        result = _run(
+            argv,
+            inp.timeout_seconds,
+            max_stderr_bytes=runtime.config.max_result_bytes,
+            on_stdout=consume,
+        )
+        # A killed command can leave one partial JSON record.  It does not
+        # describe a complete match, so only consume a final unterminated row
+        # after normal completion.
+        if pending and not result.timed_out:
+            consume_record(bytes(pending))
+        _raise_search_failure(argv, result)
         matches = list(by_path.values())
         return SearchResult(
             roots=root_refs,
-            matches=matches[: inp.limit],
-            returned=min(len(matches), inp.limit),
-            truncated=limit_reached or output_exceeded,
+            matches=matches,
+            returned=len(matches),
+            truncated=limit_reached or result.timed_out,
             engine="rg",
-            timed_out=timed_out,
+            timed_out=result.timed_out,
             warnings=warnings,
         )
     argv = ["fd", "--print0", "--absolute-path", f"--max-results={inp.limit + 1}"]
@@ -612,31 +764,44 @@ def _search(runtime: Runtime, inp: SearchInput) -> SearchResult:
         argv.append(".")
     argv.extend(["--"] if not (inp.name_glob or inp.path_regex) else [])
     argv.extend(str(root) for root in roots)
-    output, timed_out, returncode, output_exceeded, stderr = _run(
-        argv, inp.timeout_seconds
+    entries: list[FileEntry] = []
+    path_count = 0
+    pending = bytearray()
+
+    def consume_path(raw: bytes) -> None:
+        nonlocal path_count
+        if not raw:
+            return
+        path_count += 1
+        if path_count > inp.limit:
+            return
+        entry = _entry(runtime, Path(raw.decode("utf-8", "surrogateescape")))
+        if entry is not None:
+            entries.append(entry)
+
+    def consume(chunk: bytes) -> None:
+        pending.extend(chunk)
+        while (separator := pending.find(b"\0")) >= 0:
+            raw = bytes(pending[:separator])
+            del pending[: separator + 1]
+            consume_path(raw)
+
+    result = _run(
+        argv,
+        inp.timeout_seconds,
+        max_stderr_bytes=runtime.config.max_result_bytes,
+        on_stdout=consume,
     )
-    if returncode not in (0, 1) and not timed_out:
-        diagnostic = stderr.decode("utf-8", "replace").strip()
-        raise ProtocolError(
-            "owner_failed",
-            diagnostic or f"fd failed with exit status {returncode}",
-            details={"command": argv[0], "exit_status": returncode},
-        )
-    paths = [
-        piece.decode("utf-8", "surrogateescape")
-        for piece in output.split(b"\0")
-        if piece
-    ]
-    entries = [
-        entry for entry in (_entry(Path(path)) for path in paths[: inp.limit]) if entry
-    ]
+    if pending and not result.timed_out:
+        consume_path(bytes(pending))
+    _raise_search_failure(argv, result)
     return SearchResult(
         roots=root_refs,
         matches=[FileMatch(**entry.model_dump()) for entry in entries],
         returned=len(entries),
-        truncated=len(paths) > inp.limit or output_exceeded,
+        truncated=path_count > inp.limit or result.timed_out,
         engine="fd",
-        timed_out=timed_out,
+        timed_out=result.timed_out,
         warnings=warnings,
     )
 

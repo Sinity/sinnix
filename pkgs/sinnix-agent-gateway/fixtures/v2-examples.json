@@ -1,5 +1,5 @@
 {
-  "action_catalog_hash": "b8df6639b882d2cc6cd0d67984526741a92445a25c67c7ff2eac3f423b3310e5",
+  "action_catalog_hash": "daa7e61046c0ca022806a018d4552421504da37a3a86e57a491645a7a951383e",
   "examples": [
     {
       "action": "gateway.status",
@@ -171,6 +171,88 @@
         }
       },
       "title": "Move a file"
+    },
+    {
+      "action": "files.plan",
+      "family": "query",
+      "input": {
+        "moves": [
+          {
+            "destination": {
+              "path": "/realm/archive/a.txt"
+            },
+            "source": {
+              "path": "/realm/tmp/work/a.txt"
+            }
+          }
+        ]
+      },
+      "title": "Plan one explicit move"
+    },
+    {
+      "action": "files.changeset",
+      "family": "change",
+      "input": {
+        "idempotency_key": "apply-relocation-1",
+        "plan_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+        "plan_ref": "sinnix://artifacts/00000000-0000-0000-0000-000000000000"
+      },
+      "title": "Apply an approved plan"
+    },
+    {
+      "action": "files.references",
+      "family": "query",
+      "input": {
+        "old_paths": [
+          "/realm/data/old-note.md"
+        ],
+        "roots": [
+          {
+            "path": "/realm/project/sinnix"
+          }
+        ]
+      },
+      "title": "Find one old path"
+    },
+    {
+      "action": "documents.inspect",
+      "family": "query",
+      "input": {
+        "target": {
+          "path": "/realm/documents/example.pdf"
+        }
+      },
+      "title": "Inspect a PDF"
+    },
+    {
+      "action": "documents.render",
+      "family": "query",
+      "input": {
+        "pages": [
+          1,
+          2
+        ],
+        "target": {
+          "path": "/realm/documents/example.pdf"
+        }
+      },
+      "title": "View PDF pages"
+    },
+    {
+      "action": "documents.render",
+      "family": "query",
+      "input": {
+        "crop": {
+          "height": 600,
+          "width": 800,
+          "x": 100,
+          "y": 100
+        },
+        "target": {
+          "path": "/realm/photos/example.jpg"
+        }
+      },
+      "title": "View an image crop"
     },
     {
       "action": "projects.list",

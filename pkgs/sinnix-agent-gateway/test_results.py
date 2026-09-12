@@ -69,6 +69,29 @@ def config(tmp_path, *, max_result_bytes: int = 262_144):
     )
 
 
+def test_large_metadata_has_retrievable_continuation(tmp_path) -> None:
+    cfg = config(tmp_path)
+    principal = Principal.for_name("operator")
+    results = ResultService(cfg, principal)
+    receipt = AuditService(cfg, principal).append("fixture.query", "ok", {})
+    meta = {"coverage": {"items": ["source" * 100] * 1000}}
+    result = results.record(
+        action="fixture.query",
+        owner="fixture",
+        route="fixture",
+        outcome="ok",
+        payload={"answer": 42},
+        receipt=receipt,
+        meta=meta,
+    )
+    assert result["data"] == {"answer": 42}
+    assert len(json.dumps(result).encode()) < cfg.max_result_bytes
+    artifact_id = result["meta"]["artifact_refs"][0].rsplit("/", 1)[1]
+    info = results.artifacts._metadata(artifact_id)
+    retained = json.loads(info["_source"].read_text())
+    assert retained["coverage"] == meta["coverage"]
+
+
 def test_result_snapshot_preserves_owner_page_and_receipt(tmp_path) -> None:
     cfg = config(tmp_path)
     audit = AuditService(cfg, Principal.for_name("observer"))

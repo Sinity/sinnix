@@ -12,6 +12,7 @@ import base64
 import hashlib
 import mimetypes
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any, Literal
 
@@ -40,6 +41,12 @@ class Artifact(GatewayModel):
     sha256: str | None = None
     name: str | None = None
     representation: Literal["image", "resource", "link", "text"]
+    preview: bool = Field(
+        default=False,
+        description="The image block is a derived view; ref and hash still identify the original bytes.",
+    )
+    preview_width: int | None = None
+    preview_height: int | None = None
 
 
 def sniff_media_type(path: Path) -> str:
@@ -101,12 +108,32 @@ def attach(
         "sha256": digest,
         "name": path.name,
     }
-    if media_type in IMAGE_TYPES and size <= (max_inline_bytes or INLINE_IMAGE_BYTES):
+    if media_type in IMAGE_TYPES and size <= INLINE_IMAGE_BYTES:
         data = base64.b64encode(path.read_bytes()).decode()
         return (
             Artifact(representation="image", **base),
             [ImageContent(type="image", data=data, mime_type=media_type)],
         )
+    if media_type.startswith("image/"):
+        from . import visual
+
+        with tempfile.TemporaryDirectory(prefix="gateway-image-") as directory:
+            output = Path(directory)
+            source = output / "source"
+            visual.snapshot(path, source)
+            decoded = visual.decode(source, output, render=True, pages=[])
+            row = decoded["renders"][0]
+            data = base64.b64encode((output / row["name"]).read_bytes()).decode()
+            return (
+                Artifact(
+                    representation="image",
+                    preview=True,
+                    preview_width=row["width"],
+                    preview_height=row["height"],
+                    **base,
+                ),
+                [ImageContent(type="image", data=data, mime_type=row["media_type"])],
+            )
     if size <= (max_inline_bytes or INLINE_BLOB_BYTES):
         data = base64.b64encode(path.read_bytes()).decode()
         return (

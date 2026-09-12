@@ -189,7 +189,7 @@ class TreeInput(RequestControls):
         max_length=4_096,
         description="Project-relative directory.",
     )
-    max_entries: int = Field(default=500, ge=1, le=2_000)
+    max_entries: int = Field(default=500, ge=1)
 
 
 class TreeEntry(GatewayModel):
@@ -231,7 +231,7 @@ class ReadInput(RequestControls):
     )
     start_line: int = Field(default=1, ge=1)
     end_line: int | None = Field(default=None, ge=1)
-    max_bytes: int = Field(default=64_000, ge=1, le=262_144)
+    max_bytes: int = Field(default=64_000, ge=1)
 
 
 class ProjectFile(Identity):
@@ -269,7 +269,7 @@ class ReadRequest(GatewayModel):
     path: str = Field(min_length=1, max_length=4_096)
     start_line: int = Field(default=1, ge=1)
     end_line: int | None = Field(default=None, ge=1)
-    max_bytes: int = Field(default=64_000, ge=1, le=262_144)
+    max_bytes: int = Field(default=64_000, ge=1)
 
 
 class ReadManyInput(RequestControls):
@@ -391,7 +391,7 @@ def _diff(runtime: Runtime, inp: DiffInput) -> Diff:
 class SearchInput(RequestControls):
     target: CheckoutLocator
     query: str = Field(min_length=1, max_length=1_000, description="ripgrep regex.")
-    max_matches: int = Field(default=200, ge=1, le=1_000)
+    max_matches: int = Field(default=200, ge=1)
 
 
 class SearchMatch(GatewayModel):

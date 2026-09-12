@@ -89,15 +89,61 @@ def test_session_reference_rejects_path_escape(tmp_path: Path) -> None:
         service.read("claude-code:../session.jsonl")
 
 
-def test_session_search_declares_prefix_bound(tmp_path: Path) -> None:
+def test_session_search_covers_a_long_line_beyond_the_old_prefix(
+    tmp_path: Path,
+) -> None:
     service, root = session_service(tmp_path)
     (root / "session.jsonl").write_text("x" * 70_000 + "needle\n")
 
     result = service.search("claude-code", "needle")
 
-    assert result["matches"] == []
-    assert result["truncated"] is True
-    assert result["scanned_bytes"] == 64_000
+    assert result["matches"][0]["offset"] == 69_800
+    assert "needle" in result["matches"][0]["text"]
+    assert result["truncated"] is False
+
+
+def test_session_search_continues_across_chunk_and_unicode_boundaries(
+    tmp_path: Path,
+) -> None:
+    service, root = session_service(tmp_path)
+    session = root / "large.jsonl"
+    session.write_bytes(b"x" * (64 * 1_024 - 1) + "éneedle\n".encode())
+    key = b"s" * 32
+
+    first = service.search(
+        "claude-code", "éneedle", scan_bytes=64 * 1_024, cursor_key=key
+    )
+    assert first["matches"] == [] and first["next_cursor"]
+    second = service.search(
+        "claude-code",
+        "éneedle",
+        scan_bytes=64 * 1_024,
+        cursor=first["next_cursor"],
+        cursor_key=key,
+    )
+
+    match = second["matches"][0]
+    assert match["line"] == 1 and "éneedle" in match["text"]
+    assert (
+        "éneedle" in service.read(match["reference"], match["offset"], 512)["content"]
+    )
+    assert second["next_cursor"] is None
+
+
+def test_session_search_continuation_rejects_a_changed_source(tmp_path: Path) -> None:
+    service, root = session_service(tmp_path)
+    session = root / "large.jsonl"
+    session.write_text("x" * (64 * 1_024) + "needle\n")
+    key = b"s" * 32
+    first = service.search(
+        "claude-code", "needle", scan_bytes=64 * 1_024, cursor_key=key
+    )
+    session.write_text(session.read_text() + "changed\n")
+
+    with pytest.raises(SessionError, match="source changed"):
+        service.search(
+            "claude-code", "needle", cursor=first["next_cursor"], cursor_key=key
+        )
 
 
 def test_newest_sessions_are_selected_across_the_entire_tree(tmp_path: Path) -> None:

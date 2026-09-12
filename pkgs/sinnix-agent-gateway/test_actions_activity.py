@@ -335,6 +335,43 @@ def test_session_listing_pages_a_snapshot_without_rescanning(
     assert wrong_scope["error"]["code"] == "stale_cursor"
 
 
+def test_session_search_action_pages_and_binds_its_source(tmp_path: Path) -> None:
+    rt, _ = runtime(tmp_path)
+    session = rt.sessions.sources[0].root / "proj" / "large.jsonl"
+    session.write_bytes(b"x" * (64 * 1_024 - 1) + "éneedle\n".encode())
+    request = {
+        "operation": "search",
+        "provider": "claude-code",
+        "query": "éneedle",
+        "reference": "claude-code:proj/large.jsonl",
+        "scan_bytes": 64 * 1_024,
+    }
+    first = call(rt, "sessions.query", {"request": request}, BY_NAME)
+    assert first["data"]["matches"] == [] and first["data"]["next_cursor"]
+    second = call(
+        rt,
+        "sessions.query",
+        {"request": {**request, "cursor": first["data"]["next_cursor"]}},
+        BY_NAME,
+    )
+    assert "éneedle" in second["data"]["matches"][0]["text"]
+    assert second["page"]["next_cursor"] is None
+
+    changed = call(
+        rt,
+        "sessions.query",
+        {
+            "request": {
+                **request,
+                "cursor": first["data"]["next_cursor"],
+                "query": "other",
+            }
+        },
+        BY_NAME,
+    )
+    assert changed["error"]["code"] == "stale_cursor"
+
+
 def test_missing_session_provider_returns_typed_unavailable(tmp_path: Path) -> None:
     rt, _ = runtime(tmp_path)
     result = call(

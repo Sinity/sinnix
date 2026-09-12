@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import struct
 import zlib
 from dataclasses import replace
@@ -12,8 +13,9 @@ from pathlib import Path
 import anyio
 import pytest
 from mcp.types import CallToolResult, ImageContent
+from sinnix_agent_gateway import files as host_files
 from sinnix_agent_gateway.action import Action, MutationControls, RequestControls
-from sinnix_agent_gateway.actions import ALL_ACTIONS, visible
+from sinnix_agent_gateway.actions import ALL_ACTIONS, files, visible
 from sinnix_agent_gateway.app import create_server
 from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
 from sinnix_agent_gateway.contracts import VerbFamily
@@ -24,6 +26,7 @@ from sinnix_agent_gateway.locators import (
 )
 from sinnix_agent_gateway.schemas import GatewayModel
 from sinnix_agent_gateway.tooling import build_tool, tool_signature_matches
+from sinnix_mcp.execution import ExecutionResult
 
 
 def config(tmp_path: Path) -> GatewayConfig:
@@ -328,6 +331,228 @@ def test_files_search_paths_and_content(tmp_path: Path) -> None:
         )
     )
     assert limited["data"]["returned"] == 1 and limited["data"]["truncated"] is True
+
+
+def test_files_search_streams_long_matches_to_the_result_artifact(
+    tmp_path: Path,
+) -> None:
+    server = create_server(config(tmp_path), "operator")
+    runtime = server._sinnix_revision_publisher.runtime
+    root = tmp_path / "large-corpus"
+    root.mkdir()
+    long_line = "needle " + "x" * (8 * 1024 * 1024)
+    (root / "large.txt").write_text(long_line + "\n")
+
+    # The requested result count is a caller control, not a transport bound.
+    assert files.SearchInput(roots=[{"path": str(root)}], limit=2_001).limit == 2_001
+
+    response = structured(
+        call(
+            server,
+            "files.search",
+            {
+                "roots": [{"path": str(root)}],
+                "content_regex": "needle",
+                "limit": 1,
+            },
+        )
+    )
+    artifact_id = response["data"]["artifact"]["artifact_id"]
+    source = runtime.artifacts._metadata(artifact_id)["_source"]
+    payload = json.loads(source.read_text())
+
+    assert payload["truncated"] is False
+    assert payload["matches"][0]["lines"][0]["text"] == long_line
+
+
+def test_files_search_timeout_reports_the_complete_streamed_prefix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    server = create_server(config(tmp_path), "operator")
+    runtime = server._sinnix_revision_publisher.runtime
+    root = tmp_path / "timed-corpus"
+    root.mkdir()
+    target = root / "partial.txt"
+    target.write_text("needle\n")
+    event = {
+        "type": "match",
+        "data": {
+            "path": {"text": str(target)},
+            "lines": {"text": "needle\n"},
+            "line_number": 1,
+        },
+    }
+
+    def timed_out_run(argv, timeout, *, max_stderr_bytes, on_stdout):
+        assert argv[0] == "rg" and timeout == 30 and max_stderr_bytes > 0
+        on_stdout(json.dumps(event).encode() + b"\n")
+        return ExecutionResult(
+            command=tuple(argv),
+            exit_status=-15,
+            stdout=b"",
+            stderr=b"",
+            timed_out=True,
+            failure_class="command_timeout",
+        )
+
+    monkeypatch.setattr(files, "_run", timed_out_run)
+    result = files._search(
+        runtime,
+        files.SearchInput(roots=[{"path": str(root)}], content_regex="needle"),
+    )
+
+    assert result.timed_out is True and result.truncated is True
+    assert result.returned == 1
+    assert result.matches[0].lines[0].text == "needle"
+
+
+def test_files_search_decodes_ripgrep_byte_records_without_silently_dropping_them(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    server = create_server(config(tmp_path), "operator")
+    runtime = server._sinnix_revision_publisher.runtime
+    root = tmp_path / "byte-corpus"
+    root.mkdir()
+    raw_path = os.fsencode(str(root)) + b"/match-\xff.txt"
+    descriptor = os.open(raw_path, os.O_WRONLY | os.O_CREAT, 0o600)
+    with os.fdopen(descriptor, "wb") as handle:
+        handle.write(b"needle\xff\n")
+    target = Path(os.fsdecode(raw_path))
+    event = {
+        "type": "match",
+        "data": {
+            "path": {"bytes": base64.b64encode(raw_path).decode()},
+            "lines": {"bytes": base64.b64encode(b"needle\xff\n").decode()},
+            "line_number": 1,
+        },
+    }
+
+    def byte_record_run(argv, timeout, *, max_stderr_bytes, on_stdout):
+        on_stdout(json.dumps(event).encode() + b"\n")
+        return ExecutionResult(
+            command=tuple(argv), exit_status=0, stdout=b"", stderr=b""
+        )
+
+    monkeypatch.setattr(files, "_run", byte_record_run)
+    result = files._search(
+        runtime,
+        files.SearchInput(roots=[{"path": str(root)}], content_regex="needle"),
+    )
+
+    assert result.matches[0].path == str(target)
+    assert result.matches[0].lines[0].text == "needle�"
+    assert any("non-UTF-8 path" in warning for warning in result.warnings)
+    assert any("non-UTF-8 line" in warning for warning in result.warnings)
+
+
+def test_files_image_and_pdf_afford_document_inspection(tmp_path: Path) -> None:
+    server = create_server(config(tmp_path), "operator")
+    image = tmp_path / "page.png"
+    image.write_bytes(tiny_png())
+    pdf = tmp_path / "page.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF\n")
+
+    for target in (image, pdf):
+        stat = structured(
+            call(server, "files.stat", {"target": {"path": str(target)}})
+        )["data"]
+        read = structured(
+            call(server, "files.read", {"target": {"path": str(target)}})
+        )["data"]
+        assert {"documents.inspect", "documents.render"} <= set(stat["affordances"])
+        assert {"documents.inspect", "documents.render"} <= set(read["affordances"])
+
+
+def test_observer_file_listing_and_search_hide_secret_descendants(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "corpus"
+    root.mkdir()
+    visible = root / "visible.txt"
+    visible.write_text("needle visible\n")
+    secret_root = root / ".private"
+    secret_root.mkdir()
+    secret = secret_root / "secret.txt"
+    secret.write_text("needle secret\n")
+    (root / "secret-link").symlink_to(secret)
+    monkeypatch.setattr(host_files, "_SECRET_ROOTS", (secret_root,))
+
+    gateway_config = config(tmp_path)
+    observer = create_server(gateway_config, "observer")
+    listed = structured(
+        call(
+            observer,
+            "files.list",
+            {"target": {"path": str(root)}, "include_hidden": True},
+        )
+    )["data"]
+    assert [entry["name"] for entry in listed["entries"]] == ["visible.txt"]
+
+    searched = structured(
+        call(
+            observer,
+            "files.search",
+            {
+                "roots": [{"path": str(root)}],
+                "content_regex": "needle",
+                "include_hidden": True,
+            },
+        )
+    )["data"]
+    assert [match["name"] for match in searched["matches"]] == ["visible.txt"]
+
+    operator = create_server(gateway_config, "operator")
+    operator_listing = structured(
+        call(
+            operator,
+            "files.list",
+            {"target": {"path": str(root)}, "include_hidden": True},
+        )
+    )["data"]
+    assert {".private", "secret-link", "visible.txt"} == {
+        entry["name"] for entry in operator_listing["entries"]
+    }
+    operator_search = structured(
+        call(
+            operator,
+            "files.search",
+            {
+                "roots": [{"path": str(root)}],
+                "content_regex": "needle",
+                "include_hidden": True,
+            },
+        )
+    )["data"]
+    assert {"secret.txt", "visible.txt"} == {
+        match["name"] for match in operator_search["matches"]
+    }
+
+
+def test_files_stat_reports_hash_coverage(tmp_path: Path) -> None:
+    server = create_server(config(tmp_path), "operator")
+    target = tmp_path / "hash.txt"
+    target.write_text("hash me\n")
+
+    skipped = structured(
+        call(
+            server,
+            "files.stat",
+            {"target": {"path": str(target)}, "max_hash_bytes": 0},
+        )
+    )["data"]
+    assert skipped["sha256"] is None
+    assert skipped["sha256_status"] == "skipped_size"
+    assert "max_hash_bytes" in skipped["sha256_reason"]
+
+    disabled = structured(
+        call(
+            server,
+            "files.stat",
+            {"target": {"path": str(target)}, "with_sha256": False},
+        )
+    )["data"]
+    assert disabled["sha256_status"] == "not_requested"
+    assert disabled["sha256_reason"] is not None
 
 
 def test_files_patch_modes_and_preconditions(tmp_path: Path) -> None:

@@ -531,6 +531,27 @@ class ResultService:
             ) from exc
         encoded = _canonical(envelope)
         if len(encoded) > max(self.config.max_result_bytes, 4_096):
+            metadata_artifact = self.artifacts.register_json(
+                metadata,
+                kind="v2-result-metadata",
+                owner_id=owner,
+                source="v2-result",
+                target={"action": action, "route": route, "component": "meta"},
+            )
+            envelope["meta"] = {
+                "source": {"owner": owner, "route": route},
+                "coverage": {"state": "see_artifact", "ref": metadata_artifact["ref"]},
+                "artifact_refs": [metadata_artifact["ref"]]
+                + ([artifact["ref"]] if artifact is not None else []),
+                "warnings": [
+                    "Complete result metadata is retained in the metadata artifact."
+                ],
+                "correlation_id": request.request_id,
+            }
+            envelope["result"]["sha256"] = self._digest(envelope)
+            V2ToolEnvelope.model_validate(envelope)
+            encoded = _canonical(envelope)
+        if len(encoded) > max(self.config.max_result_bytes, 4_096):
             raise ResultError(
                 "V2 result envelope exceeded response bound", "response_bound"
             )

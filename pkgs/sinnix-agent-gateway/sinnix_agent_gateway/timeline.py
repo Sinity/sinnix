@@ -1,15 +1,15 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import UTC, datetime
 from typing import Any
 
 from .capabilities import Capability, Principal
-from .sessions import SessionError, SessionLogService
+from .sessions import OpaqueSessionCursor, SessionError, SessionLogService
 from .sources import (
     LOCAL_AUTHORITY,
-    any_source_truncated,
-    fetch_each_source,
+    UNAVAILABLE_SOURCES,
     resolve_providers,
 )
 
@@ -52,6 +52,10 @@ class TimelineService:
         query: str | None = None,
         providers: list[str] | None = None,
         limit: int = 100,
+        *,
+        cursor: str | None = None,
+        cursor_key: bytes | None = None,
+        scan_bytes: int = 8 * 1_024 * 1_024,
     ) -> dict[str, Any]:
         self.principal.require(Capability.SESSION_READ)
         start_ns = self._timestamp(start, "start")
@@ -62,56 +66,197 @@ class TimelineService:
             not isinstance(query, str) or not query or len(query) > 1_000
         ):
             raise TimelineError("query must contain 1-1000 characters")
-        if (
-            isinstance(limit, bool)
-            or not isinstance(limit, int)
-            or not 1 <= limit <= 500
-        ):
-            raise TimelineError("limit must be 1-500")
+        if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
+            raise TimelineError("limit must be positive")
         requested = resolve_providers(providers, error=TimelineError, noun="timeline")
+        if cursor_key is None and cursor is not None:
+            raise TimelineError("timeline continuation cursor is unavailable")
+        # Direct service users do not own the gateway result key.  Keep a
+        # process-local equivalent only for completing this call; gateway
+        # actions always supply the persistent, principal-scoped key.
+        effective_cursor_key = (
+            cursor_key
+            or hashlib.sha256(
+                f"timeline-direct:{self.principal.name}".encode()
+            ).digest()
+        )
+        scope = {
+            "principal": self.principal.name,
+            "start": start_ns,
+            "end": end_ns,
+            "query": query,
+            "providers": requested,
+        }
+        if cursor is None:
+            state: dict[str, Any] = {"current": {}, "pending": {}, "done": []}
+        else:
+            state = OpaqueSessionCursor(
+                self.principal.name, effective_cursor_key, "timeline-query"
+            ).decode(cursor, scope)
+            if (
+                set(state) != {"current", "pending", "done"}
+                or not isinstance(state["current"], dict)
+                or not isinstance(state["pending"], dict)
+                or not isinstance(state["done"], list)
+            ):
+                raise TimelineError("timeline continuation cursor is malformed")
 
-        def fetch(provider: str, per_source_limit: int) -> dict[str, Any]:
+        sources: list[dict[str, Any]] = []
+        raw = [
+            provider for provider in requested if provider not in UNAVAILABLE_SOURCES
+        ]
+        for provider in requested:
+            if provider in UNAVAILABLE_SOURCES:
+                sources.append(
+                    {
+                        "source": provider,
+                        "authority": "upstream",
+                        "availability": "unavailable",
+                        "reason": UNAVAILABLE_SOURCES[provider],
+                    }
+                )
+                continue
+            source = next(
+                candidate
+                for candidate in self.sessions.sources
+                if candidate.provider == provider
+            )
+            if not source.root.is_dir():
+                sources.append(
+                    {
+                        "source": provider,
+                        "authority": LOCAL_AUTHORITY,
+                        "availability": "unavailable",
+                        "reason": "session source directory is unavailable",
+                    }
+                )
+                state["done"].append(provider)
+            else:
+                sources.append(
+                    {
+                        "source": provider,
+                        "authority": LOCAL_AUTHORITY,
+                        "availability": "available",
+                        "coverage": {
+                            "scanned_bytes": 0,
+                            "truncated": provider not in state["done"],
+                        },
+                    }
+                )
+
+        # One look-ahead per provider is sufficient for an exact k-way merge:
+        # a provider's next file cannot outrank its pending newest entry.
+        for provider in raw:
+            if provider in state["done"] or provider in state["pending"]:
+                continue
             try:
-                return self.sessions.timeline(
-                    provider, start_ns, end_ns, query, per_source_limit
+                result = self.sessions.timeline(
+                    provider,
+                    start_ns,
+                    end_ns,
+                    query,
+                    1,
+                    cursor=state["current"].get(provider),
+                    cursor_key=effective_cursor_key,
+                    scan_bytes=scan_bytes,
                 )
             except SessionError as exc:
                 raise TimelineError(str(exc)) from exc
+            source_row = next(row for row in sources if row["source"] == provider)
+            source_row["coverage"] = {
+                "scanned_bytes": result["scanned_bytes"],
+                "truncated": result["truncated"],
+            }
+            if result["entries"]:
+                state["pending"][provider] = {
+                    "entry": result["entries"][0],
+                    "after": result["next_cursor"],
+                }
+            elif result["next_cursor"] is not None:
+                state["current"][provider] = result["next_cursor"]
+            else:
+                state["done"].append(provider)
 
-        sources, fetched = fetch_each_source(self.sessions, requested, limit, fetch)
-        entries = [
-            {
+        entries: list[dict[str, Any]] = []
+        while state["pending"] and len(entries) < limit:
+            provider, pending = max(
+                state["pending"].items(), key=lambda row: row[1]["entry"]["mtime_ns"]
+            )
+            entry = pending["entry"]
+            candidate = {
                 "source": provider,
                 "authority": LOCAL_AUTHORITY,
-                "object_reference": entry.pop("reference"),
-                **entry,
+                "object_reference": entry["reference"],
+                **{key: value for key, value in entry.items() if key != "reference"},
             }
-            for provider, result in fetched
-            for entry in result["entries"]
-        ]
-        entries.sort(key=lambda entry: entry["mtime_ns"], reverse=True)
-        entry_limit_truncated = len(entries) > limit
-        entries = entries[:limit]
-        truncated = entry_limit_truncated or any_source_truncated(sources)
-        while True:
-            response = {
-                "time_basis": "session-file-mtime",
-                "start": start,
-                "end": end,
-                "query": query,
-                "sources": sources,
-                "entries": entries,
-                "truncated": truncated,
+            if len(
+                json.dumps(entries + [candidate], separators=(",", ":")).encode()
+            ) > max(1, self.sessions.config.max_result_bytes - 16_384):
+                break
+            entries.append(candidate)
+            state["pending"].pop(provider)
+            if pending["after"] is None:
+                state["done"].append(provider)
+            else:
+                state["current"][provider] = pending["after"]
+                # Metadata-only timelines can cheaply fill a page from the
+                # winning provider without weakening the k-way ordering.
+                if query is None:
+                    try:
+                        follow = self.sessions.timeline(
+                            provider,
+                            start_ns,
+                            end_ns,
+                            None,
+                            1,
+                            cursor=pending["after"],
+                            cursor_key=effective_cursor_key,
+                            scan_bytes=scan_bytes,
+                        )
+                    except SessionError as exc:
+                        raise TimelineError(str(exc)) from exc
+                    if follow["entries"]:
+                        state["pending"][provider] = {
+                            "entry": follow["entries"][0],
+                            "after": follow["next_cursor"],
+                        }
+                    elif follow["next_cursor"] is None:
+                        state["done"].append(provider)
+                    else:
+                        state["current"][provider] = follow["next_cursor"]
+
+        more = bool(state["pending"]) or any(
+            provider not in state["done"] for provider in raw
+        )
+        next_cursor = None
+        if more:
+            next_cursor = OpaqueSessionCursor(
+                self.principal.name, effective_cursor_key, "timeline-query"
+            ).encode(scope, state)
+        response = {
+            "time_basis": "session-file-mtime",
+            "start": start,
+            "end": end,
+            "query": query,
+            "sources": sources,
+            "entries": entries,
+            "truncated": more,
+            "next_cursor": next_cursor,
+        }
+        if (
+            len(json.dumps(response, sort_keys=True, separators=(",", ":")).encode())
+            > self.sessions.config.max_result_bytes
+        ):
+            # A tiny direct-service response bound may not even accommodate a
+            # signed continuation plus the provenance envelope.  Preserve the
+            # honest coverage bit rather than returning an oversized payload.
+            response["next_cursor"] = None
+        if (
+            len(json.dumps(response, sort_keys=True, separators=(",", ":")).encode())
+            > self.sessions.config.max_result_bytes
+        ):
+            return {
+                "available": False,
+                "reason": "timeline response metadata exceeded response bound",
             }
-            encoded = json.dumps(
-                response, sort_keys=True, separators=(",", ":")
-            ).encode()
-            if len(encoded) <= self.sessions.config.max_result_bytes:
-                return response
-            if not entries:
-                return {
-                    "available": False,
-                    "reason": "timeline response metadata exceeded response bound",
-                }
-            entries.pop()
-            truncated = True
+        return response
