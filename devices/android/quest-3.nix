@@ -12,6 +12,10 @@
       # Official upstream releases. The lock records the exact APK hash and
       # signing certificate, so a headset wipe can restore these clients.
       "alvr.client.stable".github = "alvr-org/ALVR";
+      # Wolvic publishes several headset-specific APKs in each GitHub release.
+      # Pin the Quest artifact directly so a different headset build is never
+      # selected solely because it shares the same Android package id.
+      "com.igalia.wolvic".url = "https://github.com/Igalia/wolvic/releases/download/v1.9/Wolvic-oculusvr-arm64-gecko-generic-release.apk";
       "org.meumeu.wivrn.github".github = "WiVRn/WiVRn";
     };
 
@@ -58,6 +62,10 @@
 
   android.permissions = {
     "alvr.client.stable".grant = [
+      "android.permission.POST_NOTIFICATIONS"
+      "android.permission.RECORD_AUDIO"
+    ];
+    "com.igalia.wolvic".grant = [
       "android.permission.POST_NOTIFICATIONS"
       "android.permission.RECORD_AUDIO"
     ];

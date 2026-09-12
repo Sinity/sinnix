@@ -1,6 +1,6 @@
 {
   "abi": "arm64-v8a",
-  "lockedAt": 1789191632,
+  "lockedAt": 1789191940,
   "packages": {
     "alvr.client.stable": {
       "versionCode": 18091521,
@@ -21,6 +21,16 @@
         "a871d5438f9c704096e935824d93a140d9ee149c806eaa922f84fbaced4403ed"
       ],
       "source": "github:WiVRn/WiVRn"
+    },
+    "com.igalia.wolvic": {
+      "versionCode": 201401350,
+      "versionName": "1.9",
+      "url": "https://github.com/Igalia/wolvic/releases/download/v1.9/Wolvic-oculusvr-arm64-gecko-generic-release.apk",
+      "sha256": "e52e83d480abc10bee856f983ec563e38d93af0808d90dcca72ef5ae36d3b1ef",
+      "signerSha256": [
+        "d5e0870507688f23ae546c7b1bc43c6032bd04478b47e911ccc85702bd8d18d3"
+      ],
+      "source": "url:https://github.com/Igalia/wolvic/releases/download/v1.9/Wolvic-oculusvr-arm64-gecko-generic-release.apk"
     }
   }
 }
