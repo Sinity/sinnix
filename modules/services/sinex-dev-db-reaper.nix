@@ -68,7 +68,7 @@ mkServiceModule {
       description = "Reap orphaned sinex dev-postgres instances";
       # The registered surface unit is the *timer*, so the service resolves
       # its class directly rather than by unit lookup.
-      resourceClass = "background-maintenance";
+      resourceClass = "background";
       execStart = "${reaper}/bin/sinnix-sinex-dev-db reap --idle-secs ${toString cfg.idleSeconds}";
       serviceConfig = {
         # A wedged instance escalates SIGINT→SIGQUIT→SIGKILL internally with

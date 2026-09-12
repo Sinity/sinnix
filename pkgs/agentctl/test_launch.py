@@ -1017,8 +1017,11 @@ def test_snapshot_projects_a_large_terminal_history_without_reading_artifacts(
         "tasks": {
             **terminal_history,
             "6001": {
-                "id": 6001, "label": "fixture:worker:run", "group": "agent",
-                "path": "/realm/project/fixture", "dependencies": [],
+                "id": 6001,
+                "label": "fixture:worker:run",
+                "group": "agent",
+                "path": "/realm/project/fixture",
+                "dependencies": [],
                 "status": {"Running": {}},
             },
         },
@@ -1029,7 +1032,7 @@ def test_snapshot_projects_a_large_terminal_history_without_reading_artifacts(
     monkeypatch.setattr(
         pueue,
         "_run",
-        lambda arguments, **_kwargs: (calls.append(tuple(arguments)) or payload),
+        lambda arguments, **_kwargs: calls.append(tuple(arguments)) or payload,
     )
 
     snapshot = launch.snapshot_jobs(2)

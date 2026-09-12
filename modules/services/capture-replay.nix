@@ -77,7 +77,7 @@ mkServiceModule {
   surface = {
     unit = unit;
     manager = "user";
-    resourceClass = "capture-runtime";
+    resourceClass = "capture";
     observe = {
       enable = true;
       restartable = true;

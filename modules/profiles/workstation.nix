@@ -1,7 +1,6 @@
 # Interactive workstation profile.
 #
-# Coarse aggregate for a desktop/interactive host (sinnix-prime). Sets
-# `sinnix.machine.isDesktop = true` and owns the resource-governance stack
+# Applied automatically to desktop hosts. It owns the resource-governance stack
 # that keeps desktop-critical processes protected while declared services and
 # AgentCTL jobs receive their own resource policy: systemd slices, earlyoom
 # policy, io.cost init, RAPL power
@@ -15,7 +14,6 @@
   ...
 }:
 let
-  cfg = config.sinnix.profiles.workstation;
   runtimeInventory = config.sinnix.runtime.inventory;
   user = config.sinnix.user.name;
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
@@ -112,9 +110,7 @@ let
   };
 in
 {
-  options.sinnix.profiles.workstation.enable = lib.mkEnableOption "Interactive workstation profile";
-
-  config = lib.mkIf cfg.enable (
+  config = lib.mkIf config.sinnix.machine.isDesktop (
     lib.mkMerge [
       (lib.sinnix.mkScheduledJob
         {
@@ -124,7 +120,7 @@ in
         }
         {
           manager = "user";
-          resourceClass = "background-maintenance";
+          resourceClass = "background";
           execStart = "${scriptPkgs.sinnix-tmp-sweep}/bin/sinnix-tmp-sweep";
           serviceConfig = {
             TimeoutStartSec = "5min";
@@ -160,8 +156,6 @@ in
             message = "earlyoom must protect the lowercase Hyprland session launcher used by UWSM";
           }
         ];
-
-        sinnix.machine.isDesktop = lib.mkForce true;
 
         # Tiered swap posture: zram is the fast first tier absorbing bursts at
         # RAM speed; the NVMe swapfile (hosts/sinnix-prime/storage.nix, priority

@@ -146,26 +146,16 @@ let
       "${script "kitty-hypr-nav"} resize down"
     )
     (run "XF86AudioMute" "Mute or unmute audio" "pamixer -t")
-    (run "XF86AudioPlay" "Play or pause media"
-      "playerctl play-pause && notify-send -t 1000 '♪ Media' '$(playerctl status)'"
-    )
-    (run "XF86AudioNext" "Skip to the next track"
-      "playerctl next && notify-send -t 1000 '♪ Next' '$(playerctl metadata title 2>/dev/null || echo \\\"Unknown\\\")'"
-    )
-    (run "XF86AudioPrev" "Go back to the previous track"
-      "playerctl previous && notify-send -t 1000 '♪ Previous' '$(playerctl metadata title 2>/dev/null || echo \\\"Unknown\\\")'"
-    )
+    (run "XF86AudioPlay" "Play or pause active media" "sinnix quest video media-key toggle")
+    (run "XF86AudioNext" "Advance active media" "sinnix quest video media-key next")
+    (run "XF86AudioPrev" "Rewind active media" "sinnix quest video media-key previous")
     (run "XF86AudioRaiseVolume" "Raise the volume" "pamixer -i 2")
     (run "XF86AudioLowerVolume" "Lower the volume" "pamixer -d 2")
     (run "SUPER + XF86AudioMute" "Mute or unmute the microphone" "${script "audio"} mic-toggle")
     (run "SUPER + XF86AudioRaiseVolume" "Switch to the next audio output" "${script "audio"} toggle")
-    (run "SUPER + ALT + P" "Toggle Quest DeoVR playback" "sinnix quest player toggle")
-    (run "SUPER + ALT + O" "Choose and launch a local Quest video" "sinnix quest player choose")
-    (run "SUPER + ALT + Left" "Seek Quest DeoVR backward ten seconds" "sinnix quest player seek -10")
-    (run "SUPER + ALT + Right" "Seek Quest DeoVR forward ten seconds" "sinnix quest player seek +10")
-    (run "SUPER + ALT + Up" "Set Quest DeoVR speed to 1.25x" "sinnix quest player speed 1.25")
-    (run "SUPER + ALT + Down" "Set Quest DeoVR speed to 1x" "sinnix quest player speed 1")
-    (run "SUPER + ALT + SHIFT + P" "Stop Quest native video playback" "sinnix quest player stop")
+    (run "SUPER + P" "Launch clipboard video on Quest"
+      "kitty --title 'Quest video' sinnix quest video open --clipboard"
+    )
   ];
 
   binddl = [

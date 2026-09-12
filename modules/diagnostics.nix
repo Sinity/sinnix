@@ -54,7 +54,7 @@ in
     # syslog-index previously ran with no registered runtime surface at all
     # (no resourceClass resolution, no failure-notify) -- an intended
     # semantic delta of this conversion, not merely a render change: it now
-    # carries background-maintenance's Nice/IOScheduling/CPU/IOWeight/Memory
+    # carries the background class's Nice/IOScheduling/CPU/IOWeight/Memory
     # governance and the standard OnFailure path, matching every other
     # scheduled oneshot on this host.
     (lib.sinnix.mkScheduledJob
@@ -133,13 +133,13 @@ in
 
       sinnix.runtime.surfaces.capture-boot-metrics = {
         unit = "capture-boot-metrics.service";
-        resourceClass = "background-maintenance";
+        resourceClass = "background";
         observe.enable = true;
       };
 
       sinnix.runtime.surfaces.syslog-index = {
         unit = "syslog-index.service";
-        resourceClass = "background-maintenance";
+        resourceClass = "background";
         observe.enable = true;
       };
     }

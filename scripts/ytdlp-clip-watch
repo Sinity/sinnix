@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @sinnix-package
 # description: Safe clipboard->yt-dlp watcher (drains the wl-paste pipe; won't freeze kitty)
-# runtimeInputs: wl-clipboard yt-dlp coreutils util-linux
+# runtimeInputs: wl-clipboard coreutils util-linux @sinnix-ytdlp
 #
 # Watch the Wayland clipboard for download sessions: every copied http(s) URL is
 # handed to yt-dlp. Run it manually when you want a batch of copies downloaded;
@@ -24,6 +24,7 @@
 set -euo pipefail
 
 DEST=${YTDLP_CLIP_DIR:-/realm/inbox/download}
+LOG_DIR=${YTDLP_CLIP_LOG_DIR:-/realm/state/ytdlp-clip-watch}
 
 # Internal handler: invoked by `wl-paste --watch` with the selection on stdin.
 if [ "${1:-}" = "--handle" ]; then
@@ -32,9 +33,11 @@ if [ "${1:-}" = "--handle" ]; then
   http://* | https://*) ;;
   *) exit 0 ;;
   esac
-  mkdir -p "$DEST"
+  mkdir -p "$DEST" "$LOG_DIR"
+  log="$LOG_DIR/$(date -u +%Y%m%dT%H%M%SZ)-$$.log"
   # Detach so a long download never stalls the next clipboard event.
-  setsid -f yt-dlp --paths "$DEST" --no-playlist -- "$url" >/dev/null 2>&1 || true
+  setsid -f sh -c 'exec sinnix-ytdlp --paths "$1" --no-playlist -- "$2" >"$3" 2>&1' sh "$DEST" "$url" "$log"
+  echo "ytdlp-clip-watch: started download; log: $log" >&2
   exit 0
 fi
 

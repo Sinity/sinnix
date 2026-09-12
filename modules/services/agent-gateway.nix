@@ -326,7 +326,7 @@ mkServiceModule {
         lib.nameValuePair "agent-gateway-${name}" {
           unit = "sinnix-agent-gateway-${name}.service";
           manager = "user";
-          resourceClass = "interactive-agent";
+          resourceClass = "ordinary";
           observe = {
             enable = true;
             restartable = true;

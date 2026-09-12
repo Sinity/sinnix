@@ -88,17 +88,24 @@ def test_job_snapshot_bounds_terminal_history_without_hiding_active_jobs(
 ) -> None:
     for _ in range(80):
         task_id = fake_pueue.add(
-            group="normal", label="fixture:history", command=("true",),
+            group="normal",
+            label="fixture:history",
+            command=("true",),
             working_directory=cli_config.project_roots[0],
         )
         fake_pueue.succeed(task_id)
     running = fake_pueue.add(
-        group="agent", label="fixture:worker:run", command=("true",),
+        group="agent",
+        label="fixture:worker:run",
+        command=("true",),
         working_directory=cli_config.project_roots[0],
     )
     queued = fake_pueue.add(
-        group="agent", label="fixture:queued", command=("true",),
-        working_directory=cli_config.project_roots[0], after=(running,),
+        group="agent",
+        label="fixture:queued",
+        command=("true",),
+        working_directory=cli_config.project_roots[0],
+        after=(running,),
     )
     monkeypatch.setattr(
         pueue,
@@ -106,7 +113,10 @@ def test_job_snapshot_bounds_terminal_history_without_hiding_active_jobs(
         lambda: pueue.Status(
             fake_pueue.tasks(),
             {
-                name: {"status": "Paused" if name in fake_pueue.paused else "Running", "parallel_tasks": parallel}
+                name: {
+                    "status": "Paused" if name in fake_pueue.paused else "Running",
+                    "parallel_tasks": parallel,
+                }
                 for name, parallel in fake_pueue.groups.items()
             },
         ),
@@ -157,18 +167,24 @@ def test_job_start_with_wait_reports_a_failure_in_the_exit_status(
 
 
 def test_retained_run_diagnostics_reach_json_and_human_errors(
-    cli_config: Config, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    cli_config: Config,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     error = cli.JobError("worker provisioning stopped")
     error.run_id = "fixture-run"
-    error.unprovisioned = [{"worker": "review", "beads": ["fx-1"], "reason": "queue uncertain"}]
+    error.unprovisioned = [
+        {"worker": "review", "beads": ["fx-1"], "reason": "queue uncertain"}
+    ]
     monkeypatch.setattr(cli, "_dispatch", lambda *_args: (_ for _ in ()).throw(error))
 
     assert cli.main(["--json", "job", "list"]) == cli.EXIT_REFUSED
     assert json.loads(capsys.readouterr().out) == {
         "error": "worker provisioning stopped",
         "retained_run": "fixture-run",
-        "unprovisioned": [{"worker": "review", "beads": ["fx-1"], "reason": "queue uncertain"}],
+        "unprovisioned": [
+            {"worker": "review", "beads": ["fx-1"], "reason": "queue uncertain"}
+        ],
     }
     assert cli.main(["job", "list"]) == cli.EXIT_REFUSED
     assert "retained run fixture-run" in capsys.readouterr().err

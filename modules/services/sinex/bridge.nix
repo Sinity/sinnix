@@ -538,7 +538,7 @@ in
           sinex-runtime = {
             unit = "sinex-runtime.target";
             kind = "target";
-            resourceClass = "capture-runtime";
+            resourceClass = "capture";
             observe = {
               enable = runtimeAutoStart;
               restartable = false;
@@ -550,7 +550,7 @@ in
           };
           sinexd = {
             unit = "sinexd.service";
-            resourceClass = "capture-runtime";
+            resourceClass = "capture";
             observe = {
               enable = runtimeAutoStart;
               restartable = false;
@@ -558,7 +558,14 @@ in
           };
           nats = {
             unit = "nats.service";
-            resourceClass = "capture-substrate";
+            resourceClass = "ordinary";
+            resources = {
+              Nice = 8;
+              IOSchedulingClass = "best-effort";
+              IOSchedulingPriority = 7;
+              IOWeight = 20;
+              MemoryHigh = "8G";
+            };
             observe = {
               enable = runtimeAutoStart;
               restartable = false;
@@ -566,7 +573,14 @@ in
           };
           postgresql = {
             unit = "postgresql.service";
-            resourceClass = "capture-substrate";
+            resourceClass = "ordinary";
+            resources = {
+              Nice = 8;
+              IOSchedulingClass = "best-effort";
+              IOSchedulingPriority = 7;
+              IOWeight = 20;
+              MemoryHigh = "8G";
+            };
             observe = {
               enable = runtimeAutoStart;
               restartable = false;
@@ -574,7 +588,7 @@ in
           };
           sinex-postgres-dump = {
             unit = "sinex-postgres-dump.service";
-            resourceClass = "backup-maintenance";
+            resourceClass = "backup";
           };
           sinex-postgres-dump-timer = {
             unit = "sinex-postgres-dump.timer";
@@ -584,7 +598,7 @@ in
         // lib.optionalAttrs activationProfile.document {
           sinex-document-scan = {
             unit = "sinex-document-scan.service";
-            resourceClass = "background-maintenance";
+            resourceClass = "background";
           };
         };
 

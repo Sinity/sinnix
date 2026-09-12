@@ -35,6 +35,7 @@ let
 in
 mkServiceModule (mkCaptureLane {
   name = "capture-screen";
+  defaultOnDesktop = true;
   description = "Per-window screen frame capture: Hyprland events + idle-pause + 30s floor, p-hash dedup, WebP q80";
   inherit username laneDir;
   mode = "stream";

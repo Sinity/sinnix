@@ -14,7 +14,7 @@ mkServiceModule {
   description = "Transmission BitTorrent client";
   surface = {
     unit = "transmission.service";
-    resourceClass = "background-maintenance";
+    resourceClass = "background";
     # Transmission is often intentionally stopped for disk maintenance.
     # Let the dedicated autostart timer handle boot startup; observability
     # should reflect manual stops without turning them into policy.

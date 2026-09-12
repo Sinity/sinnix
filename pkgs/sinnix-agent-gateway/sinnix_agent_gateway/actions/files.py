@@ -281,7 +281,9 @@ def _list(runtime: Runtime, inp: ListInput) -> DirectoryListing:
 class ReadInput(RequestControls):
     target: FileLocator
     offset: int = Field(default=0, ge=0, description="Byte offset for raw reads.")
-    max_bytes: int = Field(default=64_000, ge=1, description="Maximum inline text bytes.")
+    max_bytes: int = Field(
+        default=64_000, ge=1, description="Maximum inline text bytes."
+    )
     with_sha256: bool = Field(
         default=False,
         description="Compute a full-file SHA-256. Disabled by default for bounded reads.",

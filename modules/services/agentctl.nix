@@ -30,6 +30,7 @@ let
 in
 mkServiceModule {
   name = "agentctl";
+  defaultOnDesktop = true;
   description = "agentctl: jobs over pueue, lanes over worktrunk, gh and bd, and their timers";
   extraOptions.projectRoots = lib.mkOption {
     type = lib.types.nonEmptyListOf lib.types.str;
@@ -112,7 +113,7 @@ mkServiceModule {
         }
         {
           manager = "user";
-          resourceClass = "background-maintenance";
+          resourceClass = "background";
           # The pass pauses and resumes pueue groups through the pueue client.
           path = [ pkgs.pueue ];
           execStart = "${scriptPkgs.agentctl}/bin/agentctl backpressure tick";
@@ -138,7 +139,7 @@ mkServiceModule {
         }
         {
           manager = "user";
-          resourceClass = "background-maintenance";
+          resourceClass = "background";
           # Each declared `schedule` becomes one transient timer running
           # `agentctl job fire`; a changed or removed declaration is stopped.
           execStart = "${scriptPkgs.agentctl}/bin/agentctl schedule apply";
@@ -160,7 +161,7 @@ mkServiceModule {
         }
         {
           manager = "user";
-          resourceClass = "background-maintenance";
+          resourceClass = "background";
           path = [ pkgs.pueue ];
           execStart = "${scriptPkgs.agentctl}/bin/agentctl pools apply";
           serviceConfig = {

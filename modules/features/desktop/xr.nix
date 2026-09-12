@@ -61,8 +61,14 @@ mkFeatureModule {
         home-manager.users.${user}.home.packages = [ pkgs.alvr ];
         # The streamer only listens while its dashboard/session is launched.
         networking.firewall.interfaces.${lanInterface} = {
-          allowedTCPPorts = [ 9943 9944 ];
-          allowedUDPPorts = [ 9943 9944 ];
+          allowedTCPPorts = [
+            9943
+            9944
+          ];
+          allowedUDPPorts = [
+            9943
+            9944
+          ];
         };
       })
       (lib.mkIf cfg.wivrn.enable {
@@ -86,8 +92,14 @@ mkFeatureModule {
           # 9790 serves private Quest video archives with HTTP byte ranges.
           # DeoVR uses those ranges for direct LAN playback; the port stays
           # scoped to the physical LAN and the user service starts on demand.
-          allowedTCPPorts = [ 9757 9790 ];
-          allowedUDPPorts = [ 5353 9757 ];
+          allowedTCPPorts = [
+            9757
+            9790
+          ];
+          allowedUDPPorts = [
+            5353
+            9757
+          ];
         };
         systemd.user.services.sinnix-quest-media = {
           description = "Private Quest video archive HTTP server";
@@ -99,7 +111,11 @@ mkFeatureModule {
         };
         systemd.user.services.sinnix-quest-player = {
           description = "Authenticated native Quest video playback session";
-          path = [ scriptPkgs.sinnix-quest scriptPkgs.sinnix-quest-player pkgs.android-tools ];
+          path = [
+            scriptPkgs.sinnix-quest
+            scriptPkgs.sinnix-quest-player
+            pkgs.android-tools
+          ];
           environment.SINNIX_QUEST_ADB_COMMAND = "sinnix-quest adb";
           serviceConfig = {
             ExecStart = "${scriptPkgs.sinnix-quest-player}/bin/sinnix-quest-player serve";
@@ -129,7 +145,7 @@ mkFeatureModule {
           }
           {
             manager = "user";
-            resourceClass = "background-maintenance";
+            resourceClass = "background";
             script = ''
               if ${scriptPkgs.sinnix-quest}/bin/sinnix-quest doctor >/dev/null; then
                 exec ${scriptPkgs.sinnix-quest}/bin/sinnix-quest media prune --apply
@@ -172,8 +188,19 @@ mkFeatureModule {
         networking.firewall.interfaces.${lanInterface} = {
           # Sunshine's default base port is 47989. Keep Moonlight traffic on
           # the physical LAN instead of opening the service globally.
-          allowedTCPPorts = [ 47984 47989 47990 48010 ];
-          allowedUDPPorts = [ 47998 47999 48000 48002 48010 ];
+          allowedTCPPorts = [
+            47984
+            47989
+            47990
+            48010
+          ];
+          allowedUDPPorts = [
+            47998
+            47999
+            48000
+            48002
+            48010
+          ];
         };
       })
       (lib.mkIf cfg.sidequest.enable {

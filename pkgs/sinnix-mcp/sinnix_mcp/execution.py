@@ -72,7 +72,9 @@ class ExecutionResult:
 
     @property
     def available(self) -> bool:
-        return self.failure_class is None and (self.exit_status == 0 or self.stopped_early)
+        return self.failure_class is None and (
+            self.exit_status == 0 or self.stopped_early
+        )
 
     def stderr_excerpt(self) -> str:
         return self.stderr.decode("utf-8", errors="replace").strip()[:2_000]

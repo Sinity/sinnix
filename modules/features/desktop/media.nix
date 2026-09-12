@@ -17,7 +17,7 @@ mkFeatureModule {
     };
     music = {
       description = "Music streaming (Spotify, ncspot)";
-      default = true;
+      default = false;
     };
     anime = {
       description = "Anime tools (ani-cli, trackma)";
@@ -49,6 +49,11 @@ mkFeatureModule {
     let
       lakeRoot = config.sinnix.paths.activityRoot;
       scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
+      videoDownloader = pkgs.symlinkJoin {
+        name = "sinnix-yt-dlp";
+        paths = [ scriptPkgs.sinnix-ytdlp ];
+        postBuild = ''ln -s "$out/bin/sinnix-ytdlp" "$out/bin/yt-dlp"'';
+      };
     in
     lib.mkMerge [
       # MPV video player
@@ -254,7 +259,7 @@ mkFeatureModule {
           gpu-screen-recorder
           gpu-screen-recorder-gtk
           ffmpeg
-          yt-dlp
+          videoDownloader
           scriptPkgs.screen-record
           # Clipboard->yt-dlp watcher. It must drain wl-paste's pipe; a
           # `wl-paste -w sh -c '...'` one-liner that leaves it undrained

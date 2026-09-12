@@ -21,6 +21,7 @@ let
 in
 mkServiceModule (mkCaptureLane {
   name = "capture-kitty-scrollback";
+  defaultOnDesktop = true;
   description = "Periodic full-ANSI kitty terminal scrollback capture";
   extraOptions = {
     intervalMinutes = lib.mkOption {

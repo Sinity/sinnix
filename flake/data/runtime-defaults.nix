@@ -4,6 +4,17 @@ let
     inherit description serviceConfig;
   };
 
+  buildSlicePolicy = {
+    IOAccounting = true;
+    CPUWeight = 5;
+    IOWeight = 2;
+    MemoryHigh = "22G";
+    MemoryMax = "28G";
+    ManagedOOMMemoryPressure = "kill";
+    ManagedOOMMemoryPressureLimit = "50%";
+    ManagedOOMMemoryPressureDurationSec = "30s";
+  };
+
   surfaceType = surface: if surface.manager == "user" then "user" else surface.kind;
 
   normalizeSurface =
@@ -12,7 +23,7 @@ let
       normalized = {
         manager = "system";
         kind = "service";
-        resourceClass = "system";
+        resourceClass = "ordinary";
         observe = {
           enable = false;
           restartable = false;
@@ -145,21 +156,14 @@ rec {
   earlyoomEmergencyAvoidPattern = "(${lib.concatStringsSep "|" earlyoomEmergencyAvoidBase})";
 
   classes = {
-    interactive-agent = mkClass "Interactive AI agent shells and frontends" { };
-    interactive-access = mkClass "Login, SSH, and input services needed to regain control" {
+    ordinary = mkClass "Services without shared resource overrides" { };
+    critical = mkClass "Services needed to observe or regain control" {
       Slice = "system-critical.slice";
       Nice = -5;
       IOSchedulingClass = "best-effort";
       IOSchedulingPriority = 0;
     };
-    desktop-shell = mkClass "Interactive desktop shell UI" {
-      Slice = "desktop-shell.slice";
-    };
-    developer-build = mkClass "User-initiated builds, tests, and Nix work" { };
-    managed-runtime-work = mkClass "Daemon-managed transient work" {
-      Slice = "agentctl-work.slice";
-    };
-    background-maintenance = mkClass "Bulk maintenance that should yield to interaction" {
+    background = mkClass "Maintenance that should yield to interaction" {
       Nice = 10;
       IOSchedulingClass = "idle";
       CPUWeight = 5;
@@ -167,7 +171,7 @@ rec {
       MemoryHigh = "1G";
       MemoryMax = "3G";
     };
-    backup-maintenance = mkClass "Snapshot and backup jobs" {
+    backup = mkClass "Snapshot and backup jobs" {
       Slice = "background.slice";
       Nice = 10;
       CPUSchedulingPolicy = "idle";
@@ -187,35 +191,13 @@ rec {
         "/outer-realm 40M"
       ];
     };
-    capture-runtime = mkClass "Long-running capture daemons" {
+    capture = mkClass "Long-running capture daemons" {
       Nice = 10;
       IOSchedulingClass = "idle";
       IOWeight = 10;
       MemoryHigh = "6G";
       MemoryMax = "8G";
     };
-    gpu-runtime = mkClass "GPU-accelerated runtimes that must not serialize builds" {
-      Nice = 5;
-      IOSchedulingClass = "best-effort";
-      IOSchedulingPriority = 7;
-      IOWeight = 20;
-      MemoryHigh = "8G";
-      MemoryMax = "12G";
-    };
-    capture-substrate = mkClass "Databases and queues backing capture daemons" {
-      Nice = 8;
-      IOSchedulingClass = "best-effort";
-      IOSchedulingPriority = 7;
-      IOWeight = 20;
-      MemoryHigh = "8G";
-    };
-    observability = mkClass "Monitoring that should remain responsive during contention" {
-      Slice = "system-critical.slice";
-      Nice = -5;
-      IOSchedulingClass = "best-effort";
-      IOSchedulingPriority = 0;
-    };
-    system = mkClass "Ordinary system services without Sinnix-specific placement" { };
   };
 
   slices = {
@@ -431,41 +413,8 @@ rec {
         MemoryMax = "4G";
         MemorySwapMax = "0";
       };
-      gpu-runtime = {
-        IOAccounting = true;
-        CPUWeight = 20;
-        IOWeight = 20;
-        MemoryHigh = "8G";
-        MemoryMax = "12G";
-      };
-      build = {
-        IOAccounting = true;
-        CPUWeight = 5;
-        IOWeight = 2;
-        MemoryHigh = "22G";
-        MemoryMax = "28G";
-        # PSI-scoped oomd: kill sacrificial work at cgroup granularity when
-        # ITS OWN memory pressure stalls it, rather than letting global
-        # earlyoom pick victims. 50%/30s (not the 10%/5s defaults) so only a
-        # genuinely wedged scope dies, not a busy one.
-        ManagedOOMMemoryPressure = "kill";
-        ManagedOOMMemoryPressureLimit = "50%";
-        ManagedOOMMemoryPressureDurationSec = "30s";
-      };
-      nix-build = {
-        IOAccounting = true;
-        CPUWeight = 5;
-        IOWeight = 2;
-        MemoryHigh = "22G";
-        MemoryMax = "28G";
-        # PSI-scoped oomd: kill sacrificial work at cgroup granularity when
-        # ITS OWN memory pressure stalls it, rather than letting global
-        # earlyoom pick victims. 50%/30s (not the 10%/5s defaults) so only a
-        # genuinely wedged scope dies, not a busy one.
-        ManagedOOMMemoryPressure = "kill";
-        ManagedOOMMemoryPressureLimit = "50%";
-        ManagedOOMMemoryPressureDurationSec = "30s";
-      };
+      build = buildSlicePolicy;
+      nix-build = buildSlicePolicy;
     };
   };
 
@@ -490,15 +439,15 @@ rec {
   baseSurfaces = {
     sshd = {
       unit = "sshd.service";
-      resourceClass = "interactive-access";
+      resourceClass = "critical";
     };
     nix-gc = {
       unit = "nix-gc.service";
-      resourceClass = "background-maintenance";
+      resourceClass = "background";
     };
     nix-optimise = {
       unit = "nix-optimise.service";
-      resourceClass = "background-maintenance";
+      resourceClass = "background";
     };
   };
 

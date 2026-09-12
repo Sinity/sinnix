@@ -107,7 +107,7 @@ mkFeatureModule {
       # matches mkScheduledJob's surfaceCoversFailure check (it compares
       # against "${unitName}.service") -- the same mismatch that already
       # meant this service got its resourceClass via a direct
-      # resourceClass = "background-maintenance" key (see the job spec
+      # resourceClass = "background" key (see the job spec
       # below) rather than a unit lookup, and equally means it never got the
       # OnFailure drop-in either (that drop-in only fires for
       # kind == "service" surfaces). Going through mkScheduledJob is a real
@@ -122,7 +122,7 @@ mkFeatureModule {
         }
         {
           manager = "user";
-          resourceClass = "background-maintenance";
+          resourceClass = "background";
           execStart = "${scriptPkgs.sinnix-wallpaper-timeofday}/bin/sinnix-wallpaper-timeofday";
           environment = {
             SINNIX_WALLPAPER_CORPUS = cfg.corpusRoot;

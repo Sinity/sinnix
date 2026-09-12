@@ -38,9 +38,10 @@
   # sub-lanes under one routerRoot).
   laneDir ? null,
   username,
+  defaultOnDesktop ? false,
   extraOptions ? { },
   manager ? "user",
-  resourceClass ? "capture-runtime",
+  resourceClass ? "capture",
   restartable ? true,
   # "poll" (oneshot + timer) or "stream" (long-running, session-lifecycle).
   mode,
@@ -265,6 +266,7 @@ in
   inherit
     name
     description
+    defaultOnDesktop
     extraOptions
     surface
     configFn

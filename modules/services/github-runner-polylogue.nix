@@ -74,7 +74,8 @@ mkServiceModule {
       (lib.mkIf tokenAvailable {
         sinnix.runtime.surfaces.github-runner-polylogue = {
           unit = "github-runner-polylogue.service";
-          resourceClass = "managed-runtime-work";
+          resourceClass = "ordinary";
+          resources.Slice = "agentctl-work.slice";
           observe = {
             enable = true;
             restartable = true;

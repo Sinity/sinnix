@@ -37,6 +37,7 @@ let
 in
 mkServiceModule (mkCaptureLane {
   name = "capture-mpris";
+  defaultOnDesktop = true;
   description = "MPRIS media-player track/status capture with playback heartbeat";
   extraOptions = {
     heartbeatIntervalSec = lib.mkOption {

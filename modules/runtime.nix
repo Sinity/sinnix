@@ -302,7 +302,7 @@ in
             };
             resourceClass = lib.mkOption {
               type = lib.types.enum resourceClassNames;
-              default = "system";
+              default = "ordinary";
               # A class becomes real by way of serviceConfig, which only a
               # service has: mkRuntimeServiceConfig resolves a surface by its
               # `<unit>.service` name and can never reach a timer. Rejecting the
@@ -310,12 +310,24 @@ in
               # stops a tenth from being added.
               apply =
                 value:
-                lib.throwIf (config.kind == "timer" && value != "system")
+                lib.throwIf (config.kind == "timer" && value != "ordinary")
                   "sinnix.runtime.surfaces.${name}: a timer has no serviceConfig, so resourceClass = \"${value}\" can never apply; declare it on the .service surface this timer triggers"
                   value;
               description = "Sinnix runtime resource class.";
             };
             resources = {
+              Slice = lib.mkOption {
+                type = lib.types.nullOr lib.types.str;
+                default = null;
+              };
+              IOSchedulingClass = lib.mkOption {
+                type = lib.types.nullOr lib.types.str;
+                default = null;
+              };
+              IOSchedulingPriority = lib.mkOption {
+                type = lib.types.nullOr lib.types.int;
+                default = null;
+              };
               MemoryHigh = lib.mkOption {
                 type = lib.types.nullOr lib.types.str;
                 default = null;
@@ -588,7 +600,7 @@ in
         # dead probe is a health verdict rather than a quiet absence.
         config-drift = {
           unit = "sinnix-config-drift.service";
-          resourceClass = "background-maintenance";
+          resourceClass = "background";
           observe.enable = true;
           captures = [
             {

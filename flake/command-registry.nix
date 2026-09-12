@@ -685,7 +685,9 @@ in
       category = "Core";
       description = "Format via treefmt";
     }
-  ] ++ activationCommandDocs ++ [
+  ]
+  ++ activationCommandDocs
+  ++ [
     {
       name = "lint";
       category = "Validate";

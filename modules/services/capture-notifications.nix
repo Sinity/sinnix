@@ -1,7 +1,7 @@
 # Desktop notification capture lane
 #
 # Reference instance of the event-capture-lane template: mkServiceModule
-# default-off, user-manager daemon, capture-runtime resource class, writing
+# desktop-default, user-manager daemon, capture resource class, writing
 # through the shared sinnix-capture envelope library (pkgs/sinnix-capture).
 # New lanes should copy this file's shape rather than re-derive it.
 #
@@ -29,6 +29,7 @@ let
 in
 mkServiceModule (mkCaptureLane {
   name = "capture-notifications";
+  defaultOnDesktop = true;
   description = "Desktop notification capture: org.freedesktop.Notifications D-Bus monitor -> sinnix-capture";
   # laneDir lives under /realm, a persistent volume outside impermanence's
   # reach, so no sinnix.persistence entry is needed -- tmpfiles alone

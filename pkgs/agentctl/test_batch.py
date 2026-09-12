@@ -1836,9 +1836,9 @@ def test_resume_replaces_its_own_landing_after_the_queue_was_reordered(
         "the resume dropped the id the landing was queued at, where the "
         "switch had left an unrelated job"
     )
-    assert (
-        launch.launch_reference(harness.pueue.task(queued_landing_at)) == "other"
-    ), "the unrelated job no longer holds the id the switch gave it"
+    assert launch.launch_reference(harness.pueue.task(queued_landing_at)) == "other", (
+        "the unrelated job no longer holds the id the switch gave it"
+    )
     landing = harness.pueue.task(resumed["landing"]["task_id"])
     assert sorted(landing.dependencies) == sorted(
         worker["task_id"] for worker in resumed["workers"]

@@ -458,8 +458,13 @@ def _prepare(
                 pending = worker.get("pending_launch")
                 task = pending_task(config, pending) if pending else None
 
-                def record_pending(reference: str) -> None:
-                    set_worker(config, run.run_id, index, pending_launch=reference)
+                def record_pending(
+                    reference: str,
+                    *,
+                    run_id: str = run.run_id,
+                    worker_index: int = index,
+                ) -> None:
+                    set_worker(config, run_id, worker_index, pending_launch=reference)
 
                 if task is not None:
                     job = {
@@ -539,12 +544,13 @@ def _prepare(
 
         return update(config, run.run_id, mark_prepared)
     except Exception as error:
+        error_text = str(error)
 
         def record_failure(document: dict[str, Any]) -> None:
             document["preparation_error"] = {
                 "worker": worker_id,
                 "stage": stage,
-                "error": str(error),
+                "error": error_text,
             }
 
         try:

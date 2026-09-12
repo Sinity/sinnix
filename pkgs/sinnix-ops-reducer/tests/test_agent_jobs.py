@@ -21,10 +21,24 @@ def test_snapshot_reads_one_bounded_owner_projection() -> None:
     owner_snapshot = {
         "schema": "sinnix.agentctl.job-snapshot.v1",
         "limit": MAX_SNAPSHOT_JOBS,
-        "groups": {"agent": {"status": "Paused", "parallel": 4, "running": 1, "queued": 1, "paused": 1, "stashed": 0, "terminal": 99, "total": 102}},
+        "groups": {
+            "agent": {
+                "status": "Paused",
+                "parallel": 4,
+                "running": 1,
+                "queued": 1,
+                "paused": 1,
+                "stashed": 0,
+                "terminal": 99,
+                "total": 102,
+            }
+        },
         "jobs": jobs,
         "omitted": {"total": 100, "active": 0, "terminal": 100},
-        "coverage": {"active": {"total": 2, "returned": 2}, "terminal": {"total": 100, "returned": 0}},
+        "coverage": {
+            "active": {"total": 2, "returned": 2},
+            "terminal": {"total": 100, "returned": 0},
+        },
         "truncated": True,
     }
     calls: list[list[str]] = []

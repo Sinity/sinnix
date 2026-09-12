@@ -16,6 +16,7 @@ let
 in
 mkServiceModule {
   name = "ops-reducer";
+  defaultOnDesktop = true;
   description = "Sinnix operator current-state reducer and bounded action receipts";
   configFn =
     {
@@ -40,7 +41,7 @@ mkServiceModule {
       sinnix.runtime.surfaces.ops-reducer = {
         unit = "sinnix-ops-reducer.service";
         manager = "user";
-        resourceClass = "interactive-agent";
+        resourceClass = "ordinary";
         observe = {
           enable = true;
           restartable = true;

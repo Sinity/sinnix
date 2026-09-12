@@ -22,7 +22,7 @@ mkServiceModule {
   };
   surface = {
     unit = "muse-glimmer.service";
-    resourceClass = "interactive-agent";
+    resourceClass = "ordinary";
     activation = {
       mode = "socket-proxy";
       publicEndpoint = "127.0.0.1:${toString helpers.data.ports.museGlimmer.public}";

@@ -124,11 +124,11 @@ let
 
   # Previously hand-rolled with no registered runtime surface at all (no
   # resourceClass resolution, no failure-notify) -- an intended semantic
-  # delta of this conversion: it now carries background-maintenance's
+  # delta of this conversion: it now carries the background class's
   # Nice/IOScheduling/CPU/IOWeight/Memory governance and the standard
   # OnFailure path, matching every other scheduled oneshot on this host.
   # The explicit IOSchedulingPriority=7 override is dropped along with it:
-  # background-maintenance doesn't set one (defaults to systemd's own
+  # the background class doesn't set one (defaults to systemd's own
   # priority-4-within-class), which is the class this job now defers to.
   drainSwapfileJob =
     lib.sinnix.mkScheduledJob
@@ -569,7 +569,7 @@ in
 
   sinnix.runtime.surfaces.sinnix-drain-swapfile = {
     unit = "sinnix-drain-swapfile.service";
-    resourceClass = "background-maintenance";
+    resourceClass = "background";
     observe.enable = true;
   };
 

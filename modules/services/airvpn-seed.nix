@@ -24,7 +24,7 @@ mkServiceModule {
   description = "AirVPN WireGuard tunnel for Transmission seeding with policy routing";
   surface = {
     unit = "wireguard-airvpn-seed.service";
-    resourceClass = "background-maintenance";
+    resourceClass = "background";
     observe = {
       enable = true;
       restartable = true;

@@ -35,7 +35,7 @@ mkServiceModule {
     # Uncapped memory: a single 1M-token request is buffered in the proxy while
     # streaming, so a hard MemoryMax could kill it mid-response (same reasoning
     # as ollama/open-webui).
-    resourceClass = "interactive-agent";
+    resourceClass = "ordinary";
     activation = {
       mode = "socket-proxy";
       publicEndpoint = "127.0.0.1:${toString helpers.data.ports.litellm.public}";

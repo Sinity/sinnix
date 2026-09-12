@@ -57,7 +57,7 @@
             throw "unknown Sinnix runtime surface unit: ${unit}"
           else
             matchingSurfaces.${builtins.head surfaceNames};
-      resolvedResourceClass = if resourceClass != null then resourceClass else "system";
+      resolvedResourceClass = if resourceClass != null then resourceClass else "ordinary";
       serviceConfig =
         if surfaceForUnit != null then
           surfaceForUnit.effectiveResources

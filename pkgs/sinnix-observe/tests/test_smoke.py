@@ -428,7 +428,16 @@ def test_agent_gateway_reads_the_bounded_agentctl_projection(monkeypatch) -> Non
         lambda limit: {
             "schema": "sinnix.agentctl.job-snapshot.v1",
             "groups": {"agent": {"running": 1}},
-            "jobs": [{"job_id": 7, "label": "sinnix:worker:run", "project": "sinnix", "kind": "attested-agent", "phase": "running", "group": "agent"}],
+            "jobs": [
+                {
+                    "job_id": 7,
+                    "label": "sinnix:worker:run",
+                    "project": "sinnix",
+                    "kind": "attested-agent",
+                    "phase": "running",
+                    "group": "agent",
+                }
+            ],
             "omitted": {"total": 1, "active": 0, "terminal": 1},
             "coverage": {"active": {"total": 1, "returned": 1}},
         },
@@ -443,7 +452,9 @@ def test_agent_gateway_reads_the_bounded_agentctl_projection(monkeypatch) -> Non
 
 def test_agent_gateway_keeps_owner_failure_visible(monkeypatch) -> None:
     monkeypatch.setattr(
-        agent_gateway, "_snapshot", lambda _limit: (_ for _ in ()).throw(RuntimeError("socket unavailable"))
+        agent_gateway,
+        "_snapshot",
+        lambda _limit: (_ for _ in ()).throw(RuntimeError("socket unavailable")),
     )
     out = agent_gateway.collect_agent_gateway()
     assert out["available"] is False
@@ -458,10 +469,17 @@ def test_human_render_reports_owner_queue_omissions() -> None:
             "window": {"since": "10 min ago"},
             "agent_gateway": {
                 "available": True,
-                "jobs": [{"job_id": 7, "label": "sinnix:worker", "phase": "running", "group": "agent"}],
+                "jobs": [
+                    {
+                        "job_id": 7,
+                        "label": "sinnix:worker",
+                        "phase": "running",
+                        "group": "agent",
+                    }
+                ],
                 "omitted": {"total": 50},
                 "error": None,
-            }
+            },
         }
     )
     assert "jobs=1 omitted=50" in rendered
@@ -516,7 +534,6 @@ def test_sqlite_failure_is_recorded_not_swallowed(tmp_path):
 def test_successful_read_records_no_error(tmp_path):
     """Anti-vacuity for the test above: the accumulator must stay empty on
     the happy path, or 'errors is empty' would mean nothing."""
-    import sqlite3
 
     from sinnix_observe.sources import sqlite_util
 

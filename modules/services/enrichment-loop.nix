@@ -37,7 +37,7 @@ mkServiceModule {
   surface = {
     unit = "sinnix-enrichment-loop.service";
     manager = "user";
-    resourceClass = "background-maintenance";
+    resourceClass = "background";
     observe.enable = true;
   };
   configFn = _: {
@@ -59,7 +59,7 @@ mkServiceModule {
     { cfg, lib, ... }:
     {
       manager = "user";
-      resourceClass = "background-maintenance";
+      resourceClass = "background";
       description = "Enrichment pass: dump system state, run claude -p, write versioned outputs";
       execStart = "${dump}/bin/sinnix-enrich-dump";
       # The interactive session's TMPDIR is read-only under

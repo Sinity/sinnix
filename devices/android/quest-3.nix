@@ -15,26 +15,32 @@
       # Pair with Sinnix's receive-only media endpoint after selecting the
       # Videoshots folder through Android's folder picker.  Do not pre-grant
       # broad media access: the headset UI scopes the sync root.
-      "com.github.catfriend1.syncthingfork".url = "https://github.com/researchxxl/syncthing-android/releases/download/v2.1.5.0/com.github.catfriend1.syncthingfork_release_v2.1.5.0_arm64-v8a.apk";
+      "com.github.catfriend1.syncthingfork".url =
+        "https://github.com/researchxxl/syncthing-android/releases/download/v2.1.5.0/com.github.catfriend1.syncthingfork_release_v2.1.5.0_arm64-v8a.apk";
       # A local shell makes the headset independently useful for diagnostics,
       # SSH and small automation.  Keep it on Termux's GitHub signing track so
       # any future addons can use the same source.
-      "com.termux".url = "https://github.com/termux/termux-app/releases/download/v0.118.3/termux-app_v0.118.3%2Bgithub-debug_arm64-v8a.apk";
+      "com.termux".url =
+        "https://github.com/termux/termux-app/releases/download/v0.118.3/termux-app_v0.118.3%2Bgithub-debug_arm64-v8a.apk";
       # Wolvic publishes several headset-specific APKs in each GitHub release.
       # Pin the Quest artifact directly so a different headset build is never
       # selected solely because it shares the same Android package id.
-      "com.igalia.wolvic".url = "https://github.com/Igalia/wolvic/releases/download/v1.9/Wolvic-oculusvr-arm64-gecko-generic-release.apk";
+      "com.igalia.wolvic".url =
+        "https://github.com/Igalia/wolvic/releases/download/v1.9/Wolvic-oculusvr-arm64-gecko-generic-release.apk";
       "org.meumeu.wivrn.github".github = "WiVRn/WiVRn";
       # A conventional Android client is a useful fallback for remote desktop,
       # video and troubleshooting when an XR streaming runtime is not wanted.
-      "com.limelight".url = "https://github.com/moonlight-stream/moonlight-android/releases/download/v12.1/app-nonRoot-release.apk";
+      "com.limelight".url =
+        "https://github.com/moonlight-stream/moonlight-android/releases/download/v12.1/app-nonRoot-release.apk";
       # The official universal APK brings the headset onto Sinnix's existing
       # tailnet. It is pinned here because the vendor notes that sideloaded
       # APKs do not update themselves.
-      "com.tailscale.ipn".url = "https://pkgs.tailscale.com/stable/tailscale-android-universal-1.102.4.apk";
+      "com.tailscale.ipn".url =
+        "https://pkgs.tailscale.com/stable/tailscale-android-universal-1.102.4.apk";
       # Native, offline-capable creative tool. Use the formal Quest release,
       # never a GitHub prerelease whose sketches may not open in the stable app.
-      "com.Icosa.OpenBrush".url = "https://github.com/icosa-foundation/open-brush/releases/download/2.32.0/OpenBrush_Quest_2.32.0.apk";
+      "com.Icosa.OpenBrush".url =
+        "https://github.com/icosa-foundation/open-brush/releases/download/2.32.0/OpenBrush_Quest_2.32.0.apk";
     };
 
     fdroid.packages = [

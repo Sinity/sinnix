@@ -1,0 +1,104 @@
+#!/usr/bin/env python3
+# @sinnix-package
+# description: Shared yt-dlp entry point with browser authentication and structured-video fallback
+# runtimeInputs: python3 yt-dlp
+"""Run yt-dlp with the workstation browser session and a standards fallback."""
+
+import html.parser
+import json
+import os
+import pathlib
+import subprocess
+import sys
+import urllib.request
+import urllib.parse
+
+
+class StructuredData(html.parser.HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.in_json = False
+        self.parts = []
+        self.documents = []
+
+    def handle_starttag(self, tag, attrs):
+        values = dict(attrs)
+        if tag == "script" and values.get("type", "").lower() == "application/ld+json":
+            self.in_json = True
+            self.parts = []
+
+    def handle_data(self, data):
+        if self.in_json:
+            self.parts.append(data)
+
+    def handle_endtag(self, tag):
+        if tag == "script" and self.in_json:
+            self.in_json = False
+            try:
+                self.documents.append(json.loads("".join(self.parts)))
+            except json.JSONDecodeError:
+                pass
+
+
+def video_urls(value):
+    if isinstance(value, list):
+        for item in value:
+            yield from video_urls(item)
+    elif isinstance(value, dict):
+        kind = value.get("@type", [])
+        kinds = kind if isinstance(kind, list) else [kind]
+        if "VideoObject" in kinds:
+            candidate = value.get("contentUrl")
+            if isinstance(candidate, str) and candidate.startswith(("http://", "https://")):
+                yield candidate
+        for item in value.values():
+            if isinstance(item, (dict, list)):
+                yield from video_urls(item)
+
+
+def structured_video_url(page_url):
+    request = urllib.request.Request(page_url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(request, timeout=20) as response:
+        content_type = response.headers.get_content_type()
+        if content_type not in {"text/html", "application/xhtml+xml"}:
+            return None
+        body = response.read(4 * 1024 * 1024).decode(response.headers.get_content_charset() or "utf-8", "replace")
+    parser = StructuredData()
+    parser.feed(body)
+    return next((url for document in parser.documents for url in video_urls(document)), None)
+
+
+def with_browser_cookies(arguments):
+    if any(arg == "--cookies" or arg.startswith("--cookies=") or arg == "--cookies-from-browser" or arg.startswith("--cookies-from-browser=") for arg in arguments):
+        return arguments
+    profile = pathlib.Path(os.environ.get("SINNIX_CHROME_PROFILE", "~/.config/chrome-ws/Default")).expanduser()
+    if (profile / "Cookies").exists():
+        return ["--cookies-from-browser", f"chrome:{profile}", *arguments]
+    return arguments
+
+
+def main():
+    arguments = sys.argv[1:]
+    command = ["yt-dlp", *with_browser_cookies(arguments)]
+    result = subprocess.run(command, check=False)
+    if result.returncode == 0:
+        return 0
+
+    pages = [arg for arg in arguments if arg.startswith(("http://", "https://"))]
+    if len(pages) != 1:
+        return result.returncode
+    try:
+        media_url = structured_video_url(pages[0])
+    except (OSError, ValueError):
+        return result.returncode
+    if not media_url or media_url == pages[0]:
+        return result.returncode
+
+    fallback = [media_url if arg == pages[0] else arg for arg in arguments]
+    origin = urllib.parse.urlsplit(pages[0])
+    headers = ["--referer", pages[0], "--add-header", f"Origin:{origin.scheme}://{origin.netloc}"]
+    return subprocess.run(["yt-dlp", *with_browser_cookies([*headers, *fallback])], check=False).returncode
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

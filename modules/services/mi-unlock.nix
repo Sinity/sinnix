@@ -63,7 +63,7 @@ mkServiceModule {
       sinnix.runtime.surfaces.mi-unlock = {
         unit = "sinnix-mi-unlock.service";
         manager = "user";
-        resourceClass = "background-maintenance";
+        resourceClass = "background";
         observe.enable = true;
       };
 

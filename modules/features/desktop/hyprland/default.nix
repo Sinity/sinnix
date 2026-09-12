@@ -61,7 +61,7 @@ in
 {
   options.sinnix.features.desktop.hyprland = {
     enable = (lib.mkEnableOption "Hyprland Window Manager (Atomic Module)") // {
-      default = true;
+      default = config.sinnix.machine.isDesktop;
     };
   };
 

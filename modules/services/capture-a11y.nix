@@ -44,6 +44,7 @@ let
 in
 mkServiceModule (mkCaptureLane {
   name = "capture-a11y";
+  defaultOnDesktop = true;
   description = "AT-SPI2 accessibility-tree capture (focus/text-changed events + focused-window subtree dumps)";
   inherit username laneDir;
   mode = "stream";

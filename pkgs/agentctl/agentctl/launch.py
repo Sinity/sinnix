@@ -639,8 +639,16 @@ def snapshot_jobs(limit: int) -> dict[str, Any]:
         if group is None:
             group = groups.setdefault(
                 task.group,
-                {"status": "", "parallel": 0, "running": 0, "queued": 0,
-                 "paused": 0, "stashed": 0, "terminal": 0, "total": 0},
+                {
+                    "status": "",
+                    "parallel": 0,
+                    "running": 0,
+                    "queued": 0,
+                    "paused": 0,
+                    "stashed": 0,
+                    "terminal": 0,
+                    "total": 0,
+                },
             )
         group["total"] += 1
         if task.terminal:

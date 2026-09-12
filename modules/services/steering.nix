@@ -55,7 +55,7 @@ mkServiceModule {
   surface = {
     unit = "sinnix-steering-morning.service";
     manager = "user";
-    resourceClass = "interactive-agent";
+    resourceClass = "ordinary";
     observe.enable = true;
   };
   configFn =
@@ -78,7 +78,7 @@ mkServiceModule {
         }
         {
           manager = "user";
-          resourceClass = "interactive-agent";
+          resourceClass = "ordinary";
           execStart = "${steer}/bin/sinnix-steer ritual morning";
           environment = {
             SINNIX_STEERING_STATE_DIR = stateDir;
@@ -101,7 +101,7 @@ mkServiceModule {
         }
         {
           manager = "user";
-          resourceClass = "interactive-agent";
+          resourceClass = "ordinary";
           execStart = "${steer}/bin/sinnix-steer ritual evening";
           environment = {
             SINNIX_STEERING_STATE_DIR = stateDir;
@@ -126,7 +126,7 @@ mkServiceModule {
         }
         {
           manager = "user";
-          resourceClass = "interactive-agent";
+          resourceClass = "ordinary";
           execStart = "${steer}/bin/sinnix-steer export";
           environment = {
             SINNIX_STEERING_STATE_DIR = stateDir;
@@ -153,13 +153,13 @@ mkServiceModule {
         sinnix.runtime.surfaces.steering-evening = {
           unit = "sinnix-steering-evening.service";
           manager = "user";
-          resourceClass = "interactive-agent";
+          resourceClass = "ordinary";
           observe.enable = true;
         };
         sinnix.runtime.surfaces.steering-export = {
           unit = "sinnix-steering-export.service";
           manager = "user";
-          resourceClass = "interactive-agent";
+          resourceClass = "ordinary";
           observe.enable = true;
           captures = [
             {
@@ -179,7 +179,7 @@ mkServiceModule {
         sinnix.runtime.surfaces.cockpit = {
           unit = "sinnix-cockpit.service";
           manager = "user";
-          resourceClass = "interactive-agent";
+          resourceClass = "ordinary";
           observe = {
             enable = true;
             restartable = true;

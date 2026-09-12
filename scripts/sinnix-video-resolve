@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @sinnix-package
 # description: Resolve video-hosting URLs found in the URL ledger into archived copies
-# runtimeInputs: yt-dlp duckdb coreutils jq
+# runtimeInputs: duckdb coreutils jq @sinnix-ytdlp
 
 # The URL ledger discovers and normalizes every URL this operator's browsing
 # history has touched, joined against archive-availability. This script is
@@ -18,9 +18,9 @@ set -euo pipefail
 LEDGER_PARQUET="${SINNIX_URL_LEDGER_PARQUET:-/realm/activity/url-ledger/url_ledger.parquet}"
 ARCHIVE_ROOT="${SINNIX_VIDEO_ARCHIVE_ROOT:-/realm/activity/video-resolve}"
 DL_ARCHIVE="$ARCHIVE_ROOT/.yt-dlp-archive"
-# Every URL handed to yt-dlp, whether it resolved or not, so unavailable
-# videos are not retried every week; yt-dlp's archive only knows successes.
-# Delete this file to retry failures.
+# Compatibility record from the first resolver implementation. It remains
+# append-only, but no longer suppresses retries because it contains failures
+# as well as successes.
 TRIED="$ARCHIVE_ROOT/.tried-urls"
 # The ledger holds tens of thousands of watch URLs; a run pulls a bounded
 # slice, most-visited first, and the rest waits for later runs.
@@ -44,7 +44,6 @@ mapfile -t urls < <(
     SELECT normalized_url
     FROM read_parquet('$LEDGER_PARQUET')
     WHERE regexp_matches(normalized_url, '$VIDEO_URL_PATTERN')
-      AND normalized_url NOT IN (SELECT column0 FROM read_csv('$TRIED', header=false, columns={'column0': 'VARCHAR'}))
     ORDER BY visit_count DESC, normalized_url
     LIMIT $LIMIT;"
 )
@@ -56,15 +55,13 @@ failed=0
 for url in "${urls[@]}"; do
   [[ -n "$url" ]] || continue
   printf '%s\n' "$url" >> "$TRIED"
-  if yt-dlp \
+  if sinnix-ytdlp \
     --download-archive "$DL_ARCHIVE" \
     --no-playlist \
     --extractor-args 'youtube:player_client=android' \
     --paths "$ARCHIVE_ROOT" \
     --output "%(extractor)s/%(id)s.%(ext)s" \
     --write-info-json \
-    --ignore-errors \
-    --quiet \
     -- "$url"; then
     resolved=$((resolved + 1))
   else

@@ -33,7 +33,14 @@ class AgentCtlClient:
     def snapshot(self) -> dict[str, Any]:
         """The one bounded owner projection the reducer publishes each refresh."""
         value = self._call(
-            (self.command, "--json", "job", "snapshot", "--limit", str(MAX_SNAPSHOT_JOBS))
+            (
+                self.command,
+                "--json",
+                "job",
+                "snapshot",
+                "--limit",
+                str(MAX_SNAPSHOT_JOBS),
+            )
         )
         if (
             not isinstance(value, dict)
@@ -43,7 +50,9 @@ class AgentCtlClient:
             or not isinstance(value.get("omitted"), dict)
             or not isinstance(value.get("coverage"), dict)
         ):
-            raise AgentCtlError("agentctl job snapshot did not print a bounded job document")
+            raise AgentCtlError(
+                "agentctl job snapshot did not print a bounded job document"
+            )
         if len(value["jobs"]) > MAX_SNAPSHOT_JOBS or any(
             not isinstance(job, dict) for job in value["jobs"]
         ):

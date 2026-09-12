@@ -93,7 +93,7 @@ let
       runtimeSurface = {
         unit = "${proxy}.socket";
         kind = "socket";
-        resourceClass = "interactive-agent";
+        resourceClass = "ordinary";
         activation = {
           mode = "socket-proxy";
           inherit
