@@ -90,12 +90,25 @@ def decode(
             tempfile.TemporaryFile(dir=directory) as stdout,
             tempfile.TemporaryFile(dir=directory) as stderr,
         ):
+            # The installed console wrapper adds the gateway and decoder
+            # dependencies to *this* interpreter with ``site.addsitedir``.
+            # ``sys.executable -m …`` starts the base Nix Python again, which
+            # has none of those paths.  Pass the already-resolved, trusted
+            # interpreter search path explicitly to the disposable process.
+            # Do not inherit an ambient PYTHONPATH, which could turn a visual
+            # read into arbitrary code loading.
+            environment = os.environ.copy()
+            environment["PYTHONPATH"] = os.pathsep.join(
+                entry for entry in sys.path if entry
+            )
+            environment["PYTHONNOUSERSITE"] = "true"
             completed = subprocess.run(
                 [sys.executable, "-m", "sinnix_agent_gateway.visual_decoder"],
                 input=encoded,
                 text=True,
                 stdout=stdout,
                 stderr=stderr,
+                env=environment,
                 timeout=30,
                 check=False,
             )
