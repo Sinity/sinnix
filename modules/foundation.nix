@@ -134,6 +134,14 @@ in
               type = types.str;
               default = "${config.root}/sinnix";
             };
+            stashbox = mkOption {
+              type = types.str;
+              default = "${config.root}/stashbox";
+            };
+            steering = mkOption {
+              type = types.str;
+              default = "${config.root}/steering";
+            };
             scribeTap = mkOption {
               type = types.str;
               default = "${config.root}/scribe-tap";
@@ -158,6 +166,11 @@ in
                     observerRead = mkOption {
                       type = types.bool;
                       default = false;
+                    };
+                    agentctl = mkOption {
+                      type = types.bool;
+                      default = true;
+                      description = "Whether this repository supplies an agentctl project descriptor.";
                     };
                     checkoutDiscovery = mkOption {
                       type = types.enum [ "git-worktree" ];
@@ -239,6 +252,28 @@ in
                   taskAuthority = {
                     workspace = "${cfg.paths.stateRoot}/tasks/lynchpin/.beads";
                     database = "${cfg.paths.stateRoot}/tasks/lynchpin/.beads/dolt";
+                    publicationPolicy = "local";
+                  };
+                };
+                # These are active Beads authorities too, but deliberately do
+                # not masquerade as agentctl projects: neither checkout has a
+                # project descriptor and both contain private operator data.
+                stashbox = {
+                  path = config.stashbox;
+                  remote = "/realm/archive/code-history/repos/mine/stashbox.git";
+                  agentctl = false;
+                  taskAuthority = {
+                    workspace = "${cfg.paths.stateRoot}/tasks/stashbox/.beads";
+                    database = "${cfg.paths.stateRoot}/tasks/stashbox/.beads/dolt";
+                    publicationPolicy = "dolt-sync";
+                  };
+                };
+                steering = {
+                  path = config.steering;
+                  agentctl = false;
+                  taskAuthority = {
+                    workspace = "${cfg.paths.stateRoot}/tasks/steering/.beads";
+                    database = "${cfg.paths.stateRoot}/tasks/steering/.beads/dolt";
                     publicationPolicy = "local";
                   };
                 };
