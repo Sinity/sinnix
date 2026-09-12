@@ -1,9 +1,10 @@
 """Binary and large content at the MCP boundary.
 
 Text rides inline in the structured envelope. Images become ``ImageContent``
-blocks so a vision-capable client sees the picture. Other binary content is
-an ``EmbeddedResource`` addressed by its canonical ref; bytes never appear as
-replacement characters inside a JSON string.
+blocks so a vision-capable client sees the picture. Other binary content is a
+``ResourceLink`` addressed by its canonical ref. Its bytes never become a
+chat attachment, so reading a host file cannot trigger client-side attachment
+approval.
 """
 
 from __future__ import annotations
@@ -17,9 +18,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from mcp.types import (
-    BlobResourceContents,
     ContentBlock,
-    EmbeddedResource,
     ImageContent,
     ResourceLink,
 )
@@ -28,7 +27,6 @@ from pydantic import Field
 from .schemas import GatewayModel
 
 INLINE_IMAGE_BYTES = 4 * 1024 * 1024
-INLINE_BLOB_BYTES = 1024 * 1024
 IMAGE_TYPES = frozenset({"image/png", "image/jpeg", "image/webp", "image/gif"})
 
 
@@ -95,9 +93,8 @@ def attach(
     *,
     ref: str,
     media_type: str | None = None,
-    max_inline_bytes: int | None = None,
 ) -> tuple[Artifact, list[ContentBlock]]:
-    """Describe a file and produce the content blocks that carry its bytes."""
+    """Describe a file and produce visual blocks or a read-only binary handle."""
     media_type = media_type or sniff_media_type(path)
     size = path.stat().st_size
     digest = sha256_of(path)
@@ -134,19 +131,6 @@ def attach(
                 ),
                 [ImageContent(type="image", data=data, mime_type=row["media_type"])],
             )
-    if size <= (max_inline_bytes or INLINE_BLOB_BYTES):
-        data = base64.b64encode(path.read_bytes()).decode()
-        return (
-            Artifact(representation="resource", **base),
-            [
-                EmbeddedResource(
-                    type="resource",
-                    resource=BlobResourceContents(
-                        uri=ref, mime_type=media_type, blob=data
-                    ),
-                )
-            ],
-        )
     return (
         Artifact(representation="link", **base),
         [
@@ -156,7 +140,7 @@ def attach(
                 uri=ref,
                 mime_type=media_type,
                 size=size,
-                description="Bytes exceed the inline bound; read by ref with offsets.",
+                description="Read-only binary resource handle; bytes are not attached to the chat.",
             )
         ],
     )

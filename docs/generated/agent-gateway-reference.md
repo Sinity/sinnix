@@ -1,11 +1,11 @@
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: d07a26f5625590cf20111bb15252ecd457e4403cac30d5a195deffce434940e4 -->
+<!-- gateway-catalog-sha256: 7f96f482afd0829da20e7264475dab50157178267bd115e23d886108e24ed176 -->
 # Sinnix Agent Gateway reference
 
 Generated from `sinnix_agent_gateway.actions`. Every action is one MCP tool whose `tools/list` input schema is the one below; the catalog hash changes when any principal-visible action catalog row changes, including its schema, principal set, example or affordance.
 
-Revision: `v3-typed-actions`. Catalog SHA-256: `d07a26f5625590cf20111bb15252ecd457e4403cac30d5a195deffce434940e4`.
+Revision: `v3-typed-actions`. Catalog SHA-256: `7f96f482afd0829da20e7264475dab50157178267bd115e23d886108e24ed176`.
 
 ## Invocation
 
@@ -45,7 +45,7 @@ MCP: call the tool named after the action. CLI: `sinnix-agent-gateway call <acti
 | `gateway.catalog`        | `catalog` | `gateway`          | `agent-control, observer, operator` | Every action is also an MCP tool with its full schema in tools/list; the catalog adds aliases, affordances, resource kinds and the brokered MCP tool inventory (lynchpin, sinex, polylogue).                                                                                                                                                                                                      |
 | `files.stat`             | `query`   | `files`            | `observer, operator`                | Describe one host path: kind, size, mode, owner, timestamps, MIME, hash.                                                                                                                                                                                                                                                                                                                          |
 | `files.list`             | `query`   | `files`            | `observer, operator`                | List a directory with a canonical ref for every child.                                                                                                                                                                                                                                                                                                                                            |
-| `files.read`             | `query`   | `files`            | `observer, operator`                | Read a file: text inline, images as an image block, other binary as a resource block.                                                                                                                                                                                                                                                                                                             |
+| `files.read`             | `query`   | `files`            | `observer, operator`                | Read a file: text inline, images as image blocks, other binary as read-only links.                                                                                                                                                                                                                                                                                                                |
 | `files.search`           | `query`   | `files`            | `observer, operator`                | Without content_regex the search is over paths (fd); with it, matching lines are returned (ripgrep --json). Results are bounded by limit and timeout.                                                                                                                                                                                                                                             |
 | `files.patch`            | `change`  | `files`            | `operator`                          | Pass expected_sha256 from the prior read so a concurrent change is refused instead of overwritten. Unified hunks are applied individually; rejected hunks are reported.                                                                                                                                                                                                                           |
 | `files.change`           | `change`  | `files`            | `operator`                          | Copy and move never overwrite an existing destination. Remove supports regular files only.                                                                                                                                                                                                                                                                                                        |
@@ -684,7 +684,7 @@ List /realm/tmp:
 
 ### `files.read`
 
-Read a file: text inline, images as an image block, other binary as a resource block.
+Read a file: text inline, images as image blocks, other binary as read-only links.
 
 Family: `query`. Owner: `files`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
@@ -786,6 +786,7 @@ Input schema:
     },
     "max_bytes": {
       "default": 64000,
+      "description": "Maximum inline text bytes.",
       "minimum": 1,
       "type": "integer"
     },
@@ -810,11 +811,10 @@ Input schema:
     },
     "representation": {
       "default": "auto",
-      "description": "auto returns text inline for text types and a typed content block for binary types.",
+      "description": "auto returns text inline and binary files as canonical read-only links.",
       "enum": [
         "auto",
-        "text",
-        "binary"
+        "text"
       ],
       "type": "string"
     },
@@ -18725,6 +18725,7 @@ Input schema:
     },
     "max_bytes": {
       "default": 64000,
+      "description": "Maximum inline text bytes.",
       "minimum": 1,
       "type": "integer"
     },
@@ -18751,8 +18752,7 @@ Input schema:
       "default": "auto",
       "enum": [
         "auto",
-        "text",
-        "binary"
+        "text"
       ],
       "type": "string"
     },

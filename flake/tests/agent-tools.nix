@@ -119,6 +119,7 @@ in
             hm = config.home-manager.users.${config.sinnix.user.name};
             activationText = hm.home.activation.claudeSymlink.data or "";
             codexMigrationText = hm.home.activation.codexSystemDefaultsMigration.data or "";
+            codexWrapperText = hm.home.file.".local/bin/codex".text or "";
           in
           [
             {
@@ -134,6 +135,10 @@ in
                 (config.environment.etc."claude-code/managed-settings.json".source or null)
                 == "${config.sinnix.paths.dotsRoot}/claude/managed-settings.json";
               message = "Claude managed settings must be deployed to /etc/claude-code as a symlink into the live dots checkout.";
+            }
+            {
+              assertion = lib.hasInfix "export PATH=\"$HOME/.local/bin:" codexWrapperText;
+              message = "the Codex wrapper must resolve nested codex calls through ~/.local/bin before its private npm prefix";
             }
             {
               assertion = builtins.hasAttr ".config/claude/agents" hm.home.file;

@@ -51,9 +51,8 @@ switch`, and do not preflight a switch with duplicate evaluation. After
 activation, compare `nixos-version --configuration-revision` with the intended
 commit and inspect the direct live service or file fact.
 
-Edits through live out-of-store links are available on the next read; existing
-sessions may retain loaded instructions. Generated MCP profiles and link-layout
-changes need activation. Codex's private configuration is an app-owned overlay,
-not an activation-time copy. Inspect installed targets to verify delivery. Structural agent
-changes regenerate `docs/agent-environment.md`; generated gateway references
-change through their renderer.
+Live dots links update on the next read, though a running client can retain
+loaded instructions. Generated profiles and link layouts need activation;
+Codex's private configuration remains an app-owned overlay. Inspect installed
+targets to verify delivery. Structural agent changes regenerate
+`docs/agent-environment.md`; gateway references change through their renderer.

@@ -333,9 +333,7 @@ mkFeatureModule {
         }
       )
       {
-        # Codex reads this system layer before the private ~/.codex/config.toml.
-        # Keep it an out-of-store link so operational defaults can be updated
-        # without copying them into the GUI-owned home configuration.
+        # Codex reads this live system layer before its private overlay.
         environment.etc."codex/config.toml".source = "${dotsRoot}/codex/config.toml";
         environment.etc."codex/agents/explorer.toml".source = "${dotsRoot}/codex/agents/explorer.toml";
         sinnix.features.dev.mcp-servers.codexConfigSource = inputs.self + "/dots/codex/config.toml";

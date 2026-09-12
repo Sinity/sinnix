@@ -155,8 +155,8 @@ def _get(runtime: Runtime, inp: GetInput) -> Metadata:
 class ReadInput(RequestControls):
     target: ArtifactLocator
     offset: int = Field(default=0, ge=0, description="Byte offset for text reads.")
-    max_bytes: int = Field(default=64_000, ge=1)
-    representation: Literal["auto", "text", "binary"] = "auto"
+    max_bytes: int = Field(default=64_000, ge=1, description="Maximum inline text bytes.")
+    representation: Literal["auto", "text"] = "auto"
 
 
 class Content(GatewayModel):
@@ -173,7 +173,7 @@ class Content(GatewayModel):
     truncated: bool = False
     artifact: Artifact | None = Field(
         default=None,
-        description="Set for binary artifacts; the bytes travel in a content block.",
+        description="Set for binary artifacts; bytes are represented by a canonical read-only link.",
     )
     affordances: list[str] = Field(default_factory=list)
 
@@ -219,11 +219,9 @@ def _read(runtime: Runtime, inp: ReadInput) -> ActionResult:
                 truncated=truncated,
             )
         )
-    artifact, blocks = attach(
-        source, ref=ref, media_type=media, max_inline_bytes=max_bytes
-    )
+    artifact, blocks = attach(source, ref=ref, media_type=media)
     return ActionResult(
-        Content(**base, artifact=artifact, returned_bytes=min(size, max_bytes)),
+        Content(**base, artifact=artifact, returned_bytes=0),
         blocks=blocks,
     )
 

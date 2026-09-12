@@ -400,7 +400,7 @@ def test_screenshot_download_upload_and_close(tmp_path, monkeypatch) -> None:
     )
     payload = structured(downloaded)
     assert payload["result"]["outcome"] == "ok", payload
-    assert payload["data"]["artifact"]["representation"] == "resource"
+    assert payload["data"]["artifact"]["representation"] == "link"
     assert payload["data"]["artifact_ref"].startswith("sinnix://artifacts/")
     assert payload["data"]["result"]["status"] == 200
 

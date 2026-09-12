@@ -41,9 +41,10 @@ SQLx compiles against the live dev database; do not create an offline cache.
 
 ## Verification and deployment
 
-Run the narrow semantic command while iterating, then one broad `xtask check
---full` or `xtask test --impact-mode=off --all` at the publishable boundary.
-Product changes use a ready, squash-merged PR. The local gate is authoritative.
+Run the narrow semantic command while iterating. Select a broad `xtask check
+--full` or `xtask test --impact-mode=off --all` only when the task, project
+policy, or operator requests it. Follow the repository's delivery policy; the
+local gate is authoritative for the scope it ran.
 
 Production deployment is owned by Sinnix. Pin the Sinex revision and run the
 Sinnix `switch` wrapper. Workstation activation does not restart `sinexd`;

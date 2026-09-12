@@ -337,6 +337,7 @@ def test_batch_reads_accept_the_run_suffix_and_shorten_ids_unless_full(
         "age",
         "workers",
         "candidate",
+        "abandonment",
     ]
     assert "0123abcd" in listed and "fixture-20260903" not in listed
     assert cli.main(["batch", "list", "fixture", "--json"]) == 0
@@ -347,6 +348,73 @@ def test_batch_reads_accept_the_run_suffix_and_shorten_ids_unless_full(
     _manifest(cli_config, "fixture-20260903-090000-0123abcd")
     assert cli.main(["batch", "status", "0123abcd"]) == cli.EXIT_REFUSED
     assert "names 2 runs" in capsys.readouterr().err
+
+
+def test_batch_status_renders_requested_dispatch_and_abandonment(
+    fake_pueue: FakePueue, cli_config: Config, capsys: pytest.CaptureFixture[str]
+) -> None:
+    run_id = "fixture-20260903-080000-0123abcd"
+    _manifest(cli_config, run_id)
+    path = manifest.manifest_path(cli_config, run_id)
+    document = json.loads(path.read_text())
+    document["workers"][0].update(
+        {
+            "task_reference": "worker-launch",
+            "attempts": [
+                {
+                    "number": 2,
+                    "task_id": 41,
+                    "task_reference": "worker-launch",
+                    "backend": "fixture-backend",
+                    "model": "fixture-model",
+                    "effort": "high",
+                }
+            ],
+        }
+    )
+    document["landing"].update(
+        {
+            "task_reference": "landing-launch",
+            "verify_run": {"job_id": 42, "reference": "verify-launch"},
+            "review_verdict": {"policy": "none"},
+            "agent_attempts": [
+                {
+                    "kind": "review",
+                    "job_id": 43,
+                    "launch_reference": "review-launch",
+                    "requested": {
+                        "backend": "fixture-backend",
+                        "model": "fixture-model",
+                        "effort": "high",
+                    },
+                }
+            ],
+        }
+    )
+    document["abandoned"] = {
+        "at": "2026-09-03T09:00:00+00:00",
+        "reason": "canary failed",
+        "residual": ["batch/run/w1: worktree kept"],
+    }
+    path.write_text(json.dumps(document))
+
+    assert cli.main(["batch", "status", "0123abcd"]) == 0
+    text = capsys.readouterr().out
+    assert (
+        "dispatch: attempt 2; requested backend=fixture-backend "
+        "model=fixture-model effort=high; task 41; ref worker-launch" in text
+    )
+    assert "landing: task None ref landing-launch" in text
+    assert "evidence: verify task 42 ref verify-launch; review policy none" in text
+    assert (
+        "landing agent: review; requested backend=fixture-backend "
+        "model=fixture-model effort=high; task 43; ref review-launch" in text
+    )
+    assert "abandoned: " in text and "canary failed" in text
+    assert "residual: batch/run/w1: worktree kept" in text
+
+    assert cli.main(["batch", "list", "fixture"]) == 0
+    assert "canary failed; 1 residual" in capsys.readouterr().out
 
 
 def test_batch_list_reads_each_run_pr_through_the_project(

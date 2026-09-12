@@ -45,7 +45,7 @@ Use `orchestrate` for model allocation and `agent-runtime` for managed jobs.
 Sinnix owns agent sources under `dots/claude/`, shared skills under
 `dots/_ai/skills/`, and client rendering under
 `modules/features/dev/agents/`. Resolve `~/.claude/` links before editing:
-some sources are live-linked, others are generated or copied on activation.
+dots sources can be live-linked, while generated profiles reflect activation.
 Wrapper profiles come from `flake/data/agent-lanes.nix`.
 
 Use Polylogue for session history and `claude-sessions` for bounded raw-JSONL

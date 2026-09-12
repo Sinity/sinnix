@@ -5,67 +5,28 @@ description: Operate or recover agentctl jobs and batches — declared operation
 
 # Agent runtime
 
-`agentctl` is an in-process CLI; nothing runs on its behalf. pueue owns each
-job's queue, process and terminal result; worktrunk owns batch worktrees;
-GitHub owns review, required checks and merge; Beads owns tasks and claims.
-Systemd owns fixed services, timer wake-ups and transient job units, while pueue remains
-the authority for queue pause/resume and task state. Do not add a parallel
-ledger for any of them. `docs/agentctl.md` in sinnix is the reference.
-
-Verbs: `project`, `job`, `batch`, `view`, `events`, `schedule`, `pools`,
-`backpressure`. `agentctl <verb> --help` is the surface. Reads print tables
-in local time; `--json` (before or after the verb) prints the document;
-writes print JSON on stdout and one summary line on stderr. `--project` is
-optional everywhere: a leading positional that names a project or checkout
-selects it, else the checkout enclosing the working directory. A run is its
-id or its 8-character suffix; `--full` prints whole ids. Exit status: 0
-done, 1 refused or failed, 2 usage, 3 a driven tool failed, 4 the waited job
-did not succeed.
+`agentctl` is an in-process CLI. pueue owns job state, worktrunk owns batch
+worktrees, GitHub owns hosted publication, Beads owns tasks, and systemd owns
+fixed services and timer wake-ups. Do not create a second ledger or job
+controller. `docs/agentctl.md` owns verb, output, and exit-code details; use
+`agentctl <verb> --help` for the installed surface.
 
 ## Jobs
 
-`start`, `fire`, `list`, `get`, `logs`, `result`, `cancel`, `retry`, `wait`,
-`clean`.
+List declared work with `agentctl project operations <project>`, then use
+`agentctl job start` rather than reconstructing its environment, pool, or
+timeout. Inspect a job through `get`, `logs`, and `result`; use `cancel`,
+`retry`, or `clean` only after reading their current help.
 
-- `agentctl project operations <project>` lists the declared operations.
-- `agentctl job start [project] <operation> [--workspace <path>] [--wait]
-[-- extra args]` queues one pueue task in the operation's pool, labelled
-  `<project>:<operation>`. The job id is the pueue task id. The descriptor
-  owns environment, pool, result contract and timeout; extra arguments are
-  appended to its `exec`.
-- `job list [--project p] [--active] [--all]` (newest first, 40 rows unless
-  `--all`), `job get <id>`, `job logs <id>` (the log is capped at 8 MB),
-  `job result <id>` (the typed artifact for `json`/`pytest` results, else the
-  outcome), `job wait <id>`, `job retry <id>` (`pueue restart --in-place`).
-- `job cancel <id>`: a queued task is removed; a running task's unit is
-  stopped and its whole cgroup with it. Exit 1 while the unit is still
-  active.
-- Outcomes of a run, shown by `job result` and carried on the finished
-  event: `success`, `failed` (the command's exit), `timeout` (124),
-  `cancelled` (130), `vanished` (126, the unit could not be observed after a
-  failing wait), `slot_occupied` (75, a single-slot pool was held).
-- `job clean <id>` deletes a terminal task's launch input, log, result,
-  outcome and cancel marker, then removes the task from pueue;
-  `--all-terminal` retains jobs referenced by live batches and refuses if run
-  manifests cannot be read; `--daemon-era` deletes
-  the state subtrees no verb reads. Never by age.
-- Every task's start and finish reaches
-  `/realm/state/agentctl/events.jsonl`; watch `agentctl events tail --follow`.
-  Keep one watch per concern and retain its execution-session handle. In
-  `functions.exec`, forward the full result with
-  `text(await tools.exec_command({...}))`: `session_id` means the command
-  is still running. Resume that session with `write_stdin`; an outer
-  “Script completed” only describes the JavaScript call. When supervision
-  ends, terminate the owned command and verify its exit. On takeover,
-  inspect full argv, including `.agentctl-wrapped`, before creating a watch.
-- Declared operations may run for up to eight hours; agents run until they
-  finish and are cancelled by hand.
-- Every long launch carries an evidence-based duration expectation and a
-  deadline around twice it. At the deadline, inspect progress evidence and
-  cancel, repair, or extend for a stated reason.
-- Artifacts (launch input, log, result) live under `~/.local/state/agentctl`
-  or the task's own working directory, and are found by the launch input the
-  task's command names.
+Every task start and finish reaches `agentctl events tail --follow`. Keep one
+watch per concern. In `functions.exec`, a returned `session_id` is still
+running and must be resumed through `write_stdin`; an outer “Script completed”
+only describes the JavaScript call. When supervision ends, terminate the
+owned command and verify its exit. On takeover, inspect the full argv before
+creating another watch.
+
+Give long work an evidence-based duration estimate. At roughly twice it,
+inspect progress and cancel, repair, or extend with a reason.
 
 ### Session subagents run outside pueue
 
@@ -78,49 +39,19 @@ heavy step through `agentctl job start`.
 A batch is several workers on one base commit landed as one candidate. Its
 manifest is `~/.local/state/agentctl/runs/<run>.json`.
 
-- `agentctl batch start [project] <bead>… [--worker a,b]… [--workers
-queued|external] [--backend B --model M --effort E]` validates the members,
-  writes the manifest, claims the beads, creates one worktree per worker on
-  branch `batch/<run>/<worker>` at `<workspace.root>/<repo>-<branch with /
-replaced by ->` through `wt switch --create` (the project's `wt.toml` hooks
-  provision it), writes the
-  packet to `.agentctl/prompt.md`, queues each worker in group `agent` inside a
-  unit capped at the descriptor's `agent_memory_max`, and queues the landing
-  task behind them in `<project>-land`. `--workers external` skips the
-  worker enqueue and stashes the landing task for another harness's
-  workers. Repeating it on an existing run completes what is missing.
-- `agentctl batch result <run> <worker> <result.json>` files an external
-  worker's result after validating it against the worker schema and binding
-  it to the worktree head; the last result enqueues the landing task.
-- `agentctl batch land <run>` integrates, verifies, reviews, publishes,
-  records acceptance, closes satisfied beads and removes worker worktrees.
-  It is the landing task's body and is re-run by hand after a named failure;
-  one landing per run at a time. `--keep-integration` lands the integration
-  worktree's current HEAD without re-merging.
-- `agentctl batch abandon <run> [--reason R]` unclaims the members, removes
-  the worktrees holding no unpreserved work and marks the manifest
-  abandoned; refused while the landing task runs.
-- `agentctl batch clean <project>` removes the worktrees of runs that are
-  over -- landed, abandoned, or with no manifest left -- keeping and naming
-  any that holds uncommitted or unmerged work. Run state, never age.
-- `agentctl batch resume <run> --worker <w>` queues a fresh agent into the
-  worker's existing worktree with a resume packet (`.agentctl/resume-<n>.md`)
-  that carries the original. Uncommitted work there belongs to the new agent.
-- `agentctl batch status <run>` (each worker's prompt path; for an external
-  worker without a result, the exact `batch result` line), `agentctl batch
-list [project]`.
+`batch start` creates a manifest and one worktree per ownership group. A
+queued batch runs its landing task after its workers; an external batch needs
+one schema-valid `batch result` for every worker before landing. Read `batch
+status` before recovery. Resume one worker in its existing worktree, land a
+named failure after correcting it, or abandon a run that will not land.
+`batch clean` follows recorded run state and preserves uncommitted or
+unmerged work.
 
 ## The screen
 
-`agentctl view <project>`: queue groups (running/queued/paused/held), what
-needs attention (failed jobs, workers and landings of the last six hours),
-active jobs with start time and elapsed, every open run with each worker's
-stage, since and job, the landing task and what follows next, and the ready
-beads (epics and decisions left out).
-Pressure pauses admit no new work while already running jobs finish. Native
-Pueue dependencies and operator stashes remain separate; no pool-wide
-pytest/agent exclusion is imposed.
-`agentctl events tail [--follow] [--project p]` is the same over time.
+`agentctl view <project>` shows queue pressure, active jobs, open runs, and
+ready work; `events tail` shows the same over time. Pressure stops admissions,
+not running jobs. pueue dependencies and operator stashes stay separate.
 
 ## Worker toolbelt
 
@@ -138,16 +69,10 @@ Agents have `lane` on PATH:
 
 ## Failures
 
-- Wedged job: `job get`, `job logs`, `job cancel` once, confirm the task is
-  terminal in `pueue status` before restarting.
-- Dead worker: the worktree keeps its work; commit it, then `batch resume
---worker` for a fresh agent, or `batch abandon <run>` to release the run.
-- Failed landing: `batch status` names the code, `job logs <landing task>`
-  the cause; fix it, then `batch land <run>` again, or `batch land <run>
---keep-integration` after fixing the integration worktree by hand.
-  An unchanged candidate reuses successful verification and review only while
-  its base, worker inputs and verification/review contracts still match.
-- `pueue has no group X`: the descriptor names a pool pueued does not have;
-  the groups are declared with pueued in the CLI feature.
-- Environment mismatch: use the declared operation. Do not duplicate its
-  devshell, secret, port, or service contract in an ad hoc wrapper.
+- Wedged job: inspect it, cancel once, confirm it is terminal, then retry.
+- Dead worker: preserve its worktree, then resume its owner or abandon the
+  run.
+- Failed landing: read `batch status` and landing logs, fix the named cause,
+  then land again. Reuse evidence only when its base and contract still match.
+- Environment mismatch or an unknown pool: use the descriptor and fix its
+  declaration, never an ad hoc wrapper.

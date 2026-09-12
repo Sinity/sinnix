@@ -152,6 +152,13 @@ def status(
         document["landing"].get("task_reference"),
     )
     document["landing"]["task"] = job_view(landing_task) if landing_task else None
+    for attempt in document["landing"].get("agent_attempts") or []:
+        if not isinstance(attempt, dict):
+            continue
+        task = launch.find_task(
+            tasks, attempt.get("job_id"), attempt.get("launch_reference")
+        )
+        attempt["task"] = job_view(task) if task else None
     # The recorded landing id when pueue no longer has it, so a reader never
     # takes `task_id` for a task that exists.
     document["landing"]["vanished"] = lost.landing
@@ -762,15 +769,33 @@ class Output:
                 else "-"
             )
             lines.append(f"  {worker['id']}: prompt {prompt}")
+            dispatch = _worker_dispatch(worker)
+            if dispatch:
+                lines.append(f"    dispatch: {dispatch}")
             if commands.get(worker["id"]):
                 lines.append(f"    next: {commands[worker['id']]}")
         lines.append(
             f"landing: task {landing.get('task_id')}"
             f"{' (pueue no longer has it)' if landing.get('vanished') is not None else ''}"
+            f"{_reference_text(landing.get('task_reference'))}"
             f" candidate {self.sha(landing.get('candidate_sha'))}"
             f"{' PR #' + str(landing['pr_number']) if landing.get('pr_number') else ''}"
             f"{' failure ' + landing['failure']['code'] if landing.get('failure') else ''}"
         )
+        evidence = _landing_evidence(landing)
+        if evidence:
+            lines.append(f"  evidence: {evidence}")
+        for attempt in landing.get("agent_attempts") or []:
+            if isinstance(attempt, Mapping):
+                rendered = _landing_agent_dispatch(attempt)
+                if rendered:
+                    lines.append(f"  landing agent: {rendered}")
+        abandoned = document.get("abandoned")
+        if isinstance(abandoned, Mapping):
+            reason = str(abandoned.get("reason") or "(no reason recorded)")
+            lines.append(f"abandoned: {self.when(abandoned.get('at'))}; {reason}")
+            for residual in abandoned.get("residual") or []:
+                lines.append(f"  residual: {residual}")
         if landing.get("vanished") is not None:
             lines.append(f"  next: {_landing_next(document, commands)}")
         return "\n".join(lines)
@@ -779,7 +804,16 @@ class Output:
         if not rows:
             return "(no runs)"
         return table(
-            ("run", "harness", "stage", "started", "age", "workers", "candidate"),
+            (
+                "run",
+                "harness",
+                "stage",
+                "started",
+                "age",
+                "workers",
+                "candidate",
+                "abandonment",
+            ),
             [
                 (
                     self.run(row["run_id"]),
@@ -789,7 +823,90 @@ class Output:
                     age(row.get("created_at"), self.now),
                     " ".join(f"{w['id']}:{w['stage']}" for w in row["workers"]),
                     self.sha(row["landing"].get("candidate_sha")),
+                    _abandonment_text(row.get("abandoned")),
                 )
                 for row in rows
             ],
         )
+
+
+def _reference_text(reference: Any) -> str:
+    return f" ref {reference}" if isinstance(reference, str) and reference else ""
+
+
+def _requested_text(value: Any) -> str:
+    if not isinstance(value, Mapping):
+        return ""
+    fields = [
+        f"{key}={value[key]}"
+        for key in ("backend", "model", "effort")
+        if isinstance(value.get(key), str) and value[key]
+    ]
+    return " ".join(fields)
+
+
+def _worker_dispatch(worker: Mapping[str, Any]) -> str:
+    """The recorded launch selection, never a claim about the executor."""
+    attempts = worker.get("attempts")
+    attempt = (
+        attempts[-1]
+        if isinstance(attempts, list) and attempts and isinstance(attempts[-1], Mapping)
+        else {}
+    )
+    requested = _requested_text(attempt) or _requested_text(worker)
+    number = attempt.get("number")
+    task_id = attempt.get("task_id", worker.get("task_id"))
+    reference = attempt.get("task_reference", worker.get("task_reference"))
+    fields = [f"attempt {number}" if isinstance(number, int) else "dispatch"]
+    if requested:
+        fields.append(f"requested {requested}")
+    if isinstance(task_id, int):
+        fields.append(f"task {task_id}")
+    if isinstance(reference, str) and reference:
+        fields.append(f"ref {reference}")
+    return "; ".join(fields) if len(fields) > 1 else ""
+
+
+def _landing_agent_dispatch(attempt: Mapping[str, Any]) -> str:
+    kind = attempt.get("kind")
+    if not isinstance(kind, str) or not kind:
+        return ""
+    fields = [kind]
+    requested = _requested_text(attempt.get("requested"))
+    if requested:
+        fields.append(f"requested {requested}")
+    if isinstance(attempt.get("job_id"), int):
+        fields.append(f"task {attempt['job_id']}")
+    if isinstance(attempt.get("launch_reference"), str) and attempt["launch_reference"]:
+        fields.append(f"ref {attempt['launch_reference']}")
+    task = attempt.get("task")
+    if isinstance(task, Mapping) and isinstance(task.get("phase"), str):
+        fields.append(task["phase"])
+    return "; ".join(fields)
+
+
+def _landing_evidence(landing: Mapping[str, Any]) -> str:
+    facts = []
+    verify = landing.get("verify_run")
+    if isinstance(verify, Mapping) and isinstance(verify.get("job_id"), int):
+        facts.append(
+            f"verify task {verify['job_id']}{_reference_text(verify.get('reference'))}"
+        )
+    review = landing.get("review_verdict")
+    if isinstance(review, Mapping):
+        if isinstance(review.get("job_id"), int):
+            facts.append(
+                f"review task {review['job_id']}{_reference_text(review.get('reference'))}"
+            )
+        elif isinstance(review.get("policy"), str):
+            facts.append(f"review policy {review['policy']}")
+    return "; ".join(facts)
+
+
+def _abandonment_text(value: Any) -> str:
+    if not isinstance(value, Mapping):
+        return ""
+    reason = str(value.get("reason") or "no reason")
+    residual = value.get("residual")
+    count = len(residual) if isinstance(residual, list) else 0
+    return f"{reason}; {count} residual"

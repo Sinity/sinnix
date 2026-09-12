@@ -5,7 +5,7 @@ description: Use when invoking, inspecting, or documenting Sinnix Agent Gateway 
 
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: d07a26f5625590cf20111bb15252ecd457e4403cac30d5a195deffce434940e4 -->
+<!-- gateway-catalog-sha256: 7f96f482afd0829da20e7264475dab50157178267bd115e23d886108e24ed176 -->
 
 # Agent Gateway
 
@@ -42,7 +42,7 @@ Effectful actions (families change, operate, run) require `idempotency_key`; rep
 
 - `files.stat` — Describe one host path: kind, size, mode, owner, timestamps, MIME, hash.
 - `files.list` — List a directory with a canonical ref for every child.
-- `files.read` — Read a file: text inline, images as an image block, other binary as a resource block.
+- `files.read` — Read a file: text inline, images as image blocks, other binary as read-only links.
 - `files.search` — Without content_regex the search is over paths (fd); with it, matching lines are returned (ripgrep --json). Results are bounded by limit and timeout.
 - `files.plan` — The caller supplies every mapping. The plan hashes each regular source file and records collision, parent and filesystem facts without changing host files.
 - `files.references` — Runs the existing bounded files.search text primitive once for each supplied old path. It only reports provenance and never rewrites references.
@@ -145,4 +145,4 @@ Effectful actions (families change, operate, run) require `idempotency_key`; rep
 
 The complete schemas and examples are in `docs/generated/agent-gateway-reference.md`.
 
-Catalog revision: `v3-typed-actions`. Catalog SHA-256: `d07a26f5625590cf20111bb15252ecd457e4403cac30d5a195deffce434940e4`.
+Catalog revision: `v3-typed-actions`. Catalog SHA-256: `7f96f482afd0829da20e7264475dab50157178267bd115e23d886108e24ed176`.

@@ -214,7 +214,7 @@ def test_cli_subprocess_preserves_failure_envelope_and_status(tmp_path: Path) ->
     not os.environ.get("SINNIX_GATEWAY_TEST_EXECUTABLE"),
     reason="package check supplies the installed gateway executable",
 )
-def test_cli_subprocess_preserves_binary_resource_bytes(tmp_path: Path) -> None:
+def test_cli_subprocess_keeps_binary_bytes_out_of_the_chat(tmp_path: Path) -> None:
     config = tmp_path / "gateway.json"
     config.write_text(
         json.dumps({"stateDir": str(tmp_path / "state")}), encoding="utf-8"
@@ -231,7 +231,7 @@ def test_cli_subprocess_preserves_binary_resource_bytes(tmp_path: Path) -> None:
         "call",
         "files.read",
         "--input",
-        json.dumps({"target": {"path": str(fixture)}, "representation": "binary"}),
+        json.dumps({"target": {"path": str(fixture)}}),
     ]
 
     completed = subprocess.run(command, capture_output=True, text=True, check=False)
@@ -239,8 +239,9 @@ def test_cli_subprocess_preserves_binary_resource_bytes(tmp_path: Path) -> None:
     assert completed.returncode == 0
     response = json.loads(completed.stdout)
     assert response["data"]["sha256"] == hashlib.sha256(payload).hexdigest()
-    block = next(block for block in response["content"] if block["type"] == "resource")
-    assert base64.b64decode(block["resource"]["blob"]) == payload
+    block = next(block for block in response["content"] if block["type"] == "resource_link")
+    assert block["uri"] == response["data"]["ref"]
+    assert "blob" not in json.dumps(block)
 
 
 def test_input_sources_are_bounded_and_require_a_json_object(tmp_path: Path) -> None:

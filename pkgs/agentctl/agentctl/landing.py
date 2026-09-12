@@ -173,6 +173,37 @@ def _review_agent(project: ProjectAdapter, run: Run) -> dict[str, str]:
     }
 
 
+def _record_landing_agent_attempt(
+    config: Config,
+    run_id: str,
+    *,
+    kind: str,
+    job: Mapping[str, Any],
+    requested: Mapping[str, str],
+    prompt_path: Path,
+) -> None:
+    """Retain the dispatch facts for an integration or review agent.
+
+    Pueue remains the authority for the task's live and terminal phase.  The
+    manifest keeps the launch identity and requested selection so a failed or
+    subsequently cleaned task does not erase how the landing was dispatched.
+    """
+    attempt = {
+        "kind": kind,
+        "job_id": job.get("job_id"),
+        "launch_reference": job.get("reference"),
+        "requested": dict(requested),
+        "prompt_path": str(prompt_path),
+    }
+
+    def record(document: dict[str, Any]) -> None:
+        attempts = list(document["landing"].get("agent_attempts") or [])
+        attempts.append(attempt)
+        document["landing"]["agent_attempts"] = attempts
+
+    update(config, run_id, record)
+
+
 def _landing_inputs(
     config: Config, project: ProjectAdapter, run: Run, base: str, beads: Beads
 ) -> str:
@@ -301,6 +332,7 @@ def _integrate(
             members=_members_for_agents(run, beads, path),
             results=_results_for_agents(run, path),
         )
+        selection = _review_agent(project, run)
         job = queue_agent(
             config,
             project,
@@ -309,9 +341,17 @@ def _integrate(
             prompt=prompt,
             prompt_name="integrate.md",
             group=LANDING_AGENT_GROUP,
-            **_review_agent(project, run),
+            **selection,
             binding=binding(run, None),
             inaccessible=other_worktrees(project, run, None),
+        )
+        _record_landing_agent_attempt(
+            config,
+            run.run_id,
+            kind="integration",
+            job=job,
+            requested=selection,
+            prompt_path=path / WORKTREE_STATE_DIR / "integrate.md",
         )
         waited = launch.wait(
             job["job_id"],
@@ -849,6 +889,7 @@ def _review(
             path, "candidate-verification.json", [run.landing.get("verify_run") or {}]
         ),
     )
+    selection = _review_agent(project, run)
     job = queue_agent(
         config,
         project,
@@ -857,10 +898,18 @@ def _review(
         prompt=prompt,
         prompt_name="review.md",
         group=LANDING_AGENT_GROUP,
-        **_review_agent(project, run),
+        **selection,
         schema="judge",
         binding=binding(run, None),
         inaccessible=other_worktrees(project, run, None),
+    )
+    _record_landing_agent_attempt(
+        config,
+        run.run_id,
+        kind="review",
+        job=job,
+        requested=selection,
+        prompt_path=path / WORKTREE_STATE_DIR / "review.md",
     )
     waited = launch.wait(
         job["job_id"],
