@@ -55,4 +55,15 @@
     };
     system.screen_off_timeout = 86400000;
   };
+
+  android.permissions = {
+    "alvr.client.stable".grant = [
+      "android.permission.POST_NOTIFICATIONS"
+      "android.permission.RECORD_AUDIO"
+    ];
+    "org.meumeu.wivrn.github".grant = [
+      "android.permission.POST_NOTIFICATIONS"
+      "android.permission.RECORD_AUDIO"
+    ];
+  };
 }
