@@ -1,7 +1,8 @@
-# Private phone-media ingress over the tailnet.
+# Private mobile-media ingress over the tailnet or an explicitly forwarded
+# local transport.
 #
-# The Redmi is authoritative for media. Prime receives a recoverable mirror;
-# staggered versions protect against accidental deletion on the phone.
+# Mobile devices remain authoritative for media. Prime receives recoverable
+# mirrors; staggered versions protect against accidental deletion at source.
 {
   mkServiceModule,
   lib,
@@ -24,6 +25,7 @@ mkServiceModule {
       username = config.sinnix.user.name;
       stateDir = "/realm/state/syncthing";
       mediaDir = "/realm/photos/phone-sync";
+      questMediaDir = "/realm/photos/quest-3/videoshots";
     in
     {
       services.syncthing = {
@@ -46,20 +48,43 @@ mkServiceModule {
               "quic://100.111.240.107:22000"
             ];
           };
+          devices.quest-3 = {
+            id = "ZB4K2DB-SXJRE2T-CCVTEAZ-HHQLNJ5-T2UJLZB-CZ2I5A6-QPK5NJ5-G2GFGAO";
+            # Quest initiates the connection through `adb reverse`; it has no
+            # independently reachable address that the host should probe.
+            addresses = [ "dynamic" ];
+          };
 
-          folders = lib.genAttrs [ "DCIM" "Pictures" "Movies" ] (name: {
-            id = "redmi-${lib.toLower name}";
-            path = "${mediaDir}/${name}";
-            devices = [ "redmi-note-11" ];
-            type = "receiveonly";
-            versioning = {
-              type = "staggered";
-              params = {
-                cleanInterval = "3600";
-                maxAge = "31536000";
+          folders =
+            lib.genAttrs [ "DCIM" "Pictures" "Movies" ] (name: {
+              id = "redmi-${lib.toLower name}";
+              path = "${mediaDir}/${name}";
+              devices = [ "redmi-note-11" ];
+              type = "receiveonly";
+              versioning = {
+                type = "staggered";
+                params = {
+                  cleanInterval = "3600";
+                  maxAge = "31536000";
+                };
+              };
+            })
+            // {
+              quest-videoshots = {
+                id = "quest-videoshots";
+                label = "Quest 3 Videoshots";
+                path = questMediaDir;
+                devices = [ "quest-3" ];
+                type = "receiveonly";
+                versioning = {
+                  type = "staggered";
+                  params = {
+                    cleanInterval = "3600";
+                    maxAge = "31536000";
+                  };
+                };
               };
             };
-          });
 
           options = {
             globalAnnounceEnabled = false;
@@ -78,6 +103,7 @@ mkServiceModule {
         "d ${stateDir}/config 0700 ${username} users -"
         "d ${stateDir}/database 0700 ${username} users -"
         "d ${mediaDir} 0750 ${username} users -"
+        "d ${questMediaDir} 0750 ${username} users -"
       ];
 
       # Data transfer and QUIC are admitted only from tailnet peers. The web
