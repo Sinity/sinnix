@@ -77,7 +77,7 @@ let
   # ========================
   # Authorized SSH key
   # ========================
-  authorizedKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDwD8IB2eVfw6X7z9AqBBGjrqOIOCJ4tden1we7mCqOy sinity@sinnix-prime";
+  authorizedKey = "@@ROUTER_AUTHORIZED_KEY@@";
 
   # ========================
   # WiFi

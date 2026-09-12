@@ -28,7 +28,7 @@ mkAiService {
   extraOptions = {
     autoStart = args.lib.mkOption {
       type = args.lib.types.bool;
-      default = true;
+      default = false;
       description = "Start Open WebUI automatically at boot.";
     };
   };
@@ -41,6 +41,11 @@ mkAiService {
       ...
     }:
     {
+      sinnix.runtime.dataStores.open-webui-state = {
+        path = "/var/lib/open-webui";
+        class = "canonical";
+      };
+
       services.open-webui = {
         enable = true;
         host = "127.0.0.1";

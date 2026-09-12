@@ -112,7 +112,6 @@ EXPENSIVE_COMMANDS = frozenset(
         "gcc",
         "gradle",
         "java",
-        "koboldcpp",
         "ld",
         "lld",
         "llama-server",

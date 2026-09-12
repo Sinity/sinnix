@@ -29,6 +29,7 @@ let
   borgRepoRoot = "${config.sinnix.paths.outerRealm}/backup";
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   username = config.sinnix.user.name;
+  backupCfg = config.sinnix.backup;
 
   # state/polylogue is a nested btrfs subvolume (sinnix-3pvd): btrbk snapshots
   # `subvolume .` of /realm, which does not cross subvolume boundaries, so
@@ -166,7 +167,7 @@ let
   # `cache` 73,805 entries present, `library/media/Steam/steamapps` 92,639 present,
   # while `**/node_modules`, `**/target` and `**/.venv` were each 0. Roughly
   # 870G of explicitly-excluded regenerable data (cache 280G, library/models 120G,
-  # library/media/Steam 103G, stashbox caches 84G, genome cache 285G, container layers
+  # library/media/Steam 103G, private project caches, and container layers
   # 23G) had been replicating into a 1.9T repository.
   #
   # Reproduced and fixed in a throwaway repo before landing: `--exclude cache`
@@ -465,7 +466,7 @@ let
   ];
 
   realmExcludes = [
-    # Re-acquirable media: Steam and model weights re-download, and stashbox
+    # Re-acquirable media: Steam, model weights, and private project caches
     # regenerable members carry their own provenance. Precious-small media
     # (books, videos, substack, edu, music-audio-features, web-content)
     # deliberately stays in coverage.
@@ -484,7 +485,7 @@ let
     # measured: borg stops recursing into an excluded directory, so a `+`
     # pattern for the subtree never gets the chance to match, and the archive
     # ends at `media` with nothing beneath it.
-    # media/model and the four media/stashbox/* caches used to be listed here
+    # media/model and private project caches used to be listed here
     # too. They are dropped, not repointed: each now carries a CACHEDIR.TAG
     # (commit 2dfa8ae6), and --exclude-caches below already excludes them by
     # that property regardless of where they live -- which is the whole
@@ -761,1144 +762,471 @@ let
 
   '';
 
+  backupContext = {
+    inherit
+      pkgs
+      lib
+      config
+      options
+      helpers
+      realmRoot
+      sinexBlobRepositoryPath
+      borgRepoRoot
+      scriptPkgs
+      username
+      polylogueStateRoot
+      polylogueBackupRoot
+      machineTelemetryBackupRoot
+      machineTelemetryBackupMarker
+      polylogueDbNames
+      polylogueDbExcludes
+      realmSnapshots
+      persistSnapshots
+      borgSnapshotBindRoot
+      borgPersistSnapshotBind
+      borgRealmSnapshotBind
+      borgDrainStateRoot
+      borgIntegrityReceipt
+      borgRepoPersistPath
+      borgRepoRealmPath
+      borgRepoRootSnapshotsPath
+      borgRepoSinexBlobsPath
+      borgRepoPolylogueStatePath
+      btrfsImageRoot
+      btrfsImageMinBytes
+      borgRepoPersist
+      borgRepoRealm
+      borgRepoRootSnapshots
+      borgRepoSinexBlobs
+      borgRepoPolylogueState
+      borgPassphrasePath
+      outerRealmMountUnit
+      borgLockWaitSec
+      borgCacheDir
+      borgStaleLockMinutes
+      borgGlobalLock
+      sinexProjectPath
+      sinexBeadsDoltArchivePath
+      sinexBeadsIssuesArchivePath
+      sinexBeadsDrillLog
+      sinexBeadsArchivePaths
+      elicitStateArchivePath
+      protectedRealmArchivePaths
+      borgArchiveMaxAgeSec
+      borgSnapshotQueueMaxAgeSec
+      borgDailyArchiveMaxAgeSec
+      borgDrainMinIntervalSec
+      mkBackupJob
+      mkBorgExcludeArgs
+      borgStaleLockRecovery
+      mkBorgCommonScript
+      mkSnapshotDrainScript
+      persistExcludes
+      realmExcludes
+      borgGlobToRegex
+      protectedPathAndAncestors
+      realmExcludeMatchesProtectedPath
+      mkSinexBeadsDrillScript
+      mkSnapshotQueueProbeScript
+      mkIntegrityStuckProbeScript
+      btrbkConfig
+      ;
+  };
+
 in
 {
-  config = lib.mkMerge [
-    {
-      sinnix.runtime.surfaces = {
-        btrbk = {
-          unit = "btrbk.service";
-          resourceClass = "backup";
-        };
-        btrbk-timer = {
-          unit = "btrbk.timer";
-          kind = "timer";
-          observe = {
-            enable = true;
-            restartable = false;
-          };
-        };
-        borgbackup-job-persist = {
-          unit = "borgbackup-job-persist.service";
-          resourceClass = "backup";
-          observe = {
-            enable = true;
-            restartable = false;
-          };
-          captures = [
-            {
-              name = "borg-persist-archive";
-              path = "${borgDrainStateRoot}/persist.last-success";
-              eventDriven = true;
-              # Same budget the retired borgbackup-status "persist"
-              # archive_freshness check used: 3x the 4h drain floor.
-              staleAfterSeconds = borgArchiveMaxAgeSec;
-            }
-          ];
-        };
-        borgbackup-job-realm = {
-          unit = "borgbackup-job-realm.service";
-          resourceClass = "backup";
-          observe = {
-            enable = true;
-            restartable = false;
-          };
-          captures = [
-            {
-              name = "borg-realm-archive";
-              path = "${borgDrainStateRoot}/realm.last-success";
-              eventDriven = true;
-              staleAfterSeconds = borgArchiveMaxAgeSec;
-            }
-            {
-              # The btrbk snapshot queue (persist AND realm, both checked by
-              # the probe below) has no owning unit of its own -- it is a
-              # property of the drain state this job and borgbackup-job-persist
-              # share. Landed here rather than split across both surfaces,
-              # since realm is the heavier of the two volumes and the one that
-              # has actually stalled before (drains contend for one global
-              # Borg lock, so a stall on either queue means the same lock
-              # contention regardless of which volume's job reports it).
-              #
-              # `path` is deliberately the small drain-state directory (a
-              # handful of marker/stamp files), NOT the snapshot directories
-              # themselves: those are full btrfs subvolume trees (potentially
-              # many GB / millions of files each), and the sweep's
-              # newest_mtime does a plain os.walk over every capture path on a
-              # 60s clock -- pointing it at a live snapshot tree would re-stat
-              # the entire /realm or /persist dataset every minute. No
-              # staleAfterSeconds: the drain-state directory always holds a
-              # file once the first drain has ever succeeded, so plain
-              # presence is enough; the real freshness question here is
-              # answered by the probe below, not by this path's mtime.
-              name = "borg-snapshot-queue";
-              path = borgDrainStateRoot;
-              eventDriven = true;
-              livenessProbe = {
-                command = mkSnapshotQueueProbeScript;
-                timeoutSeconds = 15;
-              };
-            }
-          ];
-        };
-        borgbackup-job-sinex-blobs = {
-          unit = "borgbackup-job-sinex-blobs.service";
-          resourceClass = "backup";
-          observe = {
-            enable = true;
-            restartable = false;
-          };
-          captures = [
-            {
-              name = "borg-sinex-blobs-archive";
-              path = "${borgDrainStateRoot}/sinex-blobs.last-success";
-              eventDriven = true;
-              # sinex-blobs runs on its own daily 05:40 timer, not the 4h-floor
-              # persist/realm drain cadence, so it keeps the daily budget the
-              # retired borgbackup-status check used for it (3x cadence).
-              staleAfterSeconds = borgDailyArchiveMaxAgeSec;
-            }
-          ];
-        };
-        polylogue-sqlite-backup = {
-          unit = "polylogue-sqlite-backup.service";
-          resourceClass = "backup";
-          observe.enable = true;
-        };
-        polylogue-sqlite-backup-timer = {
-          unit = "polylogue-sqlite-backup.timer";
-          kind = "timer";
-        };
-        borgbackup-job-polylogue-state = {
-          unit = "borgbackup-job-polylogue-state.service";
-          resourceClass = "backup";
-          observe = {
-            enable = true;
-            restartable = false;
-          };
-          captures = [
-            {
-              name = "borg-polylogue-state-archive";
-              path = "${borgDrainStateRoot}/polylogue-state.last-success";
-              eventDriven = true;
-              # Daily timer, same budget convention as sinex-blobs: 3x cadence.
-              staleAfterSeconds = borgDailyArchiveMaxAgeSec;
-            }
-          ];
-        };
-        borgbackup-job-machine-telemetry-dumps = {
-          unit = "borgbackup-job-machine-telemetry-dumps.service";
-          resourceClass = "backup";
-          observe = {
-            enable = true;
-            restartable = false;
-          };
-          captures = [
-            {
-              name = "borg-machine-telemetry-dumps";
-              path = machineTelemetryBackupMarker;
-              eventDriven = true;
-              # The direct-path job runs daily; a 3x cadence budget leaves
-              # room for one delayed HDD run without masking a stalled job.
-              staleAfterSeconds = borgDailyArchiveMaxAgeSec;
-            }
-          ];
-        };
-        borgbackup-verify = {
-          unit = "borgbackup-verify.service";
-          resourceClass = "backup";
-          observe = {
-            enable = true;
-            restartable = false;
-          };
-          captures = [
-            {
-              name = "borg-drill";
-              path = "${config.sinnix.paths.machineRoot}/borg_drill.jsonl";
-              eventDriven = true;
-              # borgbackup-verify.timer runs weekly (604800s); budget 3x
-              # cadence so one missed/delayed run doesn't false-positive.
-              staleAfterSeconds = 1814400;
-            }
-            {
-              name = "borg-integrity-receipt";
-              path = borgIntegrityReceipt;
-              eventDriven = true;
-              # Same 3x-weekly-cadence budget as the drill lane above: the
-              # receipt only updates on a verify run.
-              staleAfterSeconds = 1814400;
-              # Staleness alone reads a run stuck mid-check (state=="running"
-              # well past its own deadline_epoch, the case the retired
-              # borgbackup-status integrity-state machinery covered) as merely
-              # "not yet stale" until the weekly budget itself expires --
-              # days later. The probe answers that narrower question directly.
-              # completed/failed states exit 0 here: a failed run already
-              # fires OnFailure from the unit itself.
-              livenessProbe = {
-                command = mkIntegrityStuckProbeScript;
-                timeoutSeconds = 10;
-              };
-            }
-          ];
-        };
-        borgbackup-maintenance = {
-          unit = "borgbackup-maintenance.service";
-          resourceClass = "backup";
-          observe = {
-            enable = true;
-            restartable = false;
-          };
-        };
-        btrfs-metadata-image-backup = {
-          unit = "btrfs-metadata-image-backup.service";
-          resourceClass = "backup";
-          # Was unset (default false), which meant the auto-attached OnFailure
-          # hook (modules/runtime.nix, gated on observe.enable) was NEVER
-          # wired for this unit -- it failed with status=1/FAILURE on
-          # 2026-08-16 and nothing surfaced it. Not a restart candidate: a
-          # failed capture is retried by the retry loop inside the script
-          # itself and by next Sunday's timer, not by systemd Restart=.
-          observe = {
-            enable = true;
-            restartable = false;
-          };
-        };
-        borgbackup-root-snapshots = {
-          unit = "borgbackup-root-snapshots.service";
-          resourceClass = "backup";
-        };
-        sinnix-borg-beads-drill = {
-          unit = "sinnix-borg-beads-drill.service";
-          resourceClass = "backup";
-          captures = [
-            {
-              name = "borg-beads-drill";
-              path = sinexBeadsDrillLog;
-              eventDriven = true;
-              staleAfterSeconds = 1814400;
-            }
-          ];
-        };
-      };
+  options.sinnix.backup.enable = (lib.mkEnableOption "workstation snapshot and archive backups") // {
+    default = config.sinnix.machine.isDesktop;
+  };
 
-      environment.systemPackages = [
-        pkgs.btrbk
-        pkgs.borgbackup
-      ];
-
-      # btrbk configuration
-      environment.etc."btrbk/btrbk.conf".text = btrbkConfig;
-    }
-
-    # ─── Borg Snapshot Drainers ───
-    #
-    # btrbk is the producer. Borg is the durability gate. Local snapshots are
-    # never deleted by btrbk rotation; a snapshot leaves disk only after this
-    # drain has either found or created the matching Borg archive.
-    #
-    # Backups are scheduled bulk I/O and must stay below interactive work;
-    # unthrottled they saturate /realm enough to visibly stall the desktop.
-    #
-    # The drain timers are RETRY granularity, not work cadence: how often a
-    # drain actually copies anything is set by borgDrainMinIntervalSec (4h),
-    # and a wake inside that window exits after one stat without touching the
-    # Borg lock. What the timer period buys is recovery margin. A drain that
-    # loses the global lock race skips outright and waits for its next wake,
-    # while the health budget (borgArchiveMaxAgeSec / borgSnapshotQueueMaxAgeSec,
-    # 6h) starts counting from the last SUCCESS -- so the 4h floor leaves only
-    # ~2h of slack. At the old hourly period two consecutive lock races spent
-    # most of it and a third breached the budget; at 20 minutes, six retries
-    # fit in the same slack. Both stay off btrbk's :00/:30 wakes and off each
-    # other so the two drains never race for the lock they now rarely take.
-    (mkBackupJob "borgbackup-job-persist" {
-      description = "Drain /persist btrbk snapshots into Borg";
-      unit = {
-        after = [
-          "persist.mount"
-          outerRealmMountUnit
-        ];
-        requires = [
-          "persist.mount"
-          outerRealmMountUnit
-        ];
-      };
-      serviceConfig.TimeoutStopSec = "15s";
-      path = with pkgs; [
-        borgbackup
-        btrfs-progs
-        coreutils
-        findutils
-        gnugrep
-        util-linux
-      ];
-      script = mkSnapshotDrainScript {
-        label = "persist";
-        repo = borgRepoPersist;
-        repoPath = borgRepoPersistPath;
-        snapshotDir = persistSnapshots;
-        snapshotGlob = "persist.*";
-        bindTarget = borgPersistSnapshotBind;
-        archivePrefix = "persist";
-        minIntervalSec = borgDrainMinIntervalSec;
-        exclude = persistExcludes;
-      };
-      timer = {
-        onCalendar = "*-*-* *:05,25,45:00";
-        persistent = false;
-      };
-    })
-
-    (mkBackupJob "borgbackup-job-realm" {
-      description = "Drain /realm btrbk snapshots into Borg";
-      unit = {
-        after = [
-          "realm.mount"
-          outerRealmMountUnit
-        ];
-        requires = [
-          "realm.mount"
-          outerRealmMountUnit
-        ];
-      };
-      serviceConfig.TimeoutStopSec = "15s";
-      path = with pkgs; [
-        borgbackup
-        btrfs-progs
-        coreutils
-        findutils
-        gnugrep
-        util-linux
-      ];
-      script = mkSnapshotDrainScript {
-        label = "realm";
-        repo = borgRepoRealm;
-        repoPath = borgRepoRealmPath;
-        snapshotDir = realmSnapshots;
-        snapshotGlob = "realm.*";
-        bindTarget = borgRealmSnapshotBind;
-        archivePrefix = "realm";
-        minIntervalSec = borgDrainMinIntervalSec;
-        exclude = realmExcludes;
-      };
-      timer = {
-        onCalendar = "*-*-* *:15,35,55:00";
-        persistent = false;
-      };
-    })
-
-    # ─── Sinex blob-repository Borg job ───
-    # A CAS lives outside the /realm snapshot stream, so Borg reads the live
-    # evaluated content-store path. Immutable objects make this safe without a
-    # snapshot; `RequiresMountsFor` keeps the source mount authoritative. The
-    # guard covers service AND timer: a timer whose service does not exist is
-    # a failed start, not a backup.
-    (lib.mkIf (sinexBlobRepositoryPath != "") (
-      mkBackupJob "borgbackup-job-sinex-blobs" {
-        description = "Back up sinex blob repository into Borg";
-        unit = {
-          after = [
-            "persist.mount"
-            outerRealmMountUnit
-          ];
-          requires = [
-            "persist.mount"
-            outerRealmMountUnit
-          ];
-          unitConfig.RequiresMountsFor = [ sinexBlobRepositoryPath ];
-        };
-        serviceConfig.TimeoutStopSec = "15s";
-        path = with pkgs; [
-          borgbackup
-          coreutils
-          gnugrep
-          util-linux
-        ];
-        timer = {
-          onCalendar = "*-*-* 05:40:00";
-          randomizedDelaySec = "10min";
-          persistent = true;
-        };
-        script = ''
-          set -euo pipefail
-          ${mkBorgCommonScript borgRepoSinexBlobs}
-
-          install -d -m 0700 -o root -g root ${lib.escapeShellArg borgRepoSinexBlobsPath}
-          recover_stale_borg_locks
-
-          if [ ! -e ${lib.escapeShellArg "${borgRepoSinexBlobsPath}/config"} ]; then
-            with_borg_lock borg init --encryption repokey-blake2 "$BORG_REPO"
-          fi
-
-          archive_name="sinex-blobs-$(date -u +%Y%m%dT%H%M%SZ)"
-          with_borg_lock borg create \
-            --compression auto,zstd,1 \
-            --lock-wait ${toString borgLockWaitSec} \
-            "::$archive_name" \
-            ${lib.escapeShellArg sinexBlobRepositoryPath}
-          echo "sinex blob backup complete: $archive_name"
-
-          # The borg-sinex-blobs-archive capture lane (this surface's
-          # captures, above) gates freshness off this marker, same convention
-          # as the btrbk drain jobs' "$label.last-success" (mkSnapshotDrainScript
-          # above) -- without it, sinex-blobs had zero freshness gating despite
-          # being on a daily timer just like persist/realm are on their 4h floor.
-          install -d -m 0755 -o root -g root ${lib.escapeShellArg borgDrainStateRoot}
-          marker=${lib.escapeShellArg "${borgDrainStateRoot}/sinex-blobs.last-success"}
-          {
-            printf 'archive=%s\n' "$archive_name"
-            printf 'epoch=%s\n' "$(date +%s)"
-          } > "$marker.tmp"
-          mv "$marker.tmp" "$marker"
-        '';
-      }
-    ))
-
-    # ─── Polylogue nested-subvolume coverage (sinnix-3pvd) ───
-    #
-    # Two jobs cover state/polylogue, split the same way sinex is split
-    # between sinex-postgres-dump (logical dump of the live DB) and
-    # borgbackup-job-sinex-blobs (direct-path borg of the immutable CAS):
-    # sqlite-safe dumps for the live databases, and a direct-path borg job
-    # for everything else (blob/ CAS, hooks/, browser-capture/, inbox/, and
-    # the retired/historical db siblings that are no longer written).
-    (mkBackupJob "polylogue-sqlite-backup" {
-      description = "Back up Polylogue SQLite databases";
-      unit = {
-        after = [
-          "realm.mount"
-        ];
-        requires = [
-          "realm.mount"
-        ];
-        unitConfig.RequiresMountsFor = [
-          polylogueStateRoot
-          polylogueBackupRoot
-        ];
-      };
-      user = username;
-      serviceConfig = {
-        Group = "users";
-        TimeoutStartSec = "30min";
-      };
-      path = [
-        pkgs.coreutils
-        pkgs.findutils
-        pkgs.gawk
-        scriptPkgs.sinnix-sqlite-backup
-      ];
-      timer = {
-        onCalendar = "*-*-* 04:15:00";
-        randomizedDelaySec = "20min";
-        persistent = true;
-      };
-      script = ''
-        set -euo pipefail
-
-        umask 077
-        install -d -m 0700 -o ${lib.escapeShellArg username} -g users ${lib.escapeShellArg polylogueBackupRoot}
-
-        stamp="$(date -u +%Y%m%dT%H%M%SZ)"
-
-        for name in ${lib.escapeShellArgs polylogueDbNames}; do
-          src=${lib.escapeShellArg polylogueStateRoot}/"$name"
-          [ -e "$src" ] || continue
-          base="''${name%.db}"
-          final=${lib.escapeShellArg polylogueBackupRoot}/"$base-$stamp".db.zst
-
-          sinnix-sqlite-backup "$src" "$final"
-
-        done
-      '';
-    })
-
-    # Direct-path borg over the live state root, same reasoning as
-    # borgbackup-job-sinex-blobs: excluded files are the live databases
-    # (torn-copy risk, covered by the dump job above instead); everything
-    # else here is either immutable CAS or currently-static, so a plain
-    # file-level copy is safe without a btrfs snapshot.
-    (mkBackupJob "borgbackup-job-polylogue-state" {
-      description = "Back up Polylogue state (blob CAS and non-live files) into Borg";
-      unit = {
-        after = [
-          "realm.mount"
-          outerRealmMountUnit
-        ];
-        requires = [
-          "realm.mount"
-          outerRealmMountUnit
-        ];
-        unitConfig.RequiresMountsFor = [ polylogueStateRoot ];
-      };
-      serviceConfig.TimeoutStopSec = "15s";
-      path = with pkgs; [
-        borgbackup
-        coreutils
-        gnugrep
-        util-linux
-      ];
-      timer = {
-        onCalendar = "*-*-* 05:55:00";
-        randomizedDelaySec = "10min";
-        persistent = true;
-      };
-      script = ''
-        set -euo pipefail
-        ${mkBorgCommonScript borgRepoPolylogueState}
-
-        install -d -m 0700 -o root -g root ${lib.escapeShellArg borgRepoPolylogueStatePath}
-        recover_stale_borg_locks
-
-        if [ ! -e ${lib.escapeShellArg "${borgRepoPolylogueStatePath}/config"} ]; then
-          with_borg_lock borg init --encryption repokey-blake2 "$BORG_REPO"
-        fi
-
-        archive_name="polylogue-state-$(date -u +%Y%m%dT%H%M%SZ)"
-        with_borg_lock borg create \
-          --compression auto,zstd,1 \
-          --lock-wait ${toString borgLockWaitSec} \
-          ${mkBorgExcludeArgs polylogueStateRoot polylogueDbExcludes} \
-          "::$archive_name" \
-          ${lib.escapeShellArg polylogueStateRoot}
-        echo "polylogue state backup complete: $archive_name"
-
-        install -d -m 0755 -o root -g root ${lib.escapeShellArg borgDrainStateRoot}
-        marker=${lib.escapeShellArg "${borgDrainStateRoot}/polylogue-state.last-success"}
+  config = lib.mkIf backupCfg.enable (
+    lib.mkMerge (
+      [
         {
-          printf 'archive=%s\n' "$archive_name"
-          printf 'epoch=%s\n' "$(date +%s)"
-        } > "$marker.tmp"
-        mv "$marker.tmp" "$marker"
-      '';
-    })
+          sinnix.runtime.dataStores = {
+            # Backup coverage remains active for persisted Polylogue data even
+            # when its daemon is disabled. The owning service supplies the
+            # same higher-priority declarations when enabled.
+            polylogue-inbox = lib.mkDefault {
+              path = "${polylogueStateRoot}/inbox";
+              class = "canonical";
+            };
+            polylogue-source = lib.mkDefault {
+              path = "${polylogueStateRoot}/source.db";
+              class = "canonical";
+            };
+            polylogue-user = lib.mkDefault {
+              path = "${polylogueStateRoot}/user.db";
+              class = "canonical";
+            };
+            polylogue-audit = lib.mkDefault {
+              path = "${polylogueStateRoot}/audit.db";
+              class = "canonical";
+            };
+            polylogue-ops = lib.mkDefault {
+              path = "${polylogueStateRoot}/ops.db";
+              class = "canonical";
+            };
+            polylogue-index = lib.mkDefault {
+              path = "${polylogueStateRoot}/index.db";
+              class = "derived";
+              inputs = [
+                "polylogue-inbox"
+                "polylogue-source"
+                "polylogue-user"
+                "polylogue-audit"
+                "polylogue-ops"
+              ];
+            };
+            polylogue-embeddings = lib.mkDefault {
+              path = "${polylogueStateRoot}/embeddings.db";
+              class = "derived";
+              inputs = [ "polylogue-source" ];
+            };
+            realm-source = {
+              path = realmRoot;
+              class = "canonical";
+            };
+            persist-source = {
+              path = "/persist";
+              class = "canonical";
+            };
+            realm-snapshots = {
+              path = realmSnapshots;
+              class = "exact-copy";
+              source = "realm-source";
+            };
+            persist-snapshots = {
+              path = persistSnapshots;
+              class = "exact-copy";
+              source = "persist-source";
+            };
+            borg-realm-archives = {
+              path = borgRepoRealmPath;
+              class = "exact-copy";
+              source = "realm-source";
+              preservation = "indefinite";
+              backup = "direct";
+            };
+            borg-persist-archives = {
+              path = borgRepoPersistPath;
+              class = "exact-copy";
+              source = "persist-source";
+              preservation = "indefinite";
+              backup = "direct";
+            };
+            sinex-blob-repository = {
+              path = sinexBlobRepositoryPath;
+              class = "canonical";
+            };
+            borg-sinex-blob-archives = {
+              path = borgRepoSinexBlobsPath;
+              class = "exact-copy";
+              source = "sinex-blob-repository";
+              preservation = "indefinite";
+              backup = "direct";
+            };
+            borg-root-archives = {
+              path = borgRepoRootSnapshotsPath;
+              # Each archive is the durable historical record after
+              # rebuildable root paths are excluded from a pre-wipe snapshot.
+              class = "canonical";
+              backup = "direct";
+            };
+            borg-polylogue-state-archives = {
+              # This repository preserves selected non-database state across
+              # versions and is therefore a canonical historical source.
+              path = borgRepoPolylogueStatePath;
+              class = "canonical";
+              backup = "direct";
+            };
+            polylogue-db-dumps = {
+              path = polylogueBackupRoot;
+              class = "exact-copy";
+              inputs = [
+                "polylogue-source"
+                "polylogue-user"
+                "polylogue-audit"
+                "polylogue-ops"
+                "polylogue-index"
+                "polylogue-embeddings"
+              ];
+              preservation = "indefinite";
+              backup = "direct";
+            };
+            machine-telemetry-dumps = {
+              path = machineTelemetryBackupRoot;
+              class = "exact-copy";
+              source = "machine-telemetry";
+              preservation = "indefinite";
+              backup = "direct";
+            };
+          };
 
-    # Direct-path Borg coverage for the machine telemetry SQLite dump stream.
-    # The live database is dumped by machine-telemetry-sqlite-backup; this job
-    # archives every resulting compressed dump without deleting or pruning any
-    # source snapshot. It also restores one archived dump through stdout and
-    # runs zstd's frame test before publishing the freshness marker, so a
-    # successful marker means both archive creation and a real restore probe
-    # succeeded.
-    (mkBackupJob "borgbackup-job-machine-telemetry-dumps" {
-      description = "Back up and restore-check machine telemetry SQLite dumps";
-      unit = {
-        after = [
-          "realm.mount"
-          outerRealmMountUnit
-        ];
-        requires = [
-          "realm.mount"
-          outerRealmMountUnit
-        ];
-        unitConfig.RequiresMountsFor = [ machineTelemetryBackupRoot ];
-      };
-      serviceConfig = {
-        # This is a Type=oneshot service, so TimeoutStartSec bounds the full
-        # Borg process lifetime. The dump set can be large on the HDD; keep
-        # the measured 12-hour allowance used by the weekly restore path.
-        TimeoutStartSec = "12h";
-        TimeoutStopSec = "15s";
-      };
-      environment = {
-        BORG_PASSCOMMAND = "${pkgs.coreutils}/bin/cat ${borgPassphrasePath}";
-        BORG_CACHE_DIR = borgCacheDir;
-      };
-      path = with pkgs; [
-        borgbackup
-        coreutils
-        findutils
-        gnugrep
-        jq
-        util-linux
-        zstd
-      ];
-      timer = {
-        onCalendar = "*-*-* 06:15:00";
-        randomizedDelaySec = "30min";
-        persistent = true;
-      };
-      script = ''
-        set -euo pipefail
+          sinnix.runtime.surfaces = {
+            btrbk = {
+              unit = "btrbk.service";
+              resourceClass = "backup";
+            };
+            btrbk-timer = {
+              unit = "btrbk.timer";
+              kind = "timer";
+              observe = {
+                enable = true;
+                restartable = false;
+              };
+            };
+            borgbackup-job-persist = {
+              unit = "borgbackup-job-persist.service";
+              resourceClass = "backup";
+              observe = {
+                enable = true;
+                restartable = false;
+              };
+              captures = [
+                {
+                  name = "borg-persist-archive";
+                  path = "${borgDrainStateRoot}/persist.last-success";
+                  eventDriven = true;
+                  # Same budget the retired borgbackup-status "persist"
+                  # archive_freshness check used: 3x the 4h drain floor.
+                  staleAfterSeconds = borgArchiveMaxAgeSec;
+                  data = {
+                    class = "derived";
+                    inputs = [ "borg-persist-archives" ];
+                  };
+                }
+              ];
+            };
+            borgbackup-job-realm = {
+              unit = "borgbackup-job-realm.service";
+              resourceClass = "backup";
+              observe = {
+                enable = true;
+                restartable = false;
+              };
+              captures = [
+                {
+                  name = "borg-realm-archive";
+                  path = "${borgDrainStateRoot}/realm.last-success";
+                  eventDriven = true;
+                  staleAfterSeconds = borgArchiveMaxAgeSec;
+                  data = {
+                    class = "derived";
+                    inputs = [ "borg-realm-archives" ];
+                  };
+                }
+                {
+                  # The btrbk snapshot queue (persist AND realm, both checked by
+                  # the probe below) has no owning unit of its own -- it is a
+                  # property of the drain state this job and borgbackup-job-persist
+                  # share. Landed here rather than split across both surfaces,
+                  # since realm is the heavier of the two volumes and the one that
+                  # has actually stalled before (drains contend for one global
+                  # Borg lock, so a stall on either queue means the same lock
+                  # contention regardless of which volume's job reports it).
+                  #
+                  # `path` is deliberately the small drain-state directory (a
+                  # handful of marker/stamp files), NOT the snapshot directories
+                  # themselves: those are full btrfs subvolume trees (potentially
+                  # many GB / millions of files each), and the sweep's
+                  # newest_mtime does a plain os.walk over every capture path on a
+                  # 60s clock -- pointing it at a live snapshot tree would re-stat
+                  # the entire /realm or /persist dataset every minute. No
+                  # staleAfterSeconds: the drain-state directory always holds a
+                  # file once the first drain has ever succeeded, so plain
+                  # presence is enough; the real freshness question here is
+                  # answered by the probe below, not by this path's mtime.
+                  name = "borg-snapshot-queue";
+                  path = borgDrainStateRoot;
+                  eventDriven = true;
+                  livenessProbe = {
+                    command = mkSnapshotQueueProbeScript;
+                    timeoutSeconds = 15;
+                  };
+                  data = {
+                    class = "derived";
+                    inputs = [
+                      "realm-snapshots"
+                      "persist-snapshots"
+                    ];
+                  };
+                }
+              ];
+            };
+            borgbackup-job-sinex-blobs = {
+              unit = "borgbackup-job-sinex-blobs.service";
+              resourceClass = "backup";
+              observe = {
+                enable = true;
+                restartable = false;
+              };
+              captures = [
+                {
+                  name = "borg-sinex-blobs-archive";
+                  path = "${borgDrainStateRoot}/sinex-blobs.last-success";
+                  eventDriven = true;
+                  # sinex-blobs runs on its own daily 05:40 timer, not the 4h-floor
+                  # persist/realm drain cadence, so it keeps the daily budget the
+                  # retired borgbackup-status check used for it (3x cadence).
+                  staleAfterSeconds = borgDailyArchiveMaxAgeSec;
+                  data = {
+                    class = "derived";
+                    inputs = [ "borg-sinex-blob-archives" ];
+                  };
+                }
+              ];
+            };
+            polylogue-sqlite-backup = {
+              unit = "polylogue-sqlite-backup.service";
+              resourceClass = "backup";
+              observe.enable = true;
+            };
+            polylogue-sqlite-backup-timer = {
+              unit = "polylogue-sqlite-backup.timer";
+              kind = "timer";
+            };
+            borgbackup-job-polylogue-state = {
+              unit = "borgbackup-job-polylogue-state.service";
+              resourceClass = "backup";
+              observe = {
+                enable = true;
+                restartable = false;
+              };
+              captures = [
+                {
+                  name = "borg-polylogue-state-archive";
+                  path = "${borgDrainStateRoot}/polylogue-state.last-success";
+                  eventDriven = true;
+                  # Daily timer, same budget convention as sinex-blobs: 3x cadence.
+                  staleAfterSeconds = borgDailyArchiveMaxAgeSec;
+                  data = {
+                    class = "derived";
+                    inputs = [ "borg-polylogue-state-archives" ];
+                  };
+                }
+              ];
+            };
+            borgbackup-job-machine-telemetry-dumps = {
+              unit = "borgbackup-job-machine-telemetry-dumps.service";
+              resourceClass = "backup";
+              observe = {
+                enable = true;
+                restartable = false;
+              };
+              captures = [
+                {
+                  name = "borg-machine-telemetry-dumps";
+                  path = machineTelemetryBackupMarker;
+                  eventDriven = true;
+                  # The direct-path job runs daily; a 3x cadence budget leaves
+                  # room for one delayed HDD run without masking a stalled job.
+                  staleAfterSeconds = borgDailyArchiveMaxAgeSec;
+                  data = {
+                    class = "derived";
+                    inputs = [ "machine-telemetry-dumps" ];
+                  };
+                }
+              ];
+            };
+            borgbackup-verify = {
+              unit = "borgbackup-verify.service";
+              resourceClass = "backup";
+              observe = {
+                enable = true;
+                restartable = false;
+              };
+              captures = [
+                {
+                  name = "borg-drill";
+                  path = "${config.sinnix.paths.machineRoot}/borg_drill.jsonl";
+                  eventDriven = true;
+                  # borgbackup-verify.timer runs weekly (604800s); budget 3x
+                  # cadence so one missed/delayed run doesn't false-positive.
+                  staleAfterSeconds = 1814400;
+                }
+                {
+                  name = "borg-integrity-receipt";
+                  path = borgIntegrityReceipt;
+                  eventDriven = true;
+                  # Same 3x-weekly-cadence budget as the drill lane above: the
+                  # receipt only updates on a verify run.
+                  staleAfterSeconds = 1814400;
+                  # Staleness alone reads a run stuck mid-check (state=="running"
+                  # well past its own deadline_epoch, the case the retired
+                  # borgbackup-status integrity-state machinery covered) as merely
+                  # "not yet stale" until the weekly budget itself expires --
+                  # days later. The probe answers that narrower question directly.
+                  # completed/failed states exit 0 here: a failed run already
+                  # fires OnFailure from the unit itself.
+                  livenessProbe = {
+                    command = mkIntegrityStuckProbeScript;
+                    timeoutSeconds = 10;
+                  };
+                  data = {
+                    class = "derived";
+                    inputs = [
+                      "borg-realm-archives"
+                      "borg-persist-archives"
+                    ];
+                  };
+                }
+              ];
+            };
+            borgbackup-maintenance = {
+              unit = "borgbackup-maintenance.service";
+              resourceClass = "backup";
+              observe = {
+                enable = true;
+                restartable = false;
+              };
+            };
+            btrfs-metadata-image-backup = {
+              unit = "btrfs-metadata-image-backup.service";
+              resourceClass = "backup";
+              # Was unset (default false), which meant the auto-attached OnFailure
+              # hook (modules/runtime.nix, gated on observe.enable) was NEVER
+              # wired for this unit -- it failed with status=1/FAILURE on
+              # 2026-08-16 and nothing surfaced it. Not a restart candidate: a
+              # failed capture is retried by the retry loop inside the script
+              # itself and by next Sunday's timer, not by systemd Restart=.
+              observe = {
+                enable = true;
+                restartable = false;
+              };
+            };
+            borgbackup-root-snapshots = {
+              unit = "borgbackup-root-snapshots.service";
+              resourceClass = "backup";
+            };
+            sinnix-borg-beads-drill = {
+              unit = "sinnix-borg-beads-drill.service";
+              resourceClass = "backup";
+              captures = [
+                {
+                  name = "borg-beads-drill";
+                  path = sinexBeadsDrillLog;
+                  eventDriven = true;
+                  staleAfterSeconds = 1814400;
+                }
+              ];
+            };
+          };
 
-        ${mkBorgCommonScript borgRepoRealm}
-        install -d -m 0755 -o root -g root ${lib.escapeShellArg borgDrainStateRoot}
-        recover_stale_borg_locks
-        if [ ! -e ${lib.escapeShellArg "${borgRepoRealmPath}/config"} ]; then
-          with_borg_lock borg init --encryption repokey-blake2 "$BORG_REPO"
-        fi
+          environment.systemPackages = [
+            pkgs.btrbk
+            pkgs.borgbackup
+          ];
 
-        source_count="$(${pkgs.findutils}/bin/find ${lib.escapeShellArg machineTelemetryBackupRoot} -maxdepth 1 -type f -name 'telemetry-*.sqlite.zst' -printf 'x\n' | ${pkgs.coreutils}/bin/wc -l)"
-        if [ "$source_count" -eq 0 ]; then
-          echo "no machine telemetry SQLite dump is available; refusing a false-success marker" >&2
-          exit 1
-        fi
-
-        archive_name="machine-telemetry-dumps-$(date -u +%Y%m%dT%H%M%SZ)"
-        with_borg_lock borg create \
-          --compression auto,zstd,1 \
-          --lock-wait ${toString borgLockWaitSec} \
-          --exclude-caches \
-          --exclude-if-present .nobackup \
-          "::$archive_name" \
-          ${lib.escapeShellArg "${machineTelemetryBackupRoot}/./"}
-
-        # `borg list --short` prints directories without a trailing slash, so
-        # the archive root `.` would be sampled and its stdout extract is
-        # empty. Probe the newest dump by name.
-        sample_path="$(with_borg_lock borg list --short "::$archive_name" | ${pkgs.gnugrep}/bin/grep -E '\.sqlite\.zst$' | ${pkgs.coreutils}/bin/sort | ${pkgs.coreutils}/bin/tail -n 1)"
-        if [ -z "$sample_path" ]; then
-          echo "machine telemetry Borg archive contains no dump file" >&2
-          exit 1
-        fi
-        with_borg_lock borg extract --stdout "::$archive_name" "$sample_path" | ${pkgs.zstd}/bin/zstd -t
-
-        {
-          printf 'archive=%s\n' "$archive_name"
-          printf 'source_count=%s\n' "$source_count"
-          printf 'sample_path=%s\n' "$sample_path"
-          printf 'epoch=%s\n' "$(date +%s)"
-        } > ${lib.escapeShellArg machineTelemetryBackupMarker}.tmp
-        mv ${lib.escapeShellArg machineTelemetryBackupMarker}.tmp ${lib.escapeShellArg machineTelemetryBackupMarker}
-      '';
-    })
-
-    {
-      assertions =
-        lib.optional (sinexBlobRepositoryPath != "") {
-          assertion = lib.hasInfix sinexBlobRepositoryPath config.systemd.services.borgbackup-job-sinex-blobs.script;
-          message = "Sinex CAS Borg backup must archive services.sinex.storage.blob.repositoryPath";
-        }
-        ++ [
-          {
-            assertion = lib.all (exclude: !realmExcludeMatchesProtectedPath exclude) realmExcludes;
-            message = "The /realm Borg backup must not exclude a protected path: ${lib.concatStringsSep ", " protectedRealmArchivePaths}";
-          }
-        ];
-    }
-
-    # Weekly integrity check — verify repo metadata and detect bit rot on the
-    # HDD, then run the bounded restore drill in the same window. Merged into
-    # one unit (was borgbackup-check.service + sinnix-borg-drill.service,
-    # sinnix-borg-drill.timer Wed 04:00 retired) so the two weekly borg-heavy
-    # jobs no longer contend for the HDD on separate schedules.
-    (mkBackupJob "borgbackup-verify" {
-      description = "Borg backup integrity check and bounded restore drill";
-      serviceConfig = {
-        TimeoutStopSec = "15s";
-        # Repository checks are capped at 3h (1800+7200+1800s) by their own
-        # --max-duration budgets; the drill's borg check --verify-data on a
-        # multi-GB archive can take tens of minutes more on HDD. 12h total,
-        # matching the retired sinnix-borg-drill.service's own allowance.
-        TimeoutStartSec = "12h";
-      };
-      environment = {
-        BORG_PASSCOMMAND = "${pkgs.coreutils}/bin/cat ${borgPassphrasePath}";
-        BORG_CACHE_DIR = borgCacheDir;
-      };
-      timer = {
-        onCalendar = "Sun 06:17:00";
-        persistent = false;
-      };
-      path = with pkgs; [
-        borgbackup
-        coreutils
-        findutils
-        gnugrep
-        jq
-        util-linux
-      ];
-      script = ''
-        set -euo pipefail
-
-        ${mkBorgCommonScript borgRepoPersist}
-        acquire_borg_global_lock_or_skip "Borg repository check"
-        run_id="''${INVOCATION_ID:-borg-check-$(date +%s)}"
-        write_integrity_receipt() {
-          state="$1"
-          install -d -m 0755 ${lib.escapeShellArg borgDrainStateRoot}
-          jq -cn \
-            --arg operation_kind integrity_check \
-            --arg run_id "$run_id" \
-            --argjson expected_jobs '["persist","realm","sinex-blobs"]' \
-            --argjson start_epoch "$start_epoch" \
-            --argjson deadline_epoch "$deadline_epoch" \
-            --arg state "$state" \
-            --arg ts "$(date -Iseconds)" \
-            '{operation_kind:$operation_kind,run_id:$run_id,expected_jobs:$expected_jobs,start_epoch:$start_epoch,deadline_epoch:$deadline_epoch,state:$state,updated_at:$ts}' \
-            > ${lib.escapeShellArg borgIntegrityReceipt}.tmp
-          mv ${lib.escapeShellArg borgIntegrityReceipt}.tmp ${lib.escapeShellArg borgIntegrityReceipt}
-        }
-        start_epoch="$(date +%s)"
-        deadline_epoch=$((start_epoch + 3 * 3600))
-        receipt_failure_trap() {
-          rc="$?"
-          write_integrity_receipt failed
-          exit "$rc"
-        }
-        # Armed BEFORE the first receipt write: when jq was missing from this
-        # unit's path, the "running" write died with 127 before the trap
-        # existed, so no receipt was written at all -- not even a failed one.
-        # The freshness check reading this receipt then reported it missing
-        # and went red for two weeks while the backups themselves were fine.
-        # The trap only ever writes "failed" -- "completed" is
-        # written explicitly once the repository checks below succeed, so a
-        # later drill failure (which is a separate concern, not part of
-        # expected_jobs) does not retroactively flip a completed integrity
-        # check back to failed.
-        trap receipt_failure_trap EXIT
-        write_integrity_receipt running
-        recover_stale_borg_locks
-        ${mkBorgCommonScript borgRepoRealm}
-        recover_stale_borg_locks
-
-        # --max-duration makes the repository check INCREMENTAL: each run
-        # verifies segments for at most the budget and records progress in
-        # the repo, so successive weekly runs cycle through the full
-        # repository without ever monopolizing the repo lock for a whole day
-        # and starving the hourly drains.
-        ${pkgs.borgbackup}/bin/borg check --repository-only --max-duration 1800 ${borgRepoPersist}
-        ${pkgs.borgbackup}/bin/borg check --repository-only --max-duration 7200 ${borgRepoRealm}
-        ${pkgs.borgbackup}/bin/borg check --repository-only --max-duration 1800 ${borgRepoSinexBlobs}
-
-        trap - EXIT
-        write_integrity_receipt completed
-
-        # Bounded restore drill (was sinnix-borg-drill.service, its own
-        # weekly timer). Runs the same packaged script the manual
-        # `sinnix borg-drill [--verify-data]` verb uses, so borg_drill.jsonl
-        # receipts land exactly as before. The repository checks above
-        # release the global Borg lock here (by closing fd 9) before
-        # invoking it: the drill script does its own `exec 9>...; flock -n`
-        # in a fresh process against the same lock file, which would
-        # otherwise always see the lock as already held by this script and
-        # skip -- a re-entrant flock is per-open-file-description, not
-        # per-process-tree.
-        exec 9>&-
-        ${scriptPkgs.sinnix-borg-drill}/bin/sinnix-borg-drill
-      '';
-    })
-
-    # Backup policy is indefinite lossless retention: no archive is deleted
-    # because of its age, count or size. Compaction only reclaims segment
-    # space that no archive references, so every archive ever written stays
-    # addressable and restorable.
-    (mkBackupJob "borgbackup-maintenance" {
-      description = "Compact Borg backup repositories";
-      unit = {
-        after = [
-          outerRealmMountUnit
-        ];
-        requires = [
-          outerRealmMountUnit
-        ];
-      };
-      serviceConfig.TimeoutStopSec = "15s";
-      environment = {
-        BORG_PASSCOMMAND = "${pkgs.coreutils}/bin/cat ${borgPassphrasePath}";
-        BORG_CACHE_DIR = borgCacheDir;
-      };
-      path = with pkgs; [
-        borgbackup
-        coreutils
-        findutils
-        gnugrep
-        util-linux
-      ];
-      timer = {
-        onCalendar = "*-*-* 04:50:00";
-        persistent = false;
-        randomizedDelaySec = "45min";
-      };
-      script = ''
-        set -euo pipefail
-
-        export BORG_CACHE_DIR=${lib.escapeShellArg borgCacheDir}
-
-        with_borg_lock() {
-          if [ "''${SINNIX_BORG_GLOBAL_LOCK_HELD:-0}" = 1 ]; then
-            "$@"
-          else
-            flock ${lib.escapeShellArg borgGlobalLock} "$@"
-          fi
-        }
-
-        acquire_borg_global_lock_or_skip() {
-          if [ "''${SINNIX_BORG_GLOBAL_LOCK_HELD:-0}" = 1 ]; then
-            return
-          fi
-          reason="$1"
-          exec 9>${lib.escapeShellArg borgGlobalLock}
-          if ! flock -n 9; then
-            echo "Another Borg operation is active; skipping $reason"
-            exit 0
-          fi
-          export SINNIX_BORG_GLOBAL_LOCK_HELD=1
-        }
-
-        ${borgStaleLockRecovery}
-
-        maintain_repo() {
-          repo="$1"
-          if [ ! -e "''${repo#file://}/config" ]; then
-            echo "Skipping uninitialized repo $repo"
-            return
-          fi
-
-          acquire_borg_global_lock_or_skip "Borg maintenance"
-          recover_stale_borg_locks "$repo"
-          with_borg_lock borg compact --lock-wait ${toString borgLockWaitSec} "$repo"
-        }
-
-        maintain_repo ${lib.escapeShellArg borgRepoPersist}
-        maintain_repo ${lib.escapeShellArg borgRepoRealm}
-        maintain_repo ${lib.escapeShellArg borgRepoSinexBlobs}
-        maintain_repo ${lib.escapeShellArg borgRepoRootSnapshots}
-        maintain_repo ${lib.escapeShellArg borgRepoPolylogueState}
-      '';
-    })
-
-    # Borg is file-level recovery. Keep compact Btrfs metadata images off the
-    # source filesystems so a future tree/chunk/extent repair has native
-    # metadata evidence instead of only a file archive.
-    (mkBackupJob "btrfs-metadata-image-backup" {
-      description = "Capture Btrfs metadata images for realm and persist";
-      unit = {
-        after = [
-          "persist.mount"
-          "realm.mount"
-          outerRealmMountUnit
-        ];
-        requires = [
-          "persist.mount"
-          "realm.mount"
-          outerRealmMountUnit
-        ];
-      };
-      # The backup class sizes MemoryHigh=2G around borg, but a btrfs-image
-      # walk of the root filesystem peaked at 2.2G on a run that SUCCEEDED
-      # (measured 2026-08-18), so the class default sits below this job's
-      # working set and every attempt spends its whole length in cgroup
-      # reclaim. Right-sized on the unit rather than in the class, which no
-      # other backup job needs raised. Deliberately NOT claimed as the cause
-      # of the persist failures: seven controlled captures that day produced
-      # both successes and failures with and against the cap, so the transid
-      # race below is genuinely probabilistic. This removes one pressure
-      # source that is otherwise present on every single run.
-      serviceConfig = {
-        TimeoutStopSec = "15s";
-        MemoryHigh = "6G";
-        MemoryMax = "8G";
-      };
-      path = with pkgs; [
-        btrfs-progs
-        coreutils
-        findutils
-      ];
-      timer = {
-        onCalendar = "Sun 00:12:00";
-        persistent = false;
-        randomizedDelaySec = "2h";
-      };
-      script = ''
-        set -euo pipefail
-
-        stamp="$(date -u +%Y%m%dT%H%M%SZ)"
-        install -d -m 0700 -o root -g root "${btrfsImageRoot}"
-
-        # btrfs-image writes to "$out.tmp" and renames only on success, so a
-        # run killed mid-capture leaves a multi-GB partial file that is not an
-        # image of anything. Only that in-flight debris is swept; finished
-        # images (no .tmp suffix) are kept indefinitely.
-        find "${btrfsImageRoot}" -type f -name '*.btrfs-image.tmp' -mtime +1 -delete
-
-        # btrfs-image walks a MOUNTED, actively-written filesystem: there is
-        # no consistent-view mode for one, and a tree block whose generation
-        # advances between the parent-pointer read and the child read aborts
-        # the walk with "parent transid verify failed" / "child eb corrupted".
-        # That is a race against concurrent writes, not on-disk damage (the
-        # device error counters stay at zero throughout), so it is worth
-        # retrying rather than failing the run -- a quieter moment succeeds.
-        #
-        # A snapshot cannot route around this (sinnix-0dyg): btrfs-image's
-        # own usage text is "source is the btrfs device" -- it reads the
-        # whole filesystem's chunk/root/extent trees off the block device,
-        # not a mounted path or a subvolume, so a read-only snapshot of
-        # persist does not exist as an addressable source for it. The race
-        # is against the SHARED device, and a snapshot subvolume lives on
-        # that same device.
-        #
-        # Confirmed 2026-08-16 that off-peak scheduling alone is not
-        # sufficient: the SCHEDULED Sun 00:12 run (not the ad-hoc daytime
-        # test run in this bead's earlier notes) produced realm-20260815T233745Z
-        # but no matching persist image -- both labels share one $stamp, so
-        # persist genuinely failed inside that same quiet-hour invocation.
-        # Telemetry for that window (block_device_sample) rules out raw
-        # write volume as the discriminator: nvme0n1p3 (realm) saw ~6x
-        # persist's write rate in the same window and still succeeded, so
-        # persist's smaller size buys it nothing here. The mitigation below
-        # is retry-shape tuning, per the bead's own fallback: capture persist
-        # FIRST (while the window is freshest, before realm's variable-length
-        # capture pushes persist's attempts toward the next btrbk :00/:30
-        # snapshot-creation boundary -- a bigger single generation-bump than
-        # steady small-file writes), and widen the retry budget.
-        capture_image() {
-          label="$1"
-          device="$2"
-          out="${btrfsImageRoot}/$label-$stamp.btrfs-image"
-          tmp="$out.tmp"
-          attempt=1
-
-          while [ "$attempt" -le 5 ]; do
-            rm -f "$tmp"
-            if btrfs-image -c 9 "$device" "$tmp"; then
-              # errexit is disabled inside a function whose caller is an `if`
-              # condition, so nothing from here to the rename is covered by
-              # `set -e`: a chmod or mv that failed (full or read-only
-              # /outer-realm) used to fall through to `return 0` and the unit
-              # reported a capture that was not on disk. Every step is checked
-              # by hand, and the image is only "captured" once it is readable
-              # at its final name.
-              if chmod 0600 "$tmp" && mv -- "$tmp" "$out"; then
-                size="$(stat -c %s "$out" 2>/dev/null || echo 0)"
-                if [ "$size" -ge ${toString btrfsImageMinBytes} ]; then
-                  echo "btrfs-metadata-image-backup: $label captured $label-$stamp.btrfs-image ($size bytes)"
-                  return 0
-                fi
-                echo "btrfs-metadata-image-backup: $label produced a degenerate image ($size bytes, floor ${toString btrfsImageMinBytes})" >&2
-                rm -f -- "$out"
-              else
-                echo "btrfs-metadata-image-backup: $label could not be published to $out" >&2
-              fi
-            fi
-            echo "btrfs-metadata-image-backup: $label attempt $attempt failed (live-filesystem race or real error)" >&2
-            attempt=$((attempt + 1))
-            if [ "$attempt" -gt 5 ]; then
-              break
-            fi
-            # Deliberately not a fixed interval: a constant 60s could
-            # resonate with another periodic writer on the same cadence.
-            # 45/90/135/180s spreads retries across a wider span of the
-            # window instead.
-            sleep $((45 * (attempt - 1)))
-          done
-
-          rm -f "$tmp"
-          echo "btrfs-metadata-image-backup: $label failed after 5 attempts" >&2
-          return 1
+          # btrbk configuration
+          environment.etc."btrbk/btrbk.conf".text = btrbkConfig;
         }
 
-        # Per-label accounting: a combined exit code hides which target is
-        # actually broken. persist goes first -- see the comment above.
-        rc=0
-        if ! capture_image persist /dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02; then
-          rc=1
-        fi
-        if ! capture_image realm /dev/disk/by-uuid/43701cf7-7880-4e0c-9725-b6e12d91898a; then
-          rc=1
-        fi
-
-        exit "$rc"
-      '';
-    })
-
-    {
-      system.activationScripts.borgRepositoryDirectories.text = ''
-        ${pkgs.coreutils}/bin/install -d -m 0750 -o root -g users ${borgRepoRoot}
-        ${pkgs.coreutils}/bin/install -d -m 0700 -o root -g root ${borgRepoPersistPath}
-        ${pkgs.coreutils}/bin/install -d -m 0700 -o root -g root ${borgRepoRealmPath}
-        ${pkgs.coreutils}/bin/install -d -m 0700 -o root -g root ${borgRepoRootSnapshotsPath}
-        ${pkgs.coreutils}/bin/install -d -m 0700 -o root -g root ${borgRepoSinexBlobsPath}
-        ${pkgs.coreutils}/bin/install -d -m 0700 -o root -g root ${borgRepoPolylogueStatePath}
-        ${pkgs.coreutils}/bin/install -d -m 0700 -o root -g root ${btrfsImageRoot}
-      '';
-
-      # Borg chunk cache must survive reboots. / is ephemeral, so the default
-      # ~/.cache/borg is lost on every boot, forcing a full re-read + re-chunk
-      # of every file (616GB read for 2.4GB written — a 256:1 waste).
-      # Persist it under /persist so backups are truly incremental.
-      systemd.tmpfiles.rules = lib.mkAfter [
-        "d ${realmSnapshots} 0750 root users -"
-        # polylogue-sqlite-backup runs as the operator while db-dumps' parent
-        # is root:root -- pre-create its subdir or the first run dies on mkdir
-        # (exactly how it announced itself, 2026-08-18).
-        "d ${polylogueBackupRoot} 0700 sinity users -"
-        "d ${persistSnapshots} 0750 root users -"
-        "d ${borgSnapshotBindRoot} 0700 root root -"
-        "d ${borgPersistSnapshotBind} 0700 root root -"
-        "d ${borgRealmSnapshotBind} 0700 root root -"
-        "d ${borgRepoRoot} 0750 root users -"
-        "d ${borgRepoRootSnapshotsPath} 0700 root root -"
-        "d ${btrfsImageRoot} 0700 root root -"
-        "d ${borgCacheDir} 0700 root root -"
-        "d ${borgDrainStateRoot} 0700 root root -"
-        "f ${borgGlobalLock} 0600 root root -"
-      ];
-    }
-
-    # btrbk is invoked as one unit against /etc/btrbk/btrbk.conf, not through
-    # nixpkgs' services.btrbk instance generator, so this is a plain job
-    # declaration and not an override of an upstream-rendered unit.
-    # Depends on all snapshotted volumes being mounted. neo-outer-realm is an
-    # HDD (slow spin-up) with nofail — without this, btrbk races the mount on boot.
-    (mkBackupJob "btrbk" {
-      description = "btrbk btrfs snapshot";
-      unit.after = [
-        "persist.mount"
-        "realm.mount"
-      ];
-      execStart = "${pkgs.btrbk}/bin/btrbk --quiet --preserve-snapshots run";
-      serviceConfig.TimeoutStopSec = "15s";
-      timer = {
-        onCalendar = "*-*-* *:00/30:00";
-        persistent = false;
-      };
-    })
-
-    # Root snapshot archival: the initrd saves pre-wipe / states to
-    # .snapshots/root.TIMESTAMP (btrfs subvolumes) on every boot. Archive them
-    # to a dedicated borg repo so slow root-drain work never blocks the normal
-    # /persist backup lock, then delete only after the archive exists.
-    (mkBackupJob "borgbackup-root-snapshots" {
-      description = "Archive ephemeral root snapshots to borg";
-      unit = {
-        after = [
-          "persist.mount"
-          outerRealmMountUnit
-        ];
-        requires = [ outerRealmMountUnit ];
-      };
-      serviceConfig.TimeoutStopSec = "15s";
-      environment = {
-        BORG_PASSCOMMAND = "${pkgs.coreutils}/bin/cat ${borgPassphrasePath}";
-        BORG_REPO = borgRepoRootSnapshots;
-        BORG_CACHE_DIR = borgCacheDir;
-      };
-      timer = {
-        onBootSec = "45min";
-        onCalendar = "daily";
-        persistent = true;
-        randomizedDelaySec = 1800;
-      };
-      path = with pkgs; [
-        btrfs-progs
-        borgbackup
-        coreutils
-        findutils
-        gnugrep
-        util-linux
-      ];
-      script = ''
-        ${mkBorgCommonScript borgRepoRootSnapshots}
-        acquire_borg_global_lock_or_skip "root snapshot Borg drain"
-        recover_stale_borg_locks
-
-        PERSIST_DEV="/dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02"
-        TMP_ROOT=$(mktemp -d)
-        cleanup() {
-          umount "$TMP_ROOT" 2>/dev/null || true
-          rm -rf "$TMP_ROOT"
-        }
-        trap cleanup EXIT
-
-        mount -o subvol=/ "$PERSIST_DEV" "$TMP_ROOT"
-
-        if [ ! -e "${borgRepoRootSnapshotsPath}/config" ]; then
-          install -d -m 0700 -o root -g root "${borgRepoRootSnapshotsPath}"
-          with_borg_lock borg init --encryption repokey-blake2 "$BORG_REPO"
-        fi
-
-        delete_archived_snapshot() {
-          snap_dir="$1"
-          if btrfs subvolume show "$snap_dir" >/dev/null 2>&1; then
-            btrfs subvolume delete "$snap_dir"
-          else
-            rm -rf --one-file-system "$snap_dir"
-          fi
-        }
-
-        backed_up=0
-        for snap_dir in "$TMP_ROOT"/.snapshots/root.*; do
-          [ -d "$snap_dir" ] || continue
-          snap_name=$(basename "$snap_dir")
-          archive_name="root-$snap_name"
-
-          if with_borg_lock borg list --short --glob-archives "$archive_name" "$BORG_REPO" | grep -Fxq "$archive_name"; then
-            echo "Archive $archive_name already exists; deleting archived snapshot $snap_name"
-            delete_archived_snapshot "$snap_dir"
-            backed_up=$((backed_up + 1))
-            continue
-          fi
-
-          if with_borg_lock borg create \
-            --compression auto,zstd,1 \
-            --lock-wait ${toString borgLockWaitSec} \
-            --exclude "$snap_dir/dev" \
-            --exclude "$snap_dir/home/*/.cache" \
-            --exclude "$snap_dir/mnt" \
-            --exclude "$snap_dir/neo-outer-realm" \
-            --exclude "$snap_dir/nix" \
-            --exclude "$snap_dir/outer-realm" \
-            --exclude "$snap_dir/persist" \
-            --exclude "$snap_dir/proc" \
-            --exclude "$snap_dir/realm" \
-            --exclude "$snap_dir/root/.cache" \
-            --exclude "$snap_dir/run" \
-            --exclude "$snap_dir/swap" \
-            --exclude "$snap_dir/sys" \
-            --exclude "$snap_dir/tmp" \
-            --exclude "$snap_dir/var/cache" \
-            "::$archive_name" "$snap_dir"; then
-            delete_archived_snapshot "$snap_dir"
-            backed_up=$((backed_up + 1))
-          else
-            echo "borg create failed for $snap_name; subvolume kept on disk" >&2
-          fi
-        done
-
-        # Compaction is batched by borgbackup-maintenance.service.
-      '';
-    })
-
-    # The realm archive is the production authority for Sinex's checkout,
-    # including the mutable Beads Dolt directory and tracked JSONL export.
-    # This drill lists both exact paths, extracts them into an ephemeral
-    # directory, validates their formats, and records archive/source commits.
-    #
-    # Its failure notification comes from the renderer, not from a hand-wired
-    # onFailure: the drill is deliberately not an observed surface (its
-    # evidence is the drill log, not unit state), so runtime.nix's
-    # surface-driven attachment skips it and mkScheduledJob's does not.
-    (mkBackupJob "sinnix-borg-beads-drill" {
-      description = "Restore drill for Sinex Beads Dolt and issues JSONL";
-      unit = {
-        reloadIfChanged = false;
-        stopIfChanged = false;
-        after = [ outerRealmMountUnit ];
-        requires = [ outerRealmMountUnit ];
-      };
-      environment = {
-        BORG_PASSCOMMAND = "${pkgs.coreutils}/bin/cat ${borgPassphrasePath}";
-        BORG_CACHE_DIR = borgCacheDir;
-      };
-      path = with pkgs; [
-        borgbackup
-        coreutils
-        dolt
-        git
-        gnugrep
-        jq
-        util-linux
-      ];
-      serviceConfig = {
-        PrivateTmp = true;
-        TimeoutStartSec = "30min";
-      };
-      timer = {
-        # Follow the regular realm archive and stay clear of the repository
-        # integrity check and restore drill on Sunday (borgbackup-verify).
-        onCalendar = "Thu 05:00:00";
-        persistent = true;
-      };
-      script = mkSinexBeadsDrillScript;
-    })
-  ];
+      ]
+      ++ (import ./lib/backup/snapshots.nix { context = backupContext; })
+      ++ (import ./lib/backup/archives.nix { context = backupContext; })
+      ++ (import ./lib/backup/acknowledgement.nix { context = backupContext; })
+      ++ (import ./lib/backup/verification.nix { context = backupContext; })
+    )
+  );
 }

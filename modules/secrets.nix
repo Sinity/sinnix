@@ -28,6 +28,8 @@ let
     "firecrawl-api-key"
     "openai-api-key"
     "openai-tunnel-runtime-key"
+    "phone-authorized-key"
+    "private-project-catalog"
     "sinex-api-admin-token"
     "sinex-nats-ca"
     "sinex-nats-client-nkey"
@@ -90,6 +92,15 @@ let
       exportEnv = false;
     };
     "router-sinnix-prime-mac".exportEnv = false;
+    "router-authorized-key".exportEnv = false;
+    "phone-authorized-key" = {
+      path = "/run/sinnix/authorized_keys/${username}";
+      owner = "root";
+      group = "root";
+      mode = "0444";
+      exportEnv = false;
+    };
+    "private-project-catalog".exportEnv = false;
     "borg-passphrase".exportEnv = false;
     "configstore-update-notifier".exportEnv = false;
     "factorio-token".exportEnv = false;
@@ -116,7 +127,7 @@ let
     in
     {
       file = declaration.file;
-      path = "/run/agenix/${secretName}";
+      path = meta.path or "/run/agenix/${secretName}";
       owner = meta.owner or username;
       mode = meta.mode or "0400";
     }
@@ -129,7 +140,9 @@ let
   declaredSecretNames = lib.unique (
     secretNames ++ runtimeSecretContracts ++ builtins.attrNames secretMeta
   );
-  secretPaths = lib.genAttrs declaredSecretNames (name: "/run/agenix/${name}");
+  secretPaths = lib.genAttrs declaredSecretNames (
+    name: (secretMeta.${name} or { }).path or "/run/agenix/${name}"
+  );
 
   mkSecretExport =
     secretName:

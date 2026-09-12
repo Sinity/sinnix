@@ -11,6 +11,12 @@ in
       testLib = import ../test-lib.nix { inherit inputs lib; };
       inherit (testLib) evalTestSpec mkFeatureTest;
       syntheticCiphertext = builtins.toFile "sinnix-secret-fixture.age" "fixture";
+      secretDeclarationLoader = import ../secret-declarations.nix;
+      syntheticManifest = builtins.toFile "sinnix-secret-declarations.nix" ''
+        { fixture.file = ${builtins.toJSON syntheticCiphertext}; }
+      '';
+      emptySecretDeclarations = secretDeclarationLoader { manifestPath = ""; };
+      loadedSecretDeclarations = secretDeclarationLoader { manifestPath = syntheticManifest; };
       dotfileSpec = mkFeatureTest {
         name = "dotfile-renderer-metadata";
         feature = "sinnix.features.cli.polylogue.enable";
@@ -135,6 +141,8 @@ in
         test ${if secrets.config ? age then "1" else "0"} = 1
         test ${if duplicateRejected then "1" else "0"} = 1
         test ${if unknownRendererRejected then "1" else "0"} = 1
+        test ${if emptySecretDeclarations == { } then "1" else "0"} = 1
+        test ${if loadedSecretDeclarations.fixture.file == syntheticCiphertext then "1" else "0"} = 1
         touch "$out"
       '';
     };

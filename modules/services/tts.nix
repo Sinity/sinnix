@@ -32,7 +32,7 @@ mkAiService {
   extraOptions = {
     autoStart = args.lib.mkOption {
       type = args.lib.types.bool;
-      default = true;
+      default = false;
       description = "Start the OpenedAI-Speech container automatically at boot.";
     };
     image = args.lib.mkOption {

@@ -1,7 +1,7 @@
 """Plackett-Luce top-1 MM fit (Hunter 2004) with virtual-tie anchor
 regularization, standard errors, and connected-component detection.
 
-Generalized clean-room reimplementation of the model in stashbox's
+Generalized clean-room reimplementation of an earlier media ranker's
 ranker-4wise (ranker_core.fit_bradley_terry / bt-core.js): that code kept a
 separate Bradley-Terry pairwise-edge accumulator alongside a Plackett-Luce
 choice-set accumulator because pairs and choice-sets were tracked in two

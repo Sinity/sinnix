@@ -129,6 +129,12 @@ The filesystem layout separates projects, canonical personal data, service
 state, staging, temporary work, and media. Persistence is declared instead of
 being an accidental consequence of a path.
 
+The runtime inventory classifies each declared store and capture as canonical,
+derived, cache, or exact-copy data. Canonical data is preserved indefinitely;
+derived data names its inputs; caches are explicitly ephemeral; exact copies
+name their source and backup responsibility. Evaluation rejects contradictory
+or dangling declarations before activation.
+
 Snapshots and Borg jobs cover durable data. Rebuildable or nested subvolumes use
 explicit alternative handling. Restore drills exercise the recovery path rather
 than assuming that an archive is usable.

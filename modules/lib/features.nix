@@ -185,14 +185,11 @@ let
         extraOptions
         docs
         ;
-      meta = meta // {
-        ai = {
-          inherit backendKind requiresCuda;
-          socketProxy = (activation.mode or null) == "socket-proxy";
-        };
-      };
       surface = {
         inherit unit resourceClass activation;
+        ai = {
+          inherit backendKind requiresCuda;
+        };
         observe = {
           enable = true;
           restartable = true;

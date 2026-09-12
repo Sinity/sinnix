@@ -8,6 +8,7 @@ import html.parser
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 import urllib.request
@@ -68,6 +69,69 @@ def structured_video_url(page_url):
     return next((url for document in parser.documents for url in video_urls(document)), None)
 
 
+def browser_video_url(page_url):
+    """Resolve media after the real browser has passed an anti-bot page."""
+    control = shutil.which("sinnix-chrome-control")
+    if control is None:
+        return None
+    page_id = None
+    try:
+        opened = subprocess.run(
+            [control, "agent-window", "--url", page_url],
+            check=True,
+            text=True,
+            capture_output=True,
+            timeout=30,
+        )
+        page_id = json.loads(opened.stdout)["id"]
+        expression = """[...document.querySelectorAll('video, source')]
+          .map(node => node.currentSrc || node.src || '')
+          .find(url => /^https?:/.test(url)) || ''"""
+        subprocess.run(
+            [
+                control,
+                "await",
+                page_id,
+                "--js",
+                expression,
+                "--timeout-sec",
+                "20",
+                "--interval-ms",
+                "250",
+            ],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=25,
+        )
+        resolved = subprocess.run(
+            [control, "evaluate", page_id, "--js", expression],
+            check=True,
+            text=True,
+            capture_output=True,
+            timeout=10,
+        )
+        output = resolved.stdout.strip()
+        try:
+            value = json.loads(output)
+        except json.JSONDecodeError:
+            # The desktop control plane prints strings directly and JSON for
+            # structured values. Accept both forms of its stable CLI output.
+            value = output
+        return value if isinstance(value, str) and value.startswith(("http://", "https://")) else None
+    except (KeyError, OSError, ValueError, subprocess.SubprocessError):
+        return None
+    finally:
+        if page_id is not None:
+            subprocess.run(
+                [control, "close", page_id],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=10,
+            )
+
+
 def with_browser_cookies(arguments):
     if any(arg == "--cookies" or arg.startswith("--cookies=") or arg == "--cookies-from-browser" or arg.startswith("--cookies-from-browser=") for arg in arguments):
         return arguments
@@ -90,7 +154,9 @@ def main():
     try:
         media_url = structured_video_url(pages[0])
     except (OSError, ValueError):
-        return result.returncode
+        media_url = None
+    if not media_url:
+        media_url = browser_video_url(pages[0])
     if not media_url or media_url == pages[0]:
         return result.returncode
 

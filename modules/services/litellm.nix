@@ -25,12 +25,11 @@ mkServiceModule {
   name = "litellm";
   description = "LiteLLM gateway (Anthropic↔OpenAI) for local models";
   docs = "docs/local-ai-activation.md";
-  meta.ai = {
-    backendKind = "native";
-    requiresCuda = false;
-    socketProxy = true;
-  };
   surface = {
+    ai = {
+      backendKind = "native";
+      requiresCuda = false;
+    };
     unit = "litellm.service";
     # Uncapped memory: a single 1M-token request is buffered in the proxy while
     # streaming, so a hard MemoryMax could kill it mid-response (same reasoning
@@ -52,7 +51,7 @@ mkServiceModule {
   extraOptions = {
     autoStart = args.lib.mkOption {
       type = args.lib.types.bool;
-      default = true;
+      default = false;
       description = "Start LiteLLM automatically at boot.";
     };
   };

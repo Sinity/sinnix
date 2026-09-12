@@ -25,7 +25,6 @@
     self = 8880; # Caddy: dashboard, reports, AI panel (loopback + tailscale0)
     openWebui = 8881; # tailnet republish of the Open WebUI frontend
     comfyui = 8882; # tailnet republish of the ComfyUI frontend
-    koboldcpp = 8883; # tailnet republish of the KoboldCpp frontend
   };
   opsReducer = 3090; # read-only current-state reducer (also a unix socket)
 
@@ -33,10 +32,6 @@
   ollama = {
     public = 11434;
     backend = 11435;
-  };
-  koboldcpp = {
-    public = 5001;
-    backend = 5002;
   };
   litellm = {
     public = 4000;

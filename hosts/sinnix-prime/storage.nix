@@ -519,9 +519,6 @@ in
       "d ${realmRoot}/state/cache/sinex 0775 ${username} users -"
       # NATS JetStream state, backed up with the realm volume.
       "d ${realmRoot}/state/nats 0755 nats nats -"
-      # Keep Stashbox state on /realm while preserving its stable XDG path.
-      # Regenerable members stay outside frequent persist backup coverage.
-      "L+ /home/${username}/.local/share/stashbox - - - - ${realmRoot}/state/stashbox"
     ];
 
     # XDG consumers use the same archive as the configured daemon and MCP.

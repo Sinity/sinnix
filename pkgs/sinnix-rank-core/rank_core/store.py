@@ -1,6 +1,6 @@
 """Append-only comparisons + items store, one directory per ranking domain.
 
-Lifted from stashbox's ranker-4wise Store (append-only comparisons.jsonl with
+Adapted from an earlier ranker store (append-only comparisons.jsonl with
 tombstone deletes) and generalized: items are opaque {id, label, meta} instead
 of Stash scenes, and comparisons carry the doc's generic schema (kind, set,
 winner, weight, context) instead of ranker-4wise's user4/pair split.

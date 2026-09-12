@@ -94,8 +94,13 @@ let
     if [ -n "''${SINNIX_LYNCHPIN_OVERRIDE:-}" ]; then
       append_override_arg lynchpin "$SINNIX_LYNCHPIN_OVERRIDE"
     fi
-    # Host declarations import the private agenix deployment manifest outside
-    # the flake source. Pure test evaluation supplies explicit synthetic input.
+    # Live host builds use the established private agenix declaration map.
+    # Pure evaluations omit it, so public checks remain reproducible.
+    export SINNIX_SECRET_DECLARATIONS="''${SINNIX_SECRET_DECLARATIONS:-/realm/state/secrets/sinnix/runtime.nix}"
+    if [[ ! -r "$SINNIX_SECRET_DECLARATIONS" ]]; then
+      echo "sinnix: secret declaration manifest is not readable: $SINNIX_SECRET_DECLARATIONS" >&2
+      exit 66
+    fi
     nh_extra_args=(-- --impure)
     if [ "''${#nix_override_args[@]}" -gt 0 ]; then
       nh_extra_args+=("''${nix_override_args[@]}")
@@ -138,6 +143,7 @@ let
     lib.concatStringsSep " \\\n    " [
       ''--setenv=NIX_CONFIG="eval-cache = false"''
       "--setenv=SINNIX_REBUILD_ACTIVE=1"
+      ''--setenv=SINNIX_SECRET_DECLARATIONS="$SINNIX_SECRET_DECLARATIONS"''
       "--slice=nix-build.slice"
       "-p CPUSchedulingPolicy=idle"
       "-p IOSchedulingClass=idle"

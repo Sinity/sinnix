@@ -213,6 +213,30 @@ in
       ))
 
       (lib.mkIf hostPrepared {
+        sinnix.runtime.dataStores = {
+          sinex-state = {
+            path = sinexStateRoot;
+            class = "canonical";
+          };
+          sinex-postgres = {
+            path = sinexPostgresDataDir;
+            class = "canonical";
+          };
+          sinex-postgres-dumps = {
+            path = sinexPostgresDumpRoot;
+            class = "exact-copy";
+            source = "sinex-postgres";
+            preservation = "indefinite";
+            backup = "direct";
+          };
+          sinex-nats-transport = {
+            path = "/var/lib/nats/jetstream";
+            # JetStream is a bounded replay transport. The canonical events
+            # live in the capture and database stores that can repopulate it.
+            class = "cache";
+          };
+        };
+
         services = {
           postgresql.dataDir = sinexPostgresDataDir;
           # NixOS's own `authentication` default outranks whatever the sinex

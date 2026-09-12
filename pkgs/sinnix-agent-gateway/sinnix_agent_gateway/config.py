@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -88,8 +89,43 @@ class GatewayConfig:
             raw: dict[str, Any] = {}
         else:
             raw = json.loads(path.read_text())
+        project_rows = raw.get("projects", {})
+        if not isinstance(project_rows, Mapping):
+            raise ValueError("projects must be an object")
+        private_catalog = raw.get("privateProjectCatalogFile")
+        if private_catalog is not None:
+            if not isinstance(private_catalog, str) or not private_catalog.startswith(
+                "/"
+            ):
+                raise ValueError("privateProjectCatalogFile must be an absolute path")
+            private_path = Path(private_catalog)
+            if private_path.is_file():
+                private_raw = json.loads(private_path.read_text())
+                if not isinstance(private_raw, Mapping) or set(private_raw) - {
+                    "projects",
+                    "links",
+                }:
+                    raise ValueError(
+                        "private project catalog may contain projects and links objects"
+                    )
+                private_rows = private_raw.get("projects", {})
+                if not isinstance(private_rows, Mapping):
+                    raise ValueError(
+                        "private project catalog projects must be an object"
+                    )
+                collisions = sorted(set(project_rows).intersection(private_rows))
+                if collisions:
+                    raise ValueError(
+                        "private project catalog duplicates public projects: "
+                        + ", ".join(collisions)
+                    )
+                project_rows = {**project_rows, **private_rows}
         projects: dict[str, ProjectConfig] = {}
-        for project_id, row in raw.get("projects", {}).items():
+        for project_id, row in project_rows.items():
+            if not isinstance(project_id, str) or not project_id:
+                raise ValueError("project IDs must be non-empty strings")
+            if not isinstance(row, Mapping):
+                raise ValueError(f"project {project_id} must be an object")
             obsolete = {"remoteRead", "remoteWrite"}.intersection(row)
             if obsolete:
                 fields = ", ".join(sorted(obsolete))

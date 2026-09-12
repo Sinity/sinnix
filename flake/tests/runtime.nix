@@ -146,6 +146,24 @@ in
       };
       evaluated = evalTestSpec system spec;
       inventoryJson = builtins.toJSON evaluated.config.sinnix.runtime.inventory;
+      invalidLifecycleSpec = mkFeatureTest {
+        name = "invalid-runtime-data-policy";
+        feature = "sinnix.features.cli.polylogue.enable";
+        extraModules = [
+          ({ ... }: {
+            sinnix.runtime.dataStores.invalid-canonical = {
+              path = "/fixture/invalid-canonical";
+              class = "canonical";
+              preservation = "ephemeral";
+            };
+          })
+        ];
+        assertions = _: [ ];
+      };
+      invalidLifecycleRejected =
+        !(builtins.tryEval (
+          builtins.deepSeq (evalTestSpec system invalidLifecycleSpec).config.assertions true
+        )).success;
       localModels = import ../data/local-models.nix { inherit lib; };
       localModelRosterJson = builtins.toJSON {
         models = localModels.models;
@@ -157,14 +175,11 @@ in
         extraModules = [
           ({ ... }: {
             sinnix.services.ollama.enable = true;
-            sinnix.services.koboldcpp.enable = true;
             sinnix.services.litellm.enable = true;
             sinnix.services.open-webui.enable = true;
             sinnix.services.stt.enable = true;
             sinnix.services.tts.enable = true;
             sinnix.services.llama-cpp.enable = true;
-            sinnix.services.muse-glimmer.enable = true;
-            sinnix.services.qwen38-vram.enable = true;
             sinnix.services.comfyui.enable = true;
             sinnix.services.musicgen.enable = true;
             sinnix.services.ocr.enable = true;
@@ -187,25 +202,15 @@ in
             # Every socket-proxy front door, read from the inventory rather
             # than listed here, so a new backend is covered the day it is
             # declared.
-            proxySurfaces = lib.filterAttrs (
-              _: surface:
-              (surface.activation.mode or "direct") == "socket-proxy" && (surface.kind or "service") == "socket"
+            proxyBackends = lib.filterAttrs (
+              _: surface: surface.ai != null && (surface.activation.mode or "direct") == "socket-proxy"
             ) config.sinnix.runtime.inventory.surfaces;
-            proxies = lib.mapAttrsToList (_: surface: {
-              name = lib.removeSuffix ".socket" surface.unit;
+            proxies = lib.mapAttrsToList (name: surface: {
+              name = "${name}-proxy";
               inherit (surface) activation;
-            }) proxySurfaces;
+            }) proxyBackends;
             proxyNames = map (proxy: proxy.name) proxies;
-            declaredAiSocketBackends = lib.naturalSort (
-              lib.attrNames (
-                lib.filterAttrs (
-                  name: service:
-                  config.sinnix.services.${name}.enable
-                  && (lib.attrByPath [ "meta" "ai" ] null service) != null
-                  && (lib.attrByPath [ "meta" "ai" "socketProxy" ] false service)
-                ) config.sinnix.services
-              )
-            );
+            declaredAiSocketBackends = lib.naturalSort (lib.attrNames proxyBackends);
             execStartOf = name: config.systemd.services.${name}.serviceConfig.ExecStart;
             backendUnitsOf =
               proxyName:
@@ -220,10 +225,6 @@ in
               ollama = {
                 service = "ollama.service";
                 proxy = "ollama-proxy.service";
-              };
-              koboldcpp = {
-                service = "koboldcpp.service";
-                proxy = "koboldcpp-proxy.service";
               };
               comfyui = {
                 service = "podman-comfyui.service";
@@ -396,7 +397,7 @@ in
               assertion =
                 !(lib.elem "ollama-proxy.service" (config.systemd.services.litellm.requires or [ ]))
                 && !(lib.elem "ollama-proxy" (
-                  config.sinnix.runtime.inventory.surfaces."litellm-proxy".activation.dependsOn or [ ]
+                  config.sinnix.runtime.inventory.surfaces.litellm.activation.dependsOn or [ ]
                 ));
               message = "LiteLLM must not unconditionally start the Ollama GPU backend; model backends activate independently";
             }
@@ -500,6 +501,15 @@ in
         ${inventoryJson}
         EOF_INVENTORY
       '';
+      # Red twin for the preservation seam: canonical data cannot be made
+      # ephemeral by an owning module.
+      checks.runtime-data-policy =
+        assert invalidLifecycleRejected;
+        pkgs.runCommand "runtime-data-policy-check" { } ''
+          cat > "$out" <<'EOF_INVENTORY'
+          ${inventoryJson}
+          EOF_INVENTORY
+        '';
       # Provably fails when: any socket-proxy surface's unit wiring drifts
       # from the endpoints/timeouts its inventory entry advertises, or the
       # gpu-inference conflicts mesh loses symmetry. Claims live in the
@@ -546,7 +556,7 @@ in
             entry: entry.model_name == "local-gemma4-26b-abliterated"
           ) null localModels.litellmModelList;
           glimmerEndpoint =
-            aiActivationEvaluated.config.sinnix.runtime.inventory.surfaces.muse-glimmer-proxy.activation.publicEndpoint;
+            aiActivationEvaluated.config.sinnix.runtime.inventory.surfaces.muse-glimmer.activation.publicEndpoint;
         in
         assert lib.assertMsg (
           !lib.elem "muse-glimmer" localModels.ollamaLoadModels

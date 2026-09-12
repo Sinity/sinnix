@@ -493,7 +493,7 @@ def render_ai(
         '<p class="sub">These sit behind <code>systemd-socket-proxyd</code> and '
         "exit after their idle timeout, so <em>idle</em> is the resting state, not "
         "a fault: connecting to the public endpoint starts one with no privileged "
-        "action at all. Ollama and KoboldCpp hold the same "
+        "action at all. CUDA backends hold the same "
         "<code>gpu-inference</code> admission key and conflict by design.</p>"
         f"{blocks}</section>"
     )

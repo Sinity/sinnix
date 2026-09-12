@@ -33,6 +33,12 @@ in
           inputs.sinex.nixosModules.default
           (_: {
             networking.hostName = "backup-runtime";
+            sinnix.backup.enable = true;
+            sinnix.services = {
+              "machine-telemetry".enable = true;
+              polylogue.enable = true;
+              sinex.prepareHost = true;
+            };
             services.sinex = {
               stateRoot = "/var/lib/sinex/state";
               storage.blob.repositoryPath = "/var/lib/sinex/state/blob-repository";
@@ -113,6 +119,26 @@ in
           }
         ];
       };
+      headlessBackupEval = evalTestSpec system {
+        name = "backup-headless-default";
+        modules = [
+          mountTmpfsRoots
+          baseTestConfig
+          inputs.sinex.nixosModules.default
+          ({ ... }: {
+            networking.hostName = "backup-headless";
+            sinnix.machine.isDesktop = false;
+            services.sinex.storage.blob.repositoryPath = "/var/lib/sinex/state/blob-repository";
+          })
+        ];
+        assertions = _: [ ];
+      };
+      headlessBackupUnits =
+        builtins.filter (name: lib.hasInfix "borg" name || lib.hasInfix "btrbk" name)
+          (
+            builtins.attrNames headlessBackupEval.config.systemd.services
+            ++ builtins.attrNames headlessBackupEval.config.systemd.timers
+          );
       # `assertions` fed into evalTestSpec above are declared as NixOS module
       # assertions, but nothing in this test harness forces
       # `config.assertions` (no `system.build.toplevel` or
@@ -951,6 +977,11 @@ in
       checks = {
         backup-borg-hook-runtime = backupBorgHookRuntime;
         backup-health-lanes-runtime = borgHealthLanesRuntime;
+        backup-headless-default =
+          assert headlessBackupUnits == [ ];
+          pkgs.runCommand "backup-headless-default-check" { } ''
+            touch "$out"
+          '';
       };
     };
 }

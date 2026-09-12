@@ -135,7 +135,7 @@ let
       litellmApiKey = "sk-local";
       notes = ''
         Qwen3.8 27B UD-IQ2_XXS on the dedicated qwen38-vram llama.cpp
-        endpoint (modules/services/qwen38-vram.nix), which owns the exact
+        profile, which owns the exact
         fit: strict full offload, batch 64, ctx 16384 with q8_0 KV. Measured 2026-08-31:
         40.7 tok/s fully resident vs 1.2 tok/s when ollama silently spilled
         16% of layers to CPU — ollama cannot pin per-model load options,
@@ -161,11 +161,10 @@ let
       expectedBytes = null;
       notes = ''
         Qwen3-VL abliterated 8B instruct (6.1 GB, dense, fully
-        VRAM-resident) — the default uncensored vision lane. Instruct, not
-        thinking: the thinking tags spend max_tokens on reasoning and
-        return empty content for bulk caption calls. Supplants stashbox's private
-        llama.cpp/koboldcpp endpoint on :8899 and the JoyCaption GGUFs;
-        stashbox consumes this through LiteLLM (bead stashbox-1mx).
+        VRAM-resident) — the default uncensored vision lane. Instruct, since
+        thinking tags can spend max_tokens on reasoning and return empty
+        content for bulk caption calls. Private media consumers use it through
+        LiteLLM.
       '';
     }
     {
@@ -269,6 +268,91 @@ in
 rec {
   inherit models ollamaApiBase;
 
+  # One llama.cpp service plane. Profiles preserve the established unit names
+  # and endpoints while sharing one renderer and lifecycle contract.
+  llamaCppProfiles = {
+    llama-cpp = {
+      description = "llama.cpp reranker";
+      portKey = "llamaCpp";
+      model = "qwen3-reranker-0.6b-q8_0.gguf";
+      requiresCuda = false;
+      dynamicUser = true;
+      idleTimeout = "30s";
+      readinessTimeout = 30;
+      arguments = [
+        "--ctx-size"
+        "0"
+        "--flash-attn"
+        "on"
+        "--n-gpu-layers"
+        "0"
+        "--reranking"
+      ];
+    };
+    qwen38-vram = {
+      description = "Qwen3.8 27B VRAM-resident llama.cpp server";
+      portKey = "qwen38Vram";
+      model = "Qwen3.8-27B-UD-IQ2_XXS.gguf";
+      requiresCuda = true;
+      dynamicUser = false;
+      idleTimeout = "900s";
+      readinessTimeout = 600;
+      arguments = [
+        "--n-gpu-layers"
+        "999"
+        "--ctx-size"
+        "16384"
+        "--batch-size"
+        "64"
+        "--ubatch-size"
+        "64"
+        "--parallel"
+        "1"
+        "--flash-attn"
+        "on"
+        "--cache-type-k"
+        "q8_0"
+        "--cache-type-v"
+        "q8_0"
+        "--no-mmproj"
+        "--jinja"
+      ];
+    };
+    muse-glimmer = {
+      description = "Muse Glimmer 30B llama.cpp server";
+      portKey = "museGlimmer";
+      model = "Muse-Glimmer-30B-Abliterated-Q4_K_M.gguf";
+      requiresCuda = true;
+      dynamicUser = false;
+      idleTimeout = "900s";
+      readinessTimeout = 600;
+      arguments = [
+        "--n-gpu-layers"
+        "auto"
+        "--fit"
+        "on"
+        "--fit-target"
+        "1536"
+        "--ctx-size"
+        "32768"
+        "--parallel"
+        "1"
+        "--flash-attn"
+        "on"
+        "--no-mmproj"
+        "--jinja"
+        "--chat-template-kwargs"
+        ''{"reasoning_strength":"medium"}''
+        "--temp"
+        "1.0"
+        "--top-p"
+        "0.95"
+        "--top-k"
+        "64"
+      ];
+    };
+  };
+
   # modules/services/ollama.nix `loadModels` default: plain ordered tag list.
   ollamaLoadModels = map (m: m.ollamaTag) (lib.filter (m: m.ollamaTag != null) models);
 
@@ -295,8 +379,8 @@ rec {
 
   # Sideloaded GGUF files under /realm/library/models/gguf (not pulled through
   # ollama). Consumed by modules/services/llama-cpp.nix's reranker endpoint;
-  # hosts/sinnix-prime picks the active one via `llama-cpp.model`. Data only
-  # today — no fetch/verify machinery reads this list yet.
+  # the profiled llama.cpp service plane. Data only today — no fetch/verify
+  # machinery reads this list yet.
   ggufSideloads = [
     {
       file = "Qwen3.8-27B-UD-IQ2_XXS.gguf";

@@ -274,7 +274,7 @@ let
         );
 
       # ── services, and the AI backends among them ─────────────────────────
-      # An AI backend is a service that used mkAiService, which stamps meta.ai.
+      # An AI backend is a service whose owning runtime surface carries `ai`.
       # It gets its own kind rather than a duplicate row: the /ai/ page, the
       # `sinnix ai` verbs and the admission mesh all treat it as its own thing.
       serviceRows = mapAttrsToList (
@@ -283,7 +283,7 @@ let
           option = attrByPath [ name "enable" ] { } (options.sinnix.services or { });
           owner = declaringFile option;
           surface = surfaceOf name owner;
-          ai = attrByPath [ "meta" "ai" ] null service;
+          ai = if surface == null then null else surface.ai;
           endpoint = if surface == null then null else surface.activation.publicEndpoint or null;
           # Every surface this module declared, for the live-state probe and
           # for the usage census, which keys services by surface name.
