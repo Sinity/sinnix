@@ -1,10 +1,9 @@
 """Binary and large content at the MCP boundary.
 
 Text rides inline in the structured envelope. Images become ``ImageContent``
-blocks so a vision-capable client sees the picture. Other binary content is a
-``ResourceLink`` addressed by its canonical ref. Its bytes never become a
-chat attachment, so reading a host file cannot trigger client-side attachment
-approval.
+blocks so a vision-capable client sees the picture. Other binary content is
+described only in the structured envelope: some MCP clients materialize even a
+``ResourceLink`` as a chat attachment and prompt for approval.
 """
 
 from __future__ import annotations
@@ -20,7 +19,6 @@ from typing import Any, Literal
 from mcp.types import (
     ContentBlock,
     ImageContent,
-    ResourceLink,
 )
 from pydantic import Field
 
@@ -94,7 +92,7 @@ def attach(
     ref: str,
     media_type: str | None = None,
 ) -> tuple[Artifact, list[ContentBlock]]:
-    """Describe a file and produce visual blocks or a read-only binary handle."""
+    """Describe a file and produce visual blocks without client attachments."""
     media_type = media_type or sniff_media_type(path)
     size = path.stat().st_size
     digest = sha256_of(path)
@@ -133,14 +131,5 @@ def attach(
             )
     return (
         Artifact(representation="link", **base),
-        [
-            ResourceLink(
-                type="resource_link",
-                name=path.name,
-                uri=ref,
-                mime_type=media_type,
-                size=size,
-                description="Read-only binary resource handle; bytes are not attached to the chat.",
-            )
-        ],
+        [],
     )

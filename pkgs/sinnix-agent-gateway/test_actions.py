@@ -243,7 +243,7 @@ def test_binary_read_never_attaches_bytes_to_the_chat(tmp_path: Path) -> None:
 
     linked = call(server, "files.read", {"target": {"path": str(pdf)}})
     assert isinstance(linked, CallToolResult) and not linked.is_error
-    assert any(isinstance(block, ResourceLink) for block in linked.content)
+    assert not any(isinstance(block, ResourceLink) for block in linked.content)
     assert structured(linked)["data"]["artifact"]["representation"] == "link"
 
     rejected = structured(
