@@ -68,10 +68,14 @@ wivrn_wired() {
     return 1
   }
   systemctl --user start wivrn.service
+  # WiVRn rejects an unpaired headset until the server explicitly opens this
+  # short pairing window. The headset renders the one-time confirmation in
+  # VR, where Android's ordinary UI automation is deliberately unavailable.
+  wivrnctl pair --duration 10 >/dev/null
   adb -s "$target" reverse tcp:9757 tcp:9757
   adb -s "$target" shell am start -a android.intent.action.VIEW \
     -d 'wivrn+tcp://localhost:9757' "$package"
-  echo "WiVRn wired launch requested through USB headset $target"
+  echo "WiVRn wired pairing is open for 10 minutes on USB headset $target"
 }
 
 start_session() {
