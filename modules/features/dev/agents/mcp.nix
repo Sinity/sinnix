@@ -448,7 +448,7 @@ mkFeatureModule {
                 # and is deliberately left untouched.
                 codexSkills = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
                   codex_skills="$HOME/.codex/skills"
-                  declared_skills="${dotsRoot}/codex/skills"
+                  declared_skills="${dotsRoot}/_ai/skills"
                   codex_manage_skills=1
                   if [ -L "$codex_skills" ]; then
                     codex_link="$(readlink "$codex_skills" || true)"
@@ -473,7 +473,8 @@ mkFeatureModule {
                           continue
                         fi
                         codex_target="$(readlink -f "$codex_entry" || true)"
-                        if [ "$codex_target" != "${dotsRoot}/_ai/skills/$codex_name" ] && [ "$codex_target" != "$(readlink -f "$declared_skills/$codex_name" || true)" ]; then
+                        codex_raw_target="$(readlink "$codex_entry" || true)"
+                        if [ "$codex_target" != "${dotsRoot}/_ai/skills/$codex_name" ] && [ "$codex_raw_target" != "${dotsRoot}/codex/skills/$codex_name" ]; then
                           codex_owned_farm=0
                           break
                         fi
@@ -517,13 +518,35 @@ mkFeatureModule {
                   done
                   fi
                 '';
+                directMutableAgentLinks = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
+                  direct_link() {
+                    target="$1"
+                    source="$2"
+                    if [ -e "$target" ] || [ -L "$target" ]; then
+                      current="$(readlink -f "$target" 2>/dev/null || true)"
+                      expected="$(readlink -f "$source")"
+                      if [ "$current" != "$expected" ]; then
+                        echo "sinnix: preserving unrecognised mutable agent file $target" >&2
+                        return
+                      fi
+                      run rm "$target"
+                    fi
+                    run mkdir -p "$(dirname "$target")"
+                    run ln -s "$source" "$target"
+                  }
+                  direct_link "$HOME/.config/claude/CLAUDE.md" "${dotsRoot}/claude/CLAUDE.md"
+                  direct_link "$HOME/.config/claude/agents" "${dotsRoot}/claude/agents"
+                  direct_link "$HOME/.config/claude/skills" "${dotsRoot}/_ai/skills"
+                  direct_link "$HOME/.agents/skills" "${dotsRoot}/_ai/skills"
+                  direct_link "$HOME/.codex/agents/explorer.toml" "${dotsRoot}/codex/agents/explorer.toml"
+                  direct_link "$HOME/.gemini/skills" "${dotsRoot}/_ai/skills"
+                  direct_link "$HOME/.gemini/config/skills" "${dotsRoot}/_ai/skills"
+                  direct_link "$HOME/.gemini/config/AGENTS.md" "${dotsRoot}/claude/CLAUDE.md"
+                '';
               };
             };
 
             home.file = {
-              # One directory symlink, not per-file entries: a new agent
-              # definition dropped into dots/claude/agents/ is live
-              # immediately, no registration and no rebuild.
               ".config/claude/agents" = {
                 source = mkDotsFile "/claude/agents";
                 force = true;
@@ -540,12 +563,12 @@ mkFeatureModule {
                 source = codexHooksFile;
                 force = true;
               };
-              ".gemini/skills" = {
-                source = mkDotsFile "/_ai/skills";
-                force = true;
-              };
               ".gemini/settings.json" = {
                 source = geminiSettingsFile;
+                force = true;
+              };
+              ".gemini/skills" = {
+                source = mkDotsFile "/_ai/skills";
                 force = true;
               };
               ".gemini/config/mcp_config.json" = {

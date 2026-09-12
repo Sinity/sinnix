@@ -1,6 +1,7 @@
 # Canonical Codex home on this system is ~/.codex.
 # Global instruction file is ~/.codex/AGENTS.md.
-# Skills are managed from ~/.codex/skills via Home Manager.
+# Shared skills are linked directly from dots/_ai/skills; app-installed and
+# .system skills remain private to Codex.
 # MCP servers are registry-generated into full/lean/browser profile files by
 # modules/features/dev/agents/mcp.nix. The wrapper invokes the intended
 # profile explicitly so lean sessions do not inherit the full MCP table.
