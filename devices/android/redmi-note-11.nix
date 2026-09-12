@@ -96,6 +96,22 @@
       ];
       "com.google.android.apps.walletnfcrel".grant = [ "android.permission.POST_NOTIFICATIONS" ];
       "com.machiav3lli.backup".grant = [ "android.permission.POST_NOTIFICATIONS" ];
+      "com.oculus.twilight".grant = [
+        "android.permission.ACCESS_COARSE_LOCATION"
+        "android.permission.ACCESS_FINE_LOCATION"
+        "android.permission.BLUETOOTH_ADVERTISE"
+        "android.permission.BLUETOOTH_CONNECT"
+        "android.permission.BLUETOOTH_SCAN"
+        "android.permission.CAMERA"
+        "android.permission.GET_ACCOUNTS"
+        "android.permission.POST_NOTIFICATIONS"
+        "android.permission.READ_CALENDAR"
+        "android.permission.READ_MEDIA_IMAGES"
+        "android.permission.READ_MEDIA_VIDEO"
+        "android.permission.READ_MEDIA_VISUAL_USER_SELECTED"
+        "android.permission.RECORD_AUDIO"
+        "android.permission.WRITE_CALENDAR"
+      ];
       "com.sony.songpal.mdr".grant = [
         "android.permission.BLUETOOTH_CONNECT"
         "android.permission.BLUETOOTH_SCAN"
@@ -244,6 +260,7 @@
     batteryOptimization.exempt = [
       "com.github.catfriend1.syncthingfork"
       "com.machiav3lli.backup"
+      "com.oculus.twilight"
       "com.tailscale.ipn"
       "com.termux"
       "com.termux.boot"
