@@ -5,34 +5,17 @@
     user = 0;
   };
 
-  # System software remains Quest-owned.  This profile only preserves the
-  # directly observed, USB-development settings; package drift is reported,
-  # never removed.
+  # System software remains Quest-owned. This is a report baseline for the
+  # retained utility set, not an install manifest or a deletion policy.
   apps = {
-    # Side-loaded or store apps observed on this headset.  They remain
-    # headset-managed: this profile documents their expected presence without
-    # claiming an install source or removing any of them.
+    # Store and side-loaded utilities retained after the 2026-09 cleanup.
+    # `cleanup = "report"` only surfaces drift in `android-rebuild plan`.
     attended = [
-      "chat.fluffy.fluffychat"
+      "alvr.client.stable"
       "com.aurora.store"
       "com.apk.editor"
-      "com.beatgames.beatsaber"
-      "com.CarbonStudio.TheWizards"
-      "com.crytek.climb2"
       "com.deovr.gearvr"
-      "com.DigitalLode.Espire2"
-      "com.EpicScapes.RealmsOfFlow"
-      "com.FunktronicLabs.TheLightBrigade"
-      "com.JorgeJGnz.PhysHand"
-      "com.LiminalVR.Liminal"
-      "com.MightyYellStudios.WobblyKnightMaster"
-      "com.OmnifariousStudiosLLC.ProjectDemigod"
-      "com.SchellGames.DieScreaming"
-      "com.SchellGames.LostRecipes"
-      "com.Trebuchet.PrisonBossVR"
-      "com.VirZOOM.FLY"
       "com.google.android.apps.youtube.vr.oculus"
-      "com.holonautic.cybrix"
       "com.meta.curio.ruler"
       "com.meta.handseducationmodule"
       "com.meta.shell.env.footprint.haven2025"
@@ -41,30 +24,19 @@
       "com.oculus.fitnesstracker"
       "com.oculus.paracosmaavalanche"
       "com.oculus.vrprivacycheckup"
-      "com.onemt.and.kc"
-      "com.puddle.thrasher_release"
       "com.qcxr.qcxr"
       "com.rarlab.rar"
-      "com.resolutiongames.homesports"
-      "com.resolutiongames.trolin"
       "com.streamlabs"
       "com.threethan.launcher"
       "com.threethan.launcher.metastore"
-      "com.truantpixel.Runner"
       "com.valvesoftware.steamlinkvr"
-      "com.voidroom.TeaForGod"
-      "com.voidroom.TeaForGodEmperor"
-      "com.vrchat.oculus.quest"
       "com.zerotier.one"
       "com.ZeroTransform.VStreamer_Live"
-      "geniesoft.io.DancingArrow"
       "github.paroj.dsub2000"
       "org.fdroid.fdroid"
-      "org.godotengine.open_saber_plus"
+      "org.meumeu.wivrn.github"
       "pupper.dev.barkvr"
       "quest.side.vr"
-      "quest.eleven.forfunlabs"
-      "studio.NewFolderGames.TitansClinic"
     ];
     cleanup = "report";
   };

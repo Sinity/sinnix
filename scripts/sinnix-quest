@@ -15,9 +15,15 @@ Usage: sinnix quest <command>
 
 Commands:
   status              show the selected ADB transport and headset state
+  health              show battery, thermal, storage, and foreground-app state
+  storage             show the largest shared-storage directories and files
   network-adb         enable TCP ADB from the authorized USB connection
   connect [HOST]      connect to HOST:5555, or the last known Quest address
   stop-network-adb    return the connected headset to USB-only ADB
+  performance status  show session-only Quest performance overrides
+  performance high    enable 120 Hz and high CPU/GPU levels when thermally safe
+  performance normal  restore a balanced 90 Hz, level-3 session profile
+  performance hud N   set the performance HUD detail level (0 through 4)
   shell               open an ADB shell
   screen [ARGS...]    mirror/control with scrcpy
   adb [ARGS...]       run an explicit adb command against the headset
@@ -25,6 +31,9 @@ Commands:
 TCP ADB survives only until the Quest reboots and listens on every network it
 joins. Use network-adb only on a trusted network; use stop-network-adb when it
 is no longer needed.
+
+Performance overrides are session-only. QuestOS clears them on reboot. `high`
+refuses to run when Android reports any thermal throttling.
 EOF
 }
 
@@ -119,9 +128,87 @@ status() {
   '
 }
 
+health() {
+  local target
+  target="$(resolve_target)"
+  ANDROID_SERIAL="$target" adb shell '
+    echo "== battery =="
+    dumpsys battery | grep -E "AC powered:|USB powered:|Wireless powered:|status:|level:|temperature:"
+    echo "== thermal =="
+    dumpsys thermalservice | grep "Thermal Status:" || true
+    echo "== storage =="
+    df -h /sdcard | tail -n 1
+    echo "== foreground =="
+    dumpsys window | grep -E "mCurrentFocus=Window|mFocusedApp=ActivityRecord" | tail -n 2
+  '
+}
+
+storage() {
+  local target
+  target="$(resolve_target)"
+  ANDROID_SERIAL="$target" adb shell '
+    echo "== shared storage =="
+    df -h /sdcard | tail -n 1
+    echo "== largest directories (KiB) =="
+    du -sk /sdcard/* /sdcard/Android/* 2>/dev/null | sort -nr | head -n 20
+    echo "== largest files (bytes) =="
+    find /sdcard/Oculus /sdcard/Download /sdcard/Movies /sdcard/Pictures -type f -printf "%s %p\\n" 2>/dev/null | sort -nr | head -n 20
+  '
+}
+
+thermal_status() {
+  local target
+  target="$(resolve_target)"
+  ANDROID_SERIAL="$target" adb shell 'dumpsys thermalservice | awk "/Thermal Status:/ { print \$3; exit }"' | tr -d '\r'
+}
+
+performance() {
+  local mode="${1:-status}" target thermal level
+  target="$(resolve_target)"
+  case "$mode" in
+    status)
+      ANDROID_SERIAL="$target" adb shell 'getprop | grep -E "^\\[debug\\.oculus\\.(refreshRate|textureWidth|textureHeight|gpuLevel|cpuLevel|foveation|showPerfHud|capture)" || true'
+      ;;
+    high)
+      thermal="$(thermal_status)"
+      [ "$thermal" = 0 ] || {
+        echo "refusing high performance while thermal status is ${thermal:-unknown}" >&2
+        return 1
+      }
+      ANDROID_SERIAL="$target" adb shell '
+        setprop debug.oculus.refreshRate 120
+        setprop debug.oculus.cpuLevel 4
+        setprop debug.oculus.gpuLevel 4
+        setprop debug.oculus.foveation.dynamic 1
+      '
+      echo "enabled high performance for this Quest session"
+      performance status
+      ;;
+    normal)
+      ANDROID_SERIAL="$target" adb shell '
+        setprop debug.oculus.refreshRate 90
+        setprop debug.oculus.cpuLevel 3
+        setprop debug.oculus.gpuLevel 3
+        setprop debug.oculus.foveation.dynamic 1
+      '
+      echo "enabled balanced performance for this Quest session"
+      performance status
+      ;;
+    hud)
+      level="${2:-}"
+      case "$level" in 0|1|2|3|4) ;; *) echo "HUD level must be 0 through 4" >&2; return 2 ;; esac
+      ANDROID_SERIAL="$target" adb shell "setprop debug.oculus.showPerfHud $level"
+      echo "performance HUD level: $level"
+      ;;
+    *) echo "unknown performance mode: $mode" >&2; return 2 ;;
+  esac
+}
+
 command="${1:-}"
 case "$command" in
   status) status ;;
+  health) health ;;
+  storage) storage ;;
   network-adb) enable_network_adb ;;
   connect) shift; connect_network_adb "${1:-}" ;;
   stop-network-adb)
@@ -129,6 +216,7 @@ case "$command" in
     ANDROID_SERIAL="$target" adb usb
     rm -f "$HOST_CACHE"
     ;;
+  performance) shift; performance "$@" ;;
   shell) target="$(resolve_target)"; ANDROID_SERIAL="$target" adb shell ;;
   screen) shift; target="$(resolve_target)"; exec scrcpy --serial "$target" "$@" ;;
   adb) shift; target="$(resolve_target)"; exec env ANDROID_SERIAL="$target" adb "$@" ;;
