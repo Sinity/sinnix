@@ -186,7 +186,7 @@ status() {
 }
 
 doctor() {
-  local json=0 target model android storage level temperature usb_powered wivrn alvr syncthing
+  local json=0 target model android storage level temperature usb_powered wivrn alvr syncthing moonlight tailscale termux openbrush
   [ "${1:-}" = --json ] && json=1
   target="$(resolve_target)"
   model="$(ANDROID_SERIAL="$target" adb shell getprop ro.product.model | tr -d '\r')"
@@ -198,14 +198,19 @@ doctor() {
   wivrn="$(ANDROID_SERIAL="$target" adb shell pm path org.meumeu.wivrn.github 2>/dev/null | grep -c '^package:' || true)"
   alvr="$(ANDROID_SERIAL="$target" adb shell pm path alvr.client.stable 2>/dev/null | grep -c '^package:' || true)"
   syncthing="$(ANDROID_SERIAL="$target" adb shell pm path com.github.catfriend1.syncthingfork 2>/dev/null | grep -c '^package:' || true)"
+  moonlight="$(ANDROID_SERIAL="$target" adb shell pm path com.limelight 2>/dev/null | grep -c '^package:' || true)"
+  tailscale="$(ANDROID_SERIAL="$target" adb shell pm path com.tailscale.ipn 2>/dev/null | grep -c '^package:' || true)"
+  termux="$(ANDROID_SERIAL="$target" adb shell pm path com.termux 2>/dev/null | grep -c '^package:' || true)"
+  openbrush="$(ANDROID_SERIAL="$target" adb shell pm path com.Icosa.OpenBrush 2>/dev/null | grep -c '^package:' || true)"
   if [ "$json" = 1 ]; then
-    printf '{"serial":"%s","transport":"%s","model":"%s","android":"%s","storageKiB":%s,"batteryPercent":%s,"batteryTemperatureDeciC":%s,"usbPowered":%s,"apps":{"wivrn":%s,"alvr":%s,"syncthing":%s}}\n' \
-      "$target" "$TRANSPORT" "$model" "$android" "${storage:-0}" "${level:-0}" "${temperature:-0}" "${usb_powered:-false}" "$([ "$wivrn" -gt 0 ] && echo true || echo false)" "$([ "$alvr" -gt 0 ] && echo true || echo false)" "$([ "$syncthing" -gt 0 ] && echo true || echo false)"
+    printf '{"serial":"%s","transport":"%s","model":"%s","android":"%s","storageKiB":%s,"batteryPercent":%s,"batteryTemperatureDeciC":%s,"usbPowered":%s,"apps":{"wivrn":%s,"alvr":%s,"syncthing":%s,"moonlight":%s,"tailscale":%s,"termux":%s,"openbrush":%s}}\n' \
+      "$target" "$TRANSPORT" "$model" "$android" "${storage:-0}" "${level:-0}" "${temperature:-0}" "${usb_powered:-false}" "$([ "$wivrn" -gt 0 ] && echo true || echo false)" "$([ "$alvr" -gt 0 ] && echo true || echo false)" "$([ "$syncthing" -gt 0 ] && echo true || echo false)" "$([ "$moonlight" -gt 0 ] && echo true || echo false)" "$([ "$tailscale" -gt 0 ] && echo true || echo false)" "$([ "$termux" -gt 0 ] && echo true || echo false)" "$([ "$openbrush" -gt 0 ] && echo true || echo false)"
   else
     printf 'Quest %s on Android %s via %s (%s)\n' "$model" "$android" "$TRANSPORT" "$target"
     printf 'Battery: %s%%, %s deci-C, USB powered: %s\n' "$level" "$temperature" "$usb_powered"
     printf 'Free shared storage: %s KiB\n' "$storage"
-    printf 'Core apps: WiVRn=%s ALVR=%s Syncthing=%s\n' "$wivrn" "$alvr" "$syncthing"
+    printf 'Streaming apps: WiVRn=%s ALVR=%s Moonlight=%s Syncthing=%s\n' "$wivrn" "$alvr" "$moonlight" "$syncthing"
+    printf 'Utility apps: Tailscale=%s Termux=%s OpenBrush=%s\n' "$tailscale" "$termux" "$openbrush"
   fi
 }
 
