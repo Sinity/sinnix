@@ -1,1 +1,26 @@
-{ "abi": "arm64-v8a", "lockedAt": 0, "packages": {} }
+{
+  "abi": "arm64-v8a",
+  "lockedAt": 1789191632,
+  "packages": {
+    "alvr.client.stable": {
+      "versionCode": 18091521,
+      "versionName": "20.14.1",
+      "url": "https://github.com/alvr-org/ALVR/releases/download/v20.14.1/alvr_client_android.apk",
+      "sha256": "be68feeb02665e3d69f1cdbcabf38ea4d15c42868a7ec6b5e698dbefee4e4e36",
+      "signerSha256": [
+        "ede8cde840ed3afa82c25f9791666d6694cc3b3d405cbd3c8b396fee72e0fd64"
+      ],
+      "source": "github:alvr-org/ALVR"
+    },
+    "org.meumeu.wivrn.github": {
+      "versionCode": 1,
+      "versionName": "26.6.2",
+      "url": "https://github.com/WiVRn/WiVRn/releases/download/v26.6.2/WiVRn-release.apk",
+      "sha256": "f735a5da0b22c627c9bcbbae5b8999641cd3b5006a7d919435a6d0ed1c9219a7",
+      "signerSha256": [
+        "a871d5438f9c704096e935824d93a140d9ee149c806eaa922f84fbaced4403ed"
+      ],
+      "source": "github:WiVRn/WiVRn"
+    }
+  }
+}
