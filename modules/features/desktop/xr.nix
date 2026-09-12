@@ -39,10 +39,12 @@ mkFeatureModule {
       pkgs,
       cfg,
       user,
+      helpers,
       ...
     }:
     let
       lanInterface = "enp4s0";
+      scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
     in
     lib.mkMerge [
       {
@@ -84,7 +86,44 @@ mkFeatureModule {
           allowedTCPPorts = [ 9757 ];
           allowedUDPPorts = [ 5353 9757 ];
         };
+        # Archives are retained until a later realm backup receipt exists;
+        # the script exits successfully when the USB headset is absent, so a
+        # daily timer is safe on an unattended workstation.
+        sinnix.runtime.surfaces.quest-media-prune = {
+          unit = "sinnix-quest-media-prune.timer";
+          manager = "user";
+          kind = "timer";
+          observe = {
+            enable = true;
+            restartable = false;
+          };
+        };
       })
+      (lib.mkIf cfg.wivrn.enable (
+        lib.sinnix.mkScheduledJob
+          {
+            inherit config;
+            unitName = "sinnix-quest-media-prune";
+            description = "Prune Quest recordings safely archived and backed up for 30 days";
+            surface = config.sinnix.runtime.surfaces.quest-media-prune;
+          }
+          {
+            manager = "user";
+            resourceClass = "background-maintenance";
+            script = ''
+              if ${scriptPkgs.sinnix-quest}/bin/sinnix-quest doctor >/dev/null; then
+                exec ${scriptPkgs.sinnix-quest}/bin/sinnix-quest media prune --apply
+              fi
+            '';
+            timer = {
+              onCalendar = "*-*-* 03:30:00";
+              persistent = true;
+              randomizedDelaySec = "20min";
+              accuracySec = "5min";
+              description = "Daily safe Quest recording retention pass";
+            };
+          }
+      ))
       (lib.mkIf cfg.desktop.enable {
         services.sunshine = {
           enable = true;
