@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @sinnix-package
 # description: Control the Quest 3 through its USB bootstrap or authenticated LAN ADB transport
-# runtimeInputs: bash coreutils android-tools scrcpy iproute2 gawk
+# runtimeInputs: bash coreutils android-tools scrcpy iproute2 gawk systemd
 
 set -euo pipefail
 
@@ -20,6 +20,7 @@ Commands:
   storage             show the largest shared-storage directories and files
   media list          list recorded Quest videos
   media pull FILE...  copy Videoshots to Sinnix with SHA-256 verification
+  sync                prepare a wired Syncthing pairing with Sinnix
   network-adb         enable TCP ADB from the authorized USB connection
   connect [HOST]      connect to HOST:5555, or the last known Quest address
   stop-network-adb    return the connected headset to USB-only ADB
@@ -41,6 +42,11 @@ refuses to run when Android reports any thermal throttling.
 `media pull` keeps the headset originals and only accepts files below
 /sdcard/Oculus/Videoshots/. It writes verified copies under $MEDIA_DIR by
 default; set SINNIX_QUEST_MEDIA_DIR to choose another destination.
+
+`sync` forwards Quest TCP port 22000 over the current ADB connection and
+prints Sinnix's Syncthing identity. Complete the app's onboarding, choose the
+Videoshots folder through its folder picker, then add Sinnix with the printed
+ID and tcp://localhost:22000. The forwarding lasts only for this ADB session.
 EOF
 }
 
@@ -216,6 +222,44 @@ media() {
   esac
 }
 
+sync() {
+  local target config host_name host_id
+  target="$(resolve_target)"
+  config="${SINNIX_QUEST_SYNCTHING_CONFIG:-/realm/state/syncthing/config/config.xml}"
+  [ -r "$config" ] || {
+    echo "cannot read Sinnix Syncthing config: $config" >&2
+    return 1
+  }
+  systemctl is-active --quiet syncthing.service || {
+    echo "Sinnix Syncthing service is not active" >&2
+    return 1
+  }
+  host_name="$(hostname)"
+  host_id="$(awk -v name="$host_name" '
+    /<device id=/ && index($0, "name=\"" name "\"") {
+      if (match($0, /id="[^"]+"/)) {
+        value = substr($0, RSTART + 4, RLENGTH - 5)
+        print value
+        exit
+      }
+    }
+  ' "$config")"
+  [[ "$host_id" =~ ^[A-Z0-9]{7}(-[A-Z0-9]{7}){7}$ ]] || {
+    echo "could not find Sinnix's Syncthing device ID in $config" >&2
+    return 1
+  }
+  ANDROID_SERIAL="$target" adb reverse tcp:22000 tcp:22000
+  cat <<EOF
+Sinnix Syncthing ID: $host_id
+Quest wired address: tcp://localhost:22000
+
+In Syncthing-Fork, complete onboarding, select /sdcard/Oculus/Videoshots with
+the folder picker, and add Sinnix with the ID and address above. Confirm the
+new Quest device ID here afterward so the receive-only Quest folder can be
+declared on Sinnix.
+EOF
+}
+
 thermal_status() {
   local target
   target="$(resolve_target)"
@@ -270,6 +314,7 @@ case "$command" in
   health) health ;;
   storage) storage ;;
   media) shift; media "$@" ;;
+  sync) sync ;;
   network-adb) enable_network_adb ;;
   connect) shift; connect_network_adb "${1:-}" ;;
   stop-network-adb)
