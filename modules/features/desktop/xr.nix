@@ -77,7 +77,7 @@ mkFeatureModule {
         home-manager.users.${user}.home.packages = [ pkgs.sidequest ];
       })
       (lib.mkIf cfg.kdeconnect.enable {
-        programs.kdeconnect.enable = true;
+        home-manager.users.${user}.home.packages = [ pkgs.kdePackages.kdeconnect-kde ];
         # KDE Connect discovers and transports only on the local physical LAN.
         networking.firewall.interfaces.${lanInterface} = {
           allowedTCPPortRanges = [
