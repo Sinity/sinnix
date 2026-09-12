@@ -8,6 +8,7 @@ set -euo pipefail
 STATE_DIR="${SINNIX_QUEST_STATE_DIR:-/realm/state/sinnix-quest}"
 HOST_CACHE="$STATE_DIR/last-host"
 QUEST_MODEL="${SINNIX_QUEST_MODEL:-Quest 3}"
+MEDIA_DIR="${SINNIX_QUEST_MEDIA_DIR:-/realm/photos/quest-3/videoshots}"
 
 usage() {
   cat <<'EOF'
@@ -17,6 +18,8 @@ Commands:
   status              show the selected ADB transport and headset state
   health              show battery, thermal, storage, and foreground-app state
   storage             show the largest shared-storage directories and files
+  media list          list recorded Quest videos
+  media pull FILE...  copy Videoshots to Sinnix with SHA-256 verification
   network-adb         enable TCP ADB from the authorized USB connection
   connect [HOST]      connect to HOST:5555, or the last known Quest address
   stop-network-adb    return the connected headset to USB-only ADB
@@ -34,6 +37,10 @@ is no longer needed.
 
 Performance overrides are session-only. QuestOS clears them on reboot. `high`
 refuses to run when Android reports any thermal throttling.
+
+`media pull` keeps the headset originals and only accepts files below
+/sdcard/Oculus/Videoshots/. It writes verified copies under $MEDIA_DIR by
+default; set SINNIX_QUEST_MEDIA_DIR to choose another destination.
 EOF
 }
 
@@ -156,6 +163,59 @@ storage() {
   '
 }
 
+media() {
+  local action="${1:-list}" target remote local_path partial_path remote_hash local_hash
+  target="$(resolve_target)"
+  case "$action" in
+    list)
+      ANDROID_SERIAL="$target" adb shell '
+        find /sdcard/Oculus/Videoshots -maxdepth 1 -type f -printf "%s %p\\n" 2>/dev/null | sort -nr
+      '
+      ;;
+    pull)
+      shift
+      [ "$#" -gt 0 ] || {
+        echo "provide one or more Videoshots paths to copy" >&2
+        return 2
+      }
+      mkdir -p "$MEDIA_DIR"
+      for remote in "$@"; do
+        case "$remote" in
+          /sdcard/Oculus/Videoshots/*)
+            case "$remote" in *".."*) echo "refusing unsafe media path: $remote" >&2; return 2 ;; esac
+            ;;
+          *) echo "refusing non-Videoshots path: $remote" >&2; return 2 ;;
+        esac
+        local_path="$MEDIA_DIR/${remote##*/}"
+        remote_hash="$(ANDROID_SERIAL="$target" adb shell sha256sum "$remote" | awk '{ print $1 }' | tr -d '\r')"
+        [[ "$remote_hash" =~ ^[0-9a-f]{64}$ ]] || {
+          echo "could not hash headset file: $remote" >&2
+          return 1
+        }
+        if [ -e "$local_path" ]; then
+          local_hash="$(sha256sum "$local_path" | awk '{ print $1 }')"
+          [ "$local_hash" = "$remote_hash" ] || {
+            echo "destination exists with a different hash: $local_path" >&2
+            return 1
+          }
+          echo "already verified: $local_path"
+          continue
+        fi
+        partial_path="$local_path.partial-$$"
+        ANDROID_SERIAL="$target" adb pull "$remote" "$partial_path"
+        local_hash="$(sha256sum "$partial_path" | awk '{ print $1 }')"
+        [ "$local_hash" = "$remote_hash" ] || {
+          echo "copy hash mismatch; retained partial copy: $partial_path" >&2
+          return 1
+        }
+        mv "$partial_path" "$local_path"
+        echo "verified copy: $local_path"
+      done
+      ;;
+    *) echo "unknown media action: $action" >&2; return 2 ;;
+  esac
+}
+
 thermal_status() {
   local target
   target="$(resolve_target)"
@@ -209,6 +269,7 @@ case "$command" in
   status) status ;;
   health) health ;;
   storage) storage ;;
+  media) shift; media "$@" ;;
   network-adb) enable_network_adb ;;
   connect) shift; connect_network_adb "${1:-}" ;;
   stop-network-adb)
