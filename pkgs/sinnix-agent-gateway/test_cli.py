@@ -239,9 +239,8 @@ def test_cli_subprocess_keeps_binary_bytes_out_of_the_chat(tmp_path: Path) -> No
     assert completed.returncode == 0
     response = json.loads(completed.stdout)
     assert response["data"]["sha256"] == hashlib.sha256(payload).hexdigest()
-    block = next(block for block in response["content"] if block["type"] == "resource_link")
-    assert block["uri"] == response["data"]["ref"]
-    assert "blob" not in json.dumps(block)
+    assert response["data"]["artifact"]["representation"] == "link"
+    assert not any(block["type"] in {"resource_link", "resource"} for block in response["content"])
 
 
 def test_input_sources_are_bounded_and_require_a_json_object(tmp_path: Path) -> None:
