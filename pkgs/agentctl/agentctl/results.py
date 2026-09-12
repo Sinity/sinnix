@@ -302,6 +302,8 @@ def load_result(path: Path, *, kind: str) -> tuple[Any, list[str]]:
         return None, [f"{path}: not JSON ({error})"]
     if isinstance(value, dict) and "structured_output" in value:
         value = value["structured_output"]
+    if kind == "worker":
+        return value, validate_worker_result(value)
     return value, validate(SCHEMAS[kind], value)
 
 

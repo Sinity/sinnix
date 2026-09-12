@@ -1057,7 +1057,7 @@ def test_land_integrates_verifies_reviews_publishes_and_closes_satisfied_members
     assert verify["operation"] == "check" and verify["candidate_sha"] == SHA
     assert verify["requested_sha"] == SHA and verify["tested_sha"] == SHA
     assert verify["git_dirty"] is False and verify["status"] == "passed"
-    assert verify["receipt"] == f"agentctl://jobs/{verify['job_id']}"
+    assert verify["receipt"] == f"agentctl://jobs/{verify['job_id']}/{verify['reference']}"
     assert verify["reference"] == launch.launch_reference(
         harness.pueue.task(verify["job_id"])
     )
@@ -1456,7 +1456,13 @@ def test_pr_policy_pushes_the_branch_waits_for_required_checks_and_merges_the_he
             "number": number,
             "state": "MERGED" if merged else "OPEN",
             "headRefOid": SHA,
-            "statusCheckRollup": [],
+            "statusCheckRollup": [
+                {
+                    "name": "verify",
+                    "headSha": SHA,
+                    "detailsUrl": "https://checks/verify",
+                }
+            ],
             "mergeCommit": {"oid": MERGED} if merged else None,
         }
 
@@ -1528,7 +1534,15 @@ def test_pr_policy_pushes_the_branch_waits_for_required_checks_and_merges_the_he
         "requested_sha": SHA,
         "phase": "succeeded",
         "status": "passed",
-        "checks": [],
+        "checks": [
+            {
+                "name": "verify",
+                "headSha": SHA,
+                "detailsUrl": "https://checks/verify",
+            }
+        ],
+        "tested_sha": SHA,
+        "reference": "https://checks/verify",
         "recorded_at": verify["recorded_at"],
     }
     assert [call for call in calls if call[0] in {"merge", "delete", "advisory"}] == [
