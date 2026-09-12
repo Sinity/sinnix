@@ -31,6 +31,13 @@ Commands:
                       show, or remove, verified archive copies older than 30 days
   media serve         serve the archive to DeoVR over LAN and USB ADB reverse
   media stop-serving  stop the archive service and remove USB forwarding
+  player open FILE [OPTIONS]
+                      start persistent native DeoVR playback through ADB reverse
+  player choose [ROOT] [OPTIONS]
+                      choose a local video from the desktop menu and launch it
+  player browse URL   open an HTTP(S) player-native library URL in DeoVR
+  player status|pause|resume|toggle|seek N|speed N|stop
+                      inspect or control the active DeoVR session
   sync                prepare a wired Syncthing pairing with Sinnix
   network-adb         enable TCP ADB from the authorized USB connection
   connect [HOST]      connect to HOST:5555, or the last known Quest address
@@ -456,6 +463,7 @@ case "$command" in
   health) health ;;
   storage) storage ;;
   media) shift; media "$@" ;;
+  player) shift; exec sinnix-quest-player "$@" ;;
   sync) sync ;;
   network-adb) enable_network_adb ;;
   connect) shift; connect_network_adb "${1:-}" ;;

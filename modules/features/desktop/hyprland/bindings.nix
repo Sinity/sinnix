@@ -159,6 +159,13 @@ let
     (run "XF86AudioLowerVolume" "Lower the volume" "pamixer -d 2")
     (run "SUPER + XF86AudioMute" "Mute or unmute the microphone" "${script "audio"} mic-toggle")
     (run "SUPER + XF86AudioRaiseVolume" "Switch to the next audio output" "${script "audio"} toggle")
+    (run "SUPER + ALT + P" "Toggle Quest DeoVR playback" "sinnix quest player toggle")
+    (run "SUPER + ALT + O" "Choose and launch a local Quest video" "sinnix quest player choose")
+    (run "SUPER + ALT + Left" "Seek Quest DeoVR backward ten seconds" "sinnix quest player seek -10")
+    (run "SUPER + ALT + Right" "Seek Quest DeoVR forward ten seconds" "sinnix quest player seek +10")
+    (run "SUPER + ALT + Up" "Set Quest DeoVR speed to 1.25x" "sinnix quest player speed 1.25")
+    (run "SUPER + ALT + Down" "Set Quest DeoVR speed to 1x" "sinnix quest player speed 1")
+    (run "SUPER + ALT + SHIFT + P" "Stop Quest native video playback" "sinnix quest player stop")
   ];
 
   binddl = [
