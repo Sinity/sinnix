@@ -1,7 +1,18 @@
 {
   "abi": "arm64-v8a",
-  "lockedAt": 1789193487,
+  "lockedAt": 1789194308,
   "packages": {
+    "org.kde.kdeconnect_tp": {
+      "versionCode": 13513,
+      "versionName": "1.35.13",
+      "url": "https://f-droid.org/repo/org.kde.kdeconnect_tp_13513.apk",
+      "sha256": "87949c72a22bae97e019ce81cdb41496999254ca9a53cc6647ea802c3d5506f4",
+      "repoFingerprint": "43238d512c1e5eb2d6569f4a3afbf5523418b82e0a3ed1552770abb9a9c9ccab",
+      "signerSha256": [
+        "79b50031486746dffbc746f48fb0eb62fc7bb0ae7b976e7d6507b2c078840d92"
+      ],
+      "preferredSigner": "79b50031486746dffbc746f48fb0eb62fc7bb0ae7b976e7d6507b2c078840d92"
+    },
     "alvr.client.stable": {
       "versionCode": 18091521,
       "versionName": "20.14.1",

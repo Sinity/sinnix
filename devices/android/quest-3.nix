@@ -30,6 +30,12 @@
       "com.limelight".url = "https://github.com/moonlight-stream/moonlight-android/releases/download/v12.1/app-nonRoot-release.apk";
     };
 
+    fdroid.packages = [
+      # Local file transfer, clipboard, and remote-input companion for the
+      # KDE Connect endpoint declared in desktop.xr.
+      "org.kde.kdeconnect_tp"
+    ];
+
     # Store and side-loaded utilities retained after the 2026-09 cleanup.
     # `cleanup = "report"` only surfaces drift in `android-rebuild plan`.
     attended = [
@@ -80,6 +86,9 @@
       "android.permission.POST_NOTIFICATIONS"
     ];
     "com.github.catfriend1.syncthingfork".grant = [
+      "android.permission.POST_NOTIFICATIONS"
+    ];
+    "org.kde.kdeconnect_tp".grant = [
       "android.permission.POST_NOTIFICATIONS"
     ];
     "com.igalia.wolvic".grant = [

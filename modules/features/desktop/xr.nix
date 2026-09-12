@@ -23,6 +23,10 @@ mkFeatureModule {
       description = "SideQuest headset application manager";
       default = true;
     };
+    kdeconnect = {
+      description = "KDE Connect LAN companion for headset file and input utilities";
+      default = true;
+    };
   };
   configFn =
     {
@@ -71,6 +75,24 @@ mkFeatureModule {
       })
       (lib.mkIf cfg.sidequest.enable {
         home-manager.users.${user}.home.packages = [ pkgs.sidequest ];
+      })
+      (lib.mkIf cfg.kdeconnect.enable {
+        programs.kdeconnect.enable = true;
+        # KDE Connect discovers and transports only on the local physical LAN.
+        networking.firewall.interfaces.${lanInterface} = {
+          allowedTCPPortRanges = [
+            {
+              from = 1714;
+              to = 1764;
+            }
+          ];
+          allowedUDPPortRanges = [
+            {
+              from = 1714;
+              to = 1764;
+            }
+          ];
+        };
       })
     ];
 } args
