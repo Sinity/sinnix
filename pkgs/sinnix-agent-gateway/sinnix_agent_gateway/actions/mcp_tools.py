@@ -3,23 +3,26 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import time
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import Field
+import anyio
+from pydantic import Field, ValidationError
 
 from ..action import (
     OBSERVER_OPERATOR,
     OPERATOR_ONLY,
     Action,
+    ActionResult,
     Example,
     MutationControls,
     RequestControls,
 )
 from ..capabilities import Capability
 from ..catalog import search_rows
-from ..contracts import VerbFamily
+from ..contracts import EffectMode, VerbFamily
 from ..locators import ARTIFACT_REF_PREFIX, McpToolLocator
 from ..mcp_broker import (
     McpBrokerDeadlineError,
@@ -236,6 +239,98 @@ class CallResult(GatewayModel):
     affordances: list[str] = Field(default_factory=list)
 
 
+_SELF_SERVER_NAMES = frozenset({"sinnix-agent-gateway", "sinnix-gateway"})
+
+
+async def _invoke_self(
+    runtime: Runtime,
+    *,
+    server: str,
+    tool: str,
+    ref: str,
+    arguments: dict[str, Any],
+    write: bool,
+) -> CallResult | ActionResult:
+    """Route the model's common self-broker spelling to a direct read tool.
+
+    ChatGPT can discover the gateway through ``gateway.catalog`` and then
+    incorrectly treat its own action set as a brokered upstream.  Preserve
+    the direct tool's validation, audit receipt and content blocks rather
+    than returning a misleading missing-server error.  Mutation remains
+    direct-only, so this alias cannot widen write authority.
+    """
+    # Imported lazily because this module is one member of actions.__init__.
+    from ..actions import BY_NAME as actions_by_name
+
+    action = actions_by_name.get(tool)
+    if action is None:
+        raise ProtocolError(
+            "not_found", "gateway action is not configured", details={"tool": tool}
+        )
+    if write or action.effect is not EffectMode.READ or action.name.startswith("mcp."):
+        raise ProtocolError(
+            "invalid_request",
+            "self-broker routing supports direct read actions only; invoke changes by their action name",
+            details={"tool": tool},
+        )
+    if runtime.principal_name not in action.principals:
+        raise ProtocolError(
+            "policy_denied", "principal cannot invoke the requested gateway action"
+        )
+    try:
+        request_input = action.Input.model_validate(dict(arguments))
+    except ValidationError as exc:
+        first = exc.errors(include_url=False)[0]
+        location = ".".join(str(part) for part in first.get("loc", ())) or "request"
+        raise ProtocolError(
+            "invalid_request", f"{location}: {first.get('msg')}"
+        ) from exc
+
+    blocks: list[Any] = []
+
+    async def callback() -> Any:
+        if action.is_async:
+            raw = await action.handler(runtime, request_input)
+        else:
+            raw = await anyio.to_thread.run_sync(
+                functools.partial(action.handler, runtime, request_input)
+            )
+        if isinstance(raw, ActionResult):
+            blocks.extend(raw.blocks)
+            raw = raw.data
+        try:
+            return action.Output.model_validate(raw).model_dump(
+                mode="json", by_alias=True
+            )
+        except ValidationError as exc:
+            raise ProtocolError(
+                "owner_failed",
+                "owner result does not match the declared output",
+                details={"problems": exc.errors(include_url=False)[:8]},
+            ) from exc
+
+    nested = await runtime.execute_v2_async(
+        action, callback, request_input.model_dump(mode="json")
+    )
+    if nested["result"]["outcome"] != "ok":
+        error = nested["error"] or {}
+        raise ProtocolError(
+            error.get("code", "owner_failed"),
+            error.get("message", "gateway action failed"),
+            details=error.get("details", {}),
+        )
+    result = CallResult(
+        ref=ref,
+        server=server,
+        tool=tool,
+        mode="read",
+        response=nested["data"],
+        truncated=False,
+        affordances=[tool],
+    )
+    return ActionResult(result, blocks=blocks) if blocks else result
+
+
 async def _invoke(
     runtime: Runtime,
     target: McpToolLocator,
@@ -245,6 +340,15 @@ async def _invoke(
     deadline_at: float | None = None,
 ) -> CallResult:
     server, tool, ref = target.resolve()
+    if server in _SELF_SERVER_NAMES:
+        return await _invoke_self(
+            runtime,
+            server=server,
+            tool=tool,
+            ref=ref,
+            arguments=arguments,
+            write=write,
+        )
     if server not in runtime.config.mcp_broker_servers:
         raise ProtocolError(
             "not_found", "MCP server is not configured", details={"server": server}
@@ -350,7 +454,7 @@ ACTIONS: tuple[Action, ...] = (
         resource_kinds=("mcp_tool",),
         affordances=("mcp.tools", "artifacts.read"),
         aliases=("call mcp tool", "query upstream", "polylogue search"),
-        documentation="Reads require an owner read-only annotation or an exact match to trusted registry selectors. Other requests require mcp.change (operator only).",
+        documentation="Reads require an owner read-only annotation or an exact match to trusted registry selectors. Other requests require mcp.change (operator only). A target using server=sinnix-agent-gateway is routed to the named direct read action, preserving its native content blocks; changes stay direct-only.",
         examples=(
             Example(
                 title="Call by server and tool",
