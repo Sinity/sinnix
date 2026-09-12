@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @sinnix-package
 # description: Control the Quest 3 through its USB bootstrap or authenticated LAN ADB transport
-# runtimeInputs: bash coreutils android-tools scrcpy iproute2 gawk systemd
+# runtimeInputs: bash coreutils android-tools scrcpy iproute2 gawk systemd @sinnix-quest-player
 
 set -euo pipefail
 
