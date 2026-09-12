@@ -12,11 +12,18 @@
       # Official upstream releases. The lock records the exact APK hash and
       # signing certificate, so a headset wipe can restore these clients.
       "alvr.client.stable".github = "alvr-org/ALVR";
+      # A local shell makes the headset independently useful for diagnostics,
+      # SSH and small automation.  Keep it on Termux's GitHub signing track so
+      # any future addons can use the same source.
+      "com.termux".url = "https://github.com/termux/termux-app/releases/download/v0.118.3/termux-app_v0.118.3%2Bgithub-debug_arm64-v8a.apk";
       # Wolvic publishes several headset-specific APKs in each GitHub release.
       # Pin the Quest artifact directly so a different headset build is never
       # selected solely because it shares the same Android package id.
       "com.igalia.wolvic".url = "https://github.com/Igalia/wolvic/releases/download/v1.9/Wolvic-oculusvr-arm64-gecko-generic-release.apk";
       "org.meumeu.wivrn.github".github = "WiVRn/WiVRn";
+      # A conventional Android client is a useful fallback for remote desktop,
+      # video and troubleshooting when an XR streaming runtime is not wanted.
+      "com.limelight".url = "https://github.com/moonlight-stream/moonlight-android/releases/download/v12.1/app-nonRoot-release.apk";
     };
 
     # Store and side-loaded utilities retained after the 2026-09 cleanup.
@@ -64,6 +71,9 @@
     "alvr.client.stable".grant = [
       "android.permission.POST_NOTIFICATIONS"
       "android.permission.RECORD_AUDIO"
+    ];
+    "com.termux".grant = [
+      "android.permission.POST_NOTIFICATIONS"
     ];
     "com.igalia.wolvic".grant = [
       "android.permission.POST_NOTIFICATIONS"

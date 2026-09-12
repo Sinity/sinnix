@@ -1,6 +1,6 @@
 {
   "abi": "arm64-v8a",
-  "lockedAt": 1789191940,
+  "lockedAt": 1789193314,
   "packages": {
     "alvr.client.stable": {
       "versionCode": 18091521,
@@ -31,6 +31,26 @@
         "d5e0870507688f23ae546c7b1bc43c6032bd04478b47e911ccc85702bd8d18d3"
       ],
       "source": "url:https://github.com/Igalia/wolvic/releases/download/v1.9/Wolvic-oculusvr-arm64-gecko-generic-release.apk"
+    },
+    "com.limelight": {
+      "versionCode": 314,
+      "versionName": "12.1",
+      "url": "https://github.com/moonlight-stream/moonlight-android/releases/download/v12.1/app-nonRoot-release.apk",
+      "sha256": "87012ee6949cd51f211d029ee1194d0daa03adc6ed3fc9448afa92b1dc43cd9f",
+      "signerSha256": [
+        "d6ce3a4df15060fe488fe52441a549dee4ba199b36e2cb1ed9085cca8bfa1aca"
+      ],
+      "source": "url:https://github.com/moonlight-stream/moonlight-android/releases/download/v12.1/app-nonRoot-release.apk"
+    },
+    "com.termux": {
+      "versionCode": 1002,
+      "versionName": "0.118.3",
+      "url": "https://github.com/termux/termux-app/releases/download/v0.118.3/termux-app_v0.118.3%2Bgithub-debug_arm64-v8a.apk",
+      "sha256": "72fdb596045116bf5ba1b5bdf5b26fddb9acc0bd074ad9f2da9eb0ae85e83a4e",
+      "signerSha256": [
+        "b6da01480eefd5fbf2cd3771b8d1021ec791304bdd6c4bf41d3faabad48ee5e1"
+      ],
+      "source": "url:https://github.com/termux/termux-app/releases/download/v0.118.3/termux-app_v0.118.3%2Bgithub-debug_arm64-v8a.apk"
     }
   }
 }
