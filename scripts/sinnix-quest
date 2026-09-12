@@ -45,6 +45,8 @@ Commands:
   performance status  show session-only Quest performance overrides
   performance high    enable 120 Hz and high CPU/GPU levels when thermally safe
   performance normal  restore a balanced 90 Hz, level-3 session profile
+  performance endurance
+                      reduce session draw for a data-only PCVR USB connection
   performance hud N   set the performance HUD detail level (0 through 4)
   shell               open an ADB shell
   screen [ARGS...]    mirror/control with scrcpy
@@ -444,6 +446,16 @@ performance() {
         setprop debug.oculus.foveation.dynamic 1
       '
       echo "enabled balanced performance for this Quest session"
+      performance status
+      ;;
+    endurance)
+      ANDROID_SERIAL="$target" adb shell '
+        setprop debug.oculus.refreshRate 72
+        setprop debug.oculus.cpuLevel 2
+        setprop debug.oculus.gpuLevel 2
+        setprop debug.oculus.foveation.dynamic 1
+      '
+      echo "enabled 72 Hz endurance profile for this Quest session"
       performance status
       ;;
     hud)
