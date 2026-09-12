@@ -67,11 +67,12 @@ class ExecutionResult:
     combined_output: bytes = b""
     timed_out: bool = False
     output_exceeded: bool = False
+    stopped_early: bool = False
     failure_class: str | None = None
 
     @property
     def available(self) -> bool:
-        return self.failure_class is None and self.exit_status == 0
+        return self.failure_class is None and (self.exit_status == 0 or self.stopped_early)
 
     def stderr_excerpt(self) -> str:
         return self.stderr.decode("utf-8", errors="replace").strip()[:2_000]
@@ -234,7 +235,7 @@ class OwnerExecution:
         command: Sequence[str],
         profile: ExecutionProfile,
         *,
-        stdout_chunk_callback: Callable[[bytes], None] | None = None,
+        stdout_chunk_callback: Callable[[bytes], bool | None] | None = None,
     ) -> ExecutionResult:
         if not command:
             raise ValueError("owner command cannot be empty")
@@ -263,6 +264,7 @@ class OwnerExecution:
         combined_output = bytearray()
         pending_stdin = memoryview(profile.stdin_bytes or b"")
         exceeded = False
+        stopped_early = False
         stream_failure: str | None = None
         selector = selectors.DefaultSelector()
         assert process.stdout is not None
@@ -309,9 +311,13 @@ class OwnerExecution:
                         combined_output.extend(chunk)
                     if stream == "stdout" and stdout_chunk_callback is not None:
                         try:
-                            stdout_chunk_callback(chunk)
+                            keep_reading = stdout_chunk_callback(chunk)
                         except Exception:
                             stream_failure = "command_stream_decode"
+                            self.terminate(process)
+                            break
+                        if keep_reading is False:
+                            stopped_early = True
                             self.terminate(process)
                             break
                     else:
@@ -357,7 +363,7 @@ class OwnerExecution:
             failure = "command_timeout"
         elif exceeded:
             failure = "command_output_bound"
-        elif exit_status != 0:
+        elif not stopped_early and exit_status != 0:
             failure = "command_failed"
         else:
             failure = None
@@ -373,6 +379,7 @@ class OwnerExecution:
             ),
             timed_out=timed_out,
             output_exceeded=exceeded,
+            stopped_early=stopped_early,
             failure_class=failure,
         )
 
@@ -380,7 +387,7 @@ class OwnerExecution:
         self,
         command: Sequence[str],
         profile: ExecutionProfile,
-        on_row: Callable[[Any], None],
+        on_row: Callable[[Any], bool | None],
         *,
         max_row_bytes: int | None = None,
     ) -> ExecutionResult:
@@ -388,7 +395,7 @@ class OwnerExecution:
         pending = bytearray()
         row_bound = max_row_bytes or profile.max_stdout_bytes
 
-        def consume(chunk: bytes) -> None:
+        def consume(chunk: bytes) -> bool | None:
             pending.extend(chunk)
             if len(pending) > row_bound and b"\n" not in pending:
                 raise ValueError("JSONL row exceeded stream bound")
@@ -399,7 +406,9 @@ class OwnerExecution:
                     raise ValueError("JSONL row exceeded stream bound")
                 if not line:
                     continue
-                on_row(json.loads(line))
+                if on_row(json.loads(line)) is False:
+                    return False
+            return None
 
         result = self.run(command, profile, stdout_chunk_callback=consume)
         if result.failure_class is not None:
