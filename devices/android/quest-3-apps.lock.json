@@ -1,6 +1,6 @@
 {
   "abi": "arm64-v8a",
-  "lockedAt": 1789193314,
+  "lockedAt": 1789193487,
   "packages": {
     "alvr.client.stable": {
       "versionCode": 18091521,
@@ -21,6 +21,16 @@
         "a871d5438f9c704096e935824d93a140d9ee149c806eaa922f84fbaced4403ed"
       ],
       "source": "github:WiVRn/WiVRn"
+    },
+    "com.github.catfriend1.syncthingfork": {
+      "versionCode": 2010500,
+      "versionName": "2.1.5.0",
+      "url": "https://github.com/researchxxl/syncthing-android/releases/download/v2.1.5.0/com.github.catfriend1.syncthingfork_release_v2.1.5.0_arm64-v8a.apk",
+      "sha256": "221c05d1b6db9788e7112a6293a230ef0e7bc676d8523a96db5ff176be94582c",
+      "signerSha256": [
+        "d374b8de5057013143c7d1515a015598c2df403be8160cae01a58c227e6e86aa"
+      ],
+      "source": "url:https://github.com/researchxxl/syncthing-android/releases/download/v2.1.5.0/com.github.catfriend1.syncthingfork_release_v2.1.5.0_arm64-v8a.apk"
     },
     "com.igalia.wolvic": {
       "versionCode": 201401350,
