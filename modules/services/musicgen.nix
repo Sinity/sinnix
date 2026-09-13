@@ -16,7 +16,7 @@
 mkServiceModule {
   name = "musicgen";
   description = "MusicGen text-to-music (containerized, CDI GPU)";
-  surface = {
+  surface = { cfg, ... }: {
     ai = {
       backendKind = "container";
       requiresCuda = true;
@@ -25,8 +25,8 @@ mkServiceModule {
     resourceClass = "ordinary";
     activation = {
       mode = "socket-proxy";
-      publicEndpoint = "127.0.0.1:${toString helpers.data.ports.musicgen.public}";
-      backendEndpoint = "127.0.0.1:${toString helpers.data.ports.musicgen.backend}";
+      publicEndpoint = "127.0.0.1:${toString cfg.port}";
+      backendEndpoint = "127.0.0.1:${toString cfg.backendPort}";
       # Unmeasured (disabled on this host). Same all-in-one Gradio+PyTorch
       # toolkit shape as ComfyUI, so sized to the same tier.
       idleTimeout = "900s";
