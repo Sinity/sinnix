@@ -23,6 +23,7 @@ from sinnix_ops_reducer.feedback import (
     CoalescingTrigger,
     FeedbackSpool,
     is_elicit,
+    parse_command_argv,
     resolve_elicit_model,
 )
 from sinnix_ops_reducer.server import serve
@@ -93,6 +94,19 @@ def test_is_elicit_ignores_non_objects() -> None:
     assert is_elicit({"schema": "sinnix-elicit-v1"})
     assert not is_elicit(["sinnix-elicit-v1"])
     assert not is_elicit(None)
+
+
+def test_drain_command_is_a_typed_argv() -> None:
+    assert parse_command_argv('["agentctl", "job", "start", "sinnix"]') == [
+        "agentctl",
+        "job",
+        "start",
+        "sinnix",
+    ]
+    with pytest.raises(ValueError, match="JSON argv"):
+        parse_command_argv("agentctl job start sinnix")
+    with pytest.raises(ValueError, match="nonempty"):
+        parse_command_argv("[]")
 
 
 def test_resolve_elicit_model_rejects_traversal_and_odd_charsets(

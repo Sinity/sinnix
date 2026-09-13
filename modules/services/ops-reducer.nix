@@ -82,7 +82,7 @@ mkServiceModule {
             Type = "simple";
             ExecStart = "${reducer}/bin/sinnix-ops-reducer --runtime-dir %t --state-dir ${stateDir} --inventory /etc/sinnix/runtime-inventory.json --capability-index /etc/sinnix/capability-index.json --usage-census ${config.sinnix.paths.machineRoot}/usage-census.jsonl --clodex-usage /home/${userName}/.clodex/logs/inference-requests.jsonl --ambient-product /realm/project/sinity-lynchpin/.lynchpin/generated/analysis/ambient_intelligence.json --anchor-events %t/sinnix/afk-resume.json --hyprland-events %t/sinnix/hyprland-events --agentctl ${scriptPkgs.agentctl}/bin/agentctl --observe-command ${observe}/bin/sinnix-observe --interval ${toString cfg.intervalSeconds} --feedback-dir ${cfg.feedbackDir}${
               lib.optionalString (cfg.hubManifest != null) " --hub-manifest ${cfg.hubManifest}"
-            }${lib.optionalString (cfg.elicitCommand != null) " --elicit-command '${cfg.elicitCommand}'"}";
+            }${lib.optionalString (cfg.elicitCommand != null) " --elicit-command ${lib.escapeShellArg (builtins.toJSON cfg.elicitCommand)}"}";
             # nvidia-smi, journalctl, systemctl and hyprctl are what the pages
             # probe the live host with; /run/current-system/sw/bin is where
             # they are, and the pages render on request rather than from a
@@ -141,12 +141,20 @@ mkServiceModule {
     };
 
     elicitCommand = lib.mkOption {
-      type = lib.types.nullOr lib.types.str;
-      default = null;
+      type = lib.types.nullOr (lib.types.listOf lib.types.str);
+      default = [
+        "${scriptPkgs.agentctl}/bin/agentctl"
+        "job"
+        "start"
+        "sinnix"
+        "elicit_autoingest"
+        "--wait"
+      ];
       description = ''
-        Command run, coalesced, when a `sinnix-elicit-v1` record lands in the
-        feedback spool — replacing the 120s drain timer with the arrival that
-        made it necessary. Null means nothing is triggered.
+        AgentCTL argv run, coalesced, when a `sinnix-elicit-v1` record lands
+        in the feedback spool. The default waits for the declared
+        `elicit_autoingest` operation, so completion means the drain and
+        model refit completed. Null disables arrival-triggered draining.
       '';
     };
 

@@ -124,6 +124,14 @@ result = "exit"
 cache = "none"
 timeout_seconds = 3600
 
+[operations.elicit_autoingest]
+description = "Ingest queued comparison judgments and refit changed models"
+exec = ["sinnix-elicit", "autoingest"]
+pool = "normal"
+result = "exit"
+cache = "none"
+timeout_seconds = 300
+
 [operations.phone_app_build]
 description = "Build the phone application and its signing installer"
 exec = ["nix", "build", ".#sinnix-phone-app-install", "--no-link", "--print-out-paths"]
