@@ -260,6 +260,7 @@ mkServiceModule {
                 Service = lib.sinnix.mkRuntimeServiceConfig {
                   runtimeInventory = config.sinnix.runtime.inventory;
                   unit = "sinnix-audio-recorder-devices.service";
+                  manager = "user";
                   overrides = {
                     Type = "simple";
                     ExecStart = lib.concatStringsSep " " (
@@ -309,6 +310,7 @@ mkServiceModule {
                 Service = lib.sinnix.mkRuntimeServiceConfig {
                   runtimeInventory = config.sinnix.runtime.inventory;
                   unit = "sinnix-audio-topology.service";
+                  manager = "user";
                   overrides = {
                     Type = "simple";
                     ExecStart = "${audioPkg}/bin/sinnix-audio-capture topology --capture-root ${lakeRoot} --pw-mon-bin ${pwMonBin}";

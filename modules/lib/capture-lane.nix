@@ -251,7 +251,9 @@ let
                 };
                 Service = lib.sinnix.mkRuntimeServiceConfig {
                   runtimeInventory = config.sinnix.runtime.inventory;
-                  inherit unit;
+                  # The surface registered itself under this lane's manager;
+                  # the lookup matches on both, so pass the declared value.
+                  inherit unit manager;
                   overrides = streamOverrides;
                 };
                 Install.WantedBy = if wantedBy != null then wantedBy else [ target ];

@@ -197,6 +197,7 @@ mkServiceModule {
           serviceConfig = lib.sinnix.mkRuntimeServiceConfig {
             runtimeInventory = config.sinnix.runtime.inventory;
             unit = "sinnix-cockpit.service";
+            manager = "user";
             overrides = {
               Type = "simple";
               # Idempotent (checks existing activity names before inserting), so

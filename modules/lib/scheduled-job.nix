@@ -102,15 +102,18 @@ let
   # job's own surface already carries it -- modules/runtime.nix attaches the
   # same template to every observed surface, and a unit naming one dependency
   # twice is noise.
-  surfaceCoversFailure =
+  # A job may register its surface on the timer rather than the service (a
+  # submission job's policy belongs to the schedule). Only this service's own
+  # surface can answer a unit lookup for it.
+  surfaceIsThisService =
     surface != null
     && (surface.unit or null) == "${unitName}.service"
-    && (surface.manager or "system") == manager
-    && (surface.observe.enable or false);
+    && (surface.manager or "system") == manager;
+  surfaceCoversFailure = surfaceIsThisService && (surface.observe.enable or false);
   serviceBody = {
     description = j.description or description;
     serviceConfig =
-      if surface != null then
+      if surfaceIsThisService then
         systemdLib.mkRuntimeServiceConfig {
           runtimeInventory = config.sinnix.runtime.inventory;
           unit = "${unitName}.service";

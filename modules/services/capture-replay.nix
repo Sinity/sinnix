@@ -129,6 +129,7 @@ mkServiceModule {
           Service = lib.sinnix.mkRuntimeServiceConfig {
             runtimeInventory = config.sinnix.runtime.inventory;
             unit = unit;
+            manager = "user";
             overrides = {
               Type = "simple";
               Environment = "PATH=${config.security.wrapperDir}:/run/current-system/sw/bin";
