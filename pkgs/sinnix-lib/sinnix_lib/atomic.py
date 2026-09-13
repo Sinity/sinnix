@@ -154,15 +154,28 @@ def atomic_text_writer(
 ) -> Iterator[TextIO]:
     """Stream text into a private sibling, publishing only on clean exit."""
     destination = Path(destination)
+    _validate_name(destination.name)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    directory = os.open(destination.parent, os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_CLOEXEC", 0))
+    directory = os.open(
+        destination.parent,
+        os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_CLOEXEC", 0),
+    )
     temporary = None
     descriptor = -1
     try:
         for _ in range(8):
             candidate = f".{destination.name}.atomic-tmp-{uuid.uuid4().hex}"
             try:
-                descriptor = os.open(candidate, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, mode, dir_fd=directory)
+                descriptor = os.open(
+                    candidate,
+                    os.O_WRONLY
+                    | os.O_CREAT
+                    | os.O_EXCL
+                    | os.O_NOFOLLOW
+                    | getattr(os, "O_CLOEXEC", 0),
+                    mode,
+                    dir_fd=directory,
+                )
                 temporary = candidate
                 break
             except FileExistsError:
@@ -176,7 +189,12 @@ def atomic_text_writer(
             handle.flush()
             if fsync:
                 os.fsync(handle.fileno())
-        os.replace(temporary, destination.name, src_dir_fd=directory, dst_dir_fd=directory)
+        os.replace(
+            temporary,
+            destination.name,
+            src_dir_fd=directory,
+            dst_dir_fd=directory,
+        )
         temporary = None
         if fsync:
             os.fsync(directory)

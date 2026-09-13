@@ -194,3 +194,59 @@ def test_write_json_atomic_syncs_the_file_and_its_directory_when_asked(
     synced.clear()
     write_json_atomic(tmp_path / "cheap.json", {"a": 1})
     assert synced == []
+
+
+def test_text_writer_keeps_the_prior_file_when_its_body_fails(tmp_path):
+    """A stream failure never exposes a partial replacement to readers."""
+    from sinnix_lib.atomic import atomic_text_writer
+
+    destination = tmp_path / "scan.jsonl"
+    destination.write_text("old\n")
+
+    with pytest.raises(RuntimeError, match="interrupted"):
+        with atomic_text_writer(destination, fsync=False) as handle:
+            handle.write("new\n")
+            raise RuntimeError("interrupted")
+
+    assert destination.read_text() == "old\n"
+    assert list(tmp_path.iterdir()) == [destination]
+
+
+def test_text_writer_publishes_complete_content_with_requested_mode(tmp_path):
+    from sinnix_lib.atomic import atomic_text_writer
+
+    destination = tmp_path / "scan.jsonl"
+    with atomic_text_writer(destination, fsync=False, mode=0o640) as handle:
+        handle.write('{"record": 1}\n')
+
+    assert destination.read_text() == '{"record": 1}\n'
+    assert stat.S_IMODE(destination.stat().st_mode) == 0o640
+
+
+def test_text_writer_rejects_a_nonfile_destination_before_opening_it(tmp_path):
+    from sinnix_lib.atomic import atomic_text_writer
+
+    with pytest.raises(ValueError, match="basename"):
+        with atomic_text_writer(Path("/"), fsync=False):
+            pass
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_text_writer_retries_a_temporary_name_collision(tmp_path, monkeypatch):
+    from sinnix_lib.atomic import atomic_text_writer
+
+    destination = tmp_path / "scan.jsonl"
+    collision = tmp_path / ".scan.jsonl.atomic-tmp-collision"
+    collision.write_text("untouched")
+    names = iter(["collision", "fresh"])
+    monkeypatch.setattr(
+        atomic.uuid,
+        "uuid4",
+        lambda: type("UUID", (), {"hex": next(names)})(),
+    )
+
+    with atomic_text_writer(destination, fsync=False) as handle:
+        handle.write("published")
+
+    assert collision.read_text() == "untouched"
+    assert destination.read_text() == "published"
