@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 
 from sinnix_agent_gateway.owner_execution import (
     EnvironmentProfile,
@@ -59,6 +60,21 @@ def test_owner_execution_terminates_timed_out_command() -> None:
     assert result.failure_class == "command_timeout"
     assert result.timed_out is True
     assert result.exit_status is not None
+
+
+def test_owner_execution_deadline_kills_descendant_holding_pipes() -> None:
+    started = time.monotonic()
+    result = OwnerExecution().run(
+        [
+            sys.executable,
+            "-c",
+            "import os, time; os.fork() and os._exit(0); time.sleep(0.8)",
+        ],
+        ExecutionProfile(route=OwnerRoute("fixture"), timeout_seconds=0.05),
+    )
+
+    assert result.failure_class == "command_timeout"
+    assert time.monotonic() - started < 0.4
 
 
 def test_owner_execution_reports_unavailable_command() -> None:

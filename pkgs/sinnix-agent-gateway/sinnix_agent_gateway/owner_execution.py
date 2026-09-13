@@ -218,6 +218,14 @@ class OwnerExecution:
     def terminate(process: subprocess.Popen[bytes]) -> None:
         """Terminate one detached process group, escalating after one second."""
         if process.poll() is not None:
+            # The leader can exit while a descendant still holds its stdout or
+            # stderr pipe.  The group remains addressable even though wait()
+            # returns immediately for the leader; kill it before cleanup reads
+            # either pipe, otherwise that read defeats the caller's deadline.
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
             return
         try:
             os.killpg(process.pid, signal.SIGTERM)
