@@ -363,49 +363,33 @@ mkServiceModule {
         ${frontendSites}
       '';
 
-      # $1 is the environment file to write (the unit passes %t-derived path).
-      resolveBind = pkgs.writeShellScript "sinnix-hub-resolve-bind" ''
+      mkResolveBind = name: key: label: pkgs.writeShellScript name ''
         set -euo pipefail
         target="$1"
-        ${pkgs.coreutils}/bin/mkdir -p "$(${pkgs.coreutils}/bin/dirname "$target")"
+        target_dir="$(${pkgs.coreutils}/bin/dirname "$target")"
+        ${pkgs.coreutils}/bin/mkdir -p "$target_dir"
         for _ in $(${pkgs.coreutils}/bin/seq 1 60); do
           address="$(${pkgs.iproute2}/bin/ip -4 -o addr show dev ${tailscaleInterface} 2>/dev/null \
             | ${pkgs.gawk}/bin/awk '{print $4}' \
             | ${pkgs.coreutils}/bin/cut -d/ -f1 \
             | ${pkgs.coreutils}/bin/head -n1)"
           if [ -n "''${address:-}" ]; then
-            ${pkgs.coreutils}/bin/printf 'SINNIX_HUB_TAILNET_IP=%s\n' "$address" > "$target"
+            temporary="$(${pkgs.coreutils}/bin/mktemp "$target_dir/.${key}.tmp.XXXXXX")"
+            trap 'rm -f "$temporary"' EXIT
+            ${pkgs.coreutils}/bin/printf '${key}=%s\n' "$address" > "$temporary"
+            ${pkgs.coreutils}/bin/sync -f "$temporary"
+            ${pkgs.coreutils}/bin/mv -f "$temporary" "$target"
+            ${pkgs.coreutils}/bin/sync -f "$target_dir"
+            trap - EXIT
             exit 0
           fi
           ${pkgs.coreutils}/bin/sleep 2
         done
-        echo "sinnix-hub: ${tailscaleInterface} has no IPv4 address; refusing to start" >&2
+        echo "${label}: ${tailscaleInterface} has no IPv4 address; refusing to start" >&2
         exit 1
       '';
-
-      # The dispatcher's embedded telemetry receiver binds tailscale0
-      # directly (it is a raw TCP listener, not something Caddy fronts), so
-      # it needs its own resolved-address file on the dispatcher unit's own
-      # ExecStartPre -- ported unchanged from an earlier standalone
-      # receiver module.
-      resolveBindPhoneStream = pkgs.writeShellScript "sinnix-phone-dispatcher-resolve-bind" ''
-        set -euo pipefail
-        target="$1"
-        ${pkgs.coreutils}/bin/mkdir -p "$(${pkgs.coreutils}/bin/dirname "$target")"
-        for _ in $(${pkgs.coreutils}/bin/seq 1 60); do
-          address="$(${pkgs.iproute2}/bin/ip -4 -o addr show dev ${tailscaleInterface} 2>/dev/null \
-            | ${pkgs.gawk}/bin/awk '{print $4}' \
-            | ${pkgs.coreutils}/bin/cut -d/ -f1 \
-            | ${pkgs.coreutils}/bin/head -n1)"
-          if [ -n "''${address:-}" ]; then
-            ${pkgs.coreutils}/bin/printf 'SINNIX_PHONE_STREAM_HOST=%s\n' "$address" > "$target"
-            exit 0
-          fi
-          ${pkgs.coreutils}/bin/sleep 2
-        done
-        echo "sinnix-phone-dispatcher: ${tailscaleInterface} has no IPv4 address; refusing to start" >&2
-        exit 1
-      '';
+      resolveBind = mkResolveBind "sinnix-hub-resolve-bind" "SINNIX_HUB_TAILNET_IP" "sinnix-hub";
+      resolveBindPhoneStream = mkResolveBind "sinnix-phone-dispatcher-resolve-bind" "SINNIX_PHONE_STREAM_HOST" "sinnix-phone-dispatcher";
     in
     {
       assertions = [
