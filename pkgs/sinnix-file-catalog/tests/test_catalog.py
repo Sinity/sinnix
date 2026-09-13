@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import stat
 import subprocess
 import uuid
 from pathlib import Path
@@ -67,6 +68,14 @@ def test_import_is_idempotent_and_merges_evidence(tmp_path: Path) -> None:
     assert second["id"] == first["id"]
     assert second["tags"] == ["audio", "new"]
     assert len(second["inspections"]) == 2
+
+
+def test_catalog_publication_is_private(tmp_path: Path) -> None:
+    payload = tmp_path / "recording.txt"
+    payload.write_text("sample", encoding="utf-8")
+    catalog = tmp_path / "catalog.json"
+    assert import_rows(catalog, [observation(payload)]).returncode == 0
+    assert stat.S_IMODE(catalog.stat().st_mode) == 0o600
 
 
 def test_relocate_preserves_id_and_history_after_external_rename(

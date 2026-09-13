@@ -2,6 +2,7 @@
 # @sinnix-package
 # description: Maintain an evidence catalog of files and collections
 # runtimeInputs: python3
+# pythonPackages: @sinnix-lib
 
 """Small, portable file evidence catalog.
 
@@ -17,13 +18,13 @@ import copy
 import datetime as _dt
 import fcntl
 import json
-import os
 import stat
 import sys
-import tempfile
 import uuid
 from pathlib import Path
 from typing import Any
+
+from sinnix_lib.atomic import atomic_publish
 
 SCHEMA_VERSION = 1
 REQUIRED_INSPECTION = ("method", "scope", "basis")
@@ -234,16 +235,7 @@ def write_catalog(path: Path, catalog: dict[str, Any]) -> None:
     catalog["updated_at"] = now()
     text = json.dumps(catalog, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(text)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(temporary, path)
-    finally:
-        try: os.unlink(temporary)
-        except FileNotFoundError: pass
+    atomic_publish(path, text.encode("utf-8"), fsync=True, mode=0o600)
 
 
 def locked(path: Path):

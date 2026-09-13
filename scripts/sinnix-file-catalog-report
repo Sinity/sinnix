@@ -2,6 +2,7 @@
 # @sinnix-package
 # description: Render a portable file inspection catalog as a searchable offline report
 # runtimeInputs: python3
+# pythonPackages: @sinnix-lib
 # docs: docs/file-catalog.md
 """Render authored catalog observations without reading the described payloads."""
 
@@ -11,12 +12,12 @@ import argparse
 import datetime as dt
 import html
 import json
-import os
 import re
 import shlex
 import sys
-import tempfile
 from pathlib import Path
+
+from sinnix_lib.atomic import atomic_publish
 
 
 STYLE = """
@@ -223,15 +224,7 @@ def main() -> None:
     ])
     output = render(catalog, source, args.template.read_text(encoding="utf-8"), command)
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    fd, temporary = tempfile.mkstemp(prefix=f'.{args.output.name}.', dir=args.output.parent)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as file:
-            file.write(output)
-            file.flush()
-            os.fsync(file.fileno())
-        os.replace(temporary, args.output)
-    finally:
-        Path(temporary).unlink(missing_ok=True)
+    atomic_publish(args.output, output.encode("utf-8"), fsync=True, mode=0o600)
     print(args.output)
 
 
