@@ -111,6 +111,7 @@
           name = "sinnix-config-drift";
           suiteDir = ../../pkgs/sinnix-config-drift/tests;
           scripts = [ "sinnix-config-drift" ];
+          extraPythonPackages = [ sinnix-lib ];
           nativeBuildInputs = [ pkgs.systemd ];
         };
         # Provably fails when: the atuin word-boundary match regresses to a

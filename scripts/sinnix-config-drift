@@ -2,6 +2,7 @@
 # @sinnix-package
 # description: Compare live machine state with the evaluated Sinnix manifest
 # runtimeInputs: python3 coreutils systemd util-linux
+# pythonPackages: @sinnix-lib
 
 from __future__ import annotations
 
@@ -13,6 +14,8 @@ import sys
 import tomllib
 from pathlib import Path
 from typing import Any
+
+from sinnix_lib.atomic import atomic_publish
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -391,11 +394,8 @@ def main(argv: list[str] | None = None) -> int:
     rows = collect(manifest, args)
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
-    temporary = output.with_name(output.name + ".tmp")
-    with temporary.open("w", encoding="utf-8") as handle:
-        for row in rows:
-            handle.write(json.dumps(row, sort_keys=True) + "\n")
-    os.replace(temporary, output)
+    payload = "".join(json.dumps(row, sort_keys=True) + "\n" for row in rows)
+    atomic_publish(output, payload.encode("utf-8"), fsync=True, mode=0o600)
     return 0
 
 

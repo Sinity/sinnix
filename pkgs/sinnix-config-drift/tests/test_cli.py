@@ -1,4 +1,5 @@
 import json
+import stat
 import subprocess
 from pathlib import Path
 
@@ -75,6 +76,7 @@ def test_sysctl_drift_and_missing_probe_are_explicit(tmp_path):
     by_check = {row["check"]: row for row in rows}
     assert by_check["sysctl:vm.swappiness"]["match"] is False
     assert by_check["sysctl:vm.page-cluster"]["status"] == "unavailable"
+    assert stat.S_IMODE((tmp_path / "drift.jsonl").stat().st_mode) == 0o600
 
 
 def test_generation_unknown_revision_is_always_flagged(tmp_path):
