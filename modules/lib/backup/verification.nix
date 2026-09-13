@@ -86,8 +86,7 @@
           --arg state "$state" \
           --arg ts "$(date -Iseconds)" \
           '{operation_kind:$operation_kind,run_id:$run_id,expected_jobs:$expected_jobs,start_epoch:$start_epoch,deadline_epoch:$deadline_epoch,state:$state,updated_at:$ts}' \
-          > ${lib.escapeShellArg borgIntegrityReceipt}.tmp
-        mv ${lib.escapeShellArg borgIntegrityReceipt}.tmp ${lib.escapeShellArg borgIntegrityReceipt}
+          | publish_backup_marker ${lib.escapeShellArg borgIntegrityReceipt}
       }
       start_epoch="$(date +%s)"
       deadline_epoch=$((start_epoch + 3 * 3600))
