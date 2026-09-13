@@ -25,6 +25,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from sinnix_lib.atomic import atomic_publish
 from sinnix_lib.ledger import utc_ts
 from sinnix_lib.process import run
 from sinnix_lib.values import read_text
@@ -293,9 +294,8 @@ def load_json_arg(value: str | None) -> dict[str, Any]:
 
 
 def write_json(path: Path, payload: dict[str, Any]) -> None:
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    tmp.replace(path)
+    body = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    atomic_publish(path, body.encode("utf-8"), fsync=True, mode=0o644)
 
 
 def tee_stream(stream: Any, log_file: Any, console: Any) -> None:

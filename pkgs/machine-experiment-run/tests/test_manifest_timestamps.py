@@ -57,6 +57,7 @@ def test_experiment_manifest_stamps_one_utc_grammar(tmp_path: Path) -> None:
     assert UTC_TS.fullmatch(manifest["started_at"])
     assert UTC_TS.fullmatch(manifest["ended_at"])
     assert RUN_ID.fullmatch(manifest["run_id"])
+    assert manifests[0].stat().st_mode & 0o777 == 0o644
 
     started = json.loads((manifests[0].parent / "started.json").read_text())
     assert UTC_TS.fullmatch(started["started_at"])
