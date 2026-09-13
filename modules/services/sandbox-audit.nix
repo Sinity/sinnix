@@ -211,14 +211,14 @@ mkServiceModule {
 
         # Every kernel audit record was being written TWICE: once by auditd to
         # /var/log/audit/audit.log, and once by journald, which subscribes to
-        # the same netlink socket whenever services.journald.audit is on (it
+        # the same netlink socket whenever journald's Audit setting is on (it
         # defaults to "keep"). auditd is the consumer with the tooling
         # (ausearch, the drain, the lake), so it keeps the records; the journal
         # keeps none. This is also what stops audit volume from crowding out
         # everything else in `journalctl` -- on 2026-08-16 audit was 3270224 of
         # the 3272000 records in the hour, which is what a "readable journal"
         # loses to.
-        services.journald.audit = lib.mkIf cfg.kernelAudit false;
+        services.journald.settings.Journal.Audit = lib.mkIf cfg.kernelAudit "no";
         # Audit=false alone is not enough, which is only visible by measuring:
         # it stops journald turning kernel auditing ON, but journald still
         # RECEIVES every record through this socket, which NixOS wants
