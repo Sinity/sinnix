@@ -207,26 +207,8 @@ adb_resolve() {
 }
 
 adb_any() {
-  local serial
-  if [ -n "$ADB_RESOLVED" ]; then
-    ANDROID_SERIAL="$ADB_RESOLVED" adb "$@"
-    return
-  fi
-  if ANDROID_SERIAL="$ADB_TARGET" adb get-state >/dev/null 2>&1; then
-    ANDROID_SERIAL="$ADB_TARGET" adb "$@"
-    return
-  fi
-  timeout 8 adb connect "$ADB_TARGET" >/dev/null 2>&1 || true
-  if ANDROID_SERIAL="$ADB_TARGET" adb get-state >/dev/null 2>&1; then
-    ANDROID_SERIAL="$ADB_TARGET" adb "$@"
-    return
-  fi
-  serial=$(adb devices | awk '$2 == "device" && $1 !~ /:/ { print $1; exit }')
-  if [ -n "$serial" ]; then
-    ANDROID_SERIAL="$serial" adb "$@"
-    return
-  fi
-  return 1
+  adb_resolve || return 1
+  ANDROID_SERIAL="$ADB_RESOLVED" adb "$@"
 }
 
 # The grants the app needs that only shell-uid can make. RECORD_AUDIO is
@@ -668,9 +650,6 @@ app-install)
   # -- while the rest of this case carried on re-asserting grants and retiring
   # the Termux recorder as though a new APK were running.
   serial="$ADB_RESOLVED"
-  if [ -z "$serial" ]; then
-    serial=$(adb devices | awk '$2 == "device" { print $1; exit }')
-  fi
   echo "installing to ${serial:-unknown device} ($(adb_any shell getprop ro.serialno 2>/dev/null | tr -d '\r'))"
   install_log="$(mktemp)"
   install_ok=1
