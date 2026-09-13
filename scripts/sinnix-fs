@@ -36,6 +36,7 @@ import re
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 from collections import Counter
 from pathlib import Path
@@ -61,16 +62,14 @@ def safe(value):
 
 
 def run_duckdb_file(db: Path, sql: str, script_name: str) -> subprocess.CompletedProcess:
-    """Write `sql` to a scratch file next to `db` and execute it via the CLI.
-
-    Always via `-f` on a real file, never stdin: piping SQL into `duckdb`
-    over a plain pipe reads nothing, still exits 0, and produces an empty
-    database with a success message. The scratch file is removed regardless
-    of outcome; callers decide how to react to a non-zero exit.
-    """
+    """Execute SQL through a private scratch file beside its staged database."""
     db.parent.mkdir(parents=True, exist_ok=True)
-    script = db.parent / script_name
-    script.write_text(sql, encoding="utf-8")
+    with tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", prefix=f".{script_name}.", suffix=".sql",
+        dir=db.parent, delete=False,
+    ) as handle:
+        script = Path(handle.name)
+        handle.write(sql)
     try:
         return subprocess.run(["duckdb", str(db), "-f", str(script)], text=True,
                               capture_output=True, check=False)
@@ -81,6 +80,62 @@ def run_duckdb_file(db: Path, sql: str, script_name: str) -> subprocess.Complete
 def duckdb_query(db: Path, sql: str) -> subprocess.CompletedProcess:
     return subprocess.run(["duckdb", str(db), "-noheader", "-list", "-c", sql],
                           text=True, capture_output=True, check=False)
+
+
+def _fsync_file(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_CLOEXEC", 0))
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def materialize_pair(
+    db: Path, parquet: Path, sql_for_parquet, table: str,
+) -> str:
+    """Build and validate a database/Parquet pair before replacing either output.
+
+    The two final names remain a compatibility contract for existing readers.
+    Staging prevents a failed rerun from destroying their prior generation;
+    readers can only observe a mixed pair during the two final renames.
+    """
+    db.parent.mkdir(parents=True, exist_ok=True)
+    if db.parent != parquet.parent:
+        raise ValueError("database and parquet must share a publication directory")
+    with tempfile.TemporaryDirectory(prefix=f".{db.stem}.materialize-", dir=db.parent) as staging:
+        stage = Path(staging)
+        staged_db = stage / db.name
+        staged_parquet = stage / parquet.name
+        proc = run_duckdb_file(staged_db, sql_for_parquet(staged_parquet), "materialize")
+        if proc.returncode != 0:
+            print(proc.stdout, file=sys.stderr)
+            print(proc.stderr, file=sys.stderr)
+            raise SystemExit(f"duckdb failed ({proc.returncode})")
+
+        check = duckdb_query(staged_db, f"SELECT count(*) FROM {table}")
+        rows = check.stdout.strip()
+        if check.returncode != 0 or not rows.isdigit() or int(rows) == 0:
+            raise SystemExit(f"materialize produced no rows (duckdb said: {rows!r} "
+                             f"{check.stderr.strip()})")
+        parquet_check = duckdb_query(
+            staged_db, f"SELECT count(*) FROM read_parquet('{staged_parquet}')",
+        )
+        if (parquet_check.returncode != 0 or parquet_check.stdout.strip() != rows):
+            raise SystemExit(f"parquet validation failed for {staged_parquet}: "
+                             f"{parquet_check.stderr.strip()}")
+
+        # DuckDB has closed its writers; make both completed files durable
+        # before either public name moves.  os.replace is same-directory here.
+        _fsync_file(staged_db)
+        _fsync_file(staged_parquet)
+        os.replace(staged_db, db)
+        os.replace(staged_parquet, parquet)
+        directory = os.open(db.parent, os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_CLOEXEC", 0))
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+        return rows
 
 
 # =====================================================================
@@ -337,22 +392,7 @@ FROM nodes n LEFT JOIN rollup r USING (path);
 
 COPY (SELECT * FROM inventory) TO '{parquet}' (FORMAT PARQUET);
 """
-    db.parent.mkdir(parents=True, exist_ok=True)
-    db.unlink(missing_ok=True)
-    proc = run_duckdb_file(db, sql, ".materialize.sql")
-    if proc.returncode != 0:
-        print(proc.stdout, file=sys.stderr)
-        print(proc.stderr, file=sys.stderr)
-        raise SystemExit(f"duckdb failed ({proc.returncode})")
-    # Verify rather than announce: a materialisation that silently produced
-    # nothing is exactly the failure this whole inventory exists to surface.
-    check = duckdb_query(db, "SELECT count(*) FROM inventory")
-    rows = check.stdout.strip()
-    if check.returncode != 0 or not rows.isdigit() or int(rows) == 0:
-        raise SystemExit(f"materialize produced no rows (duckdb said: {rows!r} "
-                         f"{check.stderr.strip()})")
-    if not parquet.exists() or parquet.stat().st_size == 0:
-        raise SystemExit(f"parquet missing or empty: {parquet}")
+    rows = materialize_pair(db, parquet, lambda staged_parquet: sql.replace(str(parquet), str(staged_parquet)), "inventory")
     print(f"sinnix-fs inventory: materialized {rows} rows -> {db}, {parquet}")
 
 
@@ -670,17 +710,7 @@ FROM files GROUP BY 1;
 
 COPY (SELECT * FROM files) TO '{parquet}' (FORMAT PARQUET);
 """
-    db.parent.mkdir(parents=True, exist_ok=True)
-    db.unlink(missing_ok=True)
-    proc = run_duckdb_file(db, sql, ".content.sql")
-    if proc.returncode != 0:
-        print(proc.stdout, file=sys.stderr)
-        print(proc.stderr, file=sys.stderr)
-        raise SystemExit(f"duckdb failed ({proc.returncode})")
-    check = duckdb_query(db, "SELECT count(*) FROM files")
-    rows = check.stdout.strip()
-    if not rows.isdigit() or int(rows) == 0:
-        raise SystemExit(f"materialize produced no rows ({rows!r} {check.stderr.strip()})")
+    rows = materialize_pair(db, parquet, lambda staged_parquet: sql.replace(str(parquet), str(staged_parquet)), "files")
     print(f"sinnix-fs content: materialized {rows} rows -> {db}, {parquet}")
 
 
