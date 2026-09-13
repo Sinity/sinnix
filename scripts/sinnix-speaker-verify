@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # @sinnix-package
 # description: Speaker verification (enroll/score) via SpeechBrain ECAPA-TDNN embeddings, built on mke's diarization substrate
-# pythonPackages: speechbrain torchaudio numpy
+# pythonPackages: speechbrain torchaudio numpy @sinnix-lib
 
 """sinnix-speaker-verify: enrollment, scoring, and held-out calibration.
 
@@ -30,9 +30,17 @@ import json
 import sys
 from pathlib import Path
 
+from sinnix_lib.atomic import atomic_publish
+
 STORE_DIR = Path("/realm/state/speaker-verify")
 AUDIO_SUFFIXES = {".wav", ".flac", ".ogg", ".mp3", ".m4a"}
 CALIBRATION_VERSION = 1
+
+
+def _enrollment_path(name: str) -> Path:
+    if not isinstance(name, str) or not name or name in {".", ".."} or Path(name).name != name:
+        raise ValueError("enrollment name must be a non-special basename")
+    return STORE_DIR / f"{name}.json"
 
 
 def _load_model():
@@ -148,8 +156,9 @@ def cmd_enroll(args: argparse.Namespace) -> int:
     centroid = centroid / np.linalg.norm(centroid)
 
     STORE_DIR.mkdir(parents=True, exist_ok=True)
-    out = STORE_DIR / f"{args.name}.json"
-    out.write_text(
+    out = _enrollment_path(args.name)
+    atomic_publish(
+        out,
         json.dumps(
             {
                 "name": args.name,
@@ -157,7 +166,9 @@ def cmd_enroll(args: argparse.Namespace) -> int:
                 "n_samples": len(audio_files),
                 "source_files": audio_files,
             }
-        )
+        ).encode(),
+        fsync=True,
+        mode=0o600,
     )
     print(f"enrolled '{args.name}' from {len(audio_files)} sample(s) -> {out}")
     return 0
@@ -166,7 +177,7 @@ def cmd_enroll(args: argparse.Namespace) -> int:
 def cmd_score(args: argparse.Namespace) -> int:
     import numpy as np
 
-    enrolled_path = STORE_DIR / f"{args.name}.json"
+    enrolled_path = _enrollment_path(args.name)
     if not enrolled_path.exists():
         print(f"error: no enrollment for '{args.name}' -- run enroll first", file=sys.stderr)
         return 1
@@ -245,7 +256,12 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
         "cohort_embeddings": [item.tolist() for item in cohort_embeddings],
         "note": "attribution/friction only; never authorization",
     }
-    Path(args.output).write_text(json.dumps(result, indent=2) + "\n")
+    atomic_publish(
+        Path(args.output),
+        (json.dumps(result, indent=2) + "\n").encode(),
+        fsync=True,
+        mode=0o600,
+    )
     print(json.dumps({key: value for key, value in result.items() if key != "cohort_embeddings"}))
     return 0
 
