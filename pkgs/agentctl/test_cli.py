@@ -525,56 +525,29 @@ def test_batch_list_reads_each_run_pr_through_the_project(
     assert json.loads(capsys.readouterr().out)[0]["landing"]["pr"]["state"] == "MERGED"
 
 
-def test_job_clean_daemon_era_removes_only_the_listed_subtrees_and_is_idempotent(
-    cli_config: Config, capsys: pytest.CaptureFixture[str]
+def test_retired_destructive_cleanup_is_refused_before_touching_evidence(
+    cli_config: Config, tmp_path: Path
 ) -> None:
     state = cli_config.state_dir
-    for name in (
-        "leases",
-        "locks",
-        "workspaces",
-        "logs",
-        "results",
-        "jobs-archive",
-        "jobs",
-        "inputs",
-        "runs",
-    ):
-        (state / name).mkdir(parents=True, exist_ok=True)
-    (state / "leases" / "held.json").write_text("{}")
-    (state / "logs" / "old.log").write_text("")
-    for name in (
-        "active-jobs.json",
-        "capacity.json",
-        "task-sinnix.lock",
-        "schedules.json",
-    ):
-        (state / name).write_text("")
-    (state / "jobs" / "fixture-check-1.log").write_text("kept")
-    (state / "jobs" / "fixture-check-1.log.pgid").write_text("123")
+    historical = state / "jobs-archive" / "history.json"
+    current = state / "jobs" / "fixture.attempts" / "1" / "output.log"
+    historical.parent.mkdir(parents=True)
+    current.parent.mkdir(parents=True)
+    historical.write_bytes(b"historical evidence")
+    current.write_bytes(b"current attempt")
+    external = tmp_path / "external-evidence"
+    external.write_bytes(b"external evidence")
+    retained_link = state / "native"
+    retained_link.symlink_to(external)
 
-    assert cli.main(["job", "clean", "--daemon-era"]) == 0
-    captured = capsys.readouterr()
-    removed = json.loads(captured.out)["removed"]
-    assert {Path(item).name for item in removed} == {
-        "leases",
-        "locks",
-        "workspaces",
-        "logs",
-        "results",
-        "jobs-archive",
-        "active-jobs.json",
-        "capacity.json",
-        "task-sinnix.lock",
-        "schedules.json",
-        "fixture-check-1.log.pgid",
-    }
-    assert captured.err.startswith("removed 11 daemon-era path(s) under ")
-    assert (state / "jobs" / "fixture-check-1.log").read_text() == "kept"
-    assert (state / "inputs").is_dir() and (state / "runs").is_dir()
+    with pytest.raises(SystemExit) as usage:
+        cli.main(["job", "clean", "--daemon-era"])
 
-    assert cli.main(["job", "clean", "--daemon-era"]) == 0
-    assert json.loads(capsys.readouterr().out)["removed"] == []
+    assert usage.value.code == cli.EXIT_USAGE
+    assert historical.read_bytes() == b"historical evidence"
+    assert current.read_bytes() == b"current attempt"
+    assert retained_link.is_symlink()
+    assert external.read_bytes() == b"external evidence"
 
 
 def test_job_start_passes_arguments_after_a_bare_double_dash(

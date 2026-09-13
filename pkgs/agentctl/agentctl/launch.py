@@ -15,7 +15,6 @@ import json
 import os
 import re
 import shlex
-import shutil
 import stat
 import subprocess
 import time
@@ -1354,53 +1353,6 @@ def clean_terminal(config: Config) -> list[dict[str, Any]]:
         and task.task_id not in retained
         and launch_input_path(task) is not None
     ]
-
-
-# State under the state directory that no verb reads.
-DAEMON_ERA_PATHS = (
-    "active-jobs.json",
-    "schedules.json",
-    "logs",
-    "results",
-    "jobs-archive",
-    "active-jobs.lock",
-    "admission.json",
-    "capacity.json",
-    "envelopes.json",
-    "leases",
-    "locks",
-    "packet-sagas",
-    "plans",
-    "readiness",
-    "retry-prompts",
-    "unreleased-service-leases.json",
-    "unreleased-service-leases.lock",
-    "workspaces",
-    "handoffs",
-    "harvest-packets",
-    "job-dirs",
-    "native",
-    "task-outcomes",
-)
-DAEMON_ERA_GLOBS = ("task-*.lock", "jobs/*.log.pgid")
-
-
-def clean_daemon_era(config: Config) -> dict[str, Any]:
-    """Delete the daemon-era subtrees under the state directory; idempotent."""
-    root = config.state_dir
-    candidates = [root / name for name in DAEMON_ERA_PATHS]
-    for pattern in DAEMON_ERA_GLOBS:
-        candidates.extend(sorted(root.glob(pattern)))
-    removed: list[str] = []
-    for path in candidates:
-        if path.is_symlink() or path.is_file():
-            path.unlink()
-        elif path.is_dir():
-            shutil.rmtree(path)
-        else:
-            continue
-        removed.append(str(path))
-    return {"state_dir": str(root), "removed": removed}
 
 
 def retry(task_id: int, reference: str | None = None) -> dict[str, Any]:

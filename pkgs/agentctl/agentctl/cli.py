@@ -223,11 +223,6 @@ def parser() -> argparse.ArgumentParser:
     clean.add_argument("job_id", type=int, nargs="?")
     _reference_option(clean)
     clean.add_argument("--all-terminal", action="store_true")
-    clean.add_argument(
-        "--daemon-era",
-        action="store_true",
-        help="delete the state subtrees no current verb reads",
-    )
     _output_arguments(clean)
     wait = job_verbs.add_parser("wait")
     wait.add_argument("job_id", type=int)
@@ -551,19 +546,12 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         out.write(job, f"{out.job_line(job)}; {job['state']}")
         return EXIT_REFUSED if job["state"] == "failed" else EXIT_OK
     if verb == "clean":
-        if arguments.daemon_era:
-            removed = launch.clean_daemon_era(config)
-            out.write(
-                removed,
-                f"removed {len(removed['removed'])} daemon-era path(s) under {removed['state_dir']}",
-            )
-            return EXIT_OK
         if arguments.all_terminal:
             rows = launch.clean_terminal(config)
             out.write(rows, f"cleaned {len(rows)} terminal task(s)")
             return EXIT_OK
         if arguments.job_id is None:
-            raise JobError("job clean needs a job id, --all-terminal or --daemon-era")
+            raise JobError("job clean needs a job id or --all-terminal")
         job = launch.clean(config, arguments.job_id, arguments.reference)
         out.write(job, f"{out.job_line(job)}; cleaned")
         return EXIT_OK
