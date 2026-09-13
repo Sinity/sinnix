@@ -2,6 +2,7 @@
 # @sinnix-package
 # description: Regenerate the maximalist OS cheatsheet (Hyprland binds, the whole capability index, qutebrowser, beads/git essentials, agent-dispatch idioms) as a searchable HTML page
 # runtimeInputs: python3 coreutils hyprland @sinnix-ops-reducer
+# pythonPackages: @sinnix-lib
 
 """The cheatsheet as a program, not a document.
 
@@ -38,6 +39,8 @@ import re
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
+
+from sinnix_lib.atomic import atomic_publish
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_OUTPUT = Path("/realm/reports/cheatsheet.html")
@@ -392,9 +395,7 @@ def main() -> int:
     doc = build_html(now_iso)
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    tmp = args.output.with_suffix(".tmp")
-    tmp.write_text(doc)
-    tmp.rename(args.output)
+    atomic_publish(args.output, doc.encode(), fsync=False, mode=0o644)
     print(str(args.output))
     return 0
 

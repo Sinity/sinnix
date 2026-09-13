@@ -2,6 +2,7 @@
 # @sinnix-package
 # description: Regenerate a MANIFEST.json file inventory (path/size/mtime/sha256) for an export tree
 # runtimeInputs: bash coreutils python3
+# pythonPackages: @sinnix-lib
 
 # The lake's export trees carry MANIFEST.json inventories so a snapshot's
 # integrity and completeness can be checked years later. The original
@@ -23,6 +24,8 @@ python3 - "$root" <<'PY'
 import hashlib
 import json
 import os
+
+from sinnix_lib.atomic import atomic_publish
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -56,8 +59,11 @@ manifest = {
     "entries": entries,
 }
 target = root / "MANIFEST.json"
-tmp = root / ".MANIFEST.json.tmp"
-tmp.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-os.replace(tmp, target)
+atomic_publish(
+    target,
+    (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode(),
+    fsync=True,
+    mode=0o644,
+)
 print(f"{target}: {len(entries)} entries, {manifest['total_bytes']} bytes inventoried")
 PY

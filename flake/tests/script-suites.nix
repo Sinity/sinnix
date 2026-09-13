@@ -143,6 +143,7 @@
           suiteDir = ../../pkgs/sinnix-stt-review/tests;
           scripts = [ "sinnix-stt-review" ];
           pythonPackages = [ "tzdata" ];
+          extraPythonPackages = [ sinnix-lib ];
         };
         speaker-verify-suite = mkScriptSuite {
           name = "sinnix-speaker-verify";
@@ -192,7 +193,7 @@
             "sinnix-rank"
             "sinnix-deck-forge"
           ];
-          extraPythonPackages = [ sinnix-rank-core ];
+          extraPythonPackages = [ sinnix-rank-core sinnix-lib ];
           extraFiles = [
             {
               source = ../../modules/features/desktop/hyprland/bindings.nix;

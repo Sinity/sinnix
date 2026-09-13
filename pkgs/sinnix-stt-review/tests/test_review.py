@@ -52,6 +52,7 @@ def test_resume_preserves_evidence_and_rejects_changed_audio(
     assert len(calls) == 1
     assert calls[0]["language_code"] == "pol"
     assert json.loads((output / "clip.wav.scribe.json").read_text()) == response
+    assert (output / "clip.wav.scribe.json").stat().st_mode & 0o777 == 0o600
     review = json.loads((output / "review-spans.json").read_text())
     assert review[0]["start"] == 1.2
     assert review[0]["low_logprob_words"] == response["words"]
