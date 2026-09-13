@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -63,6 +65,68 @@ def test_service_unit_props_batches_each_manager(monkeypatch) -> None:
         "polylogued.service",
         "noctalia.service",
     }
+
+
+def test_dstate_probe_uses_shared_runner_error_contract(monkeypatch) -> None:
+    collector = _collector()
+    monkeypatch.setattr(
+        collector,
+        "run",
+        lambda argv, *, timeout: SimpleNamespace(error="missing ps", stdout="", returncode=-1),
+    )
+    assert collector.dstate_tasks() == (0, "ps_failed")
+
+
+def test_kill_event_scan_keeps_cursor_on_bounded_failure(monkeypatch) -> None:
+    collector = _collector()
+    calls = []
+    monkeypatch.setattr(
+        collector,
+        "run_bounded",
+        lambda argv, **kwargs: calls.append((argv, kwargs))
+        or SimpleNamespace(error="stdout exceeded limit", stdout=b'{"__CURSOR":"partial"'),
+    )
+
+    assert collector.scan_kill_events("host", "boot", "old-cursor") == ([], None)
+    assert calls == [
+        (
+            [
+                "journalctl",
+                "-o",
+                "json",
+                "--no-pager",
+                "-g",
+                collector.KILL_EVENT_GREP,
+                "--after-cursor",
+                "old-cursor",
+            ],
+            {
+                "timeout": 120,
+                "stdout_limit": collector.KILL_EVENT_STDOUT_LIMIT,
+                "stderr_limit": collector.KILL_EVENT_STDERR_LIMIT,
+            },
+        )
+    ]
+
+
+def test_kill_event_scan_parses_complete_bounded_output(monkeypatch) -> None:
+    collector = _collector()
+    entry = {
+        "__CURSOR": "next-cursor",
+        "MESSAGE": 'sending SIGKILL to process 42 uid 1000 "worker": oom_score 800, oom_score_adj 0, VmRSS 512 MiB',
+    }
+    monkeypatch.setattr(
+        collector,
+        "run_bounded",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            error=None, stdout=(json.dumps(entry) + "\n").encode()
+        ),
+    )
+
+    rows, cursor = collector.scan_kill_events("host", "boot", None)
+    assert cursor == "next-cursor"
+    assert rows[0]["killer"] == "earlyoom"
+    assert rows[0]["victim_pid"] == 42
 
 
 def test_psi_adapter_keeps_telemetry_flat_float_fields(monkeypatch) -> None:
