@@ -2,6 +2,7 @@
 # @sinnix-package
 # description: Filesystem index pipeline — directory inventory, content scan and judgment ledger (inventory/content/ledger/run)
 # runtimeInputs: python3 duckdb coreutils file
+# pythonPackages: @sinnix-lib
 
 """sinnix-fs — the filesystem index pipeline, as one CLI.
 
@@ -22,6 +23,8 @@ its standalone file; read it via `sinnix-fs <subcommand> --help`.
 """
 
 from __future__ import annotations
+
+from sinnix_lib.atomic import atomic_text_writer
 
 import argparse
 import hashlib
@@ -171,7 +174,7 @@ def inventory_scan(roots: list[str], max_depth: int, out_path: Path, progress_ev
     written = 0
     started = time.monotonic()
 
-    with out_path.open("w", encoding="utf-8") as out:
+    with atomic_text_writer(out_path, fsync=True, mode=0o600) as out:
         queue: list[tuple[str, int]] = [(r, 0) for r in roots if os.path.isdir(r)]
         while queue:
             path, depth = queue.pop(0)
@@ -546,7 +549,7 @@ def content_walk(roots: list[str], out_path: Path, progress_every: int) -> int:
     errored = 0
     skipped = 0
     started = time.monotonic()
-    with out_path.open("w", encoding="utf-8") as out:
+    with atomic_text_writer(out_path, fsync=True, mode=0o600) as out:
         for root in roots:
             for dirpath, dirnames, filenames in os.walk(root, topdown=True):
                 if content_excluded(dirpath + "/"):
