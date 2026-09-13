@@ -21,6 +21,7 @@ __all__ = [
     "notify",
     "paths",
     "phone_inbox",
+    "procfs",
     "process",
     "spool",
     "systemd",
