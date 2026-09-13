@@ -185,6 +185,8 @@
     # Operator steering: store + rituals + read-only cockpit at
     # http://127.0.0.1:8791.
     steering.enable = true;
+    # Thin declared-activity runtime; independent of the older daily rituals.
+    activity.enable = true;
     # Kernel audit capture plus the check that no unit is sandboxed out of
     # writing its own declared output.
     # Backstop reaper for orphaned per-checkout sinex dev-postgres instances;
