@@ -14,6 +14,13 @@ import threading
 import time
 from pathlib import Path
 
+from sinnix_lib.procfs import (
+    parse_cgroup_v2,
+    parse_colon_numeric,
+    parse_psi as parse_psi_text,
+    parse_stat_start_time,
+)
+
 SCHEMA_VERSION = 5
 # Interval between explicit `wal_checkpoint(TRUNCATE)` runs on the main
 # writer connection; see the checkpoint block at the bottom of the heartbeat
@@ -207,21 +214,13 @@ def rapl_watts(
 
 
 def parse_psi(path: str) -> dict[str, float]:
-    out = {}
-    raw = read_text(path) or ""
-    for line in raw.splitlines():
-        parts = line.split()
-        if not parts:
-            continue
-        prefix = parts[0]
-        for item in parts[1:]:
-            if "=" not in item:
-                continue
-            key, value = item.split("=", 1)
-            parsed = float_or_none(value)
-            if parsed is not None:
-                out[f"{prefix}_{key}"] = parsed
-    return out
+    # Keep the collector's flat field names and float values while sharing the
+    # text parser with observe and the reducer.
+    return {
+        f"{record}_{field}": float(value)
+        for record, fields in parse_psi_text(read_text(path)).items()
+        for field, value in fields.items()
+    }
 
 
 def dstate_tasks() -> tuple[int, str | None]:
@@ -255,24 +254,11 @@ def read_proc_io(pid: str) -> dict[str, int] | None:
 
 
 def process_start_time_ticks(pid: str) -> int | None:
-    raw = read_text(Path("/proc") / pid / "stat")
-    if not raw or ")" not in raw:
-        return None
-    fields_after_comm = raw.rsplit(")", 1)[1].strip().split()
-    if len(fields_after_comm) <= 19:
-        return None
-    return int_or_none(fields_after_comm[19])
+    return parse_stat_start_time(read_text(Path("/proc") / pid / "stat"))
 
 
 def process_cgroup(pid: str) -> str | None:
-    raw = read_text(Path("/proc") / pid / "cgroup")
-    if not raw:
-        return None
-    for line in raw.splitlines():
-        parts = line.split(":", 2)
-        if len(parts) == 3 and parts[1] == "":
-            return parts[2]
-    return None
+    return parse_cgroup_v2(read_text(Path("/proc") / pid / "cgroup"))
 
 
 def process_unit_from_cgroup(cgroup: str | None) -> tuple[str | None, str | None]:
@@ -709,14 +695,13 @@ def cgroup_memory_stat(control_group: str | None) -> dict[str, int | None]:
     raw = read_text(path)
     if not raw:
         return {}
-    values: dict[str, int] = {}
-    for line in raw.splitlines():
-        parts = line.split()
-        if len(parts) != 2:
-            continue
-        parsed = int_or_none(parts[1])
-        if parsed is not None:
-            values[parts[0]] = parsed
+    values = parse_colon_numeric(
+        "\n".join(
+            f"{parts[0]}: {parts[1]}"
+            for line in raw.splitlines()
+            if len(parts := line.split()) == 2
+        )
+    )
     return {
         "memory_anon_bytes": values.get("anon"),
         "memory_file_bytes": values.get("file"),
@@ -749,14 +734,13 @@ def parse_cgroup_events(control_group: str | None) -> dict[str, int | None]:
     raw = read_text(root / "cgroup.events") if root is not None else None
     if not raw:
         return {}
-    values: dict[str, int] = {}
-    for line in raw.splitlines():
-        parts = line.split()
-        if len(parts) != 2:
-            continue
-        parsed = int_or_none(parts[1])
-        if parsed is not None:
-            values[parts[0]] = parsed
+    values = parse_colon_numeric(
+        "\n".join(
+            f"{parts[0]}: {parts[1]}"
+            for line in raw.splitlines()
+            if len(parts := line.split()) == 2
+        )
+    )
     return {
         "cgroup_populated": values.get("populated"),
         "cgroup_frozen": values.get("frozen"),
@@ -772,14 +756,13 @@ def parse_memory_events(control_group: str | None) -> dict[str, int | None]:
     raw = read_text(root / "memory.events") if root is not None else None
     if not raw:
         return {}
-    values: dict[str, int] = {}
-    for line in raw.splitlines():
-        parts = line.split()
-        if len(parts) != 2:
-            continue
-        parsed = int_or_none(parts[1])
-        if parsed is not None:
-            values[parts[0]] = parsed
+    values = parse_colon_numeric(
+        "\n".join(
+            f"{parts[0]}: {parts[1]}"
+            for line in raw.splitlines()
+            if len(parts := line.split()) == 2
+        )
+    )
     return {
         "memory_events_high": values.get("high"),
         "memory_events_max": values.get("max"),
@@ -1803,12 +1786,7 @@ def insert_network_sample(conn: sqlite3.Connection, row: dict[str, object]) -> i
 
 
 def memory_metrics() -> dict[str, int | None]:
-    values = {}
-    for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines():
-        key, value = line.split(":", 1)
-        amount = int_or_none(value.strip().split()[0])
-        if amount is not None:
-            values[key] = amount
+    values = parse_colon_numeric(Path("/proc/meminfo").read_text(encoding="utf-8"))
     total = values.get("MemTotal")
     avail = values.get("MemAvailable")
     swap_total = values.get("SwapTotal", 0)

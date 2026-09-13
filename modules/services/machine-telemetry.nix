@@ -38,7 +38,7 @@ let
     destination = "/bin/machine-telemetry";
     executable = true;
     text = ''
-      #!${pkgs.python3.withPackages (p: [ p.nvidia-ml-py ])}/bin/python3
+      #!${pkgs.python3.withPackages (p: [ p.nvidia-ml-py scriptPkgs.sinnix-lib ])}/bin/python3
     ''
     + builtins.readFile ../../pkgs/machine-telemetry/collector.py;
   };
