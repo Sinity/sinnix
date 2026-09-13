@@ -43,7 +43,10 @@ def test_correct_sha_lands_the_file(monkeypatch, tmp_path) -> None:
     assert status == HTTPStatus.OK
     assert payload["ok"] is True
     assert payload["duplicate"] is False
-    assert (tmp_path / "ambient" / "clip.m4a").read_bytes() == body
+    target = tmp_path / "ambient" / "clip.m4a"
+    assert target.read_bytes() == body
+    assert target.stat().st_mode & 0o777 == 0o660
+    assert not list(target.parent.glob(".*.atomic-tmp-*"))
 
 
 def test_reuploading_the_identical_chunk_is_a_success_duplicate(
