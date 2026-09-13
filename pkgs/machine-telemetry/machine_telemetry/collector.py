@@ -14,6 +14,7 @@ import threading
 import time
 from pathlib import Path
 
+from sinnix_lib.atomic import atomic_publish
 from sinnix_lib.procfs import (
     parse_cgroup_v2,
     parse_colon_numeric,
@@ -2171,7 +2172,12 @@ def main() -> int:
         "fan_rpm": None,
         "fan_rpm_gap": "hwmon.fan_input_unavailable",
     }
-    manifest.write_text(json.dumps(state, indent=2, sort_keys=True), encoding="utf-8")
+    atomic_publish(
+        manifest,
+        json.dumps(state, indent=2, sort_keys=True).encode("utf-8"),
+        fsync=True,
+        mode=0o644,
+    )
 
     with sqlite3.connect(db, timeout=DB_BUSY_TIMEOUT_S) as conn:
         init_db(conn)
