@@ -14,22 +14,13 @@
       ...
     }:
     let
-      # Helper to create runnable commands
-      mkApp = name: command: description: {
-        type = "app";
-        program =
-          (pkgs.writeShellScriptBin name ''
-            set -euo pipefail
-            ${command}
-          '').outPath
-          + "/bin/"
-          + name;
-        meta.description = description;
-      };
-
       commandRegistry = sinnixCommandRegistry;
 
-      generatedApps = builtins.mapAttrs (name: spec: mkApp name spec.script spec.description) (
+      generatedApps = builtins.mapAttrs (name: spec: {
+        type = "app";
+        program = "${commandRegistry.mkAppCommand name spec}/bin/${name}";
+        meta.description = spec.description;
+      }) (
         pkgs.lib.filterAttrs (
           name: _: !builtins.hasAttr name commandRegistry.activationPackages
         ) commandRegistry.appCommands

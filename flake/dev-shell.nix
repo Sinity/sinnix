@@ -4,12 +4,11 @@
 # - Development tools and Nix helpers
 # - Helper scripts for common operations
 
-{ inputs, ... }:
+{ ... }:
 {
   perSystem =
     {
       pkgs,
-      system,
       sinnixCommandRegistry,
       ...
     }:
@@ -30,17 +29,14 @@
         scriptPkgs
         resolveFlakeDir
         ;
+      registryDevCommands = lib.mapAttrs commandRegistry.mkAppCommand (
+        lib.filterAttrs (
+          name: _: !builtins.hasAttr name activationPackages
+        ) commandRegistry.appCommands
+      );
       # Devshell command wrappers — every listed command is directly typeable
-      devCommands = activationPackages // {
-        check = pkgs.writeShellScriptBin "check" ''
-          set -euo pipefail
-          ${commandRegistry.appCommands.check.script}
-        '';
+      devCommands = activationPackages // registryDevCommands // {
         format = pkgs.writeShellScriptBin "format" ''exec ${nix} fmt "$@"'';
-        lint = pkgs.writeShellScriptBin "lint" ''exec ${nix} run .#lint -- "$@"'';
-        check-heavy = pkgs.writeShellScriptBin "check-heavy" ''exec ${nix} run .#check-heavy -- "$@"'';
-        check-all = pkgs.writeShellScriptBin "check-all" ''exec ${nix} run .#check-all -- "$@"'';
-        check-master = pkgs.writeShellScriptBin "check-master" ''exec ${nix} run .#check-master -- "$@"'';
         update = pkgs.writeShellScriptBin "update" ''
           set -euo pipefail
           if [ "$#" -gt 0 ]; then
@@ -55,16 +51,6 @@
               | ${pkgs.jq}/bin/jq -r '.locks.nodes.root.inputs | keys[] | select(. != "nixpkgs-ai")'
           )
           exec ${nix} flake update "''${_routine_inputs[@]}"
-        '';
-        clean = pkgs.writeShellScriptBin "clean" ''
-          exec ${pkgs.nh}/bin/nh clean all
-        '';
-        # secrets.nix + secret/*.age live outside the checkout at
-        # /realm/state/secrets/sinnix (see modules/secrets.nix) — cd there so
-        # RULES defaults to ./secrets.nix and relative FILE args like
-        # `secret/foo.age` resolve.
-        agenix = pkgs.writeShellScriptBin "agenix" ''
-          cd /realm/state/secrets/sinnix && exec ${inputs.agenix.packages.${system}.default}/bin/agenix "$@"
         '';
         diff-closure = pkgs.writeShellScriptBin "diff-closure" ''
           set -euo pipefail
@@ -150,9 +136,6 @@
           pkgs.nh
           pkgs.nvd
           pkgs.nix-tree
-
-          # Secret management
-          inputs.agenix.packages.${system}.default
 
           # Utilities
           pkgs.nix-output-monitor

@@ -31,10 +31,7 @@
         map
           (
             name:
-            pkgs.writeShellScript name ''
-              set -euo pipefail
-              ${registry.appCommands.${name}.script}
-            ''
+            "${registry.mkAppCommand name registry.appCommands.${name}}/bin/${name}"
           )
           [
             "check"
@@ -117,7 +114,7 @@
           DISCOVERY_JSON="$good" "$command"
           test "$(wc -l < "$BUILD_CALLS")" = 1
           expected_evaluations=1
-          case "$command" in *-check-all) expected_evaluations=2 ;; esac
+          case "$command" in */check-all) expected_evaluations=2 ;; esac
           test "$(wc -l < "$EVALUATION_LOG")" = "$expected_evaluations"
           grep -Fxq '/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-one.drv^*' "$BUILD_LOG"
           grep -Fxq '/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-two.drv^*' "$BUILD_LOG"
