@@ -23,8 +23,6 @@ fi
 python3 - "$root" <<'PY'
 import hashlib
 import json
-import os
-
 from sinnix_lib.atomic import atomic_publish
 import sys
 from datetime import datetime, timezone
