@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from typing import Any
 
 from sinnix_lib.process import run
@@ -15,7 +16,38 @@ from ..runtime_inventory import (
     resource_class_for_unit,
     workload_for_unit,
 )
-from ..util import split_props, words
+from ..util import words
+
+
+UNIT_PROPERTIES = (
+    "Id",
+    "LoadState",
+    "ActiveState",
+    "SubState",
+    "MainPID",
+    "ControlGroup",
+    "Slice",
+    "MemoryCurrent",
+    "MemorySwapCurrent",
+    "NRestarts",
+    "MemoryHigh",
+    "MemoryMax",
+    "CPUWeight",
+    "IOWeight",
+    "IODeviceLatencyTargetUSec",
+    "IOReadBandwidthMax",
+    "IOWriteBandwidthMax",
+    "IOSchedulingClass",
+    "Nice",
+    "TimeoutStartUSec",
+    "TimeoutStopUSec",
+    "WantedBy",
+    "Wants",
+    "PartOf",
+    "NextElapseUSecRealtime",
+    "Persistent",
+    "Result",
+)
 
 
 def collect_noctalia_health() -> dict[str, Any]:
@@ -40,72 +72,14 @@ def collect_noctalia_health() -> dict[str, Any]:
 
 
 def systemctl_show(unit: str, user: bool = False) -> dict[str, str]:
-    cmd = ["systemctl"]
-    if user:
-        cmd.append("--user")
-    cmd += [
-        "show",
-        unit,
-        "--no-pager",
-        "-p",
-        "Id",
-        "-p",
-        "LoadState",
-        "-p",
-        "ActiveState",
-        "-p",
-        "SubState",
-        "-p",
-        "MainPID",
-        "-p",
-        "ControlGroup",
-        "-p",
-        "Slice",
-        "-p",
-        "MemoryCurrent",
-        "-p",
-        "MemorySwapCurrent",
-        "-p",
-        "NRestarts",
-        "-p",
-        "MemoryHigh",
-        "-p",
-        "MemoryMax",
-        "-p",
-        "CPUWeight",
-        "-p",
-        "IOWeight",
-        "-p",
-        "IODeviceLatencyTargetUSec",
-        "-p",
-        "IOReadBandwidthMax",
-        "-p",
-        "IOWriteBandwidthMax",
-        "-p",
-        "IOSchedulingClass",
-        "-p",
-        "Nice",
-        "-p",
-        "TimeoutStartUSec",
-        "-p",
-        "TimeoutStopUSec",
-        "-p",
-        "WantedBy",
-        "-p",
-        "Wants",
-        "-p",
-        "PartOf",
-        "-p",
-        "NextElapseUSecRealtime",
-        "-p",
-        "Persistent",
-        "-p",
-        "Result",
-    ]
-    result = run(cmd, timeout=3)
-    if result.error is not None or result.returncode not in (0, 1):
+    try:
+        props = show_units(
+            [unit], user=user, properties=UNIT_PROPERTIES, timeout=3
+        ).get(unit)
+    except (OSError, subprocess.TimeoutExpired):
+        props = None
+    if props is None:
         return {"Id": unit, "LoadState": "unknown"}
-    props = split_props(result.stdout)
     props.setdefault("Id", unit)
     return props
 
@@ -158,16 +132,21 @@ def collect_systemd_units(offline: bool) -> list[dict[str, Any]]:
     if offline:
         return []
     rows: list[dict[str, Any]] = []
-    for unit in managed_units("system"):
-        props = systemctl_show(unit, user=False)
-        if props.get("LoadState") == "not-found":
-            continue
-        rows.append(unit_row(unit, "system", props))
-    for unit in managed_units("user"):
-        props = systemctl_show(unit, user=True)
-        if props.get("LoadState") == "not-found":
-            continue
-        rows.append(unit_row(unit, "user", props))
+    for manager in ("system", "user"):
+        units = managed_units(manager)
+        try:
+            states = show_units(
+                units,
+                user=manager == "user",
+                properties=UNIT_PROPERTIES,
+                timeout=3,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            states = {}
+        for unit in units:
+            props = states.get(unit, {"Id": unit, "LoadState": "unknown"})
+            if props.get("LoadState") != "not-found":
+                rows.append(unit_row(unit, manager, props))
     return rows
 
 
@@ -175,11 +154,21 @@ def collect_resource_slices(offline: bool) -> list[dict[str, Any]]:
     if offline:
         return []
     rows: list[dict[str, Any]] = []
-    for manager, unit in observed_slices():
-        props = systemctl_show(unit, user=manager == "user")
-        if props.get("LoadState") == "not-found":
-            continue
-        rows.append(unit_row(unit, manager, props))
+    for manager in ("system", "user"):
+        units = [unit for candidate, unit in observed_slices() if candidate == manager]
+        try:
+            states = show_units(
+                units,
+                user=manager == "user",
+                properties=UNIT_PROPERTIES,
+                timeout=3,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            states = {}
+        for unit in units:
+            props = states.get(unit, {"Id": unit, "LoadState": "unknown"})
+            if props.get("LoadState") != "not-found":
+                rows.append(unit_row(unit, manager, props))
     return rows
 
 
