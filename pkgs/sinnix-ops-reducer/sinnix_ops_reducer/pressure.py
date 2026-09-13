@@ -35,6 +35,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterable, Sequence
 
+from sinnix_lib.procfs import (
+    parse_cgroup_v2,
+    parse_colon_numeric,
+    parse_psi,
+    parse_stat_start_time,
+)
 from sinnix_lib.systemd import show_units
 
 # --------------------------------------------------------------------------
@@ -234,45 +240,24 @@ def read_psi(path: Path) -> dict[str, float]:
     claims and only one of them is safe to act on.
     """
     try:
-        text = path.read_text(encoding="utf-8")
+        records = parse_psi(path.read_text(encoding="utf-8"))
     except OSError:
         return {}
-    found: dict[str, float] = {}
-    for line in text.splitlines():
-        fields = line.split()
-        if not fields:
-            continue
-        for field in fields[1:]:
-            key, separator, value = field.partition("=")
-            if not separator or key != "avg10":
-                continue
-            try:
-                found[fields[0]] = float(value)
-            except ValueError:
-                pass
-    return found
+    return {
+        name: float(fields["avg10"])
+        for name, fields in records.items()
+        if "avg10" in fields
+    }
 
 
 def read_meminfo(path: Path) -> dict[str, int]:
     """/proc/meminfo as MiB, for the handful of keys this module reads."""
     wanted = {"MemTotal", "MemAvailable", "SwapTotal", "SwapFree"}
-    found: dict[str, int] = {}
     try:
-        text = path.read_text(encoding="utf-8")
+        values = parse_colon_numeric(path.read_text(encoding="utf-8"))
     except OSError:
         return {}
-    for line in text.splitlines():
-        key, separator, rest = line.partition(":")
-        if not separator or key not in wanted:
-            continue
-        fields = rest.split()
-        if not fields:
-            continue
-        try:
-            found[key] = int(fields[0]) // 1024
-        except ValueError:
-            continue
-    return found
+    return {key: values[key] // 1024 for key in wanted if key in values}
 
 
 def sample(proc: Path = PROC) -> Sample:
@@ -536,10 +521,9 @@ def classify_cheapness(names: Iterable[str], slice_unit: str) -> str:
 
 def parse_cgroup(text: str) -> tuple[str, str]:
     """(owning unit, owning slice) out of a cgroup v2 membership line."""
-    parts = [part for part in text.strip().split("\n") if part][:1]
-    if not parts:
+    path = parse_cgroup_v2(text)
+    if path is None:
         return "", ""
-    path = parts[0].rpartition(":")[2]
     unit = ""
     slice_unit = ""
     for segment in path.split("/"):
@@ -645,12 +629,7 @@ def _start_ticks(directory: Path) -> int:
         text = (directory / "stat").read_text(encoding="utf-8")
     except OSError:
         return 0
-    # comm sits in parentheses and may contain spaces: split after it.
-    tail = text.rpartition(")")[2].split()
-    try:
-        return int(tail[19])
-    except (IndexError, ValueError):
-        return 0
+    return parse_stat_start_time(text) or 0
 
 
 # --------------------------------------------------------------------------

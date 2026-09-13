@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from sinnix_lib.ledger import append_jsonl, iter_jsonl, utc_ts
+from sinnix_lib.procfs import parse_stat_start_time
 from sinnix_lib.systemd import show_units
 
 from . import pressure as pressure_model
@@ -478,13 +479,8 @@ class ActionService:
             stat_text = (directory / "stat").read_text(encoding="utf-8")
         except OSError:
             return None
-        # comm sits in parentheses and may itself contain spaces or
-        # parentheses: split after the last ")", matching pressure.py's
-        # _start_ticks and the /proc/pid/stat(5) field layout it relies on.
-        tail = stat_text.rpartition(")")[2].split()
-        try:
-            start_ticks = int(tail[19])
-        except (IndexError, ValueError):
+        start_ticks = parse_stat_start_time(stat_text)
+        if start_ticks is None:
             return None
         try:
             cgroup_text = (directory / "cgroup").read_text(encoding="utf-8")
