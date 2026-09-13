@@ -16,8 +16,7 @@ mkServiceModule {
     unit = "transmission.service";
     resourceClass = "background";
     # Transmission is often intentionally stopped for disk maintenance.
-    # Let the dedicated autostart timer handle boot startup; observability
-    # should reflect manual stops without turning them into policy.
+    # Its mount owns boot startup; observability reflects manual stops.
     observe = {
       enable = true;
       restartable = false;
@@ -27,7 +26,7 @@ mkServiceModule {
     autoStart = lib.mkOption {
       type = lib.types.bool;
       default = true;
-      description = "Start Transmission automatically after boot settles.";
+      description = "Start Transmission when its storage mount becomes available.";
     };
   };
   configFn =
@@ -98,9 +97,9 @@ mkServiceModule {
       ];
 
       systemd.services.transmission = {
-        # why mkForce: gated behind PartOf=${neoOuterRealmMount} below.
-        # The upstream nixos-transmission module attaches multi-user.target.
-        wantedBy = lib.mkForce [ ];
+        # Start with the normal boot target; RequiresMountsFor below is the
+        # actual storage gate, while PartOf stops it on unmount.
+        wantedBy = lib.mkForce (lib.optionals cfg.autoStart [ "multi-user.target" ]);
         unitConfig.RequiresMountsFor = lib.unique [
           torrentInbox
           neoOuterRealm
@@ -172,35 +171,6 @@ mkServiceModule {
         ];
       };
 
-      systemd.services.transmission-autostart = {
-        description = "Start Transmission after boot settles";
-        after = [ "network-online.target" ];
-        wants = [ "network-online.target" ];
-        serviceConfig = {
-          Type = "oneshot";
-          Restart = "on-failure";
-          RestartSec = "30s";
-          ExecStart = pkgs.writeShellScript "transmission-autostart" ''
-            set -euo pipefail
-
-            if ${pkgs.systemd}/bin/systemctl is-active --quiet transmission.service; then
-              exit 0
-            fi
-
-            exec ${pkgs.systemd}/bin/systemctl start transmission.service
-          '';
-        };
-      };
-
-      systemd.timers.transmission-autostart = {
-        description = "Deferred Transmission startup";
-        wantedBy = lib.optionals cfg.autoStart [ "timers.target" ];
-        timerConfig = {
-          OnBootSec = "30s";
-          Unit = "transmission-autostart.service";
-        };
-      };
-
       systemd.services.transmission-sparsify = {
         description = "Punch holes in Transmission partial downloads";
         after = [ neoOuterRealmMount ];
@@ -243,14 +213,14 @@ mkServiceModule {
             exit 78
           fi
 
-          systemctl stop transmission.service transmission-autostart.timer transmission-autostart.service || true
+          systemctl stop transmission.service || true
           while IFS= read -r -d "" path; do
             echo "transmission-sparsify: punching holes in $path"
             fallocate -d -- "$path"
           done < "$plan"
         '';
         postStop = ''
-          systemctl start transmission-autostart.timer transmission.service || true
+          systemctl start transmission.service || true
         '';
         serviceConfig = {
           Type = "oneshot";

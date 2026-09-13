@@ -115,8 +115,10 @@ in
           testScript = ''
             start_all()
             machine.wait_for_unit("multi-user.target")
-            machine.succeed("systemctl start transmission.service")
             machine.wait_for_unit("transmission.service")
+            machine.succeed("systemctl is-enabled --quiet transmission.service")
+            machine.fail("systemctl status transmission-autostart.timer")
+            machine.fail("systemctl status transmission-autostart.service")
             machine.wait_until_succeeds("test -d /neo-outer-realm/inbox")
 
             machine.wait_until_succeeds("curl -sS -D /tmp/transmission.headers -o /tmp/transmission.body http://127.0.0.1:9091/transmission/rpc || true; grep -q '409 Conflict' /tmp/transmission.headers")
