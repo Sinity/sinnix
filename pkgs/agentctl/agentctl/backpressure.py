@@ -1,6 +1,6 @@
 """Pressure admission with an incremental, regenerable spool projection.
 
-Pueue owns dependencies and stashes. This module only pauses a group with
+Pueue owns dependencies and ordinary stashes. This module pauses a group with
 ``pause --wait`` and later resumes pauses it can prove it made.
 """
 
@@ -21,10 +21,10 @@ IO_FULL_FREEZE = 25.0
 MEMORY_FULL_FREEZE = 25.0
 RESUME_BELOW = 10.0
 CLOSE_ORDER = {
-    "io": ("pytest", "bulk"),
-    "memory": ("pytest", "normal", "bulk", "pytest-quick"),
+    "io": ("pytest-heavy", "pytest", "bulk"),
+    "memory": ("pytest-heavy", "pytest", "normal", "bulk", "pytest-quick"),
 }
-MANAGED_GROUPS = ("agent", "pytest", "pytest-quick", "normal", "bulk")
+MANAGED_GROUPS = ("agent", "pytest-heavy", "pytest", "pytest-quick", "normal", "bulk")
 OWNER = "agentctl"
 CHECKPOINT_SCHEMA = 1
 

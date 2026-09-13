@@ -38,6 +38,7 @@ class PoolPolicy:
     """One pueue group's declared parallelism."""
 
     parallel: int
+    exclusive_with: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -130,17 +131,31 @@ def _pools(value: Any) -> dict[str, PoolPolicy]:
         if not isinstance(name, str) or POOL_NAME.fullmatch(name) is None:
             raise ConfigError(f"pools has an invalid pueue group name: {name!r}")
         if isinstance(declaration, Mapping):
-            unknown = set(declaration) - {"parallel"}
+            unknown = set(declaration) - {"parallel", "exclusive_with"}
             if unknown:
                 raise ConfigError(
                     f"pools.{name} declares unknown field(s): "
                     + ", ".join(sorted(unknown))
                 )
+            excluded = declaration.get("exclusive_with", [])
+            if not isinstance(excluded, list) or any(
+                not isinstance(pool, str) or POOL_NAME.fullmatch(pool) is None
+                for pool in excluded
+            ):
+                raise ConfigError(f"pools.{name}.exclusive_with must name valid pools")
             parsed[name] = PoolPolicy(
-                parallel=_parallel(name, declaration.get("parallel"))
+                parallel=_parallel(name, declaration.get("parallel")),
+                exclusive_with=tuple(excluded),
             )
         else:
             parsed[name] = PoolPolicy(parallel=_parallel(name, declaration))
+    for name, policy in parsed.items():
+        unknown = set(policy.exclusive_with) - set(parsed)
+        if unknown:
+            raise ConfigError(
+                f"pools.{name}.exclusive_with names undeclared pool(s): "
+                + ", ".join(sorted(unknown))
+            )
     return parsed
 
 

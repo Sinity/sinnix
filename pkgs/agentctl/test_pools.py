@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 from agentctl import cli, pools, pueue
-from agentctl.config import PoolPolicy
+from agentctl.config import PoolPolicy, load_config
 from conftest import FakePueue
 
 
@@ -152,6 +152,39 @@ def test_the_cli_applies_the_configured_pools(
 
     assert cli.main(["pools", "apply", "--json"]) == 0
     assert fake_pueue.groups["pytest"] == 1
+
+
+def test_config_preserves_the_declared_heavy_pool_exclusion(tmp_path: Path) -> None:
+    configuration = tmp_path / "agentctl.json"
+    configuration.write_text(
+        json.dumps(
+            {
+                "pools": {
+                    "agent": {"parallel": 12},
+                    "pytest-heavy": {
+                        "parallel": 1,
+                        "exclusive_with": ["agent"],
+                    },
+                }
+            }
+        )
+    )
+
+    parsed = load_config(configuration)
+
+    assert parsed.pools["pytest-heavy"] == PoolPolicy(
+        parallel=1, exclusive_with=("agent",)
+    )
+
+
+def test_config_rejects_an_exclusion_partner_that_is_not_declared(tmp_path: Path) -> None:
+    configuration = tmp_path / "agentctl.json"
+    configuration.write_text(
+        json.dumps({"pools": {"pytest-heavy": {"parallel": 1, "exclusive_with": ["agent"]}}})
+    )
+
+    with pytest.raises(ValueError, match="undeclared pool"):
+        load_config(configuration)
 
 
 def test_a_configuration_declaring_no_pools_is_refused(

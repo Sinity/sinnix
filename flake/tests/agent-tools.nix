@@ -357,6 +357,7 @@ in
             "agentctl-agent"
             "agentctl-land-agent"
             "agentctl-pytest"
+            "agentctl-pytest-heavy"
             "agentctl-pytest-quick"
             "agentctl-bulk"
             "agentctl-normal"
@@ -399,6 +400,12 @@ in
             && poolSlices.agentctl-pytest.ManagedOOMMemoryPressure == "kill"
             && poolSlices.agentctl-pytest.CPUWeight == 200
             && poolSlices.agentctl-pytest.IOWeight == 200
+            && poolSlices.agentctl-pytest-heavy.MemoryHigh == "6G"
+            && poolSlices.agentctl-pytest-heavy.MemoryMax == "8G"
+            && poolSlices.agentctl-pytest-heavy.MemorySwapMax == "0"
+            && poolSlices.agentctl-pytest-heavy.ManagedOOMMemoryPressure == "kill"
+            && poolSlices.agentctl-pytest-heavy.CPUWeight == 200
+            && poolSlices.agentctl-pytest-heavy.IOWeight == 200
             && poolSlices.agentctl-bulk.MemoryHigh == "10G"
             && poolSlices.agentctl-bulk.MemoryMax == "14G"
             && poolSlices.agentctl-bulk.MemorySwapMax == "0"
