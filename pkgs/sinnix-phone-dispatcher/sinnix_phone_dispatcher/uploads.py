@@ -18,6 +18,7 @@ import sys
 from http import HTTPStatus
 from pathlib import Path
 
+from sinnix_lib.atomic import atomic_publish
 from sinnix_lib.ledger import utc_ts
 
 from .notifications import mirror_new_events
@@ -137,26 +138,13 @@ def store_upload(
             "path": str(target),
         }
 
-    part = target.with_name(target.name + ".part")
     try:
         # The lane's own subdirectory, when the name carried one: the camera
         # mirror keeps `Camera/`, `Screenshots/` and `Pictures/` because the
-        # rsync that filled it did, and flattening them now would re-upload
-        # every photo under a new name.
+        # rsync that filled it did.
         target.parent.mkdir(parents=True, exist_ok=True)
-        with part.open("wb") as fh:
-            fh.write(body)
-            fh.flush()
-            os.fsync(fh.fileno())
-        # Match the lane's existing files rather than whatever umask this
-        # service happens to run under: these sit beside chunks the drain's
-        # rsync landed at 0660, and a lane where half the files are readable
-        # by the group and half are not is a bug waiting for its first
-        # group-reading consumer.
-        part.chmod(0o660)
-        part.replace(target)
+        atomic_publish(target, body, fsync=True, mode=0o660)
     except OSError as exc:
-        part.unlink(missing_ok=True)
         return HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "detail": str(exc)}
 
     return HTTPStatus.OK, {
