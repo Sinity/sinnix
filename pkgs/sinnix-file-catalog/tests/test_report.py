@@ -1,5 +1,7 @@
 import json
 import runpy
+import stat
+import subprocess
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -69,3 +71,25 @@ def test_dangling_relationship_is_not_rendered_as_valid(tmp_path):
     }
     with pytest.raises(ValueError, match="dangling relation"):
         MODULE["render"](catalog, tmp_path / "catalog.json", TEMPLATE, "render example")
+
+
+def test_cli_publishes_private_report(tmp_path):
+    catalog = tmp_path / "catalog.json"
+    catalog.write_text(
+        json.dumps({"schema_version": 1, "updated_at": "2026-01-01", "assets": []}),
+        encoding="utf-8",
+    )
+    template = tmp_path / "template.html"
+    template.write_text(TEMPLATE, encoding="utf-8")
+    output = tmp_path / "reports" / "catalog.html"
+    script = Path(__file__).parents[3] / "scripts/sinnix-file-catalog-report"
+    result = subprocess.run(
+        [str(script), "--catalog", str(catalog), "--template", str(template), "--output", str(output)],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == str(output)
+    assert stat.S_IMODE(output.stat().st_mode) == 0o600
+    assert "File inspection catalog" in output.read_text(encoding="utf-8")

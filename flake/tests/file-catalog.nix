@@ -4,12 +4,13 @@
     { system, ... }:
     let
       pkgs = inputs.nixpkgs.legacyPackages.${system};
+      sinnix-lib = pkgs.callPackage ../../pkgs/sinnix-lib/pkg.nix { };
     in
     {
       checks.file-catalog-suite =
         pkgs.runCommand "sinnix-file-catalog-suite-check"
           {
-            nativeBuildInputs = [ (pkgs.python3.withPackages (ps: [ ps.pytest ])) ];
+            nativeBuildInputs = [ (pkgs.python3.withPackages (ps: [ ps.pytest sinnix-lib ])) ];
           }
           ''
             mkdir -p scripts pkgs/sinnix-file-catalog/tests
