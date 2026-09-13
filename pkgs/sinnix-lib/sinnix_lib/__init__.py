@@ -16,6 +16,7 @@ bodies.
 __all__ = [
     "atomic",
     "atomic_json",
+    "http",
     "ledger",
     "lock",
     "notify",
