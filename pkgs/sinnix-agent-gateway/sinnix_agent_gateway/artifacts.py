@@ -118,8 +118,12 @@ class ArtifactService:
             "stderr_bytes": len(result.stderr),
             "stderr_excerpt": redact(result.stderr_excerpt()),
         }
-        source.write_text(json.dumps(diagnostic, sort_keys=True, separators=(",", ":")))
-        source.chmod(0o600)
+        atomic_publish(
+            source,
+            json.dumps(diagnostic, sort_keys=True, separators=(",", ":")).encode(),
+            fsync=True,
+            mode=0o600,
+        )
         receipt = {
             "schema": "sinnix.gateway-diagnostic-receipt.v1",
             "diagnostic_id": diagnostic_id,
@@ -127,10 +131,12 @@ class ArtifactService:
             "files": [source.name],
         }
         receipt_path = directory / "receipt.json"
-        receipt_path.write_text(
-            json.dumps(receipt, sort_keys=True, separators=(",", ":"))
+        atomic_publish(
+            receipt_path,
+            json.dumps(receipt, sort_keys=True, separators=(",", ":")).encode(),
+            fsync=True,
+            mode=0o600,
         )
-        receipt_path.chmod(0o600)
         artifact_id = self.register(
             source,
             kind="owner-diagnostic",
