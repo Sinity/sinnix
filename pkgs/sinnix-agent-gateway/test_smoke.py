@@ -22,9 +22,9 @@ from sinnix_agent_gateway.cli import (
     verify_approval,
 )
 from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
+from sinnix_agent_gateway.owner_execution import ExecutionResult
 from sinnix_agent_gateway.projects import ProjectError
 from sinnix_agent_gateway.server import _bounded_resource_json
-from sinnix_agent_gateway.owner_execution import ExecutionResult
 
 
 def config(tmp_path: Path, *, observer_read: bool = True) -> GatewayConfig:

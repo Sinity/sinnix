@@ -11,12 +11,6 @@ from typing import Any
 
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
-from .owner_execution import (
-    EnvironmentProfile,
-    ExecutionProfile,
-    OwnerExecution,
-    OwnerRoute,
-)
 
 from .artifacts import ArtifactService
 from .capabilities import Capability, Principal
@@ -24,6 +18,12 @@ from .config import (
     DEFAULT_MCP_CALL_TIMEOUT_SECONDS,
     GatewayConfig,
     validate_mcp_call_timeout,
+)
+from .owner_execution import (
+    EnvironmentProfile,
+    ExecutionProfile,
+    OwnerExecution,
+    OwnerRoute,
 )
 from .payloads import retain
 

@@ -48,7 +48,9 @@ def ensure_token(path: Path) -> str:
         path.chmod(0o600)
         return token
     candidate = secrets.token_urlsafe(32)
-    if atomic_publish(path, (candidate + "\n").encode(), fsync=True, mode=0o600, exclusive=True):
+    if atomic_publish(
+        path, (candidate + "\n").encode(), fsync=True, mode=0o600, exclusive=True
+    ):
         return candidate
     winner = path.read_text(encoding="utf-8").strip()
     if not winner:
@@ -433,7 +435,6 @@ class Handler(BaseHTTPRequestHandler):
         """
         requested = {
             "/": ("storage", "drift"),
-
             "/work/": ("workloads", "ingestion", "slices"),
         }.get(pages.canonical(path), ())
         snapshot = self.reducer.page_snapshot(requested)

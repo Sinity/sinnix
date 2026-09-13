@@ -6,8 +6,7 @@ import threading
 from pathlib import Path
 
 import pytest
-from agentctl import landing
-from agentctl import worktrunk
+from agentctl import landing, worktrunk
 from agentctl.config import Config
 from agentctl.projects import load_project_adapter
 from agentctl.worktrunk import (
@@ -110,7 +109,9 @@ def test_agentctl_remove_uses_the_current_worktrunk_remove_contract(
 
     worktrunk_remove(Path("/repo"), "feature/owned", reap=False)
 
-    assert calls == [("remove", "feature/owned", "--foreground", "-y", "--format", "json")]
+    assert calls == [
+        ("remove", "feature/owned", "--foreground", "-y", "--format", "json")
+    ]
 
 
 def test_terminal_release_keeps_the_exact_branch_head(tmp_path: Path) -> None:

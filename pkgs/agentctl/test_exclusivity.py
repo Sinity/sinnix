@@ -196,7 +196,9 @@ def test_affected_verification_stays_admissible_beside_agents(
     config = heavy_policy(config)
     agent_task(config, project)
 
-    affected = launch.start_operation(config, project, project.operation("verify"))["job_id"]
+    affected = launch.start_operation(config, project, project.operation("verify"))[
+        "job_id"
+    ]
 
     assert fake_pueue.task(affected).group == "pytest"
     assert fake_pueue.task(affected).status == "Running"

@@ -78,7 +78,10 @@ def test_systemd_collectors_batch_each_manager(monkeypatch) -> None:
     def show(units, *, user, properties, timeout):
         calls.append((tuple(units), user, tuple(properties), timeout))
         return {
-            unit: {"Id": unit, "LoadState": "not-found" if unit == "gone.service" else "loaded"}
+            unit: {
+                "Id": unit,
+                "LoadState": "not-found" if unit == "gone.service" else "loaded",
+            }
             for unit in units
         }
 
@@ -111,7 +114,10 @@ def test_systemd_collectors_batch_each_manager(monkeypatch) -> None:
         (("system.slice",), False),
         (("user.slice",), True),
     ]
-    assert all(properties == systemd.UNIT_PROPERTIES and timeout == 3 for _, _, properties, timeout in calls)
+    assert all(
+        properties == systemd.UNIT_PROPERTIES and timeout == 3
+        for _, _, properties, timeout in calls
+    )
 
 
 def test_noctalia_health_fixture(monkeypatch) -> None:

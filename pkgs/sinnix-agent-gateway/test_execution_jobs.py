@@ -9,13 +9,13 @@ from conftest import DirectJobs
 from sinnix_agent_gateway.actions import BY_NAME as ACTIONS
 from sinnix_agent_gateway.app import Runtime
 from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
+from sinnix_agent_gateway.owner_errors import ErrorCode
 from sinnix_agent_gateway.registry import REGISTRY
 from sinnix_agent_gateway.runtime import (
     DAEMON_ERROR_CLASSES,
     RESOURCE_READERS,
     ProtocolError,
 )
-from sinnix_agent_gateway.owner_errors import ErrorCode
 
 FakeJobs = DirectJobs
 

@@ -7,8 +7,16 @@ def test_command_defaults_and_explicit_overrides(tmp_path: Path) -> None:
     path = tmp_path / "config.json"
     path.write_text('{"stateDir": "' + str(tmp_path / "state") + '"}')
     defaults = GatewayConfig.load(path)
-    assert (defaults.systemctl_command, defaults.observe_command, defaults.beads_command) == ("systemctl", "sinnix-observe", "bd")
+    assert (
+        defaults.systemctl_command,
+        defaults.observe_command,
+        defaults.beads_command,
+    ) == ("systemctl", "sinnix-observe", "bd")
     assert str(defaults.runtime_inventory) == "/etc/sinnix/runtime-inventory.json"
     assert str(defaults.capability_index) == "/etc/sinnix/capability-index.json"
-    path.write_text('{"stateDir": "' + str(tmp_path / "state") + '", "systemctlCommand": "custom-systemctl"}')
+    path.write_text(
+        '{"stateDir": "'
+        + str(tmp_path / "state")
+        + '", "systemctlCommand": "custom-systemctl"}'
+    )
     assert GatewayConfig.load(path).systemctl_command == "custom-systemctl"

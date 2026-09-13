@@ -125,11 +125,13 @@ def test_speech_recording_is_durably_published_before_transcription(
     monkeypatch.setattr(receiver, "_phone_stream_transcribe", lambda _wav: None)
     lane = receiver._PhoneSpeechLane(tmp_path)
 
-    result = lane.ingest({
-        "audio_b64": base64.b64encode(b"\x00\x00").decode(),
-        "rate": 16000,
-        "seconds": 0.1,
-    })
+    result = lane.ingest(
+        {
+            "audio_b64": base64.b64encode(b"\x00\x00").decode(),
+            "rate": 16000,
+            "seconds": 0.1,
+        }
+    )
 
     recording = lane.blob_dir / result["audio_file"]
     assert recording.read_bytes().startswith(b"RIFF")

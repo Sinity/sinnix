@@ -94,9 +94,7 @@ class CaptureWriter:
             # The counter governs cross-process sequence allocation, so its
             # replacement and directory entry are durable before releasing
             # the lock. Readers see either complete generation of the value.
-            atomic_publish(
-                self._seq_path, str(seq).encode(), fsync=True, mode=0o600
-            )
+            atomic_publish(self._seq_path, str(seq).encode(), fsync=True, mode=0o600)
             return seq
 
     def _record_path(self, ts: float) -> Path:

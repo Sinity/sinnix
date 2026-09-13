@@ -76,7 +76,16 @@ POOL_SLICE_PREFIX = "agentctl"
 # The pools with a declared slice policy. Any other pueue group (a project's
 # landing group, a fixture) runs under the normal slice.
 POLICY_POOLS = frozenset(
-    {"agent", "land-agent", "pytest", "pytest-heavy", "pytest-quick", "bulk", "normal", "interactive"}
+    {
+        "agent",
+        "land-agent",
+        "pytest",
+        "pytest-heavy",
+        "pytest-quick",
+        "bulk",
+        "normal",
+        "interactive",
+    }
 )
 DEFAULT_SLICE_POOL = "normal"
 RUN_EXECUTABLE = "agentctl-run"

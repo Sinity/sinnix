@@ -75,7 +75,12 @@ def test_enroll_publishes_private_embedding_state(monkeypatch, tmp_path: Path) -
 
 def test_calibrate_publishes_a_private_report(monkeypatch, tmp_path: Path) -> None:
     groups = {}
-    for label, count in {"enrollment": 2, "genuine": 2, "impostor": 2, "cohort": 3}.items():
+    for label, count in {
+        "enrollment": 2,
+        "genuine": 2,
+        "impostor": 2,
+        "cohort": 3,
+    }.items():
         paths = []
         for index in range(count):
             path = tmp_path / label / f"{index}.wav"
@@ -91,11 +96,19 @@ def test_calibrate_publishes_a_private_report(monkeypatch, tmp_path: Path) -> No
         path = Path(audio)
         if path.parent.name == "cohort":
             return np.array([[1.0, 0.0], [0.0, 1.0], [-1.0, 0.0]][int(path.stem)])
-        return np.array([-1.0, 0.0]) if path.parent.name == "impostor" else np.array([1.0, 0.0])
+        return (
+            np.array([-1.0, 0.0])
+            if path.parent.name == "impostor"
+            else np.array([1.0, 0.0])
+        )
 
     monkeypatch.setattr(MODULE, "_embed", embedding)
     output = tmp_path / "report.json"
-    args = type("Args", (), {**{label: label for label in groups}, "output": str(output), "max_eer": 0.5})()
+    args = type(
+        "Args",
+        (),
+        {**{label: label for label in groups}, "output": str(output), "max_eer": 0.5},
+    )()
 
     assert MODULE.cmd_calibrate(args) == 0
     assert json.loads(output.read_text())["version"] == MODULE.CALIBRATION_VERSION

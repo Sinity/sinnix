@@ -46,7 +46,13 @@ python3Packages.buildPythonApplication {
     install -Dm755 ${./agentctl-agent} "$out/libexec/agentctl-agent"
     sed -i '1c #!${bash}/bin/bash' "$out/libexec/agentctl-agent"
     wrapProgram "$out/libexec/agentctl-agent" \
-      --prefix PATH : ${lib.makeBinPath [ bash coreutils python3Packages.python ]}
+      --prefix PATH : ${
+        lib.makeBinPath [
+          bash
+          coreutils
+          python3Packages.python
+        ]
+      }
     ln -s ../libexec/agentctl-agent "$out/bin/agentctl-agent"
   '';
   nativeCheckInputs = [

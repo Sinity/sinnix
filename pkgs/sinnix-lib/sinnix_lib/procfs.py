@@ -14,7 +14,6 @@ from __future__ import annotations
 
 from typing import TypeAlias
 
-
 PSIValue: TypeAlias = float | int
 PSIRecord: TypeAlias = dict[str, PSIValue]
 

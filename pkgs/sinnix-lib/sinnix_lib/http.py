@@ -12,7 +12,6 @@ import json
 from collections.abc import Mapping
 from typing import Any, BinaryIO, Literal, cast
 
-
 BodyErrorReason = Literal[
     "missing_content_length",
     "invalid_content_length",
@@ -114,9 +113,7 @@ def _content_length(headers: Mapping[str, Any], *, require: bool) -> int:
     # A syntactically valid decimal cannot be negative, but retain a distinct
     # reason for custom header containers that supply an integer value.
     if length < 0:
-        raise RequestBodyError(
-            "negative_content_length", "negative Content-Length"
-        )
+        raise RequestBodyError("negative_content_length", "negative Content-Length")
     return length
 
 
@@ -240,7 +237,9 @@ def read_json_object(
     try:
         value = json.loads(raw.decode("utf-8"), parse_constant=_reject_constant)
     except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
-        raise RequestBodyError("invalid_json", "request body is not valid JSON") from error
+        raise RequestBodyError(
+            "invalid_json", "request body is not valid JSON"
+        ) from error
     if not isinstance(value, dict):
         raise RequestBodyError("json_not_object", "request body must be a JSON object")
     return cast(dict[str, Any], value)

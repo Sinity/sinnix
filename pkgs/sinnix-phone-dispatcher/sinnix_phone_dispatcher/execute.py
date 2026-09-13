@@ -167,7 +167,9 @@ def deliver_job_answer(intent: dict) -> dict:
         target = answers / f"{job_id}.json"
         atomic_publish(
             target,
-            (json.dumps({"job_id": job_id, "answer": answer, "at": utc_ts()}) + "\n").encode(),
+            (
+                json.dumps({"job_id": job_id, "answer": answer, "at": utc_ts()}) + "\n"
+            ).encode(),
             fsync=True,
             mode=0o600,
         )

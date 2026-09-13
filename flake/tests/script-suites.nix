@@ -200,7 +200,10 @@
             "sinnix-rank"
             "sinnix-deck-forge"
           ];
-          extraPythonPackages = [ sinnix-rank-core sinnix-lib ];
+          extraPythonPackages = [
+            sinnix-rank-core
+            sinnix-lib
+          ];
           extraFiles = [
             {
               source = ../../modules/features/desktop/hyprland/bindings.nix;

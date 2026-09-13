@@ -377,8 +377,14 @@ class Harness:
                 entry.setdefault("bead_revision", binding["bead_revision"])
                 entry.setdefault("acceptance_digest", binding["acceptance_digest"])
                 if not all("ac_id" in item for item in entry["criteria"]):
-                    status = entry["criteria"][0]["status"] if entry["criteria"] else "unsatisfied"
-                    evidence = entry["criteria"][0]["evidence"] if entry["criteria"] else ""
+                    status = (
+                        entry["criteria"][0]["status"]
+                        if entry["criteria"]
+                        else "unsatisfied"
+                    )
+                    evidence = (
+                        entry["criteria"][0]["evidence"] if entry["criteria"] else ""
+                    )
                     entry["criteria"] = [
                         {**item, "status": status, "evidence": evidence}
                         for item in binding["criteria"]
@@ -730,7 +736,9 @@ def test_launch_binds_beads_authored_v2_criteria_into_the_worker_result(
 def test_strict_dispatch_refuses_a_satisfied_partial_acceptance_claim(
     harness: Harness,
 ) -> None:
-    criteria = [{"id": f"AC-{index}", "text": f"requirement {index}"} for index in range(5)]
+    criteria = [
+        {"id": f"AC-{index}", "text": f"requirement {index}"} for index in range(5)
+    ]
     harness.beads.beads["fx-solo"]["metadata"]["acceptance_criteria"] = criteria
     run = harness.start("fx-solo")
     worker = run["workers"][0]
@@ -1825,7 +1833,9 @@ def test_invalid_manifest_create_publishes_no_final_file(harness: Harness) -> No
     assert not list(path.parent.glob(f".{path.name}.*.tmp"))
 
 
-def test_duplicate_manifest_creation_preserves_the_first_bytes(harness: Harness) -> None:
+def test_duplicate_manifest_creation_preserves_the_first_bytes(
+    harness: Harness,
+) -> None:
     run = manifest.Run.from_dict({**harness.start("fx-solo")})
     path = manifest.manifest_path(harness.config, run.run_id)
     original = path.read_bytes()

@@ -40,7 +40,9 @@ def test_parse_colon_numeric_skips_malformed_and_missing_records() -> None:
 
 
 def test_parse_cgroup_v2_requires_one_well_formed_v2_record() -> None:
-    assert parse_cgroup_v2("0::/user.slice/session.scope\n") == "/user.slice/session.scope"
+    assert (
+        parse_cgroup_v2("0::/user.slice/session.scope\n") == "/user.slice/session.scope"
+    )
     assert parse_cgroup_v2("0::/\n") == "/"
     assert parse_cgroup_v2("1:name=systemd:/system.slice\n0::/user.slice\n") is None
     assert parse_cgroup_v2("0:/wrong:/user.slice\n") is None

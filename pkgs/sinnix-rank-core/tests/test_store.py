@@ -65,7 +65,9 @@ def test_append_log_emits_second_precision_utc(tmp_path):
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", record["at"])
 
 
-def test_store_uses_durable_shared_append_for_items_and_comparisons(tmp_path, monkeypatch):
+def test_store_uses_durable_shared_append_for_items_and_comparisons(
+    tmp_path, monkeypatch
+):
     import rank_core.store as store_module
 
     calls = []

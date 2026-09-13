@@ -8,7 +8,6 @@ from types import SimpleNamespace
 
 import pytest
 
-
 SCRIPT = Path(__file__).parents[3] / "scripts" / "sinnix-fs"
 
 

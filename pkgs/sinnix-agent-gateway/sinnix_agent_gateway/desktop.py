@@ -5,6 +5,9 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from .artifacts import ArtifactService
+from .capabilities import Capability, Principal
+from .config import GatewayConfig
 from .owner_execution import (
     EnvironmentProfile,
     ExecutionProfile,
@@ -12,10 +15,6 @@ from .owner_execution import (
     OwnerExecution,
     OwnerRoute,
 )
-
-from .artifacts import ArtifactService
-from .capabilities import Capability, Principal
-from .config import GatewayConfig
 
 
 class DesktopError(ValueError):

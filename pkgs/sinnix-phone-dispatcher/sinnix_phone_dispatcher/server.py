@@ -111,13 +111,13 @@ class Handler(BaseHTTPRequestHandler):
         _, _, raw = self.path.partition("?")
         return {k: v[0] for k, v in urllib.parse.parse_qs(raw).items() if v}
 
-    def _read_body(self, max_bytes: int, *, json_object: bool = False) -> bytes | dict[str, Any] | None:
+    def _read_body(
+        self, max_bytes: int, *, json_object: bool = False
+    ) -> bytes | dict[str, Any] | None:
         """Read one bounded request body and map framing failures to the API."""
         try:
             if json_object:
-                return read_json_object(
-                    self.headers, self.rfile, max_bytes=max_bytes
-                )
+                return read_json_object(self.headers, self.rfile, max_bytes=max_bytes)
             return read_body(self.headers, self.rfile, max_bytes=max_bytes)
         except RequestBodyError as error:
             if error.reason == "body_too_large":

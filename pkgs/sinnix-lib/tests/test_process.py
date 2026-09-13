@@ -132,7 +132,11 @@ def test_run_bounded_enforces_per_stream_and_combined_limits():
     assert "stdout exceeded" in (per_stream.error or "")
 
     combined = run_bounded(
-        [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'x'*20); sys.stderr.buffer.write(b'y'*20)"],
+        [
+            sys.executable,
+            "-c",
+            "import sys; sys.stdout.buffer.write(b'x'*20); sys.stderr.buffer.write(b'y'*20)",
+        ],
         timeout=30,
         combined_limit=25,
     )

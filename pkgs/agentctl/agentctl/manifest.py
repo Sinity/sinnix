@@ -226,9 +226,7 @@ def create(config: Config, run: Run) -> None:
         exclusive=True,
     )
     if not published:
-        raise BatchRefusal(
-            "exists", f"run {run.run_id} already has a manifest"
-        )
+        raise BatchRefusal("exists", f"run {run.run_id} already has a manifest")
 
 
 def load(config: Config, run_id: str) -> Run:

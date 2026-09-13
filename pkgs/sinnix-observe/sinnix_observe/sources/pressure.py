@@ -5,7 +5,8 @@ from __future__ import annotations
 from typing import Any
 
 from sinnix_lib.process import run
-from sinnix_lib.procfs import parse_colon_numeric, parse_psi as parse_psi_text
+from sinnix_lib.procfs import parse_colon_numeric
+from sinnix_lib.procfs import parse_psi as parse_psi_text
 from sinnix_lib.values import float_or_none, int_or_none, read_text
 
 
@@ -40,8 +41,7 @@ def collect_pressure(offline: bool) -> dict[str, Any]:
     pressure["meminfo_mb"] = {
         key: value // 1024
         for key, value in meminfo.items()
-        if key in {"MemTotal", "MemAvailable", "SwapTotal", "SwapFree"}
-        and value >= 0
+        if key in {"MemTotal", "MemAvailable", "SwapTotal", "SwapFree"} and value >= 0
     }
     return pressure
 

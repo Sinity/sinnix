@@ -10,7 +10,12 @@
       checks.file-catalog-suite =
         pkgs.runCommand "sinnix-file-catalog-suite-check"
           {
-            nativeBuildInputs = [ (pkgs.python3.withPackages (ps: [ ps.pytest sinnix-lib ])) ];
+            nativeBuildInputs = [
+              (pkgs.python3.withPackages (ps: [
+                ps.pytest
+                sinnix-lib
+              ]))
+            ];
           }
           ''
             mkdir -p scripts pkgs/sinnix-file-catalog/tests

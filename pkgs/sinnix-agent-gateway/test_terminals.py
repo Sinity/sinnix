@@ -9,12 +9,12 @@ import pytest
 from sinnix_agent_gateway.artifacts import ArtifactService
 from sinnix_agent_gateway.capabilities import PolicyError, Principal
 from sinnix_agent_gateway.config import GatewayConfig
+from sinnix_agent_gateway.owner_execution import OwnerExecution
 from sinnix_agent_gateway.terminals import (
     TerminalDiagnosticError,
     TerminalError,
     TerminalService,
 )
-from sinnix_agent_gateway.owner_execution import OwnerExecution
 
 
 def terminal_service(

@@ -116,12 +116,16 @@ def test_run_grim_returns_stderr_as_failure_reason(monkeypatch) -> None:
     assert "mutually exclusive" in err
 
 
-def test_write_frame_publishes_a_complete_private_frame(tmp_path: Path, monkeypatch) -> None:
+def test_write_frame_publishes_a_complete_private_frame(
+    tmp_path: Path, monkeypatch
+) -> None:
     class Result:
         returncode = 0
         stderr = ""
 
-    monkeypatch.setattr(capture_module.subprocess, "run", lambda *_args, **_kwargs: Result())
+    monkeypatch.setattr(
+        capture_module.subprocess, "run", lambda *_args, **_kwargs: Result()
+    )
     frame = capture_module.write_frame(
         payload={"ts": 1},
         webp_bytes=b"RIFFframe",
@@ -137,17 +141,24 @@ def test_write_frame_publishes_a_complete_private_frame(tmp_path: Path, monkeypa
     assert not list(frame.parent.glob(".*.atomic-tmp-*"))
 
 
-def test_write_frame_returns_none_when_envelope_write_fails(tmp_path: Path, monkeypatch) -> None:
+def test_write_frame_returns_none_when_envelope_write_fails(
+    tmp_path: Path, monkeypatch
+) -> None:
     class Result:
         returncode = 1
         stderr = "capture writer failed"
 
-    monkeypatch.setattr(capture_module.subprocess, "run", lambda *_args, **_kwargs: Result())
-    assert capture_module.write_frame(
-        payload={"ts": 1},
-        webp_bytes=b"RIFFframe",
-        capture_root=tmp_path,
-        lane="screen",
-        sinnix_capture_bin="sinnix-capture",
-        filename="frame.webp",
-    ) is None
+    monkeypatch.setattr(
+        capture_module.subprocess, "run", lambda *_args, **_kwargs: Result()
+    )
+    assert (
+        capture_module.write_frame(
+            payload={"ts": 1},
+            webp_bytes=b"RIFFframe",
+            capture_root=tmp_path,
+            lane="screen",
+            sinnix_capture_bin="sinnix-capture",
+            filename="frame.webp",
+        )
+        is None
+    )

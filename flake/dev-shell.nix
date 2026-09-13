@@ -30,51 +30,52 @@
         resolveFlakeDir
         ;
       registryDevCommands = lib.mapAttrs commandRegistry.mkAppCommand (
-        lib.filterAttrs (
-          name: _: !builtins.hasAttr name activationPackages
-        ) commandRegistry.appCommands
+        lib.filterAttrs (name: _: !builtins.hasAttr name activationPackages) commandRegistry.appCommands
       );
       # Devshell command wrappers — every listed command is directly typeable
-      devCommands = activationPackages // registryDevCommands // {
-        format = pkgs.writeShellScriptBin "format" ''exec ${nix} fmt "$@"'';
-        update = pkgs.writeShellScriptBin "update" ''
-          set -euo pipefail
-          if [ "$#" -gt 0 ]; then
-            exec ${nix} flake update "$@"
-          fi
-          # Routine (no-arg) updates bump every input EXCEPT nixpkgs-ai: that
-          # input feeds CUDA-narrowed AI packages (flake/overlay/package/local-ai.nix)
-          # whose derivation hash breaks on any nixpkgs rev change, forcing an
-          # hours-long recompile. Bump it deliberately: `update nixpkgs-ai`.
-          mapfile -t _routine_inputs < <(
-            ${nix} flake metadata --json \
-              | ${pkgs.jq}/bin/jq -r '.locks.nodes.root.inputs | keys[] | select(. != "nixpkgs-ai")'
-          )
-          exec ${nix} flake update "''${_routine_inputs[@]}"
-        '';
-        diff-closure = pkgs.writeShellScriptBin "diff-closure" ''
-          set -euo pipefail
-          if [ $# -ge 2 ]; then
-            exec ${pkgs.nvd}/bin/nvd diff "$@"
-          elif [ $# -eq 0 ]; then
-            exec ${pkgs.nvd}/bin/nvd diff /nix/var/nix/profiles/system-{1,2}-link
-          else
-            echo "Usage: diff-closure [before] [after]" >&2
-            echo "Default: compares two most recent system profiles" >&2
-            exit 1
-          fi
-        '';
-        smoke = pkgs.writeShellScriptBin "smoke" ''
-          ${resolveFlakeDir}
-          target="''${1:-all}"
-          case "$target" in
-            terminal) exec ${nix} run "$_flake_dir#host-smoke-terminal" ;;
-            services) exec ${nix} run "$_flake_dir#host-smoke-services" ;;
-            all)      exec ${nix} run "$_flake_dir#host-smoke-all" ;;
-            *) echo "Usage: smoke [terminal|services|all]" >&2; exit 1 ;;
-          esac
-        '';
-      };
+      devCommands =
+        activationPackages
+        // registryDevCommands
+        // {
+          format = pkgs.writeShellScriptBin "format" ''exec ${nix} fmt "$@"'';
+          update = pkgs.writeShellScriptBin "update" ''
+            set -euo pipefail
+            if [ "$#" -gt 0 ]; then
+              exec ${nix} flake update "$@"
+            fi
+            # Routine (no-arg) updates bump every input EXCEPT nixpkgs-ai: that
+            # input feeds CUDA-narrowed AI packages (flake/overlay/package/local-ai.nix)
+            # whose derivation hash breaks on any nixpkgs rev change, forcing an
+            # hours-long recompile. Bump it deliberately: `update nixpkgs-ai`.
+            mapfile -t _routine_inputs < <(
+              ${nix} flake metadata --json \
+                | ${pkgs.jq}/bin/jq -r '.locks.nodes.root.inputs | keys[] | select(. != "nixpkgs-ai")'
+            )
+            exec ${nix} flake update "''${_routine_inputs[@]}"
+          '';
+          diff-closure = pkgs.writeShellScriptBin "diff-closure" ''
+            set -euo pipefail
+            if [ $# -ge 2 ]; then
+              exec ${pkgs.nvd}/bin/nvd diff "$@"
+            elif [ $# -eq 0 ]; then
+              exec ${pkgs.nvd}/bin/nvd diff /nix/var/nix/profiles/system-{1,2}-link
+            else
+              echo "Usage: diff-closure [before] [after]" >&2
+              echo "Default: compares two most recent system profiles" >&2
+              exit 1
+            fi
+          '';
+          smoke = pkgs.writeShellScriptBin "smoke" ''
+            ${resolveFlakeDir}
+            target="''${1:-all}"
+            case "$target" in
+              terminal) exec ${nix} run "$_flake_dir#host-smoke-terminal" ;;
+              services) exec ${nix} run "$_flake_dir#host-smoke-services" ;;
+              all)      exec ${nix} run "$_flake_dir#host-smoke-all" ;;
+              *) echo "Usage: smoke [terminal|services|all]" >&2; exit 1 ;;
+            esac
+          '';
+        };
 
       # Grouped table for shellHook
       motdLines = builtins.concatStringsSep "\n" (

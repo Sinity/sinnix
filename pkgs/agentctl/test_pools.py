@@ -177,10 +177,14 @@ def test_config_preserves_the_declared_heavy_pool_exclusion(tmp_path: Path) -> N
     )
 
 
-def test_config_rejects_an_exclusion_partner_that_is_not_declared(tmp_path: Path) -> None:
+def test_config_rejects_an_exclusion_partner_that_is_not_declared(
+    tmp_path: Path,
+) -> None:
     configuration = tmp_path / "agentctl.json"
     configuration.write_text(
-        json.dumps({"pools": {"pytest-heavy": {"parallel": 1, "exclusive_with": ["agent"]}}})
+        json.dumps(
+            {"pools": {"pytest-heavy": {"parallel": 1, "exclusive_with": ["agent"]}}}
+        )
     )
 
     with pytest.raises(ValueError, match="undeclared pool"):
