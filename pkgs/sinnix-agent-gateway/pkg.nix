@@ -10,7 +10,6 @@
   gnutar,
   gzip,
   coreutils,
-  sinnix-mcp,
   sinnix-lib,
   agentctl,
   polylogue-contract-source,
@@ -126,7 +125,6 @@ python3Packages.buildPythonApplication {
   dependencies = [
     python3Packages.anyio
     mcp-sdk
-    sinnix-mcp
     sinnix-lib
     agentctl
     python3Packages.psutil

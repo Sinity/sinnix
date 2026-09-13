@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from pydantic import Field
-from sinnix_mcp.execution import (
+from ..owner_execution import (
     ExecutionProfile,
     ExecutionResult,
     OwnerExecution,

@@ -15,7 +15,7 @@ from sinnix_agent_gateway.actions import contexts, jobs, waits
 from sinnix_agent_gateway.app import Runtime, create_server
 from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
 from sinnix_agent_gateway.locators import JobLocator
-from sinnix_mcp import ErrorCode
+from sinnix_agent_gateway.owner_errors import ErrorCode
 
 OWNED = (*jobs.ACTIONS, *waits.ACTIONS, *contexts.ACTIONS)
 

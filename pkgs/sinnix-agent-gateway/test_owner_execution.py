@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sys
 
-from sinnix_mcp.execution import (
+from sinnix_agent_gateway.owner_execution import (
     EnvironmentProfile,
     ExecutionProfile,
     OwnerExecution,

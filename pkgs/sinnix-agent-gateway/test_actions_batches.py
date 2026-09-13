@@ -17,7 +17,7 @@ from sinnix_agent_gateway.actions import batches, jobs
 from sinnix_agent_gateway.app import Runtime, create_server
 from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
 from sinnix_agent_gateway.locators import RunLocator
-from sinnix_mcp import ErrorCode
+from sinnix_agent_gateway.owner_errors import ErrorCode
 
 OWNED = (*batches.ACTIONS, *jobs.ACTIONS)
 RUN_ID = "fixture-20260906-012123-a2c81926"

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sinnix_mcp.refs import RefTemplate, SinnixRef
+from .refs import RefTemplate, SinnixRef
 
 from .contracts import ResourceSpec
 

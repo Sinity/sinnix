@@ -15,7 +15,7 @@ from sinnix_agent_gateway.runtime import (
     RESOURCE_READERS,
     ProtocolError,
 )
-from sinnix_mcp import ErrorCode
+from sinnix_agent_gateway.owner_errors import ErrorCode
 
 FakeJobs = DirectJobs
 

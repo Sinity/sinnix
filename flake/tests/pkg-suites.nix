@@ -98,10 +98,6 @@
         sinnix-agent-gateway-suite = sinnixScriptRegistry.packageSet.sinnix-agent-gateway;
         sqlite-backup-package = sinnixScriptRegistry.packageSet.sinnix-sqlite-backup;
 
-        # Owner-execution has daemon and adapter consumers. This package check
-        # exercises its bounded subprocess contract at its package boundary.
-        sinnix-mcp-suite = sinnixScriptRegistry.packageSet.sinnix-mcp;
-
         # The shared library every other Python package here depends on, so
         # its suite only ever ran as a side effect of building a consumer.
         # Named here it fails on its own contract, not on a consumer's.

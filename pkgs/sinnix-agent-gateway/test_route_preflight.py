@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from sinnix_agent_gateway.config import GatewayConfig
 from sinnix_agent_gateway.route_preflight import GatewayRoutePreflight
-from sinnix_mcp.execution import OwnerExecution
+from sinnix_agent_gateway.owner_execution import OwnerExecution
 
 
 def make_inventory(tmp_path: Path) -> tuple[Path, Path]:

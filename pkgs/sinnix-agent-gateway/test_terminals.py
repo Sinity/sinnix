@@ -14,7 +14,7 @@ from sinnix_agent_gateway.terminals import (
     TerminalError,
     TerminalService,
 )
-from sinnix_mcp.execution import OwnerExecution
+from sinnix_agent_gateway.owner_execution import OwnerExecution
 
 
 def terminal_service(

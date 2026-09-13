@@ -13,7 +13,7 @@ from sinnix_agent_gateway.browser import (
 )
 from sinnix_agent_gateway.capabilities import PolicyError, Principal
 from sinnix_agent_gateway.config import GatewayConfig
-from sinnix_mcp.execution import ExecutionResult
+from sinnix_agent_gateway.owner_execution import ExecutionResult
 
 
 def browser_service(tmp_path: Path, principal_name: str) -> tuple[BrowserService, Path]:
