@@ -174,6 +174,12 @@
           suiteDir = ../../pkgs/sinnix-ytdlp/tests;
           scripts = [ "sinnix-ytdlp" ];
         };
+        fs-materialization-suite = mkScriptSuite {
+          name = "sinnix-fs";
+          suiteDir = ../../pkgs/sinnix-fs/tests;
+          scripts = [ "sinnix-fs" ];
+          extraPythonPackages = [ sinnix-lib ];
+        };
         quest-player-suite = mkScriptSuite {
           name = "sinnix-quest-player";
           suiteDir = ../../pkgs/sinnix-quest-player/tests;
