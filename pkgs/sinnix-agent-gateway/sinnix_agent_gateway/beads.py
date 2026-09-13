@@ -11,10 +11,9 @@ from difflib import unified_diff
 from pathlib import Path
 from typing import Any, Mapping
 
-from .owner_execution import ExecutionProfile, OwnerExecution, OwnerRoute
-
 from .capabilities import Capability, Principal
 from .config import GatewayConfig, ProjectConfig, TaskAuthorityConfig
+from .owner_execution import ExecutionProfile, OwnerExecution, OwnerRoute
 from .results import ProtocolError, ResultError, ResultService
 
 
@@ -236,9 +235,31 @@ class BeadsService:
             "project_uuid": authority.project_uuid,
             "schema_version": where.get("schema_version"),
             "revision": revision,
+            "committed_revision": self._committed_revision(project),
             "summary": status.get("summary"),
             "attested": True,
         }
+
+    def _committed_revision(self, project: ProjectConfig) -> str | None:
+        """The latest revision a historical read will actually accept.
+
+        A live owner read reports the working-set hash, which is not a ref
+        spec: replaying it into ``at`` fails with ``invalid ref spec``. Only a
+        committed revision round-trips, so resolve it separately rather than
+        letting callers mistake one identifier for the other.
+        """
+        try:
+            head = self._run(
+                project,
+                ["owner", "read"],
+                False,
+                payload={"aggregate": {}, "limit": 1, "at": "HEAD"},
+            )
+        except BeadsError:
+            return None
+        if isinstance(head, Mapping) and isinstance(head.get("revision"), str):
+            return head["revision"]
+        return None
 
     def _attest(
         self, project_id: str, write: bool

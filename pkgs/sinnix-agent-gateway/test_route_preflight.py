@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 from sinnix_agent_gateway.config import GatewayConfig
-from sinnix_agent_gateway.route_preflight import GatewayRoutePreflight
 from sinnix_agent_gateway.owner_execution import OwnerExecution
+from sinnix_agent_gateway.route_preflight import GatewayRoutePreflight
 
 
 def make_inventory(tmp_path: Path) -> tuple[Path, Path]:
@@ -40,6 +40,9 @@ def make_owner_command(tmp_path: Path) -> str:
         "    value = []\n"
         "elif arguments == ['status']:\n"
         "    value = {'Browser': 'fixture'}\n"
+        "elif arguments[:2] == ['--user', 'show']:\n"
+        "    print('Version=257')\n"
+        "    sys.exit()\n"
         "elif arguments == ['--version']:\n"
         "    print('fixture')\n"
         "    sys.exit()\n"
@@ -65,6 +68,7 @@ def preflight(tmp_path: Path, **overrides: object) -> GatewayRoutePreflight:
         "kitty_control_command": command,
         "chrome_control_command": command,
         "beads_command": command,
+        "systemctl_command": command,
     }
     config_values.update(overrides)
     config = GatewayConfig(**config_values)
@@ -74,6 +78,7 @@ def preflight(tmp_path: Path, **overrides: object) -> GatewayRoutePreflight:
             "LANG": "C.UTF-8",
             "PATH": os.environ["PATH"],
             "XDG_RUNTIME_DIR": str(tmp_path / "runtime"),
+            "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus",
             "WAYLAND_DISPLAY": "wayland-fixture",
             "HYPRLAND_INSTANCE_SIGNATURE": "fixture",
         }
@@ -232,6 +237,7 @@ def test_route_preflight_marks_each_missing_owner_command_unavailable(
     ("missing", "route"),
     [
         ("XDG_RUNTIME_DIR", "terminal.kitty"),
+        ("DBUS_SESSION_BUS_ADDRESS", "machine.units.user"),
         ("WAYLAND_DISPLAY", "desktop.hypr"),
         ("HYPRLAND_INSTANCE_SIGNATURE", "desktop.screenshot"),
     ],
@@ -245,6 +251,7 @@ def test_route_preflight_marks_required_owner_environment_unavailable(
         "LANG": "C.UTF-8",
         "PATH": os.environ["PATH"],
         "XDG_RUNTIME_DIR": str(tmp_path / "runtime"),
+        "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus",
         "WAYLAND_DISPLAY": "wayland-fixture",
         "HYPRLAND_INSTANCE_SIGNATURE": "fixture",
     }
@@ -264,10 +271,14 @@ def test_route_preflight_reports_missing_broker_environment(
     monkeypatch.delenv("DBUS_SESSION_BUS_ADDRESS", raising=False)
     monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
 
-    result = preflight(
+    checker = preflight(
         tmp_path,
         mcp_broker_servers={"fixture": {"brokered": True}},
-    ).run()
+    )
+    checker.execution = OwnerExecution(
+        {"HOME": str(tmp_path), "LANG": "C.UTF-8", "PATH": os.environ["PATH"]}
+    )
+    result = checker.run()
 
     assert result["status"] == "degraded"
     assert result["routes"][-1] == {
