@@ -4,22 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from sinnix_lib.values import int_or_none, read_text
+from sinnix_lib.procfs import parse_cgroup_v2, parse_colon_numeric
+from sinnix_lib.values import read_text
 
 
 def parse_proc_io(path: Path) -> dict[str, int]:
-    raw = read_text(path)
-    result: dict[str, int] = {}
-    if not raw:
-        return result
-    for line in raw.splitlines():
-        if ":" not in line:
-            continue
-        key, value = line.split(":", 1)
-        parsed = int_or_none(value.strip())
-        if parsed is not None:
-            result[key.strip()] = parsed
-    return result
+    return parse_colon_numeric(read_text(path))
 
 
 def parse_proc_status(path: Path) -> dict[str, str]:
@@ -36,11 +26,4 @@ def parse_proc_status(path: Path) -> dict[str, str]:
 
 
 def parse_proc_cgroup(path: Path) -> str | None:
-    raw = read_text(path)
-    if not raw:
-        return None
-    for line in raw.splitlines():
-        parts = line.split(":", 2)
-        if len(parts) == 3 and parts[0] == "0":
-            return parts[2]
-    return raw.splitlines()[0] if raw.splitlines() else None
+    return parse_cgroup_v2(read_text(path))
