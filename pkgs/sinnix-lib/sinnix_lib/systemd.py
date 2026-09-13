@@ -2,13 +2,14 @@
 
 The blank-line-delimited ``systemctl show`` block parser existed in bash
 (health sentinel), in Python (hub renderer), and in sinnix-observe — three
-dialects of one parser. This is the one implementation, with the sentinel's
-sudo/user-bus bridge for probing another user's manager from a system unit.
+dialects of one parser. This is the one implementation, with a PAM-free
+user-bus bridge for probing another user's manager from a system unit.
 """
 
 from __future__ import annotations
 
 import os
+import pwd
 import socket
 import subprocess
 from collections.abc import Sequence
@@ -80,7 +81,7 @@ def show_units(
     if not units:
         return {}
     cmd = ["systemctl", *(["--user"] if user else []), "show", *units]
-    for prop in properties:
+    for prop in ("Id", *[prop for prop in properties if prop != "Id"]):
         cmd += ["-p", prop]
     proc = subprocess.run(
         cmd, check=False, capture_output=True, text=True, timeout=timeout
@@ -96,28 +97,39 @@ def show_units_as_user(
     *,
     bus_path: Path | None = None,
     properties: Sequence[str] = DEFAULT_PROPERTIES,
+    timeout: float | None = None,
 ) -> dict[str, dict[str, str]]:
-    """Probe another user's manager from a privileged caller (the
-    sentinel's sudo + session-bus bridge, factored out)."""
+    """Probe another user's manager without opening a PAM session.
+
+    ``setpriv`` changes identity in the current process and the explicit user
+    bus environment lets dbus-broker authenticate that identity directly.
+    This is the bridge used by system services sampling a user's manager.
+    """
     if not units:
         return {}
     bus = bus_path or Path(f"/run/user/{uid}/bus")
     if not bus.is_socket():
         return {}
+    pw = pwd.getpwuid(uid)
     cmd = [
-        "sudo",
-        "-u",
-        f"#{uid}",
-        f"XDG_RUNTIME_DIR=/run/user/{uid}",
+        "setpriv",
+        f"--reuid={uid}",
+        f"--regid={pw.pw_gid}",
+        "--init-groups",
+        "env",
         f"DBUS_SESSION_BUS_ADDRESS=unix:path={bus}",
+        f"XDG_RUNTIME_DIR=/run/user/{uid}",
+        f"HOME={pw.pw_dir}",
         "systemctl",
         "--user",
         "show",
         *units,
     ]
-    for prop in properties:
+    for prop in ("Id", *[prop for prop in properties if prop != "Id"]):
         cmd += ["-p", prop]
-    proc = subprocess.run(cmd, check=False, capture_output=True, text=True)
+    proc = subprocess.run(
+        cmd, check=False, capture_output=True, text=True, timeout=timeout
+    )
     if proc.returncode != 0 and not proc.stdout:
         return {}
     return _parse_blocks(proc.stdout)

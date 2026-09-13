@@ -8,7 +8,12 @@ import pytest
 from sinnix_lib.atomic_json import modify_json, read_json, write_json_atomic
 from sinnix_lib.ledger import append_jsonl, iter_jsonl, receipt, write_jsonl_atomic
 from sinnix_lib.lock import LockBusy, flock
-from sinnix_lib.systemd import _parse_blocks, sd_notify, watchdog_period
+from sinnix_lib.systemd import (
+    _parse_blocks,
+    sd_notify,
+    show_units_as_user,
+    watchdog_period,
+)
 
 
 def test_atomic_roundtrip(tmp_path):
@@ -175,3 +180,38 @@ def test_unit_probe_timeout_bounds_a_wedged_manager(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", str(tmp_path))
     with pytest.raises(subprocess.TimeoutExpired):
         show_units(["fixture.service"], timeout=0.05)
+
+
+def test_user_unit_probe_uses_pam_free_setpriv_bridge(monkeypatch, tmp_path):
+    import pwd
+    import subprocess
+
+    bus = tmp_path / "bus"
+    bus.write_text("")
+    monkeypatch.setattr(type(bus), "is_socket", lambda _path: True)
+    monkeypatch.setattr(
+        pwd,
+        "getpwuid",
+        lambda _uid: type("Pw", (), {"pw_gid": 1000, "pw_dir": "/home/test"})(),
+    )
+    seen = {}
+
+    def fake_run(cmd, **kwargs):
+        seen["cmd"] = cmd
+        return subprocess.CompletedProcess(
+            cmd, 0, "Id=demo.service\nActiveState=active\n\n", ""
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert show_units_as_user(["demo.service"], 1000, bus_path=bus) == {
+        "demo.service": {"Id": "demo.service", "ActiveState": "active"}
+    }
+    assert seen["cmd"][:7] == [
+        "setpriv",
+        "--reuid=1000",
+        "--regid=1000",
+        "--init-groups",
+        "env",
+        "DBUS_SESSION_BUS_ADDRESS=unix:path=" + str(bus),
+        "XDG_RUNTIME_DIR=/run/user/1000",
+    ]

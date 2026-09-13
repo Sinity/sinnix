@@ -27,6 +27,44 @@ def test_systemd_unescape_fragment_decodes_hex_escapes() -> None:
     )
 
 
+def test_service_unit_props_batches_each_manager(monkeypatch) -> None:
+    collector = _collector()
+    calls = []
+    monkeypatch.setattr(
+        collector,
+        "show_units",
+        lambda units, **kwargs: calls.append(("system", units, kwargs))
+        or {unit: {"ActiveState": "active"} for unit in units},
+    )
+    monkeypatch.setattr(
+        collector,
+        "show_units_as_user",
+        lambda units, uid, **kwargs: calls.append(("user", units, uid, kwargs))
+        or {unit: {"SubState": "running"} for unit in units},
+    )
+    monkeypatch.setattr(
+        collector.pwd,
+        "getpwnam",
+        lambda _name: type("Pw", (), {"pw_uid": 1000})(),
+    )
+
+    got = collector.service_unit_props(
+        ["a.service", "polylogued.service", "b.service", "noctalia.service"],
+        user_units={"polylogued.service", "noctalia.service"},
+        user_name="test",
+    )
+
+    assert [call[0] for call in calls] == ["system", "user"]
+    assert calls[0][1] == ["a.service", "b.service"]
+    assert calls[1][1] == ["polylogued.service", "noctalia.service"]
+    assert set(got) == {
+        "a.service",
+        "b.service",
+        "polylogued.service",
+        "noctalia.service",
+    }
+
+
 def test_psi_adapter_keeps_telemetry_flat_float_fields(monkeypatch) -> None:
     collector = _collector()
     monkeypatch.setattr(
