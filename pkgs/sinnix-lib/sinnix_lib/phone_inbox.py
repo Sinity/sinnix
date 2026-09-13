@@ -27,6 +27,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from .atomic import atomic_publish
 from .ledger import utc_ts
 
 SCHEMA = "sinnix.phone.receipt/1"
@@ -42,16 +43,18 @@ def write_message(directory: Path | str, payload: dict[str, Any]) -> Path:
     """Land *payload* in *directory* as a complete file or not at all.
 
     The reader (drain or app) polls this directory, so a partially written
-    file must never carry the final name -- hence ``.part`` plus a rename,
-    which the inbox reader also knows to skip.
+    file must never carry the final name. The shared publisher writes under
+    a unique sibling temporary and renames only complete, durable bytes.
     """
     d = Path(directory)
     d.mkdir(parents=True, exist_ok=True)
-    name = message_name()
-    tmp = d / (name + ".part")
-    tmp.write_text(json.dumps(payload) + "\n", encoding="utf-8")
-    target = d / name
-    tmp.rename(target)
+    target = d / message_name()
+    atomic_publish(
+        target,
+        (json.dumps(payload) + "\n").encode("utf-8"),
+        fsync=True,
+        mode=0o600,
+    )
     return target
 
 

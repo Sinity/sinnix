@@ -33,22 +33,10 @@ def test_notify_payload_has_no_intent_fields(tmp_path):
     }
 
 
-def test_message_is_never_visible_half_written(tmp_path):
-    """A reader polling *.json must not see a partial file: the writer lands
-    it under .part first, which is exactly what the app's drain skips."""
-    written = []
-    real_write_text = phone_inbox.Path.write_text
+def test_message_is_private_and_leaves_no_temporary(tmp_path):
+    path = phone_inbox.emit_receipt(tmp_path, "k", "t", "b", None)
 
-    def spy(self, *a, **kw):
-        written.append(self.name)
-        return real_write_text(self, *a, **kw)
-
-    phone_inbox.Path.write_text = spy
-    try:
-        path = phone_inbox.emit_receipt(tmp_path, "k", "t", "b", None)
-    finally:
-        phone_inbox.Path.write_text = real_write_text
-    assert written == [path.name + ".part"]
+    assert path.stat().st_mode & 0o777 == 0o600
     assert [p.name for p in tmp_path.iterdir()] == [path.name]
 
 
