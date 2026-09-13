@@ -48,6 +48,8 @@ import sys
 import time
 from pathlib import Path
 
+from sinnix_lib.atomic_json import write_json_atomic
+
 from . import capture, hypr
 from .hashing import (
     CaptureAttemptGate,
@@ -81,14 +83,15 @@ def _load_throttle_state(path: Path, clock) -> ThrottleState | None:
 
 
 def _save_throttle_state(path: Path, state: ThrottleState) -> None:
-    path.write_text(
-        json.dumps(
-            {
-                "day": state.day,
-                "bytes_written": state.bytes_written,
-                "tripped": state.tripped,
-            }
-        )
+    write_json_atomic(
+        path,
+        {
+            "day": state.day,
+            "bytes_written": state.bytes_written,
+            "tripped": state.tripped,
+        },
+        mode=0o600,
+        fsync=True,
     )
 
 

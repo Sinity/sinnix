@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 from PIL import Image
+from sinnix_capture_screen.daemon import _save_throttle_state
 from sinnix_capture_screen.hashing import (
     CaptureAttemptGate,
     DailyThrottleGuard,
@@ -296,3 +297,10 @@ def test_pause_detector_refires_after_movement_and_new_idle_period() -> None:
     assert pd.sample(3.5, 200, 200) is False
     assert pd.sample(4.0, 200, 200) is False
     assert pd.sample(6.5, 200, 200) is True
+
+
+def test_throttle_state_is_private_and_published_atomically(tmp_path) -> None:
+    path = tmp_path / "throttle.json"
+    _save_throttle_state(path, DailyThrottleGuard(100).state)
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert not list(tmp_path.glob(".throttle.json.atomic-tmp-*"))
