@@ -9,6 +9,8 @@ import sys
 import warnings
 from pathlib import Path
 
+from sinnix_lib.atomic import atomic_publish
+
 SOURCE_PIXELS = 80_000_000
 OUTPUT_PIXELS = 16_000_000
 
@@ -34,8 +36,7 @@ def _encode(image, destination: Path, budget: int, *, original: bool) -> dict:
             data, media, suffix = output.getvalue(), "image/jpeg", ".jpg"
         if len(data) <= budget:
             path = destination.with_suffix(suffix)
-            path.write_bytes(data)
-            path.chmod(0o600)
+            atomic_publish(path, data, fsync=False, mode=0o600)
             return {
                 "name": path.name,
                 "width": image.width,
