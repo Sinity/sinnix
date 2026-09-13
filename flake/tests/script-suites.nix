@@ -85,6 +85,7 @@
           suiteDir = ../../pkgs/machine-telemetry/tests;
           scripts = [ "sinnix-sqlite-backup" ];
           packageFiles = [ "collector.py" ];
+          extraPythonPackages = [ sinnix-lib ];
           nativeBuildInputs = [ pkgs.zstd ];
         };
         # Provably fails when: either runner stamps a grammar other than the

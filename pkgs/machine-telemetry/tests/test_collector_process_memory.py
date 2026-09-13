@@ -27,6 +27,22 @@ def test_systemd_unescape_fragment_decodes_hex_escapes() -> None:
     )
 
 
+def test_psi_adapter_keeps_telemetry_flat_float_fields(monkeypatch) -> None:
+    collector = _collector()
+    monkeypatch.setattr(
+        collector,
+        "read_text",
+        lambda _path: "some avg10=0.25 avg60=1.5 total=42\nfull total=7\n",
+    )
+
+    assert collector.parse_psi("/proc/pressure/cpu") == {
+        "some_avg10": 0.25,
+        "some_avg60": 1.5,
+        "some_total": 42.0,
+        "full_total": 7.0,
+    }
+
+
 @pytest.mark.parametrize("value", [2**53 + 1, 2**63 - 1, -(2**53 + 1), 0])
 def test_integer_counter_retains_precision_in_sqlite(value) -> None:
     collector = _collector()
