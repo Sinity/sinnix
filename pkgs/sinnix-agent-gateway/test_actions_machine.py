@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 import anyio
+import pytest
 from mcp.types import CallToolResult
 from sinnix_agent_gateway.action import Action
 from sinnix_agent_gateway.actions import machine
@@ -16,6 +17,13 @@ from sinnix_agent_gateway.runtime import Runtime
 from sinnix_agent_gateway.tooling import build_tool
 
 BY_NAME = {action.name: action for action in machine.ACTIONS}
+
+
+@pytest.fixture(autouse=True)
+def user_bus(monkeypatch) -> None:
+    """User-scoped systemctl needs its bus; the hermetic build has none."""
+    monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")
+    monkeypatch.setenv("XDG_RUNTIME_DIR", "/run/user/1000")
 
 
 def call(
@@ -82,7 +90,8 @@ if "show" in argv:
         print(f"{p}={values.get(p, '')}")
     sys.exit(0)
 sys.exit(2)
-""" % (json.dumps(UNITS), __import__("os").getpid()),
+"""
+        % (json.dumps(UNITS), __import__("os").getpid()),
     )
 
 
@@ -124,7 +133,8 @@ if key:
     rows = report[key]; page = rows[cursor:cursor + limit]
     report[key] = {"total": len(rows), "cursor": cursor, "next_cursor": cursor + len(page) if cursor + len(page) < len(rows) else None, "rows": page}
 print(json.dumps(report))
-""" % json.dumps(report),
+"""
+        % json.dumps(report),
     )
 
 
@@ -413,3 +423,44 @@ def test_observer_can_prepare_exact_target_precondition(tmp_path: Path) -> None:
     )
     assert result["data"]["ref"] == "sinnix://machine/units/user/alpha.service"
     assert runtime._fake_connection.requests[-1][:2] == ("POST", "/v1/actions/prepare")
+
+
+def _env_recording_systemctl(tmp_path: Path) -> Path:
+    return script(
+        tmp_path / "systemctl",
+        """
+import os
+Path = __import__("pathlib").Path
+Path(sys.argv[0] + ".env").write_text(json.dumps(dict(os.environ)))
+print(json.dumps(%s))
+"""
+        % json.dumps(UNITS),
+    )
+
+
+def test_user_scoped_systemctl_receives_the_user_bus(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """--user cannot reach the user manager without its bus in the environment."""
+    runtime = make_runtime(tmp_path)
+    recorder = _env_recording_systemctl(tmp_path)
+
+    call(runtime, "machine.units.list", {"scope": "user"})
+    delivered = json.loads(Path(str(recorder) + ".env").read_text())
+    assert delivered["DBUS_SESSION_BUS_ADDRESS"] == "unix:path=/run/user/1000/bus"
+    assert delivered["XDG_RUNTIME_DIR"] == "/run/user/1000"
+
+    call(runtime, "machine.units.list", {"scope": "system"})
+    system_env = json.loads(Path(str(recorder) + ".env").read_text())
+    assert "DBUS_SESSION_BUS_ADDRESS" not in system_env
+
+
+def test_missing_user_bus_is_reported_as_environment_unavailable(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.delenv("DBUS_SESSION_BUS_ADDRESS", raising=False)
+    monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
+    runtime = make_runtime(tmp_path)
+    failure = call(runtime, "machine.units.list", {"scope": "user"})
+    assert failure["error"]["code"] == "unavailable"
+    assert "DBUS_SESSION_BUS_ADDRESS" in json.dumps(failure["error"])

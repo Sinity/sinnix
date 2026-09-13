@@ -90,7 +90,7 @@ class QueryInput(RequestControls):
     at: str | None = Field(
         default=None,
         max_length=256,
-        description="Exact revision or RFC3339 timestamp with timezone; all reads use the resolved revision.",
+        description="Committed revision or RFC3339 timestamp with timezone; all reads use the resolved revision. Use committed_revision from the project authority, not its live revision: the latter is a working-set hash and is rejected as an invalid ref spec.",
     )
     projection: Literal["summary", "full"] = "summary"
     aggregate: dict[str, Any] | None = Field(

@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from typing import Any, Callable
 
+from .captures import queryable_capture_lanes
+from .config import GatewayConfig
 from .owner_execution import (
     EnvironmentProfile,
     ExecutionProfile,
@@ -10,9 +12,6 @@ from .owner_execution import (
     OwnerExecution,
     OwnerRoute,
 )
-
-from .captures import queryable_capture_lanes
-from .config import GatewayConfig
 
 
 class GatewayRoutePreflight:
@@ -33,13 +32,14 @@ class GatewayRoutePreflight:
         decode: Callable[[ExecutionResult], Any],
         valid: Callable[[Any], bool],
         timeout_seconds: int = 5,
+        max_stdout_bytes: int = 16_384,
     ) -> dict[str, Any]:
         result = self.execution.run(
             command,
             ExecutionProfile(
                 route=route,
                 timeout_seconds=timeout_seconds,
-                max_stdout_bytes=16_384,
+                max_stdout_bytes=max_stdout_bytes,
             ),
         )
         evidence = {
@@ -172,6 +172,23 @@ class GatewayRoutePreflight:
                 ExecutionResult.decode_json,
                 lambda value: self._is_json_object(value, "schema"),
             ),
+            self._probe(
+                # Exercises the same route and environment profile that
+                # machine.units.* uses for scope="user", so a pass here means
+                # that action can reach the user manager.
+                "machine.units.user",
+                [
+                    self.config.systemctl_command,
+                    "--user",
+                    "show",
+                    "--property=Version",
+                    "--no-pager",
+                ],
+                OwnerRoute("machine-units", EnvironmentProfile.USER_BUS),
+                "non_empty_text",
+                ExecutionResult.decode_json_or_text,
+                lambda value: isinstance(value, str) and value.startswith("Version="),
+            ),
             self._capture_probe(),
             self._probe(
                 "desktop.hypr",
@@ -196,6 +213,10 @@ class GatewayRoutePreflight:
                 "json_list",
                 ExecutionResult.decode_json,
                 lambda value: isinstance(value, list),
+                # A kitty inventory costs roughly 4 KiB per OS window, so a
+                # 16 KiB bound truncates the JSON during ordinary desktop use
+                # and reports a reachable terminal as degraded.
+                max_stdout_bytes=262_144,
             ),
             self._probe(
                 "browser.chrome",

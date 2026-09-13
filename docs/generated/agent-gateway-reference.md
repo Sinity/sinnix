@@ -1,11 +1,11 @@
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: 708e45967932b23d92890cb6dafcbbc3be11f449183f655a8154cd4e6e9b5a1d -->
+<!-- gateway-catalog-sha256: 33f44ec692ccf317e502d92680d31a81ea2a87701a559ffcee151768af4baca6 -->
 # Sinnix Agent Gateway reference
 
 Generated from `sinnix_agent_gateway.actions`. Every action is one MCP tool whose `tools/list` input schema is the one below; the catalog hash changes when any principal-visible action catalog row changes, including its schema, principal set, example or affordance.
 
-Revision: `v3-typed-actions`. Catalog SHA-256: `708e45967932b23d92890cb6dafcbbc3be11f449183f655a8154cd4e6e9b5a1d`.
+Revision: `v3-typed-actions`. Catalog SHA-256: `33f44ec692ccf317e502d92680d31a81ea2a87701a559ffcee151768af4baca6`.
 
 ## Invocation
 
@@ -4423,7 +4423,7 @@ Input schema:
         }
       ],
       "default": null,
-      "description": "Exact revision or RFC3339 timestamp with timezone; all reads use the resolved revision."
+      "description": "Committed revision or RFC3339 timestamp with timezone; all reads use the resolved revision. Use committed_revision from the project authority, not its live revision: the latter is a working-set hash and is rejected as an invalid ref spec."
     },
     "cursor": {
       "anyOf": [

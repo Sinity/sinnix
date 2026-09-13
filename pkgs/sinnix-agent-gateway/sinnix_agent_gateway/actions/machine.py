@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import Field
-from ..owner_execution import ExecutionProfile, ExecutionResult, OwnerRoute
 
 from ..action import (
     ALL_PRINCIPALS,
@@ -22,6 +21,12 @@ from ..capabilities import Capability
 from ..contracts import VerbFamily
 from ..locators import UNIT_REF_PREFIX, UnitLocator, UnitScope
 from ..machine_actions import MachineActionError
+from ..owner_execution import (
+    EnvironmentProfile,
+    ExecutionProfile,
+    ExecutionResult,
+    OwnerRoute,
+)
 from ..results import ProtocolError
 from ..schemas import GatewayModel
 
@@ -111,16 +116,25 @@ MachineRequest = (
 
 
 def _run(
-    runtime: Runtime, argv: list[str], route: str, timeout: float = 20
+    runtime: Runtime,
+    argv: list[str],
+    route: str,
+    timeout: float = 20,
+    environment_profile: EnvironmentProfile = EnvironmentProfile.PLAIN,
 ) -> ExecutionResult:
     return runtime.observe.execution.run(
         argv,
         ExecutionProfile(
-            route=OwnerRoute(route),
+            route=OwnerRoute(route, environment_profile),
             timeout_seconds=timeout,
             max_stdout_bytes=max(runtime.config.max_result_bytes * 8, 1_048_576),
         ),
     )
+
+
+def _scope_profile(scope: UnitScope) -> EnvironmentProfile:
+    """Reaching the user manager needs its bus; the system manager does not."""
+    return EnvironmentProfile.USER_BUS if scope == "user" else EnvironmentProfile.PLAIN
 
 
 def _failed(result: ExecutionResult, what: str) -> ProtocolError:
@@ -436,7 +450,9 @@ def _units_list(runtime: Runtime, inp: UnitsListInput) -> UnitsListing:
         argv.append(f"--state={inp.state}")
     if inp.pattern:
         argv.append(inp.pattern)
-    result = _run(runtime, argv, "machine-units")
+    result = _run(
+        runtime, argv, "machine-units", environment_profile=_scope_profile(inp.scope)
+    )
     if result.failure_class is not None:
         raise _failed(result, "systemctl list-units")
     try:
@@ -540,7 +556,9 @@ def _unit_show(
     ]
     for name in properties:
         argv += ["-p", name]
-    result = _run(runtime, argv, "machine-units")
+    result = _run(
+        runtime, argv, "machine-units", environment_profile=_scope_profile(scope)
+    )
     if result.failure_class is not None:
         raise _failed(result, "systemctl show")
     shown = {}
@@ -666,7 +684,13 @@ def _units_logs(runtime: Runtime, inp: UnitLogsInput) -> UnitLogs:
         argv += ["-p", inp.priority]
     if inp.grep:
         argv += ["--case-sensitive=false", "-g", inp.grep]
-    result = _run(runtime, argv, "machine-journal", timeout=30)
+    result = _run(
+        runtime,
+        argv,
+        "machine-journal",
+        timeout=30,
+        environment_profile=_scope_profile(scope),
+    )
     if result.failure_class is not None:
         raise _failed(result, "journalctl")
     from datetime import datetime, timezone
@@ -813,7 +837,9 @@ def _operate_via_reducer(
         code = (
             "conflict"
             if "stale" in message or "revision" in message
-            else "unavailable" if "unavailable" in message else "owner_failed"
+            else "unavailable"
+            if "unavailable" in message
+            else "owner_failed"
         )
         raise ProtocolError(code, message) from exc
     return OperateResult(**payload, affordances=["machine.query", "audit.receipt"])
