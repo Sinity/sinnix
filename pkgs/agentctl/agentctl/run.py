@@ -40,6 +40,8 @@ from enum import Enum
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping, Sequence
 
+from sinnix_lib.atomic import atomic_publish
+
 from . import artifacts, pueue
 from .launch_input import QueueInputError, read_input
 from .limits import SYSTEMCTL_TIMEOUT_SECONDS
@@ -496,7 +498,12 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
             "exit_code": REFUSED_EXIT_CODE,
             "attempt": launch["attempt"],
         }
-        outcome_path_for(log_path).write_text(json.dumps(record, sort_keys=True))
+        atomic_publish(
+            outcome_path_for(log_path),
+            json.dumps(record, sort_keys=True).encode(),
+            fsync=True,
+            mode=0o600,
+        )
         append_event(
             spool_path,
             {
@@ -639,7 +646,12 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
             **scratch_footprint(scratch_dir),
         }
         remove_scratch(scratch_dir)
-    outcome_path_for(log_path).write_text(json.dumps(record, sort_keys=True))
+    atomic_publish(
+        outcome_path_for(log_path),
+        json.dumps(record, sort_keys=True).encode(),
+        fsync=True,
+        mode=0o600,
+    )
     append_event(spool_path, {**event, "phase": "finished", **record})
     return status
 
