@@ -3,11 +3,11 @@ from __future__ import annotations
 import os
 import subprocess
 import threading
-import time
 from pathlib import Path
 
 import pytest
 from agentctl import landing
+from agentctl import worktrunk
 from agentctl.config import Config
 from agentctl.projects import load_project_adapter
 from agentctl.worktrunk import (
@@ -55,22 +55,6 @@ def _worktree(root: Path, branch: str, path: Path) -> None:
     )
 
 
-def _isolated_worktrunk_environment(tmp_path: Path) -> dict[str, str]:
-    home = tmp_path / "home"
-    config = home / ".config"
-    state = home / ".local" / "state"
-    config.mkdir(parents=True)
-    state.mkdir(parents=True)
-    return {
-        **os.environ,
-        "HOME": str(home),
-        "XDG_CONFIG_HOME": str(config),
-        "XDG_STATE_HOME": str(state),
-        "GIT_CONFIG_GLOBAL": "/dev/null",
-        "GIT_CONFIG_SYSTEM": "/dev/null",
-    }
-
-
 def _git_absolute_path(root: Path, *arguments: str) -> Path:
     result = subprocess.run(
         ["git", "-C", str(root), *arguments],
@@ -79,31 +63,6 @@ def _git_absolute_path(root: Path, *arguments: str) -> Path:
         text=True,
     )
     return Path(result.stdout.strip())
-
-
-def _fsmonitor_marker(worktree: Path) -> Path:
-    """The per-worktree IPC state path used by Worktrunk 0.68.0."""
-    return _git_absolute_path(worktree, "rev-parse", "--absolute-git-dir") / (
-        "fsmonitor--daemon.ipc"
-    )
-
-
-def _stale_trash_entry(root: Path) -> Path:
-    common = _git_absolute_path(
-        root, "rev-parse", "--path-format=absolute", "--git-common-dir"
-    )
-    timestamp = int(time.time()) - 2 * 24 * 60 * 60
-    entry = common / "wt" / "trash" / f"unrelated-stale-{timestamp}"
-    entry.mkdir(parents=True)
-    (entry / "marker").write_text("unrelated\n")
-    return entry
-
-
-def _assert_eventually_gone(path: Path) -> None:
-    deadline = time.monotonic() + 5
-    while path.exists() and time.monotonic() < deadline:
-        time.sleep(0.02)
-    assert not path.exists(), f"Worktrunk did not sweep {path}"
 
 
 def _spy(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
@@ -137,90 +96,21 @@ def test_create_places_the_worktree_at_the_requested_path_and_remove_reverses_it
     assert worktrunk_find(root, "feature/lane") is None
 
 
-def test_agentctl_remove_disables_worktrunk_global_sweep_without_changing_operator_default(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_agentctl_remove_uses_the_current_worktrunk_remove_contract(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The adapter and the patched real binary have separate observable contracts."""
-    environment = _isolated_worktrunk_environment(tmp_path)
-    monkeypatch.setenv("HOME", environment["HOME"])
-    monkeypatch.setenv("XDG_CONFIG_HOME", environment["XDG_CONFIG_HOME"])
-    monkeypatch.setenv("XDG_STATE_HOME", environment["XDG_STATE_HOME"])
-    monkeypatch.setenv("GIT_CONFIG_GLOBAL", "/dev/null")
-    monkeypatch.setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+    """Agentctl does not pass options removed from the installed Worktrunk CLI."""
+    calls: list[tuple[str, ...]] = []
 
-    help_output = subprocess.run(
-        ["wt", "remove", "--help"],
-        check=True,
-        capture_output=True,
-        text=True,
-        env=environment,
-    ).stdout
-    assert "--no-internal-sweep" in help_output
+    def record(_root: Path, arguments: list[str], _operation: str) -> str:
+        calls.append(tuple(arguments))
+        return "{}"
 
-    agent_repo = _repository(tmp_path / "agent-repo")
-    agent_target = tmp_path / "agent-owned"
-    unrelated_target = tmp_path / "agent-unrelated"
-    _worktree(agent_repo, "feature/owned", agent_target)
-    _worktree(agent_repo, "feature/unrelated", unrelated_target)
-    stale_agent = _stale_trash_entry(agent_repo)
-    marker_agent = _fsmonitor_marker(unrelated_target)
-    marker_agent.write_text("unrelated fsmonitor state\n")
+    monkeypatch.setattr(worktrunk, "_mutate", record)
 
-    worktrunk_remove(agent_repo, "feature/owned")
+    worktrunk_remove(Path("/repo"), "feature/owned", reap=False)
 
-    assert not agent_target.exists()
-    assert worktrunk_find(agent_repo, "feature/owned") is None
-    assert (
-        subprocess.run(
-            [
-                "git",
-                "-C",
-                str(agent_repo),
-                "show-ref",
-                "--verify",
-                "--quiet",
-                "refs/heads/feature/owned",
-            ],
-            check=False,
-        ).returncode
-        != 0
-    )
-    assert stale_agent.is_dir(), "agentctl removal must leave unrelated old trash"
-    assert marker_agent.is_file(), (
-        "agentctl removal must leave unrelated fsmonitor state"
-    )
-
-    operator_repo = _repository(tmp_path / "operator-repo")
-    operator_target = tmp_path / "operator-owned"
-    unrelated_operator_target = tmp_path / "operator-unrelated"
-    _worktree(operator_repo, "feature/operator", operator_target)
-    _worktree(operator_repo, "feature/unrelated", unrelated_operator_target)
-    stale_operator = _stale_trash_entry(operator_repo)
-    marker_operator = _fsmonitor_marker(unrelated_operator_target)
-    marker_operator.write_text("unrelated fsmonitor state\n")
-
-    completed = subprocess.run(
-        [
-            "wt",
-            "-C",
-            str(operator_repo),
-            "remove",
-            "feature/operator",
-            "--foreground",
-            "-y",
-            "--format",
-            "json",
-        ],
-        check=False,
-        capture_output=True,
-        text=True,
-        env=environment,
-    )
-    assert completed.returncode == 0, completed.stderr
-    assert not operator_target.exists()
-    assert worktrunk_find(operator_repo, "feature/operator") is None
-    _assert_eventually_gone(stale_operator)
-    assert marker_operator.is_file()
+    assert calls == [("remove", "feature/owned", "--foreground", "-y", "--format", "json")]
 
 
 def test_terminal_release_keeps_the_exact_branch_head(tmp_path: Path) -> None:
