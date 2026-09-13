@@ -304,6 +304,34 @@ let
       export SINNIX_BORG_GLOBAL_LOCK_HELD=1
     }
 
+    publish_backup_marker() {
+      marker="$1"
+      marker_dir="$(dirname "$marker")"
+      marker_base="$(basename "$marker")"
+      temporary="$(mktemp "$marker_dir/.''${marker_base}.tmp.XXXXXX")"
+      trap 'rm -f "$temporary"' RETURN
+      cat > "$temporary"
+      chmod 0644 "$temporary"
+      sync -f "$temporary"
+      mv -f "$temporary" "$marker"
+      sync -f "$marker_dir"
+      trap - RETURN
+    }
+
+    publish_backup_marker() {
+      marker="$1"
+      marker_dir="$(dirname "$marker")"
+      marker_base="$(basename "$marker")"
+      temporary="$(mktemp "$marker_dir/.''${marker_base}.tmp.XXXXXX")"
+      trap 'rm -f "$temporary"' RETURN
+      cat > "$temporary"
+      chmod 0644 "$temporary"
+      sync -f "$temporary"
+      mv -f "$temporary" "$marker"
+      sync -f "$marker_dir"
+      trap - RETURN
+    }
+
     ${borgStaleLockRecovery}
   '';
 
@@ -395,8 +423,7 @@ let
           printf 'snapshot=%s\n' "$snapshot"
           printf 'coverage=%s\n' "$proof"
           printf 'epoch=%s\n' "$(date +%s)"
-        } > "$marker.tmp"
-        mv "$marker.tmp" "$marker"
+        } | publish_backup_marker "$marker"
       done <<< "$queue"
       exit "$failed"
     '';
