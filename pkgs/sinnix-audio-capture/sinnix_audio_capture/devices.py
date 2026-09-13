@@ -529,7 +529,12 @@ class DeviceSupervisor:
         }
         path = Path(str(self._tee_socket_path) + ".json")
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+        atomic_publish(
+            path,
+            (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode(),
+            fsync=True,
+            mode=0o644,
+        )
 
     def _tee_chunk(self, node_name: str, data: bytes) -> None:
         if self._tee is not None and node_name == self._asr_node:

@@ -348,6 +348,7 @@ def test_asr_tee_mirrors_only_the_nominated_source(tmp_path: Path):
     assert fmt["node_name"] == YETI_IN
     assert fmt["format"] == "s16le"
     assert (fmt["rate"], fmt["channels"]) == (48000, 2)
+    assert (Path(str(socket_path) + ".json").stat().st_mode & 0o777) == 0o644
 
 
 def test_no_asr_pattern_means_no_privileged_channel(tmp_path: Path):
