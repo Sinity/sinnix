@@ -160,8 +160,6 @@ mkServiceModule {
           inherit stateDir endpoint projects;
           privateProjectCatalogFile = config.sinnix.projects.privateCatalogFile;
           inherit (cfg) maxResultBytes;
-          runtimeInventory = "/etc/sinnix/runtime-inventory.json";
-          capabilityIndex = "/etc/sinnix/capability-index.json";
           inherit mcpBrokerServers;
         }
         // approvals;
