@@ -369,6 +369,28 @@ def test_resume_prompt_names_the_worktree_branch_and_base(project_root: Path) ->
     assert "## Original dispatch packet" in with_packet and "original" in with_packet
 
 
+def test_resume_prompt_over_budget_keeps_a_digest_and_local_packet_pointer(
+    project_root: Path,
+) -> None:
+    config = PromptConfig.from_project(load_project_adapter(project_root))
+    oversized = bead("fx-solo", "Solo bead")
+    oversized["notes"] = "x" * MAX_PROMPT_BYTES
+
+    prompt = resume_prompt(
+        config=config,
+        bead=oversized,
+        branch="feature/packet/fx-solo",
+        base="origin/master",
+        worktree=Path("/w"),
+        packet="# Dispatch packet\n\n" + "y" * MAX_PROMPT_BYTES,
+    )
+
+    assert len(prompt.encode()) <= MAX_PROMPT_BYTES
+    assert "bead_bodies" in prompt and '"digest"' in prompt
+    assert ".agentctl/prompt.md" in prompt
+    assert "sha256=" in prompt
+
+
 def test_a_missing_worker_contract_is_a_typed_refusal(project_root: Path) -> None:
     config = PromptConfig.from_project(load_project_adapter(project_root))
     config.template_path.unlink()
