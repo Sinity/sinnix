@@ -22,6 +22,7 @@ from sinnix_lib.procfs import (
 )
 from sinnix_lib.process import run, run_bounded
 from sinnix_lib.systemd import show_units, show_units_as_user
+from sinnix_lib.values import float_or_none, int_or_none, read_text
 
 SCHEMA_VERSION = 5
 # Interval between explicit `wal_checkpoint(TRUNCATE)` runs on the main
@@ -92,46 +93,6 @@ VMSTAT_FIELDS = (
 
 def now_iso() -> str:
     return dt.datetime.now(UTC).replace(microsecond=0).isoformat()
-
-
-def read_text(path: str | Path) -> str | None:
-    try:
-        return Path(path).read_text(encoding="utf-8").strip()
-    except OSError:
-        return None
-
-
-def float_or_none(value: object) -> float | None:
-    try:
-        text = str(value).strip()
-        if not text:
-            return None
-        return float(text)
-    except (TypeError, ValueError):
-        return None
-
-
-def int_or_none(value: object) -> int | None:
-    try:
-        text = str(value).strip()
-        if not text:
-            return None
-        return int(text)
-    except (TypeError, ValueError):
-        return None
-
-
-def bool_or_none(value: object) -> bool | None:
-    if isinstance(value, bool):
-        return value
-    if value is None:
-        return None
-    text = str(value).strip().lower()
-    if text in {"1", "true", "yes", "y", "on"}:
-        return True
-    if text in {"0", "false", "no", "n", "off"}:
-        return False
-    return None
 
 
 def sysfs_temp_c(path: str | Path | None) -> float | None:
