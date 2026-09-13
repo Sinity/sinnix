@@ -10,19 +10,12 @@
     {
       pkgs,
       system,
-      sinnixScriptRegistry,
+      sinnixCommandRegistry,
       ...
     }:
     let
       inherit (pkgs) lib;
-      commandRegistry = import ./command-registry.nix {
-        inherit
-          inputs
-          pkgs
-          system
-          sinnixScriptRegistry
-          ;
-      };
+      commandRegistry = sinnixCommandRegistry;
       nix = "${pkgs.nix}/bin/nix";
       # resolveFlakeDir is shared with command-registry.nix's appCommands
       # (`nix run .#switch` etc.) so both entry points resolve the same way

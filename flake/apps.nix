@@ -4,14 +4,13 @@
 # Only for multi-step operations or commands needing nix closure wiring.
 # Don't wrap single nix commands (use nix flake check, nix fmt, nix flake update directly).
 
-{ inputs, ... }:
+{ ... }:
 {
   perSystem =
     {
       pkgs,
-      system,
+      sinnixCommandRegistry,
       self',
-      sinnixScriptRegistry,
       ...
     }:
     let
@@ -28,17 +27,7 @@
         meta.description = description;
       };
 
-      # sinnixScriptRegistry (flake/script-registry.nix) is the one
-      # evaluation of scripts.nix per perSystem `pkgs`, shared via
-      # `_module.args` -- not a second re-walk of scripts/ for this file.
-      commandRegistry = import ./command-registry.nix {
-        inherit
-          inputs
-          pkgs
-          system
-          sinnixScriptRegistry
-          ;
-      };
+      commandRegistry = sinnixCommandRegistry;
 
       generatedApps = builtins.mapAttrs (name: spec: mkApp name spec.script spec.description) (
         pkgs.lib.filterAttrs (
