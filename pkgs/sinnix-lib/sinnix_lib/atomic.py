@@ -121,44 +121,25 @@ def atomic_publish(
     mode: int = PRIVATE_MODE,
     exclusive: bool = False,
 ) -> bool:
-    """Publish *payload* at *destination* as one indivisible step.
+    """Publish *payload* at *destination* through the pinned-dirfd primitive.
 
-    ``exclusive`` publishes by hard link instead of rename, so an existing
-    destination is never replaced -- for content nobody may silently
-    overwrite, such as a key other state is already derived from. Returns
-    whether this call published; False means ``exclusive`` and the
-    destination already existed.
-
-    The temporary carries the final mode from creation rather than being
-    chmod'd afterwards: a private state file must never be briefly readable
-    by anyone else, however narrow the window.
+    The public path API keeps its existing caller contract while sharing the
+    same collision, cleanup, durability, and exclusive-publication behavior
+    as callers which already hold a directory descriptor.
     """
     destination = Path(destination)
-    directory = destination.parent
-    temporary = directory / f".{destination.name}.{uuid.uuid4().hex}.tmp"
+    directory = os.open(
+        destination.parent,
+        os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_CLOEXEC", 0),
+    )
     try:
-        descriptor = os.open(
-            temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC, mode
+        return atomic_publish_at(
+            directory,
+            destination.name,
+            payload,
+            fsync=fsync,
+            mode=mode,
+            exclusive=exclusive,
         )
-        with os.fdopen(descriptor, "wb") as handle:
-            os.fchmod(handle.fileno(), mode)
-            handle.write(payload)
-            handle.flush()
-            if fsync:
-                os.fsync(handle.fileno())
-        if exclusive:
-            try:
-                os.link(temporary, destination)
-            except FileExistsError:
-                return False
-        else:
-            os.replace(temporary, destination)
-        if fsync:
-            directory_descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
-            try:
-                os.fsync(directory_descriptor)
-            finally:
-                os.close(directory_descriptor)
     finally:
-        temporary.unlink(missing_ok=True)
-    return True
+        os.close(directory)
