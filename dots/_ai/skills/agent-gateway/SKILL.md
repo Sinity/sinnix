@@ -5,7 +5,7 @@ description: Use when invoking, inspecting, or documenting Sinnix Agent Gateway 
 
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: 19ccdfa0ccf89ac27206323b65535c2ab3e6940704a8795fb670a7d5c8f8c154 -->
+<!-- gateway-catalog-sha256: 708e45967932b23d92890cb6dafcbbc3be11f449183f655a8154cd4e6e9b5a1d -->
 
 # Agent Gateway
 
@@ -26,7 +26,7 @@ Effectful actions (families change, operate, run) require `idempotency_key`. Con
 - `gateway.status` — Report the principal, contract hashes, tool count and per-route availability.
 - `desktop.snapshot` — One observation of the desktop: monitors, workspaces, focus, every window with geometry, and a generation stamp.
 - `machine.snapshot` — Each section carries its own availability and source; GPU and network report unavailable because no owner exposes them.
-- `mcp.servers` — Each probe runs initialize + tools/list with a 5 s bound; a timeout stores the upstream stderr as an artifact and returns its ref.
+- `mcp.servers` — Each probe runs initialize + tools/list within the configured call timeout, capped at 30 seconds; the observer process uses the same bound. A timeout stores the upstream stderr as an artifact and returns its ref.
 - `audit.verify` — Verify the tamper-evident audit hash chain end to end.
 
 ### catalog
@@ -179,4 +179,4 @@ Effectful actions (families change, operate, run) require `idempotency_key`. Con
 
 The complete schemas and examples are in `docs/generated/agent-gateway-reference.md`.
 
-Catalog revision: `v3-typed-actions`. Catalog SHA-256: `19ccdfa0ccf89ac27206323b65535c2ab3e6940704a8795fb670a7d5c8f8c154`.
+Catalog revision: `v3-typed-actions`. Catalog SHA-256: `708e45967932b23d92890cb6dafcbbc3be11f449183f655a8154cd4e6e9b5a1d`.

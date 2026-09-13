@@ -1,11 +1,11 @@
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: 19ccdfa0ccf89ac27206323b65535c2ab3e6940704a8795fb670a7d5c8f8c154 -->
+<!-- gateway-catalog-sha256: 708e45967932b23d92890cb6dafcbbc3be11f449183f655a8154cd4e6e9b5a1d -->
 # Sinnix Agent Gateway reference
 
 Generated from `sinnix_agent_gateway.actions`. Every action is one MCP tool whose `tools/list` input schema is the one below; the catalog hash changes when any principal-visible action catalog row changes, including its schema, principal set, example or affordance.
 
-Revision: `v3-typed-actions`. Catalog SHA-256: `19ccdfa0ccf89ac27206323b65535c2ab3e6940704a8795fb670a7d5c8f8c154`.
+Revision: `v3-typed-actions`. Catalog SHA-256: `708e45967932b23d92890cb6dafcbbc3be11f449183f655a8154cd4e6e9b5a1d`.
 
 ## Invocation
 
@@ -138,7 +138,7 @@ MCP: call the tool named after the action. CLI: `sinnix-agent-gateway call <acti
 | `processes.tree`             | `query`   | `machine`          | `agent-control, observer, operator` | Parent/child process tree from one root or from every top-level process, bounded by depth and node count.                                                                                                                                                                                                                                        |
 | `processes.signal`           | `operate` | `machine`          | `operator`                          | The reducer path is the attested one and needs expected_target; the direct path is receipted by the gateway audit chain only.                                                                                                                                                                                                                    |
 | `processes.wait`             | `wait`    | `machine`          | `agent-control, observer, operator` | Wait until a process (same pid and start ticks) exits, or the bounded timeout elapses.                                                                                                                                                                                                                                                           |
-| `mcp.servers`                | `status`  | `mcp-broker`       | `observer, operator`                | Each probe runs initialize + tools/list with a 5 s bound; a timeout stores the upstream stderr as an artifact and returns its ref.                                                                                                                                                                                                               |
+| `mcp.servers`                | `status`  | `mcp-broker`       | `observer, operator`                | Each probe runs initialize + tools/list within the configured call timeout, capped at 30 seconds; the observer process uses the same bound. A timeout stores the upstream stderr as an artifact and returns its ref.                                                                                                                             |
 | `mcp.tools`                  | `catalog` | `mcp-broker`       | `observer, operator`                | Catalog of every admitted upstream tool with its namespaced ref, input schema and read/change effect.                                                                                                                                                                                                                                            |
 | `mcp.call`                   | `query`   | `mcp-broker`       | `observer, operator`                | Reads require an owner read-only annotation or an exact match to trusted registry selectors. Other requests require mcp.change (operator only). A target using server=sinnix-agent-gateway is routed to the named direct read action, preserving its native content blocks; changes stay direct-only.                                            |
 | `mcp.change`                 | `change`  | `mcp-broker`       | `operator`                          | Invoke an upstream request not admitted as read-only by annotation or trusted registry selectors.                                                                                                                                                                                                                                                |
@@ -22174,7 +22174,7 @@ Wait up to 10 s:
 
 ### `mcp.servers`
 
-Each probe runs initialize + tools/list with a 5 s bound; a timeout stores the upstream stderr as an artifact and returns its ref.
+Each probe runs initialize + tools/list within the configured call timeout, capped at 30 seconds; the observer process uses the same bound. A timeout stores the upstream stderr as an artifact and returns its ref.
 
 Family: `status`. Owner: `mcp-broker`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 

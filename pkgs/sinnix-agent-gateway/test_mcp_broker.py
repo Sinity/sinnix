@@ -38,6 +38,7 @@ class FakeTransport:
 
 class RecordingExecution(OwnerExecution):
     def __init__(self) -> None:
+        super().__init__()
         self.calls: list[tuple[tuple[str, ...], ExecutionProfile]] = []
 
     def run(self, command: Sequence[str], profile: ExecutionProfile) -> ExecutionResult:
@@ -253,6 +254,62 @@ def test_catalog_probes_admitted_servers_and_keeps_exclusions_static(
             },
         ]
     }
+
+
+@pytest.mark.parametrize(
+    ("configured_timeout", "handshake_seconds", "probe_timeout", "available"),
+    [(None, 16, 30, True), (3, 4, 3, False), (300, 16, 30, True), (300, 31, 30, False)],
+)
+def test_probe_admission_and_observer_lifetime_share_the_capped_call_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    configured_timeout: int | None,
+    handshake_seconds: int,
+    probe_timeout: int,
+    available: bool,
+) -> None:
+    broker = broker_service(tmp_path, "observer")
+    broker.execution = RecordingExecution()
+    if configured_timeout is not None:
+        broker.config.mcp_broker_servers["fixture"]["callTimeoutSeconds"] = (
+            configured_timeout
+        )
+    monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")
+    monkeypatch.setenv("XDG_RUNTIME_DIR", "/run/user/1000")
+    monkeypatch.setattr(
+        "sinnix_agent_gateway.mcp_broker.stdio_client",
+        lambda *_args, **_kwargs: FakeTransport(),
+    )
+    monkeypatch.setattr("sinnix_agent_gateway.mcp_broker.ClientSession", FakeSession)
+    captured_parameters = []
+    original_parameters = broker._parameters
+
+    def parameters(*args, **kwargs):
+        result = original_parameters(*args, **kwargs)
+        captured_parameters.append(result[0])
+        return result
+
+    monkeypatch.setattr(broker, "_parameters", parameters)
+    deadlines = []
+
+    async def wait_for(handshake, *, timeout):
+        deadlines.append(timeout)
+        if handshake_seconds > timeout:
+            handshake.close()
+            raise asyncio.TimeoutError
+        return await handshake
+
+    monkeypatch.setattr("sinnix_agent_gateway.mcp_broker.asyncio.wait_for", wait_for)
+    catalog = anyio.run(broker.catalog)
+    fixture = next(row for row in catalog["servers"] if row["name"] == "fixture")
+    assert deadlines == [probe_timeout]
+    assert f"--property=RuntimeMaxSec={probe_timeout}" in captured_parameters[0].args
+    assert fixture["availability"] == ("available" if available else "unavailable")
+    if available:
+        assert fixture["tool_count"] == fixture["read_only_tool_count"] == 1
+    else:
+        assert fixture["failure_class"] == "timeout"
+        assert len(broker.execution.calls) == 1
 
 
 def write_stdio_fixture(tmp_path: Path, source: str) -> Path:

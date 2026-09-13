@@ -181,8 +181,9 @@ class McpBrokerService:
         self, server: dict[str, Any], server_name: str, environment: dict[str, str]
     ) -> dict[str, Any]:
         """Prove one upstream can initialize and disclose its live tools."""
+        timeout = min(self._call_timeout(server), DEFAULT_MCP_CALL_TIMEOUT_SECONDS)
         parameters, observer_unit = self._parameters(
-            server, environment, runtime_max_seconds=5
+            server, environment, runtime_max_seconds=timeout
         )
         stderr_directory = self.config.state_dir / "captures" / uuid.uuid4().hex
         stderr_directory.mkdir(mode=0o700, parents=True)
@@ -203,7 +204,9 @@ class McpBrokerService:
             )
 
         try:
-            tools, read_only_tool_count = await asyncio.wait_for(inspect(), timeout=5)
+            tools, read_only_tool_count = await asyncio.wait_for(
+                inspect(), timeout=timeout
+            )
         except asyncio.TimeoutError:
             if observer_unit is not None:
                 self._stop(observer_unit)
@@ -213,7 +216,7 @@ class McpBrokerService:
             result: dict[str, Any] = {
                 "availability": "unavailable",
                 "failure_class": "timeout",
-                "reason": "upstream did not complete initialize and tools/list within 5 seconds",
+                "reason": f"upstream did not complete initialize and tools/list within {timeout} seconds",
             }
             if artifact_id is not None:
                 result["diagnostic_artifact_id"] = artifact_id
