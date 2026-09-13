@@ -148,42 +148,40 @@ def test_git_failure_is_reported_without_claiming_no_history(tmp_path: Path) -> 
 
 def test_rejects_git_output_over_the_read_bound(tmp_path: Path, monkeypatch) -> None:
     root = _repo(tmp_path)
-    real_popen = history.subprocess.Popen
+    real_run_bounded = history.run_bounded
 
-    def oversized(*_args, **_kwargs):
-        return real_popen(
+    def oversized(_argv, **kwargs):
+        return real_run_bounded(
             [
                 sys.executable,
                 "-c",
                 "import sys; sys.stdout.buffer.write(b'x' * (4 * 1024 * 1024 + 1))",
             ],
-            stdout=_kwargs["stdout"],
-            stderr=_kwargs["stderr"],
+            **kwargs,
         )
 
-    monkeypatch.setattr(history.subprocess, "Popen", oversized)
+    monkeypatch.setattr(history, "run_bounded", oversized)
     with pytest.raises(GitHistoryError, match="output exceeds"):
         discover_git_history(root, project="demo", bead="sinnix-4")
 
 
-def test_deadline_applies_after_process_closes_output(
+def test_deadline_applies_to_pipe_holding_descendant(
     tmp_path: Path, monkeypatch
 ) -> None:
     root = _repo(tmp_path)
-    real_popen = history.subprocess.Popen
+    real_run_bounded = history.run_bounded
 
-    def closed_output(*_args, **_kwargs):
-        return real_popen(
+    def closed_output(_argv, **kwargs):
+        return real_run_bounded(
             [
                 sys.executable,
                 "-c",
-                "import os,time; os.close(1); os.close(2); time.sleep(10)",
+                "import os,time; os.fork() and os._exit(0); time.sleep(10)",
             ],
-            stdout=_kwargs["stdout"],
-            stderr=_kwargs["stderr"],
+            **kwargs,
         )
 
-    monkeypatch.setattr(history.subprocess, "Popen", closed_output)
+    monkeypatch.setattr(history, "run_bounded", closed_output)
     monkeypatch.setattr(history, "CALL_TIMEOUT_SECONDS", 0.1)
     with pytest.raises(GitHistoryError, match="timed out"):
         discover_git_history(root, project="demo", bead="sinnix-4")

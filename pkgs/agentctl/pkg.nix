@@ -10,6 +10,7 @@
   pueue,
   nix,
   systemd,
+  sinnix-lib,
   ...
 }:
 let
@@ -26,6 +27,7 @@ python3Packages.buildPythonApplication {
   src = ./.;
 
   build-system = [ python3Packages.setuptools ];
+  dependencies = [ sinnix-lib ];
   makeWrapperArgs = [
     "--prefix PATH : ${
       lib.makeBinPath [

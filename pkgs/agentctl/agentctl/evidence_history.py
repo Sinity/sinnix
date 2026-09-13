@@ -9,12 +9,11 @@ from __future__ import annotations
 
 import os
 import re
-import selectors
-import subprocess
-import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+from sinnix_lib.process import run_bounded
 
 from .limits import CALL_TIMEOUT_SECONDS
 
@@ -99,58 +98,33 @@ def _run_git(root: Path, reference: str, limit: int) -> bytes:
         "--end-of-options",
         reference,
     ]
-    try:
-        process = subprocess.Popen(
-            argv,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"},
-        )
-    except OSError as error:
-        raise GitHistoryError(f"git history read failed in {root}: {error}") from error
-
-    assert process.stdout is not None and process.stderr is not None
-    limits = {process.stdout: MAX_GIT_OUTPUT_BYTES, process.stderr: MAX_GIT_ERROR_BYTES}
-    buffers = {process.stdout: bytearray(), process.stderr: bytearray()}
-    selector = selectors.DefaultSelector()
-    selector.register(process.stdout, selectors.EVENT_READ)
-    selector.register(process.stderr, selectors.EVENT_READ)
-    deadline = time.monotonic() + CALL_TIMEOUT_SECONDS
-    try:
-        while selector.get_map():
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise GitHistoryError(f"git history read timed out in {root}")
-            ready = selector.select(remaining)
-            if not ready:
-                raise GitHistoryError(f"git history read timed out in {root}")
-            for key, _event in ready:
-                stream = key.fileobj
-                chunk = os.read(stream.fileno(), 65_536)
-                if not chunk:
-                    selector.unregister(stream)
-                    continue
-                buffer = buffers[stream]
-                buffer.extend(chunk)
-                if len(buffer) > limits[stream]:
-                    label = "history" if stream is process.stdout else "error"
-                    bound = limits[stream]
-                    raise GitHistoryError(
-                        f"git history {label} output exceeds {bound} bytes"
-                    )
-        try:
-            returncode = process.wait(timeout=max(0.001, deadline - time.monotonic()))
-        except subprocess.TimeoutExpired as error:
-            raise GitHistoryError(f"git history read timed out in {root}") from error
-    finally:
-        selector.close()
-        if process.poll() is None:
-            process.kill()
-        process.wait(timeout=1)
-        process.stdout.close()
-        process.stderr.close()
-    stdout = bytes(buffers[process.stdout])
-    stderr = bytes(buffers[process.stderr])
+    result = run_bounded(
+        argv,
+        timeout=CALL_TIMEOUT_SECONDS,
+        env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"},
+        stdout_limit=MAX_GIT_OUTPUT_BYTES,
+        stderr_limit=MAX_GIT_ERROR_BYTES,
+    )
+    if result.timed_out:
+        raise GitHistoryError(f"git history read timed out in {root}")
+    if result.limited:
+        error = result.error or "output limit exceeded"
+        if error.startswith("stdout exceeded"):
+            raise GitHistoryError(
+                f"git history output exceeds {MAX_GIT_OUTPUT_BYTES} bytes"
+            )
+        if error.startswith("stderr exceeded"):
+            raise GitHistoryError(
+                f"git history error output exceeds {MAX_GIT_ERROR_BYTES} bytes"
+            )
+        raise GitHistoryError(f"git history output limit exceeded in {root}: {error}")
+    if result.error is not None:
+        raise GitHistoryError(f"git history read failed in {root}: {result.error}")
+    stdout = result.stdout
+    stderr = result.stderr
+    returncode = result.returncode
+    if returncode is None:
+        raise GitHistoryError(f"git history read failed in {root}: no exit status")
     if returncode != 0:
         detail = stderr.decode("utf-8", "replace").strip() or "unknown git error"
         raise GitHistoryError(f"git log failed in {root}: {detail}")
