@@ -52,6 +52,7 @@ in
     ./tests/quota.nix
     ./tests/noctalia.nix
     ./tests/mi-unlock.nix
+    ./tests/fstrim.nix
     ./tests/hyprland-rules.nix
     ./tests/hyprland-lua-tools.nix
     ./tests/memory-audit.nix

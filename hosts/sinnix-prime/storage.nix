@@ -177,6 +177,29 @@ let
       fi
     '';
   };
+
+  fstrimJob =
+    lib.sinnix.mkScheduledJob
+      {
+        inherit config;
+        unitName = "sinnix-fstrim";
+        description = "Trim canonical NVMe data filesystem";
+        surface = config.sinnix.runtime.surfaces.sinnix-fstrim;
+      }
+      {
+        resourceClass = "background";
+        execStart = "${fstrimCanonical}/bin/sinnix-fstrim-canonical";
+        serviceConfig = {
+          Nice = 10;
+          IOSchedulingClass = "idle";
+          IOSchedulingPriority = 7;
+        };
+        timer = {
+          onCalendar = "weekly";
+          randomizedDelaySec = "1h";
+          persistent = true;
+        };
+      };
 in
 {
   services = {
@@ -390,16 +413,7 @@ in
 
     services.sinnix-drain-swapfile = drainSwapfileJob.systemd.services.sinnix-drain-swapfile;
 
-    services.sinnix-fstrim = {
-      description = "Trim canonical NVMe data filesystem";
-      serviceConfig = {
-        Type = "oneshot";
-        ExecStart = "${fstrimCanonical}/bin/sinnix-fstrim-canonical";
-        Nice = 10;
-        IOSchedulingClass = "idle";
-        IOSchedulingPriority = 7;
-      };
-    };
+    services.sinnix-fstrim = fstrimJob.systemd.services.sinnix-fstrim;
 
     services."btrfs-scrub--".serviceConfig = {
       Slice = "background.slice";
@@ -419,14 +433,7 @@ in
       CPUWeight = 5;
     };
 
-    timers.sinnix-fstrim = {
-      wantedBy = [ "timers.target" ];
-      timerConfig = {
-        OnCalendar = "weekly";
-        RandomizedDelaySec = "1h";
-        Persistent = true;
-      };
-    };
+    timers.sinnix-fstrim = fstrimJob.systemd.timers.sinnix-fstrim;
 
     timers.sinnix-drain-swapfile = drainSwapfileJob.systemd.timers.sinnix-drain-swapfile;
 
@@ -566,6 +573,12 @@ in
 
   sinnix.runtime.surfaces.sinnix-drain-swapfile = {
     unit = "sinnix-drain-swapfile.service";
+    resourceClass = "background";
+    observe.enable = true;
+  };
+
+  sinnix.runtime.surfaces.sinnix-fstrim = {
+    unit = "sinnix-fstrim.service";
     resourceClass = "background";
     observe.enable = true;
   };
