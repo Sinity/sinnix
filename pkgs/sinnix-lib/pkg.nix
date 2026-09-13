@@ -13,6 +13,7 @@ python3Packages.buildPythonPackage {
     "sinnix_lib"
     "sinnix_lib.atomic"
     "sinnix_lib.atomic_json"
+    "sinnix_lib.http"
     "sinnix_lib.ledger"
     "sinnix_lib.lock"
     "sinnix_lib.notify"
