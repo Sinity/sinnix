@@ -171,6 +171,12 @@
           suiteDir = ../../pkgs/sinnix-ytdlp/tests;
           scripts = [ "sinnix-ytdlp" ];
         };
+        quest-player-suite = mkScriptSuite {
+          name = "sinnix-quest-player";
+          suiteDir = ../../pkgs/sinnix-quest-player/tests;
+          scripts = [ "sinnix-quest-player" ];
+          extraPythonPackages = [ sinnix-lib ];
+        };
         # Provably fails when: a binding's ranking identity starts tracking
         # source order or its /nix/store action path, a usage prior stops
         # distinguishing "never measured" from "measured zero", operator
