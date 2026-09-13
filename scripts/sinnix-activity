@@ -1,0 +1,460 @@
+#!/usr/bin/env python3
+# @sinnix-package
+# description: Declare an activity, preserve its reconsideration boundary, and acknowledge or pause it
+# runtimeInputs: python3 libnotify xdg-utils
+# docs: docs/activity.md
+"""A provisional declaration store, not a behavior tracker or productivity policy.
+
+SQLite is authoritative; current.json is a replaceable projection. All commands
+serialize on one bounded file lock, including notification submission, so an ack
+cannot finish before an already obsolete notification is submitted. Notification
+attempts are at-most-once per slot; a crash leaves an honest unknown outcome.
+"""
+from __future__ import annotations
+
+import argparse
+import fcntl
+import hashlib
+import html
+import json
+import os
+from pathlib import Path
+import re
+import sqlite3
+import subprocess
+import sys
+import tempfile
+import time
+import uuid
+from datetime import datetime, timedelta, timezone
+from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo
+
+SCHEMA = "sinnix-activity/v1"
+DB_VERSION = 1
+FIELDS = ("mode", "activity", "started_at", "reconsider_at", "checkpoint_id", "return_url", "last_ack_at")
+DDL = """
+CREATE TABLE events (seq INTEGER PRIMARY KEY, kind TEXT NOT NULL, recorded_at TEXT NOT NULL,
+                     effective_at TEXT, actor TEXT NOT NULL, payload TEXT NOT NULL);
+CREATE TABLE state (id INTEGER PRIMARY KEY CHECK (id = 1), data TEXT NOT NULL);
+CREATE TABLE notices (checkpoint_id TEXT NOT NULL, slot INTEGER NOT NULL, attempted_at TEXT NOT NULL,
+                      outcome TEXT NOT NULL, detail TEXT, PRIMARY KEY(checkpoint_id, slot));
+PRAGMA user_version = 1;
+"""
+
+
+def utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def stamp(value: datetime | None) -> str | None:
+    return value.astimezone(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z") if value else None
+
+
+def timestamp(value: str) -> datetime:
+    if not isinstance(value, str):
+        raise ValueError("timestamp must be a timezone-aware ISO string")
+    try:
+        result = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError("invalid ISO timestamp") from exc
+    if result.tzinfo is None:
+        raise ValueError("timestamp needs a timezone (Z or an explicit offset)")
+    return result.astimezone(timezone.utc)
+
+
+def local_zone():
+    zone = os.environ.get("TZ")
+    if zone:
+        return ZoneInfo(zone)
+    try:
+        with open("/etc/localtime", "rb") as source:
+            return ZoneInfo.from_file(source)
+    except OSError:
+        return datetime.now().astimezone().tzinfo
+
+
+def duration(value: str) -> timedelta:
+    match = re.fullmatch(r"([1-9][0-9]{0,6})([mhd])", value or "")
+    if not match:
+        raise ValueError("duration must be a positive integer followed by m, h, or d")
+    seconds = int(match[1]) * {"m": 60, "h": 3600, "d": 86400}[match[2]]
+    if seconds > 366 * 86400:
+        raise ValueError("duration exceeds the supported 366-day bound")
+    return timedelta(seconds=seconds)
+
+
+def boundary(value: str, now: datetime, zone) -> datetime:
+    if not re.fullmatch(r"[0-9]{1,2}:[0-9]{2}", value):
+        result = timestamp(value)
+        if result <= now:
+            raise ValueError("an explicit reconsideration timestamp must be in the future")
+        return result
+    hour, minute = map(int, value.split(":"))
+    if hour > 23 or minute > 59:
+        raise ValueError("invalid local HH:MM")
+    today = now.astimezone(zone).date()
+    for day in (today, today + timedelta(days=1)):
+        wall = datetime.combine(day, datetime.min.time()).replace(hour=hour, minute=minute)
+        candidates = {wall.replace(tzinfo=zone, fold=f).astimezone(timezone.utc) for f in (0, 1)}
+        valid = sorted(t for t in candidates if t.astimezone(zone).replace(tzinfo=None) == wall)
+        if not valid:
+            raise ValueError("that local clock time does not exist on the DST transition; use an explicit ISO time")
+        future = [t for t in valid if t > now]
+        if future:
+            return future[0]
+    raise ValueError("could not resolve the next local clock boundary")
+
+
+def name(value: str) -> str:
+    if not isinstance(value, str) or not value.strip() or len(value) > 256:
+        raise ValueError("activity must be 1–256 characters, not blank")
+    if any(ord(c) < 32 or ord(c) == 127 for c in value):
+        raise ValueError("activity must be a single line without control characters")
+    return value.strip()
+
+
+def url(value: str | None) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or len(value) > 4096 or any(c.isspace() for c in value):
+        raise ValueError("invalid continuation URL")
+    parsed = urlsplit(value)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password:
+        raise ValueError("continuation URL must be HTTP(S), with a host and no embedded credentials")
+    _ = parsed.port
+    return value
+
+
+class Runtime:
+    def __init__(self, root=None, clock=utcnow, zone=None, actor="caller", runner=subprocess.run):
+        default = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "sinnix/activity"
+        self.root = Path(root or os.environ.get("SINNIX_ACTIVITY_STATE_DIR", default))
+        self.clock, self.zone, self.actor, self.runner = clock, zone or local_zone(), actor, runner
+        self.db = None
+        self.lock = None
+        self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        self.root.chmod(0o700)
+        try:
+            self.lock = os.open(self.root / "runtime.lock", os.O_CREAT | os.O_RDWR, 0o600)
+            deadline = time.monotonic() + 12
+            while True:
+                try:
+                    fcntl.flock(self.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError("activity store is busy; no change was made")
+                    time.sleep(0.02)
+            path = self.root / "activity.sqlite3"
+            existed = path.exists()
+            self.db = sqlite3.connect(path, timeout=10)
+            path.chmod(0o600)
+            self.db.row_factory = sqlite3.Row
+            if not existed:
+                self.db.executescript(DDL)
+            tables = {row[0] for row in self.db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            if self.db.execute("PRAGMA user_version").fetchone()[0] != DB_VERSION or not {"state", "events", "notices"} <= tables:
+                raise RuntimeError("unsupported or incomplete activity database; preserved without reset")
+            self.read()
+        except Exception:
+            self.close()
+            raise
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+    def close(self):
+        if self.db is not None:
+            self.db.close()
+            self.db = None
+        if self.lock is not None:
+            os.close(self.lock)
+            self.lock = None
+
+    def read(self) -> dict:
+        row = self.db.execute("SELECT data FROM state WHERE id=1").fetchone()
+        if row is None:
+            # Observation notes are valid on their own.  Every other existing
+            # event kind represents a stateful operation and therefore still
+            # requires the state row; never reinterpret that history as an
+            # empty runtime.
+            if self.db.execute("SELECT 1 FROM events WHERE kind <> 'observation_captured' LIMIT 1").fetchone():
+                raise RuntimeError("activity state row is missing; history was not reset")
+            return dict.fromkeys(FIELDS) | {"mode": "unallocated"}
+        value = json.loads(row[0])
+        if not isinstance(value, dict) or not all(k in value for k in FIELDS):
+            raise RuntimeError("invalid activity state; no reset performed")
+        if value["mode"] not in ("active", "acknowledged", "paused"):
+            raise RuntimeError("invalid stored activity mode")
+        name(value["activity"])
+        url(value["return_url"])
+        if not isinstance(value["checkpoint_id"], str) or not value["checkpoint_id"]:
+            raise RuntimeError("invalid checkpoint identity")
+        for key in ("started_at", "reconsider_at", "last_ack_at"):
+            if value[key] is not None:
+                timestamp(value[key])
+        return value
+
+    def event(self, kind: str, payload: dict, effective=None):
+        cursor = self.db.execute(
+            "INSERT INTO events(kind,recorded_at,effective_at,actor,payload) VALUES(?,?,?,?,?)",
+            (kind, stamp(self.clock()), stamp(effective), self.actor, json.dumps(payload, ensure_ascii=False)),
+        )
+        return int(cursor.lastrowid)
+
+    def save(self, kind: str, state: dict, effective=None, evidence=None):
+        with self.db:
+            self.event(kind, {"state": state, "evidence": evidence}, effective)
+            self.db.execute("INSERT INTO state(id,data) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data",
+                            (json.dumps(state, ensure_ascii=False),))
+        return self.status()
+
+    def status(self) -> dict:
+        state = self.read()
+        current = {key: state[key] for key in FIELDS}
+        current.update(schema=SCHEMA, revision=self.db.execute("SELECT COALESCE(MAX(seq),0) FROM events").fetchone()[0],
+                       seconds_remaining=None, generated_at=stamp(self.clock()))
+        if state["reconsider_at"]:
+            remaining = (timestamp(state["reconsider_at"]) - self.clock()).total_seconds()
+            current["seconds_remaining"] = int(remaining)
+            if state["mode"] == "active" and remaining <= 0:
+                current["mode"] = "due"
+        for key in ("started", "reconsider"):
+            value = state[key + "_at"]
+            current[key + "_local"] = timestamp(value).astimezone(self.zone).strftime("%Y-%m-%d %H:%M %Z") if value else None
+        fd, temporary = tempfile.mkstemp(prefix=".current-", dir=self.root)
+        try:
+            with os.fdopen(fd, "w") as stream:
+                json.dump(current, stream, ensure_ascii=False)
+                stream.write("\n")
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, self.root / "current.json")
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+        return current
+
+    def choose(self, activity, *, for_duration=None, until=None, open_ended=False, return_url=None):
+        previous = self.read()
+        if sum((for_duration is not None, until is not None, bool(open_ended))) != 1:
+            raise ValueError("choose exactly one duration, clock boundary, or open-ended interval")
+        current = self.clock()
+        end = current + duration(for_duration) if for_duration else boundary(until, current, self.zone) if until else None
+        state = dict(mode="active", activity=name(activity), started_at=stamp(current), reconsider_at=stamp(end),
+                     checkpoint_id=str(uuid.uuid4()), return_url=url(return_url) if return_url is not None else previous["return_url"], last_ack_at=None)
+        return self.save("allocation_declared", state, current)
+
+    def mutate(self, command, value=None):
+        state = self.read()
+        if state["activity"] is None:
+            raise ValueError("no declared activity yet")
+        current = self.clock()
+        if command == "extend":
+            state.update(reconsider_at=stamp(current + duration(value)), mode="active",
+                         checkpoint_id=str(uuid.uuid4()), last_ack_at=None)
+            state.pop("resume_mode", None)
+        elif command == "ack":
+            if state["mode"] == "acknowledged":
+                return self.status()
+            state.update(mode="acknowledged", last_ack_at=stamp(current))
+            state.pop("resume_mode", None)
+        elif command == "pause":
+            if state["mode"] == "paused":
+                return self.status()
+            state.update(resume_mode=state["mode"], mode="paused")
+        elif command == "resume":
+            if state["mode"] != "paused":
+                return self.status()
+            state["mode"] = state.pop("resume_mode", "active")
+        else:
+            raise ValueError("unknown mutation")
+        return self.save(command, state, current)
+
+    def note(self, text: str):
+        """Capture a literal observation without changing activity state."""
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError("note text must not be blank")
+        if "\x00" in text:
+            raise ValueError("note text must not contain NUL")
+        if len(text) > 8192:
+            raise ValueError("note text must be at most 8192 characters")
+        state = self.read()
+        payload = {
+            "text": text,
+            "checkpoint_id": state["checkpoint_id"],
+            "activity": state["activity"],
+        }
+        with self.db:
+            event_id = self.event("observation_captured", payload)
+        return self.status() | {"capture": {"event_id": event_id, "text": text}}
+
+    def import_checkpoint(self, path):
+        path = Path(path).resolve()
+        raw = path.read_bytes()
+        digest = hashlib.sha256(raw).hexdigest()
+        for row in self.db.execute("SELECT payload FROM events WHERE kind='checkpoint_imported'"):
+            evidence = json.loads(row[0])["evidence"]
+            if evidence["path"] == str(path) and evidence["sha256"] == digest:
+                return self.status()
+        if self.read()["activity"] is not None:
+            raise ValueError("runtime is not empty; refusing to overwrite it with a checkpoint")
+        data = json.loads(raw)
+        try:
+            allocation = data["last_declared_allocation"]
+            identity = data["return_checkpoint"]["id"]
+            activity = name(allocation["activity"])
+            start = timestamp(allocation["effective_from"]) if allocation.get("effective_from") else None
+            end = timestamp(allocation["reconsider_at"]) if allocation.get("reconsider_at") else None
+            destination = url(data.get("conversation_url"))
+            if not isinstance(identity, str) or not identity or len(identity) > 256:
+                raise ValueError("invalid checkpoint identity")
+            if start and end and end <= start:
+                raise ValueError("checkpoint boundary does not follow its start")
+        except (KeyError, TypeError, AttributeError) as exc:
+            raise ValueError("malformed session checkpoint") from exc
+        state = dict(mode="active", activity=activity, started_at=stamp(start), reconsider_at=stamp(end),
+                     checkpoint_id=identity, return_url=destination, last_ack_at=None)
+        return self.save("checkpoint_imported", state, start, {"path": str(path), "sha256": digest,
+                         "source": "explicit prior declaration, not current observation"})
+
+    def open(self):
+        destination = url(self.read()["return_url"])
+        if not destination:
+            raise ValueError("no continuation URL configured")
+        result = self.runner(["xdg-open", destination], timeout=5, capture_output=True, text=True)
+        if result.returncode:
+            raise RuntimeError("could not open continuation: " + (result.stderr or "")[:400])
+        with self.db:
+            self.event("continuation_open_requested", {"url": destination, "not_acknowledged": True})
+        return self.status()
+
+    def tick(self, notify=False):
+        current = self.status()
+        if not notify or current["mode"] != "due":
+            return current
+        elapsed = -current["seconds_remaining"]
+        slot = 2 if elapsed >= 86400 else 1 if elapsed >= 1800 else 0
+        identity = current["checkpoint_id"]
+        if self.db.execute("SELECT 1 FROM notices WHERE checkpoint_id=? AND slot=?", (identity, slot)).fetchone():
+            return current
+        evidence = {"checkpoint_id": identity, "slot": slot, "outcome": "attempted"}
+        with self.db:
+            self.db.execute("INSERT INTO notices VALUES(?,?,?,?,?)", (identity, slot, stamp(self.clock()), "attempted", None))
+            self.event("notification_attempt", evidence)
+        try:
+            message = html.escape(current["activity"]) + "\nReconsideration is available. Continue, change or pause in the activity panel (Super+F12)."
+            result = self.runner(["notify-send", "--app-name=Activity", "--print-id", "--expire-time=15000",
+                                  "--hint=string:x-canonical-private-synchronous:sinnix-activity",
+                                  "Reconsider activity", message], timeout=5, capture_output=True, text=True)
+            outcome = "submitted" if result.returncode == 0 else "failed"
+            detail = (result.stdout if result.returncode == 0 else result.stderr) or ""
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            outcome, detail = "failed", str(exc)
+        evidence.update(outcome=outcome, detail=detail[:1000], human_notice="unknown")
+        with self.db:
+            self.db.execute("UPDATE notices SET outcome=?,detail=? WHERE checkpoint_id=? AND slot=?", (outcome, detail[:1000], identity, slot))
+            self.event("notification_result", evidence)
+        return self.status() | {"notification": evidence}
+
+    def history(self, limit=None):
+        query = "SELECT * FROM events ORDER BY seq" if limit is None else "SELECT * FROM events ORDER BY seq DESC LIMIT ?"
+        rows = self.db.execute(query, () if limit is None else (limit,))
+        return [dict(row) | {"payload": json.loads(row["payload"])} for row in rows]
+
+    def notes(self, limit=8):
+        if not 1 <= limit <= 200:
+            raise ValueError("notes limit must be between 1 and 200")
+        rows = self.db.execute(
+            "SELECT seq, recorded_at, actor, payload FROM events "
+            "WHERE kind='observation_captured' ORDER BY seq DESC LIMIT ?",
+            (limit,),
+        )
+        result = []
+        for row in rows:
+            payload = json.loads(row["payload"])
+            if not isinstance(payload, dict) or not isinstance(payload.get("text"), str):
+                raise RuntimeError("invalid observation event")
+            result.append({
+                "event_id": int(row["seq"]),
+                "recorded_at": row["recorded_at"],
+                "actor": row["actor"],
+                "text": payload["text"],
+                "activity": payload.get("activity"),
+                "checkpoint_id": payload.get("checkpoint_id"),
+            })
+        return result
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--actor", default="caller", help="provenance label, not an authority grant")
+    commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("status").add_argument("--json", action="store_true")
+    choose = commands.add_parser("choose")
+    choose.add_argument("activity")
+    group = choose.add_mutually_exclusive_group(required=True)
+    group.add_argument("--for", dest="for_duration")
+    group.add_argument("--until")
+    group.add_argument("--open-ended", action="store_true")
+    choose.add_argument("--return-url")
+    for cmd in ("ack", "pause", "resume", "open", "export"):
+        commands.add_parser(cmd)
+    note = commands.add_parser("note")
+    note.add_argument("text")
+    notes = commands.add_parser("notes")
+    notes.add_argument("--json", action="store_true")
+    notes.add_argument("--limit", type=int, default=8)
+    commands.add_parser("extend").add_argument("duration")
+    commands.add_parser("import-checkpoint").add_argument("path")
+    commands.add_parser("tick").add_argument("--notify", action="store_true")
+    history = commands.add_parser("history")
+    history.add_argument("--json", action="store_true")
+    history.add_argument("--limit", type=int, default=20)
+    args = parser.parse_args(argv)
+    os.umask(0o077)
+    try:
+        if args.command == "history" and not 1 <= args.limit <= 10000:
+            raise ValueError("history limit must be between 1 and 10000")
+        if args.command == "notes" and not 1 <= args.limit <= 200:
+            raise ValueError("notes limit must be between 1 and 200")
+        with Runtime(actor=args.actor) as runtime:
+            command = args.command
+            if command == "choose":
+                result = runtime.choose(args.activity, for_duration=args.for_duration, until=args.until,
+                                        open_ended=args.open_ended, return_url=args.return_url)
+            elif command in ("ack", "pause", "resume", "extend"):
+                result = runtime.mutate(command, getattr(args, "duration", None))
+            elif command == "open":
+                result = runtime.open()
+            elif command == "import-checkpoint":
+                result = runtime.import_checkpoint(args.path)
+            elif command == "note":
+                result = runtime.note(args.text)
+            elif command == "notes":
+                result = runtime.notes(args.limit)
+            elif command == "tick":
+                result = runtime.tick(args.notify)
+            elif command in ("export", "history"):
+                result = runtime.history(None if command == "export" else args.limit)
+            else:
+                result = runtime.status()
+        if command == "status" and not args.json:
+            print(f"{result['mode']}: {result['activity'] or 'unallocated'} | reconsider: {result['reconsider_local'] or 'open'}")
+        elif command == "export" or (command == "history" and not args.json):
+            for record in result:
+                print(json.dumps(record, ensure_ascii=False))
+        else:
+            print(json.dumps(result, ensure_ascii=False))
+        return 0
+    except (OSError, ValueError, RuntimeError, sqlite3.Error, subprocess.SubprocessError) as exc:
+        print(f"sinnix-activity: {exc}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

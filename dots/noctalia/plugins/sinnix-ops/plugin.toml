@@ -53,5 +53,5 @@ entry = "panel.luau"
 width = 680
 height = 900
 placement = "floating"
-position = "top_right"
-open_near_click = true
+position = "center"
+open_near_click = false

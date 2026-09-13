@@ -7,11 +7,15 @@ license = "MIT"
 dependencies = ["hyprctl"]
 tags = ["bar", "system", "utility", "hyprland"]
 icon = "layout-dashboard"
-description = "Visible bar affordances for the drilled capture verbs, the capability index and the reading stack."
+description = "Visible bar affordances for capture, declared activity, the capability index and the reading stack."
 
 [[service]]
 id = "probe"
 entry = "service.luau"
+
+[[service]]
+id = "activity-probe"
+entry = "activity-service.luau"
 
 [[setting]]
 key = "hub_url"
@@ -38,3 +42,25 @@ entry = "capabilities.luau"
 [[widget]]
 id = "reading-stack"
 entry = "reading-stack.luau"
+
+[[widget]]
+id = "activity"
+entry = "activity.luau"
+
+[[panel]]
+id = "activity-panel"
+entry = "activity-panel.luau"
+width = 720
+height = 520
+placement = "floating"
+position = "center"
+open_near_click = false
+
+[[panel]]
+id = "capture-panel"
+entry = "capture-panel.luau"
+width = 720
+height = 420
+placement = "floating"
+position = "center"
+open_near_click = false
