@@ -330,7 +330,7 @@ def test_view_json_is_the_snapshot(
 def test_backpressure_tick_reports_the_decision(
     cli_config: Config, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
-    from agentctl import backpressure
+    from agentctl import backpressure, launch
 
     monkeypatch.setattr(
         backpressure,
@@ -339,6 +339,11 @@ def test_backpressure_tick_reports_the_decision(
     )
     monkeypatch.setattr(
         backpressure.pueue, "groups_status", lambda: {"agent": "Running"}
+    )
+    monkeypatch.setattr(
+        launch,
+        "retire_legacy_holds",
+        lambda *_args: pytest.fail("recurring backpressure must not retire legacy holds"),
     )
 
     assert cli.main(["backpressure", "tick"]) == 0
