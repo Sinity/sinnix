@@ -91,6 +91,9 @@ def test_confident_word_with_long_alignment_is_flagged(subject, tmp_path):
         ],
         tmp_path,
     )
+    transcript = tmp_path / "transcript.md"
+    assert transcript.stat().st_mode & 0o777 == 0o600
+    assert not list(tmp_path.glob(".transcript.md.atomic-tmp-*"))
     assert json.loads((tmp_path / "review-spans.json").read_text()) == []
     assert json.loads((tmp_path / "alignment-review.json").read_text()) == [
         {"source": "clip.wav", "word": word}

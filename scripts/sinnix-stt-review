@@ -146,7 +146,12 @@ def render(records, output):
         if not words:
             lines.append(raw.get("text") or "*No speech returned by the model.*")
         lines.append("")
-    (output / "transcript.md").write_text("\n".join(lines))
+    atomic_publish(
+        output / "transcript.md",
+        "\n".join(lines).encode(),
+        fsync=True,
+        mode=0o600,
+    )
     write_json(output / "review-spans.json", uncertain)
     write_json(output / "alignment-review.json", alignment)
 
