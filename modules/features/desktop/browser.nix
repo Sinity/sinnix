@@ -65,6 +65,10 @@ mkFeatureModule {
             crx3 pack extension --outfile "$out/nav-capture.crx"
             id="$(crx3 id "$out/nav-capture.crx")"
             printf '%s' "$id" > "$out/extension-id"
+            # crx3 drops the key it just minted beside the archive. The store
+            # is world readable and nothing needs this key again: a rebuild
+            # mints another one and republishes the id with it.
+            rm -f "$out/nav-capture.crx.pem"
             cat > "$out/updates.xml" <<XML
             <?xml version="1.0" encoding="UTF-8"?>
             <gupdate xmlns="http://www.google.com/update2/response" protocol="2.0">
