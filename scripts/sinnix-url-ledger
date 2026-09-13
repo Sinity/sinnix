@@ -2,6 +2,7 @@
 # @sinnix-package
 # description: URL x visit x archive-snapshot coverage ledger (Wayback/CommonCrawl/Memento CDX join)
 # runtimeInputs: python3 duckdb coreutils
+# pythonPackages: @sinnix-lib
 
 """URL x visit x archive-snapshot ledger -- Stage 1 (evidence join, no crawling).
 
@@ -53,7 +54,6 @@ import calendar
 import gzip
 import hashlib
 import json
-import os
 import re
 import socket
 import subprocess
@@ -65,9 +65,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
+from sinnix_lib.atomic import atomic_publish
+
 SCHEMA = "sinnix-url-ledger-v1"
 USER_AGENT = "sinnix-url-ledger/1 (personal archival-coverage research; contact ezo.dev@gmail.com)"
 REQUEST_TIMEOUT_SECONDS = 20
+
+
+def publish_text(path: Path, text: str, *, fsync: bool = True) -> None:
+    """Publish a complete private text artifact without exposing a partial file."""
+    atomic_publish(path, text.encode("utf-8"), fsync=fsync, mode=0o600)
+
 
 DEFAULT_ACTIVITY_ROOT = Path("/realm/activity")
 DEFAULT_DERIVED_ROOT = DEFAULT_ACTIVITY_ROOT
@@ -402,7 +410,7 @@ class CommonCrawlProvider:
             raise ProviderUnavailable(self._collections_error)
         if cache_path:
             cache_path.parent.mkdir(parents=True, exist_ok=True)
-            cache_path.write_text(json.dumps(ids), encoding="utf-8")
+            publish_text(cache_path, json.dumps(ids))
         self._collections = ids
         return ids
 
@@ -765,9 +773,9 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                     raw_dir = cdx_raw_root / run_date / provider_name
                     raw_dir.mkdir(parents=True, exist_ok=True)
                     raw_path = raw_dir / f"{digest}.json"
-                    raw_path.write_text(
+                    publish_text(
+                        raw_path,
                         json.dumps({"url": normalized_url, "provider": provider_name, "raw": result.raw}),
-                        encoding="utf-8",
                     )
                     raw_cache_rel = str(raw_path.relative_to(cdx_raw_root))
 
@@ -934,7 +942,7 @@ COPY (
     # an empty database file. `-bail` makes a mid-script SQL error a
     # non-zero exit instead of continuing past it.
     sql_script_path = derived_dir / ".build.sql"
-    sql_script_path.write_text(sql, encoding="utf-8")
+    publish_text(sql_script_path, sql)
     try:
         proc = subprocess.run(
             [args.duckdb_bin, "-bail", str(duckdb_path), "-f", str(sql_script_path)],
