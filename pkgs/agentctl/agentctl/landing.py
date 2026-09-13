@@ -152,7 +152,9 @@ def _closure_verdicts(run: Run, beads: Beads) -> tuple[dict[str, bool], dict[str
                 current = prompts.evidence_binding(beads.show(bead_id))
             except (BatchError, PromptError) as error:
                 verdicts[bead_id] = False
-                residuals[bead_id] = f"current acceptance could not be observed: {error}"
+                residuals[bead_id] = (
+                    f"current acceptance could not be observed: {error}"
+                )
                 continue
             if any(
                 current.get(key) != binding.get(key)
@@ -515,19 +517,19 @@ def _pr_text(run: Run, beads: Beads) -> tuple[str, str]:
     }
     criteria: dict[str, list[str]] = {}
     for worker in run.workers:
-        for binding in worker.get("evidence_binding") or ():
+        for evidence in worker.get("evidence_binding") or ():
             if (
-                not isinstance(binding, Mapping)
-                or binding.get("v2_available") is not True
+                not isinstance(evidence, Mapping)
+                or evidence.get("v2_available") is not True
             ):
                 continue
-            bead_id = binding.get("id")
+            bead_id = evidence.get("id")
             if not isinstance(bead_id, str):
                 continue
             criteria[bead_id] = [
                 f"- [{'x' if claims.get(bead_id, {}).get(str(item.get('ac_id')), {}).get('status') in {'satisfied', 'superseded'} else ' '}] "
                 f"{str(item.get('text') or '')[: prompts.RESULT_TEXT_CHARS]}"
-                for item in binding.get("criteria") or ()
+                for item in evidence.get("criteria") or ()
                 if isinstance(item, Mapping)
             ]
     lines = [f"Batch `{run.run_id}` on base `{run.base_commit[:12]}`.", ""]
