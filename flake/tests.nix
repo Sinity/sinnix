@@ -33,6 +33,7 @@ in
     ./tests/terminal-capture.nix
     ./tests/capture-clipboard.nix
     ./tests/capture-primary.nix
+    ./tests/capture-mpris.nix
     ./tests/backup.nix
     ./tests/agent-environment.nix
     ./tests/lane-toolbelt.nix
