@@ -1,9 +1,10 @@
 """Contracts of the one subprocess wrapper and the lenient scalar reads."""
 
+import os
 import sys
 import time
 
-from sinnix_lib.process import NO_EXIT_STATUS, run
+from sinnix_lib.process import NO_EXIT_STATUS, run, run_bounded
 from sinnix_lib.values import float_or_none, int_or_none, read_text
 
 SLEEP = [sys.executable, "-c", "import time; time.sleep(30)"]
@@ -69,6 +70,82 @@ def test_run_honours_cwd(tmp_path):
         cwd=tmp_path,
     )
     assert result.text == str(tmp_path.resolve())
+
+
+def test_run_bounded_accepts_bytes_stdin_and_environment(tmp_path):
+    result = run_bounded(
+        [
+            sys.executable,
+            "-c",
+            "import os, sys; sys.stdout.buffer.write(os.environ['MARK'].encode() + b':' + sys.stdin.buffer.read())",
+        ],
+        timeout=30,
+        cwd=tmp_path,
+        env={"MARK": "from-env", "PATH": os.environ["PATH"]},
+        stdin=b"from-stdin",
+    )
+    assert result.ok
+    assert result.stdout == b"from-env:from-stdin"
+
+
+def test_run_bounded_drains_both_streams_and_reports_stdout_chunks():
+    chunks = []
+    result = run_bounded(
+        [
+            sys.executable,
+            "-c",
+            "import sys; sys.stdout.buffer.write(b'a'*100000); sys.stderr.buffer.write(b'b'*100000)",
+        ],
+        timeout=30,
+        on_stdout_chunk=chunks.append,
+    )
+    assert result.ok
+    assert result.stdout == b"a" * 100000
+    assert result.stderr == b"b" * 100000
+    assert b"".join(chunks) == result.stdout
+    assert len(chunks) > 1
+
+
+def test_run_bounded_enforces_per_stream_and_combined_limits():
+    per_stream = run_bounded(
+        [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'x'*1000)"],
+        timeout=30,
+        stdout_limit=31,
+    )
+    assert per_stream.limited
+    assert per_stream.stdout == b"x" * 31
+    assert "stdout exceeded" in (per_stream.error or "")
+
+    combined = run_bounded(
+        [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'x'*20); sys.stderr.buffer.write(b'y'*20)"],
+        timeout=30,
+        combined_limit=25,
+    )
+    assert combined.limited
+    assert len(combined.stdout) + len(combined.stderr) == 25
+    assert "combined output exceeded" in (combined.error or "")
+
+
+def test_run_bounded_timeout_kills_pipe_holding_descendants():
+    started = time.monotonic()
+    result = run_bounded(
+        [
+            sys.executable,
+            "-c",
+            "import os, time; os.fork() and os._exit(0); time.sleep(30)",
+        ],
+        timeout=0.05,
+    )
+    assert result.timed_out
+    assert result.returncode is None
+    assert time.monotonic() - started < 0.4
+
+
+def test_run_bounded_missing_command_is_a_failure():
+    result = run_bounded(["sinnix-no-such-binary-4f2a"], timeout=30)
+    assert not result.ok
+    assert result.returncode is None
+    assert result.error
 
 
 def test_read_text_strips_and_survives_absence(tmp_path):
