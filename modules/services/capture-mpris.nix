@@ -24,13 +24,14 @@ let
   lakeRoot = config.sinnix.paths.activityRoot;
   mprisDir = "${lakeRoot}/mpris";
   cfg = config.sinnix.services.capture-mpris;
+  monitorPython = pkgs.python3.withPackages (_: [ scriptPkgs.sinnix-lib ]);
 
   monitor = pkgs.writeTextFile {
     name = "capture-mpris-monitor";
     destination = "/bin/capture-mpris-monitor";
     executable = true;
     text = ''
-      #!${pkgs.python3}/bin/python3
+      #!${monitorPython}/bin/python3
     ''
     + builtins.readFile ../../pkgs/capture-mpris/monitor.py;
   };

@@ -18,8 +18,8 @@ write time (both for change events and for heartbeats).
 
 Every actual capture write shells out to the ``sinnix-capture`` CLI
 (``sinnix-capture write --lane mpris``) rather than importing the writer
-library directly, so this script has no Python dependency beyond the
-standard library.
+library directly. Command execution uses the shared ``sinnix_lib`` result
+contract so timeouts and spawn failures remain ordinary collector outcomes.
 """
 
 from __future__ import annotations
@@ -31,6 +31,8 @@ import sys
 import threading
 import time
 from dataclasses import dataclass, field
+
+from sinnix_lib.process import run
 
 FIELD_SEP = "\x1f"  # ASCII unit separator; vanishingly unlikely in track metadata
 FOLLOW_FIELDS = ("player", "status", "title", "artist", "album")
@@ -54,22 +56,18 @@ class PlayerState:
     seen: bool = False
 
 
-def run(argv: list[str]) -> tuple[int, str, str]:
-    try:
-        proc = subprocess.run(argv, capture_output=True, text=True, timeout=10)
-        return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
-    except (subprocess.TimeoutExpired, OSError) as exc:
-        return 1, "", str(exc)
-
-
 def fetch_position_and_duration(
     playerctl_bin: str, player: str
 ) -> tuple[float | None, float | None]:
-    rc, out, _err = run([playerctl_bin, "-p", player, "position"])
-    position_seconds = float(out) if rc == 0 and out else None
+    position = run([playerctl_bin, "-p", player, "position"], timeout=10)
+    position_text = position.text
+    position_seconds = float(position_text) if position_text else None
 
-    rc, out, _err = run([playerctl_bin, "-p", player, "metadata", "mpris:length"])
-    duration_seconds = (int(out) / 1_000_000.0) if rc == 0 and out else None
+    duration = run(
+        [playerctl_bin, "-p", player, "metadata", "mpris:length"], timeout=10
+    )
+    duration_text = duration.text
+    duration_seconds = (int(duration_text) / 1_000_000.0) if duration_text else None
 
     return position_seconds, duration_seconds
 
@@ -80,7 +78,7 @@ def write_envelope(
     lane: str,
     payload: dict,
 ) -> None:
-    rc, _out, err = run(
+    result = run(
         [
             sinnix_capture_bin,
             "write",
@@ -90,10 +88,12 @@ def write_envelope(
             lane,
             "--payload",
             json.dumps(payload),
-        ]
+        ],
+        timeout=10,
     )
-    if rc != 0:
-        log(f"sinnix-capture write failed (rc={rc}): {err}")
+    if not result.ok:
+        detail = result.error or result.stderr.strip()
+        log(f"sinnix-capture write failed (rc={result.returncode}): {detail}")
 
 
 def classify_change(
