@@ -31,11 +31,12 @@ python3 "$benchmark" \
 jq -e '
   .schema == "sinnix-agent-profile-benchmark-v1"
   and (.profiles | keys == ["claude-lean", "gateway-observer"])
-  and .profiles["claude-lean"].sample_count == 6
-  and .profiles["gateway-observer"].sample_count == 6
+  and .profiles["claude-lean"].sample_count == 3
+  and .profiles["gateway-observer"].sample_count == 3
   and .profiles["claude-lean"].tool_count == 1
   and .profiles["gateway-observer"].tool_count == 1
   and .recommendations.task_success_guard
+  and (all(.profiles[]; has("wall_ns") and (has("cold_wall_ns") | not) and (has("warm_wall_ns") | not)))
 ' "$root/out/summary.json" >/dev/null
-jq -e '(.schema == "sinnix-agent-profile-benchmark-v1") and ((.records | length) == 12) and all(.records[]; .provider_usage.status == "unavailable")' "$root/out/raw.json" >/dev/null
+jq -e '(.schema == "sinnix-agent-profile-benchmark-v1") and ((.records | length) == 6) and all(.records[]; .provider_usage.status == "unavailable" and (has("phase") | not))' "$root/out/raw.json" >/dev/null
 echo 'agent-profile-benchmark fixture passed'
