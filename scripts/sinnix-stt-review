@@ -2,7 +2,7 @@
 # @sinnix-package
 # description: Transcribe selected recordings with Polish-conditioned Scribe v2 and retain word evidence
 # runtimeInputs: python3
-# pythonPackages: tzdata
+# pythonPackages: tzdata @sinnix-lib
 # docs: docs/speech.md
 """Explicit cloud transcription with raw word evidence, independent of the capture pass."""
 
@@ -20,11 +20,16 @@ import uuid
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from sinnix_lib.atomic import atomic_publish
+
 
 def write_json(path, value):
-    temporary = path.with_suffix(".tmp")
-    temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n")
-    temporary.replace(path)
+    atomic_publish(
+        path,
+        (json.dumps(value, ensure_ascii=False, indent=2) + "\n").encode(),
+        fsync=True,
+        mode=0o600,
+    )
 
 
 def request_transcript(path, key, parameters):

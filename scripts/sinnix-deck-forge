@@ -40,6 +40,7 @@ import sys
 from pathlib import Path
 from typing import Any, Iterable
 
+from sinnix_lib.atomic import atomic_publish
 from sinnix_lib.ledger import utc_ts
 
 SCHEMA = "sinnix.phone.deck/1"
@@ -68,9 +69,12 @@ def write_deck(deck: dict, *, dry_run: bool = False) -> Path | None:
         return None
     DECKS_DIR.mkdir(parents=True, exist_ok=True)
     dest = DECKS_DIR / f"{deck['id']}.json"
-    tmp = dest.with_suffix(".json.part")
-    tmp.write_text(json.dumps(deck, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    tmp.rename(dest)
+    atomic_publish(
+        dest,
+        (json.dumps(deck, ensure_ascii=False, indent=2) + "\n").encode(),
+        fsync=True,
+        mode=0o644,
+    )
     return dest
 
 
