@@ -43,13 +43,14 @@ from __future__ import annotations
 
 import datetime as dt
 import json
-import os
 import re
 import subprocess
 import sys
 import threading
 from pathlib import Path
 from typing import Any
+
+from sinnix_lib.ledger import append_jsonl
 
 SCHEMA = "sinnix-hub-feedback-v1"
 ELICIT_SCHEMA = "sinnix-elicit-v1"
@@ -67,8 +68,10 @@ def parse_command_argv(raw: str) -> list[str]:
         command = json.loads(raw)
     except json.JSONDecodeError as error:
         raise ValueError("command must be a JSON argv array") from error
-    if not isinstance(command, list) or not command or not all(
-        isinstance(argument, str) and argument for argument in command
+    if (
+        not isinstance(command, list)
+        or not command
+        or not all(isinstance(argument, str) and argument for argument in command)
     ):
         raise ValueError("command must be a nonempty JSON argv array of strings")
     return command
@@ -186,7 +189,9 @@ class FeedbackSpool:
             target = self.directory / f"{received:%Y-%m-%d}.jsonl"
             # The spool is read directly by agents, so preserve its readable
             # spacing while sharing the durable append contract.
-            append_jsonl(target, envelope, mode=0o644, fsync=True, separators=(",", ": "))
+            append_jsonl(
+                target, envelope, mode=0o644, fsync=True, separators=(", ", ": ")
+            )
         if self.elicit is not None and is_elicit(payload):
             self.elicit.trigger()
         return {
