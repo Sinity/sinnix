@@ -46,7 +46,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Iterable
 
-from sinnix_lib.ledger import utc_ts
+from sinnix_lib.ledger import append_jsonl, utc_ts
 
 SCHEMA = "sinnix.transcript/1"
 
@@ -421,21 +421,17 @@ def cmd_lake(args: argparse.Namespace) -> int:
 
             day = _day_of(path)
             out = TRANSCRIPT_DIR / f"{day}.jsonl"
-            with out.open("a", encoding="utf-8") as fh:
-                fh.write(json.dumps(record, ensure_ascii=False) + "\n")
-            with LEDGER.open("a", encoding="utf-8") as fh:
-                fh.write(
-                    json.dumps(
-                        {
-                            "file": path.name,
-                            "bytes": size,
-                            "lane": lane,
-                            "speech_seconds": record.get("speech_seconds", 0),
-                            "at": utc_ts(),
-                        }
-                    )
-                    + "\n"
-                )
+            append_jsonl(out, record, ensure_ascii=False)
+            append_jsonl(
+                LEDGER,
+                {
+                    "file": path.name,
+                    "bytes": size,
+                    "lane": lane,
+                    "speech_seconds": record.get("speech_seconds", 0),
+                    "at": utc_ts(),
+                },
+            )
             done += 1
             if record.get("undecodable"):
                 undecodable += 1
