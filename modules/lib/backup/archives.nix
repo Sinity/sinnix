@@ -92,8 +92,7 @@
         {
           printf 'archive=%s\n' "$archive_name"
           printf 'epoch=%s\n' "$(date +%s)"
-        } > "$marker.tmp"
-        mv "$marker.tmp" "$marker"
+        } | publish_backup_marker "$marker"
       '';
     }
   ))
@@ -211,8 +210,7 @@
       {
         printf 'archive=%s\n' "$archive_name"
         printf 'epoch=%s\n' "$(date +%s)"
-      } > "$marker.tmp"
-      mv "$marker.tmp" "$marker"
+      } | publish_backup_marker "$marker"
     '';
   })
 
