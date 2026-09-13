@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from pydantic import Field
+from sinnix_lib.atomic import atomic_publish
 from ..owner_execution import (
     ExecutionProfile,
     ExecutionResult,
@@ -1108,10 +1109,12 @@ def _patch(runtime: Runtime, inp: PatchInput) -> PatchResult:
         ).encode()
     updated = _split_lines(encoded.decode("utf-8"))
     if not inp.dry_run:
-        temporary = target.with_name(f".{target.name}.gateway-tmp")
-        temporary.write_bytes(encoded)
-        temporary.chmod(target.stat().st_mode & 0o7777)
-        temporary.replace(target)
+        atomic_publish(
+            target,
+            encoded,
+            fsync=True,
+            mode=stat_module.S_IMODE(target.stat().st_mode),
+        )
     import hashlib
 
     after = hashlib.sha256(encoded).hexdigest()
