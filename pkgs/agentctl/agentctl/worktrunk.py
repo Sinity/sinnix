@@ -34,7 +34,7 @@ from .limits import CALL_TIMEOUT_SECONDS
 
 # Removal is asynchronous by default; a caller that drops a workspace and then
 # reports it gone must observe the removal, so every call passes --foreground.
-_REMOVE_ARGUMENTS = ("--foreground", "--no-internal-sweep", "-y", "--format", "json")
+_REMOVE_ARGUMENTS = ("--foreground", "-y", "--format", "json")
 
 # `--porcelain -z` terminates every attribute with a NUL and every worktree
 # with an empty one, so a path is read exactly as Git holds it.
