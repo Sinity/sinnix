@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import Field
-from sinnix_mcp.execution import ExecutionProfile, ExecutionResult, OwnerRoute
+from ..owner_execution import ExecutionProfile, ExecutionResult, OwnerRoute
 
 from ..action import (
     ALL_PRINCIPALS,

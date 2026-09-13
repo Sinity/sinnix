@@ -26,7 +26,7 @@ from sinnix_agent_gateway.locators import (
 )
 from sinnix_agent_gateway.schemas import GatewayModel
 from sinnix_agent_gateway.tooling import build_tool, tool_signature_matches
-from sinnix_mcp.execution import ExecutionResult
+from sinnix_agent_gateway.owner_execution import ExecutionResult
 
 
 def config(tmp_path: Path) -> GatewayConfig:

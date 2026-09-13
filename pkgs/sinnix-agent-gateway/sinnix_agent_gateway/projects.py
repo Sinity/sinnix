@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Iterator, Mapping, TextIO
 
 from sinnix_lib.lock import flock
-from sinnix_mcp.execution import ExecutionProfile, OwnerExecution, OwnerRoute
+from .owner_execution import ExecutionProfile, OwnerExecution, OwnerRoute
 
 from .capabilities import Capability, Principal
 from .config import GatewayConfig, ProjectConfig

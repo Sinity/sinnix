@@ -115,9 +115,7 @@ let
       }) mcpRegistry.registry;
     }
   );
-  sinnixMcpPackage = pkgs.callPackage ../pkgs/sinnix-mcp/pkg.nix { };
   agentctlPackage = pkgs.callPackage ../pkgs/agentctl/pkg.nix {
-    sinnix-mcp = sinnixMcpPackage;
     sinnix-lib = externalPackages.sinnix-lib;
     beads = externalPackages.beads;
   };
@@ -125,7 +123,6 @@ let
     polylogue-contract-source = inputs.polylogue;
     lynchpin-contract-source = inputs.lynchpin;
     beads-owner = externalPackages.beads;
-    sinnix-mcp = sinnixMcpPackage;
     sinnix-lib = externalPackages.sinnix-lib;
     agentctl = agentctlPackage;
   };
@@ -349,7 +346,6 @@ let
       npmDepsHash = "sha256-/duhx34Iiq+7ZOaRTTAWChbGjJhxiVvWOoaLJsH2USc=";
     };
 
-    sinnix-mcp = sinnixMcpPackage;
     agentctl = agentctlPackage;
     # The same tool without its test-suite check phase: environment builds
     # (dev shell, rebuild wrappers) need the binary, not the gate. The gate

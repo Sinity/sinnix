@@ -17,7 +17,7 @@ from agentctl.projects import ProjectConfigError
 from agentctl.prompts import PromptError
 from agentctl.pueue import PueueError
 from agentctl.worktrunk import WorktrunkError
-from sinnix_mcp import ErrorCode
+from .owner_errors import ErrorCode
 
 OWNER = "systemd-jobs"
 JOB_LIST_ORDERING = "created_at_desc_job_id_desc"

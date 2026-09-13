@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from sinnix_mcp.execution import ExecutionProfile, OwnerExecution, OwnerRoute
+from .owner_execution import ExecutionProfile, OwnerExecution, OwnerRoute
 
 from .artifacts import ArtifactService
 from .capabilities import Capability, Principal

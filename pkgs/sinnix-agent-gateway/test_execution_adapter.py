@@ -7,7 +7,7 @@ import pytest
 from agentctl import batch, launch, pueue
 from agentctl.config import Config
 from sinnix_agent_gateway.execution import JobOwnerError, LocalJobs
-from sinnix_mcp import ErrorCode
+from sinnix_agent_gateway.owner_errors import ErrorCode
 
 DESCRIPTOR = """
 schema = 1

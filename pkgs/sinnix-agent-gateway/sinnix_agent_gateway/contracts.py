@@ -5,7 +5,7 @@ from enum import StrEnum
 from typing import Any, Callable, Mapping
 from urllib.parse import quote
 
-from sinnix_mcp.refs import RefTemplate
+from .refs import RefTemplate
 
 KNOWN_PRINCIPALS = frozenset({"observer", "agent-control", "operator"})
 

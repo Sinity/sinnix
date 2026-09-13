@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any, Callable
 
-from sinnix_mcp.execution import (
+from .owner_execution import (
     EnvironmentProfile,
     ExecutionProfile,
     ExecutionResult,

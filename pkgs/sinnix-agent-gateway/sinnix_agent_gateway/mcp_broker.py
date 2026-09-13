@@ -11,7 +11,7 @@ from typing import Any
 
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
-from sinnix_mcp.execution import (
+from .owner_execution import (
     EnvironmentProfile,
     ExecutionProfile,
     OwnerExecution,

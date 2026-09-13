@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Mapping
 
 import anyio
-from sinnix_mcp import ErrorCode
-from sinnix_mcp.execution import OwnerDiagnosticError
+from .owner_errors import ErrorCode
+from .owner_execution import OwnerDiagnosticError
 
 from .action import Action, ActionResult
 from .actions import BY_NAME as ACTIONS_BY_NAME

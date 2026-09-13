@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from sinnix_mcp.execution import (
+from .owner_execution import (
     EnvironmentProfile,
     ExecutionProfile,
     OwnerDiagnosticError,
