@@ -9,7 +9,7 @@ import pytest
 
 
 def _collector():
-    path = Path(__file__).resolve().parents[1] / "collector.py"
+    path = Path(__file__).resolve().parents[1] / "machine_telemetry" / "collector.py"
     spec = importlib.util.spec_from_file_location("machine_telemetry_collector", path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)

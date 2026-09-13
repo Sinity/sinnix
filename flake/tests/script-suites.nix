@@ -59,6 +59,7 @@
             )}
             ${builtins.concatStringsSep "\n" (
               map (file: ''
+                mkdir -p "$root/pkgs/${name}/$(dirname ${file})"
                 cp ${../../pkgs + "/${name}/${file}"} "$root/pkgs/${name}/${file}"
               '') packageFiles
             )}
@@ -76,15 +77,14 @@
     in
     {
       checks = {
-        # Provably fails when: the backup stops handling a WAL-less (parked)
-        # database, stops verifying integrity, or leaves its raw intermediate
-        # behind. Verified by restoring the old try/except-FileNotFoundError
-        # shape around the WAL copy, which cp never raises.
-        machine-telemetry-suite = mkScriptSuite {
+        # The SQLite backup remains a standalone script package. Its regression
+        # suite drives the source script through subprocess, while the
+        # machine-telemetry package owns collector tests in its checkPhase.
+        sqlite-backup-regression-suite = mkScriptSuite {
           name = "machine-telemetry";
           suiteDir = ../../pkgs/machine-telemetry/tests;
           scripts = [ "sinnix-sqlite-backup" ];
-          packageFiles = [ "collector.py" ];
+          packageFiles = [ "machine_telemetry/collector.py" ];
           extraPythonPackages = [ sinnix-lib ];
           nativeBuildInputs = [ pkgs.zstd ];
         };

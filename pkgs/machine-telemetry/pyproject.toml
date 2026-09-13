@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "machine-telemetry"
+version = "0.1.0"
+description = "Canonical host machine telemetry collector for Sinnix"
+requires-python = ">=3.12"
+
+[project.scripts]
+machine-telemetry = "machine_telemetry.collector:main"
+
+[tool.setuptools.packages.find]
+include = ["machine_telemetry*"]
