@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import hashlib
 import io
-from concurrent.futures import ThreadPoolExecutor
 import json
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest

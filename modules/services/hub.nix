@@ -363,33 +363,37 @@ mkServiceModule {
         ${frontendSites}
       '';
 
-      mkResolveBind = name: key: label: pkgs.writeShellScript name ''
-        set -euo pipefail
-        target="$1"
-        target_dir="$(${pkgs.coreutils}/bin/dirname "$target")"
-        ${pkgs.coreutils}/bin/mkdir -p "$target_dir"
-        for _ in $(${pkgs.coreutils}/bin/seq 1 60); do
-          address="$(${pkgs.iproute2}/bin/ip -4 -o addr show dev ${tailscaleInterface} 2>/dev/null \
-            | ${pkgs.gawk}/bin/awk '{print $4}' \
-            | ${pkgs.coreutils}/bin/cut -d/ -f1 \
-            | ${pkgs.coreutils}/bin/head -n1)"
-          if [ -n "''${address:-}" ]; then
-            temporary="$(${pkgs.coreutils}/bin/mktemp "$target_dir/.${key}.tmp.XXXXXX")"
-            trap 'rm -f "$temporary"' EXIT
-            ${pkgs.coreutils}/bin/printf '${key}=%s\n' "$address" > "$temporary"
-            ${pkgs.coreutils}/bin/sync -f "$temporary"
-            ${pkgs.coreutils}/bin/mv -f "$temporary" "$target"
-            ${pkgs.coreutils}/bin/sync -f "$target_dir"
-            trap - EXIT
-            exit 0
-          fi
-          ${pkgs.coreutils}/bin/sleep 2
-        done
-        echo "${label}: ${tailscaleInterface} has no IPv4 address; refusing to start" >&2
-        exit 1
-      '';
+      mkResolveBind =
+        name: key: label:
+        pkgs.writeShellScript name ''
+          set -euo pipefail
+          target="$1"
+          target_dir="$(${pkgs.coreutils}/bin/dirname "$target")"
+          ${pkgs.coreutils}/bin/mkdir -p "$target_dir"
+          for _ in $(${pkgs.coreutils}/bin/seq 1 60); do
+            address="$(${pkgs.iproute2}/bin/ip -4 -o addr show dev ${tailscaleInterface} 2>/dev/null \
+              | ${pkgs.gawk}/bin/awk '{print $4}' \
+              | ${pkgs.coreutils}/bin/cut -d/ -f1 \
+              | ${pkgs.coreutils}/bin/head -n1)"
+            if [ -n "''${address:-}" ]; then
+              temporary="$(${pkgs.coreutils}/bin/mktemp "$target_dir/.${key}.tmp.XXXXXX")"
+              trap 'rm -f "$temporary"' EXIT
+              ${pkgs.coreutils}/bin/printf '${key}=%s\n' "$address" > "$temporary"
+              ${pkgs.coreutils}/bin/sync -f "$temporary"
+              ${pkgs.coreutils}/bin/mv -f "$temporary" "$target"
+              ${pkgs.coreutils}/bin/sync -f "$target_dir"
+              trap - EXIT
+              exit 0
+            fi
+            ${pkgs.coreutils}/bin/sleep 2
+          done
+          echo "${label}: ${tailscaleInterface} has no IPv4 address; refusing to start" >&2
+          exit 1
+        '';
       resolveBind = mkResolveBind "sinnix-hub-resolve-bind" "SINNIX_HUB_TAILNET_IP" "sinnix-hub";
-      resolveBindPhoneStream = mkResolveBind "sinnix-phone-dispatcher-resolve-bind" "SINNIX_PHONE_STREAM_HOST" "sinnix-phone-dispatcher";
+      resolveBindPhoneStream =
+        mkResolveBind "sinnix-phone-dispatcher-resolve-bind" "SINNIX_PHONE_STREAM_HOST"
+          "sinnix-phone-dispatcher";
     in
     {
       assertions = [

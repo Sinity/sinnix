@@ -84,7 +84,15 @@ def test_cli_publishes_private_report(tmp_path):
     output = tmp_path / "reports" / "catalog.html"
     script = Path(__file__).parents[3] / "scripts/sinnix-file-catalog-report"
     result = subprocess.run(
-        [str(script), "--catalog", str(catalog), "--template", str(template), "--output", str(output)],
+        [
+            str(script),
+            "--catalog",
+            str(catalog),
+            "--template",
+            str(template),
+            "--output",
+            str(output),
+        ],
         text=True,
         capture_output=True,
         check=False,

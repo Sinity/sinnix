@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from .refs import RefTemplate, SinnixRef
-
 from .contracts import ResourceSpec
+from .refs import RefTemplate, SinnixRef
 
 
 class RegistryError(ValueError):

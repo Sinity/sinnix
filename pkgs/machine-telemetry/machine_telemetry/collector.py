@@ -15,13 +15,15 @@ import time
 from pathlib import Path
 
 from sinnix_lib.atomic import atomic_publish
+from sinnix_lib.process import run, run_bounded
 from sinnix_lib.procfs import (
     parse_cgroup_v2,
     parse_colon_numeric,
-    parse_psi as parse_psi_text,
     parse_stat_start_time,
 )
-from sinnix_lib.process import run, run_bounded
+from sinnix_lib.procfs import (
+    parse_psi as parse_psi_text,
+)
 from sinnix_lib.systemd import show_units, show_units_as_user
 from sinnix_lib.values import float_or_none, int_or_none, read_text
 
@@ -1874,7 +1876,9 @@ def insert_service_states(
     pressure_rows: list[dict[str, object]] = []
     cgroup_memory_rows: list[dict[str, object]] = []
     user_units = {"polylogued.service", "noctalia.service"}
-    service_props = service_unit_props(units, user_units=user_units, user_name=user_name)
+    service_props = service_unit_props(
+        units, user_units=user_units, user_name=user_name
+    )
     for unit in units:
         item = service_props.get(unit)
         if item is None:

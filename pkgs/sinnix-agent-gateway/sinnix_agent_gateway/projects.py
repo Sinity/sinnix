@@ -14,12 +14,12 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, Iterator, Mapping, TextIO
 
-from sinnix_lib.lock import flock
 from sinnix_lib.atomic import atomic_publish_at
-from .owner_execution import ExecutionProfile, OwnerExecution, OwnerRoute
+from sinnix_lib.lock import flock
 
 from .capabilities import Capability, Principal
 from .config import GatewayConfig, ProjectConfig
+from .owner_execution import ExecutionProfile, OwnerExecution, OwnerRoute
 
 
 class ProjectError(ValueError):
@@ -65,8 +65,7 @@ def _is_excluded(path: Path) -> bool:
     if any(part.lower() in SENSITIVE_PARTS for part in parts):
         return True
     if any(
-        part.startswith(".")
-        and (".gateway-tmp-" in part or ".atomic-tmp-" in part)
+        part.startswith(".") and (".gateway-tmp-" in part or ".atomic-tmp-" in part)
         for part in parts
     ):
         return True

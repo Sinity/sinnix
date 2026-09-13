@@ -610,7 +610,9 @@ def _batch(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         note = (
             "already prepared; nothing launched"
             if started.get("existing") and not started.get("resumed")
-            else "preparation completed" if started.get("resumed") else "started"
+            else "preparation completed"
+            if started.get("resumed")
+            else "started"
         )
         out.write(started, f"{out.run_lines(started)}\n{note}")
         return EXIT_OK

@@ -1,13 +1,12 @@
 """Regression coverage for the MPRIS shared subprocess boundary."""
 
-from importlib.machinery import SourceFileLoader
-from pathlib import Path
 import sys
 import unittest
+from importlib.machinery import SourceFileLoader
+from pathlib import Path
 from unittest.mock import patch
 
 from sinnix_lib.process import run
-
 
 MONITOR = SourceFileLoader(
     "capture_mpris_monitor", str(Path(__file__).with_name("monitor.py"))

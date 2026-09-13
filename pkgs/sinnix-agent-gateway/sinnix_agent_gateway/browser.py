@@ -7,16 +7,16 @@ from pathlib import Path
 from typing import Any
 
 from sinnix_lib.atomic import atomic_publish
+
+from .artifacts import ArtifactService
+from .capabilities import Capability, Principal
+from .config import GatewayConfig
 from .owner_execution import (
     ExecutionProfile,
     OwnerDiagnosticError,
     OwnerExecution,
     OwnerRoute,
 )
-
-from .artifacts import ArtifactService
-from .capabilities import Capability, Principal
-from .config import GatewayConfig
 
 
 class BrowserError(ValueError):

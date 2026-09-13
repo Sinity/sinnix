@@ -8,9 +8,9 @@ post-switch coordinator check.
 from __future__ import annotations
 
 import json
-from http.client import HTTPConnection
 import urllib.error
 import urllib.request
+from http.client import HTTPConnection
 from pathlib import Path
 from urllib.parse import urlsplit
 

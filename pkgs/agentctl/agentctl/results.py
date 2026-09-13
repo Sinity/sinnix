@@ -223,6 +223,7 @@ def _drop_transport_nulls(schema: Mapping[str, Any], value: Any) -> Any:
         normalized[name] = _drop_transport_nulls(child, item)
     return normalized
 
+
 _TYPES: dict[str, tuple[type, ...]] = {
     "object": (dict,),
     "array": (list,),

@@ -226,12 +226,14 @@ mkServiceModule {
           '';
         }
       ) enabledEndpoints;
-      gatewayPath = lib.makeBinPath [
-        pkgs.systemd
-        scriptPkgs.sinnix-observe
-        scriptPkgs.beads
-        scriptPkgs.sinnix-capture
-      ] + ":/home/${userName}/.local/bin";
+      gatewayPath =
+        lib.makeBinPath [
+          pkgs.systemd
+          scriptPkgs.sinnix-observe
+          scriptPkgs.beads
+          scriptPkgs.sinnix-capture
+        ]
+        + ":/home/${userName}/.local/bin";
       endpointValues = lib.mapAttrsToList (_: endpoint: endpoint) enabledEndpoints;
       duplicateValues =
         field:
@@ -379,7 +381,10 @@ mkServiceModule {
               # The user manager's TMPDIR is the NVMe scratch root, read-only
               # under strict; the private /tmp is where this unit's temporary
               # files belong.
-              Environment = [ "TMPDIR=/tmp" "PATH=${gatewayPath}" ];
+              Environment = [
+                "TMPDIR=/tmp"
+                "PATH=${gatewayPath}"
+              ];
             };
             Install.WantedBy = lib.optionals endpoint.autoStart [ "default.target" ];
           }

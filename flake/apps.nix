@@ -16,15 +16,18 @@
     let
       commandRegistry = sinnixCommandRegistry;
 
-      generatedApps = builtins.mapAttrs (name: spec: {
-        type = "app";
-        program = "${commandRegistry.mkAppCommand name spec}/bin/${name}";
-        meta.description = spec.description;
-      }) (
-        pkgs.lib.filterAttrs (
-          name: _: !builtins.hasAttr name commandRegistry.activationPackages
-        ) commandRegistry.appCommands
-      );
+      generatedApps =
+        builtins.mapAttrs
+          (name: spec: {
+            type = "app";
+            program = "${commandRegistry.mkAppCommand name spec}/bin/${name}";
+            meta.description = spec.description;
+          })
+          (
+            pkgs.lib.filterAttrs (
+              name: _: !builtins.hasAttr name commandRegistry.activationPackages
+            ) commandRegistry.appCommands
+          );
       activationApps = builtins.mapAttrs (name: package: {
         type = "app";
         program = "${package}/bin/${name}";

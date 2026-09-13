@@ -329,7 +329,9 @@ def test_quit_saves_the_refit_model(serving, image_domain):
     assert model["ranking"][0]["id"] == "alpha"
 
 
-def test_elicit_publication_is_readable_and_atomic(elicit_module, tmp_path, monkeypatch):
+def test_elicit_publication_is_readable_and_atomic(
+    elicit_module, tmp_path, monkeypatch
+):
     path = tmp_path / "model.json"
     published = {}
 
@@ -338,7 +340,7 @@ def test_elicit_publication_is_readable_and_atomic(elicit_module, tmp_path, monk
         return True
 
     monkeypatch.setattr(elicit_module, "atomic_publish", record)
-    elicit_module.publish_text(path, "{\n  \"model\": 1\n}\n")
+    elicit_module.publish_text(path, '{\n  "model": 1\n}\n')
     assert published == {
         "target": path,
         "payload": b'{\n  "model": 1\n}\n',

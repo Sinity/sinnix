@@ -3,11 +3,10 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from .owner_execution import ExecutionProfile, OwnerExecution, OwnerRoute
-
 from .artifacts import ArtifactService
 from .capabilities import Capability, Principal
 from .config import GatewayConfig
+from .owner_execution import ExecutionProfile, OwnerExecution, OwnerRoute
 
 
 class ObserveService:

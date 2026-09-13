@@ -30,7 +30,9 @@ def run(
     log = ""
     if systemctl_log is not None:
         log = "printf '%s\\n' \"$@\" > " + shlex.quote(str(systemctl_log)) + "\n"
-    systemctl.write_text("#!/bin/sh\n" + log + "cat <<'EOF'\n" + systemctl_output + "\nEOF\n")
+    systemctl.write_text(
+        "#!/bin/sh\n" + log + "cat <<'EOF'\n" + systemctl_output + "\nEOF\n"
+    )
     systemctl.chmod(0o755)
     current = tmp_path / "current"
     booted = tmp_path / "booted"

@@ -18,7 +18,6 @@ from ..runtime_inventory import (
 )
 from ..util import words
 
-
 UNIT_PROPERTIES = (
     "Id",
     "LoadState",

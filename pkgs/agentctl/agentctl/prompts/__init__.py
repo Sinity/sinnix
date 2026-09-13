@@ -657,7 +657,9 @@ def evidence_binding(bead: Mapping[str, Any]) -> dict[str, Any]:
     criteria = _stable_criteria(bead)
     available = revision is not None and bool(criteria)
     digest = hashlib.sha256(
-        json.dumps(list(criteria), separators=(",", ":"), sort_keys=True).encode("utf-8")
+        json.dumps(list(criteria), separators=(",", ":"), sort_keys=True).encode(
+            "utf-8"
+        )
     ).hexdigest()
     return {
         "v2_available": available,
@@ -863,6 +865,7 @@ def resume_prompt(
     contract it carries apply unchanged.
     """
     template, contract_path = _template(config)
+
     def render(resume_bead: Mapping[str, Any], original: str) -> str:
         snapshot = json.dumps(
             {

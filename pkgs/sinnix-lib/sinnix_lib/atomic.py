@@ -19,10 +19,10 @@ from __future__ import annotations
 
 import os
 import uuid
-from contextlib import contextmanager
 from collections.abc import Iterator
-from typing import TextIO
+from contextlib import contextmanager
 from pathlib import Path
+from typing import TextIO
 
 PRIVATE_MODE = 0o600
 

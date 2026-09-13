@@ -11,9 +11,9 @@ import inspect
 import json
 import threading
 import time
-from http.client import HTTPConnection
 import urllib.error
 import urllib.request
+from http.client import HTTPConnection
 from pathlib import Path
 from urllib.parse import urlsplit
 

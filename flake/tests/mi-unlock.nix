@@ -10,7 +10,8 @@ in
       spec = testLib.mkFeatureTest {
         name = "mi-unlock-scheduled";
         feature = "sinnix.services.mi-unlock.enable";
-        assertions = config:
+        assertions =
+          config:
           let
             service = config.systemd.user.services.sinnix-mi-unlock;
             timer = config.systemd.user.timers.sinnix-mi-unlock.timerConfig;
@@ -37,7 +38,9 @@ in
               message = "mi-unlock must retain its boundary calendar and timer accuracy";
             }
             {
-              assertion = !(timer ? Persistent) && config.systemd.user.timers.sinnix-mi-unlock.wantedBy == [ "timers.target" ];
+              assertion =
+                !(timer ? Persistent)
+                && config.systemd.user.timers.sinnix-mi-unlock.wantedBy == [ "timers.target" ];
               message = "mi-unlock must remain nonpersistent and enabled with user timers";
             }
           ];

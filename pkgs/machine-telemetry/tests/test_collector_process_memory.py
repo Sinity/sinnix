@@ -35,14 +35,18 @@ def test_service_unit_props_batches_each_manager(monkeypatch) -> None:
     monkeypatch.setattr(
         collector,
         "show_units",
-        lambda units, **kwargs: calls.append(("system", units, kwargs))
-        or {unit: {"ActiveState": "active"} for unit in units},
+        lambda units, **kwargs: (
+            calls.append(("system", units, kwargs))
+            or {unit: {"ActiveState": "active"} for unit in units}
+        ),
     )
     monkeypatch.setattr(
         collector,
         "show_units_as_user",
-        lambda units, uid, **kwargs: calls.append(("user", units, uid, kwargs))
-        or {unit: {"SubState": "running"} for unit in units},
+        lambda units, uid, **kwargs: (
+            calls.append(("user", units, uid, kwargs))
+            or {unit: {"SubState": "running"} for unit in units}
+        ),
     )
     monkeypatch.setattr(
         collector.pwd,
@@ -72,7 +76,9 @@ def test_dstate_probe_uses_shared_runner_error_contract(monkeypatch) -> None:
     monkeypatch.setattr(
         collector,
         "run",
-        lambda argv, *, timeout: SimpleNamespace(error="missing ps", stdout="", returncode=-1),
+        lambda argv, *, timeout: SimpleNamespace(
+            error="missing ps", stdout="", returncode=-1
+        ),
     )
     assert collector.dstate_tasks() == (0, "ps_failed")
 
@@ -83,8 +89,12 @@ def test_kill_event_scan_keeps_cursor_on_bounded_failure(monkeypatch) -> None:
     monkeypatch.setattr(
         collector,
         "run_bounded",
-        lambda argv, **kwargs: calls.append((argv, kwargs))
-        or SimpleNamespace(error="stdout exceeded limit", stdout=b'{"__CURSOR":"partial"'),
+        lambda argv, **kwargs: (
+            calls.append((argv, kwargs))
+            or SimpleNamespace(
+                error="stdout exceeded limit", stdout=b'{"__CURSOR":"partial"'
+            )
+        ),
     )
 
     assert collector.scan_kill_events("host", "boot", "old-cursor") == ([], None)

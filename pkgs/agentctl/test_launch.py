@@ -558,9 +558,9 @@ def test_a_read_by_reference_answers_about_that_job_after_a_reorder(
     cancelled = launch.cancel(config, asked, reference=reference)
 
     assert cancelled["reference"] == reference
-    assert fake_pueue.removed == [
-        second["job_id"]
-    ], "the cancel dropped the task at the id it was handed, not its own job"
+    assert fake_pueue.removed == [second["job_id"]], (
+        "the cancel dropped the task at the id it was handed, not its own job"
+    )
     assert (config.jobs_dir / f"{second['reference']}.log").exists()
 
 

@@ -6,10 +6,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .owner_execution import ExecutionProfile, OwnerExecution, OwnerRoute
-
 from .capabilities import Capability, Principal
 from .config import GatewayConfig
+from .owner_execution import ExecutionProfile, OwnerExecution, OwnerRoute
 
 
 @dataclass(frozen=True)

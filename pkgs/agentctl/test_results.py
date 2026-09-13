@@ -190,7 +190,10 @@ def test_versioned_result_rejects_duplicate_bead_rows() -> None:
             }
         ],
     )
-    assert any("duplicate bead id fx-1" in error for error in results.validate_worker_result(result))
+    assert any(
+        "duplicate bead id fx-1" in error
+        for error in results.validate_worker_result(result)
+    )
 
 
 @pytest.mark.parametrize(
@@ -293,12 +296,17 @@ def test_write_schema_round_trips_the_embedded_document(tmp_path: Path) -> None:
 
 
 def test_codex_schema_requires_nullable_transport_placeholders(tmp_path: Path) -> None:
-    written = results.write_schema(tmp_path / "x" / "worker.schema.json", "worker", codex_strict=True)
+    written = results.write_schema(
+        tmp_path / "x" / "worker.schema.json", "worker", codex_strict=True
+    )
     schema = json.loads(written.read_text())
     assert set(schema["required"]) == set(schema["properties"])
     segment = schema["properties"]["model_segments"]["items"]
     assert set(segment["required"]) == set(segment["properties"])
-    assert set(segment["properties"]["actual_executor_model"]["type"]) == {"string", "null"}
+    assert set(segment["properties"]["actual_executor_model"]["type"]) == {
+        "string",
+        "null",
+    }
 
 
 def test_load_result_drops_codex_only_null_placeholders(tmp_path: Path) -> None:

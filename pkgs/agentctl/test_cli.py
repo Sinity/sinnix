@@ -343,7 +343,9 @@ def test_backpressure_tick_reports_the_decision(
     monkeypatch.setattr(
         launch,
         "retire_legacy_holds",
-        lambda *_args: pytest.fail("recurring backpressure must not retire legacy holds"),
+        lambda *_args: pytest.fail(
+            "recurring backpressure must not retire legacy holds"
+        ),
     )
 
     assert cli.main(["backpressure", "tick"]) == 0

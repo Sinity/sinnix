@@ -7,8 +7,6 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Mapping
 
 import anyio
-from .owner_errors import ErrorCode
-from .owner_execution import OwnerDiagnosticError
 
 from .action import Action, ActionResult
 from .actions import BY_NAME as ACTIONS_BY_NAME
@@ -31,6 +29,8 @@ from .locators import decode_file_ref
 from .machine_actions import MachineActionService
 from .mcp_broker import McpBrokerService
 from .observe import ObserveService
+from .owner_errors import ErrorCode
+from .owner_execution import OwnerDiagnosticError
 from .projects import ProjectService
 from .redaction import public_error
 from .registry import REGISTRY, RegistryError

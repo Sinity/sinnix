@@ -13,12 +13,6 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import Field
 from sinnix_lib.atomic import atomic_publish
-from ..owner_execution import (
-    ExecutionProfile,
-    ExecutionResult,
-    OwnerExecution,
-    OwnerRoute,
-)
 
 from .. import files as host_files
 from ..action import (
@@ -35,6 +29,12 @@ from ..content import Artifact, attach, is_text, sha256_of, sniff_media_type
 from ..contracts import VerbFamily
 from ..files import FileError
 from ..locators import FileLocator, encode_file_ref
+from ..owner_execution import (
+    ExecutionProfile,
+    ExecutionResult,
+    OwnerExecution,
+    OwnerRoute,
+)
 from ..results import ProtocolError
 from ..schemas import GatewayModel
 

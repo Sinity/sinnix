@@ -9,7 +9,8 @@
 }:
 let
   inherit (pkgs) lib;
-  mkAppCommand = name: spec:
+  mkAppCommand =
+    name: spec:
     pkgs.writeShellScriptBin name ''
       set -euo pipefail
       ${spec.script}

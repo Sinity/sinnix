@@ -4,7 +4,6 @@ import runpy
 import stat
 from pathlib import Path
 
-
 MODULE = runpy.run_path(
     str(Path(__file__).parents[3] / "scripts" / "sinnix-quest-player")
 )

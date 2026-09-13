@@ -171,7 +171,9 @@ def test_prepare_and_execute_share_the_http_target_contract(
     assert calls == ["restart"]
 
 
-def test_action_rejects_invalid_content_length_before_dispatch(hub_server_factory) -> None:
+def test_action_rejects_invalid_content_length_before_dispatch(
+    hub_server_factory,
+) -> None:
     class Actions:
         def __init__(self) -> None:
             self.calls = 0

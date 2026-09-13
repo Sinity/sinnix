@@ -5,7 +5,6 @@ from __future__ import annotations
 import io
 
 import pytest
-
 from sinnix_lib.http import RequestBodyError, read_body, read_json_object
 
 
@@ -30,7 +29,10 @@ class ShortReader:
         ({"Content-Length": "1.0"}, "invalid_content_length"),
         ({"Content-Length": "1,2"}, "conflicting_content_length"),
         ({"Content-Length": ["1", "2"]}, "conflicting_content_length"),
-        ({"Content-Length": "1", "Transfer-Encoding": "chunked"}, "conflicting_framing"),
+        (
+            {"Content-Length": "1", "Transfer-Encoding": "chunked"},
+            "conflicting_framing",
+        ),
         ({"Transfer-Encoding": "chunked"}, "unsupported_transfer_encoding"),
     ],
 )
@@ -41,8 +43,13 @@ def test_rejects_invalid_or_ambiguous_framing(headers, reason):
 
 
 def test_same_duplicate_content_length_is_allowed():
-    assert read_body({"Content-Length": "2, 2"}, io.BytesIO(b"ok"), max_bytes=2) == b"ok"
-    assert read_body({"Content-Length": ["2", "2"]}, io.BytesIO(b"ok"), max_bytes=2) == b"ok"
+    assert (
+        read_body({"Content-Length": "2, 2"}, io.BytesIO(b"ok"), max_bytes=2) == b"ok"
+    )
+    assert (
+        read_body({"Content-Length": ["2", "2"]}, io.BytesIO(b"ok"), max_bytes=2)
+        == b"ok"
+    )
 
 
 def test_negative_integer_header_container_is_rejected():
@@ -100,7 +107,7 @@ def test_reader_returning_non_bytes_is_rejected():
         (b"[]", "json_not_object"),
         (b"null", "json_not_object"),
         (b"{bad}", "invalid_json"),
-        (b"{\"x\": NaN}", "invalid_json"),
+        (b'{"x": NaN}', "invalid_json"),
         (b"\xff", "invalid_json"),
     ],
 )

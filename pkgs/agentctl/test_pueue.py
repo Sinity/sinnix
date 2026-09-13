@@ -540,9 +540,9 @@ def test_a_landing_queued_behind_a_worker_is_cancelled_by_its_own_reference(
     cancelled = launch.cancel(config, landing["job_id"], reference=landing["reference"])
 
     assert cancelled["reference"] == landing["reference"]
-    assert (
-        cancelled["job_id"] == worker["job_id"]
-    ), "the landing did not follow the switch to the worker's old id"
+    assert cancelled["job_id"] == worker["job_id"], (
+        "the landing did not follow the switch to the worker's old id"
+    )
     assert pueue.task(cancelled["job_id"]) is None
     assert landing_input.read_bytes() == landing_before
     retained = launch.get_job(

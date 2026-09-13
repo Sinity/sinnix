@@ -261,11 +261,19 @@ def run_bounded(
                             stderr_chunks.append(retained)
                             stderr_size += len(retained)
 
-                    exceeded_stream = stream_limit is not None and stream_size + len(chunk) > stream_limit
-                    exceeded_combined = combined_limit is not None and combined_size + len(chunk) > combined_limit
+                    exceeded_stream = (
+                        stream_limit is not None
+                        and stream_size + len(chunk) > stream_limit
+                    )
+                    exceeded_combined = (
+                        combined_limit is not None
+                        and combined_size + len(chunk) > combined_limit
+                    )
                     if exceeded_stream or exceeded_combined:
                         if exceeded_stream:
-                            description = f"{kind} exceeded limit of {stream_limit} bytes"
+                            description = (
+                                f"{kind} exceeded limit of {stream_limit} bytes"
+                            )
                         else:
                             description = f"combined output exceeded limit of {combined_limit} bytes"
                         kill(description, is_limit=True)

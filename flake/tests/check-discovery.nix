@@ -27,18 +27,12 @@
         };
         sinnixScriptRegistry.packageSet = { };
       };
-      commands =
-        map
-          (
-            name:
-            "${registry.mkAppCommand name registry.appCommands.${name}}/bin/${name}"
-          )
-          [
-            "check"
-            "check-master"
-            "check-heavy"
-            "check-all"
-          ];
+      commands = map (name: "${registry.mkAppCommand name registry.appCommands.${name}}/bin/${name}") [
+        "check"
+        "check-master"
+        "check-heavy"
+        "check-all"
+      ];
       activationRegistry = import ../command-registry.nix {
         inherit inputs system;
         pkgs = pkgs // {
