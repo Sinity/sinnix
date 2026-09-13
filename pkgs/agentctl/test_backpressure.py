@@ -134,6 +134,26 @@ def test_checkpoint_round_trips_nonempty_legacy_holds(tmp_path) -> None:
     assert restored.legacy_holds == {7: held}
 
 
+def test_malformed_checkpoint_recovers_to_empty_state(tmp_path) -> None:
+    checkpoint = tmp_path / "checkpoint.json"
+    checkpoint.write_text("{not-json", encoding="utf-8")
+
+    state = backpressure.event_state(None, checkpoint=checkpoint)
+
+    assert state.pauses == {}
+    assert state.legacy_holds == {}
+    assert state.cursor is None
+
+
+def test_backpressure_append_keeps_compact_jsonl_record(tmp_path) -> None:
+    spool = tmp_path / "events.jsonl"
+
+    record = backpressure._append(spool, {"action": "closed", "group": "agent"})
+
+    assert json.loads(spool.read_text(encoding="utf-8")) == record
+    assert spool.read_text(encoding="utf-8").endswith("\n")
+
+
 def test_memory_closure_stays_until_memory_below_hysteresis(monkeypatch) -> None:
     result, calls = _tick(
         monkeypatch,

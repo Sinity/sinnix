@@ -14,6 +14,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 
+from sinnix_lib.atomic_json import read_json, write_json_atomic
+from sinnix_lib.ledger import append_jsonl
+
 from . import pueue
 from .pueue import PueueError
 
@@ -76,9 +79,8 @@ def _checkpoint_path(spool: Path | None, checkpoint: Path | None) -> Path | None
 def _load_checkpoint(path: Path | None) -> SpoolState:
     if path is None:
         return SpoolState()
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    raw = read_json(path)
+    if raw is None:
         return SpoolState()
     if not isinstance(raw, dict) or raw.get("schema_version") != CHECKPOINT_SCHEMA:
         return SpoolState()
@@ -117,10 +119,7 @@ def _save_checkpoint(path: Path | None, state: SpoolState) -> None:
         },
     }
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-        temporary.write_text(json.dumps(payload, sort_keys=True, separators=(",", ":")))
-        os.replace(temporary, path)
+        write_json_atomic(path, payload, fsync=False)
     except OSError:
         return
 
@@ -256,11 +255,7 @@ def _append(spool: Path | None, event: Mapping[str, object]) -> dict[str, Any]:
     }
     if spool is not None:
         try:
-            spool.parent.mkdir(parents=True, exist_ok=True)
-            with open(spool, "a", encoding="utf-8") as handle:
-                handle.write(
-                    json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n"
-                )
+            append_jsonl(spool, record, fsync=False)
         except OSError:
             pass
     return record
