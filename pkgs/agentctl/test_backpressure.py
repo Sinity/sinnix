@@ -422,3 +422,60 @@ def test_operator_focused_test_pause_is_preserved_under_io_pressure(
     )
     assert calls == []
     assert result["action"] == "hold"
+
+
+def test_tick_retires_tracked_holds_whose_task_pueue_no_longer_knows(
+    monkeypatch, tmp_path
+) -> None:
+    """A held task removed by `pueue clean` emits no release event of its own."""
+    spool = tmp_path / "events.jsonl"
+    checkpoint = tmp_path / "checkpoint.json"
+    spool.write_text(
+        json.dumps(
+            {
+                "kind": "pool-hold",
+                "action": "held",
+                "task_id": 847,
+                "held_at": "2026-09-11T15:37:39+00:00",
+            }
+        )
+        + "\n"
+    )
+    monkeypatch.setattr(
+        backpressure, "read_pressure", lambda _root: {"io_full_avg60": 1.0}
+    )
+    monkeypatch.setattr(
+        backpressure.pueue, "groups_status", lambda: {"agent": "Running"}
+    )
+    monkeypatch.setattr(backpressure.pueue, "tasks", lambda: {})
+
+    backpressure.tick(spool=spool, checkpoint=checkpoint, pressure_root=Path("unused"))
+
+    assert backpressure.event_state(None, checkpoint=checkpoint).legacy_holds == {}
+    retired = [
+        json.loads(line)
+        for line in spool.read_text().splitlines()
+        if json.loads(line).get("action") == "retired"
+    ]
+    assert [event["task_id"] for event in retired] == [847]
+    assert retired[0]["reason"] == "task-absent-from-pueue"
+
+
+def test_tick_keeps_a_hold_whose_task_is_still_queued(monkeypatch, tmp_path) -> None:
+    spool = tmp_path / "events.jsonl"
+    checkpoint = tmp_path / "checkpoint.json"
+    held = {"kind": "pool-hold", "action": "held", "task_id": 847}
+    spool.write_text(json.dumps(held) + "\n")
+    monkeypatch.setattr(
+        backpressure, "read_pressure", lambda _root: {"io_full_avg60": 1.0}
+    )
+    monkeypatch.setattr(
+        backpressure.pueue, "groups_status", lambda: {"agent": "Running"}
+    )
+    monkeypatch.setattr(backpressure.pueue, "tasks", lambda: {847: object()})
+
+    backpressure.tick(spool=spool, checkpoint=checkpoint, pressure_root=Path("unused"))
+
+    assert set(backpressure.event_state(None, checkpoint=checkpoint).legacy_holds) == {
+        847
+    }

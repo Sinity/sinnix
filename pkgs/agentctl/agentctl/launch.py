@@ -289,9 +289,11 @@ def admission_lock(config: Config) -> Iterator[None]:
             try:
                 fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 break
-            except BlockingIOError:
+            except BlockingIOError as error:
                 if time.monotonic() >= deadline:
-                    raise JobError(f"another launch has held {path} for over 60s")
+                    raise JobError(
+                        f"another launch has held {path} for over 60s"
+                    ) from error
                 time.sleep(ADMISSION_LOCK_POLL_SECONDS)
         try:
             yield
@@ -342,7 +344,7 @@ def release_holds(config: Config) -> dict[str, list[dict[str, Any]]]:
             }
             released: list[dict[str, Any]] = []
             waiting: list[dict[str, Any]] = []
-            for task_id, hold in sorted(held.items()):
+            for task_id in sorted(held):
                 task = tasks[task_id]
                 blockers = pools.blocking_tasks(
                     config.pools,

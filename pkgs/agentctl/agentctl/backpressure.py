@@ -265,6 +265,33 @@ def paused_by_us(spool: Path | None, *, checkpoint: Path | None = None) -> set[s
     return event_state(spool, checkpoint=checkpoint).ours()
 
 
+def _vanished_hold_retirements(state: SpoolState) -> list[dict[str, Any]]:
+    """Retire tracked holds whose task pueue no longer knows about.
+
+    A hold leaves the tracked set on its own ``released``/``retired`` event,
+    but a held task removed by ``pueue clean`` emits neither, so its entry
+    would otherwise be carried forever. pueue owns queue membership, so an
+    absent task is authoritative: reconcile against it rather than let this
+    checkpoint grow into a second ledger.
+    """
+    if not state.legacy_holds:
+        return []
+    try:
+        live = pueue.tasks()
+    except PueueError:
+        return []
+    return [
+        {
+            "kind": "pool-hold",
+            "action": "retired",
+            "task_id": task_id,
+            "reason": "task-absent-from-pueue",
+        }
+        for task_id in sorted(state.legacy_holds)
+        if task_id not in live
+    ]
+
+
 def tick(
     *,
     spool: Path | None,
@@ -282,6 +309,8 @@ def tick(
     for name in sorted(state.ours()):
         if groups.get(name) == "Running":
             state.apply(_append(spool, {"action": "released", "group": name}))
+    for event in _vanished_hold_retirements(state):
+        state.apply(_append(spool, event))
     _save_checkpoint(checkpoint_path, state)
     signals = over_threshold(pressure)
     signal = "+".join(signals) or None
