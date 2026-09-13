@@ -14,7 +14,7 @@
 mkServiceModule {
   name = "ocr";
   description = "OCR / document understanding (containerized, CDI GPU)";
-  surface = {
+  surface = { cfg, ... }: {
     ai = {
       backendKind = "container";
       requiresCuda = true;
@@ -23,8 +23,8 @@ mkServiceModule {
     resourceClass = "ordinary";
     activation = {
       mode = "socket-proxy";
-      publicEndpoint = "127.0.0.1:${toString helpers.data.ports.ocr.public}";
-      backendEndpoint = "127.0.0.1:${toString helpers.data.ports.ocr.backend}";
+      publicEndpoint = "127.0.0.1:${toString cfg.port}";
+      backendEndpoint = "127.0.0.1:${toString cfg.backendPort}";
       # Unmeasured (disabled on this host). marker-api's Surya weights are
       # small (~1-2GB) next to ComfyUI's checkpoint tree, so sized to the tts
       # container tier.
