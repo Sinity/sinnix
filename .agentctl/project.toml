@@ -19,7 +19,6 @@ publish = "master"
 
 [packets]
 template = "dots/_ai/skills/orchestrate/references/worker-contract.md"
-atlas_dir = "docs/atlas"
 branch_prefix = "feature/packet"
 
 [packets.defaults]
