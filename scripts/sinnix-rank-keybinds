@@ -46,6 +46,7 @@ import sys
 from pathlib import Path
 
 from rank_core import Item, Store, fit
+from sinnix_lib.atomic import atomic_publish
 from sinnix_lib.ledger import utc_ts
 
 MANIFEST_SCHEMA = "sinnix.keybind.manifest/1"
@@ -459,7 +460,12 @@ def cmd_usage(args: argparse.Namespace) -> int:
     }
     path = usage_path(args.domain)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    atomic_publish(
+        path,
+        (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode(),
+        fsync=True,
+        mode=0o600,
+    )
     states: dict[str, int] = {}
     for record in records.values():
         states[record["state"]] = states.get(record["state"], 0) + 1
@@ -492,7 +498,7 @@ def cmd_manifest(args: argparse.Namespace) -> int:
     if args.output:
         out = Path(args.output)
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(text)
+        atomic_publish(out, text.encode(), fsync=True, mode=0o644)
         print(f"manifest -> {out}", file=sys.stderr)
     return 0
 
