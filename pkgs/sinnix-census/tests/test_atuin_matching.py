@@ -99,3 +99,21 @@ def test_name_as_final_token_is_not_lost(tmp_path, monkeypatch):
 
     assert result is not None
     assert result["sinnix-cat"]["n"] == 1
+
+
+def test_polylogue_evidence_is_cached_by_query_and_window(monkeypatch):
+    census._POLYLOGUE_EVIDENCE.clear()
+    calls = []
+
+    class Result:
+        text = '{"items": [{"id": "one"}]}'
+
+    def fake_run(command, **_kwargs):
+        calls.append(command)
+        return Result()
+
+    monkeypatch.setattr(census, "run", fake_run)
+    assert census.polylogue_evidence("shared", 90) == {"n": 1, "last": None}
+    assert census.polylogue_evidence("shared", 90) == {"n": 1, "last": None}
+    assert census.polylogue_evidence("shared", 30) == {"n": 1, "last": None}
+    assert len(calls) == 2

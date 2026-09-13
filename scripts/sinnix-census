@@ -86,17 +86,25 @@ def atuin_evidence(names: list[str], since_ns: int) -> dict | None:
     return out
 
 
+_POLYLOGUE_EVIDENCE: dict[tuple[str, int], dict | None] = {}
+
+
 def polylogue_evidence(name: str, window_days: int) -> dict | None:
+    key = (name, window_days)
+    if key in _POLYLOGUE_EVIDENCE:
+        return _POLYLOGUE_EVIDENCE[key]
     # Stable-interface rule: CLI only, never polylogue's sqlite (schema churns).
     # `search` was renamed to the query-first `find QUERY` dispatch; root
     # flags (--json/--limit) precede the subcommand, and results come back
     # as {"items": [...]} rather than a bare list or {"results": [...]}.
     out = run(["polylogue", "--json", "--limit", "5", "find", name], timeout=60).text
     if out is None:
+        _POLYLOGUE_EVIDENCE[key] = None
         return None
     try:
         data = json.loads(out)
     except json.JSONDecodeError:
+        _POLYLOGUE_EVIDENCE[key] = None
         return None
     if isinstance(data, dict):
         items = data.get("items", [])
@@ -104,7 +112,9 @@ def polylogue_evidence(name: str, window_days: int) -> dict | None:
         items = data
     else:
         items = []
-    return {"n": len(items), "last": None}
+    evidence = {"n": len(items), "last": None}
+    _POLYLOGUE_EVIDENCE[key] = evidence
+    return evidence
 
 
 def journal_count(unit: str, days: int, manager_user: bool, pattern: str | None = None) -> int | None:
