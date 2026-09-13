@@ -200,7 +200,6 @@ mkServiceModule {
           ollama-model-loader.wantedBy = lib.mkForce [ ];
         })
         {
-          ollama.partOf = [ "ollama-proxy.service" ];
           # Conflicts= against every other GPU-inference backend is computed
           # centrally in ai-control.nix's gpuInferenceConflicts.
           # Full override (mkForce): the upstream `script` is a plain
