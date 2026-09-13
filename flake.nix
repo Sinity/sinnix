@@ -199,6 +199,7 @@
 
         # Local modules
         ./flake/script-registry.nix
+        ./flake/command-registry-module.nix
         ./flake/dev-shell.nix
         ./flake/apps.nix
         ./flake/packages.nix
