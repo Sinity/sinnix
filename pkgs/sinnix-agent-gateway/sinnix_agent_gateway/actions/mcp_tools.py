@@ -417,7 +417,7 @@ ACTIONS: tuple[Action, ...] = (
             "upstream servers",
             "broker status",
         ),
-        documentation="Each probe runs initialize + tools/list with a 5 s bound; a timeout stores the upstream stderr as an artifact and returns its ref.",
+        documentation="Each probe runs initialize + tools/list within the configured call timeout, capped at 30 seconds; the observer process uses the same bound. A timeout stores the upstream stderr as an artifact and returns its ref.",
         examples=(
             Example(title="Probe one server", input={"servers": ["polylogue"]}),
             Example(title="Probe all", input={}),
