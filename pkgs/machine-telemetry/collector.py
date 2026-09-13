@@ -20,6 +20,7 @@ from sinnix_lib.procfs import (
     parse_psi as parse_psi_text,
     parse_stat_start_time,
 )
+from sinnix_lib.process import run, run_bounded
 from sinnix_lib.systemd import show_units, show_units_as_user
 
 SCHEMA_VERSION = 5
@@ -133,17 +134,6 @@ def bool_or_none(value: object) -> bool | None:
     return None
 
 
-def run_cmd(
-    args: list[str], timeout: float = 3.0
-) -> subprocess.CompletedProcess[str] | None:
-    try:
-        return subprocess.run(
-            args, check=False, capture_output=True, text=True, timeout=timeout
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-
-
 def sysfs_temp_c(path: str | Path | None) -> float | None:
     if not path:
         return None
@@ -225,8 +215,8 @@ def parse_psi(path: str) -> dict[str, float]:
 
 
 def dstate_tasks() -> tuple[int, str | None]:
-    proc = run_cmd(["ps", "-eo", "stat,pid,wchan:32,comm,args"], timeout=3)
-    if proc is None:
+    proc = run(["ps", "-eo", "stat,pid,wchan:32,comm,args"], timeout=3)
+    if proc.error is not None:
         return 0, "ps_failed"
     count = 0
     waits = []
@@ -1621,8 +1611,8 @@ def init_db(conn: sqlite3.Connection) -> None:
 
 
 def parse_ping(ip: str) -> dict[str, object]:
-    proc = run_cmd(["ping", "-c", "3", "-i", "0.2", "-W", "1", "-q", ip], timeout=5)
-    if proc is None:
+    proc = run(["ping", "-c", "3", "-i", "0.2", "-W", "1", "-q", ip], timeout=5)
+    if proc.error is not None:
         return {
             "ip": ip,
             "loss": 100,
@@ -1645,8 +1635,8 @@ def parse_ping(ip: str) -> dict[str, object]:
 
 
 def ethtool_value(dev: str, pattern: str) -> str | None:
-    proc = run_cmd(["ethtool", dev], timeout=3)
-    if proc is None or proc.returncode != 0:
+    proc = run(["ethtool", dev], timeout=3)
+    if proc.error is not None or proc.returncode != 0:
         return None
     match = re.search(pattern, proc.stdout)
     return match.group(1) if match else None
@@ -1729,20 +1719,20 @@ def network_probe(
         "established": 0,
         "timewait": 0,
     }
-    established = run_cmd(["ss", "-tn", "state", "established"], timeout=3)
-    timewait = run_cmd(["ss", "-tn", "state", "time-wait"], timeout=3)
-    if established is not None:
+    established = run(["ss", "-tn", "state", "established"], timeout=3)
+    timewait = run(["ss", "-tn", "state", "time-wait"], timeout=3)
+    if established.error is None:
         tcp["established"] = max(len(established.stdout.splitlines()) - 1, 0)
-    if timewait is not None:
+    if timewait.error is None:
         tcp["timewait"] = max(len(timewait.stdout.splitlines()) - 1, 0)
 
     dns_start = time.monotonic()
-    dns = run_cmd(["nslookup", "example.com"], timeout=3)
+    dns = run(["nslookup", "example.com"], timeout=3)
     dns_ms = int((time.monotonic() - dns_start) * 1000)
-    if dns is None or dns.returncode != 0:
+    if dns.error is not None or dns.returncode != 0:
         gaps.append("network.dns_probe_failed")
 
-    pmtu = run_cmd(
+    pmtu = run(
         ["ping", "-c", "1", "-W", "2", "-M", "do", "-s", "1464", "8.8.8.8"], timeout=4
     )
     conntrack = {
@@ -1762,7 +1752,7 @@ def network_probe(
         "nic_json": json.dumps(nic, sort_keys=True),
         "tcp_json": json.dumps(tcp, sort_keys=True),
         "dns_ms": dns_ms,
-        "pmtu_1492": int(pmtu is not None and pmtu.returncode == 0),
+        "pmtu_1492": int(pmtu.error is None and pmtu.returncode == 0),
         "conntrack_json": json.dumps(conntrack, sort_keys=True),
         "gap_codes_json": json.dumps(sorted(set(gaps))),
     }
@@ -2054,6 +2044,8 @@ KILL_EVENT_PATTERNS = (
 # subsequent run resumes from the persisted cursor regardless of this constant.
 KILL_EVENT_BACKFILL_SINCE = "2026-06-17"
 KILL_EVENT_SOURCE = "machine.kill_event"
+KILL_EVENT_STDOUT_LIMIT = 8 * 1024 * 1024
+KILL_EVENT_STDERR_LIMIT = 64 * 1024
 
 
 def classify_kill_line(message: str) -> tuple[str, dict[str, object]] | None:
@@ -2092,15 +2084,20 @@ def scan_kill_events(
         cmd += ["--after-cursor", after_cursor]
     else:
         cmd += ["--since", KILL_EVENT_BACKFILL_SINCE]
-    try:
-        proc = subprocess.run(
-            cmd, check=False, capture_output=True, text=True, timeout=120
-        )
-    except (OSError, subprocess.TimeoutExpired):
+    proc = run_bounded(
+        cmd,
+        timeout=120,
+        stdout_limit=KILL_EVENT_STDOUT_LIMIT,
+        stderr_limit=KILL_EVENT_STDERR_LIMIT,
+    )
+    # A limited or timed-out result may end in a partial JSON line. Keeping
+    # the old cursor makes the whole query safe to retry without losing the
+    # unseen tail or advancing beyond an incomplete record.
+    if proc.error is not None:
         return [], None
     rows: list[dict[str, object]] = []
     new_cursor = after_cursor
-    for line in proc.stdout.splitlines():
+    for line in proc.stdout.decode("utf-8", "replace").splitlines():
         try:
             entry = json.loads(line)
         except json.JSONDecodeError:
