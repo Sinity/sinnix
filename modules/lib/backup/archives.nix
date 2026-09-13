@@ -299,8 +299,7 @@
         printf 'source_count=%s\n' "$source_count"
         printf 'sample_path=%s\n' "$sample_path"
         printf 'epoch=%s\n' "$(date +%s)"
-      } > ${lib.escapeShellArg machineTelemetryBackupMarker}.tmp
-      mv ${lib.escapeShellArg machineTelemetryBackupMarker}.tmp ${lib.escapeShellArg machineTelemetryBackupMarker}
+      } | publish_backup_marker ${lib.escapeShellArg machineTelemetryBackupMarker}
     '';
   })
 
