@@ -20,6 +20,7 @@ from sinnix_lib.procfs import (
     parse_psi as parse_psi_text,
     parse_stat_start_time,
 )
+from sinnix_lib.systemd import show_units, show_units_as_user
 
 SCHEMA_VERSION = 5
 # Interval between explicit `wal_checkpoint(TRUNCATE)` runs on the main
@@ -1865,69 +1866,47 @@ def vmstat_metrics() -> dict[str, int | None]:
     return {f"vmstat_{key}": values.get(key) for key in VMSTAT_FIELDS}
 
 
-def systemctl_props(
-    unit: str, *, user: bool = False, user_name: str | None = None
-) -> dict[str, str]:
-    cmd = ["systemctl"]
-    if user:
-        if user_name:
-            # PAM-free user-manager access: `--user --machine=<user>@` rides
-            # systemd-stdio-bridge through a full PAM login (session scope +
-            # transient unit + lastlog2 write) on every sample tick. setpriv
-            # switches uid without PAM; dbus-broker admits the matching uid
-            # to the user bus directly.
-            pw = pwd.getpwnam(user_name)
-            cmd = [
-                "setpriv",
-                f"--reuid={pw.pw_uid}",
-                f"--regid={pw.pw_gid}",
-                "--init-groups",
-                "env",
-                f"DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{pw.pw_uid}/bus",
-                f"XDG_RUNTIME_DIR=/run/user/{pw.pw_uid}",
-                f"HOME={pw.pw_dir}",
-                "systemctl",
-                "--user",
-            ]
-        else:
-            cmd.append("--user")
-    cmd += [
-        "show",
-        unit,
-        "--no-pager",
-        "-p",
-        "ActiveState",
-        "-p",
-        "SubState",
-        "-p",
-        "MainPID",
-        "-p",
-        "ControlGroup",
-        "-p",
-        "MemoryCurrent",
-        "-p",
-        "MemorySwapCurrent",
-        "-p",
-        "NRestarts",
-        "-p",
-        "CPUUsageNSec",
-        "-p",
-        "IOReadBytes",
-        "-p",
-        "IOWriteBytes",
-    ]
+SERVICE_PROPERTIES = (
+    "ActiveState",
+    "SubState",
+    "MainPID",
+    "ControlGroup",
+    "MemoryCurrent",
+    "MemorySwapCurrent",
+    "NRestarts",
+    "CPUUsageNSec",
+    "IOReadBytes",
+    "IOWriteBytes",
+)
+
+
+def service_unit_props(
+    units: list[str], *, user_units: set[str], user_name: str
+) -> dict[str, tuple[str, dict[str, str]]]:
+    """Fetch all service state with one probe per systemd manager."""
+    system = [unit for unit in units if unit not in user_units]
+    user = [unit for unit in units if unit in user_units]
+    result: dict[str, tuple[str, dict[str, str]]] = {}
     try:
-        proc = subprocess.run(
-            cmd, check=False, capture_output=True, text=True, timeout=3
-        )
+        system_props = show_units(system, properties=SERVICE_PROPERTIES, timeout=3)
     except (OSError, subprocess.TimeoutExpired):
-        return {}
-    props = {}
-    for line in proc.stdout.splitlines():
-        if "=" in line:
-            key, value = line.split("=", 1)
-            props[key] = value
-    return props
+        system_props = {}
+    for unit, props in system_props.items():
+        result[unit] = ("system", props)
+    if user:
+        uid = pwd.getpwnam(user_name).pw_uid
+        try:
+            user_props = show_units_as_user(
+                user,
+                uid,
+                properties=SERVICE_PROPERTIES,
+                timeout=3,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            user_props = {}
+        for unit, props in user_props.items():
+            result[unit] = ("user", props)
+    return result
 
 
 def insert_service_states(
@@ -1942,12 +1921,13 @@ def insert_service_states(
     io_rows: list[dict[str, object]] = []
     pressure_rows: list[dict[str, object]] = []
     cgroup_memory_rows: list[dict[str, object]] = []
+    user_units = {"polylogued.service", "noctalia.service"}
+    service_props = service_unit_props(units, user_units=user_units, user_name=user_name)
     for unit in units:
-        user = unit in {"polylogued.service", "noctalia.service"}
-        props = systemctl_props(unit, user=user, user_name=user_name)
-        if not props:
+        item = service_props.get(unit)
+        if item is None:
             continue
-        scope = "user" if user else "system"
+        scope, props = item
         control_group = props.get("ControlGroup")
         memory_stat = cgroup_memory_stat(control_group)
         rows.append(
