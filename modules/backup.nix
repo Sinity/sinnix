@@ -318,20 +318,6 @@ let
       trap - RETURN
     }
 
-    publish_backup_marker() {
-      marker="$1"
-      marker_dir="$(dirname "$marker")"
-      marker_base="$(basename "$marker")"
-      temporary="$(mktemp "$marker_dir/.''${marker_base}.tmp.XXXXXX")"
-      trap 'rm -f "$temporary"' RETURN
-      cat > "$temporary"
-      chmod 0644 "$temporary"
-      sync -f "$temporary"
-      mv -f "$temporary" "$marker"
-      sync -f "$marker_dir"
-      trap - RETURN
-    }
-
     ${borgStaleLockRecovery}
   '';
 
