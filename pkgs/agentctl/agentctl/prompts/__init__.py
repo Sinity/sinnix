@@ -863,31 +863,56 @@ def resume_prompt(
     contract it carries apply unchanged.
     """
     template, contract_path = _template(config)
-    snapshot = json.dumps(
-        {
-            "bead": public_bead(bead),
-            "branch": branch,
-            "base": base,
-            "worktree": str(worktree),
-        },
-        indent=2,
-        sort_keys=True,
-    )
+    def render(resume_bead: Mapping[str, Any], original: str) -> str:
+        snapshot = json.dumps(
+            {
+                "bead": resume_bead,
+                "branch": branch,
+                "base": base,
+                "worktree": str(worktree),
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        return (
+            "# Resume packet\n\n"
+            f"The worker below lives in `{worktree}` on `{branch}`, branched from "
+            f"`{base}`. Continue its work: any uncommitted change in the worktree is "
+            "yours, an unfinished merge or rebase is resolved against the bead's "
+            "intent, and the result is committed on this branch. Do not push, "
+            "publish, or rebase onto anything newer than the base. A conflict you "
+            "cannot resolve honestly is reported, never forced to green.\n\n"
+            f"{UNTRUSTED_JSON_PREAMBLE}\n\n"
+            f"```json\n{snapshot}\n```\n\n"
+            f"## Operating rules (`{contract_path}`)\n\n"
+            f"{template}\n"
+            f"{original}"
+        )
+
     original = f"\n\n## Original dispatch packet\n\n{packet}" if packet else ""
-    return _bounded(
-        "# Resume packet\n\n"
-        f"The worker below lives in `{worktree}` on `{branch}`, branched from "
-        f"`{base}`. Continue its work: any uncommitted change in the worktree is "
-        "yours, an unfinished merge or rebase is resolved against the bead's "
-        "intent, and the result is committed on this branch. Do not push, "
-        "publish, or rebase onto anything newer than the base. A conflict you "
-        "cannot resolve honestly is reported, never forced to green.\n\n"
-        f"{UNTRUSTED_JSON_PREAMBLE}\n\n"
-        f"```json\n{snapshot}\n```\n\n"
-        f"## Operating rules (`{contract_path}`)\n\n"
-        f"{template}\n"
-        f"{original}"
+    full = render(public_bead(bead), original)
+    if _fits(full):
+        return full
+
+    # A resume must remain possible when historical Bead notes or the original
+    # packet have grown beyond the current prompt budget.  The complete packet
+    # is already retained beside the worker; bind the fresh worker to the
+    # current Bead body by digest and point it at that durable local evidence.
+    digested = {
+        **digest_bead(bead),
+        "evidence_binding": evidence_binding(bead),
+        "bead_bodies": "digest",
+    }
+    compact_original = (
+        "\n\n## Original dispatch packet\n\n"
+        "The complete original packet remains at `.agentctl/prompt.md` in this "
+        "worktree. Read it there if needed; its omitted copy is not a change of "
+        "scope. "
+        f"sha256={hashlib.sha256((packet or '').encode()).hexdigest()}"
+        if packet
+        else ""
     )
+    return _bounded(render(digested, compact_original))
 
 
 def landing_template(name: str) -> str:
