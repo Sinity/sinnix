@@ -8,6 +8,8 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from sinnix_lib.atomic import atomic_publish
+
 from .capabilities import Capability, Principal
 from .config import GatewayConfig
 
@@ -247,10 +249,7 @@ class HostFileService:
             with target.open("ab") as handle:
                 handle.write(encoded)
         else:
-            temporary = target.with_name(f".{target.name}.gateway-tmp")
-            temporary.write_bytes(encoded)
-            temporary.chmod(0o600)
-            temporary.replace(target)
+            atomic_publish(target, encoded, fsync=True, mode=0o600)
         return {
             "operation": operation,
             "path": str(target),
