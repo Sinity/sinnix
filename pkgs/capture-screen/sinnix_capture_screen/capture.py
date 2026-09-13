@@ -19,6 +19,7 @@ from typing import Any
 
 import numpy as np
 from PIL import Image
+from sinnix_lib.atomic import atomic_publish
 
 PHASH_IMAGE_SIZE = 32  # hash_size(8) * high_freq_factor(4), see hashing.phash64
 
@@ -128,7 +129,7 @@ def write_frame(
     frames_dir = capture_root / lane / "frames"
     frames_dir.mkdir(parents=True, exist_ok=True)
     frame_path = frames_dir / filename
-    frame_path.write_bytes(webp_bytes)
+    atomic_publish(frame_path, webp_bytes, fsync=True, mode=0o600)
     proc = subprocess.run(
         [
             sinnix_capture_bin,
