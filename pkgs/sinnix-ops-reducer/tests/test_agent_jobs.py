@@ -130,3 +130,24 @@ def test_oversized_rejected_or_malformed_responses_are_typed_failures() -> None:
 
     with pytest.raises(AgentCtlError, match="unavailable"):
         AgentCtlClient(runner=missing).list()
+
+
+def test_cancel_pins_launch_and_attempt_at_the_owner():
+    calls = []
+    client = AgentCtlClient(
+        runner=lambda command, **_: calls.append(command) or response({"job_id": 7})
+    )
+    client.cancel(7, reference="launch-fixture", expected_attempt=2)
+    assert calls == [
+        [
+            "agentctl",
+            "--json",
+            "job",
+            "cancel",
+            "7",
+            "--reference",
+            "launch-fixture",
+            "--expected-attempt",
+            "2",
+        ]
+    ]

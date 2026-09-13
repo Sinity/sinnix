@@ -123,10 +123,9 @@ mkFeatureModule {
                 tree = "eza --icons --tree --group-directories-first";
                 mosh-sinity-ephemeral = "mosh --ssh=\"ssh -p 22\" sinity@sinnix-ethereal";
                 ns = "nom-shell --run zsh";
-                nix-safe = "nix-safe";
-                nix-switch = "sudo nix-safe run --accept-flake-config \"$(find-flake-root)#switch\"";
-                nix-test-system = "sudo nix-safe run --accept-flake-config \"$(find-flake-root)#test-system\"";
-                nix-check = "nix-safe run --accept-flake-config \"$(find-flake-root)#check\"";
+                nix-switch = "nix run --accept-flake-config \"$(find-flake-root)#switch\"";
+                nix-test-system = "nix run --accept-flake-config \"$(find-flake-root)#test-system\"";
+                nix-check = "nix run --accept-flake-config \"$(find-flake-root)#check\"";
                 nix-search = "nix search nixpkgs";
                 piv = "python -m venv .venv";
                 psv = "source .venv/bin/activate";
@@ -353,7 +352,6 @@ mkFeatureModule {
                 findFlakeRoot
                 scriptPkgs.ccusage
                 scriptPkgs.lsp-root
-                scriptPkgs.nix-safe
               ];
 
             programs = lib.optionalAttrs (!cliCoreEnabled) {

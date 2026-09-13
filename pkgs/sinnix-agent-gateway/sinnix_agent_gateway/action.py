@@ -56,10 +56,10 @@ _READ_ANNOTATIONS = ToolAnnotations(
     readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False
 )
 _MUTATION_ANNOTATIONS = ToolAnnotations(
-    readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False
+    readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False
 )
 _RUN_ANNOTATIONS = ToolAnnotations(
-    readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=True
+    readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True
 )
 
 FAMILY_ANNOTATIONS: dict[VerbFamily, ToolAnnotations] = {
@@ -89,11 +89,11 @@ class MutationControls(RequestControls):
     idempotency_key: str = Field(
         min_length=1,
         max_length=256,
-        description="Replaying the same key with the same request returns the stored response.",
+        description="Gateway response replay key. Confirmed responses replay unchanged; interrupted effects require owner reconciliation and are never automatically retried.",
     )
     preconditions: dict[str, Any] | None = Field(
         default=None,
-        description="Owner-checked preconditions; a mismatch fails with precondition_failed.",
+        description="Owner-specific checks; a mismatch fails with precondition_failed. Checks are best effort unless the owner explicitly guarantees an atomic compare and mutation.",
     )
 
 
@@ -204,7 +204,11 @@ class Action:
         return (
             (self.failure_codes or KNOWN_TYPED_FAILURES)
             | ({"precondition_failed"} if self.supports_precondition else set())
-            | ({"idempotency_conflict"} if self.supports_idempotency else set())
+            | (
+                {"idempotency_conflict", "indeterminate"}
+                if self.supports_idempotency
+                else set()
+            )
         )
 
     @property

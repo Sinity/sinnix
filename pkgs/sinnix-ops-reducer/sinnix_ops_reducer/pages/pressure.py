@@ -369,7 +369,7 @@ def scheduled_card(runs: list[pressure_model.ScheduledRun], parkable: set[str]) 
             meta.insert(0, badge("running now", "info"))
         if run.unit in parkable and run.active:
             controls = (
-                f'<button class="act" onclick="parkUnit('
+                f'<button class="act" data-manager="system" onclick="parkUnit('
                 f"'{esc(run.unit)}',this)\">park it</button>"
             )
         elif run.unit in parkable:
@@ -419,7 +419,13 @@ def render_pressure(
     now_us: int | None = None,
 ) -> str:
     host = str(manifest.get("host", "sinnix"))
-    reading = pressure_model.sample() if reading is None else reading
+    observation = ((snapshot or {}).get("state") or {}).get("live_pressure") or {}
+    health = ((snapshot or {}).get("sections") or {}).get("live_pressure") or {}
+    if health.get("available") is False:
+        observation = {}
+    reading = (
+        pressure_model.from_observation(observation) if reading is None else reading
+    )
     regime = pressure_model.classify(reading)
     processes = (
         pressure_model.scan_processes(HOG_SCAN) if processes is None else processes

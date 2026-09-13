@@ -339,16 +339,20 @@ def _snapshot(runtime: Runtime, inp: SnapshotInput) -> MachineSnapshot:
     ops_section = SnapshotSection(
         available=bool(ops.get("available")),
         source="ops-reducer",
-        data={k: ops.get(k) for k in ("revision", "observed_at", "degradation")}
-        if ops.get("available")
-        else None,
+        data=(
+            {k: ops.get(k) for k in ("revision", "observed_at", "degradation")}
+            if ops.get("available")
+            else None
+        ),
         reason=ops.get("reason"),
         failure_class=ops.get("failure_class"),
     )
     return MachineSnapshot(
-        generated_at=(pressure.data or {}).get("generated_at")
-        if isinstance(pressure.data, dict)
-        else None,
+        generated_at=(
+            (pressure.data or {}).get("generated_at")
+            if isinstance(pressure.data, dict)
+            else None
+        ),
         load=_proc_file("/proc/loadavg"),
         pressure=pressure,
         memory=_proc_file("/proc/meminfo"),
@@ -686,13 +690,15 @@ def _units_logs(runtime: Runtime, inp: UnitLogsInput) -> UnitLogs:
             int(usec) if isinstance(usec, (str, int)) and str(usec).isdigit() else None
         )
         entry = LogEntry(
-            at=datetime.fromtimestamp(usec / 1e6, tz=timezone.utc).isoformat()
-            if usec
-            else None,
+            at=(
+                datetime.fromtimestamp(usec / 1e6, tz=timezone.utc).isoformat()
+                if usec
+                else None
+            ),
             realtime_usec=usec,
-            priority=int(row["PRIORITY"])
-            if str(row.get("PRIORITY", "")).isdigit()
-            else None,
+            priority=(
+                int(row["PRIORITY"]) if str(row.get("PRIORITY", "")).isdigit() else None
+            ),
             pid=int(row["_PID"]) if str(row.get("_PID", "")).isdigit() else None,
             identifier=row.get("SYSLOG_IDENTIFIER") or row.get("_COMM"),
             message=str(message if message is not None else "")[:8_000],
@@ -717,6 +723,37 @@ def _units_logs(runtime: Runtime, inp: UnitLogsInput) -> UnitLogs:
 # -------------------------------------------------------------- machine.operate
 
 
+class PrepareInput(RequestControls):
+    target: str = Field(
+        min_length=1,
+        max_length=2_048,
+        pattern=r"^sinnix://(?:jobs|machine/units|processes)/",
+    )
+    request: MachineRequest = Field(discriminator="action")
+
+
+class PreparedAction(GatewayModel):
+    ref: str
+    action: str
+    target: dict[str, Any]
+    parameters: dict[str, Any] = Field(default_factory=dict)
+    expected_target: dict[str, Any]
+    observed_at: str
+    affordances: list[str] = Field(default_factory=lambda: ["machine.operate"])
+
+
+def _prepare(runtime: Runtime, inp: PrepareInput) -> PreparedAction:
+    try:
+        payload = runtime.prepare_machine_action(
+            reference=inp.target,
+            action=inp.request.action,
+            parameters=inp.request.parameters(),
+        )
+    except MachineActionError as exc:
+        raise ProtocolError("unavailable", str(exc)) from exc
+    return PreparedAction(**{**payload, "ref": inp.target})
+
+
 class OperateInput(MutationControls):
     target: str = Field(
         min_length=1,
@@ -727,10 +764,9 @@ class OperateInput(MutationControls):
     request: MachineRequest = Field(
         discriminator="action", description="The reducer action and its parameters."
     )
-    expected_revision: int | None = Field(
+    expected_target: dict[str, Any] | None = Field(
         default=None,
-        ge=0,
-        description="Revision from machine.query operation=actions; also accepted as preconditions.expected_revision.",
+        description="Target identity from machine.prepare or the displayed owner observation; also accepted as preconditions.expected_target.",
     )
 
 
@@ -748,21 +784,21 @@ def _operate_via_reducer(
     target: str,
     action: str,
     parameters: dict[str, Any],
-    expected_revision: int | None,
+    expected_target: dict[str, Any] | None,
 ) -> OperateResult:
     if not inp.reason:
         raise ProtocolError("invalid_request", "machine operation requires reason")
     preconditions = dict(inp.preconditions or {})
-    if expected_revision is not None:
+    if expected_target is not None:
         if (
-            "expected_revision" in preconditions
-            and preconditions["expected_revision"] != expected_revision
+            "expected_target" in preconditions
+            and preconditions["expected_target"] != expected_target
         ):
             raise ProtocolError(
                 "invalid_request",
-                "expected_revision disagrees with preconditions.expected_revision",
+                "expected_target disagrees with preconditions.expected_target",
             )
-        preconditions["expected_revision"] = expected_revision
+        preconditions["expected_target"] = expected_target
     try:
         payload = runtime.v2_operate(
             reference=target,
@@ -777,9 +813,7 @@ def _operate_via_reducer(
         code = (
             "conflict"
             if "stale" in message or "revision" in message
-            else "unavailable"
-            if "unavailable" in message
-            else "owner_failed"
+            else "unavailable" if "unavailable" in message else "owner_failed"
         )
         raise ProtocolError(code, message) from exc
     return OperateResult(**payload, affordances=["machine.query", "audit.receipt"])
@@ -792,14 +826,14 @@ def _operate(runtime: Runtime, inp: OperateInput) -> OperateResult:
         target=inp.target,
         action=inp.request.action,
         parameters=inp.request.parameters(),
-        expected_revision=inp.expected_revision,
+        expected_target=inp.expected_target,
     )
 
 
 class UnitOperateInput(MutationControls):
     target: UnitLocator
     action: Literal["start", "stop", "restart"]
-    expected_revision: int | None = Field(default=None, ge=0)
+    expected_target: dict[str, Any] | None = Field(default=None)
 
 
 def _units_operate(runtime: Runtime, inp: UnitOperateInput) -> OperateResult:
@@ -810,7 +844,7 @@ def _units_operate(runtime: Runtime, inp: UnitOperateInput) -> OperateResult:
         target=ref,
         action=inp.action,
         parameters={},
-        expected_revision=inp.expected_revision,
+        expected_target=inp.expected_target,
     )
 
 
@@ -921,10 +955,31 @@ ACTIONS: tuple[Action, ...] = (
         ),
     ),
     Action(
+        name="machine.prepare",
+        family=VerbFamily.GET,
+        owner="ops-reducer",
+        summary="Read the selected target identity and action preconditions without changing it.",
+        Input=PrepareInput,
+        Output=PreparedAction,
+        handler=_prepare,
+        principals=ALL_PRINCIPALS,
+        resource_kinds=("job", "machine_unit", "process"),
+        affordances=("machine.operate",),
+        examples=(
+            Example(
+                title="Prepare unit restart",
+                input={
+                    "target": "sinnix://machine/units/user/example.service",
+                    "request": {"action": "restart"},
+                },
+            ),
+        ),
+    ),
+    Action(
         name="machine.operate",
         family=VerbFamily.OPERATE,
         owner="ops-reducer",
-        summary="Submit one revision-checked ops-reducer action against a canonical job, unit or process ref.",
+        summary="Submit one target-checked ops-reducer action against a canonical job, unit or process ref.",
         Input=OperateInput,
         Output=OperateResult,
         handler=_operate,
@@ -941,7 +996,7 @@ ACTIONS: tuple[Action, ...] = (
         ),
         supports_precondition=True,
         receipt_policy="owner",
-        documentation="expected_revision must match machine.query operation=actions; the reducer receipt is verified against the submitted action and target.",
+        documentation="expected_target must match the target identity returned by machine.prepare; the reducer receipt is verified against the submitted action and target.",
         examples=(
             Example(
                 title="Restart a unit",
@@ -949,7 +1004,15 @@ ACTIONS: tuple[Action, ...] = (
                     "target": "sinnix://machine/units/user/example.service",
                     "request": {"action": "restart"},
                     "reason": "apply the approved restart",
-                    "expected_revision": 42,
+                    "expected_target": {
+                        "kind": "unit",
+                        "unit": "example.service",
+                        "manager": "user",
+                        "properties": {
+                            "InvocationID": "example-invocation",
+                            "ActiveState": "active",
+                        },
+                    },
                     "idempotency_key": "restart-example",
                 },
             ),
@@ -963,7 +1026,15 @@ ACTIONS: tuple[Action, ...] = (
                         "value": "4G",
                     },
                     "reason": "bound the runaway",
-                    "expected_revision": 42,
+                    "expected_target": {
+                        "kind": "unit",
+                        "unit": "example.service",
+                        "manager": "user",
+                        "properties": {
+                            "InvocationID": "example-invocation",
+                            "ActiveState": "active",
+                        },
+                    },
                     "idempotency_key": "policy-example",
                 },
             ),
@@ -990,7 +1061,15 @@ ACTIONS: tuple[Action, ...] = (
                     "target": {"name": "example", "scope": "user"},
                     "action": "restart",
                     "reason": "apply config",
-                    "expected_revision": 42,
+                    "expected_target": {
+                        "kind": "unit",
+                        "unit": "example.service",
+                        "manager": "user",
+                        "properties": {
+                            "InvocationID": "example-invocation",
+                            "ActiveState": "active",
+                        },
+                    },
                     "idempotency_key": "restart-example-2",
                 },
             ),

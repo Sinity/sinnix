@@ -122,6 +122,9 @@ let
     beads = externalPackages.beads;
   };
   agentGatewayPackage = pkgs.callPackage ../pkgs/sinnix-agent-gateway/pkg.nix {
+    polylogue-contract-source = inputs.polylogue;
+    lynchpin-contract-source = inputs.lynchpin;
+    beads-owner = externalPackages.beads;
     sinnix-mcp = sinnixMcpPackage;
     sinnix-lib = externalPackages.sinnix-lib;
     agentctl = agentctlPackage;
@@ -203,15 +206,15 @@ let
     # exposing the exact same Dolt package through passthru for the user PATH.
     beads =
       let
-        # No local patches. Upstream carries its own guard for the stale
-        # issues.jsonl defect (a stale file re-imposed over newer Dolt rows
-        # on every mutating command after a branch switch) -- the
-        # GetStatistics emptiness guard in cmd/bd/auto_import_upgrade.go.
         doltPackage = pkgs.dolt;
-        beadsBase = pkgs.callPackage (inputs.beads + "/default.nix") {
-          self = inputs.beads;
-          buildGoModule = pkgs.buildGo126Module;
-        };
+        beadsBase =
+          (pkgs.callPackage (inputs.beads + "/default.nix") {
+            self = inputs.beads;
+            buildGoModule = pkgs.buildGo126Module;
+          }).overrideAttrs
+            (old: {
+              patches = (old.patches or [ ]) ++ [ ../pkgs/beads/owner-contracts.patch ];
+            });
         # bd's upstream --directory flag chooses the requested checkout only
         # while finding its configuration, then a redirect can send the
         # command back to the caller's cwd authority.  Normalize the flag at
@@ -263,6 +266,14 @@ let
         # package, so its version cannot drift from the one wrapped into bd.
         passthru = {
           dolt = doltPackage;
+          ownerContractCheck = beadsBase.overrideAttrs {
+            doCheck = true;
+            checkPhase = ''
+              runHook preCheck
+              BEADS_TEST_EMBEDDED_DOLT=1 go test -tags=gms_pure_go ./cmd/bd ./internal/httpapi ./internal/storage/issueops ./internal/storage/embeddeddolt -run OwnerContract -count=1 -timeout=2m
+              runHook postCheck
+            '';
+          };
         };
         nativeBuildInputs = [ pkgs.makeWrapper ];
         postBuild = ''

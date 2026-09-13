@@ -1,11 +1,11 @@
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: 0aead88fc7ca66ee7955e3f150bc27037a0158ff8c698ea944657d19e6aa21c9 -->
+<!-- gateway-catalog-sha256: 19ccdfa0ccf89ac27206323b65535c2ab3e6940704a8795fb670a7d5c8f8c154 -->
 # Sinnix Agent Gateway reference
 
 Generated from `sinnix_agent_gateway.actions`. Every action is one MCP tool whose `tools/list` input schema is the one below; the catalog hash changes when any principal-visible action catalog row changes, including its schema, principal set, example or affordance.
 
-Revision: `v3-typed-actions`. Catalog SHA-256: `0aead88fc7ca66ee7955e3f150bc27037a0158ff8c698ea944657d19e6aa21c9`.
+Revision: `v3-typed-actions`. Catalog SHA-256: `19ccdfa0ccf89ac27206323b65535c2ab3e6940704a8795fb670a7d5c8f8c154`.
 
 ## Invocation
 
@@ -13,132 +13,165 @@ MCP: call the tool named after the action. CLI: `sinnix-agent-gateway call <acti
 
 ## Resources
 
-| Resource            | Owner              | Canonical reference                                      | Actions                                                                                                                                                                                                                                                                                                                                                                                          |
-| ------------------- | ------------------ | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `project`           | `projects`         | `sinnix://projects/{project_id}`                         | `batches.list`, `batches.start`, `beads.change`, `beads.changeset`, `beads.closure`, `beads.operate`, `beads.query`, `campaign.progress`, `context.compose`, `events.tail`, `operations.run`, `projects.change`, `projects.context`, `projects.diff`, `projects.export`, `projects.get`, `projects.list`, `projects.read`, `projects.read_many`, `projects.search`, `projects.tree`, `shell.run` |
-| `checkout`          | `projects`         | `sinnix://projects/{project_id}/checkouts/{checkout_id}` | `context.compose`, `operations.run`, `projects.change`, `projects.diff`, `projects.export`, `projects.get`, `projects.read`, `projects.read_many`, `projects.search`, `projects.tree`, `shell.run`                                                                                                                                                                                               |
-| `bead`              | `beads`            | `sinnix://projects/{project_id}/beads/{bead_id}`         | `batches.start`, `batches.status`, `beads.change`, `beads.changeset`, `beads.closure`, `beads.get`, `beads.query`, `campaign.progress`, `wait.for`                                                                                                                                                                                                                                               |
-| `task_authority`    | `beads`            | `sinnix://projects/{project_id}/task-authority`          | `beads.change`, `beads.changeset`, `beads.closure`, `beads.operate`, `beads.query`                                                                                                                                                                                                                                                                                                               |
-| `run`               | `batches`          | `sinnix://projects/{project_id}/runs/{run_id}`           | `batches.land`, `batches.list`, `batches.resume`, `batches.start`, `batches.status`                                                                                                                                                                                                                                                                                                              |
-| `job`               | `jobs`             | `sinnix://jobs/{job_id}`                                 | `batches.land`, `batches.list`, `batches.resume`, `batches.start`, `batches.status`, `context.compose`, `events.tail`, `jobs.cancel`, `jobs.clean`, `jobs.get`, `jobs.list`, `jobs.logs`, `jobs.retry`, `jobs.wait`, `machine.operate`, `operations.run`, `shell.run`, `wait.for`                                                                                                                |
-| `artifact`          | `artifacts`        | `sinnix://artifacts/{artifact_id}`                       | `artifacts.get`, `artifacts.list`, `artifacts.read`, `browser.screenshot`, `desktop.screenshot`                                                                                                                                                                                                                                                                                                  |
-| `receipt`           | `audit`            | `sinnix://receipts/{receipt_id}`                         | `audit.receipt`, `audit.verify`, `events.tail`, `wait.for`                                                                                                                                                                                                                                                                                                                                       |
-| `result`            | `results`          | `sinnix://results/{result_id}`                           | `results.get`                                                                                                                                                                                                                                                                                                                                                                                    |
-| `machine_unit`      | `machine`          | `sinnix://machine/units/{manager}/{unit}`                | `machine.operate`, `machine.query`, `machine.snapshot`, `machine.units.get`, `machine.units.list`, `machine.units.logs`, `machine.units.operate`, `wait.for`                                                                                                                                                                                                                                     |
-| `browser_page`      | `browser`          | `sinnix://browser/pages/{page_id}`                       | `browser.operate`, `browser.page`, `browser.pages`, `browser.screenshot`                                                                                                                                                                                                                                                                                                                         |
-| `browser_workspace` | `browser`          | `sinnix://browser/agent-workspace`                       | `browser.operate`, `browser.pages`                                                                                                                                                                                                                                                                                                                                                               |
-| `process`           | `machine`          | `sinnix://processes/{pid}/{start_ticks}`                 | `machine.operate`, `machine.query`, `processes.get`, `processes.list`, `processes.signal`, `processes.tree`, `processes.wait`                                                                                                                                                                                                                                                                    |
-| `terminal`          | `terminals`        | `sinnix://terminals/{terminal_id}`                       | `terminals.focus`, `terminals.get`, `terminals.list`, `terminals.open`, `terminals.processes`, `terminals.run`, `terminals.screen`, `terminals.scrollback`, `terminals.send`, `terminals.wait`, `wait.for`                                                                                                                                                                                       |
-| `desktop`           | `desktop`          | `sinnix://desktop/current`                               | `desktop.operate`, `desktop.screenshot`, `desktop.snapshot`, `desktop.tree`                                                                                                                                                                                                                                                                                                                      |
-| `host_file`         | `files`            | `sinnix://files/{file_token}`                            | `files.change`, `files.changeset`, `files.list`, `files.patch`, `files.plan`, `files.read`, `files.references`, `files.search`, `files.stat`, `wait.for`                                                                                                                                                                                                                                         |
-| `mcp_tool`          | `mcp-broker`       | `sinnix://mcp/{server}/tools/{tool}`                     | `mcp.call`, `mcp.change`, `mcp.servers`, `mcp.tools`                                                                                                                                                                                                                                                                                                                                             |
-| `capture_lane`      | `captures`         | `sinnix://captures/{lane}`                               | `activity.query`, `captures.query`, `wait.for`                                                                                                                                                                                                                                                                                                                                                   |
-| `capability`        | `capability-index` | `sinnix://capabilities/{name}`                           | `capabilities.query`                                                                                                                                                                                                                                                                                                                                                                             |
-| `session`           | `sessions`         | `sinnix://sessions/{provider}/{session_id}`              | `memory.query`, `sessions.orchestration`, `sessions.query`, `timeline.query`                                                                                                                                                                                                                                                                                                                     |
-| `context_snapshot`  | `context`          | `sinnix://contexts/{snapshot_id}`                        | `context.compose`, `results.get`                                                                                                                                                                                                                                                                                                                                                                 |
+| Resource            | Owner              | Canonical reference                                      | Actions                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ------------------- | ------------------ | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `project`           | `projects`         | `sinnix://projects/{project_id}`                         | `batches.list`, `batches.start`, `beads.batch.close`, `beads.blockers`, `beads.changeset`, `beads.claim`, `beads.claim_next`, `beads.close`, `beads.closure`, `beads.comment`, `beads.create`, `beads.cycles`, `beads.dependencies`, `beads.dependencies.add`, `beads.dependencies.count`, `beads.dependencies.remove`, `beads.graph`, `beads.graph.create`, `beads.memories`, `beads.memory.forget`, `beads.memory.get`, `beads.memory.remember`, `beads.metadata.compare_set`, `beads.operate`, `beads.query`, `beads.read`, `beads.related`, `beads.reopen`, `beads.unclaim`, `beads.update`, `campaign.progress`, `context.compose`, `events.tail`, `operations.run`, `projects.change`, `projects.context`, `projects.diff`, `projects.export`, `projects.get`, `projects.list`, `projects.read`, `projects.read_many`, `projects.search`, `projects.tree`, `shell.run` |
+| `checkout`          | `projects`         | `sinnix://projects/{project_id}/checkouts/{checkout_id}` | `context.compose`, `operations.run`, `projects.change`, `projects.diff`, `projects.export`, `projects.get`, `projects.read`, `projects.read_many`, `projects.search`, `projects.tree`, `shell.run`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `bead`              | `beads`            | `sinnix://projects/{project_id}/beads/{bead_id}`         | `batches.start`, `batches.status`, `beads.batch.close`, `beads.blockers`, `beads.changeset`, `beads.claim`, `beads.claim_next`, `beads.close`, `beads.closure`, `beads.comment`, `beads.create`, `beads.cycles`, `beads.dependencies`, `beads.dependencies.add`, `beads.dependencies.count`, `beads.dependencies.remove`, `beads.get`, `beads.graph`, `beads.graph.create`, `beads.memories`, `beads.memory.forget`, `beads.memory.get`, `beads.memory.remember`, `beads.metadata.compare_set`, `beads.query`, `beads.read`, `beads.related`, `beads.reopen`, `beads.unclaim`, `beads.update`, `campaign.progress`, `wait.for`                                                                                                                                                                                                                                               |
+| `task_authority`    | `beads`            | `sinnix://projects/{project_id}/task-authority`          | `beads.batch.close`, `beads.blockers`, `beads.changeset`, `beads.claim`, `beads.claim_next`, `beads.close`, `beads.closure`, `beads.comment`, `beads.create`, `beads.cycles`, `beads.dependencies`, `beads.dependencies.add`, `beads.dependencies.count`, `beads.dependencies.remove`, `beads.graph`, `beads.graph.create`, `beads.memories`, `beads.memory.forget`, `beads.memory.get`, `beads.memory.remember`, `beads.metadata.compare_set`, `beads.operate`, `beads.query`, `beads.read`, `beads.related`, `beads.reopen`, `beads.unclaim`, `beads.update`                                                                                                                                                                                                                                                                                                               |
+| `run`               | `batches`          | `sinnix://projects/{project_id}/runs/{run_id}`           | `batches.land`, `batches.list`, `batches.resume`, `batches.start`, `batches.status`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `job`               | `jobs`             | `sinnix://jobs/{job_id}`                                 | `batches.land`, `batches.list`, `batches.resume`, `batches.start`, `batches.status`, `context.compose`, `events.tail`, `jobs.cancel`, `jobs.clean`, `jobs.get`, `jobs.list`, `jobs.logs`, `jobs.retry`, `jobs.wait`, `machine.operate`, `machine.prepare`, `operations.run`, `shell.run`, `wait.for`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `artifact`          | `artifacts`        | `sinnix://artifacts/{artifact_id}`                       | `artifacts.get`, `artifacts.list`, `artifacts.read`, `browser.screenshot`, `desktop.screenshot`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `receipt`           | `audit`            | `sinnix://receipts/{receipt_id}`                         | `audit.receipt`, `audit.verify`, `events.tail`, `wait.for`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `result`            | `results`          | `sinnix://results/{result_id}`                           | `results.get`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `machine_unit`      | `machine`          | `sinnix://machine/units/{manager}/{unit}`                | `machine.operate`, `machine.prepare`, `machine.query`, `machine.snapshot`, `machine.units.get`, `machine.units.list`, `machine.units.logs`, `machine.units.operate`, `wait.for`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `browser_page`      | `browser`          | `sinnix://browser/pages/{page_id}`                       | `browser.operate`, `browser.page`, `browser.pages`, `browser.screenshot`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `browser_workspace` | `browser`          | `sinnix://browser/agent-workspace`                       | `browser.operate`, `browser.pages`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `process`           | `machine`          | `sinnix://processes/{pid}/{start_ticks}`                 | `machine.operate`, `machine.prepare`, `machine.query`, `processes.get`, `processes.list`, `processes.signal`, `processes.tree`, `processes.wait`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `terminal`          | `terminals`        | `sinnix://terminals/{terminal_id}`                       | `terminals.focus`, `terminals.get`, `terminals.list`, `terminals.open`, `terminals.processes`, `terminals.run`, `terminals.screen`, `terminals.scrollback`, `terminals.send`, `terminals.wait`, `wait.for`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `desktop`           | `desktop`          | `sinnix://desktop/current`                               | `desktop.operate`, `desktop.screenshot`, `desktop.snapshot`, `desktop.tree`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `host_file`         | `files`            | `sinnix://files/{file_token}`                            | `files.change`, `files.changeset`, `files.list`, `files.patch`, `files.plan`, `files.read`, `files.references`, `files.search`, `files.stat`, `wait.for`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `mcp_tool`          | `mcp-broker`       | `sinnix://mcp/{server}/tools/{tool}`                     | `mcp.call`, `mcp.change`, `mcp.servers`, `mcp.tools`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `capture_lane`      | `captures`         | `sinnix://captures/{lane}`                               | `activity.query`, `captures.query`, `wait.for`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `capability`        | `capability-index` | `sinnix://capabilities/{name}`                           | `capabilities.query`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `context_snapshot`  | `context`          | `sinnix://contexts/{snapshot_id}`                        | `context.compose`, `results.get`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 
 ## Actions
 
-| Action                   | Family    | Owner              | Principals                          | Summary                                                                                                                                                                                                                                                                                                                                                                                           |
-| ------------------------ | --------- | ------------------ | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `gateway.status`         | `status`  | `gateway`          | `agent-control, observer, operator` | Report the principal, contract hashes, tool count and per-route availability.                                                                                                                                                                                                                                                                                                                     |
-| `gateway.catalog`        | `catalog` | `gateway`          | `agent-control, observer, operator` | Every action is also an MCP tool with its full schema in tools/list; the catalog adds aliases, affordances, resource kinds and the brokered MCP tool inventory (lynchpin, sinex, polylogue).                                                                                                                                                                                                      |
-| `files.stat`             | `query`   | `files`            | `observer, operator`                | Describe one host path: kind, size, mode, owner, timestamps, MIME, hash.                                                                                                                                                                                                                                                                                                                          |
-| `files.list`             | `query`   | `files`            | `observer, operator`                | List a directory with a canonical ref for every child.                                                                                                                                                                                                                                                                                                                                            |
-| `files.read`             | `query`   | `files`            | `observer, operator`                | Read a file: text inline, images as image blocks, other binary as read-only links.                                                                                                                                                                                                                                                                                                                |
-| `files.search`           | `query`   | `files`            | `observer, operator`                | Without content_regex the search is over paths (fd); with it, matching lines are returned (ripgrep --json). Results are bounded by limit and timeout.                                                                                                                                                                                                                                             |
-| `files.patch`            | `change`  | `files`            | `operator`                          | Pass expected_sha256 from the prior read so a concurrent change is refused instead of overwritten. Unified hunks are applied individually; rejected hunks are reported.                                                                                                                                                                                                                           |
-| `files.change`           | `change`  | `files`            | `operator`                          | Copy and move never overwrite an existing destination. Remove supports regular files only.                                                                                                                                                                                                                                                                                                        |
-| `files.plan`             | `query`   | `organization`     | `operator`                          | The caller supplies every mapping. The plan hashes each regular source file and records collision, parent and filesystem facts without changing host files.                                                                                                                                                                                                                                       |
-| `files.changeset`        | `change`  | `organization`     | `operator`                          | All planned sources, destinations and parents are revalidated before the first mutation. Transfers never overwrite. Results are honest about partial completion and no global atomicity is claimed.                                                                                                                                                                                               |
-| `files.references`       | `query`   | `organization`     | `operator`                          | Runs the existing bounded files.search text primitive once for each supplied old path. It only reports provenance and never rewrites references.                                                                                                                                                                                                                                                  |
-| `projects.list`          | `query`   | `projects`         | `agent-control, observer, operator` | List the projects this principal may read, with canonical refs.                                                                                                                                                                                                                                                                                                                                   |
-| `projects.get`           | `get`     | `projects`         | `agent-control, observer, operator` | The checkout row carries head and dirty_sha256, the preconditions projects.change requires.                                                                                                                                                                                                                                                                                                       |
-| `projects.tree`          | `query`   | `projects`         | `agent-control, observer, operator` | List files under a project-relative directory without following symlinks.                                                                                                                                                                                                                                                                                                                         |
-| `projects.read`          | `query`   | `projects`         | `agent-control, observer, operator` | Read a bounded line range of one project file.                                                                                                                                                                                                                                                                                                                                                    |
-| `projects.read_many`     | `query`   | `projects`         | `agent-control, observer, operator` | Read several bounded project files from one checkout observation.                                                                                                                                                                                                                                                                                                                                 |
-| `projects.export`        | `query`   | `projects`         | `agent-control, observer, operator` | Sensitive, local-only, hidden, and symlinked paths are excluded. The export is bounded and includes a manifest with file hashes and the checkout revision.                                                                                                                                                                                                                                        |
-| `projects.diff`          | `query`   | `projects`         | `agent-control, observer, operator` | Show uncommitted changes in a checkout, optionally against a git ref.                                                                                                                                                                                                                                                                                                                             |
-| `projects.search`        | `query`   | `projects`         | `agent-control, observer, operator` | Search project file contents with ripgrep.                                                                                                                                                                                                                                                                                                                                                        |
-| `projects.change`        | `change`  | `projects`         | `operator`                          | Paths stay project-relative and policy-excluded paths (.git, secrets, local-only agent state) are refused. Take expected_dirty_sha256 or expected_head from projects.get, or expected_file_sha256 from projects.read.                                                                                                                                                                             |
-| `projects.context`       | `context` | `projects`         | `agent-control, observer, operator` | Components are budgeted independently; an unavailable component names its reason and source ref so the caller can follow the direct route.                                                                                                                                                                                                                                                        |
-| `beads.closure`          | `query`   | `beads`            | `agent-control, observer, operator` | Read a bounded dependency closure, cycles, declared gates and decisions, readiness and incomplete frontier at one revision.                                                                                                                                                                                                                                                                       |
-| `beads.query`            | `query`   | `beads`            | `agent-control, observer, operator` | The owner filters, projects and counts before serialization. limit sizes pages of one immutable snapshot of all matching rows; cursors never reread live rows. Snapshot storage and memory scale with the matching data, so use projection or aggregate for broad queries. at pins historical reads to an exact resolved Dolt revision. aggregate counts or groups without fetching issue bodies. |
-| `beads.get`              | `get`     | `beads`            | `agent-control, observer, operator` | Read one bead by ref, id or title fragment, with optional comments, history, dependencies or graph.                                                                                                                                                                                                                                                                                               |
-| `beads.change`           | `change`  | `beads`            | `operator`                          | expected.expected_task_revision/expected_etag come from beads.get. Use mode=preview to see the compiled command and a preview_digest before applying.                                                                                                                                                                                                                                             |
-| `beads.changeset`        | `change`  | `beads`            | `operator`                          | No global rollback: each applied step reports its outcome and a compensation hint. Preview first, then apply with the returned preview_digest.                                                                                                                                                                                                                                                    |
-| `beads.operate`          | `operate` | `beads`            | `operator`                          | Beads maintenance: publish the export snapshot, push or pull sync, create, list or restore backups.                                                                                                                                                                                                                                                                                               |
-| `jobs.list`              | `query`   | `systemd-jobs`     | `agent-control, observer, operator` | List queued jobs (pueue tasks) newest first, optionally for one project.                                                                                                                                                                                                                                                                                                                          |
-| `jobs.get`               | `get`     | `systemd-jobs`     | `agent-control, observer, operator` | One job's state and bead binding, with its log range or typed result on request.                                                                                                                                                                                                                                                                                                                  |
-| `jobs.logs`              | `get`     | `systemd-jobs`     | `agent-control, observer, operator` | A byte range of a job's bounded log (workload output, then the wrapper's stderr).                                                                                                                                                                                                                                                                                                                 |
-| `jobs.wait`              | `wait`    | `systemd-jobs`     | `agent-control, observer, operator` | The wait runs in a worker thread; cancelling the MCP request abandons it without stopping the job. A task id is a queue position: pass the launch_reference the start returned and the wait follows its job across a reorder, answering with the id it is at now.                                                                                                                                 |
-| `jobs.cancel`            | `operate` | `systemd-jobs`     | `agent-control, operator`           | Pass expected_phase to refuse when the job already moved on. Survivors lists PIDs that outlived the reap.                                                                                                                                                                                                                                                                                         |
-| `jobs.retry`             | `operate` | `systemd-jobs`     | `agent-control, operator`           | Re-run a terminal job in place with the same launch input and id (pueue restart).                                                                                                                                                                                                                                                                                                                 |
-| `jobs.clean`             | `operate` | `systemd-jobs`     | `agent-control, operator`           | Refused while the job is still queued or running; cancel it first.                                                                                                                                                                                                                                                                                                                                |
-| `operations.run`         | `run`     | `systemd-jobs`     | `agent-control, operator`           | Queue one project-declared operation in its declared pool on the root or a worktree.                                                                                                                                                                                                                                                                                                              |
-| `shell.run`              | `run`     | `systemd-jobs`     | `operator`                          | cwd is confined to the checkout. Default execution is asynchronous. wait=true waits up to wait_timeout_seconds (default 5, maximum 30) on the same job and returns bounded output; a timeout returns a continuation locator without cancelling the job.                                                                                                                                           |
-| `batches.list`           | `query`   | `systemd-jobs`     | `agent-control, observer, operator` | List batch runs newest first, with each worker's stage and task.                                                                                                                                                                                                                                                                                                                                  |
-| `batches.status`         | `get`     | `systemd-jobs`     | `agent-control, observer, operator` | Every id is a pueue task id: pass a worker's or the landing's job_id to jobs.logs, jobs.wait or jobs.cancel, with its job_launch_reference so the call survives a reorder.                                                                                                                                                                                                                        |
-| `batches.start`          | `run`     | `systemd-jobs`     | `agent-control, operator`           | backend, model and effort default to the project descriptor's packet defaults. Refused when a bead is claimed or already in a live run. The landing task is queued behind the workers and runs itself.                                                                                                                                                                                            |
-| `batches.land`           | `run`     | `systemd-jobs`     | `agent-control, operator`           | batches.start already queues the first landing behind the workers; this re-queues one after a landing failed. The landing runs as a job, so wait on landing_job_id rather than on this call.                                                                                                                                                                                                      |
-| `batches.resume`         | `run`     | `systemd-jobs`     | `agent-control, operator`           | backend, model and effort default to the worker's own. Refused while the worker's task is still queued or running.                                                                                                                                                                                                                                                                                |
-| `wait.for`               | `wait`    | `waits`            | `agent-control, observer, operator` | Conditions: job_terminal, bead_status, bead_revision, unit_state, file_hash, file_exists, capture_freshness, receipt_appearance, terminal_output. A timeout returns the current evidence and a continuation token.                                                                                                                                                                                |
-| `events.tail`            | `events`  | `events`           | `agent-control, observer, operator` | Pass next_cursor back to continue; a cursor from another principal or project scope fails stale_cursor.                                                                                                                                                                                                                                                                                           |
-| `context.compose`        | `context` | `context`          | `agent-control, observer, operator` | Each component is budgeted and isolated: an unavailable owner marks its component unavailable with a reason instead of failing the call. The snapshot is persisted under snapshot_ref.                                                                                                                                                                                                            |
-| `desktop.snapshot`       | `status`  | `desktop`          | `observer, operator`                | One observation of the desktop: monitors, workspaces, focus, every window with geometry, and a generation stamp.                                                                                                                                                                                                                                                                                  |
-| `desktop.screenshot`     | `query`   | `desktop`          | `observer, operator`                | full captures the focused output through the HDR-aware screenshot owner; window/rect/monitor targets capture with grim. On HDR outputs a corrected SDR variant is produced and preferred for the image block.                                                                                                                                                                                     |
-| `desktop.tree`           | `query`   | `desktop`          | `observer, operator`                | Fails unavailable when the pyatspi bindings are absent from the gateway environment; Chromium apps expose a tree only when launched with accessibility forced on.                                                                                                                                                                                                                                 |
-| `desktop.operate`        | `operate` | `desktop`          | `operator`                          | Pointer clicks, drags and scrolls need a virtual pointer tool (ydotool) on the host and fail unavailable without one; cursor moves always work. Window targets are natural locators; ambiguity returns candidates.                                                                                                                                                                                |
-| `terminals.list`         | `catalog` | `terminals`        | `observer, operator`                | Every kitty window with its ref, title, cwd, shell pid, focus and foreground processes.                                                                                                                                                                                                                                                                                                           |
-| `terminals.get`          | `get`     | `terminals`        | `observer, operator`                | Resolve one terminal by ref, kitty id, title, cwd, pid or focus.                                                                                                                                                                                                                                                                                                                                  |
-| `terminals.screen`       | `query`   | `terminals`        | `observer, operator`                | The visible screen text of one terminal.                                                                                                                                                                                                                                                                                                                                                          |
-| `terminals.scrollback`   | `query`   | `terminals`        | `observer, operator`                | The last N lines of a terminal's history, screen, or last command output.                                                                                                                                                                                                                                                                                                                         |
-| `terminals.processes`    | `query`   | `terminals`        | `observer, operator`                | Foreground processes of one terminal and whether its shell is at a prompt.                                                                                                                                                                                                                                                                                                                        |
-| `terminals.send`         | `operate` | `terminals`        | `operator`                          | Send text (optionally with Enter or bracketed paste) or key presses to one terminal.                                                                                                                                                                                                                                                                                                              |
-| `terminals.run`          | `run`     | `terminals`        | `operator`                          | Completion and output rely on kitty shell integration (at_prompt, last_cmd_output). exit_status is reported only with capture_exit_status, which appends a visible marker to the command line.                                                                                                                                                                                                    |
-| `terminals.wait`         | `wait`    | `terminals`        | `observer, operator`                | Wait until a terminal is at its prompt, shows a regex, finishes a process, or changes title.                                                                                                                                                                                                                                                                                                      |
-| `terminals.focus`        | `operate` | `terminals`        | `operator`                          | Focus one kitty window.                                                                                                                                                                                                                                                                                                                                                                           |
-| `terminals.open`         | `operate` | `terminals`        | `operator`                          | Open a new kitty window (OS window, split or tab) with an optional cwd and command; returns its ref.                                                                                                                                                                                                                                                                                              |
-| `browser.pages`          | `catalog` | `browser`          | `observer, operator`                | List every open Chrome page with its ref; flags the gateway-owned pages that can be read, captured or operated.                                                                                                                                                                                                                                                                                   |
-| `browser.page`           | `get`     | `browser`          | `observer, operator`                | Element refs (g<generation>e<n>) are attached to the DOM for this snapshot; a later snapshot or reload replaces them, and a stale ref fails not_found.                                                                                                                                                                                                                                            |
-| `browser.screenshot`     | `query`   | `browser`          | `observer, operator`                | Screenshot a gateway-owned page through CDP; the image rides in an image block and is retained as an artifact.                                                                                                                                                                                                                                                                                    |
-| `browser.operate`        | `operate` | `browser`          | `operator`                          | Operator tabs are never accepted as targets, even when a locator matches one. Element targets take a snapshot ref or a CSS selector.                                                                                                                                                                                                                                                              |
-| `machine.snapshot`       | `status`  | `machine`          | `agent-control, observer, operator` | Each section carries its own availability and source; GPU and network report unavailable because no owner exposes them.                                                                                                                                                                                                                                                                           |
-| `machine.query`          | `query`   | `machine`          | `agent-control, observer, operator` | Read one sinnix-observe section with cursor paging, or the ops-reducer revision (operation=actions).                                                                                                                                                                                                                                                                                              |
-| `machine.units.list`     | `query`   | `machine`          | `agent-control, observer, operator` | List systemd units of one manager with load/active/sub state and a canonical ref each.                                                                                                                                                                                                                                                                                                            |
-| `machine.units.get`      | `get`     | `machine`          | `agent-control, observer, operator` | Describe one unit via systemctl show: states, main pid, cgroup, restarts, timestamps.                                                                                                                                                                                                                                                                                                             |
-| `machine.units.logs`     | `query`   | `machine`          | `agent-control, observer, operator` | Journal entries for one unit (journalctl -o json), bounded by line count and bytes.                                                                                                                                                                                                                                                                                                               |
-| `machine.operate`        | `operate` | `ops-reducer`      | `operator`                          | expected_revision must match machine.query operation=actions; the reducer receipt is verified against the submitted action and target.                                                                                                                                                                                                                                                            |
-| `machine.units.operate`  | `operate` | `ops-reducer`      | `operator`                          | Start, stop or restart one unit through the ops reducer (reload and wait are not reducer actions).                                                                                                                                                                                                                                                                                                |
-| `processes.list`         | `query`   | `machine`          | `agent-control, observer, operator` | List live processes filtered by name, pid, unit, cgroup or user, with a canonical ref each.                                                                                                                                                                                                                                                                                                       |
-| `processes.get`          | `get`     | `machine`          | `agent-control, observer, operator` | Describe one process: cmdline, cwd, exe, redacted env, cgroup/unit, parent, children, sockets, cpu and memory.                                                                                                                                                                                                                                                                                    |
-| `processes.tree`         | `query`   | `machine`          | `agent-control, observer, operator` | Parent/child process tree from one root or from every top-level process, bounded by depth and node count.                                                                                                                                                                                                                                                                                         |
-| `processes.signal`       | `operate` | `machine`          | `operator`                          | The reducer path is the attested one and needs expected_revision; the direct path is receipted by the gateway audit chain only.                                                                                                                                                                                                                                                                   |
-| `processes.wait`         | `wait`    | `machine`          | `agent-control, observer, operator` | Wait until a process (same pid and start ticks) exits, or the bounded timeout elapses.                                                                                                                                                                                                                                                                                                            |
-| `mcp.servers`            | `status`  | `mcp-broker`       | `observer, operator`                | Each probe runs initialize + tools/list with a 5 s bound; a timeout stores the upstream stderr as an artifact and returns its ref.                                                                                                                                                                                                                                                                |
-| `mcp.tools`              | `catalog` | `mcp-broker`       | `observer, operator`                | Catalog of every admitted upstream tool with its namespaced ref, input schema and read/change effect.                                                                                                                                                                                                                                                                                             |
-| `mcp.call`               | `query`   | `mcp-broker`       | `observer, operator`                | Reads require an owner read-only annotation or an exact match to trusted registry selectors. Other requests require mcp.change (operator only). A target using server=sinnix-agent-gateway is routed to the named direct read action, preserving its native content blocks; changes stay direct-only.                                                                                             |
-| `mcp.change`             | `change`  | `mcp-broker`       | `operator`                          | Invoke an upstream request not admitted as read-only by annotation or trusted registry selectors.                                                                                                                                                                                                                                                                                                 |
-| `artifacts.list`         | `catalog` | `artifacts`        | `agent-control, observer, operator` | List principal-visible artifacts with kind, owner, size and canonical ref.                                                                                                                                                                                                                                                                                                                        |
-| `artifacts.get`          | `get`     | `artifacts`        | `agent-control, observer, operator` | Metadata of one artifact without its bytes.                                                                                                                                                                                                                                                                                                                                                       |
-| `artifacts.read`         | `query`   | `artifacts`        | `agent-control, observer, operator` | Read an artifact: text inline with offsets, images as image blocks, other binary as read-only links.                                                                                                                                                                                                                                                                                              |
-| `captures.query`         | `query`   | `captures`         | `agent-control, observer, operator` | List runtime-declared capture lanes, describe one, or read per-lane record deltas since a time.                                                                                                                                                                                                                                                                                                   |
-| `activity.query`         | `query`   | `captures`         | `agent-control, observer, operator` | Reads sinnix-capture-v1 envelope files under each lane path within the time window; coverage lists which lanes contributed and which have no envelope files.                                                                                                                                                                                                                                      |
-| `sessions.query`         | `query`   | `sessions`         | `observer, operator`                | operation=structured queries Polylogue's sessions projection and retains owner coverage and provenance. The owner does not support sessions continuation. Legacy list cursors continue a newest-first snapshot for one hour; legacy reads return next_offset and legacy searches expose their bounded file coverage.                                                                              |
-| `memory.query`           | `query`   | `memory`           | `observer, operator`                | Search session-derived memory across providers or fetch one object by reference, with source provenance.                                                                                                                                                                                                                                                                                          |
-| `timeline.query`         | `query`   | `timeline`         | `observer, operator`                | Session evidence ordered by file mtime within an RFC 3339 window, per provider, without claiming unavailable upstreams.                                                                                                                                                                                                                                                                           |
-| `campaign.progress`      | `query`   | `beads+lynchpin`   | `observer, operator`                | Task closure, verified delivery and acceptance remain separate. Missing evidence is unknown; bounded closure cannot establish an exact denominator. Historical task state is read at its resolved owner revision.                                                                                                                                                                                 |
-| `sessions.orchestration` | `query`   | `polylogue`        | `observer, operator`                | Native parent, model and token fields remain unknown when absent from stored evidence. Each owner product retains its coverage, provenance and ingestion watermark.                                                                                                                                                                                                                               |
-| `audit.verify`           | `status`  | `audit`            | `agent-control, observer, operator` | Verify the tamper-evident audit hash chain end to end.                                                                                                                                                                                                                                                                                                                                            |
-| `audit.receipt`          | `get`     | `audit`            | `agent-control, observer, operator` | Read one principal-scoped audit receipt by ref or id.                                                                                                                                                                                                                                                                                                                                             |
-| `results.get`            | `get`     | `results`          | `agent-control, observer, operator` | Read one immutable stored response snapshot by ref or id.                                                                                                                                                                                                                                                                                                                                         |
-| `capabilities.query`     | `catalog` | `capability-index` | `agent-control, observer, operator` | Search the generated machine capability index or describe one capability exactly.                                                                                                                                                                                                                                                                                                                 |
+| Action                       | Family    | Owner              | Principals                          | Summary                                                                                                                                                                                                                                                                                                                                          |
+| ---------------------------- | --------- | ------------------ | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `gateway.status`             | `status`  | `gateway`          | `agent-control, observer, operator` | Report the principal, contract hashes, tool count and per-route availability.                                                                                                                                                                                                                                                                    |
+| `gateway.catalog`            | `catalog` | `gateway`          | `agent-control, observer, operator` | Every action is also an MCP tool with its full schema in tools/list; the catalog adds aliases, affordances, resource kinds and the brokered MCP tool inventory (lynchpin, sinex, polylogue).                                                                                                                                                     |
+| `files.stat`                 | `query`   | `files`            | `observer, operator`                | Describe one host path: kind, size, mode, owner, timestamps, MIME, hash.                                                                                                                                                                                                                                                                         |
+| `files.list`                 | `query`   | `files`            | `observer, operator`                | List a directory with a canonical ref for every child.                                                                                                                                                                                                                                                                                           |
+| `files.read`                 | `query`   | `files`            | `observer, operator`                | Read a file: text inline, images as image blocks, other binary as read-only links.                                                                                                                                                                                                                                                               |
+| `files.search`               | `query`   | `files`            | `observer, operator`                | Without content_regex the search is over paths (fd); with it, matching lines are returned (ripgrep --json). Results are bounded by limit and timeout.                                                                                                                                                                                            |
+| `files.patch`                | `change`  | `files`            | `operator`                          | Pass expected_sha256 from the prior read so a concurrent change is refused instead of overwritten. Unified hunks are applied individually; rejected hunks are reported.                                                                                                                                                                          |
+| `files.change`               | `change`  | `files`            | `operator`                          | Copy and move never overwrite an existing destination. Remove supports regular files only.                                                                                                                                                                                                                                                       |
+| `files.plan`                 | `query`   | `organization`     | `operator`                          | The caller supplies every mapping. The plan hashes each regular source file and records collision, parent and filesystem facts without changing host files.                                                                                                                                                                                      |
+| `files.changeset`            | `change`  | `organization`     | `operator`                          | All planned sources, destinations and parents are revalidated before the first mutation. Transfers never overwrite. Results are honest about partial completion and no global atomicity is claimed.                                                                                                                                              |
+| `files.references`           | `query`   | `organization`     | `operator`                          | Runs the existing bounded files.search text primitive once for each supplied old path. It only reports provenance and never rewrites references.                                                                                                                                                                                                 |
+| `projects.list`              | `query`   | `projects`         | `agent-control, observer, operator` | List the projects this principal may read, with canonical refs.                                                                                                                                                                                                                                                                                  |
+| `projects.get`               | `get`     | `projects`         | `agent-control, observer, operator` | The checkout row carries head and dirty_sha256, the preconditions projects.change requires.                                                                                                                                                                                                                                                      |
+| `projects.tree`              | `query`   | `projects`         | `agent-control, observer, operator` | List files under a project-relative directory without following symlinks.                                                                                                                                                                                                                                                                        |
+| `projects.read`              | `query`   | `projects`         | `agent-control, observer, operator` | Read a bounded line range of one project file.                                                                                                                                                                                                                                                                                                   |
+| `projects.read_many`         | `query`   | `projects`         | `agent-control, observer, operator` | Read several bounded project files from one checkout observation.                                                                                                                                                                                                                                                                                |
+| `projects.export`            | `query`   | `projects`         | `agent-control, observer, operator` | Sensitive, local-only, hidden, and symlinked paths are excluded. The export is bounded and includes a manifest with file hashes and the checkout revision.                                                                                                                                                                                       |
+| `projects.diff`              | `query`   | `projects`         | `agent-control, observer, operator` | Show uncommitted changes in a checkout, optionally against a git ref.                                                                                                                                                                                                                                                                            |
+| `projects.search`            | `query`   | `projects`         | `agent-control, observer, operator` | Search project file contents with ripgrep.                                                                                                                                                                                                                                                                                                       |
+| `projects.change`            | `change`  | `projects`         | `operator`                          | Paths stay project-relative and policy-excluded paths (.git, secrets, local-only agent state) are refused. Take expected_dirty_sha256 or expected_head from projects.get, or expected_file_sha256 from projects.read.                                                                                                                            |
+| `projects.context`           | `context` | `projects`         | `agent-control, observer, operator` | Components are budgeted independently; an unavailable component names its reason and source ref so the caller can follow the direct route.                                                                                                                                                                                                       |
+| `beads.closure`              | `query`   | `beads`            | `agent-control, observer, operator` | Read native dependency closure, cycles, readiness and incomplete frontier at one revision.                                                                                                                                                                                                                                                       |
+| `beads.query`                | `query`   | `beads`            | `agent-control, observer, operator` | The owner filters, projects and counts before serialization. limit sizes immutable observation pages; cursors never reread live rows. Owner coverage reports any bounded prefix; beads.read exposes native offset paging. at pins historical reads to an exact resolved Dolt revision. aggregate counts or groups without fetching issue bodies. |
+| `beads.get`                  | `get`     | `beads`            | `agent-control, observer, operator` | Read one bead by ref, id or title fragment, with optional comments, history, dependencies or graph.                                                                                                                                                                                                                                              |
+| `beads.operate`              | `operate` | `beads`            | `operator`                          | Beads maintenance: publish the export snapshot, push or pull sync, create, list or restore backups.                                                                                                                                                                                                                                              |
+| `beads.read`                 | `query`   | `beads`            | `agent-control, observer, operator` | Read native Beads queries, counts or dependency closure with owner revisions and paging.                                                                                                                                                                                                                                                         |
+| `beads.comment`              | `change`  | `beads`            | `operator`                          | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
+| `beads.dependencies.add`     | `change`  | `beads`            | `operator`                          | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
+| `beads.changeset`            | `change`  | `beads`            | `operator`                          | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
+| `beads.batch.close`          | `change`  | `beads`            | `operator`                          | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
+| `beads.graph.create`         | `change`  | `beads`            | `operator`                          | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
+| `beads.claim`                | `change`  | `beads`            | `operator`                          | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
+| `beads.claim_next`           | `change`  | `beads`            | `operator`                          | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
+| `beads.close`                | `change`  | `beads`            | `operator`                          | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
+| `beads.metadata.compare_set` | `change`  | `beads`            | `operator`                          | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
+| `beads.dependencies.count`   | `query`   | `beads`            | `agent-control, observer, operator` | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
+| `beads.create`               | `change`  | `beads`            | `operator`                          | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
+| `beads.memory.forget`        | `change`  | `beads`            | `operator`                          | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
+| `beads.graph`                | `query`   | `beads`            | `agent-control, observer, operator` | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
+| `beads.memory.get`           | `query`   | `beads`            | `agent-control, observer, operator` | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
+| `beads.blockers`             | `query`   | `beads`            | `agent-control, observer, operator` | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
+| `beads.dependencies`         | `query`   | `beads`            | `agent-control, observer, operator` | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
+| `beads.cycles`               | `query`   | `beads`            | `agent-control, observer, operator` | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
+| `beads.memories`             | `query`   | `beads`            | `agent-control, observer, operator` | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
+| `beads.related`              | `query`   | `beads`            | `agent-control, observer, operator` | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
+| `beads.unclaim`              | `change`  | `beads`            | `operator`                          | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
+| `beads.memory.remember`      | `change`  | `beads`            | `operator`                          | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
+| `beads.dependencies.remove`  | `change`  | `beads`            | `operator`                          | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
+| `beads.reopen`               | `change`  | `beads`            | `operator`                          | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
+| `beads.update`               | `change`  | `beads`            | `operator`                          | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
+| `jobs.list`                  | `query`   | `systemd-jobs`     | `agent-control, observer, operator` | List queued jobs (pueue tasks) newest first, optionally for one project.                                                                                                                                                                                                                                                                         |
+| `jobs.get`                   | `get`     | `systemd-jobs`     | `agent-control, observer, operator` | One job's state and bead binding, with its log range or typed result on request.                                                                                                                                                                                                                                                                 |
+| `jobs.logs`                  | `get`     | `systemd-jobs`     | `agent-control, observer, operator` | A byte range of a job's bounded log (workload output, then the wrapper's stderr).                                                                                                                                                                                                                                                                |
+| `jobs.wait`                  | `wait`    | `systemd-jobs`     | `agent-control, observer, operator` | The wait runs in a worker thread; cancelling the MCP request abandons it without stopping the job. A task id is a queue position: pass the launch_reference the start returned and the wait follows its job across a reorder, answering with the id it is at now.                                                                                |
+| `jobs.cancel`                | `operate` | `systemd-jobs`     | `agent-control, operator`           | Pass expected_phase to refuse when the job already moved on. Survivors lists PIDs that outlived the reap.                                                                                                                                                                                                                                        |
+| `jobs.retry`                 | `operate` | `systemd-jobs`     | `agent-control, operator`           | Re-run a terminal job in place with the same launch input and id (pueue restart).                                                                                                                                                                                                                                                                |
+| `jobs.clean`                 | `operate` | `systemd-jobs`     | `agent-control, operator`           | Refused while the job is still queued or running; cancel it first.                                                                                                                                                                                                                                                                               |
+| `operations.run`             | `run`     | `systemd-jobs`     | `agent-control, operator`           | Queue one project-declared operation in its declared pool on the root or a worktree.                                                                                                                                                                                                                                                             |
+| `shell.run`                  | `run`     | `systemd-jobs`     | `operator`                          | cwd is confined to the checkout. Default execution is asynchronous. wait=true waits up to wait_timeout_seconds (default 5, maximum 30) on the same job and returns bounded output; a timeout returns a continuation locator without cancelling the job.                                                                                          |
+| `batches.list`               | `query`   | `systemd-jobs`     | `agent-control, observer, operator` | List batch runs newest first, with each worker's stage and task.                                                                                                                                                                                                                                                                                 |
+| `batches.status`             | `get`     | `systemd-jobs`     | `agent-control, observer, operator` | Every id is a pueue task id: pass a worker's or the landing's job_id to jobs.logs, jobs.wait or jobs.cancel, with its job_launch_reference so the call survives a reorder.                                                                                                                                                                       |
+| `batches.start`              | `run`     | `systemd-jobs`     | `agent-control, operator`           | backend, model and effort default to the project descriptor's packet defaults. Refused when a bead is claimed or already in a live run. The landing task is queued behind the workers and runs itself.                                                                                                                                           |
+| `batches.land`               | `run`     | `systemd-jobs`     | `agent-control, operator`           | batches.start already queues the first landing behind the workers; this re-queues one after a landing failed. The landing runs as a job, so wait on landing_job_id rather than on this call.                                                                                                                                                     |
+| `batches.resume`             | `run`     | `systemd-jobs`     | `agent-control, operator`           | backend, model and effort default to the worker's own. Refused while the worker's task is still queued or running.                                                                                                                                                                                                                               |
+| `wait.for`                   | `wait`    | `waits`            | `agent-control, observer, operator` | Conditions: job_terminal, bead_status, bead_revision, unit_state, file_hash, file_exists, capture_freshness, receipt_appearance, terminal_output. A timeout returns the current evidence and a continuation token.                                                                                                                               |
+| `events.tail`                | `events`  | `events`           | `agent-control, observer, operator` | Pass next_cursor back to continue; a cursor from another principal or project scope fails stale_cursor.                                                                                                                                                                                                                                          |
+| `context.compose`            | `context` | `context`          | `agent-control, observer, operator` | The selected owner supplies domain composition, source coverage and partial results. The gateway preserves its product and availability in an immutable observation under snapshot_ref.                                                                                                                                                          |
+| `desktop.snapshot`           | `status`  | `desktop`          | `observer, operator`                | One observation of the desktop: monitors, workspaces, focus, every window with geometry, and a generation stamp.                                                                                                                                                                                                                                 |
+| `desktop.screenshot`         | `query`   | `desktop`          | `observer, operator`                | full captures the focused output through the HDR-aware screenshot owner; window/rect/monitor targets capture with grim. On HDR outputs a corrected SDR variant is produced and preferred for the image block.                                                                                                                                    |
+| `desktop.tree`               | `query`   | `desktop`          | `observer, operator`                | Fails unavailable when the pyatspi bindings are absent from the gateway environment; Chromium apps expose a tree only when launched with accessibility forced on.                                                                                                                                                                                |
+| `desktop.operate`            | `operate` | `desktop`          | `operator`                          | Pointer clicks, drags and scrolls need a virtual pointer tool (ydotool) on the host and fail unavailable without one; cursor moves always work. Window targets are natural locators; ambiguity returns candidates.                                                                                                                               |
+| `terminals.list`             | `catalog` | `terminals`        | `observer, operator`                | Every kitty window with its ref, title, cwd, shell pid, focus and foreground processes.                                                                                                                                                                                                                                                          |
+| `terminals.get`              | `get`     | `terminals`        | `observer, operator`                | Resolve one terminal by ref, kitty id, title, cwd, pid or focus.                                                                                                                                                                                                                                                                                 |
+| `terminals.screen`           | `query`   | `terminals`        | `observer, operator`                | The visible screen text of one terminal.                                                                                                                                                                                                                                                                                                         |
+| `terminals.scrollback`       | `query`   | `terminals`        | `observer, operator`                | The last N lines of a terminal's history, screen, or last command output.                                                                                                                                                                                                                                                                        |
+| `terminals.processes`        | `query`   | `terminals`        | `observer, operator`                | Foreground processes of one terminal and whether its shell is at a prompt.                                                                                                                                                                                                                                                                       |
+| `terminals.send`             | `operate` | `terminals`        | `operator`                          | Send text (optionally with Enter or bracketed paste) or key presses to one terminal.                                                                                                                                                                                                                                                             |
+| `terminals.run`              | `run`     | `terminals`        | `operator`                          | Completion and output rely on kitty shell integration (at_prompt, last_cmd_output). exit_status is reported only with capture_exit_status, which appends a visible marker to the command line.                                                                                                                                                   |
+| `terminals.wait`             | `wait`    | `terminals`        | `observer, operator`                | Wait until a terminal is at its prompt, shows a regex, finishes a process, or changes title.                                                                                                                                                                                                                                                     |
+| `terminals.focus`            | `operate` | `terminals`        | `operator`                          | Focus one kitty window.                                                                                                                                                                                                                                                                                                                          |
+| `terminals.open`             | `operate` | `terminals`        | `operator`                          | Open a new kitty window (OS window, split or tab) with an optional cwd and command; returns its ref.                                                                                                                                                                                                                                             |
+| `browser.pages`              | `catalog` | `browser`          | `observer, operator`                | List every open Chrome page with its ref; flags the gateway-owned pages that can be read, captured or operated.                                                                                                                                                                                                                                  |
+| `browser.page`               | `get`     | `browser`          | `observer, operator`                | Element refs (g<generation>e<n>) are attached to the DOM for this snapshot; a later snapshot or reload replaces them, and a stale ref fails not_found.                                                                                                                                                                                           |
+| `browser.screenshot`         | `query`   | `browser`          | `observer, operator`                | Screenshot a gateway-owned page through CDP; the image rides in an image block and is retained as an artifact.                                                                                                                                                                                                                                   |
+| `browser.operate`            | `operate` | `browser`          | `operator`                          | Operator tabs are never accepted as targets, even when a locator matches one. Element targets take a snapshot ref or a CSS selector.                                                                                                                                                                                                             |
+| `machine.snapshot`           | `status`  | `machine`          | `agent-control, observer, operator` | Each section carries its own availability and source; GPU and network report unavailable because no owner exposes them.                                                                                                                                                                                                                          |
+| `machine.query`              | `query`   | `machine`          | `agent-control, observer, operator` | Read one sinnix-observe section with cursor paging, or the ops-reducer revision (operation=actions).                                                                                                                                                                                                                                             |
+| `machine.units.list`         | `query`   | `machine`          | `agent-control, observer, operator` | List systemd units of one manager with load/active/sub state and a canonical ref each.                                                                                                                                                                                                                                                           |
+| `machine.units.get`          | `get`     | `machine`          | `agent-control, observer, operator` | Describe one unit via systemctl show: states, main pid, cgroup, restarts, timestamps.                                                                                                                                                                                                                                                            |
+| `machine.units.logs`         | `query`   | `machine`          | `agent-control, observer, operator` | Journal entries for one unit (journalctl -o json), bounded by line count and bytes.                                                                                                                                                                                                                                                              |
+| `machine.prepare`            | `get`     | `ops-reducer`      | `agent-control, observer, operator` | Read the selected target identity and action preconditions without changing it.                                                                                                                                                                                                                                                                  |
+| `machine.operate`            | `operate` | `ops-reducer`      | `operator`                          | expected_target must match the target identity returned by machine.prepare; the reducer receipt is verified against the submitted action and target.                                                                                                                                                                                             |
+| `machine.units.operate`      | `operate` | `ops-reducer`      | `operator`                          | Start, stop or restart one unit through the ops reducer (reload and wait are not reducer actions).                                                                                                                                                                                                                                               |
+| `processes.list`             | `query`   | `machine`          | `agent-control, observer, operator` | List live processes filtered by name, pid, unit, cgroup or user, with a canonical ref each.                                                                                                                                                                                                                                                      |
+| `processes.get`              | `get`     | `machine`          | `agent-control, observer, operator` | Describe one process: cmdline, cwd, exe, redacted env, cgroup/unit, parent, children, sockets, cpu and memory.                                                                                                                                                                                                                                   |
+| `processes.tree`             | `query`   | `machine`          | `agent-control, observer, operator` | Parent/child process tree from one root or from every top-level process, bounded by depth and node count.                                                                                                                                                                                                                                        |
+| `processes.signal`           | `operate` | `machine`          | `operator`                          | The reducer path is the attested one and needs expected_target; the direct path is receipted by the gateway audit chain only.                                                                                                                                                                                                                    |
+| `processes.wait`             | `wait`    | `machine`          | `agent-control, observer, operator` | Wait until a process (same pid and start ticks) exits, or the bounded timeout elapses.                                                                                                                                                                                                                                                           |
+| `mcp.servers`                | `status`  | `mcp-broker`       | `observer, operator`                | Each probe runs initialize + tools/list with a 5 s bound; a timeout stores the upstream stderr as an artifact and returns its ref.                                                                                                                                                                                                               |
+| `mcp.tools`                  | `catalog` | `mcp-broker`       | `observer, operator`                | Catalog of every admitted upstream tool with its namespaced ref, input schema and read/change effect.                                                                                                                                                                                                                                            |
+| `mcp.call`                   | `query`   | `mcp-broker`       | `observer, operator`                | Reads require an owner read-only annotation or an exact match to trusted registry selectors. Other requests require mcp.change (operator only). A target using server=sinnix-agent-gateway is routed to the named direct read action, preserving its native content blocks; changes stay direct-only.                                            |
+| `mcp.change`                 | `change`  | `mcp-broker`       | `operator`                          | Invoke an upstream request not admitted as read-only by annotation or trusted registry selectors.                                                                                                                                                                                                                                                |
+| `artifacts.list`             | `catalog` | `artifacts`        | `agent-control, observer, operator` | List principal-visible artifacts with kind, owner, size and canonical ref.                                                                                                                                                                                                                                                                       |
+| `artifacts.get`              | `get`     | `artifacts`        | `agent-control, observer, operator` | Metadata of one artifact without its bytes.                                                                                                                                                                                                                                                                                                      |
+| `artifacts.read`             | `query`   | `artifacts`        | `agent-control, observer, operator` | Read an artifact: text inline with offsets, images as image blocks, other binary as read-only links.                                                                                                                                                                                                                                             |
+| `captures.query`             | `query`   | `captures`         | `agent-control, observer, operator` | List runtime-declared capture lanes, describe one, or read per-lane record deltas since a time.                                                                                                                                                                                                                                                  |
+| `activity.query`             | `query`   | `captures`         | `agent-control, observer, operator` | Reads sinnix-capture-v1 envelope files under each lane path within the time window; coverage lists which lanes contributed and which have no envelope files.                                                                                                                                                                                     |
+| `sessions.query`             | `query`   | `polylogue`        | `observer, operator`                | Read indexed session pages or explicit original-source fallback through Polylogue.                                                                                                                                                                                                                                                               |
+| `memory.query`               | `query`   | `polylogue`        | `observer, operator`                | Search original session sources or read one source object with explicit coverage.                                                                                                                                                                                                                                                                |
+| `timeline.query`             | `query`   | `polylogue`        | `observer, operator`                | Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.                                                                                                                                                                                        |
+| `sessions.list`              | `query`   | `polylogue`        | `observer, operator`                | Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.                                                                                                                                                                                        |
+| `sessions.search`            | `query`   | `polylogue`        | `observer, operator`                | Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.                                                                                                                                                                                        |
+| `sessions.read`              | `query`   | `polylogue`        | `observer, operator`                | Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.                                                                                                                                                                                        |
+| `sessions.raw.list`          | `query`   | `polylogue`        | `observer, operator`                | Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.                                                                                                                                                                                        |
+| `sessions.raw.search`        | `query`   | `polylogue`        | `observer, operator`                | Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.                                                                                                                                                                                        |
+| `sessions.raw.read`          | `query`   | `polylogue`        | `observer, operator`                | Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.                                                                                                                                                                                        |
+| `sessions.raw.timeline`      | `query`   | `polylogue`        | `observer, operator`                | Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.                                                                                                                                                                                        |
+| `memory.raw.get`             | `query`   | `polylogue`        | `observer, operator`                | Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.                                                                                                                                                                                        |
+| `memory.raw.search`          | `query`   | `polylogue`        | `observer, operator`                | Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.                                                                                                                                                                                        |
+| `sessions.resume`            | `query`   | `polylogue`        | `observer, operator`                | Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.                                                                                                                                                                                        |
+| `campaign.progress`          | `query`   | `lynchpin`         | `observer, operator`                | Task closure, verified delivery and acceptance remain separate. Missing evidence is unknown; bounded closure cannot establish an exact denominator. Historical task state is read at its resolved owner revision.                                                                                                                                |
+| `sessions.orchestration`     | `query`   | `polylogue`        | `observer, operator`                | Native parent, model and token fields remain unknown when absent from stored evidence. Each owner product retains its coverage, provenance and ingestion watermark.                                                                                                                                                                              |
+| `audit.verify`               | `status`  | `audit`            | `agent-control, observer, operator` | Verify the tamper-evident audit hash chain end to end.                                                                                                                                                                                                                                                                                           |
+| `audit.receipt`              | `get`     | `audit`            | `agent-control, observer, operator` | Read one principal-scoped audit receipt by ref or id.                                                                                                                                                                                                                                                                                            |
+| `results.get`                | `get`     | `results`          | `agent-control, observer, operator` | Read one immutable stored response snapshot by ref or id.                                                                                                                                                                                                                                                                                        |
+| `capabilities.query`         | `catalog` | `capability-index` | `agent-control, observer, operator` | Search the generated machine capability index or describe one capability exactly.                                                                                                                                                                                                                                                                |
 
 ### `gateway.status`
 
 Report the principal, contract hashes, tool count and per-route availability.
 
-Family: `status`. Owner: `gateway`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `status`. Owner: `gateway`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: health, ready, capabilities, what can you do.
 
@@ -220,7 +253,7 @@ Status:
 
 Every action is also an MCP tool with its full schema in tools/list; the catalog adds aliases, affordances, resource kinds and the brokered MCP tool inventory (lynchpin, sinex, polylogue).
 
-Family: `catalog`. Owner: `gateway`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `catalog`. Owner: `gateway`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: search tools, discover, help, list actions, which tool.
 
@@ -388,7 +421,7 @@ Lynchpin tools:
 
 Describe one host path: kind, size, mode, owner, timestamps, MIME, hash.
 
-Family: `query`. Owner: `files`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `files`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: file info, metadata, size, permissions.
 
@@ -531,7 +564,7 @@ Stat a file:
 
 List a directory with a canonical ref for every child.
 
-Family: `query`. Owner: `files`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `files`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: ls, directory, folder, browse.
 
@@ -686,7 +719,7 @@ List /realm/tmp:
 
 Read a file: text inline, images as image blocks, other binary as read-only links.
 
-Family: `query`. Owner: `files`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `files`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: cat, open, view, image, picture, screenshot file.
 
@@ -877,7 +910,7 @@ Lines 10-30 of a log:
 
 Without content_regex the search is over paths (fd); with it, matching lines are returned (ripgrep --json). Results are bounded by limit and timeout.
 
-Family: `query`. Owner: `files`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `files`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: find, grep, locate, rg, fd, search files, recent files.
 
@@ -1182,7 +1215,7 @@ Files modified in the last two hours:
 
 Pass expected_sha256 from the prior read so a concurrent change is refused instead of overwritten. Unified hunks are applied individually; rejected hunks are reported.
 
-Family: `change`. Owner: `files`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `change`. Owner: `files`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: edit, apply diff, modify text, sed.
 
@@ -1354,7 +1387,7 @@ Input schema:
       "description": "Hash from the prior read; the edit is refused if the file changed."
     },
     "idempotency_key": {
-      "description": "Replaying the same key with the same request returns the stored response.",
+      "description": "Gateway response replay key. Confirmed responses replay unchanged; interrupted effects require owner reconciliation and are never automatically retried.",
       "maxLength": 256,
       "minLength": 1,
       "type": "string"
@@ -1370,7 +1403,7 @@ Input schema:
         }
       ],
       "default": null,
-      "description": "Owner-checked preconditions; a mismatch fails with precondition_failed."
+      "description": "Owner-specific checks; a mismatch fails with precondition_failed. Checks are best effort unless the owner explicitly guarantees an atomic compare and mutation."
     },
     "reason": {
       "anyOf": [
@@ -1452,7 +1485,7 @@ Apply a unified diff:
 
 Copy and move never overwrite an existing destination. Remove supports regular files only.
 
-Family: `change`. Owner: `files`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `change`. Owner: `files`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: write, save, rename, delete, mkdir, touch.
 
@@ -1692,7 +1725,7 @@ Input schema:
       "default": null
     },
     "idempotency_key": {
-      "description": "Replaying the same key with the same request returns the stored response.",
+      "description": "Gateway response replay key. Confirmed responses replay unchanged; interrupted effects require owner reconciliation and are never automatically retried.",
       "maxLength": 256,
       "minLength": 1,
       "type": "string"
@@ -1708,7 +1741,7 @@ Input schema:
         }
       ],
       "default": null,
-      "description": "Owner-checked preconditions; a mismatch fails with precondition_failed."
+      "description": "Owner-specific checks; a mismatch fails with precondition_failed. Checks are best effort unless the owner explicitly guarantees an atomic compare and mutation."
     },
     "reason": {
       "anyOf": [
@@ -1789,7 +1822,7 @@ Move a file:
 
 The caller supplies every mapping. The plan hashes each regular source file and records collision, parent and filesystem facts without changing host files.
 
-Family: `query`. Owner: `organization`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `organization`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: move plan, relocation preview.
 
@@ -1953,7 +1986,7 @@ Plan one explicit move:
 
 All planned sources, destinations and parents are revalidated before the first mutation. Transfers never overwrite. Results are honest about partial completion and no global atomicity is claimed.
 
-Family: `change`. Owner: `organization`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `change`. Owner: `organization`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: apply move plan, relocation changeset.
 
@@ -1991,7 +2024,7 @@ Input schema:
       "description": "Unix timestamp after which the call is refused."
     },
     "idempotency_key": {
-      "description": "Replaying the same key with the same request returns the stored response.",
+      "description": "Gateway response replay key. Confirmed responses replay unchanged; interrupted effects require owner reconciliation and are never automatically retried.",
       "maxLength": 256,
       "minLength": 1,
       "type": "string"
@@ -2015,7 +2048,7 @@ Input schema:
         }
       ],
       "default": null,
-      "description": "Owner-checked preconditions; a mismatch fails with precondition_failed."
+      "description": "Owner-specific checks; a mismatch fails with precondition_failed. Checks are best effort unless the owner explicitly guarantees an atomic compare and mutation."
     },
     "reason": {
       "anyOf": [
@@ -2071,7 +2104,7 @@ Apply an approved plan:
 
 Runs the existing bounded files.search text primitive once for each supplied old path. It only reports provenance and never rewrites references.
 
-Family: `query`. Owner: `organization`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `organization`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: find old paths, path references.
 
@@ -2251,7 +2284,7 @@ Find one old path:
 
 List the projects this principal may read, with canonical refs.
 
-Family: `query`. Owner: `projects`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `projects`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: repos, repositories, workspaces, which projects.
 
@@ -2333,7 +2366,7 @@ List projects:
 
 The checkout row carries head and dirty_sha256, the preconditions projects.change requires.
 
-Family: `get`. Owner: `projects`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `get`. Owner: `projects`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: git status, branch, worktrees, checkouts, head, dirty.
 
@@ -2519,7 +2552,7 @@ Checkout containing a path:
 
 List files under a project-relative directory without following symlinks.
 
-Family: `query`. Owner: `projects`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `projects`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: ls, file list, directory, layout.
 
@@ -2688,7 +2721,7 @@ Top-level modules:
 
 Read a bounded line range of one project file.
 
-Family: `query`. Owner: `projects`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `projects`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: cat, open, view file, source.
 
@@ -2874,7 +2907,7 @@ Read CLAUDE.md:
 
 Read several bounded project files from one checkout observation.
 
-Family: `query`. Owner: `projects`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `projects`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: bulk read, read files, batch files.
 
@@ -3084,7 +3117,7 @@ Read two files:
 
 Sensitive, local-only, hidden, and symlinked paths are excluded. The export is bounded and includes a manifest with file hashes and the checkout revision.
 
-Family: `query`. Owner: `projects`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `projects`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: snapshot, bundle, download project, portable export.
 
@@ -3253,7 +3286,7 @@ Export a bounded checkout:
 
 Show uncommitted changes in a checkout, optionally against a git ref.
 
-Family: `query`. Owner: `projects`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `projects`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: git diff, changes, what changed, working tree.
 
@@ -3422,7 +3455,7 @@ Working tree vs HEAD:
 
 Search project file contents with ripgrep.
 
-Family: `query`. Owner: `projects`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `projects`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: grep, rg, find in files, where is.
 
@@ -3591,7 +3624,7 @@ Find a symbol:
 
 Paths stay project-relative and policy-excluded paths (.git, secrets, local-only agent state) are refused. Take expected_dirty_sha256 or expected_head from projects.get, or expected_file_sha256 from projects.read.
 
-Family: `change`. Owner: `projects`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `change`. Owner: `projects`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: write file, edit, apply patch, save.
 
@@ -3805,7 +3838,7 @@ Input schema:
       "default": null
     },
     "idempotency_key": {
-      "description": "Replaying the same key with the same request returns the stored response.",
+      "description": "Gateway response replay key. Confirmed responses replay unchanged; interrupted effects require owner reconciliation and are never automatically retried.",
       "maxLength": 256,
       "minLength": 1,
       "type": "string"
@@ -3821,7 +3854,7 @@ Input schema:
         }
       ],
       "default": null,
-      "description": "Owner-checked preconditions; a mismatch fails with precondition_failed."
+      "description": "Owner-specific checks; a mismatch fails with precondition_failed. Checks are best effort unless the owner explicitly guarantees an atomic compare and mutation."
     },
     "reason": {
       "anyOf": [
@@ -3903,7 +3936,7 @@ Apply a patch:
 
 Components are budgeted independently; an unavailable component names its reason and source ref so the caller can follow the direct route.
 
-Family: `context`. Owner: `projects`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `context`. Owner: `projects`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: orient, overview, where are we, triage, what is ready.
 
@@ -4062,13 +4095,13 @@ Triage:
 
 ### `beads.closure`
 
-Read a bounded dependency closure, cycles, declared gates and decisions, readiness and incomplete frontier at one revision.
+Read native dependency closure, cycles, readiness and incomplete frontier at one revision.
 
-Family: `query`. Owner: `beads`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `beads`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: dependency closure, campaign closure.
 
-Follow-up actions: `beads.get`, `beads.query`.
+Follow-up actions: `beads.get`, `beads.query`, `campaign.progress`.
 
 Input schema:
 
@@ -4214,13 +4247,13 @@ Blocking closure at a historical time:
 
 ### `beads.query`
 
-The owner filters, projects and counts before serialization. limit sizes pages of one immutable snapshot of all matching rows; cursors never reread live rows. Snapshot storage and memory scale with the matching data, so use projection or aggregate for broad queries. at pins historical reads to an exact resolved Dolt revision. aggregate counts or groups without fetching issue bodies.
+The owner filters, projects and counts before serialization. limit sizes immutable observation pages; cursors never reread live rows. Owner coverage reports any bounded prefix; beads.read exposes native offset paging. at pins historical reads to an exact resolved Dolt revision. aggregate counts or groups without fetching issue bodies.
 
-Family: `query`. Owner: `beads`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `beads`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: tasks, issues, todo, ready work, what is blocked, bd list, bd ready, backlog.
 
-Follow-up actions: `beads.get`, `beads.change`, `projects.context`.
+Follow-up actions: `beads.get`, `beads.update`, `projects.context`.
 
 Input schema:
 
@@ -4319,650 +4352,6 @@ Input schema:
           ],
           "default": null,
           "description": "Search memories."
-        }
-      },
-      "type": "object"
-    },
-    "NativeFilters": {
-      "additionalProperties": false,
-      "description": "Owner-native list filters; ready and stale_claims views accept a subset.",
-      "properties": {
-        "all": {
-          "anyOf": [
-            {
-              "const": true,
-              "type": "boolean"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "assignee": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "closed_after": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "closed_before": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "created_after": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "created_before": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "defer_after": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "defer_before": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "deferred": {
-          "anyOf": [
-            {
-              "const": true,
-              "type": "boolean"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "desc_contains": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "due_after": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "due_before": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "empty_description": {
-          "anyOf": [
-            {
-              "const": true,
-              "type": "boolean"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "exclude_label": {
-          "anyOf": [
-            {
-              "items": {
-                "type": "string"
-              },
-              "maxItems": 32,
-              "minItems": 1,
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "exclude_type": {
-          "anyOf": [
-            {
-              "items": {
-                "type": "string"
-              },
-              "maxItems": 32,
-              "minItems": 1,
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "external_contains": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "external_ref": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "gated": {
-          "anyOf": [
-            {
-              "const": true,
-              "type": "boolean"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "has_metadata_key": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "id": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "include_deferred": {
-          "anyOf": [
-            {
-              "const": true,
-              "type": "boolean"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "include_ephemeral": {
-          "anyOf": [
-            {
-              "const": true,
-              "type": "boolean"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "include_gates": {
-          "anyOf": [
-            {
-              "const": true,
-              "type": "boolean"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "include_infra": {
-          "anyOf": [
-            {
-              "const": true,
-              "type": "boolean"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "include_templates": {
-          "anyOf": [
-            {
-              "const": true,
-              "type": "boolean"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "label": {
-          "anyOf": [
-            {
-              "items": {
-                "type": "string"
-              },
-              "maxItems": 32,
-              "minItems": 1,
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "label_any": {
-          "anyOf": [
-            {
-              "items": {
-                "type": "string"
-              },
-              "maxItems": 32,
-              "minItems": 1,
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "label_pattern": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "label_regex": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "metadata_field": {
-          "anyOf": [
-            {
-              "items": {
-                "type": "string"
-              },
-              "maxItems": 32,
-              "minItems": 1,
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "mol": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "mol_type": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "no_assignee": {
-          "anyOf": [
-            {
-              "const": true,
-              "type": "boolean"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "no_labels": {
-          "anyOf": [
-            {
-              "const": true,
-              "type": "boolean"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "no_parent": {
-          "anyOf": [
-            {
-              "const": true,
-              "type": "boolean"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "no_pinned": {
-          "anyOf": [
-            {
-              "const": true,
-              "type": "boolean"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "notes_contains": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "overdue": {
-          "anyOf": [
-            {
-              "const": true,
-              "type": "boolean"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "parent": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "pinned": {
-          "anyOf": [
-            {
-              "const": true,
-              "type": "boolean"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "priority": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "priority_max": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "priority_min": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "ready": {
-          "anyOf": [
-            {
-              "const": true,
-              "type": "boolean"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "spec": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "stale_days": {
-          "anyOf": [
-            {
-              "minimum": 1,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "status": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "title": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "title_contains": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "type": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "unassigned": {
-          "anyOf": [
-            {
-              "const": true,
-              "type": "boolean"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "updated_after": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "updated_before": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "wisp_type": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
         }
       },
       "type": "object"
@@ -5073,7 +4462,7 @@ Input schema:
         }
       ],
       "default": null,
-      "description": "Beads-compatible comparison/AND/OR/NOT expression compiled to read-only owner SQL. Supports RFC3339/date and h/d/w relative dates; natural-language dates are unavailable."
+      "description": "Native Beads comparison/AND/OR/NOT expression; parsing and time semantics belong to the owner."
     },
     "filters": {
       "anyOf": [
@@ -5119,7 +4508,7 @@ Input schema:
     },
     "limit": {
       "default": 50,
-      "description": "Page size within an immutable snapshot; all matching rows are projected at the owner before paging. Use aggregate for counts without fetching issue rows.",
+      "description": "Page size within an immutable owner observation. Coverage reports any owner read bound; beads.read exposes native offset paging. Use aggregate for counts.",
       "minimum": 1,
       "type": "integer"
     },
@@ -5138,7 +4527,8 @@ Input schema:
     "native_filters": {
       "anyOf": [
         {
-          "$ref": "#/$defs/NativeFilters"
+          "additionalProperties": true,
+          "type": "object"
         },
         {
           "type": "null"
@@ -5301,11 +4691,11 @@ Dependency graph:
 
 Read one bead by ref, id or title fragment, with optional comments, history, dependencies or graph.
 
-Family: `get`. Owner: `beads`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `get`. Owner: `beads`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: show task, bd show, issue details, task notes.
 
-Follow-up actions: `beads.change`, `beads.query`.
+Follow-up actions: `beads.update`, `beads.query`.
 
 Input schema:
 
@@ -5513,1521 +4903,11 @@ By title:
 }
 ```
 
-### `beads.change`
-
-expected.expected_task_revision/expected_etag come from beads.get. Use mode=preview to see the compiled command and a preview_digest before applying.
-
-Family: `change`. Owner: `beads`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
-
-Aliases: create task, close task, claim, comment, add note, bd update, bd close, block on.
-
-Follow-up actions: `beads.get`, `beads.query`, `beads.changeset`.
-
-Input schema:
-
-```json
-{
-  "$defs": {
-    "BeadLocator": {
-      "additionalProperties": false,
-      "description": "A Beads task by canonical ref, id, or a title fragment within a project.",
-      "properties": {
-        "id": {
-          "anyOf": [
-            {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Bead id such as sinnix-abc1; the project is inferred from the prefix unless given."
-        },
-        "project": {
-          "anyOf": [
-            {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "ref": {
-          "anyOf": [
-            {
-              "pattern": "^sinnix://projects/[^/]+/beads/[^/]+$",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "title_contains": {
-          "anyOf": [
-            {
-              "maxLength": 512,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Case-insensitive title fragment; requires project and must match exactly one bead."
-        }
-      },
-      "type": "object"
-    },
-    "ClaimOp": {
-      "additionalProperties": false,
-      "properties": {
-        "operation": {
-          "const": "claim",
-          "default": "claim",
-          "type": "string"
-        },
-        "target": {
-          "$ref": "#/$defs/BeadLocator"
-        }
-      },
-      "required": [
-        "target"
-      ],
-      "type": "object"
-    },
-    "CloseOp": {
-      "additionalProperties": false,
-      "properties": {
-        "force": {
-          "anyOf": [
-            {
-              "const": true,
-              "type": "boolean"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Close despite open blockers."
-        },
-        "operation": {
-          "const": "close",
-          "default": "close",
-          "type": "string"
-        },
-        "reason": {
-          "anyOf": [
-            {
-              "maxLength": 32000,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "target": {
-          "$ref": "#/$defs/BeadLocator"
-        }
-      },
-      "required": [
-        "target"
-      ],
-      "type": "object"
-    },
-    "CommentOp": {
-      "additionalProperties": false,
-      "properties": {
-        "operation": {
-          "const": "comment",
-          "default": "comment",
-          "type": "string"
-        },
-        "target": {
-          "$ref": "#/$defs/BeadLocator"
-        },
-        "text": {
-          "maxLength": 32000,
-          "minLength": 1,
-          "type": "string"
-        }
-      },
-      "required": [
-        "target",
-        "text"
-      ],
-      "type": "object"
-    },
-    "CreateOp": {
-      "additionalProperties": false,
-      "properties": {
-        "acceptance": {
-          "anyOf": [
-            {
-              "maxLength": 32000,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "assignee": {
-          "anyOf": [
-            {
-              "maxLength": 256,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "defer": {
-          "anyOf": [
-            {
-              "maxLength": 64,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "dependencies": {
-          "anyOf": [
-            {
-              "items": {
-                "type": "string"
-              },
-              "maxItems": 32,
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "description": {
-          "anyOf": [
-            {
-              "maxLength": 32000,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "design": {
-          "anyOf": [
-            {
-              "maxLength": 32000,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "due": {
-          "anyOf": [
-            {
-              "maxLength": 64,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "external_ref": {
-          "anyOf": [
-            {
-              "maxLength": 1000,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "labels": {
-          "anyOf": [
-            {
-              "items": {
-                "type": "string"
-              },
-              "maxItems": 32,
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "notes": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Notes"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "operation": {
-          "const": "create",
-          "default": "create",
-          "type": "string"
-        },
-        "parent": {
-          "anyOf": [
-            {
-              "maxLength": 128,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "priority": {
-          "anyOf": [
-            {
-              "maxLength": 8,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "0-4 or P0-P4."
-        },
-        "project": {
-          "$ref": "#/$defs/ProjectLocator"
-        },
-        "spec_id": {
-          "anyOf": [
-            {
-              "maxLength": 256,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "status": {
-          "anyOf": [
-            {
-              "maxLength": 64,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "title": {
-          "maxLength": 512,
-          "minLength": 1,
-          "type": "string"
-        },
-        "type": {
-          "anyOf": [
-            {
-              "maxLength": 64,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        }
-      },
-      "required": [
-        "project",
-        "title"
-      ],
-      "type": "object"
-    },
-    "DependencyAddOp": {
-      "additionalProperties": false,
-      "properties": {
-        "depends_on": {
-          "maxLength": 128,
-          "minLength": 1,
-          "type": "string"
-        },
-        "operation": {
-          "const": "dependency.add",
-          "default": "dependency.add",
-          "type": "string"
-        },
-        "target": {
-          "$ref": "#/$defs/BeadLocator"
-        },
-        "type": {
-          "default": "blocks",
-          "maxLength": 64,
-          "type": "string"
-        }
-      },
-      "required": [
-        "target",
-        "depends_on"
-      ],
-      "type": "object"
-    },
-    "DependencyRemoveOp": {
-      "additionalProperties": false,
-      "properties": {
-        "depends_on": {
-          "maxLength": 128,
-          "minLength": 1,
-          "type": "string"
-        },
-        "operation": {
-          "const": "dependency.remove",
-          "default": "dependency.remove",
-          "type": "string"
-        },
-        "target": {
-          "$ref": "#/$defs/BeadLocator"
-        }
-      },
-      "required": [
-        "target",
-        "depends_on"
-      ],
-      "type": "object"
-    },
-    "GraphCreateOp": {
-      "additionalProperties": false,
-      "properties": {
-        "graph": {
-          "additionalProperties": true,
-          "description": "Native bd create --graph plan.",
-          "minProperties": 1,
-          "type": "object"
-        },
-        "operation": {
-          "const": "graph.create",
-          "default": "graph.create",
-          "type": "string"
-        },
-        "project": {
-          "$ref": "#/$defs/ProjectLocator"
-        }
-      },
-      "required": [
-        "project",
-        "graph"
-      ],
-      "type": "object"
-    },
-    "LabelPatch": {
-      "additionalProperties": false,
-      "properties": {
-        "add": {
-          "anyOf": [
-            {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "remove": {
-          "anyOf": [
-            {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "replace": {
-          "anyOf": [
-            {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        }
-      },
-      "type": "object"
-    },
-    "MemoryForgetOp": {
-      "additionalProperties": false,
-      "properties": {
-        "key": {
-          "maxLength": 256,
-          "minLength": 1,
-          "type": "string"
-        },
-        "operation": {
-          "const": "memory.forget",
-          "default": "memory.forget",
-          "type": "string"
-        },
-        "target": {
-          "$ref": "#/$defs/BeadLocator"
-        }
-      },
-      "required": [
-        "target",
-        "key"
-      ],
-      "type": "object"
-    },
-    "MemoryRememberOp": {
-      "additionalProperties": false,
-      "properties": {
-        "key": {
-          "maxLength": 256,
-          "minLength": 1,
-          "type": "string"
-        },
-        "operation": {
-          "const": "memory.remember",
-          "default": "memory.remember",
-          "type": "string"
-        },
-        "target": {
-          "$ref": "#/$defs/BeadLocator",
-          "description": "Bead the memory is attested against."
-        },
-        "text": {
-          "maxLength": 32000,
-          "minLength": 1,
-          "type": "string"
-        }
-      },
-      "required": [
-        "target",
-        "key",
-        "text"
-      ],
-      "type": "object"
-    },
-    "MetadataPatch": {
-      "additionalProperties": false,
-      "properties": {
-        "set": {
-          "anyOf": [
-            {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "unset": {
-          "anyOf": [
-            {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        }
-      },
-      "type": "object"
-    },
-    "Notes": {
-      "additionalProperties": false,
-      "properties": {
-        "mode": {
-          "default": "append",
-          "enum": [
-            "append",
-            "replace"
-          ],
-          "type": "string"
-        },
-        "text": {
-          "maxLength": 32000,
-          "type": "string"
-        }
-      },
-      "required": [
-        "text"
-      ],
-      "type": "object"
-    },
-    "Patch": {
-      "additionalProperties": false,
-      "properties": {
-        "labels": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/LabelPatch"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "metadata": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/MetadataPatch"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "notes": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Notes"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "set": {
-          "anyOf": [
-            {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Scalar fields: title, description, design, acceptance, status, priority, assignee, due, defer, estimate, external_ref, spec_id, parent."
-        },
-        "unset": {
-          "anyOf": [
-            {
-              "items": {
-                "enum": [
-                  "due",
-                  "defer",
-                  "parent"
-                ],
-                "type": "string"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        }
-      },
-      "type": "object"
-    },
-    "Preconditions": {
-      "additionalProperties": false,
-      "properties": {
-        "expected_assignee": {
-          "anyOf": [
-            {
-              "maxLength": 256,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "expected_etag": {
-          "anyOf": [
-            {
-              "pattern": "^[0-9a-f]{64}$",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "expected_status": {
-          "anyOf": [
-            {
-              "maxLength": 64,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "expected_task_revision": {
-          "anyOf": [
-            {
-              "pattern": "^[0-9a-f]{64}$",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        }
-      },
-      "type": "object"
-    },
-    "ProjectLocator": {
-      "additionalProperties": false,
-      "description": "A configured project by canonical ref, project id, or a path inside it.",
-      "properties": {
-        "path": {
-          "anyOf": [
-            {
-              "maxLength": 4096,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Absolute host path inside a project checkout."
-        },
-        "project": {
-          "anyOf": [
-            {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Project id."
-        },
-        "ref": {
-          "anyOf": [
-            {
-              "pattern": "^sinnix://projects/[^/]+(?:/checkouts/[^/]+)?$",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Canonical project or checkout ref."
-        }
-      },
-      "type": "object"
-    },
-    "RelateOp": {
-      "additionalProperties": false,
-      "properties": {
-        "operation": {
-          "const": "relate",
-          "default": "relate",
-          "type": "string"
-        },
-        "other_id": {
-          "maxLength": 128,
-          "minLength": 1,
-          "type": "string"
-        },
-        "target": {
-          "$ref": "#/$defs/BeadLocator"
-        }
-      },
-      "required": [
-        "target",
-        "other_id"
-      ],
-      "type": "object"
-    },
-    "ReopenOp": {
-      "additionalProperties": false,
-      "properties": {
-        "operation": {
-          "const": "reopen",
-          "default": "reopen",
-          "type": "string"
-        },
-        "reason": {
-          "anyOf": [
-            {
-              "maxLength": 32000,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "target": {
-          "$ref": "#/$defs/BeadLocator"
-        }
-      },
-      "required": [
-        "target"
-      ],
-      "type": "object"
-    },
-    "ReparentOp": {
-      "additionalProperties": false,
-      "properties": {
-        "operation": {
-          "const": "reparent",
-          "default": "reparent",
-          "type": "string"
-        },
-        "parent_id": {
-          "default": "",
-          "description": "Empty detaches from the parent.",
-          "maxLength": 128,
-          "type": "string"
-        },
-        "target": {
-          "$ref": "#/$defs/BeadLocator"
-        }
-      },
-      "required": [
-        "target"
-      ],
-      "type": "object"
-    },
-    "UnclaimOp": {
-      "additionalProperties": false,
-      "properties": {
-        "operation": {
-          "const": "unclaim",
-          "default": "unclaim",
-          "type": "string"
-        },
-        "reason": {
-          "anyOf": [
-            {
-              "maxLength": 32000,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "target": {
-          "$ref": "#/$defs/BeadLocator"
-        }
-      },
-      "required": [
-        "target"
-      ],
-      "type": "object"
-    },
-    "UnrelateOp": {
-      "additionalProperties": false,
-      "properties": {
-        "operation": {
-          "const": "unrelate",
-          "default": "unrelate",
-          "type": "string"
-        },
-        "other_id": {
-          "maxLength": 128,
-          "minLength": 1,
-          "type": "string"
-        },
-        "target": {
-          "$ref": "#/$defs/BeadLocator"
-        }
-      },
-      "required": [
-        "target",
-        "other_id"
-      ],
-      "type": "object"
-    },
-    "UpdateOp": {
-      "additionalProperties": false,
-      "properties": {
-        "operation": {
-          "const": "update",
-          "default": "update",
-          "type": "string"
-        },
-        "patch": {
-          "$ref": "#/$defs/Patch"
-        },
-        "target": {
-          "$ref": "#/$defs/BeadLocator"
-        }
-      },
-      "required": [
-        "target",
-        "patch"
-      ],
-      "type": "object"
-    }
-  },
-  "additionalProperties": false,
-  "properties": {
-    "actor": {
-      "anyOf": [
-        {
-          "maxLength": 256,
-          "minLength": 1,
-          "type": "string"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null
-    },
-    "change": {
-      "discriminator": {
-        "mapping": {
-          "claim": "#/$defs/ClaimOp",
-          "close": "#/$defs/CloseOp",
-          "comment": "#/$defs/CommentOp",
-          "create": "#/$defs/CreateOp",
-          "dependency.add": "#/$defs/DependencyAddOp",
-          "dependency.remove": "#/$defs/DependencyRemoveOp",
-          "graph.create": "#/$defs/GraphCreateOp",
-          "memory.forget": "#/$defs/MemoryForgetOp",
-          "memory.remember": "#/$defs/MemoryRememberOp",
-          "relate": "#/$defs/RelateOp",
-          "reopen": "#/$defs/ReopenOp",
-          "reparent": "#/$defs/ReparentOp",
-          "unclaim": "#/$defs/UnclaimOp",
-          "unrelate": "#/$defs/UnrelateOp",
-          "update": "#/$defs/UpdateOp"
-        },
-        "propertyName": "operation"
-      },
-      "oneOf": [
-        {
-          "$ref": "#/$defs/CreateOp"
-        },
-        {
-          "$ref": "#/$defs/GraphCreateOp"
-        },
-        {
-          "$ref": "#/$defs/UpdateOp"
-        },
-        {
-          "$ref": "#/$defs/ClaimOp"
-        },
-        {
-          "$ref": "#/$defs/UnclaimOp"
-        },
-        {
-          "$ref": "#/$defs/CloseOp"
-        },
-        {
-          "$ref": "#/$defs/ReopenOp"
-        },
-        {
-          "$ref": "#/$defs/CommentOp"
-        },
-        {
-          "$ref": "#/$defs/DependencyAddOp"
-        },
-        {
-          "$ref": "#/$defs/DependencyRemoveOp"
-        },
-        {
-          "$ref": "#/$defs/RelateOp"
-        },
-        {
-          "$ref": "#/$defs/UnrelateOp"
-        },
-        {
-          "$ref": "#/$defs/ReparentOp"
-        },
-        {
-          "$ref": "#/$defs/MemoryRememberOp"
-        },
-        {
-          "$ref": "#/$defs/MemoryForgetOp"
-        }
-      ]
-    },
-    "deadline_at": {
-      "anyOf": [
-        {
-          "type": "number"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "description": "Unix timestamp after which the call is refused."
-    },
-    "expected": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/Preconditions"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "description": "Typed preconditions; merged with preconditions."
-    },
-    "idempotency_key": {
-      "description": "Replaying the same key with the same request returns the stored response.",
-      "maxLength": 256,
-      "minLength": 1,
-      "type": "string"
-    },
-    "mode": {
-      "default": "apply",
-      "description": "preview compiles and dry-runs without writing and returns a preview_digest.",
-      "enum": [
-        "apply",
-        "preview"
-      ],
-      "type": "string"
-    },
-    "preconditions": {
-      "anyOf": [
-        {
-          "additionalProperties": true,
-          "type": "object"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "description": "Owner-checked preconditions; a mismatch fails with precondition_failed."
-    },
-    "preview_digest": {
-      "anyOf": [
-        {
-          "pattern": "^[0-9a-f]{64}$",
-          "type": "string"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "description": "From a preview; apply is refused if the source moved since."
-    },
-    "reason": {
-      "anyOf": [
-        {
-          "maxLength": 2000,
-          "minLength": 1,
-          "type": "string"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null
-    },
-    "request_id": {
-      "anyOf": [
-        {
-          "maxLength": 128,
-          "type": "string"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "description": "Caller-chosen correlation id."
-    }
-  },
-  "required": [
-    "idempotency_key",
-    "change"
-  ],
-  "type": "object"
-}
-```
-
-Output: the response envelope's `data` field is `ChangeResult`; the full envelope schema is the `sinnix://gateway/v2/actions/beads.change` resource and `sinnix-agent-gateway catalog beads.change --schema`.
-
-Examples:
-
-Create:
-
-```json
-{
-  "change": {
-    "operation": "create",
-    "priority": "2",
-    "project": {
-      "project": "sinnix"
-    },
-    "title": "Port beads actions",
-    "type": "task"
-  },
-  "idempotency_key": "create-1"
-}
-```
-
-Comment:
-
-```json
-{
-  "change": {
-    "operation": "comment",
-    "target": {
-      "id": "sinnix-abc1"
-    },
-    "text": "landed in gateway-overhaul"
-  },
-  "idempotency_key": "comment-1"
-}
-```
-
-Close with reason:
-
-```json
-{
-  "change": {
-    "operation": "close",
-    "reason": "shipped",
-    "target": {
-      "id": "sinnix-abc1"
-    }
-  },
-  "expected": {
-    "expected_status": "in_progress"
-  },
-  "idempotency_key": "close-1"
-}
-```
-
-### `beads.changeset`
-
-No global rollback: each applied step reports its outcome and a compensation hint. Preview first, then apply with the returned preview_digest.
-
-Family: `change`. Owner: `beads`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
-
-Aliases: batch, bulk create, epic with children, several tasks.
-
-Follow-up actions: `beads.query`, `beads.get`, `beads.change`.
-
-Input schema:
-
-```json
-{
-  "$defs": {
-    "ChangesetStep": {
-      "additionalProperties": false,
-      "properties": {
-        "bead": {
-          "anyOf": [
-            {
-              "maxLength": 128,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Target bead id, or a $symbol bound by an earlier step; omit for create, graph and memory operations."
-        },
-        "bind": {
-          "anyOf": [
-            {
-              "pattern": "^[A-Za-z][A-Za-z0-9_]{0,63}$",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Name the created bead for later steps as $name."
-        },
-        "operation": {
-          "enum": [
-            "create",
-            "graph.create",
-            "update",
-            "claim",
-            "unclaim",
-            "close",
-            "reopen",
-            "comment",
-            "dependency.add",
-            "dependency.remove",
-            "relate",
-            "unrelate",
-            "reparent",
-            "memory.remember",
-            "memory.forget"
-          ],
-          "type": "string"
-        },
-        "parameters": {
-          "additionalProperties": true,
-          "description": "Operation fields as for beads.change (title, text, patch, ...); values may reference $symbols.",
-          "type": "object"
-        },
-        "preconditions": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Preconditions"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "project": {
-          "anyOf": [
-            {
-              "maxLength": 128,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Project id; defaults to the changeset project."
-        }
-      },
-      "required": [
-        "operation"
-      ],
-      "type": "object"
-    },
-    "Preconditions": {
-      "additionalProperties": false,
-      "properties": {
-        "expected_assignee": {
-          "anyOf": [
-            {
-              "maxLength": 256,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "expected_etag": {
-          "anyOf": [
-            {
-              "pattern": "^[0-9a-f]{64}$",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "expected_status": {
-          "anyOf": [
-            {
-              "maxLength": 64,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "expected_task_revision": {
-          "anyOf": [
-            {
-              "pattern": "^[0-9a-f]{64}$",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        }
-      },
-      "type": "object"
-    },
-    "ProjectLocator": {
-      "additionalProperties": false,
-      "description": "A configured project by canonical ref, project id, or a path inside it.",
-      "properties": {
-        "path": {
-          "anyOf": [
-            {
-              "maxLength": 4096,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Absolute host path inside a project checkout."
-        },
-        "project": {
-          "anyOf": [
-            {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Project id."
-        },
-        "ref": {
-          "anyOf": [
-            {
-              "pattern": "^sinnix://projects/[^/]+(?:/checkouts/[^/]+)?$",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Canonical project or checkout ref."
-        }
-      },
-      "type": "object"
-    }
-  },
-  "additionalProperties": false,
-  "properties": {
-    "actor": {
-      "anyOf": [
-        {
-          "maxLength": 256,
-          "minLength": 1,
-          "type": "string"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null
-    },
-    "deadline_at": {
-      "anyOf": [
-        {
-          "type": "number"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "description": "Unix timestamp after which the call is refused."
-    },
-    "idempotency_key": {
-      "description": "Replaying the same key with the same request returns the stored response.",
-      "maxLength": 256,
-      "minLength": 1,
-      "type": "string"
-    },
-    "mode": {
-      "default": "preview",
-      "enum": [
-        "preview",
-        "apply"
-      ],
-      "type": "string"
-    },
-    "on_error": {
-      "default": "stop",
-      "enum": [
-        "stop",
-        "continue"
-      ],
-      "type": "string"
-    },
-    "preconditions": {
-      "anyOf": [
-        {
-          "additionalProperties": true,
-          "type": "object"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "description": "Owner-checked preconditions; a mismatch fails with precondition_failed."
-    },
-    "preview_digest": {
-      "anyOf": [
-        {
-          "pattern": "^[0-9a-f]{64}$",
-          "type": "string"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null
-    },
-    "project": {
-      "$ref": "#/$defs/ProjectLocator"
-    },
-    "reason": {
-      "anyOf": [
-        {
-          "maxLength": 2000,
-          "minLength": 1,
-          "type": "string"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null
-    },
-    "request_id": {
-      "anyOf": [
-        {
-          "maxLength": 128,
-          "type": "string"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "description": "Caller-chosen correlation id."
-    },
-    "steps": {
-      "items": {
-        "$ref": "#/$defs/ChangesetStep"
-      },
-      "maxItems": 128,
-      "minItems": 1,
-      "type": "array"
-    }
-  },
-  "required": [
-    "idempotency_key",
-    "project",
-    "steps"
-  ],
-  "type": "object"
-}
-```
-
-Output: the response envelope's `data` field is `ChangesetResult`; the full envelope schema is the `sinnix://gateway/v2/actions/beads.changeset` resource and `sinnix-agent-gateway catalog beads.changeset --schema`.
-
-Examples:
-
-Epic with one child:
-
-```json
-{
-  "idempotency_key": "changeset-1",
-  "project": {
-    "project": "sinnix"
-  },
-  "steps": [
-    {
-      "bind": "epic",
-      "operation": "create",
-      "parameters": {
-        "title": "Epic",
-        "type": "epic"
-      }
-    },
-    {
-      "operation": "create",
-      "parameters": {
-        "parent": "$epic",
-        "title": "Child"
-      }
-    }
-  ]
-}
-```
-
 ### `beads.operate`
 
 Beads maintenance: publish the export snapshot, push or pull sync, create, list or restore backups.
 
-Family: `operate`. Owner: `beads`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `operate`. Owner: `beads`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: bd sync, bd export, backup beads, restore beads.
 
@@ -7189,7 +5069,7 @@ Input schema:
       "description": "Unix timestamp after which the call is refused."
     },
     "idempotency_key": {
-      "description": "Replaying the same key with the same request returns the stored response.",
+      "description": "Gateway response replay key. Confirmed responses replay unchanged; interrupted effects require owner reconciliation and are never automatically retried.",
       "maxLength": 256,
       "minLength": 1,
       "type": "string"
@@ -7238,7 +5118,7 @@ Input schema:
         }
       ],
       "default": null,
-      "description": "Owner-checked preconditions; a mismatch fails with precondition_failed."
+      "description": "Owner-specific checks; a mismatch fails with precondition_failed. Checks are best effort unless the owner explicitly guarantees an atomic compare and mutation."
     },
     "project": {
       "$ref": "#/$defs/ProjectLocator"
@@ -7312,11 +5192,6081 @@ Restore a backup:
 }
 ```
 
+### `beads.read`
+
+Read native Beads queries, counts or dependency closure with owner revisions and paging.
+
+Family: `query`. Owner: `beads`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+
+Follow-up actions: `beads.get`, `beads.query`.
+
+Input schema:
+
+```json
+{
+  "$defs": {
+    "Aggregate": {
+      "additionalProperties": false,
+      "properties": {
+        "group_by": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "Order": {
+      "additionalProperties": false,
+      "properties": {
+        "field": {
+          "type": "string"
+        },
+        "reverse": {
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "ProjectLocator": {
+      "additionalProperties": false,
+      "description": "A configured project by canonical ref, project id, or a path inside it.",
+      "properties": {
+        "path": {
+          "anyOf": [
+            {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Absolute host path inside a project checkout."
+        },
+        "project": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Project id."
+        },
+        "ref": {
+          "anyOf": [
+            {
+              "pattern": "^sinnix://projects/[^/]+(?:/checkouts/[^/]+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Canonical project or checkout ref."
+        }
+      },
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "aggregate": {
+      "$ref": "#/$defs/Aggregate"
+    },
+    "at": {
+      "type": "string"
+    },
+    "deadline_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Unix timestamp after which the call is refused."
+    },
+    "depth": {
+      "type": "integer"
+    },
+    "direction": {
+      "type": "string"
+    },
+    "expression": {
+      "type": "string"
+    },
+    "filters": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "include": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "include_closed": {
+      "type": "boolean"
+    },
+    "limit": {
+      "type": "integer"
+    },
+    "max_edges": {
+      "type": "integer"
+    },
+    "native_filters": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "offset": {
+      "type": "integer"
+    },
+    "order": {
+      "$ref": "#/$defs/Order"
+    },
+    "project": {
+      "$ref": "#/$defs/ProjectLocator"
+    },
+    "projection": {
+      "type": "string"
+    },
+    "provenance": {
+      "type": "boolean"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "relations": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Caller-chosen correlation id."
+    },
+    "roots": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "view": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "project"
+  ],
+  "type": "object"
+}
+```
+
+Output: the response envelope's `data` field is `NativeResult`; the full envelope schema is the `sinnix://gateway/v2/actions/beads.read` resource and `sinnix-agent-gateway catalog beads.read --schema`.
+
+Examples:
+
+Page a pinned dependency closure:
+
+```json
+{
+  "at": "HEAD",
+  "depth": 3,
+  "direction": "dependencies",
+  "limit": 50,
+  "offset": 0,
+  "project": {
+    "project": "sinnix"
+  },
+  "relations": [
+    "blocks"
+  ],
+  "roots": [
+    "sinnix-abc1"
+  ]
+}
+```
+
+### `beads.comment`
+
+The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
+
+Family: `change`. Owner: `beads`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+
+Follow-up actions: `beads.get`, `beads.query`.
+
+Input schema:
+
+```json
+{
+  "$defs": {
+    "AddCommentRequest": {
+      "additionalProperties": false,
+      "description": "One comment to append. The issue is named by the path, so it is not a member here: a body carrying it too would give one request two spellings of one anchor and a question about what to do when they disagree.",
+      "properties": {
+        "author": {
+          "description": "Who is signing the comment. CALLER-ASSERTED, and not the authenticated principal \u2014 see the operation description.\n\nTrimmed of surrounding space, then refused when the result is empty, when it exceeds 256 bytes or 255 characters (the storage column), or when it carries a control character. The bounds and the character rule are `actor`'s, unchanged, because the value lands in a column of the same width that every renderer of the thread prints, where an unfiltered C1 introducer is an escape-sequence payload.",
+          "maxLength": 256,
+          "minLength": 1,
+          "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F\\u2028\\u2029]+$",
+          "type": "string"
+        },
+        "text": {
+          "description": "The comment body, stored VERBATIM: newlines, surrounding space and unicode all survive, and nothing trims the value that lands in the row.\n\nNO LENGTH BOUND AND NO CHARACTER RULE, unlike `author` beside it, and both absences are the column: this one is `LONGTEXT` rather than a 255-character field, and a comment that is a stack trace or a diff is an ordinary comment. The only cap is the 1 MiB every body on this surface shares.\n\nBOTH PLANES AGREE ABOUT THAT, which is worth stating because they did not. `wisp_comments.text` was left `TEXT` \u2014 65535 bytes \u2014 when the durable column was widened, so a comment past that limit wrote fine against an issue and failed against a wisp, on an operation that resolves its anchor across both planes deliberately. A caller therefore could not know which side of the bound it was on until the write failed. The ephemeral column is widened to match, so this member's bound is one number rather than two.\n\nBlank after trimming is a `400` \u2014 a comment of nothing but whitespace carries no information and is almost always a shell quoting accident \u2014 and blankness is judged on a TRIMMED COPY while the stored value is untrimmed, so a comment that merely begins with a newline is a comment.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "author",
+        "text"
+      ],
+      "type": "object"
+    },
+    "Path": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "Exact canonical issue id. No fuzzy, prefix or substring resolution.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "ProjectLocator": {
+      "additionalProperties": false,
+      "description": "A configured project by canonical ref, project id, or a path inside it.",
+      "properties": {
+        "path": {
+          "anyOf": [
+            {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Absolute host path inside a project checkout."
+        },
+        "project": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Project id."
+        },
+        "ref": {
+          "anyOf": [
+            {
+              "pattern": "^sinnix://projects/[^/]+(?:/checkouts/[^/]+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Canonical project or checkout ref."
+        }
+      },
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "body": {
+      "$ref": "#/$defs/AddCommentRequest"
+    },
+    "deadline_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Unix timestamp after which the call is refused."
+    },
+    "idempotency_key": {
+      "description": "Gateway response replay key. Confirmed responses replay unchanged; interrupted effects require owner reconciliation and are never automatically retried.",
+      "maxLength": 256,
+      "minLength": 1,
+      "type": "string"
+    },
+    "path": {
+      "$ref": "#/$defs/Path"
+    },
+    "preconditions": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Owner-specific checks; a mismatch fails with precondition_failed. Checks are best effort unless the owner explicitly guarantees an atomic compare and mutation."
+    },
+    "project": {
+      "$ref": "#/$defs/ProjectLocator"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Caller-chosen correlation id."
+    }
+  },
+  "required": [
+    "body",
+    "path",
+    "idempotency_key",
+    "project"
+  ],
+  "type": "object"
+}
+```
+
+Output: the response envelope's `data` field is `NativeResult`; the full envelope schema is the `sinnix://gateway/v2/actions/beads.comment` resource and `sinnix-agent-gateway catalog beads.comment --schema`.
+
+Examples:
+
+Append one comment to an issue's thread:
+
+```json
+{
+  "body": {
+    "author": "example-worker",
+    "text": "Focused regression checks passed."
+  },
+  "idempotency_key": "example-addComment-1",
+  "path": {
+    "id": "sinnix-abc1"
+  },
+  "project": {
+    "project": "sinnix"
+  }
+}
+```
+
+### `beads.dependencies.add`
+
+The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
+
+Family: `change`. Owner: `beads`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+
+Follow-up actions: `beads.get`, `beads.query`.
+
+Input schema:
+
+```json
+{
+  "$defs": {
+    "AddDependenciesRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "description": "Who is asserting the edges, under `ClaimRequest.actor`'s rules and for the same reasons: the server trims it, refuses an empty result, anything longer than 256 BYTES, and any control character including newline. It is attributed on each `dependency_added` event a genuinely new edge records, and interpolated into the storage commit message.",
+          "maxLength": 256,
+          "minLength": 1,
+          "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F\\u2028\\u2029]+$",
+          "type": "string"
+        },
+        "edges": {
+          "description": "The edges to assert, in the caller's order. An empty array is a `400` rather than a successful no-op: a write request that writes nothing is a client bug, and answering it cheerfully is how a client whose own list filtered to nothing silently stops wiring anything.\n\nThe 100-edge cap is a bound on how long one request may hold a write transaction, not a statement about batch semantics. Split a larger graph; each request is atomic on its own \u2014 but note that splitting it changes what the cycle gate can see, since the gate runs over one request at a time.\n\nA per-edge refusal names its offender as `edges[i].member`.",
+          "items": {
+            "$ref": "#/$defs/DependencyEdge"
+          },
+          "maxItems": 100,
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "actor",
+        "edges"
+      ],
+      "type": "object"
+    },
+    "DependencyEdge": {
+      "additionalProperties": false,
+      "description": "One directed edge, as a REQUEST names it. It is not `Dependency`, which is the stored row `GET /v0/beads/dependencies` returns and carries the columns storage assigned; this is the three members a caller supplies.",
+      "properties": {
+        "depends_on_id": {
+          "description": "The edge's TARGET \u2014 the issue depended upon. An exact canonical id, an `external:` reference, or an id belonging to another repository. Only an absence this database can SEE is refused. It must differ from `issue_id`.",
+          "maxLength": 255,
+          "minLength": 1,
+          "type": "string"
+        },
+        "issue_id": {
+          "description": "The edge's SOURCE \u2014 the issue that depends on the other end. An EXACT canonical id, and one this database holds: an edge follows its source, so a source that names nothing is a `400`.",
+          "maxLength": 255,
+          "minLength": 1,
+          "type": "string"
+        },
+        "type": {
+          "description": "The edge type, from the same OPEN vocabulary `Dependency.type` carries: checked for being a storable value, never for membership of a known-types list, so a workspace's own type passes.",
+          "maxLength": 255,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "depends_on_id",
+        "issue_id",
+        "type"
+      ],
+      "type": "object"
+    },
+    "ProjectLocator": {
+      "additionalProperties": false,
+      "description": "A configured project by canonical ref, project id, or a path inside it.",
+      "properties": {
+        "path": {
+          "anyOf": [
+            {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Absolute host path inside a project checkout."
+        },
+        "project": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Project id."
+        },
+        "ref": {
+          "anyOf": [
+            {
+              "pattern": "^sinnix://projects/[^/]+(?:/checkouts/[^/]+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Canonical project or checkout ref."
+        }
+      },
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "body": {
+      "$ref": "#/$defs/AddDependenciesRequest"
+    },
+    "deadline_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Unix timestamp after which the call is refused."
+    },
+    "idempotency_key": {
+      "description": "Gateway response replay key. Confirmed responses replay unchanged; interrupted effects require owner reconciliation and are never automatically retried.",
+      "maxLength": 256,
+      "minLength": 1,
+      "type": "string"
+    },
+    "preconditions": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Owner-specific checks; a mismatch fails with precondition_failed. Checks are best effort unless the owner explicitly guarantees an atomic compare and mutation."
+    },
+    "project": {
+      "$ref": "#/$defs/ProjectLocator"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Caller-chosen correlation id."
+    }
+  },
+  "required": [
+    "body",
+    "idempotency_key",
+    "project"
+  ],
+  "type": "object"
+}
+```
+
+Output: the response envelope's `data` field is `NativeResult`; the full envelope schema is the `sinnix://gateway/v2/actions/beads.dependencies.add` resource and `sinnix-agent-gateway catalog beads.dependencies.add --schema`.
+
+Examples:
+
+Assert dependency edges as one act:
+
+```json
+{
+  "body": {
+    "actor": "example-worker",
+    "edges": [
+      {
+        "depends_on_id": "sinnix-abc1",
+        "issue_id": "sinnix-abc2",
+        "type": "blocks"
+      }
+    ]
+  },
+  "idempotency_key": "example-addDependencies-1",
+  "project": {
+    "project": "sinnix"
+  }
+}
+```
+
+### `beads.changeset`
+
+The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
+
+Family: `change`. Owner: `beads`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+
+Follow-up actions: `beads.get`, `beads.query`.
+
+Input schema:
+
+```json
+{
+  "$defs": {
+    "AddItem": {
+      "maxLength": 255,
+      "type": "string"
+    },
+    "ApplyBatchRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "description": "Who is applying the plan, under `ClaimRequest.actor`'s rules and for the same reasons: the server trims it, refuses an empty result, anything longer than 256 BYTES (the `maxLength` above counts characters \u2014 the byte limit is the binding one), and any control character including newline.\n\nIt is attributed to every item and to the ONE history entry the request records, because a batch is one act by one caller.",
+          "maxLength": 256,
+          "minLength": 1,
+          "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F\\u2028\\u2029]+$",
+          "type": "string"
+        },
+        "force_id_prefix": {
+          "default": false,
+          "description": "Permits an explicit `create.id` outside the workspace's configured issue prefix, for EVERY create item in the request. Without it such an id is refused by the role and arrives as a `400`.",
+          "type": "boolean"
+        },
+        "items": {
+          "description": "The items to apply, IN THE ORDER THEY ARE TO BE APPLIED. An empty array is a `400` rather than a successful no-op: a write request that writes nothing is a client bug, and answering it cheerfully is how a client whose own plan filtered to nothing silently stops writing.\n\nThe 100-item cap bounds how long one request may hold a write transaction, not batch semantics. Split a larger plan; each request is atomic on its own \u2014 but splitting it changes what the end gate can see, since the gate runs over one request at a time.\n\nA per-item refusal names its offender as `items[i].kind.member`.",
+          "items": {
+            "$ref": "#/$defs/ApplyItem"
+          },
+          "maxItems": 100,
+          "minItems": 1,
+          "type": "array"
+        },
+        "provenance": {
+          "description": "Labels the version-control history entry this request records, under `updateIssue`'s rule: it changes how the entry READS, never whether one is recorded. Empty composes a default naming how many items of each kind landed and no ids.",
+          "maxLength": 255,
+          "type": "string"
+        },
+        "skip_per_edge_cycle_check": {
+          "default": false,
+          "description": "Drops the PER-EDGE cycle probe for a caller wiring a large graph, exactly as it does on `POST /v0/beads/dependencies:add`.\n\nIT NEVER DROPS THE END GATE, which runs once after every item and re-validates the whole graph this request built, and it never drops the self-dependency refusal. It trades per-edge attribution for speed, not validation for speed.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "actor",
+        "items"
+      ],
+      "type": "object"
+    },
+    "ApplyCloseItem": {
+      "additionalProperties": false,
+      "description": "Closes one existing issue, under `POST /v0/beads/issues/{id}:close`'s rules including first-close-wins.",
+      "properties": {
+        "expected_version": {
+          "description": "Requires the row's `revision` to equal this value, evaluated as-modified and checked before the idempotent close. A miss refuses the whole request with `409 precondition_failed`, and `ApplyUpdateItem.expected_version`'s already-written rule applies here identically.\n\nTHERE IS DELIBERATELY NO `expected_status` HERE. A close is idempotent \u2014 re-closing a closed issue is `changed: false` \u2014 so a guard spelled to refuse an already-closed row is asking for a REFUSAL where this verb answers with a no-op. That belongs on an `update` item whose `patch.status` crosses into the done category.\n\nDECODE IT AS A 64-BIT INTEGER, on `ApplyUpdateItem.expected_version`'s terms, including its note that a corrupted token here costs the whole plan.",
+          "type": "integer"
+        },
+        "force": {
+          "default": false,
+          "description": "Bypasses close policy \u2014 the open-children refusal and the live-blocker refusal \u2014 and nothing else.\n\nCLOSE POLICY EVALUATES AT THIS ITEM, against the row as this request has already changed it. A LATER item that gives a closed parent an open child is NOT refused: the policy is a gate on the closing act, not an invariant the store maintains.",
+          "type": "boolean"
+        },
+        "reason": {
+          "description": "Why the issue is closed, stored and read back as `close_reason`. THE FIRST CLOSE WINS: an idempotent re-close writes neither this nor `session`.",
+          "maxLength": 255,
+          "type": "string"
+        },
+        "session": {
+          "description": "The working session that closed the issue, stored and read back as `closed_by_session`, under the same first-close-wins rule.",
+          "maxLength": 255,
+          "type": "string"
+        },
+        "target": {
+          "$ref": "#/$defs/Ref"
+        }
+      },
+      "required": [
+        "target"
+      ],
+      "type": "object"
+    },
+    "ApplyCreateItem": {
+      "additionalProperties": false,
+      "description": "Creates one issue and optionally NAMES it, so later items can reach the row without knowing an id the request has not minted yet.\n\nIt publishes the whole create vocabulary rather than `POST /v0/beads/issues:batchCreate`'s narrow one, and the additions are the point: `status`, `sender`, `metadata`, `ephemeral` and `no_history` are the members whose absence there makes that operation unusable for a caller composing a real plan.\n\nTHE EDGES ARE NOT HERE. An issue's dependencies and its parent are `dep_add` ITEMS, so the order of every edge in the request is total and there is exactly one spelling for an edge. An item carrying comments or dependencies on the issue is a `400`.\n\n`metadata` is the issue's own metadata document and must be a JSON OBJECT where it is present at all. It is stored as sent; the resolved ids `metadata_refs` splices are written over its top-level keys after every id in the request exists.",
+      "properties": {
+        "acceptance_criteria": {
+          "type": "string"
+        },
+        "assignee": {
+          "maxLength": 255,
+          "type": "string"
+        },
+        "defer_until": {
+          "description": "RFC 3339. The issue is hidden from ready work until then.",
+          "format": "date-time",
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "design": {
+          "type": "string"
+        },
+        "due_at": {
+          "description": "RFC 3339.",
+          "format": "date-time",
+          "type": "string"
+        },
+        "ephemeral": {
+          "default": false,
+          "description": "Creates the issue on the EPHEMERAL plane rather than the durable one. Per item, exactly as it is for `POST /v0/beads/issues:batchCreate`, so one request may create durable issues and ephemeral ones together.\n\nThe two planes hold their edges in different tables, so a `dep_add` between two rows this request creates on OPPOSITE planes is refused with everything else the request asked for. Mutually exclusive with `no_history`.",
+          "type": "boolean"
+        },
+        "estimated_minutes": {
+          "description": "An estimate in minutes. Absent leaves it unset.",
+          "type": "integer"
+        },
+        "external_ref": {
+          "maxLength": 255,
+          "type": "string"
+        },
+        "id": {
+          "description": "An explicit id for the new row, CREATE-ONLY: an id that already names a stored row is a `409` `already_exists` and the whole request is refused \u2014 never an adoption and never an overwrite. To act on a row that already exists, send an `update` item referencing it by `{\"id\": \u2026}`. The id is checked against the workspace's configured issue prefix unless the request sets `force_id_prefix`.\n\nAbsent is the ordinary case and the server mints one. This is the member `POST /v0/beads/issues:batchCreate` deliberately does not publish, which is why that operation can never adopt or overwrite a stored row and this one can be refused for trying.",
+          "maxLength": 255,
+          "minLength": 1,
+          "type": "string"
+        },
+        "issue_type": {
+          "description": "Issue type. Spelled `issue_type` rather than `type`, matching the member `Issue` carries, and validated against the built-ins plus the workspace's configured custom types by the ROLE \u2014 this server cannot read that vocabulary without a transaction, so it checks only what this schema declares and an unknown one arrives as a `400`.",
+          "maxLength": 255,
+          "type": "string"
+        },
+        "key": {
+          "description": "This item's name inside the request. OPTIONAL \u2014 an item nothing refers to needs no name \u2014 and unique across the request's create items; a repeat is a `400`. It is what a later `Ref.key` resolves to, and the response's `keys` member is where the id it was bound to is read.",
+          "maxLength": 255,
+          "minLength": 1,
+          "type": "string"
+        },
+        "labels": {
+          "description": "The complete label set the issue is created with. Authoritative, not a patch \u2014 a create has nothing to add to.",
+          "items": {
+            "$ref": "#/$defs/Label"
+          },
+          "type": "array"
+        },
+        "metadata": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetadataValue"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "metadata_refs": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Ref"
+          },
+          "description": "Splices resolved ids into this issue's metadata: each entry writes the id its `Ref` resolves to as the WHOLE VALUE of one top-level metadata key.\n\nIT IS THE ONE PLACE A KEY MAY REACH FORWARD, or name this item's own `key` \u2014 see the operation's description. A ref here that names a key NO item declares is still a `400`.\n\nIT IS A TYPED MAP, NOT TEMPLATING. A `${key}` placeholder inside a JSON string would have no escape for a literal dollar-brace, would collide with every other templating language a caller's own values might carry, and could not be type-checked at all. This is one key, one whole value, one level deep.\n\nThe splice is applied AFTER the row is created, so a consumer of the event stream sees a create and then an update on the spliced row.",
+          "type": "object"
+        },
+        "no_history": {
+          "default": false,
+          "description": "Creates the issue on the ephemeral plane WITHOUT history, and without the garbage collection an ordinary ephemeral row is eligible for. Mutually exclusive with `ephemeral`.",
+          "type": "boolean"
+        },
+        "notes": {
+          "type": "string"
+        },
+        "owner": {
+          "description": "The human owner, which is a different member from `assignee`: the assignee is who is working it now, the owner is who it is attributed to.",
+          "maxLength": 255,
+          "type": "string"
+        },
+        "priority": {
+          "description": "0 is P0/critical. Absent means the workspace default.",
+          "maximum": 4,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "sender": {
+          "description": "Who sent this, for the message-shaped rows a plan creates. Stored verbatim and interpreted by nothing on this surface.",
+          "maxLength": 255,
+          "type": "string"
+        },
+        "status": {
+          "description": "The status the issue is created in, from this workspace's own configured vocabulary. Absent means the workspace default.",
+          "maxLength": 255,
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 255,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "title"
+      ],
+      "type": "object"
+    },
+    "ApplyDepAddItem": {
+      "additionalProperties": false,
+      "description": "Asserts ONE dependency edge, under `POST /v0/beads/dependencies:add`'s rules. An edge from a row to itself is a `400`.\n\nA TARGET NEED NOT BE A ROW THIS DATABASE HOLDS: an `external:` reference and an id belonging to another repository are legitimate targets, so only an absence this database can SEE is refused. A SOURCE has no such latitude \u2014 an edge follows its source, so a source this database holds no row for has no plane to land in.\n\n`metadata` is the edge's type-specific JSON blob, and an OBJECT where it is present at all. Most edge types carry none.\n\nA WAITS-FOR EDGE IS NORMALIZED RATHER THAN STORED AS ASKED. An absent, empty or `{}` `metadata` on a `waits-for` edge is STORED as `{\"gate\":\"all-children\"}`, because a stored waits-for row must be self-describing: readers predating the gate's introduction do not default a missing one, so an empty gate is a row those readers get wrong. A metadata that names a gate keeps it, along with the spawner and also-blocks members a caller may carry, and a gate that is neither `all-children` nor `any-children` is a `400`. Nothing else about that member is interpreted.\n\nTHERE IS NO TYPED `waits_for` MEMBER, and that is the shape rather than an omission: every measured caller already carries the gate as metadata, a typed spelling lowers to these same bytes, and the blob carries members a two-field typed member could not express. One spelling, and it is this one.",
+      "properties": {
+        "metadata": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetadataValue"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source": {
+          "$ref": "#/$defs/Ref"
+        },
+        "target": {
+          "$ref": "#/$defs/Ref"
+        },
+        "type": {
+          "description": "The edge type, from the same OPEN vocabulary `Dependency.type` carries: checked for BEING a storable value, never for membership of a known-types list, so a workspace's own type passes.",
+          "maxLength": 255,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "target",
+        "type"
+      ],
+      "type": "object"
+    },
+    "ApplyItem": {
+      "additionalProperties": false,
+      "description": "One item of a plan: a `kind` naming what it does, plus exactly one payload member matching it.\n\nIT IS A TAGGED SINGLE-SHAPE OBJECT rather than a polymorphic one, and the spelling is deliberate. This document uses no `oneOf`, `anyOf` or `allOf` anywhere: a component carrying a composition keyword alongside the `x-go-type` pins the response schemas depend on silently loses the pin, and the generated result is a second wire struct that drifts from the canonical one. So the union is carried as four OPTIONAL members with a required tag rather than as a schema alternation.\n\nWHAT A CLIENT MUST DO, since no validator can enforce it from this schema alone: send `kind`, send the ONE member `kind` names, and send no other. An item carrying no payload does nothing; an item carrying a payload its `kind` does not name has two halves that disagree; an item carrying two payloads cannot say which it meant. All three are a `400` and nothing in the request is written. A generated client's type will make all four members constructible at once \u2014 that is the cost of the spelling, and checking it is the client's.\n\nREADING one is the same rule from the other side: dispatch on `kind` and read only that member. The other three are absent.",
+      "properties": {
+        "close": {
+          "$ref": "#/$defs/ApplyCloseItem"
+        },
+        "create": {
+          "$ref": "#/$defs/ApplyCreateItem"
+        },
+        "dep_add": {
+          "$ref": "#/$defs/ApplyDepAddItem"
+        },
+        "kind": {
+          "description": "Which member below is read. A CLOSED set, unlike a dependency `type`: every value here is a verb this operation implements, and an unknown one is a request the server cannot execute rather than a workspace's own vocabulary.",
+          "enum": [
+            "create",
+            "update",
+            "close",
+            "dep_add"
+          ],
+          "type": "string"
+        },
+        "update": {
+          "$ref": "#/$defs/ApplyUpdateItem"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "ApplyLabelPatch": {
+      "additionalProperties": false,
+      "description": "An ordered label edit: `replace` first, then `add`, then `remove`, so REMOVAL WINS when the same label appears in more than one member.\n\nIt is the full patch rather than `IssuePatchBody.labels`' complete replacement because a plan edits a set it did not compose: replacing would mean reading the labels back first, and the read this operation exists to avoid is exactly that one.\n\nRepetition is free in both directions \u2014 a label named twice in one member is applied once, and removing a label the issue does not carry is a no-op. An EMPTY-STRING entry is dropped rather than refused: a label row holding \"\" renders as nothing and matches nothing, so refusing the whole request for one stray entry would fail an otherwise-good edit.",
+      "properties": {
+        "add": {
+          "description": "Labels to add after any replacement.",
+          "items": {
+            "$ref": "#/$defs/AddItem"
+          },
+          "type": "array"
+        },
+        "remove": {
+          "description": "Labels to remove after replacement and addition.",
+          "items": {
+            "$ref": "#/$defs/RemoveItem"
+          },
+          "type": "array"
+        },
+        "replace": {
+          "description": "The complete starting label set. An empty array CLEARS every label; omitting the member leaves the current set as the starting point.",
+          "items": {
+            "$ref": "#/$defs/ReplaceItem"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "ApplyMetadataPatch": {
+      "additionalProperties": false,
+      "description": "A metadata edit. `replace` is mutually exclusive with the other three; without it the edits apply as `merge`, then `set` in key order, then `unset`, so UNSETTING A KEY WINS over setting or merging it. Sending `replace` beside any of the others is a `400`.\n\n`replace` replaces the whole document. Present holding `null`, `{}` or an empty value CLEARS metadata \u2014 and clearing STORES THE EMPTY JSON DOCUMENT rather than SQL null, so \"created with no metadata\" and \"given metadata and then cleared\" are the same stored value; a reader must treat absent, empty and `{}` as one value on the way out. `merge` must be a nonempty JSON OBJECT and is merged into the current document.",
+      "properties": {
+        "merge": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetadataValue"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "replace": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetadataValue"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "set": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/MetadataValue"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "description": "Individual top-level keys to write, in deterministic key order. A value present holding `null` writes JSON null; a key is removed with `unset`, never by sending a null here.",
+          "type": "object"
+        },
+        "unset": {
+          "description": "Top-level keys to remove, applied after every other edit.",
+          "items": {
+            "$ref": "#/$defs/UnsetItem"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "ApplyPatchBody": {
+      "additionalProperties": false,
+      "description": "The fields an `update` item writes. Every member is optional and PRESENCE is the signal: a member present is written, a member absent is untouched. An empty object is a `400` \u2014 a write that writes nothing is a client bug.\n\nIt mirrors `IssuePatchBody` member for member and diverges in exactly two places now that `PATCH /v0/beads/issues/{id}` publishes `status`, `assignee` and the same `metadata` algebra.\n\n`owner` is published here and not there, which is an accident of order rather than a decision: nothing has asked for it on the single patch.\n\n`labels` is a full patch rather than a complete replacement, and that one is a real difference: a plan has to be able to REMOVE one label without knowing the rest of the set, because it edits a set it did not compose. A caller patching one row it just read already knows the set.\n\n`parent_id` is deliberately absent, and its absence is this operation's one-edge-one-spelling rule: a parent is a `dep_add` item of type `parent-child`, so the order of every edge in the request stays total. The single patch has no ordering to express and publishes it directly. `persistence` is absent from both \u2014 moving a row between planes mid-plan is a different act from writing its fields, and nothing has asked for it here.",
+      "properties": {
+        "acceptance_criteria": {
+          "type": "string"
+        },
+        "append_notes": {
+          "description": "Appends to the notes rather than replacing them. Mutually exclusive with `notes`.",
+          "type": "string"
+        },
+        "assignee": {
+          "description": "The assignee. A transfer away from a live foreign in-progress owner is refused with `409 already_claimed` unless `force_assignee_transfer` is set or `expected_assignee` matched.",
+          "maxLength": 255,
+          "type": "string"
+        },
+        "defer_until": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "RFC 3339. Explicit `null` CLEARS the deferral."
+        },
+        "description": {
+          "type": "string"
+        },
+        "design": {
+          "type": "string"
+        },
+        "due_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "RFC 3339. Explicit `null` CLEARS the due date."
+        },
+        "estimated_minutes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Explicit `null` CLEARS the estimate."
+        },
+        "external_ref": {
+          "anyOf": [
+            {
+              "maxLength": 255,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Explicit `null` CLEARS the reference."
+        },
+        "issue_type": {
+          "description": "The issue type, from this workspace's own configured vocabulary. A type outside it is refused by the ROLE and reaches the client as a `400`.",
+          "maxLength": 255,
+          "type": "string"
+        },
+        "labels": {
+          "$ref": "#/$defs/ApplyLabelPatch"
+        },
+        "metadata": {
+          "$ref": "#/$defs/ApplyMetadataPatch"
+        },
+        "notes": {
+          "description": "Replaces the notes. Mutually exclusive with `append_notes`; sending both is a `400`.",
+          "type": "string"
+        },
+        "owner": {
+          "maxLength": 255,
+          "type": "string"
+        },
+        "priority": {
+          "maximum": 4,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "status": {
+          "description": "The issue's status, from this workspace's own configured vocabulary.\n\nA STATUS THAT CROSSES INTO THE DONE CATEGORY ANSWERS TO CLOSE POLICY: the item is refused with `409 not_closable` for open children or a live blocker unless `force_close_policy` is set. A done-to-done change and a move OUT of the done category are unaffected \u2014 which is how a plan reopens a row, since there is no reopen item.",
+          "maxLength": 255,
+          "type": "string"
+        },
+        "title": {
+          "description": "Must not be blank after trimming; the length bound is what the column holds.",
+          "maxLength": 255,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "ApplyUpdateItem": {
+      "additionalProperties": false,
+      "description": "Patches one existing issue, under `PATCH /v0/beads/issues/{id}`'s rules.\n\nThe two carry the same preconditions and the same force flags; what is this operation's alone is that its guards evaluate AS-MODIFIED \u2014 against the row as earlier items of this same request have already changed it \u2014 and that a miss takes the whole plan down rather than one write.",
+      "properties": {
+        "expected_assignee": {
+          "description": "Requires the issue's assignee to equal this value, evaluated as-modified. A match AUTHORIZES the requested `patch.assignee` transfer: this compare-and-set replaces the ordinary anti-steal fence, so it must not be combined with `force_assignee_transfer`. A miss refuses the whole request with `409 precondition_failed`.",
+          "maxLength": 255,
+          "type": "string"
+        },
+        "expected_status": {
+          "description": "Requires the issue's status to equal this value, evaluated AS-MODIFIED \u2014 against the row as this request has already changed it at this item's position. A miss refuses the whole request with `409 precondition_failed`.",
+          "maxLength": 255,
+          "type": "string"
+        },
+        "expected_version": {
+          "description": "Requires the row's `revision` to equal this value before the patch. A miss refuses the WHOLE request with `409 precondition_failed`.\n\nIT IS A `400`, NOT A `409`, ON A ROW THIS REQUEST HAS ALREADY WRITTEN \u2014 including one an earlier item created. The token is minted by the write, so mid-request there is no value a caller could send: the pre-request token is stale by construction and a row this request just created never had one the caller could read. Refusing statically says so; answering with a mismatch would send the caller looking for a concurrent writer that does not exist.\n\n`expected_status` and `expected_assignee` carry no such rule, because a caller CAN know what its own earlier item set them to.\n\nDECODE IT AS A 64-BIT INTEGER, for the reason `UpdateIssueRequest.expected_version` spells out. It bites harder here than anywhere else on the surface: a corrupted token refuses the WHOLE plan rather than one write, so a client with a lossy parser loses every item of every batch it guards.",
+          "type": "integer"
+        },
+        "force_assignee_transfer": {
+          "default": false,
+          "description": "Bypasses ONLY a genuine transfer away from a live foreign in-progress owner. Reasserting the exact current assignee is idempotent and needs no force. It requires `patch.assignee` \u2014 a request setting it without one is a `400` \u2014 and it must be false when `expected_assignee` is sent.",
+          "type": "boolean"
+        },
+        "force_close_policy": {
+          "default": false,
+          "description": "Bypasses ONLY close policy \u2014 the open-children refusal and the live blocker refusal \u2014 for a `patch.status` that crosses into the workspace's done category. It has no effect without such a status change, and it never bypasses validation, the preconditions above, or the assignee fence.",
+          "type": "boolean"
+        },
+        "patch": {
+          "$ref": "#/$defs/ApplyPatchBody"
+        },
+        "target": {
+          "$ref": "#/$defs/Ref"
+        }
+      },
+      "required": [
+        "patch",
+        "target"
+      ],
+      "type": "object"
+    },
+    "Label": {
+      "maxLength": 255,
+      "type": "string"
+    },
+    "MetadataValue": {
+      "anyOf": [
+        {},
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "One metadata value: ANY JSON value \u2014 string, number, boolean, null, array or object \u2014 because typed values enter through the explicit JSON metadata path and persist in older rows. It is not a string, and a client must not decode it as one.\n\nWhere a member of this type is OMITTED, the key is absent; where it is present holding `null`, the key exists and holds null. Those are different states and this surface reports both."
+    },
+    "ProjectLocator": {
+      "additionalProperties": false,
+      "description": "A configured project by canonical ref, project id, or a path inside it.",
+      "properties": {
+        "path": {
+          "anyOf": [
+            {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Absolute host path inside a project checkout."
+        },
+        "project": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Project id."
+        },
+        "ref": {
+          "anyOf": [
+            {
+              "pattern": "^sinnix://projects/[^/]+(?:/checkouts/[^/]+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Canonical project or checkout ref."
+        }
+      },
+      "type": "object"
+    },
+    "Ref": {
+      "additionalProperties": false,
+      "description": "Names ONE issue, either by an id that already exists or by the `key` a create item earlier in the same request gave itself.\n\nEXACTLY ONE OF THE TWO IS SET, and both cases the schema cannot express are a `400`: both members set is a caller that cannot say which it meant, and neither set is a reference to nothing. (Spelling that as a schema alternation would need `oneOf`, which this document does not use \u2014 see `ApplyItem`.)\n\nA KEY REACHES BACKWARD ONLY where the ref ADDRESSES a row \u2014 an `update.target`, a `close.target`, either endpoint of a `dep_add`. The one exception is `create.metadata_refs`, whose values may reach forward or name their own item's key; the operation's description says why.",
+      "properties": {
+        "id": {
+          "description": "An id that already exists, EXACTLY. There is no fuzzy, prefix or cross-repo resolution on this surface.",
+          "maxLength": 255,
+          "minLength": 1,
+          "type": "string"
+        },
+        "key": {
+          "description": "The `key` a create item in THIS REQUEST gave itself. It is not an id, it is not stored anywhere, and it is resolved to the id the request minted \u2014 which the response's `keys` member reports.",
+          "maxLength": 255,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "RemoveItem": {
+      "maxLength": 255,
+      "type": "string"
+    },
+    "ReplaceItem": {
+      "maxLength": 255,
+      "type": "string"
+    },
+    "UnsetItem": {
+      "maxLength": 255,
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "body": {
+      "$ref": "#/$defs/ApplyBatchRequest"
+    },
+    "deadline_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Unix timestamp after which the call is refused."
+    },
+    "idempotency_key": {
+      "description": "Gateway response replay key. Confirmed responses replay unchanged; interrupted effects require owner reconciliation and are never automatically retried.",
+      "maxLength": 256,
+      "minLength": 1,
+      "type": "string"
+    },
+    "preconditions": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Owner-specific checks; a mismatch fails with precondition_failed. Checks are best effort unless the owner explicitly guarantees an atomic compare and mutation."
+    },
+    "project": {
+      "$ref": "#/$defs/ProjectLocator"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Caller-chosen correlation id."
+    }
+  },
+  "required": [
+    "body",
+    "idempotency_key",
+    "project"
+  ],
+  "type": "object"
+}
+```
+
+Output: the response envelope's `data` field is `NativeResult`; the full envelope schema is the `sinnix://gateway/v2/actions/beads.changeset` resource and `sinnix-agent-gateway catalog beads.changeset --schema`.
+
+Examples:
+
+Apply an ordered, heterogeneous plan as one act:
+
+```json
+{
+  "body": {
+    "actor": "example-worker",
+    "items": [
+      {
+        "create": {
+          "key": "implementation",
+          "title": "Implement bounded result paging"
+        },
+        "kind": "create"
+      },
+      {
+        "create": {
+          "key": "verification",
+          "title": "Verify result paging"
+        },
+        "kind": "create"
+      },
+      {
+        "dep_add": {
+          "source": {
+            "key": "verification"
+          },
+          "target": {
+            "key": "implementation"
+          },
+          "type": "blocks"
+        },
+        "kind": "dep_add"
+      }
+    ]
+  },
+  "idempotency_key": "example-applyBatch-1",
+  "project": {
+    "project": "sinnix"
+  }
+}
+```
+
+### `beads.batch.close`
+
+The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
+
+Family: `change`. Owner: `beads`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+
+Follow-up actions: `beads.get`, `beads.query`.
+
+Input schema:
+
+```json
+{
+  "$defs": {
+    "BatchCloseItem": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "Exact canonical issue id, resolved across BOTH planes. No fuzzy, prefix or substring resolution \u2014 `IssueID`'s rule.\n\nA DUPLICATE is admissible; see the operation description.",
+          "maxLength": 255,
+          "minLength": 1,
+          "type": "string"
+        },
+        "reason": {
+          "description": "Why THIS issue is closed. It is per item rather than per request because `bd close a b c --reason x --reason y --reason z` has always mapped them positionally, and one request-wide reason could not express it. `CloseIssueRequest.reason`'s rules and first-close-wins.",
+          "maxLength": 255,
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "BatchCloseRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "description": "Who is closing. `ClaimRequest.actor`'s rules exactly, and the value is recorded against every item.",
+          "maxLength": 256,
+          "minLength": 1,
+          "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F\\u2028\\u2029]+$",
+          "type": "string"
+        },
+        "force": {
+          "default": false,
+          "description": "Bypass close policy \u2014 the open-children refusal and the live-blocker refusal \u2014 for EVERY item, and nothing else. It never bypasses validation and it never bypasses existence: an id that names nothing refuses whether or not this is set. It is request-wide because the flag that spells it is.",
+          "type": "boolean"
+        },
+        "items": {
+          "description": "The issues to close, in the order the caller asked for them. Every item appears in `outcomes` at the same index.\n\nAn EMPTY array is a `400` rather than an empty answer, and the cap is `batchCreateIssues`' cap for its reason: it bounds how long one request may hold a write transaction.",
+          "items": {
+            "$ref": "#/$defs/BatchCloseItem"
+          },
+          "maxItems": 100,
+          "minItems": 1,
+          "type": "array"
+        },
+        "session": {
+          "description": "The working session, recorded against every item that closes, under `CloseIssueRequest.session`'s first-close-wins rule and bounds.",
+          "maxLength": 255,
+          "type": "string"
+        }
+      },
+      "required": [
+        "actor",
+        "items"
+      ],
+      "type": "object"
+    },
+    "ProjectLocator": {
+      "additionalProperties": false,
+      "description": "A configured project by canonical ref, project id, or a path inside it.",
+      "properties": {
+        "path": {
+          "anyOf": [
+            {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Absolute host path inside a project checkout."
+        },
+        "project": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Project id."
+        },
+        "ref": {
+          "anyOf": [
+            {
+              "pattern": "^sinnix://projects/[^/]+(?:/checkouts/[^/]+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Canonical project or checkout ref."
+        }
+      },
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "body": {
+      "$ref": "#/$defs/BatchCloseRequest"
+    },
+    "deadline_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Unix timestamp after which the call is refused."
+    },
+    "idempotency_key": {
+      "description": "Gateway response replay key. Confirmed responses replay unchanged; interrupted effects require owner reconciliation and are never automatically retried.",
+      "maxLength": 256,
+      "minLength": 1,
+      "type": "string"
+    },
+    "preconditions": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Owner-specific checks; a mismatch fails with precondition_failed. Checks are best effort unless the owner explicitly guarantees an atomic compare and mutation."
+    },
+    "project": {
+      "$ref": "#/$defs/ProjectLocator"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Caller-chosen correlation id."
+    }
+  },
+  "required": [
+    "body",
+    "idempotency_key",
+    "project"
+  ],
+  "type": "object"
+}
+```
+
+Output: the response envelope's `data` field is `NativeResult`; the full envelope schema is the `sinnix://gateway/v2/actions/beads.batch.close` resource and `sinnix-agent-gateway catalog beads.batch.close --schema`.
+
+Examples:
+
+Close many issues as one act:
+
+```json
+{
+  "body": {
+    "actor": "example-worker",
+    "items": [
+      {
+        "id": "sinnix-abc1",
+        "reason": "Acceptance checks passed"
+      }
+    ]
+  },
+  "idempotency_key": "example-batchCloseIssues-1",
+  "project": {
+    "project": "sinnix"
+  }
+}
+```
+
+### `beads.graph.create`
+
+The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
+
+Family: `change`. Owner: `beads`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+
+Follow-up actions: `beads.get`, `beads.query`.
+
+Input schema:
+
+```json
+{
+  "$defs": {
+    "BatchCreateDependency": {
+      "additionalProperties": false,
+      "properties": {
+        "target_id": {
+          "description": "The far end of the edge: an issue this workspace holds, an `external:` reference, or an id whose prefix belongs to another repository. Anything else is a `400` and nothing is created.\n\nNOT AN ITEM OF THIS REQUEST. The server assigns every id and an item carries no name, so there is nothing here a caller could write to address one; see the operation's description for the operation that can.",
+          "maxLength": 255,
+          "minLength": 1,
+          "type": "string"
+        },
+        "type": {
+          "description": "The edge type, from the same OPEN vocabulary `Dependency.type` carries. It is spelled `type` because that is the member an edge carries everywhere else on this surface.",
+          "maxLength": 255,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "target_id",
+        "type"
+      ],
+      "type": "object"
+    },
+    "BatchCreateItem": {
+      "additionalProperties": false,
+      "properties": {
+        "acceptance_criteria": {
+          "type": "string"
+        },
+        "assignee": {
+          "maxLength": 255,
+          "type": "string"
+        },
+        "dependencies": {
+          "description": "The edges this issue is created carrying. They are written in the same transaction as the issue, so this operation never publishes an issue whose declared relationships are not there yet.",
+          "items": {
+            "$ref": "#/$defs/BatchCreateDependency"
+          },
+          "maxItems": 100,
+          "type": "array"
+        },
+        "description": {
+          "type": "string"
+        },
+        "design": {
+          "type": "string"
+        },
+        "issue_type": {
+          "description": "Issue type. Spelled `issue_type` rather than `type`, matching the member `Issue` carries, and validated against the built-ins plus the workspace's configured custom types \u2014 an unknown one is a `400`.",
+          "type": "string"
+        },
+        "labels": {
+          "items": {
+            "$ref": "#/$defs/Label"
+          },
+          "type": "array"
+        },
+        "priority": {
+          "description": "0 is P0/critical. Absent means the workspace default.",
+          "maximum": 4,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "title": {
+          "maxLength": 255,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "title"
+      ],
+      "type": "object"
+    },
+    "BatchCreateRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "description": "Who is creating the issues, under `ClaimRequest.actor`'s rules and for the same reasons: the server trims it, refuses an empty result, anything longer than 256 BYTES, and any control character including newline. It is attributed to every item and interpolated into the storage commit message.",
+          "maxLength": 256,
+          "minLength": 1,
+          "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F\\u2028\\u2029]+$",
+          "type": "string"
+        },
+        "items": {
+          "description": "The issues to create, in order. An empty array is a `400` rather than a successful no-op: a write request that writes nothing is a client bug, and answering it with a cheerful empty success is how a client whose own list filtered to nothing silently stops creating anything.\n\nThe 100-item cap is a bound on how long one request may hold a write transaction, not a statement about batch semantics. Split a larger plan; each request is atomic on its own.",
+          "items": {
+            "$ref": "#/$defs/BatchCreateItem"
+          },
+          "maxItems": 100,
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "actor",
+        "items"
+      ],
+      "type": "object"
+    },
+    "Label": {
+      "maxLength": 255,
+      "type": "string"
+    },
+    "ProjectLocator": {
+      "additionalProperties": false,
+      "description": "A configured project by canonical ref, project id, or a path inside it.",
+      "properties": {
+        "path": {
+          "anyOf": [
+            {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Absolute host path inside a project checkout."
+        },
+        "project": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Project id."
+        },
+        "ref": {
+          "anyOf": [
+            {
+              "pattern": "^sinnix://projects/[^/]+(?:/checkouts/[^/]+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Canonical project or checkout ref."
+        }
+      },
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "body": {
+      "$ref": "#/$defs/BatchCreateRequest"
+    },
+    "deadline_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Unix timestamp after which the call is refused."
+    },
+    "idempotency_key": {
+      "description": "Gateway response replay key. Confirmed responses replay unchanged; interrupted effects require owner reconciliation and are never automatically retried.",
+      "maxLength": 256,
+      "minLength": 1,
+      "type": "string"
+    },
+    "preconditions": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Owner-specific checks; a mismatch fails with precondition_failed. Checks are best effort unless the owner explicitly guarantees an atomic compare and mutation."
+    },
+    "project": {
+      "$ref": "#/$defs/ProjectLocator"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Caller-chosen correlation id."
+    }
+  },
+  "required": [
+    "body",
+    "idempotency_key",
+    "project"
+  ],
+  "type": "object"
+}
+```
+
+Output: the response envelope's `data` field is `NativeResult`; the full envelope schema is the `sinnix://gateway/v2/actions/beads.graph.create` resource and `sinnix-agent-gateway catalog beads.graph.create --schema`.
+
+Examples:
+
+Create many issues as one act:
+
+```json
+{
+  "body": {
+    "actor": "example-worker",
+    "items": [
+      {
+        "title": "Add a bounded reader"
+      },
+      {
+        "title": "Document reader pagination"
+      }
+    ]
+  },
+  "idempotency_key": "example-batchCreateIssues-1",
+  "project": {
+    "project": "sinnix"
+  }
+}
+```
+
+### `beads.claim`
+
+The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
+
+Family: `change`. Owner: `beads`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+
+Follow-up actions: `beads.get`, `beads.query`.
+
+Input schema:
+
+```json
+{
+  "$defs": {
+    "ClaimRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "description": "Who is claiming the issue. The server trims it, then refuses an empty result, anything longer than 256 BYTES (the `maxLength` above counts characters \u2014 the byte limit is the binding one), and any control character including newline: Unicode category Cc \u2014 C0, DEL and the C1 block \u2014 plus the U+2028/U+2029 line separators, which is the set the `pattern` above spells.\n\nThe value is persisted as the assignee and interpolated into the storage commit message, so an unvalidated newline would forge audit-trail lines. C1 is refused for that same reason and not for tidiness: U+0085 is a line break on a VT-conformant terminal, and U+009B is the one-byte CSI introducer, which would make an actor an escape-sequence payload in anything that prints an assignee.",
+          "maxLength": 256,
+          "minLength": 1,
+          "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F\\u2028\\u2029]+$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "actor"
+      ],
+      "type": "object"
+    },
+    "Path": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "Exact canonical issue id. No fuzzy, prefix or substring resolution.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "ProjectLocator": {
+      "additionalProperties": false,
+      "description": "A configured project by canonical ref, project id, or a path inside it.",
+      "properties": {
+        "path": {
+          "anyOf": [
+            {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Absolute host path inside a project checkout."
+        },
+        "project": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Project id."
+        },
+        "ref": {
+          "anyOf": [
+            {
+              "pattern": "^sinnix://projects/[^/]+(?:/checkouts/[^/]+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Canonical project or checkout ref."
+        }
+      },
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "body": {
+      "$ref": "#/$defs/ClaimRequest"
+    },
+    "deadline_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Unix timestamp after which the call is refused."
+    },
+    "idempotency_key": {
+      "description": "Gateway response replay key. Confirmed responses replay unchanged; interrupted effects require owner reconciliation and are never automatically retried.",
+      "maxLength": 256,
+      "minLength": 1,
+      "type": "string"
+    },
+    "path": {
+      "$ref": "#/$defs/Path"
+    },
+    "preconditions": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Owner-specific checks; a mismatch fails with precondition_failed. Checks are best effort unless the owner explicitly guarantees an atomic compare and mutation."
+    },
+    "project": {
+      "$ref": "#/$defs/ProjectLocator"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Caller-chosen correlation id."
+    }
+  },
+  "required": [
+    "body",
+    "path",
+    "idempotency_key",
+    "project"
+  ],
+  "type": "object"
+}
+```
+
+Output: the response envelope's `data` field is `NativeResult`; the full envelope schema is the `sinnix://gateway/v2/actions/beads.claim` resource and `sinnix-agent-gateway catalog beads.claim --schema`.
+
+Examples:
+
+Claim an issue for an actor:
+
+```json
+{
+  "body": {
+    "actor": "example-worker"
+  },
+  "idempotency_key": "example-claimIssue-1",
+  "path": {
+    "id": "sinnix-abc1"
+  },
+  "project": {
+    "project": "sinnix"
+  }
+}
+```
+
+### `beads.claim_next`
+
+The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
+
+Family: `change`. Owner: `beads`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+
+Follow-up actions: `beads.get`, `beads.query`.
+
+Input schema:
+
+```json
+{
+  "$defs": {
+    "ClaimNextRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "description": "Who is claiming. `ClaimRequest.actor`'s rules exactly: the server trims it, then refuses an empty result, anything longer than 256 BYTES (the `maxLength` above counts characters \u2014 the byte limit is the binding one), and any control character including newline. The value is persisted as the assignee and interpolated into the storage commit message, so an unvalidated newline would forge audit-trail lines.\n\nIT IS THE ONLY BODY MEMBER, and the FILTER travels in the query string instead. That split is deliberate: the filter vocabulary is `GET /v0/beads/ready`'s and is decoded by the same function, so re-spelling it as a body object would create a second expression of one predicate \u2014 and two spellings of one predicate eventually disagree. The actor cannot go the same way: it is provenance that lands in a column, and this surface has always carried that in a body.",
+          "maxLength": 256,
+          "minLength": 1,
+          "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F\\u2028\\u2029]+$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "actor"
+      ],
+      "type": "object"
+    },
+    "ProjectLocator": {
+      "additionalProperties": false,
+      "description": "A configured project by canonical ref, project id, or a path inside it.",
+      "properties": {
+        "path": {
+          "anyOf": [
+            {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Absolute host path inside a project checkout."
+        },
+        "project": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Project id."
+        },
+        "ref": {
+          "anyOf": [
+            {
+              "pattern": "^sinnix://projects/[^/]+(?:/checkouts/[^/]+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Canonical project or checkout ref."
+        }
+      },
+      "type": "object"
+    },
+    "Query": {
+      "additionalProperties": false,
+      "properties": {
+        "assignee": {
+          "description": "Only issues assigned to this actor.",
+          "type": "string"
+        },
+        "exclude_label": {
+          "description": "Labels that must not be present.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "exclude_type": {
+          "description": "Issue types to exclude. Repeat the parameter, or pass a comma-separated list. Ignored when `type` is set.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "has_metadata_key": {
+          "description": "Only issues carrying this top-level metadata key.",
+          "type": "string"
+        },
+        "include_deferred": {
+          "default": false,
+          "description": "Include issues whose `defer_until` is still in the future.",
+          "type": "boolean"
+        },
+        "include_ephemeral": {
+          "default": false,
+          "description": "Include ephemeral (non-synced) rows.",
+          "type": "boolean"
+        },
+        "label": {
+          "description": "Labels that must ALL be present (AND).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "label_any": {
+          "description": "Labels of which at least one must be present (OR).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "label_pattern": {
+          "description": "Glob matched against labels.",
+          "type": "string"
+        },
+        "label_regex": {
+          "description": "Regular expression matched against labels.",
+          "type": "string"
+        },
+        "metadata_field": {
+          "description": "Top-level metadata equality filter as `key=value`, split on the first `=`. Repeatable. An invalid key is a 400.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "parent": {
+          "description": "Restrict to recursive descendants of this issue.",
+          "type": "string"
+        },
+        "priority": {
+          "description": "Exact priority (0 is a real value, not \"unset\").",
+          "type": "integer"
+        },
+        "sort": {
+          "default": "priority",
+          "description": "Ready-work ordering. `priority` is priority-first; `hybrid` orders recent issues by priority and older ones by age; `oldest` is creation order. An unrecognized value is a 400.\n\nThe default is the one `bd ready --sort` registers, so a client swapping `bd ready --json` for this operation gets the same items in the same order. The storage layer treats an EMPTY policy as `hybrid`, but that fallback is unreachable from the CLI and is NOT this parameter's default: `hybrid` demotes older high-priority work, so defaulting to it would change the item SET as soon as `limit` truncates \u2014 silently, and only for the clients this API exists to migrate.",
+          "enum": [
+            "hybrid",
+            "priority",
+            "oldest"
+          ],
+          "type": "string"
+        },
+        "type": {
+          "description": "Issue type. The only normalization is shorthand ALIAS expansion, exactly what `bd ready --type` does: `mr` \u2192 `merge-request`, `feat` \u2192 `feature`, `mol` \u2192 `molecule`, `enhancement` \u2192 `feature`, `dec`/`adr` \u2192 `decision`. Every other value is used as written \u2014 there is NO plural folding, so `bugs` is not `bug`.\n\nAn unrecognized type is not an error here: the type vocabulary is workspace-configurable, and `bd ready` does not validate it either, so it simply matches nothing and `items` comes back empty. (The list operation differs \u2014 `bd list` DOES validate the type, so `GET /v0/beads/issues?type=bugs` is a 400.)\n\nWhen set, `exclude_type` is ignored, and so are the default type exclusions described above.",
+          "type": "string"
+        },
+        "unassigned": {
+          "description": "Only issues with no assignee.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "body": {
+      "$ref": "#/$defs/ClaimNextRequest"
+    },
+    "deadline_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Unix timestamp after which the call is refused."
+    },
+    "idempotency_key": {
+      "description": "Gateway response replay key. Confirmed responses replay unchanged; interrupted effects require owner reconciliation and are never automatically retried.",
+      "maxLength": 256,
+      "minLength": 1,
+      "type": "string"
+    },
+    "preconditions": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Owner-specific checks; a mismatch fails with precondition_failed. Checks are best effort unless the owner explicitly guarantees an atomic compare and mutation."
+    },
+    "project": {
+      "$ref": "#/$defs/ProjectLocator"
+    },
+    "query": {
+      "$ref": "#/$defs/Query"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Caller-chosen correlation id."
+    }
+  },
+  "required": [
+    "body",
+    "idempotency_key",
+    "project"
+  ],
+  "type": "object"
+}
+```
+
+Output: the response envelope's `data` field is `NativeResult`; the full envelope schema is the `sinnix://gateway/v2/actions/beads.claim_next` resource and `sinnix-agent-gateway catalog beads.claim_next --schema`.
+
+Examples:
+
+Claim the next ready issue:
+
+```json
+{
+  "body": {
+    "actor": "example-worker"
+  },
+  "idempotency_key": "example-claimNextIssue-1",
+  "project": {
+    "project": "sinnix"
+  },
+  "query": {
+    "sort": "priority",
+    "unassigned": true
+  }
+}
+```
+
+### `beads.close`
+
+The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
+
+Family: `change`. Owner: `beads`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+
+Follow-up actions: `beads.get`, `beads.query`.
+
+Input schema:
+
+```json
+{
+  "$defs": {
+    "CloseIssueRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "description": "Who is closing the issue. `ClaimRequest.actor`'s rules exactly: the server trims it, then refuses an empty result, anything longer than 256 BYTES (the `maxLength` above counts characters \u2014 the byte limit is the binding one), and any control character including newline. The value reaches stored columns, event-stream attribution and the storage commit message, so an unvalidated newline would forge audit-trail lines.",
+          "maxLength": 256,
+          "minLength": 1,
+          "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F\\u2028\\u2029]+$",
+          "type": "string"
+        },
+        "expected_version": {
+          "description": "Requires the row's revision to equal this value BEFORE the close. A miss refuses the whole request with `409 precondition_failed` and writes nothing \u2014 `UpdateIssueRequest.expected_version`'s contract, on the operation that closes one row.\n\nIT IS CHECKED BEFORE THE IDEMPOTENT RE-CLOSE, which is the one place this guard differs from the update's. A re-close of a row somebody else has moved since the caller read it is a `409` and not the 200-with-`already_closed` the same body earns without a guard: a replay whose premise has expired is a refusal the caller wants to see, and it is the only way `already_closed` can be trusted as \"nothing has happened here since\".\n\nThe token is the `revision` this operation's own response carries. Compose the next expectation from the value a write ANSWERED with, never from a number the client incremented itself: the token is OPAQUE and compared for equality alone, so it has no predecessor a client can compute. A first guarded close seeds itself from `GET /v0/beads/issues/{id}`'s `revision` \u2014 the read that sources a guard \u2014 or, for a chain already mid-flight, from an unguarded lifecycle write or `POST /v0/beads/issues:batchApply`'s `ApplyItemResult.revision`.\n\nDECODE IT AS A 64-BIT INTEGER, for the reason `UpdateIssueRequest.expected_version` spells out: an IEEE-754-double parser corrupts it silently, and the corruption only surfaces as a `precondition_failed` on the NEXT request.",
+          "type": "integer"
+        },
+        "force": {
+          "default": false,
+          "description": "Bypass close policy \u2014 the open-children refusal and the live-blocker refusal \u2014 and nothing else. The refusals are the ROLE's, so this endpoint cannot skip a guard by forgetting one exists. A forced close still reports `open_children`.\n\nIT BYPASSES POLICY, NEVER A PRECONDITION. `expected_version` is still checked with it set, for the reason `issueops.CloseRequest.Force` gives: a caller saying \"close it anyway\" has said nothing about whether the row is still the one it read.",
+          "type": "boolean"
+        },
+        "reason": {
+          "description": "Why the issue is closed. Stored on the issue and read back as `close_reason`. THE FIRST CLOSE WINS: an idempotent re-close writes neither this nor `session`, so a replayed close cannot rewrite the record of why the work ended. Refused for control characters, and bounded by what the column holds rather than by the number above.",
+          "maxLength": 255,
+          "type": "string"
+        },
+        "session": {
+          "description": "The working session that closed the issue, stored and read back as `closed_by_session`, under the same first-close-wins rule and the same bounds as `reason`.",
+          "maxLength": 255,
+          "type": "string"
+        }
+      },
+      "required": [
+        "actor"
+      ],
+      "type": "object"
+    },
+    "Path": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "Exact canonical issue id. No fuzzy, prefix or substring resolution.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "ProjectLocator": {
+      "additionalProperties": false,
+      "description": "A configured project by canonical ref, project id, or a path inside it.",
+      "properties": {
+        "path": {
+          "anyOf": [
+            {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Absolute host path inside a project checkout."
+        },
+        "project": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Project id."
+        },
+        "ref": {
+          "anyOf": [
+            {
+              "pattern": "^sinnix://projects/[^/]+(?:/checkouts/[^/]+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Canonical project or checkout ref."
+        }
+      },
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "body": {
+      "$ref": "#/$defs/CloseIssueRequest"
+    },
+    "deadline_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Unix timestamp after which the call is refused."
+    },
+    "idempotency_key": {
+      "description": "Gateway response replay key. Confirmed responses replay unchanged; interrupted effects require owner reconciliation and are never automatically retried.",
+      "maxLength": 256,
+      "minLength": 1,
+      "type": "string"
+    },
+    "path": {
+      "$ref": "#/$defs/Path"
+    },
+    "preconditions": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Owner-specific checks; a mismatch fails with precondition_failed. Checks are best effort unless the owner explicitly guarantees an atomic compare and mutation."
+    },
+    "project": {
+      "$ref": "#/$defs/ProjectLocator"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Caller-chosen correlation id."
+    }
+  },
+  "required": [
+    "body",
+    "path",
+    "idempotency_key",
+    "project"
+  ],
+  "type": "object"
+}
+```
+
+Output: the response envelope's `data` field is `NativeResult`; the full envelope schema is the `sinnix://gateway/v2/actions/beads.close` resource and `sinnix-agent-gateway catalog beads.close --schema`.
+
+Examples:
+
+Close one issue:
+
+```json
+{
+  "body": {
+    "actor": "example-worker",
+    "expected_version": 7,
+    "reason": "Acceptance checks passed"
+  },
+  "idempotency_key": "example-closeIssue-1",
+  "path": {
+    "id": "sinnix-abc1"
+  },
+  "project": {
+    "project": "sinnix"
+  }
+}
+```
+
+### `beads.metadata.compare_set`
+
+The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
+
+Family: `change`. Owner: `beads`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+
+Follow-up actions: `beads.get`, `beads.query`.
+
+Input schema:
+
+```json
+{
+  "$defs": {
+    "CompareAndSetMetadataRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "description": "Who is performing the swap. `ClaimRequest.actor`'s rules exactly: the server trims it, then refuses an empty result, anything longer than 256 BYTES (the `maxLength` above counts characters \u2014 the byte limit is the binding one), and any control character including newline. It reaches the update event's attribution and the storage commit message, so an unvalidated newline would forge audit-trail lines.\n\nIt is REQUIRED here rather than optional, because a swap is a coordination write between racing callers and the one question asked of its history entry afterwards is which of them won.",
+          "maxLength": 256,
+          "minLength": 1,
+          "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F\\u2028\\u2029]+$",
+          "type": "string"
+        },
+        "expected": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetadataValue"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "key": {
+          "description": "The single metadata key to read and write. It must match the workspace's metadata-key syntax \u2014 a letter or underscore, then letters, digits, underscores, dots and slashes \u2014 so a key the query layer could not later spell is refused rather than written.\n\nONE KEY, NOT A PATH: a dotted key like `gc.lease` names a top-level key spelled with a dot, not a nested field. The metadata object's nesting is VALUE structure, and this operation swaps whole values.",
+          "maxLength": 255,
+          "minLength": 1,
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetadataValue"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "actor",
+        "key"
+      ],
+      "type": "object"
+    },
+    "MetadataValue": {
+      "anyOf": [
+        {},
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "One metadata value: ANY JSON value \u2014 string, number, boolean, null, array or object \u2014 because typed values enter through the explicit JSON metadata path and persist in older rows. It is not a string, and a client must not decode it as one.\n\nWhere a member of this type is OMITTED, the key is absent; where it is present holding `null`, the key exists and holds null. Those are different states and this surface reports both."
+    },
+    "Path": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "Exact canonical issue id. No fuzzy, prefix or substring resolution.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "ProjectLocator": {
+      "additionalProperties": false,
+      "description": "A configured project by canonical ref, project id, or a path inside it.",
+      "properties": {
+        "path": {
+          "anyOf": [
+            {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Absolute host path inside a project checkout."
+        },
+        "project": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Project id."
+        },
+        "ref": {
+          "anyOf": [
+            {
+              "pattern": "^sinnix://projects/[^/]+(?:/checkouts/[^/]+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Canonical project or checkout ref."
+        }
+      },
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "body": {
+      "$ref": "#/$defs/CompareAndSetMetadataRequest"
+    },
+    "deadline_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Unix timestamp after which the call is refused."
+    },
+    "idempotency_key": {
+      "description": "Gateway response replay key. Confirmed responses replay unchanged; interrupted effects require owner reconciliation and are never automatically retried.",
+      "maxLength": 256,
+      "minLength": 1,
+      "type": "string"
+    },
+    "path": {
+      "$ref": "#/$defs/Path"
+    },
+    "preconditions": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Owner-specific checks; a mismatch fails with precondition_failed. Checks are best effort unless the owner explicitly guarantees an atomic compare and mutation."
+    },
+    "project": {
+      "$ref": "#/$defs/ProjectLocator"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Caller-chosen correlation id."
+    }
+  },
+  "required": [
+    "body",
+    "path",
+    "idempotency_key",
+    "project"
+  ],
+  "type": "object"
+}
+```
+
+Output: the response envelope's `data` field is `NativeResult`; the full envelope schema is the `sinnix://gateway/v2/actions/beads.metadata.compare_set` resource and `sinnix-agent-gateway catalog beads.metadata.compare_set --schema`.
+
+Examples:
+
+Conditionally set one metadata key on an issue:
+
+```json
+{
+  "body": {
+    "actor": "example-worker",
+    "expected": "pending",
+    "key": "verification",
+    "value": "passed"
+  },
+  "idempotency_key": "example-compareAndSetMetadata-1",
+  "path": {
+    "id": "sinnix-abc1"
+  },
+  "project": {
+    "project": "sinnix"
+  }
+}
+```
+
+### `beads.dependencies.count`
+
+The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
+
+Family: `query`. Owner: `beads`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+
+Follow-up actions: `beads.get`, `beads.query`.
+
+Input schema:
+
+```json
+{
+  "$defs": {
+    "ProjectLocator": {
+      "additionalProperties": false,
+      "description": "A configured project by canonical ref, project id, or a path inside it.",
+      "properties": {
+        "path": {
+          "anyOf": [
+            {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Absolute host path inside a project checkout."
+        },
+        "project": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Project id."
+        },
+        "ref": {
+          "anyOf": [
+            {
+              "pattern": "^sinnix://projects/[^/]+(?:/checkouts/[^/]+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Canonical project or checkout ref."
+        }
+      },
+      "type": "object"
+    },
+    "Query1": {
+      "additionalProperties": false,
+      "properties": {
+        "direction": {
+          "description": "Which end of the edge the anchors sit on. `out` counts what each anchor DEPENDS ON \u2014 the direction `bd dep list` reads and the number `bd show` prints as the dependency count. `in` counts what depends on it.\n\nIT IS REQUIRED, and that is the one deliberate unfriendliness on this request. The two answers are about DIFFERENT EDGE SETS, and a workspace where most issues have edges in only one direction returns the same number for both often enough that a caller who meant the other one would not notice for a long time. An absent or unrecognized value is a 400 `invalid_argument` with `param: \"direction\"`, never a count in some default direction.\n\nThe vocabulary is CLOSED \u2014 unlike `type` below \u2014 because it is a property of the edge's shape rather than of a workspace's configuration.",
+          "enum": [
+            "out",
+            "in"
+          ],
+          "type": "string"
+        },
+        "issue_id": {
+          "description": "The anchors to count around. Repeat the parameter; at least one is required and at most 100 are accepted, and either bound is a 400 `invalid_argument` with `param: \"issue_id\"`, `reason: \"invalid_value\"`.\n\nEach value must be an EXACT canonical issue id, for the reason `GET /v0/beads/dependencies` gives. A value that matches nothing is reported on its own anchor rather than refused. An EMPTY value is a 400: the empty string names nothing a caller can have meant, and reporting it as a missing anchor would put a nameless row in an answer keyed by name.\n\nRepeats collapse onto the first mention \u2014 a second entry carries no second fact and would only invite a caller summing the result to count the same edges twice.",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 100,
+          "minItems": 1,
+          "type": "array"
+        },
+        "status": {
+          "description": "Count only edges whose DEPENDENT \u2014 the issue at the source end, the one doing the depending \u2014 is in this stored status. Empty means every status.\n\nIT IS LEGAL ONLY WITH `direction=in`. Sending it beside `direction=out` is a 400 `invalid_argument` with `param: \"status\"` and `reason: \"invalid_value\"`, rather than a filter that is quietly ignored. The asymmetry is the substrate's and `issueops.EdgeCountRequest.Status` states why: narrowing by status joins the far end of the edge to the row holding its status, and an OUTBOUND edge's far end may be an `external:` reference or an id belonging to another repository \u2014 rows this database does not hold \u2014 so the filter would silently drop every dangling edge.\n\nIt is ONE status, not a comma-separated OR set, and it is NOT validated against the workspace vocabulary: an unrecognized name matches nothing and counts 0 rather than failing, exactly as `GET /v0/beads/issues:count`'s `status` does. A scripted caller counting a status its workspace has since dropped reads 0 and should keep reading 0.",
+          "type": "string"
+        },
+        "type": {
+          "description": "Edge types to include. Repeat the parameter. Empty means every type.\n\n`GET /v0/beads/dependencies`'s `type` exactly: the vocabulary is OPEN, so an unrecognized value is not an error and simply matches no edge, while a value no edge could ever carry \u2014 empty, or longer than the column \u2014 is a 400 `invalid_argument`.\n\nThe filter narrows EDGES, never anchors. An anchor whose every edge it rejects comes back present with a count of 0, which is a different fact from an anchor that is not there.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "direction",
+        "issue_id"
+      ],
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "deadline_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Unix timestamp after which the call is refused."
+    },
+    "project": {
+      "$ref": "#/$defs/ProjectLocator"
+    },
+    "query": {
+      "$ref": "#/$defs/Query1"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Caller-chosen correlation id."
+    }
+  },
+  "required": [
+    "query",
+    "project"
+  ],
+  "type": "object"
+}
+```
+
+Output: the response envelope's `data` field is `NativeResult`; the full envelope schema is the `sinnix://gateway/v2/actions/beads.dependencies.count` resource and `sinnix-agent-gateway catalog beads.dependencies.count --schema`.
+
+Examples:
+
+Count the dependency edges around several issues:
+
+```json
+{
+  "project": {
+    "project": "sinnix"
+  },
+  "query": {
+    "direction": "out",
+    "issue_id": [
+      "sinnix-abc1"
+    ],
+    "type": [
+      "blocks"
+    ]
+  }
+}
+```
+
+### `beads.create`
+
+The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
+
+Family: `change`. Owner: `beads`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+
+Follow-up actions: `beads.get`, `beads.query`.
+
+Input schema:
+
+```json
+{
+  "$defs": {
+    "CreateIssueDependency": {
+      "additionalProperties": false,
+      "description": "One edge created with the issue. It carries `reverse` where `BatchCreateDependency` does not, because that operation's items have no id a target could point back at and this one's issue does.",
+      "properties": {
+        "metadata": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetadataValue"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reverse": {
+          "default": false,
+          "description": "Writes the edge from `target_id` TO the new issue rather than from it. It is what lets a create declare an edge that points INTO the row being minted \u2014 the id no caller could have spelled beforehand \u2014 and it is the member that makes `dependency_cycle` reachable on this operation at all.",
+          "type": "boolean"
+        },
+        "target_id": {
+          "description": "The other endpoint of the edge.",
+          "maxLength": 255,
+          "minLength": 1,
+          "type": "string"
+        },
+        "type": {
+          "description": "The edge type, from the same OPEN vocabulary `Dependency.type` carries: checked for BEING a storable value, never for membership of a known-types list, so a workspace's own type passes.",
+          "maxLength": 255,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "target_id",
+        "type"
+      ],
+      "type": "object"
+    },
+    "CreateIssueRequest": {
+      "additionalProperties": false,
+      "description": "One issue, its parent, its explicit edges and its waits-for gate, created as one act.\n\nIt is FLAT rather than nesting the issue's fields under an `issue` member, unlike `UpdateIssueRequest`'s `patch`: a patch has to distinguish a member that is absent from one set to its zero value, and a create has no such distinction to make \u2014 an absent member is the workspace default, which is the same answer a nested object would have given.\n\nThe issue members mirror `ApplyCreateItem` exactly, minus that schema's two plan-only members (`key` and `metadata_refs`, which name items of a request this operation has only one of). What this adds is the edge vocabulary that operation moves into `dep_add` items: `parent_id`, `inherit_labels_from_parent`, `dependencies` and `waits_for`.",
+      "properties": {
+        "acceptance_criteria": {
+          "type": "string"
+        },
+        "actor": {
+          "description": "Who is creating the issue. `ClaimRequest.actor`'s rules exactly: the server trims it, then refuses an empty result, anything longer than 256 BYTES (the `maxLength` above counts characters \u2014 the byte limit is the binding one), and any control character including newline. The value reaches the created edges' author column, the history entry's attribution and the storage commit message, so an unvalidated newline would forge audit-trail lines.\n\nIt is NOT the issue's `created_by`, which this operation does not publish: this is the caller-asserted provenance of the ACT, and the row's own author column is left to the implementation.",
+          "maxLength": 256,
+          "minLength": 1,
+          "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F\\u2028\\u2029]+$",
+          "type": "string"
+        },
+        "assignee": {
+          "maxLength": 255,
+          "type": "string"
+        },
+        "defer_until": {
+          "description": "RFC 3339. The issue is hidden from ready work until then. Not nullable, for `estimated_minutes`' reason.",
+          "format": "date-time",
+          "type": "string"
+        },
+        "dependencies": {
+          "description": "The complete set of explicit edges created with the issue. Authoritative, not a patch. Every edge is written in the same transaction as the row, so an edge this request cannot write means no issue either.\n\nA TARGET NEED NOT BE A ROW THIS DATABASE HOLDS: an `external:` reference and an id belonging to another repository are legitimate targets, so only an absence this database can SEE is refused \u2014 `ApplyDepAddItem`'s rule, unchanged.",
+          "items": {
+            "$ref": "#/$defs/CreateIssueDependency"
+          },
+          "maxItems": 100,
+          "type": "array"
+        },
+        "description": {
+          "type": "string"
+        },
+        "design": {
+          "type": "string"
+        },
+        "due_at": {
+          "description": "RFC 3339. Not nullable, for `estimated_minutes`' reason.",
+          "format": "date-time",
+          "type": "string"
+        },
+        "ephemeral": {
+          "default": false,
+          "description": "Creates the issue on the EPHEMERAL plane rather than the durable one, exactly as it does for `POST /v0/beads/issues:batchApply`. Mutually exclusive with `no_history`.",
+          "type": "boolean"
+        },
+        "estimated_minutes": {
+          "description": "An estimate in minutes. Absent leaves it unset. NOT nullable, unlike `IssuePatchBody.estimated_minutes`: a create has nothing to clear, so `null` here would be a second spelling of omission and is a `400`.",
+          "type": "integer"
+        },
+        "external_ref": {
+          "description": "e.g. `gh-9`. Not nullable, for `estimated_minutes`' reason.",
+          "maxLength": 255,
+          "type": "string"
+        },
+        "force_id_prefix": {
+          "default": false,
+          "description": "Permits an explicit `id` outside the workspace's configured issue prefix. It bypasses ONLY that check: it is not a force on the create-only guard, so an occupied id is still a `409`.",
+          "type": "boolean"
+        },
+        "id": {
+          "description": "An explicit id for the new row, CREATE-ONLY: an id that already names a stored row is a `409` `already_exists` and nothing is written \u2014 never an adoption and never an overwrite. It is checked against the workspace's configured issue prefix unless `force_id_prefix` is set. Absent is the ordinary case and the server mints one.",
+          "maxLength": 255,
+          "minLength": 1,
+          "type": "string"
+        },
+        "inherit_labels_from_parent": {
+          "default": false,
+          "description": "Copies the parent's labels onto the new issue at creation, on top of `labels`. It has no effect without `parent_id`.\n\nThe DEFAULT IS FALSE and diverges from `bd create --parent`, whose default is to inherit. A wire caller sends what it means: this operation has no `--no-inherit-labels` to turn off, and a create that silently acquired labels the request never named would be a set the caller has to read back to learn.",
+          "type": "boolean"
+        },
+        "issue_type": {
+          "description": "Issue type. Spelled `issue_type` rather than `type`, matching the member `Issue` carries, and validated against the built-ins plus the workspace's configured custom types by the ROLE \u2014 this server cannot read that vocabulary without a transaction, so it checks only what this schema declares and an unknown one arrives as a `400`.\n\nSEND ONE. The member is optional in this schema and the role validates the EMPTY type against the same vocabulary as any other, where it is neither a built-in nor a configured type \u2014 so an omitted `issue_type` is refused with everything else the request asked for. It stays optional because the vocabulary belongs to the workspace and a deployment may configure a default this server cannot read, but it is not optional in practice on any workspace shipped today. `POST /v0/beads/issues:batchCreate` has the same property and does not say so, which is why this member does.",
+          "maxLength": 255,
+          "type": "string"
+        },
+        "labels": {
+          "description": "The complete label set the issue is created with. Authoritative, not a patch \u2014 a create has nothing to add to. `inherit_labels_from_parent` adds the parent's labels on top of it.",
+          "items": {
+            "$ref": "#/$defs/Label"
+          },
+          "type": "array"
+        },
+        "metadata": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetadataValue"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "no_history": {
+          "default": false,
+          "description": "Creates the issue on the ephemeral plane WITHOUT history, and without the garbage collection an ordinary ephemeral row is eligible for. Mutually exclusive with `ephemeral`.",
+          "type": "boolean"
+        },
+        "notes": {
+          "type": "string"
+        },
+        "owner": {
+          "description": "The human owner, which is a different member from `assignee`: the assignee is who is working it now, the owner is who it is attributed to.",
+          "maxLength": 255,
+          "type": "string"
+        },
+        "parent_id": {
+          "description": "Creates a typed `parent-child` edge from the new issue to this target. It must not duplicate an edge `dependencies` already spells; naming the same pair twice with two types is a `400`.",
+          "maxLength": 255,
+          "type": "string"
+        },
+        "priority": {
+          "description": "0 is P0/critical. Absent means the workspace default.",
+          "maximum": 4,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "sender": {
+          "description": "Who sent this, for the message-shaped rows an orchestrator creates. Stored verbatim and interpreted by nothing on this surface.",
+          "maxLength": 255,
+          "type": "string"
+        },
+        "status": {
+          "description": "The status the issue is created in, from this workspace's own configured vocabulary. Absent means the workspace's own default, which is `open` today \u2014 unlike `issue_type`, the role fills this one in before it validates.",
+          "maxLength": 255,
+          "type": "string"
+        },
+        "title": {
+          "description": "The issue's title. Must not be blank after trimming.",
+          "maxLength": 255,
+          "minLength": 1,
+          "type": "string"
+        },
+        "waits_for": {
+          "$ref": "#/$defs/CreateIssueWaitsFor"
+        }
+      },
+      "required": [
+        "actor",
+        "title"
+      ],
+      "type": "object"
+    },
+    "CreateIssueWaitsFor": {
+      "additionalProperties": false,
+      "description": "A typed `waits-for` edge from the new issue to a spawner whose children gate it. It records a readiness primitive; it does not define scheduling or execution policy.\n\nIT IS A TYPED MEMBER HERE AND A METADATA BLOB ON `POST /v0/beads/issues:batchApply`, and the difference follows the ROLE rather than taste: `CreateRequest.WaitsFor` is a typed field that gets the gate defaulted and the \"must not duplicate an explicit edge\" check, while that operation's `dep_add` item is one generic edge with no typed field to reach. One spelling per operation, and each is its role's.",
+      "properties": {
+        "gate": {
+          "description": "The readiness condition: `all-children` or `any-children`. Absent or empty defaults to `all-children`. A value that is neither is refused by the ROLE and reaches the client as a `400`.",
+          "maxLength": 255,
+          "type": "string"
+        },
+        "spawner_id": {
+          "description": "The dependency target whose children are observed. It must not duplicate an edge `dependencies` or `parent_id` already spells.",
+          "maxLength": 255,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "spawner_id"
+      ],
+      "type": "object"
+    },
+    "Label": {
+      "maxLength": 255,
+      "type": "string"
+    },
+    "MetadataValue": {
+      "anyOf": [
+        {},
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "One metadata value: ANY JSON value \u2014 string, number, boolean, null, array or object \u2014 because typed values enter through the explicit JSON metadata path and persist in older rows. It is not a string, and a client must not decode it as one.\n\nWhere a member of this type is OMITTED, the key is absent; where it is present holding `null`, the key exists and holds null. Those are different states and this surface reports both."
+    },
+    "ProjectLocator": {
+      "additionalProperties": false,
+      "description": "A configured project by canonical ref, project id, or a path inside it.",
+      "properties": {
+        "path": {
+          "anyOf": [
+            {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Absolute host path inside a project checkout."
+        },
+        "project": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Project id."
+        },
+        "ref": {
+          "anyOf": [
+            {
+              "pattern": "^sinnix://projects/[^/]+(?:/checkouts/[^/]+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Canonical project or checkout ref."
+        }
+      },
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "body": {
+      "$ref": "#/$defs/CreateIssueRequest"
+    },
+    "deadline_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Unix timestamp after which the call is refused."
+    },
+    "idempotency_key": {
+      "description": "Gateway response replay key. Confirmed responses replay unchanged; interrupted effects require owner reconciliation and are never automatically retried.",
+      "maxLength": 256,
+      "minLength": 1,
+      "type": "string"
+    },
+    "preconditions": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Owner-specific checks; a mismatch fails with precondition_failed. Checks are best effort unless the owner explicitly guarantees an atomic compare and mutation."
+    },
+    "project": {
+      "$ref": "#/$defs/ProjectLocator"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Caller-chosen correlation id."
+    }
+  },
+  "required": [
+    "body",
+    "idempotency_key",
+    "project"
+  ],
+  "type": "object"
+}
+```
+
+Output: the response envelope's `data` field is `NativeResult`; the full envelope schema is the `sinnix://gateway/v2/actions/beads.create` resource and `sinnix-agent-gateway catalog beads.create --schema`.
+
+Examples:
+
+Create one issue:
+
+```json
+{
+  "body": {
+    "actor": "example-worker",
+    "issue_type": "task",
+    "priority": 2,
+    "title": "Add bounded result paging"
+  },
+  "idempotency_key": "example-createIssue-1",
+  "project": {
+    "project": "sinnix"
+  }
+}
+```
+
+### `beads.memory.forget`
+
+The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
+
+Family: `change`. Owner: `beads`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+
+Follow-up actions: `beads.get`, `beads.query`.
+
+Input schema:
+
+```json
+{
+  "$defs": {
+    "Path4": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "description": "Exact memory key, used verbatim. It occupies one path segment and is percent-decoded once. Keys may contain spaces, dots and unicode \u2014 the plane stores what `bd remember --key` was given \u2014 and a key carrying a CONTROL character is refused here rather than looked up; see the operation description.",
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "key"
+      ],
+      "type": "object"
+    },
+    "ProjectLocator": {
+      "additionalProperties": false,
+      "description": "A configured project by canonical ref, project id, or a path inside it.",
+      "properties": {
+        "path": {
+          "anyOf": [
+            {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Absolute host path inside a project checkout."
+        },
+        "project": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Project id."
+        },
+        "ref": {
+          "anyOf": [
+            {
+              "pattern": "^sinnix://projects/[^/]+(?:/checkouts/[^/]+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Canonical project or checkout ref."
+        }
+      },
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "deadline_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Unix timestamp after which the call is refused."
+    },
+    "idempotency_key": {
+      "description": "Gateway response replay key. Confirmed responses replay unchanged; interrupted effects require owner reconciliation and are never automatically retried.",
+      "maxLength": 256,
+      "minLength": 1,
+      "type": "string"
+    },
+    "path": {
+      "$ref": "#/$defs/Path4"
+    },
+    "preconditions": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Owner-specific checks; a mismatch fails with precondition_failed. Checks are best effort unless the owner explicitly guarantees an atomic compare and mutation."
+    },
+    "project": {
+      "$ref": "#/$defs/ProjectLocator"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Caller-chosen correlation id."
+    }
+  },
+  "required": [
+    "path",
+    "idempotency_key",
+    "project"
+  ],
+  "type": "object"
+}
+```
+
+Output: the response envelope's `data` field is `NativeResult`; the full envelope schema is the `sinnix://gateway/v2/actions/beads.memory.forget` resource and `sinnix-agent-gateway catalog beads.memory.forget --schema`.
+
+Examples:
+
+Forget one stored memory:
+
+```json
+{
+  "idempotency_key": "example-forgetMemory-1",
+  "path": {
+    "key": "reader-checks"
+  },
+  "project": {
+    "project": "sinnix"
+  }
+}
+```
+
+### `beads.graph`
+
+The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
+
+Family: `query`. Owner: `beads`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+
+Follow-up actions: `beads.get`, `beads.query`.
+
+Input schema:
+
+```json
+{
+  "$defs": {
+    "ProjectLocator": {
+      "additionalProperties": false,
+      "description": "A configured project by canonical ref, project id, or a path inside it.",
+      "properties": {
+        "path": {
+          "anyOf": [
+            {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Absolute host path inside a project checkout."
+        },
+        "project": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Project id."
+        },
+        "ref": {
+          "anyOf": [
+            {
+              "pattern": "^sinnix://projects/[^/]+(?:/checkouts/[^/]+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Canonical project or checkout ref."
+        }
+      },
+      "type": "object"
+    },
+    "Query2": {
+      "additionalProperties": false,
+      "properties": {
+        "direction": {
+          "default": "down",
+          "description": "Which way to follow edges. `down` (the default) walks what the root DEPENDS ON; `up` walks what depends ON it; `both` walks each way and returns one list.\n\nFor `both` the two walks are independent and the answer is their concatenation: every up node except the root, then the whole down tree beginning with the root. The root appears once. The two halves may repeat a node between them \u2014 an issue that both blocks and is blocked by something in the other half \u2014 so a client aggregating `items` must not assume the ids are distinct. Both walks see ONE database state.\n\nAny other value is a 400 `invalid_argument`: the vocabulary is closed.",
+          "enum": [
+            "down",
+            "up",
+            "both"
+          ],
+          "type": "string"
+        },
+        "max_depth": {
+          "default": 50,
+          "description": "How many LEVELS to descend, counting the root as level one: `max_depth=1` is the root alone. A node beyond the bound is ABSENT rather than present and flagged.\n\nZero and negative values are a 400 `invalid_argument` rather than \"unbounded\": the answer to an unbounded recursive walk on a large workspace is the request that takes the database down.",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "root_id": {
+          "description": "The issue to walk from. It must be an EXACT canonical issue id: there is no fuzzy, prefix or substring resolution on this surface, for the reason `GET /v0/beads/issues/{id}` gives. An empty value is a 400 `invalid_argument`; a value that matches no issue and no wisp is a 404 `not_found`, because there is one anchor here and no other answer to preserve.",
+          "type": "string"
+        },
+        "status": {
+          "description": "Prune the walked tree to the nodes carrying this status AND the ancestor chain of each survivor, so the answer is still a tree.\n\nIt is a POST-WALK PRUNE, not a filter on the walk, and the difference is observable: a matching node BEHIND a non-matching one is still reached, and the non-matcher is kept as its ancestor. A prune that matches nothing returns NO items at all, root included.\n\nThe value is not checked against the workspace's status vocabulary; an unrecognized status simply matches nothing.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "root_id"
+      ],
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "deadline_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Unix timestamp after which the call is refused."
+    },
+    "project": {
+      "$ref": "#/$defs/ProjectLocator"
+    },
+    "query": {
+      "$ref": "#/$defs/Query2"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Caller-chosen correlation id."
+    }
+  },
+  "required": [
+    "query",
+    "project"
+  ],
+  "type": "object"
+}
+```
+
+Output: the response envelope's `data` field is `NativeResult`; the full envelope schema is the `sinnix://gateway/v2/actions/beads.graph` resource and `sinnix-agent-gateway catalog beads.graph --schema`.
+
+Examples:
+
+Walk the dependency tree of one issue:
+
+```json
+{
+  "project": {
+    "project": "sinnix"
+  },
+  "query": {
+    "direction": "both",
+    "max_depth": 3,
+    "root_id": "sinnix-abc1"
+  }
+}
+```
+
+### `beads.memory.get`
+
+The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
+
+Family: `query`. Owner: `beads`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+
+Follow-up actions: `beads.get`, `beads.query`.
+
+Input schema:
+
+```json
+{
+  "$defs": {
+    "Path4": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "description": "Exact memory key, used verbatim. It occupies one path segment and is percent-decoded once. Keys may contain spaces, dots and unicode \u2014 the plane stores what `bd remember --key` was given \u2014 and a key carrying a CONTROL character is refused here rather than looked up; see the operation description.",
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "key"
+      ],
+      "type": "object"
+    },
+    "ProjectLocator": {
+      "additionalProperties": false,
+      "description": "A configured project by canonical ref, project id, or a path inside it.",
+      "properties": {
+        "path": {
+          "anyOf": [
+            {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Absolute host path inside a project checkout."
+        },
+        "project": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Project id."
+        },
+        "ref": {
+          "anyOf": [
+            {
+              "pattern": "^sinnix://projects/[^/]+(?:/checkouts/[^/]+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Canonical project or checkout ref."
+        }
+      },
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "deadline_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Unix timestamp after which the call is refused."
+    },
+    "path": {
+      "$ref": "#/$defs/Path4"
+    },
+    "project": {
+      "$ref": "#/$defs/ProjectLocator"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Caller-chosen correlation id."
+    }
+  },
+  "required": [
+    "path",
+    "project"
+  ],
+  "type": "object"
+}
+```
+
+Output: the response envelope's `data` field is `NativeResult`; the full envelope schema is the `sinnix://gateway/v2/actions/beads.memory.get` resource and `sinnix-agent-gateway catalog beads.memory.get --schema`.
+
+Examples:
+
+Get one stored memory:
+
+```json
+{
+  "path": {
+    "key": "reader-checks"
+  },
+  "project": {
+    "project": "sinnix"
+  }
+}
+```
+
+### `beads.blockers`
+
+The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
+
+Family: `query`. Owner: `beads`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+
+Follow-up actions: `beads.get`, `beads.query`.
+
+Input schema:
+
+```json
+{
+  "$defs": {
+    "ProjectLocator": {
+      "additionalProperties": false,
+      "description": "A configured project by canonical ref, project id, or a path inside it.",
+      "properties": {
+        "path": {
+          "anyOf": [
+            {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Absolute host path inside a project checkout."
+        },
+        "project": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Project id."
+        },
+        "ref": {
+          "anyOf": [
+            {
+              "pattern": "^sinnix://projects/[^/]+(?:/checkouts/[^/]+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Canonical project or checkout ref."
+        }
+      },
+      "type": "object"
+    },
+    "Query3": {
+      "additionalProperties": false,
+      "properties": {
+        "issue_id": {
+          "description": "The issues to annotate. Repeat the parameter; at least one is required and at most 100 are accepted, and either bound is a 400 `invalid_argument` with `param: \"issue_id\"`, `reason: \"invalid_value\"`.\n\nEach value must be an EXACT canonical issue id: there is no fuzzy, prefix or substring resolution on this surface, for the reason `GET /v0/beads/issues/{id}` gives. A value that matches nothing gets a bare entry rather than being refused. An empty value is a 400.\n\nRepeats collapse: an id named twice is one entry, at the position of its first mention.",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 100,
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "issue_id"
+      ],
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "deadline_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Unix timestamp after which the call is refused."
+    },
+    "project": {
+      "$ref": "#/$defs/ProjectLocator"
+    },
+    "query": {
+      "$ref": "#/$defs/Query3"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Caller-chosen correlation id."
+    }
+  },
+  "required": [
+    "query",
+    "project"
+  ],
+  "type": "object"
+}
+```
+
+Output: the response envelope's `data` field is `NativeResult`; the full envelope schema is the `sinnix://gateway/v2/actions/beads.blockers` resource and `sinnix-agent-gateway catalog beads.blockers --schema`.
+
+Examples:
+
+Read the blocking decoration of several issues:
+
+```json
+{
+  "project": {
+    "project": "sinnix"
+  },
+  "query": {
+    "issue_id": [
+      "sinnix-abc1"
+    ]
+  }
+}
+```
+
+### `beads.dependencies`
+
+The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
+
+Family: `query`. Owner: `beads`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+
+Follow-up actions: `beads.get`, `beads.query`.
+
+Input schema:
+
+```json
+{
+  "$defs": {
+    "ProjectLocator": {
+      "additionalProperties": false,
+      "description": "A configured project by canonical ref, project id, or a path inside it.",
+      "properties": {
+        "path": {
+          "anyOf": [
+            {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Absolute host path inside a project checkout."
+        },
+        "project": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Project id."
+        },
+        "ref": {
+          "anyOf": [
+            {
+              "pattern": "^sinnix://projects/[^/]+(?:/checkouts/[^/]+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Canonical project or checkout ref."
+        }
+      },
+      "type": "object"
+    },
+    "Query4": {
+      "additionalProperties": false,
+      "properties": {
+        "issue_id": {
+          "description": "The issues to read edges for. Repeat the parameter; at least one is required and at most 100 are accepted, and either bound is a 400 `invalid_argument` with `param: \"issue_id\"`, `reason: \"invalid_value\"`.\n\nEach value must be an EXACT canonical issue id: there is no fuzzy, prefix or substring resolution on this surface, for the reason `GET /v0/beads/issues/{id}` gives. A value that matches nothing is reported in `missing` rather than refused. An empty value is a 400.\n\nRepeats collapse: an id named twice is one entry in `missing` at most once, and its edges appear once.",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 100,
+          "minItems": 1,
+          "type": "array"
+        },
+        "type": {
+          "description": "Edge types to include. Repeat the parameter. Empty means every type.\n\nThe vocabulary is OPEN \u2014 a workspace configures its own edge types \u2014 so an unrecognized value is not an error here: it simply matches no edge. What IS refused, with a 400 `invalid_argument`, is a value no edge could ever carry: empty, or longer than the column.\n\nThe filter narrows EDGES, never the named issues. An issue whose every edge the filter rejects is still not in `missing`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "issue_id"
+      ],
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "deadline_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Unix timestamp after which the call is refused."
+    },
+    "project": {
+      "$ref": "#/$defs/ProjectLocator"
+    },
+    "query": {
+      "$ref": "#/$defs/Query4"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Caller-chosen correlation id."
+    }
+  },
+  "required": [
+    "query",
+    "project"
+  ],
+  "type": "object"
+}
+```
+
+Output: the response envelope's `data` field is `NativeResult`; the full envelope schema is the `sinnix://gateway/v2/actions/beads.dependencies` resource and `sinnix-agent-gateway catalog beads.dependencies --schema`.
+
+Examples:
+
+List the stored dependency edges of several issues:
+
+```json
+{
+  "project": {
+    "project": "sinnix"
+  },
+  "query": {
+    "issue_id": [
+      "sinnix-abc1"
+    ],
+    "type": [
+      "blocks"
+    ]
+  }
+}
+```
+
+### `beads.cycles`
+
+The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
+
+Family: `query`. Owner: `beads`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+
+Follow-up actions: `beads.get`, `beads.query`.
+
+Input schema:
+
+```json
+{
+  "$defs": {
+    "ProjectLocator": {
+      "additionalProperties": false,
+      "description": "A configured project by canonical ref, project id, or a path inside it.",
+      "properties": {
+        "path": {
+          "anyOf": [
+            {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Absolute host path inside a project checkout."
+        },
+        "project": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Project id."
+        },
+        "ref": {
+          "anyOf": [
+            {
+              "pattern": "^sinnix://projects/[^/]+(?:/checkouts/[^/]+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Canonical project or checkout ref."
+        }
+      },
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "deadline_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Unix timestamp after which the call is refused."
+    },
+    "project": {
+      "$ref": "#/$defs/ProjectLocator"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Caller-chosen correlation id."
+    }
+  },
+  "required": [
+    "project"
+  ],
+  "type": "object"
+}
+```
+
+Output: the response envelope's `data` field is `NativeResult`; the full envelope schema is the `sinnix://gateway/v2/actions/beads.cycles` resource and `sinnix-agent-gateway catalog beads.cycles --schema`.
+
+Examples:
+
+List dependency cycles:
+
+```json
+{
+  "project": {
+    "project": "sinnix"
+  }
+}
+```
+
+### `beads.memories`
+
+The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
+
+Family: `query`. Owner: `beads`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+
+Follow-up actions: `beads.get`, `beads.query`.
+
+Input schema:
+
+```json
+{
+  "$defs": {
+    "ProjectLocator": {
+      "additionalProperties": false,
+      "description": "A configured project by canonical ref, project id, or a path inside it.",
+      "properties": {
+        "path": {
+          "anyOf": [
+            {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Absolute host path inside a project checkout."
+        },
+        "project": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Project id."
+        },
+        "ref": {
+          "anyOf": [
+            {
+              "pattern": "^sinnix://projects/[^/]+(?:/checkouts/[^/]+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Canonical project or checkout ref."
+        }
+      },
+      "type": "object"
+    },
+    "Query5": {
+      "additionalProperties": false,
+      "properties": {
+        "search": {
+          "description": "Narrows the answer to memories that MATCH: a memory matches when the lowercase of its key, or the lowercase of its value, contains the lowercase of this term. Absent or empty means everything, and a term nothing matches is a `200` with an empty `items`.\n\nIT IS A SUBSTRING MATCH, NOT THE `issues:query` EXPRESSION LANGUAGE, and it is spelled `search` rather than `q` FOR THAT REASON. On `GET /v0/beads/issues:query`, `q` is a boolean expression over issue fields that is refused when it does not parse; here there is nothing to parse, no vocabulary and no refusal \u2014 every string is a legal search term, `status=open` included, and it is matched literally. Two names because two questions: a client that sent this operation the other `q` would otherwise get a literal substring search back instead of an error.\n\nThe term reaches the role UNFOLDED. Case folding is the role's, so that this surface and `bd memories` cannot come to disagree about what matching means; a client sends what its user typed.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "deadline_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Unix timestamp after which the call is refused."
+    },
+    "project": {
+      "$ref": "#/$defs/ProjectLocator"
+    },
+    "query": {
+      "$ref": "#/$defs/Query5"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Caller-chosen correlation id."
+    }
+  },
+  "required": [
+    "project"
+  ],
+  "type": "object"
+}
+```
+
+Output: the response envelope's `data` field is `NativeResult`; the full envelope schema is the `sinnix://gateway/v2/actions/beads.memories` resource and `sinnix-agent-gateway catalog beads.memories --schema`.
+
+Examples:
+
+List the workspace's stored memories:
+
+```json
+{
+  "project": {
+    "project": "sinnix"
+  },
+  "query": {
+    "search": "reader"
+  }
+}
+```
+
+### `beads.related`
+
+The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
+
+Family: `query`. Owner: `beads`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+
+Follow-up actions: `beads.get`, `beads.query`.
+
+Input schema:
+
+```json
+{
+  "$defs": {
+    "Path6": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "Exact canonical issue id. No fuzzy, prefix or substring resolution.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "ProjectLocator": {
+      "additionalProperties": false,
+      "description": "A configured project by canonical ref, project id, or a path inside it.",
+      "properties": {
+        "path": {
+          "anyOf": [
+            {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Absolute host path inside a project checkout."
+        },
+        "project": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Project id."
+        },
+        "ref": {
+          "anyOf": [
+            {
+              "pattern": "^sinnix://projects/[^/]+(?:/checkouts/[^/]+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Canonical project or checkout ref."
+        }
+      },
+      "type": "object"
+    },
+    "Query6": {
+      "additionalProperties": false,
+      "properties": {
+        "direction": {
+          "description": "Which way this issue's edges are walked. `out` answers the issues it DEPENDS ON \u2014 the `dependencies` member of `GET /v0/beads/issues/{id}`. `in` answers the issues that depend on it \u2014 that read's `dependents` member.\n\nIT IS REQUIRED AND HAS NO DEFAULT, on `GET /v0/beads/dependencies:count`'s terms and for the reason `issueops.RelationDirection` gives: the two answers have the same shape and the same member names, so a caller handed the inverse graph has nothing to notice. An absent or unrecognized value is a 400 `invalid_argument` with `param: \"direction\"`, never a walk in some default direction.\n\nThe vocabulary is CLOSED \u2014 unlike `type` below \u2014 because it is a property of the edge's shape rather than of a workspace's configuration.",
+          "enum": [
+            "out",
+            "in"
+          ],
+          "type": "string"
+        },
+        "type": {
+          "description": "Edge types to include. Repeat the parameter. Empty means every type.\n\n`GET /v0/beads/dependencies`'s `type` exactly: the vocabulary is OPEN, so an unrecognized value is not an error and simply matches no edge, while a value no edge could ever carry \u2014 empty, or longer than the column \u2014 is a 400 `invalid_argument` with `param: \"type\"`.\n\nThe filter narrows EDGES, never the anchor. An issue whose every edge it rejects is answered with an empty `items` and not with a 404, which is a different fact from an id that names nothing.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "direction"
+      ],
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "deadline_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Unix timestamp after which the call is refused."
+    },
+    "path": {
+      "$ref": "#/$defs/Path6"
+    },
+    "project": {
+      "$ref": "#/$defs/ProjectLocator"
+    },
+    "query": {
+      "$ref": "#/$defs/Query6"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Caller-chosen correlation id."
+    }
+  },
+  "required": [
+    "path",
+    "query",
+    "project"
+  ],
+  "type": "object"
+}
+```
+
+Output: the response envelope's `data` field is `NativeResult`; the full envelope schema is the `sinnix://gateway/v2/actions/beads.related` resource and `sinnix-agent-gateway catalog beads.related --schema`.
+
+Examples:
+
+List one issue's neighbors in a named direction:
+
+```json
+{
+  "path": {
+    "id": "sinnix-abc1"
+  },
+  "project": {
+    "project": "sinnix"
+  },
+  "query": {
+    "direction": "out",
+    "type": [
+      "blocks"
+    ]
+  }
+}
+```
+
+### `beads.unclaim`
+
+The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
+
+Family: `change`. Owner: `beads`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+
+Follow-up actions: `beads.get`, `beads.query`.
+
+Input schema:
+
+```json
+{
+  "$defs": {
+    "Path6": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "Exact canonical issue id. No fuzzy, prefix or substring resolution.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "ProjectLocator": {
+      "additionalProperties": false,
+      "description": "A configured project by canonical ref, project id, or a path inside it.",
+      "properties": {
+        "path": {
+          "anyOf": [
+            {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Absolute host path inside a project checkout."
+        },
+        "project": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Project id."
+        },
+        "ref": {
+          "anyOf": [
+            {
+              "pattern": "^sinnix://projects/[^/]+(?:/checkouts/[^/]+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Canonical project or checkout ref."
+        }
+      },
+      "type": "object"
+    },
+    "ReleaseIssueRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "description": "Who is releasing the claim. `ClaimRequest.actor`'s rules exactly: the server trims it, then refuses an empty result, anything longer than 256 BYTES (the `maxLength` above counts characters \u2014 the byte limit is the binding one), and any control character including newline. The value reaches the event the release records and the storage commit message, so an unvalidated newline would forge audit-trail lines.\n\nIt is REQUIRED, and for one reason beyond the audit trail: a release is the moment work stops being owned, and the one question asked of its history entry afterwards is who let it go. On the unconditional path it is ALSO the ownership fence's subject \u2014 see the operation description.",
+          "maxLength": 256,
+          "minLength": 1,
+          "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F\\u2028\\u2029]+$",
+          "type": "string"
+        },
+        "expected_assignee": {
+          "description": "Compare-and-set on the holder: the release proceeds only while the issue is still assigned to this actor, and otherwise refuses with `409` / `precondition_failed` naming this value, having written nothing.\n\nA MATCH REPLACES THE OWNERSHIP FENCE, so `actor` need not be the holder. Sending it beside `force` is a 400: the two are answers to the same question and they disagree.\n\nTHE COMPARISON IS SEPARATOR-INSENSITIVE AND NOTHING ELSE. A run of `.`, `_` or `-` matches any other such run, so `agent-a`, `agent_a` and `agent.a` are one holder \u2014 that is deliberate, so a caller naming the holder under a different layer's spelling is a match rather than a mismatch. THE ONE EXCEPTION IS AN EXACT `--` RUN: that is gascity's session-name encoding of a rig-qualified agent's `/`, so it decodes to `/` instead of collapsing. `a--b` matches `a/b`, and no longer matches `a__b` or `a-b`. Those name different identities \u2014 `a--b` is the agent `b` on rig `a`, `a__b` is the dotted alias `a.b` \u2014 so treating them as one holder was a widening, and removing it is the point of the exception. Longer or mixed runs, `__` included, still collapse. NOTHING ELSE IS FORGIVEN: the value is not trimmed and not case-folded, so `\" agent-a\"` and `Agent-a` are both refusals. The server trims only far enough to tell a blank expectation from a real one and never sends the trimmed form on, so a caller that pads its expectation loses EVERY time rather than intermittently. Compose it from a holder a read gave you.\n\nTHE EMPTY STRING IS A 400, and this is the one place this member disagrees with `UpdateIssueRequest.expected_assignee`, where an empty string is a real guard meaning \"expected unassigned\". Here \"release a row nobody holds\" describes no release at all; a caller that wants to assert a row is unheld is asking a READER a question, not asking this operation to do nothing. Absent, and only absent, selects the unconditional path.\n\nIT IS NOT LENGTH- OR PATTERN-BOUNDED the way `actor` is, and the asymmetry is deliberate: this value is COMPARED and never stored, so a value no assignee column could hold simply cannot match, and refusing it at the edge would be a refusal the role does not have.",
+          "type": "string"
+        },
+        "force": {
+          "default": false,
+          "description": "Bypass the ownership fence, so an actor that is not the holder may release the claim. It is the escape hatch `bd unclaim --force` spells, for an abandoned claim whose holder crashed.\n\nIT BYPASSES THE FENCE AND NOTHING ELSE. It does not make an unheld row releasable, it does not make a closed one releasable, and it never bypasses a precondition \u2014 sending it beside `expected_assignee` is a 400 rather than a silent win for either.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "actor"
+      ],
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "body": {
+      "$ref": "#/$defs/ReleaseIssueRequest"
+    },
+    "deadline_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Unix timestamp after which the call is refused."
+    },
+    "idempotency_key": {
+      "description": "Gateway response replay key. Confirmed responses replay unchanged; interrupted effects require owner reconciliation and are never automatically retried.",
+      "maxLength": 256,
+      "minLength": 1,
+      "type": "string"
+    },
+    "path": {
+      "$ref": "#/$defs/Path6"
+    },
+    "preconditions": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Owner-specific checks; a mismatch fails with precondition_failed. Checks are best effort unless the owner explicitly guarantees an atomic compare and mutation."
+    },
+    "project": {
+      "$ref": "#/$defs/ProjectLocator"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Caller-chosen correlation id."
+    }
+  },
+  "required": [
+    "body",
+    "path",
+    "idempotency_key",
+    "project"
+  ],
+  "type": "object"
+}
+```
+
+Output: the response envelope's `data` field is `NativeResult`; the full envelope schema is the `sinnix://gateway/v2/actions/beads.unclaim` resource and `sinnix-agent-gateway catalog beads.unclaim --schema`.
+
+Examples:
+
+Give back the claim on an issue:
+
+```json
+{
+  "body": {
+    "actor": "example-worker",
+    "expected_assignee": "example-worker"
+  },
+  "idempotency_key": "example-releaseIssue-1",
+  "path": {
+    "id": "sinnix-abc1"
+  },
+  "project": {
+    "project": "sinnix"
+  }
+}
+```
+
+### `beads.memory.remember`
+
+The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
+
+Family: `change`. Owner: `beads`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+
+Follow-up actions: `beads.get`, `beads.query`.
+
+Input schema:
+
+```json
+{
+  "$defs": {
+    "ProjectLocator": {
+      "additionalProperties": false,
+      "description": "A configured project by canonical ref, project id, or a path inside it.",
+      "properties": {
+        "path": {
+          "anyOf": [
+            {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Absolute host path inside a project checkout."
+        },
+        "project": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Project id."
+        },
+        "ref": {
+          "anyOf": [
+            {
+              "pattern": "^sinnix://projects/[^/]+(?:/checkouts/[^/]+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Canonical project or checkout ref."
+        }
+      },
+      "type": "object"
+    },
+    "RememberRequest": {
+      "additionalProperties": false,
+      "description": "What to remember, and optionally under what key.",
+      "properties": {
+        "content": {
+          "description": "The memory itself, stored VERBATIM: newlines, surrounding space and unicode all survive. Flattening it to one line is what a front door does when it prints, not what this plane does when it stores.\n\nEmpty after trimming is a `400`. So is content from which no key can be derived when `key` is omitted \u2014 `\"!!!\"` derives to nothing \u2014 and the recovery for that one is to send a `key`.",
+          "type": "string"
+        },
+        "key": {
+          "description": "The key to store under. OMIT IT to have the server derive one from `content`; the response's `key` is then how the caller learns where the memory landed.\n\nSupplied, it is used verbatim \u2014 no trimming, no slugging, no charset restriction. A key carrying a control character is storable this way and by `bd remember --key`, and is then unreachable through `GET`/`DELETE /v0/beads/memories/{key}`, which refuse one: see those operations.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "content"
+      ],
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "body": {
+      "$ref": "#/$defs/RememberRequest"
+    },
+    "deadline_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Unix timestamp after which the call is refused."
+    },
+    "idempotency_key": {
+      "description": "Gateway response replay key. Confirmed responses replay unchanged; interrupted effects require owner reconciliation and are never automatically retried.",
+      "maxLength": 256,
+      "minLength": 1,
+      "type": "string"
+    },
+    "preconditions": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Owner-specific checks; a mismatch fails with precondition_failed. Checks are best effort unless the owner explicitly guarantees an atomic compare and mutation."
+    },
+    "project": {
+      "$ref": "#/$defs/ProjectLocator"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Caller-chosen correlation id."
+    }
+  },
+  "required": [
+    "body",
+    "idempotency_key",
+    "project"
+  ],
+  "type": "object"
+}
+```
+
+Output: the response envelope's `data` field is `NativeResult`; the full envelope schema is the `sinnix://gateway/v2/actions/beads.memory.remember` resource and `sinnix-agent-gateway catalog beads.memory.remember --schema`.
+
+Examples:
+
+Store one memory:
+
+```json
+{
+  "body": {
+    "content": "The reader contract includes bounded pages and continuation tokens.",
+    "key": "reader-checks"
+  },
+  "idempotency_key": "example-rememberMemory-1",
+  "project": {
+    "project": "sinnix"
+  }
+}
+```
+
+### `beads.dependencies.remove`
+
+The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
+
+Family: `change`. Owner: `beads`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+
+Follow-up actions: `beads.get`, `beads.query`.
+
+Input schema:
+
+```json
+{
+  "$defs": {
+    "ProjectLocator": {
+      "additionalProperties": false,
+      "description": "A configured project by canonical ref, project id, or a path inside it.",
+      "properties": {
+        "path": {
+          "anyOf": [
+            {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Absolute host path inside a project checkout."
+        },
+        "project": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Project id."
+        },
+        "ref": {
+          "anyOf": [
+            {
+              "pattern": "^sinnix://projects/[^/]+(?:/checkouts/[^/]+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Canonical project or checkout ref."
+        }
+      },
+      "type": "object"
+    },
+    "RemoveDependencyRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "description": "Who is removing the edge, under `ClaimRequest.actor`'s rules and for the same reasons: the server trims it, refuses an empty result, anything longer than 256 BYTES, and any control character including newline. It is attributed on the `dependency_removed` event a real removal records, and interpolated into the storage commit message.",
+          "maxLength": 256,
+          "minLength": 1,
+          "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F\\u2028\\u2029]+$",
+          "type": "string"
+        },
+        "depends_on_id": {
+          "description": "The edge's TARGET \u2014 the issue depended upon. An exact canonical id, under `issue_id`'s rule.",
+          "maxLength": 255,
+          "minLength": 1,
+          "type": "string"
+        },
+        "issue_id": {
+          "description": "The edge's SOURCE \u2014 the issue that depends on the other end. An EXACT canonical id: there is no fuzzy, prefix or substring resolution on this surface.",
+          "maxLength": 255,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "actor",
+        "depends_on_id",
+        "issue_id"
+      ],
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "body": {
+      "$ref": "#/$defs/RemoveDependencyRequest"
+    },
+    "deadline_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Unix timestamp after which the call is refused."
+    },
+    "idempotency_key": {
+      "description": "Gateway response replay key. Confirmed responses replay unchanged; interrupted effects require owner reconciliation and are never automatically retried.",
+      "maxLength": 256,
+      "minLength": 1,
+      "type": "string"
+    },
+    "preconditions": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Owner-specific checks; a mismatch fails with precondition_failed. Checks are best effort unless the owner explicitly guarantees an atomic compare and mutation."
+    },
+    "project": {
+      "$ref": "#/$defs/ProjectLocator"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Caller-chosen correlation id."
+    }
+  },
+  "required": [
+    "body",
+    "idempotency_key",
+    "project"
+  ],
+  "type": "object"
+}
+```
+
+Output: the response envelope's `data` field is `NativeResult`; the full envelope schema is the `sinnix://gateway/v2/actions/beads.dependencies.remove` resource and `sinnix-agent-gateway catalog beads.dependencies.remove --schema`.
+
+Examples:
+
+Remove one dependency edge:
+
+```json
+{
+  "body": {
+    "actor": "example-worker",
+    "depends_on_id": "sinnix-abc1",
+    "issue_id": "sinnix-abc2"
+  },
+  "idempotency_key": "example-removeDependency-1",
+  "project": {
+    "project": "sinnix"
+  }
+}
+```
+
+### `beads.reopen`
+
+The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
+
+Family: `change`. Owner: `beads`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+
+Follow-up actions: `beads.get`, `beads.query`.
+
+Input schema:
+
+```json
+{
+  "$defs": {
+    "Path6": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "Exact canonical issue id. No fuzzy, prefix or substring resolution.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "ProjectLocator": {
+      "additionalProperties": false,
+      "description": "A configured project by canonical ref, project id, or a path inside it.",
+      "properties": {
+        "path": {
+          "anyOf": [
+            {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Absolute host path inside a project checkout."
+        },
+        "project": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Project id."
+        },
+        "ref": {
+          "anyOf": [
+            {
+              "pattern": "^sinnix://projects/[^/]+(?:/checkouts/[^/]+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Canonical project or checkout ref."
+        }
+      },
+      "type": "object"
+    },
+    "ReopenIssueRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "description": "Who is reopening the issue. `ClaimRequest.actor`'s rules exactly: the server trims it, then refuses an empty result, anything longer than 256 BYTES (the `maxLength` above counts characters \u2014 the byte limit is the binding one), and any control character including newline. The value reaches the `reopened` event's attribution and the storage commit message, so an unvalidated newline would forge audit-trail lines.",
+          "maxLength": 256,
+          "minLength": 1,
+          "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F\\u2028\\u2029]+$",
+          "type": "string"
+        },
+        "expected_version": {
+          "description": "Requires the row's revision to equal this value BEFORE the reopen. A miss refuses the whole request with `409 precondition_failed` and writes nothing \u2014 `CloseIssueRequest.expected_version`'s contract, on the close's mirror.\n\nIT IS CHECKED BEFORE THE NON-DONE NO-OP, the mirror of the close's check-before-the-idempotent-re-close, and for the same reason: a reopen of a row somebody else has moved is a `409` rather than the 200-with-`already_open` the same body earns unguarded, which is what lets `already_open` be read as \"nothing has happened here since\".\n\nThe token is the `revision` this operation's own response carries; compose the next expectation from a value a write ANSWERED with and never from one the client computed. DECODE IT AS A 64-BIT INTEGER, for the reason `UpdateIssueRequest.expected_version` spells out.",
+          "type": "integer"
+        },
+        "reason": {
+          "description": "Why the issue is being reopened. Recorded on the `reopened` EVENT this move records \u2014 not on a field of the issue, and not carried in the response, so a caller that wants it back reads the issue's events. Refused for control characters, and bounded by what the column holds rather than by the number above.",
+          "maxLength": 255,
+          "type": "string"
+        }
+      },
+      "required": [
+        "actor"
+      ],
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "body": {
+      "$ref": "#/$defs/ReopenIssueRequest"
+    },
+    "deadline_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Unix timestamp after which the call is refused."
+    },
+    "idempotency_key": {
+      "description": "Gateway response replay key. Confirmed responses replay unchanged; interrupted effects require owner reconciliation and are never automatically retried.",
+      "maxLength": 256,
+      "minLength": 1,
+      "type": "string"
+    },
+    "path": {
+      "$ref": "#/$defs/Path6"
+    },
+    "preconditions": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Owner-specific checks; a mismatch fails with precondition_failed. Checks are best effort unless the owner explicitly guarantees an atomic compare and mutation."
+    },
+    "project": {
+      "$ref": "#/$defs/ProjectLocator"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Caller-chosen correlation id."
+    }
+  },
+  "required": [
+    "body",
+    "path",
+    "idempotency_key",
+    "project"
+  ],
+  "type": "object"
+}
+```
+
+Output: the response envelope's `data` field is `NativeResult`; the full envelope schema is the `sinnix://gateway/v2/actions/beads.reopen` resource and `sinnix-agent-gateway catalog beads.reopen --schema`.
+
+Examples:
+
+Reopen one issue:
+
+```json
+{
+  "body": {
+    "actor": "example-worker",
+    "expected_version": 8,
+    "reason": "A pagination regression remains"
+  },
+  "idempotency_key": "example-reopenIssue-1",
+  "path": {
+    "id": "sinnix-abc1"
+  },
+  "project": {
+    "project": "sinnix"
+  }
+}
+```
+
+### `beads.update`
+
+The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
+
+Family: `change`. Owner: `beads`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+
+Follow-up actions: `beads.get`, `beads.query`.
+
+Input schema:
+
+```json
+{
+  "$defs": {
+    "AddLabel": {
+      "maxLength": 255,
+      "type": "string"
+    },
+    "ApplyMetadataPatch": {
+      "additionalProperties": false,
+      "description": "A metadata edit. `replace` is mutually exclusive with the other three; without it the edits apply as `merge`, then `set` in key order, then `unset`, so UNSETTING A KEY WINS over setting or merging it. Sending `replace` beside any of the others is a `400`.\n\n`replace` replaces the whole document. Present holding `null`, `{}` or an empty value CLEARS metadata \u2014 and clearing STORES THE EMPTY JSON DOCUMENT rather than SQL null, so \"created with no metadata\" and \"given metadata and then cleared\" are the same stored value; a reader must treat absent, empty and `{}` as one value on the way out. `merge` must be a nonempty JSON OBJECT and is merged into the current document.",
+      "properties": {
+        "merge": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetadataValue"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "replace": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetadataValue"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "set": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/MetadataValue"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "description": "Individual top-level keys to write, in deterministic key order. A value present holding `null` writes JSON null; a key is removed with `unset`, never by sending a null here.",
+          "type": "object"
+        },
+        "unset": {
+          "description": "Top-level keys to remove, applied after every other edit.",
+          "items": {
+            "$ref": "#/$defs/UnsetItem"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "IssuePatchBody": {
+      "additionalProperties": false,
+      "description": "The fields to write. Every member is optional and PRESENCE is the signal: a member present is written, a member absent is untouched. An empty object is a `400` \u2014 a write that writes nothing is a client bug.\n\nThis is a deliberate SUBSET of the fields an issue carries; the members it does not spell are future surface rather than oversights, and `updateIssue`'s own description says which and why.\n\nIt now agrees with `ApplyPatchBody` on every member it publishes, and the two differ only in the SHAPE of two of them: `labels` is complete replacement here and an ordered add/remove/replace patch there, because that operation edits a set it did not compose. Everything else \u2014 down to the `metadata` algebra and the four nullable members \u2014 is one definition, so a caller cannot get a different answer for the same edit depending on which operation it sent.",
+      "properties": {
+        "acceptance_criteria": {
+          "type": "string"
+        },
+        "add_labels": {
+          "description": "Labels to add, applied AFTER any `labels` replacement.\n\nIT IS NOT MUTUALLY EXCLUSIVE WITH `labels`, and that is the difference from `append_notes`, which is. The role defines an order over all three label edits, so sending a replacement and an addition together has a defined result; notes have no such algebra, so there the two are a contradiction and are refused.\n\nIT IS WHY THIS PAIR EXISTS. A caller that reads a row, adds one label and writes the whole set back silently drops any label another writer added in between \u2014 and `bd label add` and every agent that tags work concurrently are exactly that caller. A replacement can only be composed safely by a writer that knows it is alone.\n\nRepetition is free: a label named twice is applied once, and adding one the issue already carries changes no labels. (Whether the RESPONSE reports `changed: false` is a fact about the whole patch \u2014 see `remove_labels`.) An EMPTY-STRING entry is DROPPED rather than refused \u2014 a label row carrying `\"\"` renders as nothing and matches nothing, so writing one would only store junk, and refusing the whole update would let one stray entry fail an otherwise-good edit.",
+          "items": {
+            "$ref": "#/$defs/AddLabel"
+          },
+          "type": "array"
+        },
+        "append_notes": {
+          "description": "Appends to the notes rather than replacing them. Mutually exclusive with `notes`.",
+          "type": "string"
+        },
+        "assignee": {
+          "description": "The assignee. A transfer away from a live foreign in-progress owner is refused with `409 already_claimed` unless `force_assignee_transfer` is set or `expected_assignee` matched. Setting it to the empty string unassigns.\n\n`{id}:claim` remains the operation that ACQUIRES work: it carries its own eligibility rules and sets the status with the assignee in one act. This member is the raw write, fenced.",
+          "maxLength": 255,
+          "type": "string"
+        },
+        "defer_until": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "RFC 3339. Explicit `null` CLEARS the deferral."
+        },
+        "description": {
+          "type": "string"
+        },
+        "design": {
+          "type": "string"
+        },
+        "due_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "RFC 3339. Explicit `null` CLEARS the due date."
+        },
+        "estimated_minutes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Explicit `null` CLEARS the estimate."
+        },
+        "external_ref": {
+          "anyOf": [
+            {
+              "maxLength": 255,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Explicit `null` CLEARS the reference."
+        },
+        "issue_type": {
+          "description": "The issue type, from this workspace's own configured vocabulary. A type outside it is refused by the ROLE and reaches the client as a `400` \u2014 this server cannot read the vocabulary without a transaction, so it checks only what this schema declares.",
+          "maxLength": 255,
+          "type": "string"
+        },
+        "labels": {
+          "description": "COMPLETE REPLACEMENT of the label set. An empty array clears every label.\n\nIt is the REPLACE half of the same ordered edit `ApplyPatchBody` spells as `labels.replace`, and `add_labels`/`remove_labels` are the other two. All three may travel together and are applied in that order \u2014 replace, then add, then remove \u2014 so REMOVAL WINS when one label appears in more than one of them. That is the role's own algebra, not this operation's arrangement of it.\n\nTHE SHAPE DIFFERS FROM `ApplyPatchBody`'s, which nests the three under one `labels` object, and the difference is historical rather than meaningful. This member shipped as a bare array; nesting it now would RE-TYPE a published member, which is the one kind of change this document has no additive route for. Two flat siblings is the shape that could be added \u2014 and it is the shape `notes` and `append_notes` already use for the same replace/increment pair.",
+          "items": {
+            "$ref": "#/$defs/Label"
+          },
+          "type": "array"
+        },
+        "metadata": {
+          "$ref": "#/$defs/ApplyMetadataPatch"
+        },
+        "notes": {
+          "description": "Replaces the notes. Mutually exclusive with `append_notes`; sending both is a `400`.",
+          "type": "string"
+        },
+        "parent_id": {
+          "description": "Replaces the issue's parents atomically: a nonempty value makes THAT issue the only parent, and an EMPTY STRING removes every parent-child edge the issue has. Labels are not inherited \u2014 that is a create-time choice (`CreateIssueRequest.inherit_labels_from_parent`) and a reparent does not re-run it.\n\nIT IS A GRAPH EDIT, and it earns the graph's refusals: a new parent this workspace holds no row for is a `400`, a pair that already carries an edge of another type is `409 dependency_exists`, and a move under the issue's own descendant is `409 dependency_cycle` \u2014 the PLAIN one, carrying no `issue_id`/`blocker_id`/ `blocker_is_ancestor`, because the hierarchy refusal answers only to blocking edges and this member writes a `parent-child` edge. Naming the issue itself is a `400`. One call rather than a remove-then-add pair, which is the whole reason it is here: the two-call spelling leaves the issue parentless if the second call fails.",
+          "maxLength": 255,
+          "type": "string"
+        },
+        "priority": {
+          "maximum": 4,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "remove_labels": {
+          "description": "Labels to remove, applied AFTER `labels` and `add_labels`, so REMOVAL WINS over both.\n\nRemoving a label the issue does not carry CHANGES NO LABELS; it is not a `404` and not a conflict. Whether the RESPONSE reports `changed: false` is a fact about the whole patch, not about this member \u2014 a request that also moved a title changed the row. The same repetition and empty-string rules as `add_labels` apply, and a value longer than the column is refused here as it is there \u2014 the length rule is about what a label may BE, not about whether this particular row happens to carry one.",
+          "items": {
+            "$ref": "#/$defs/RemoveLabel"
+          },
+          "type": "array"
+        },
+        "status": {
+          "description": "The issue's status, from this workspace's own configured vocabulary.\n\nA STATUS THAT CROSSES INTO THE DONE CATEGORY ANSWERS TO CLOSE POLICY: the update is refused with `409 not_closable` for open children or a live blocker unless `force_close_policy` is set. A done-to-done change and a move OUT of the done category are unaffected.\n\nIT IS NOT A SECOND SPELLING OF `{id}:close` AND `{id}:reopen`. Those two carry semantics a status write has nowhere to put \u2014 the reason and session under first-close-wins, the done-status normalization, the `already_closed`/`already_open` idempotence flags \u2014 and they remain the operations to reach for when what you mean is \"close this\". This member is for the edit that moves a status ALONGSIDE other fields in one transaction, which is the thing two calls cannot do. `ApplyPatchBody.status` has meant exactly this since `issues:batchApply` landed.",
+          "maxLength": 255,
+          "type": "string"
+        },
+        "title": {
+          "description": "The issue's title. Must not be blank after trimming; the length bound is what the column holds.",
+          "maxLength": 255,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "Label": {
+      "maxLength": 255,
+      "type": "string"
+    },
+    "MetadataValue": {
+      "anyOf": [
+        {},
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "One metadata value: ANY JSON value \u2014 string, number, boolean, null, array or object \u2014 because typed values enter through the explicit JSON metadata path and persist in older rows. It is not a string, and a client must not decode it as one.\n\nWhere a member of this type is OMITTED, the key is absent; where it is present holding `null`, the key exists and holds null. Those are different states and this surface reports both."
+    },
+    "Path6": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "Exact canonical issue id. No fuzzy, prefix or substring resolution.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "ProjectLocator": {
+      "additionalProperties": false,
+      "description": "A configured project by canonical ref, project id, or a path inside it.",
+      "properties": {
+        "path": {
+          "anyOf": [
+            {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Absolute host path inside a project checkout."
+        },
+        "project": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Project id."
+        },
+        "ref": {
+          "anyOf": [
+            {
+              "pattern": "^sinnix://projects/[^/]+(?:/checkouts/[^/]+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Canonical project or checkout ref."
+        }
+      },
+      "type": "object"
+    },
+    "RemoveLabel": {
+      "maxLength": 255,
+      "type": "string"
+    },
+    "UnsetItem": {
+      "maxLength": 255,
+      "type": "string"
+    },
+    "UpdateIssueRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "description": "Who is editing the issue. `ClaimRequest.actor`'s rules exactly: the server trims it, then refuses an empty result, anything longer than 256 BYTES (the `maxLength` above counts characters \u2014 the byte limit is the binding one), and any control character including newline. The value reaches the history entry's attribution and the storage commit message, so an unvalidated newline would forge audit-trail lines.",
+          "maxLength": 256,
+          "minLength": 1,
+          "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F\\u2028\\u2029]+$",
+          "type": "string"
+        },
+        "expected_assignee": {
+          "description": "Requires the issue's assignee to equal this value before the patch. A match AUTHORIZES the requested `patch.assignee` transfer: this compare-and-set replaces the ordinary anti-steal fence, so it must not be combined with `force_assignee_transfer`. A miss refuses the whole request with `409 precondition_failed`.",
+          "maxLength": 255,
+          "type": "string"
+        },
+        "expected_status": {
+          "description": "Requires the issue's status to equal this value before the patch. A miss refuses the whole request with `409 precondition_failed`.\n\nUnlike `expected_version` this one is readable: `Issue.status` is on every read of this surface, so a caller can guard a status transition without any token at all.",
+          "maxLength": 255,
+          "type": "string"
+        },
+        "expected_version": {
+          "description": "Requires the row's revision to equal this value before the patch. A miss refuses the WHOLE request with `409 precondition_failed` and writes nothing \u2014 `ApplyUpdateItem.expected_version`'s contract, on the operation that patches one row.\n\nThe token is the `revision` this operation's own response carries, and the same one `GET /v0/beads/issues/{id}` publishes \u2014 which is where a first guarded write seeds itself, rather than from an unguarded one or from `POST /v0/beads/issues:batchApply`'s `ApplyItemResult.revision`. Compose the next expectation from the value the write ANSWERED with, never from a number the client incremented itself: the token is OPAQUE and compared for equality alone, so it has no predecessor a client can compute.\n\nDECODE IT AS A 64-BIT INTEGER. Live tokens run past 5e17, where an IEEE-754 double's ulp is already 64, so a parser that decodes JSON numbers as doubles \u2014 JavaScript's `JSON.parse`, Go's `any`, Python's `float` \u2014 hands back a value NEAR the token that is not it, and the guard is refused against a row nothing else touched.",
+          "type": "integer"
+        },
+        "force_assignee_transfer": {
+          "default": false,
+          "description": "Bypasses ONLY a genuine transfer away from a live foreign in-progress owner. Reasserting the exact current assignee is idempotent and needs no force. It requires `patch.assignee` \u2014 a request setting it without one is a `400` \u2014 and it must be false when `expected_assignee` is sent.",
+          "type": "boolean"
+        },
+        "force_close_policy": {
+          "default": false,
+          "description": "Bypasses ONLY close policy \u2014 the open-children refusal and the live blocker refusal \u2014 for a `patch.status` that crosses into the workspace's done category. It has no effect without such a status change, and it never bypasses validation, the preconditions above, or the assignee fence.",
+          "type": "boolean"
+        },
+        "patch": {
+          "$ref": "#/$defs/IssuePatchBody"
+        }
+      },
+      "required": [
+        "actor",
+        "patch"
+      ],
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "body": {
+      "$ref": "#/$defs/UpdateIssueRequest"
+    },
+    "deadline_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Unix timestamp after which the call is refused."
+    },
+    "idempotency_key": {
+      "description": "Gateway response replay key. Confirmed responses replay unchanged; interrupted effects require owner reconciliation and are never automatically retried.",
+      "maxLength": 256,
+      "minLength": 1,
+      "type": "string"
+    },
+    "path": {
+      "$ref": "#/$defs/Path6"
+    },
+    "preconditions": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Owner-specific checks; a mismatch fails with precondition_failed. Checks are best effort unless the owner explicitly guarantees an atomic compare and mutation."
+    },
+    "project": {
+      "$ref": "#/$defs/ProjectLocator"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Caller-chosen correlation id."
+    }
+  },
+  "required": [
+    "body",
+    "path",
+    "idempotency_key",
+    "project"
+  ],
+  "type": "object"
+}
+```
+
+Output: the response envelope's `data` field is `NativeResult`; the full envelope schema is the `sinnix://gateway/v2/actions/beads.update` resource and `sinnix-agent-gateway catalog beads.update --schema`.
+
+Examples:
+
+Edit the fields of one issue:
+
+```json
+{
+  "body": {
+    "actor": "example-worker",
+    "expected_version": 7,
+    "patch": {
+      "add_labels": [
+        "verified"
+      ],
+      "append_notes": "Focused regression checks passed."
+    }
+  },
+  "idempotency_key": "example-updateIssue-1",
+  "path": {
+    "id": "sinnix-abc1"
+  },
+  "project": {
+    "project": "sinnix"
+  }
+}
+```
+
 ### `jobs.list`
 
 List queued jobs (pueue tasks) newest first, optionally for one project.
 
-Family: `query`. Owner: `systemd-jobs`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `systemd-jobs`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: queue, pueue status, running jobs, tasks.
 
@@ -7491,7 +11441,7 @@ One project's jobs:
 
 One job's state and bead binding, with its log range or typed result on request.
 
-Family: `get`. Owner: `systemd-jobs`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `get`. Owner: `systemd-jobs`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: job status, job result, job output, phase.
 
@@ -7565,6 +11515,29 @@ Input schema:
         }
       ],
       "default": null
+    },
+    "attempt": {
+      "anyOf": [
+        {
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "attempt_limit": {
+      "default": 100,
+      "maximum": 100,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "attempt_offset": {
+      "default": 0,
+      "minimum": 0,
+      "type": "integer"
     },
     "deadline_at": {
       "anyOf": [
@@ -7665,7 +11638,7 @@ Typed result:
 
 A byte range of a job's bounded log (workload output, then the wrapper's stderr).
 
-Family: `get`. Owner: `systemd-jobs`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `get`. Owner: `systemd-jobs`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: job log, tail, output, stdout.
 
@@ -7733,6 +11706,18 @@ Input schema:
           "maxLength": 256,
           "minLength": 1,
           "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "attempt": {
+      "anyOf": [
+        {
+          "minimum": 1,
+          "type": "integer"
         },
         {
           "type": "null"
@@ -7830,7 +11815,7 @@ Continue from an offset:
 
 The wait runs in a worker thread; cancelling the MCP request abandons it without stopping the job. A task id is a queue position: pass the launch_reference the start returned and the wait follows its job across a reorder, answering with the id it is at now.
 
-Family: `wait`. Owner: `systemd-jobs`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `wait`. Owner: `systemd-jobs`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: wait for job, block, until done.
 
@@ -7991,7 +11976,7 @@ Wait on the job, not the queue position:
 
 Pass expected_phase to refuse when the job already moved on. Survivors lists PIDs that outlived the reap.
 
-Family: `operate`. Owner: `systemd-jobs`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `operate`. Owner: `systemd-jobs`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: kill, stop job, abort.
 
@@ -8093,7 +12078,7 @@ Input schema:
       "description": "Refuse unless the job is still in this phase (queued, running, ...)."
     },
     "idempotency_key": {
-      "description": "Replaying the same key with the same request returns the stored response.",
+      "description": "Gateway response replay key. Confirmed responses replay unchanged; interrupted effects require owner reconciliation and are never automatically retried.",
       "maxLength": 256,
       "minLength": 1,
       "type": "string"
@@ -8109,7 +12094,7 @@ Input schema:
         }
       ],
       "default": null,
-      "description": "Owner-checked preconditions; a mismatch fails with precondition_failed."
+      "description": "Owner-specific checks; a mismatch fails with precondition_failed. Checks are best effort unless the owner explicitly guarantees an atomic compare and mutation."
     },
     "reason": {
       "anyOf": [
@@ -8169,7 +12154,7 @@ Cancel a running job:
 
 Re-run a terminal job in place with the same launch input and id (pueue restart).
 
-Family: `operate`. Owner: `systemd-jobs`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `operate`. Owner: `systemd-jobs`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: restart, rerun, requeue.
 
@@ -8257,7 +12242,7 @@ Input schema:
       "description": "Unix timestamp after which the call is refused."
     },
     "idempotency_key": {
-      "description": "Replaying the same key with the same request returns the stored response.",
+      "description": "Gateway response replay key. Confirmed responses replay unchanged; interrupted effects require owner reconciliation and are never automatically retried.",
       "maxLength": 256,
       "minLength": 1,
       "type": "string"
@@ -8273,7 +12258,7 @@ Input schema:
         }
       ],
       "default": null,
-      "description": "Owner-checked preconditions; a mismatch fails with precondition_failed."
+      "description": "Owner-specific checks; a mismatch fails with precondition_failed. Checks are best effort unless the owner explicitly guarantees an atomic compare and mutation."
     },
     "reason": {
       "anyOf": [
@@ -8332,7 +12317,7 @@ Retry job 41:
 
 Refused while the job is still queued or running; cancel it first.
 
-Family: `operate`. Owner: `systemd-jobs`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `operate`. Owner: `systemd-jobs`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: remove job, forget, delete job, prune.
 
@@ -8420,7 +12405,7 @@ Input schema:
       "description": "Unix timestamp after which the call is refused."
     },
     "idempotency_key": {
-      "description": "Replaying the same key with the same request returns the stored response.",
+      "description": "Gateway response replay key. Confirmed responses replay unchanged; interrupted effects require owner reconciliation and are never automatically retried.",
       "maxLength": 256,
       "minLength": 1,
       "type": "string"
@@ -8436,7 +12421,7 @@ Input schema:
         }
       ],
       "default": null,
-      "description": "Owner-checked preconditions; a mismatch fails with precondition_failed."
+      "description": "Owner-specific checks; a mismatch fails with precondition_failed. Checks are best effort unless the owner explicitly guarantees an atomic compare and mutation."
     },
     "reason": {
       "anyOf": [
@@ -8495,7 +12480,7 @@ Clean job 41:
 
 Queue one project-declared operation in its declared pool on the root or a worktree.
 
-Family: `run`. Owner: `systemd-jobs`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `run`. Owner: `systemd-jobs`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: agentctl job start, run check, run lint, verify, build.
 
@@ -8600,7 +12585,7 @@ Input schema:
       "description": "Unix timestamp after which the call is refused."
     },
     "idempotency_key": {
-      "description": "Replaying the same key with the same request returns the stored response.",
+      "description": "Gateway response replay key. Confirmed responses replay unchanged; interrupted effects require owner reconciliation and are never automatically retried.",
       "maxLength": 256,
       "minLength": 1,
       "type": "string"
@@ -8630,7 +12615,7 @@ Input schema:
         }
       ],
       "default": null,
-      "description": "Owner-checked preconditions; a mismatch fails with precondition_failed."
+      "description": "Owner-specific checks; a mismatch fails with precondition_failed. Checks are best effort unless the owner explicitly guarantees an atomic compare and mutation."
     },
     "reason": {
       "anyOf": [
@@ -8700,7 +12685,7 @@ Run on a worktree:
 
 cwd is confined to the checkout. Default execution is asynchronous. wait=true waits up to wait_timeout_seconds (default 5, maximum 30) on the same job and returns bounded output; a timeout returns a continuation locator without cancelling the job.
 
-Family: `run`. Owner: `systemd-jobs`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `run`. Owner: `systemd-jobs`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: exec, command, bash, run command.
 
@@ -8819,7 +12804,7 @@ Input schema:
       "description": "Unix timestamp after which the call is refused."
     },
     "idempotency_key": {
-      "description": "Replaying the same key with the same request returns the stored response.",
+      "description": "Gateway response replay key. Confirmed responses replay unchanged; interrupted effects require owner reconciliation and are never automatically retried.",
       "maxLength": 256,
       "minLength": 1,
       "type": "string"
@@ -8841,7 +12826,7 @@ Input schema:
         }
       ],
       "default": null,
-      "description": "Owner-checked preconditions; a mismatch fails with precondition_failed."
+      "description": "Owner-specific checks; a mismatch fails with precondition_failed. Checks are best effort unless the owner explicitly guarantees an atomic compare and mutation."
     },
     "reason": {
       "anyOf": [
@@ -8920,7 +12905,7 @@ git status in sinnix:
 
 List batch runs newest first, with each worker's stage and task.
 
-Family: `query`. Owner: `systemd-jobs`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `systemd-jobs`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: runs, agentctl batch list, which batches, active runs.
 
@@ -9082,7 +13067,7 @@ One project's runs:
 
 Every id is a pueue task id: pass a worker's or the landing's job_id to jobs.logs, jobs.wait or jobs.cancel, with its job_launch_reference so the call survives a reorder.
 
-Family: `get`. Owner: `systemd-jobs`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `get`. Owner: `systemd-jobs`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: batch status, run status, how is the batch, agentctl batch status.
 
@@ -9219,7 +13204,7 @@ By canonical ref:
 
 backend, model and effort default to the project descriptor's packet defaults. Refused when a bead is claimed or already in a live run. The landing task is queued behind the workers and runs itself.
 
-Family: `run`. Owner: `systemd-jobs`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `run`. Owner: `systemd-jobs`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: dispatch, agentctl batch start, work on bead, start agents.
 
@@ -9348,7 +13333,7 @@ Input schema:
       "default": null
     },
     "idempotency_key": {
-      "description": "Replaying the same key with the same request returns the stored response.",
+      "description": "Gateway response replay key. Confirmed responses replay unchanged; interrupted effects require owner reconciliation and are never automatically retried.",
       "maxLength": 256,
       "minLength": 1,
       "type": "string"
@@ -9377,7 +13362,7 @@ Input schema:
         }
       ],
       "default": null,
-      "description": "Owner-checked preconditions; a mismatch fails with precondition_failed."
+      "description": "Owner-specific checks; a mismatch fails with precondition_failed. Checks are best effort unless the owner explicitly guarantees an atomic compare and mutation."
     },
     "project": {
       "$ref": "#/$defs/ProjectLocator"
@@ -9487,7 +13472,7 @@ Two workers, pinned agent:
 
 batches.start already queues the first landing behind the workers; this re-queues one after a landing failed. The landing runs as a job, so wait on landing_job_id rather than on this call.
 
-Family: `run`. Owner: `systemd-jobs`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `run`. Owner: `systemd-jobs`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: land, agentctl batch land, publish the batch, merge the run.
 
@@ -9560,7 +13545,7 @@ Input schema:
       "description": "Unix timestamp after which the call is refused."
     },
     "idempotency_key": {
-      "description": "Replaying the same key with the same request returns the stored response.",
+      "description": "Gateway response replay key. Confirmed responses replay unchanged; interrupted effects require owner reconciliation and are never automatically retried.",
       "maxLength": 256,
       "minLength": 1,
       "type": "string"
@@ -9576,7 +13561,7 @@ Input schema:
         }
       ],
       "default": null,
-      "description": "Owner-checked preconditions; a mismatch fails with precondition_failed."
+      "description": "Owner-specific checks; a mismatch fails with precondition_failed. Checks are best effort unless the owner explicitly guarantees an atomic compare and mutation."
     },
     "reason": {
       "anyOf": [
@@ -9635,7 +13620,7 @@ Re-run a failed landing:
 
 backend, model and effort default to the worker's own. Refused while the worker's task is still queued or running.
 
-Family: `run`. Owner: `systemd-jobs`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `run`. Owner: `systemd-jobs`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: resume worker, agentctl batch resume, retry the agent.
 
@@ -9740,7 +13725,7 @@ Input schema:
       "default": null
     },
     "idempotency_key": {
-      "description": "Replaying the same key with the same request returns the stored response.",
+      "description": "Gateway response replay key. Confirmed responses replay unchanged; interrupted effects require owner reconciliation and are never automatically retried.",
       "maxLength": 256,
       "minLength": 1,
       "type": "string"
@@ -9769,7 +13754,7 @@ Input schema:
         }
       ],
       "default": null,
-      "description": "Owner-checked preconditions; a mismatch fails with precondition_failed."
+      "description": "Owner-specific checks; a mismatch fails with precondition_failed. Checks are best effort unless the owner explicitly guarantees an atomic compare and mutation."
     },
     "reason": {
       "anyOf": [
@@ -9836,7 +13821,7 @@ Resume one worker:
 
 Conditions: job_terminal, bead_status, bead_revision, unit_state, file_hash, file_exists, capture_freshness, receipt_appearance, terminal_output. A timeout returns the current evidence and a continuation token.
 
-Family: `wait`. Owner: `waits`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `wait`. Owner: `waits`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: wait until, block until, poll, watch for.
 
@@ -10395,7 +14380,7 @@ Wait for a unit to be active:
 
 Pass next_cursor back to continue; a cursor from another principal or project scope fails stale_cursor.
 
-Family: `events`. Owner: `events`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `events`. Owner: `events`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: what happened, recent activity, audit log, changes since.
 
@@ -10576,9 +14561,9 @@ One project:
 
 ### `context.compose`
 
-Each component is budgeted and isolated: an unavailable owner marks its component unavailable with a reason instead of failing the call. The snapshot is persisted under snapshot_ref.
+The selected owner supplies domain composition, source coverage and partial results. The gateway preserves its product and availability in an immutable observation under snapshot_ref.
 
-Family: `context`. Owner: `context`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `context`. Owner: `context`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: orient, overview, situation, what is going on, triage, review job, incident.
 
@@ -10904,7 +14889,7 @@ Incident overview:
 
 One observation of the desktop: monitors, workspaces, focus, every window with geometry, and a generation stamp.
 
-Family: `status`. Owner: `desktop`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `status`. Owner: `desktop`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: windows, clients, workspaces, monitors, active window, what is on screen.
 
@@ -10991,7 +14976,7 @@ Observe the desktop:
 
 full captures the focused output through the HDR-aware screenshot owner; window/rect/monitor targets capture with grim. On HDR outputs a corrected SDR variant is produced and preferred for the image block.
 
-Family: `query`. Owner: `desktop`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `desktop`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: screen capture, grab screen, picture of screen, capture window.
 
@@ -11506,7 +15491,7 @@ Active window tree:
 
 Pointer clicks, drags and scrolls need a virtual pointer tool (ydotool) on the host and fail unavailable without one; cursor moves always work. Window targets are natural locators; ambiguity returns candidates.
 
-Family: `operate`. Owner: `desktop`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `operate`. Owner: `desktop`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: focus window, launch app, close window, click, type text, press key, xdg-open, hyprctl dispatch.
 
@@ -12173,7 +16158,7 @@ Input schema:
       "description": "Unix timestamp after which the call is refused."
     },
     "idempotency_key": {
-      "description": "Replaying the same key with the same request returns the stored response.",
+      "description": "Gateway response replay key. Confirmed responses replay unchanged; interrupted effects require owner reconciliation and are never automatically retried.",
       "maxLength": 256,
       "minLength": 1,
       "type": "string"
@@ -12189,7 +16174,7 @@ Input schema:
         }
       ],
       "default": null,
-      "description": "Owner-checked preconditions; a mismatch fails with precondition_failed."
+      "description": "Owner-specific checks; a mismatch fails with precondition_failed. Checks are best effort unless the owner explicitly guarantees an atomic compare and mutation."
     },
     "reason": {
       "anyOf": [
@@ -12276,7 +16261,7 @@ Ctrl+L in the active window:
 
 Every kitty window with its ref, title, cwd, shell pid, focus and foreground processes.
 
-Family: `catalog`. Owner: `terminals`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `catalog`. Owner: `terminals`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: kitty windows, terminal inventory, shells.
 
@@ -12358,7 +16343,7 @@ List terminals:
 
 Resolve one terminal by ref, kitty id, title, cwd, pid or focus.
 
-Family: `get`. Owner: `terminals`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `get`. Owner: `terminals`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: find terminal, which terminal, focused terminal.
 
@@ -12533,7 +16518,7 @@ The focused terminal:
 
 The visible screen text of one terminal.
 
-Family: `query`. Owner: `terminals`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `terminals`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: what does the terminal show, terminal contents, screen text.
 
@@ -12713,7 +16698,7 @@ Screen of a titled terminal:
 
 The last N lines of a terminal's history, screen, or last command output.
 
-Family: `query`. Owner: `terminals`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `terminals`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: history, last output, scroll back, command output.
 
@@ -12921,7 +16906,7 @@ Output of the last command:
 
 Foreground processes of one terminal and whether its shell is at a prompt.
 
-Family: `query`. Owner: `terminals`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `terminals`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: what is running, is it busy, terminal processes.
 
@@ -13096,7 +17081,7 @@ Processes in a terminal:
 
 Send text (optionally with Enter or bracketed paste) or key presses to one terminal.
 
-Family: `operate`. Owner: `terminals`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `operate`. Owner: `terminals`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: type into terminal, press keys, ctrl+c, send text.
 
@@ -13268,7 +17253,7 @@ Input schema:
       "description": "Unix timestamp after which the call is refused."
     },
     "idempotency_key": {
-      "description": "Replaying the same key with the same request returns the stored response.",
+      "description": "Gateway response replay key. Confirmed responses replay unchanged; interrupted effects require owner reconciliation and are never automatically retried.",
       "maxLength": 256,
       "minLength": 1,
       "type": "string"
@@ -13301,7 +17286,7 @@ Input schema:
         }
       ],
       "default": null,
-      "description": "Owner-checked preconditions; a mismatch fails with precondition_failed."
+      "description": "Owner-specific checks; a mismatch fails with precondition_failed. Checks are best effort unless the owner explicitly guarantees an atomic compare and mutation."
     },
     "reason": {
       "anyOf": [
@@ -13383,7 +17368,7 @@ Interrupt:
 
 Completion and output rely on kitty shell integration (at_prompt, last_cmd_output). exit_status is reported only with capture_exit_status, which appends a visible marker to the command line.
 
-Family: `run`. Owner: `terminals`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `run`. Owner: `terminals`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: execute in terminal, run command, shell command in kitty.
 
@@ -13523,7 +17508,7 @@ Input schema:
       "description": "Unix timestamp after which the call is refused."
     },
     "idempotency_key": {
-      "description": "Replaying the same key with the same request returns the stored response.",
+      "description": "Gateway response replay key. Confirmed responses replay unchanged; interrupted effects require owner reconciliation and are never automatically retried.",
       "maxLength": 256,
       "minLength": 1,
       "type": "string"
@@ -13539,7 +17524,7 @@ Input schema:
         }
       ],
       "default": null,
-      "description": "Owner-checked preconditions; a mismatch fails with precondition_failed."
+      "description": "Owner-specific checks; a mismatch fails with precondition_failed. Checks are best effort unless the owner explicitly guarantees an atomic compare and mutation."
     },
     "reason": {
       "anyOf": [
@@ -13628,7 +17613,7 @@ Run with exit status:
 
 Wait until a terminal is at its prompt, shows a regex, finishes a process, or changes title.
 
-Family: `wait`. Owner: `terminals`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `wait`. Owner: `terminals`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: wait for prompt, wait for output, wait until done.
 
@@ -13936,7 +17921,7 @@ Wait for a pattern:
 
 Focus one kitty window.
 
-Family: `operate`. Owner: `terminals`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `operate`. Owner: `terminals`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: switch to terminal, bring terminal to front.
 
@@ -14057,7 +18042,7 @@ Input schema:
       "description": "Unix timestamp after which the call is refused."
     },
     "idempotency_key": {
-      "description": "Replaying the same key with the same request returns the stored response.",
+      "description": "Gateway response replay key. Confirmed responses replay unchanged; interrupted effects require owner reconciliation and are never automatically retried.",
       "maxLength": 256,
       "minLength": 1,
       "type": "string"
@@ -14073,7 +18058,7 @@ Input schema:
         }
       ],
       "default": null,
-      "description": "Owner-checked preconditions; a mismatch fails with precondition_failed."
+      "description": "Owner-specific checks; a mismatch fails with precondition_failed. Checks are best effort unless the owner explicitly guarantees an atomic compare and mutation."
     },
     "reason": {
       "anyOf": [
@@ -14132,7 +18117,7 @@ Focus by title:
 
 Open a new kitty window (OS window, split or tab) with an optional cwd and command; returns its ref.
 
-Family: `operate`. Owner: `terminals`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `operate`. Owner: `terminals`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: new terminal, open kitty, spawn shell.
 
@@ -14201,7 +18186,7 @@ Input schema:
       "description": "Unix timestamp after which the call is refused."
     },
     "idempotency_key": {
-      "description": "Replaying the same key with the same request returns the stored response.",
+      "description": "Gateway response replay key. Confirmed responses replay unchanged; interrupted effects require owner reconciliation and are never automatically retried.",
       "maxLength": 256,
       "minLength": 1,
       "type": "string"
@@ -14227,7 +18212,7 @@ Input schema:
         }
       ],
       "default": null,
-      "description": "Owner-checked preconditions; a mismatch fails with precondition_failed."
+      "description": "Owner-specific checks; a mismatch fails with precondition_failed. Checks are best effort unless the owner explicitly guarantees an atomic compare and mutation."
     },
     "reason": {
       "anyOf": [
@@ -14305,7 +18290,7 @@ Run a command in a new tab:
 
 List every open Chrome page with its ref; flags the gateway-owned pages that can be read, captured or operated.
 
-Family: `catalog`. Owner: `browser`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `catalog`. Owner: `browser`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: tabs, open pages, list tabs, what is open in chrome.
 
@@ -14396,7 +18381,7 @@ List pages:
 
 Element refs (g<generation>e<n>) are attached to the DOM for this snapshot; a later snapshot or reload replaces them, and a stale ref fails not_found.
 
-Family: `get`. Owner: `browser`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `get`. Owner: `browser`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: page text, read page, page content, elements, links, forms.
 
@@ -14560,7 +18545,7 @@ Read a page:
 
 Screenshot a gateway-owned page through CDP; the image rides in an image block and is retained as an artifact.
 
-Family: `query`. Owner: `browser`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `browser`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: page screenshot, capture page, picture of the page.
 
@@ -14738,7 +18723,7 @@ Full-page PNG:
 
 Operator tabs are never accepted as targets, even when a locator matches one. Element targets take a snapshot ref or a CSS selector.
 
-Family: `operate`. Owner: `browser`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `operate`. Owner: `browser`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: open url, click link, fill form, type in browser, press enter, download file, upload file, run javascript.
 
@@ -15325,7 +19310,7 @@ Input schema:
       "description": "Unix timestamp after which the call is refused."
     },
     "idempotency_key": {
-      "description": "Replaying the same key with the same request returns the stored response.",
+      "description": "Gateway response replay key. Confirmed responses replay unchanged; interrupted effects require owner reconciliation and are never automatically retried.",
       "maxLength": 256,
       "minLength": 1,
       "type": "string"
@@ -15341,7 +19326,7 @@ Input schema:
         }
       ],
       "default": null,
-      "description": "Owner-checked preconditions; a mismatch fails with precondition_failed."
+      "description": "Owner-specific checks; a mismatch fails with precondition_failed. Checks are best effort unless the owner explicitly guarantees an atomic compare and mutation."
     },
     "reason": {
       "anyOf": [
@@ -15461,7 +19446,7 @@ Wait for text:
 
 Each section carries its own availability and source; GPU and network report unavailable because no owner exposes them.
 
-Family: `status`. Owner: `machine`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `status`. Owner: `machine`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: overview, health, how is the machine, system status, top.
 
@@ -15555,7 +19540,7 @@ Machine overview:
 
 Read one sinnix-observe section with cursor paging, or the ops-reducer revision (operation=actions).
 
-Family: `query`. Owner: `machine`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `machine`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: observe, pressure, storage, workloads, slices, revision.
 
@@ -15682,7 +19667,7 @@ Ops revision:
 
 List systemd units of one manager with load/active/sub state and a canonical ref each.
 
-Family: `query`. Owner: `machine`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `machine`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: systemctl list-units, services, timers, failed units.
 
@@ -15816,7 +19801,7 @@ Failed user units:
 
 Describe one unit via systemctl show: states, main pid, cgroup, restarts, timestamps.
 
-Family: `get`. Owner: `machine`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `get`. Owner: `machine`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: systemctl status, unit status, service status, is it running.
 
@@ -15962,7 +19947,7 @@ Describe polylogued:
 
 Journal entries for one unit (journalctl -o json), bounded by line count and bytes.
 
-Family: `query`. Owner: `machine`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `machine`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: journalctl, logs, journal, why did it fail.
 
@@ -16169,11 +20154,312 @@ Last 50 lines:
 }
 ```
 
+### `machine.prepare`
+
+Read the selected target identity and action preconditions without changing it.
+
+Family: `get`. Owner: `ops-reducer`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+
+Follow-up actions: `machine.operate`.
+
+Input schema:
+
+```json
+{
+  "$defs": {
+    "FreezeOp": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "freeze",
+          "default": "freeze",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "InterruptOp": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "interrupt",
+          "default": "interrupt",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "ParkOp": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "park",
+          "default": "park",
+          "type": "string"
+        },
+        "deadline_seconds": {
+          "maximum": 86400,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "deadline_seconds"
+      ],
+      "type": "object"
+    },
+    "RebuildOverrideOp": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "rebuild_override",
+          "default": "rebuild_override",
+          "type": "string"
+        },
+        "name": {
+          "enum": [
+            "max_jobs",
+            "cores",
+            "eval_cache"
+          ],
+          "type": "string"
+        },
+        "value": {
+          "maxLength": 32,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "value"
+      ],
+      "type": "object"
+    },
+    "ResetPolicyOp": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "reset_policy",
+          "default": "reset_policy",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "RestartOp": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "restart",
+          "default": "restart",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "SetPolicyOp": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "set_policy",
+          "default": "set_policy",
+          "type": "string"
+        },
+        "property": {
+          "enum": [
+            "MemoryHigh",
+            "MemoryMax",
+            "MemoryLow",
+            "CPUWeight",
+            "IOWeight",
+            "Nice"
+          ],
+          "type": "string"
+        },
+        "value": {
+          "maxLength": 64,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "property",
+        "value"
+      ],
+      "type": "object"
+    },
+    "StartOp": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "start",
+          "default": "start",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "StopOp": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "stop",
+          "default": "stop",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "ThawOp": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "thaw",
+          "default": "thaw",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "deadline_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Unix timestamp after which the call is refused."
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "request": {
+      "discriminator": {
+        "mapping": {
+          "freeze": "#/$defs/FreezeOp",
+          "interrupt": "#/$defs/InterruptOp",
+          "park": "#/$defs/ParkOp",
+          "rebuild_override": "#/$defs/RebuildOverrideOp",
+          "reset_policy": "#/$defs/ResetPolicyOp",
+          "restart": "#/$defs/RestartOp",
+          "set_policy": "#/$defs/SetPolicyOp",
+          "start": "#/$defs/StartOp",
+          "stop": "#/$defs/StopOp",
+          "thaw": "#/$defs/ThawOp"
+        },
+        "propertyName": "action"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/InterruptOp"
+        },
+        {
+          "$ref": "#/$defs/FreezeOp"
+        },
+        {
+          "$ref": "#/$defs/ThawOp"
+        },
+        {
+          "$ref": "#/$defs/ResetPolicyOp"
+        },
+        {
+          "$ref": "#/$defs/SetPolicyOp"
+        },
+        {
+          "$ref": "#/$defs/ParkOp"
+        },
+        {
+          "$ref": "#/$defs/RebuildOverrideOp"
+        },
+        {
+          "$ref": "#/$defs/RestartOp"
+        },
+        {
+          "$ref": "#/$defs/StartOp"
+        },
+        {
+          "$ref": "#/$defs/StopOp"
+        }
+      ]
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Caller-chosen correlation id."
+    },
+    "target": {
+      "maxLength": 2048,
+      "minLength": 1,
+      "pattern": "^sinnix://(?:jobs|machine/units|processes)/",
+      "type": "string"
+    }
+  },
+  "required": [
+    "target",
+    "request"
+  ],
+  "type": "object"
+}
+```
+
+Output: the response envelope's `data` field is `PreparedAction`; the full envelope schema is the `sinnix://gateway/v2/actions/machine.prepare` resource and `sinnix-agent-gateway catalog machine.prepare --schema`.
+
+Examples:
+
+Prepare unit restart:
+
+```json
+{
+  "request": {
+    "action": "restart"
+  },
+  "target": "sinnix://machine/units/user/example.service"
+}
+```
+
 ### `machine.operate`
 
-expected_revision must match machine.query operation=actions; the reducer receipt is verified against the submitted action and target.
+expected_target must match the target identity returned by machine.prepare; the reducer receipt is verified against the submitted action and target.
 
-Family: `operate`. Owner: `ops-reducer`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `operate`. Owner: `ops-reducer`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: restart service, freeze, thaw, park, set policy, interrupt job.
 
@@ -16367,21 +20653,21 @@ Input schema:
       "default": null,
       "description": "Unix timestamp after which the call is refused."
     },
-    "expected_revision": {
+    "expected_target": {
       "anyOf": [
         {
-          "minimum": 0,
-          "type": "integer"
+          "additionalProperties": true,
+          "type": "object"
         },
         {
           "type": "null"
         }
       ],
       "default": null,
-      "description": "Revision from machine.query operation=actions; also accepted as preconditions.expected_revision."
+      "description": "Target identity from machine.prepare or the displayed owner observation; also accepted as preconditions.expected_target."
     },
     "idempotency_key": {
-      "description": "Replaying the same key with the same request returns the stored response.",
+      "description": "Gateway response replay key. Confirmed responses replay unchanged; interrupted effects require owner reconciliation and are never automatically retried.",
       "maxLength": 256,
       "minLength": 1,
       "type": "string"
@@ -16397,7 +20683,7 @@ Input schema:
         }
       ],
       "default": null,
-      "description": "Owner-checked preconditions; a mismatch fails with precondition_failed."
+      "description": "Owner-specific checks; a mismatch fails with precondition_failed. Checks are best effort unless the owner explicitly guarantees an atomic compare and mutation."
     },
     "reason": {
       "anyOf": [
@@ -16500,7 +20786,15 @@ Restart a unit:
 
 ```json
 {
-  "expected_revision": 42,
+  "expected_target": {
+    "kind": "unit",
+    "manager": "user",
+    "properties": {
+      "ActiveState": "active",
+      "InvocationID": "example-invocation"
+    },
+    "unit": "example.service"
+  },
   "idempotency_key": "restart-example",
   "reason": "apply the approved restart",
   "request": {
@@ -16514,7 +20808,15 @@ Cap a unit's memory:
 
 ```json
 {
-  "expected_revision": 42,
+  "expected_target": {
+    "kind": "unit",
+    "manager": "user",
+    "properties": {
+      "ActiveState": "active",
+      "InvocationID": "example-invocation"
+    },
+    "unit": "example.service"
+  },
   "idempotency_key": "policy-example",
   "reason": "bound the runaway",
   "request": {
@@ -16530,7 +20832,7 @@ Cap a unit's memory:
 
 Start, stop or restart one unit through the ops reducer (reload and wait are not reducer actions).
 
-Family: `operate`. Owner: `ops-reducer`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `operate`. Owner: `ops-reducer`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: systemctl restart, systemctl start, systemctl stop, bounce.
 
@@ -16620,11 +20922,11 @@ Input schema:
       "default": null,
       "description": "Unix timestamp after which the call is refused."
     },
-    "expected_revision": {
+    "expected_target": {
       "anyOf": [
         {
-          "minimum": 0,
-          "type": "integer"
+          "additionalProperties": true,
+          "type": "object"
         },
         {
           "type": "null"
@@ -16633,7 +20935,7 @@ Input schema:
       "default": null
     },
     "idempotency_key": {
-      "description": "Replaying the same key with the same request returns the stored response.",
+      "description": "Gateway response replay key. Confirmed responses replay unchanged; interrupted effects require owner reconciliation and are never automatically retried.",
       "maxLength": 256,
       "minLength": 1,
       "type": "string"
@@ -16649,7 +20951,7 @@ Input schema:
         }
       ],
       "default": null,
-      "description": "Owner-checked preconditions; a mismatch fails with precondition_failed."
+      "description": "Owner-specific checks; a mismatch fails with precondition_failed. Checks are best effort unless the owner explicitly guarantees an atomic compare and mutation."
     },
     "reason": {
       "anyOf": [
@@ -16699,7 +21001,15 @@ Restart by name:
 ```json
 {
   "action": "restart",
-  "expected_revision": 42,
+  "expected_target": {
+    "kind": "unit",
+    "manager": "user",
+    "properties": {
+      "ActiveState": "active",
+      "InvocationID": "example-invocation"
+    },
+    "unit": "example.service"
+  },
   "idempotency_key": "restart-example-2",
   "reason": "apply config",
   "target": {
@@ -16713,7 +21023,7 @@ Restart by name:
 
 List live processes filtered by name, pid, unit, cgroup or user, with a canonical ref each.
 
-Family: `query`. Owner: `machine`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `machine`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: ps, pgrep, what is running, find process.
 
@@ -16928,7 +21238,7 @@ Processes of a unit:
 
 Describe one process: cmdline, cwd, exe, redacted env, cgroup/unit, parent, children, sockets, cpu and memory.
 
-Family: `get`. Owner: `machine`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `get`. Owner: `machine`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: process info, pid details, what is pid, open sockets, environment.
 
@@ -17136,7 +21446,7 @@ Inspect pid 1234:
 
 Parent/child process tree from one root or from every top-level process, bounded by depth and node count.
 
-Family: `query`. Owner: `machine`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `machine`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: pstree, children, descendants.
 
@@ -17353,9 +21663,9 @@ Subtree of a unit's main process:
 
 ### `processes.signal`
 
-The reducer path is the attested one and needs expected_revision; the direct path is receipted by the gateway audit chain only.
+The reducer path is the attested one and needs expected_target; the direct path is receipted by the gateway audit chain only.
 
-Family: `operate`. Owner: `machine`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `operate`. Owner: `machine`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: kill, pkill, terminate, sigterm, sigkill.
 
@@ -17452,10 +21762,10 @@ Input schema:
     "ReducerStop": {
       "additionalProperties": false,
       "properties": {
-        "expected_revision": {
-          "description": "Revision from machine.query operation=actions.",
-          "minimum": 0,
-          "type": "integer"
+        "expected_target": {
+          "additionalProperties": true,
+          "description": "Target identity from machine.prepare for this process stop.",
+          "type": "object"
         },
         "operation": {
           "const": "stop",
@@ -17464,7 +21774,7 @@ Input schema:
         }
       },
       "required": [
-        "expected_revision"
+        "expected_target"
       ],
       "type": "object"
     },
@@ -17540,7 +21850,7 @@ Input schema:
       "description": "Unix timestamp after which the call is refused."
     },
     "idempotency_key": {
-      "description": "Replaying the same key with the same request returns the stored response.",
+      "description": "Gateway response replay key. Confirmed responses replay unchanged; interrupted effects require owner reconciliation and are never automatically retried.",
       "maxLength": 256,
       "minLength": 1,
       "type": "string"
@@ -17556,7 +21866,7 @@ Input schema:
         }
       ],
       "default": null,
-      "description": "Owner-checked preconditions; a mismatch fails with precondition_failed."
+      "description": "Owner-specific checks; a mismatch fails with precondition_failed. Checks are best effort unless the owner explicitly guarantees an atomic compare and mutation."
     },
     "reason": {
       "anyOf": [
@@ -17626,7 +21936,11 @@ Reducer stop:
   "idempotency_key": "stop-4242",
   "reason": "runaway rg",
   "request": {
-    "expected_revision": 17,
+    "expected_target": {
+      "kind": "process",
+      "pid": 4242,
+      "start_ticks": 12345
+    },
     "operation": "stop"
   },
   "target": {
@@ -17655,7 +21969,7 @@ Direct SIGHUP:
 
 Wait until a process (same pid and start ticks) exits, or the bounded timeout elapses.
 
-Family: `wait`. Owner: `machine`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `wait`. Owner: `machine`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: wait for exit, await process, has it finished.
 
@@ -17862,7 +22176,7 @@ Wait up to 10 s:
 
 Each probe runs initialize + tools/list with a 5 s bound; a timeout stores the upstream stderr as an artifact and returns its ref.
 
-Family: `status`. Owner: `mcp-broker`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `status`. Owner: `mcp-broker`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: mcp health, is polylogue mcp up, upstream servers, broker status.
 
@@ -17962,7 +22276,7 @@ Probe all:
 
 Catalog of every admitted upstream tool with its namespaced ref, input schema and read/change effect.
 
-Family: `catalog`. Owner: `mcp-broker`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `catalog`. Owner: `mcp-broker`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: list mcp tools, upstream tools, tool schema.
 
@@ -18091,7 +22405,7 @@ Read tools mentioning search:
 
 Reads require an owner read-only annotation or an exact match to trusted registry selectors. Other requests require mcp.change (operator only). A target using server=sinnix-agent-gateway is routed to the named direct read action, preserving its native content blocks; changes stay direct-only.
 
-Family: `query`. Owner: `mcp-broker`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `mcp-broker`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: call mcp tool, query upstream, polylogue search.
 
@@ -18239,7 +22553,7 @@ Call by server and tool:
 
 Invoke an upstream request not admitted as read-only by annotation or trusted registry selectors.
 
-Family: `change`. Owner: `mcp-broker`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `change`. Owner: `mcp-broker`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: write mcp tool, mutate upstream, refresh.
 
@@ -18328,7 +22642,7 @@ Input schema:
       "description": "Unix timestamp after which the call is refused."
     },
     "idempotency_key": {
-      "description": "Replaying the same key with the same request returns the stored response.",
+      "description": "Gateway response replay key. Confirmed responses replay unchanged; interrupted effects require owner reconciliation and are never automatically retried.",
       "maxLength": 256,
       "minLength": 1,
       "type": "string"
@@ -18344,7 +22658,7 @@ Input schema:
         }
       ],
       "default": null,
-      "description": "Owner-checked preconditions; a mismatch fails with precondition_failed."
+      "description": "Owner-specific checks; a mismatch fails with precondition_failed. Checks are best effort unless the owner explicitly guarantees an atomic compare and mutation."
     },
     "reason": {
       "anyOf": [
@@ -18404,7 +22718,7 @@ Call a write tool:
 
 List principal-visible artifacts with kind, owner, size and canonical ref.
 
-Family: `catalog`. Owner: `artifacts`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `catalog`. Owner: `artifacts`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: captures, diagnostics, stored responses, large results.
 
@@ -18531,7 +22845,7 @@ Recent MCP stderr captures:
 
 Metadata of one artifact without its bytes.
 
-Family: `get`. Owner: `artifacts`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `get`. Owner: `artifacts`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: artifact info, artifact metadata.
 
@@ -18657,7 +22971,7 @@ By ref:
 
 Read an artifact: text inline with offsets, images as image blocks, other binary as read-only links.
 
-Family: `query`. Owner: `artifacts`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `artifacts`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: open artifact, diagnostic log, truncated response, view capture.
 
@@ -18803,7 +23117,7 @@ First 64 KB of a stored response:
 
 List runtime-declared capture lanes, describe one, or read per-lane record deltas since a time.
 
-Family: `query`. Owner: `captures`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `captures`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: capture lanes, lane health, records since, sidecar index.
 
@@ -18992,7 +23306,7 @@ Deltas for two lanes:
 
 Reads sinnix-capture-v1 envelope files under each lane path within the time window; coverage lists which lanes contributed and which have no envelope files.
 
-Family: `query`. Owner: `captures`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `captures`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: what was I doing, recent activity, clipboard history, notifications, now playing.
 
@@ -19174,80 +23488,98 @@ Last hour of clipboard and notifications:
 
 ### `sessions.query`
 
-operation=structured queries Polylogue's sessions projection and retains owner coverage and provenance. The owner does not support sessions continuation. Legacy list cursors continue a newest-first snapshot for one hour; legacy reads return next_offset and legacy searches expose their bounded file coverage.
+Read indexed session pages or explicit original-source fallback through Polylogue.
 
-Family: `query`. Owner: `sessions`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `polylogue`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
-Aliases: claude sessions, codex sessions, transcript, session log, recent work.
-
-Follow-up actions: `sessions.query`, `memory.query`, `timeline.query`.
+Follow-up actions: `sessions.read`, `sessions.search`, `timeline.query`.
 
 Input schema:
 
 ```json
 {
   "$defs": {
-    "SessionsListOp": {
+    "Origin": {
+      "description": "Archive source-origin tokens.",
+      "enum": [
+        "claude-code-session",
+        "codex-session",
+        "gemini-cli-session",
+        "hermes-session",
+        "antigravity-session",
+        "beads-issue",
+        "grok-export",
+        "chatgpt-export",
+        "claude-ai-export",
+        "claude-design-session",
+        "aistudio-drive",
+        "unknown-export"
+      ],
+      "type": "string"
+    },
+    "RawList": {
       "additionalProperties": false,
       "properties": {
-        "cursor": {
+        "continuation": {
           "anyOf": [
             {
               "maxLength": 8192,
+              "minLength": 1,
               "type": "string"
             },
             {
               "type": "null"
             }
           ],
-          "default": null,
-          "description": "page.next_cursor from this provider and limit. Omit to observe current files."
+          "default": null
         },
         "limit": {
           "default": 100,
+          "maximum": 1000,
           "minimum": 1,
           "type": "integer"
         },
         "operation": {
-          "const": "list",
-          "default": "list",
+          "const": "sessions.raw.list",
+          "default": "sessions.raw.list",
           "type": "string"
         },
-        "provider": {
+        "origin": {
           "enum": [
-            "claude-code",
-            "codex"
+            "claude-code-session",
+            "codex-session"
           ],
           "type": "string"
         }
       },
       "required": [
-        "provider"
+        "origin"
       ],
       "type": "object"
     },
-    "SessionsReadOp": {
+    "RawRead": {
       "additionalProperties": false,
       "properties": {
         "max_bytes": {
           "default": 64000,
-          "description": "Source byte limit; pages stop at UTF-8 boundaries. If a character cannot fit, increase this limit. Malformed bytes are replaced with U+FFFD.",
-          "minimum": 1,
+          "maximum": 64000,
+          "minimum": 4,
           "type": "integer"
         },
         "offset": {
           "default": 0,
-          "description": "Raw byte offset; use next_offset to continue.",
           "minimum": 0,
           "type": "integer"
         },
         "operation": {
-          "const": "read",
-          "default": "read",
+          "default": "sessions.raw.read",
+          "enum": [
+            "sessions.raw.read",
+            "memory.raw.get"
+          ],
           "type": "string"
         },
         "reference": {
-          "description": "provider:relative/path.jsonl from a list or search row.",
           "maxLength": 8192,
           "minLength": 1,
           "type": "string"
@@ -19258,42 +23590,41 @@ Input schema:
       ],
       "type": "object"
     },
-    "SessionsSearchOp": {
+    "RawSearch": {
       "additionalProperties": false,
       "properties": {
-        "cursor": {
+        "continuation": {
           "anyOf": [
             {
               "maxLength": 8192,
+              "minLength": 1,
               "type": "string"
             },
             {
               "type": "null"
             }
           ],
-          "default": null,
-          "description": "Continuation returned by the preceding identical search."
+          "default": null
         },
-        "max_results": {
+        "limit": {
           "default": 100,
-          "description": "Maximum matches in this page; response byte bounds may return fewer.",
+          "maximum": 1000,
           "minimum": 1,
           "type": "integer"
         },
         "operation": {
-          "const": "search",
-          "default": "search",
+          "const": "sessions.raw.search",
+          "default": "sessions.raw.search",
           "type": "string"
         },
-        "provider": {
+        "origin": {
           "enum": [
-            "claude-code",
-            "codex"
+            "claude-code-session",
+            "codex-session"
           ],
           "type": "string"
         },
         "query": {
-          "description": "Literal text. Searches every session file through bounded resumable scan pages.",
           "maxLength": 1000,
           "minLength": 1,
           "type": "string"
@@ -19309,53 +23640,106 @@ Input schema:
               "type": "null"
             }
           ],
-          "default": null,
-          "description": "Optional session reference to search instead of the provider's full history."
+          "default": null
         },
         "scan_bytes": {
           "default": 8388608,
-          "description": "Maximum transcript bytes to inspect in this call; continue to cover more.",
+          "maximum": 8388608,
           "minimum": 1,
           "type": "integer"
         }
       },
       "required": [
-        "provider",
+        "origin",
         "query"
       ],
       "type": "object"
     },
-    "SessionsStructuredOp": {
+    "SessionList": {
       "additionalProperties": false,
       "properties": {
-        "expression": {
+        "continuation": {
           "anyOf": [
             {
-              "maxLength": 1000,
+              "maxLength": 65536,
+              "minLength": 1,
               "type": "string"
             },
             {
               "type": "null"
             }
           ],
-          "default": null,
-          "description": "Owner-ranked free-text search; omit for exhaustive filtered listing."
+          "default": null
+        },
+        "expression": {
+          "anyOf": [
+            {
+              "maxLength": 8192,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "limit": {
-          "default": 100,
-          "maximum": 500,
+          "default": 50,
+          "maximum": 1000,
           "minimum": 1,
           "type": "integer"
         },
+        "max_messages": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "min_messages": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "min_words": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "offset": {
+          "default": 0,
+          "minimum": 0,
+          "type": "integer"
+        },
         "operation": {
-          "const": "structured",
-          "default": "structured",
+          "const": "sessions.list",
+          "default": "sessions.list",
           "type": "string"
         },
         "origin": {
           "anyOf": [
             {
-              "type": "string"
+              "$ref": "#/$defs/Origin"
             },
             {
               "type": "null"
@@ -19386,6 +23770,224 @@ Input schema:
           "default": null
         },
         "sort": {
+          "anyOf": [
+            {
+              "enum": [
+                "date",
+                "tokens",
+                "messages",
+                "words",
+                "longest"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "tag": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "until": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "type": "object"
+    },
+    "SessionRead": {
+      "additionalProperties": false,
+      "properties": {
+        "continuation": {
+          "anyOf": [
+            {
+              "maxLength": 65536,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "limit": {
+          "default": 50,
+          "maximum": 1000,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "offset": {
+          "default": 0,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "operation": {
+          "const": "sessions.read",
+          "default": "sessions.read",
+          "type": "string"
+        },
+        "ref": {
+          "maxLength": 8192,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "ref"
+      ],
+      "type": "object"
+    },
+    "SessionSearch": {
+      "additionalProperties": false,
+      "properties": {
+        "continuation": {
+          "anyOf": [
+            {
+              "maxLength": 65536,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "expression": {
+          "anyOf": [
+            {
+              "maxLength": 8192,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "limit": {
+          "default": 50,
+          "maximum": 1000,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "max_messages": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "min_messages": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "min_words": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "offset": {
+          "default": 0,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "operation": {
+          "const": "sessions.search",
+          "default": "sessions.search",
+          "type": "string"
+        },
+        "origin": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Origin"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "repo": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "since": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "sort": {
+          "anyOf": [
+            {
+              "enum": [
+                "date",
+                "tokens",
+                "messages",
+                "words",
+                "longest"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "tag": {
           "anyOf": [
             {
               "type": "string"
@@ -19454,25 +24056,34 @@ Input schema:
     "request": {
       "discriminator": {
         "mapping": {
-          "list": "#/$defs/SessionsListOp",
-          "read": "#/$defs/SessionsReadOp",
-          "search": "#/$defs/SessionsSearchOp",
-          "structured": "#/$defs/SessionsStructuredOp"
+          "memory.raw.get": "#/$defs/RawRead",
+          "sessions.list": "#/$defs/SessionList",
+          "sessions.raw.list": "#/$defs/RawList",
+          "sessions.raw.read": "#/$defs/RawRead",
+          "sessions.raw.search": "#/$defs/RawSearch",
+          "sessions.read": "#/$defs/SessionRead",
+          "sessions.search": "#/$defs/SessionSearch"
         },
         "propertyName": "operation"
       },
       "oneOf": [
         {
-          "$ref": "#/$defs/SessionsListOp"
+          "$ref": "#/$defs/SessionList"
         },
         {
-          "$ref": "#/$defs/SessionsReadOp"
+          "$ref": "#/$defs/SessionSearch"
         },
         {
-          "$ref": "#/$defs/SessionsSearchOp"
+          "$ref": "#/$defs/SessionRead"
         },
         {
-          "$ref": "#/$defs/SessionsStructuredOp"
+          "$ref": "#/$defs/RawList"
+        },
+        {
+          "$ref": "#/$defs/RawSearch"
+        },
+        {
+          "$ref": "#/$defs/RawRead"
         }
       ]
     },
@@ -19501,121 +24112,55 @@ Output: the response envelope's `data` field is `SessionsResult`; the full envel
 
 Examples:
 
-Structured project sessions:
+Project sessions:
 
 ```json
 {
   "request": {
-    "limit": 20,
-    "operation": "structured",
+    "operation": "sessions.list",
     "repo": "sinnix"
-  }
-}
-```
-
-Recent Claude Code sessions:
-
-```json
-{
-  "request": {
-    "limit": 20,
-    "operation": "list",
-    "provider": "claude-code"
-  }
-}
-```
-
-Search:
-
-```json
-{
-  "request": {
-    "operation": "search",
-    "provider": "codex",
-    "query": "gateway"
   }
 }
 ```
 
 ### `memory.query`
 
-Search session-derived memory across providers or fetch one object by reference, with source provenance.
+Search original session sources or read one source object with explicit coverage.
 
-Family: `query`. Owner: `memory`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `polylogue`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
-Aliases: remember, recall, what did we decide, semantic search.
-
-Follow-up actions: `memory.query`, `sessions.query`.
+Follow-up actions: `memory.raw.search`, `sessions.raw.read`.
 
 Input schema:
 
 ```json
 {
   "$defs": {
-    "MemoryGetOp": {
-      "additionalProperties": false,
-      "properties": {
-        "max_bytes": {
-          "default": 64000,
-          "maximum": 262144,
-          "minimum": 1,
-          "type": "integer"
-        },
-        "offset": {
-          "default": 0,
-          "minimum": 0,
-          "type": "integer"
-        },
-        "operation": {
-          "const": "get",
-          "default": "get",
-          "type": "string"
-        },
-        "reference": {
-          "maxLength": 8192,
-          "minLength": 1,
-          "type": "string"
-        }
-      },
-      "required": [
-        "reference"
-      ],
-      "type": "object"
-    },
-    "MemorySearchOp": {
+    "RawMemorySearch": {
       "additionalProperties": false,
       "properties": {
         "limit": {
           "default": 100,
+          "maximum": 1000,
           "minimum": 1,
           "type": "integer"
         },
         "operation": {
-          "const": "search",
-          "default": "search",
+          "const": "memory.raw.search",
+          "default": "memory.raw.search",
           "type": "string"
         },
-        "providers": {
-          "anyOf": [
-            {
-              "items": {
-                "enum": [
-                  "claude-code",
-                  "codex",
-                  "polylogue",
-                  "sinex",
-                  "lynchpin"
-                ],
-                "type": "string"
-              },
-              "minItems": 1,
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
+        "origins": {
+          "items": {
+            "enum": [
+              "claude-code-session",
+              "codex-session"
+            ],
+            "type": "string"
+          },
+          "maxItems": 2,
+          "minItems": 1,
+          "type": "array"
         },
         "query": {
           "maxLength": 1000,
@@ -19624,6 +24169,7 @@ Input schema:
         },
         "scan_bytes": {
           "default": 8388608,
+          "maximum": 8388608,
           "minimum": 1,
           "type": "integer"
         },
@@ -19642,8 +24188,8 @@ Input schema:
               },
               "propertyNames": {
                 "enum": [
-                  "claude-code",
-                  "codex"
+                  "claude-code-session",
+                  "codex-session"
                 ]
               },
               "type": "object"
@@ -19652,12 +24198,44 @@ Input schema:
               "type": "null"
             }
           ],
-          "default": null,
-          "description": "Per-provider continuations returned by the preceding identical memory search."
+          "default": null
         }
       },
       "required": [
         "query"
+      ],
+      "type": "object"
+    },
+    "RawRead": {
+      "additionalProperties": false,
+      "properties": {
+        "max_bytes": {
+          "default": 64000,
+          "maximum": 64000,
+          "minimum": 4,
+          "type": "integer"
+        },
+        "offset": {
+          "default": 0,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "operation": {
+          "default": "sessions.raw.read",
+          "enum": [
+            "sessions.raw.read",
+            "memory.raw.get"
+          ],
+          "type": "string"
+        },
+        "reference": {
+          "maxLength": 8192,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "reference"
       ],
       "type": "object"
     }
@@ -19705,17 +24283,18 @@ Input schema:
     "request": {
       "discriminator": {
         "mapping": {
-          "get": "#/$defs/MemoryGetOp",
-          "search": "#/$defs/MemorySearchOp"
+          "memory.raw.get": "#/$defs/RawRead",
+          "memory.raw.search": "#/$defs/RawMemorySearch",
+          "sessions.raw.read": "#/$defs/RawRead"
         },
         "propertyName": "operation"
       },
       "oneOf": [
         {
-          "$ref": "#/$defs/MemorySearchOp"
+          "$ref": "#/$defs/RawMemorySearch"
         },
         {
-          "$ref": "#/$defs/MemoryGetOp"
+          "$ref": "#/$defs/RawRead"
         }
       ]
     },
@@ -19740,16 +24319,16 @@ Input schema:
 }
 ```
 
-Output: the response envelope's `data` field is `MemoryResult`; the full envelope schema is the `sinnix://gateway/v2/actions/memory.query` resource and `sinnix-agent-gateway catalog memory.query --schema`.
+Output: the response envelope's `data` field is `SessionsResult`; the full envelope schema is the `sinnix://gateway/v2/actions/memory.query` resource and `sinnix-agent-gateway catalog memory.query --schema`.
 
 Examples:
 
-Search all sources:
+Search original sources:
 
 ```json
 {
   "request": {
-    "operation": "search",
+    "operation": "memory.raw.search",
     "query": "screenshot probe"
   }
 }
@@ -19757,13 +24336,701 @@ Search all sources:
 
 ### `timeline.query`
 
-Session evidence ordered by file mtime within an RFC 3339 window, per provider, without claiming unavailable upstreams.
+Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.
 
-Family: `query`. Owner: `timeline`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `polylogue`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
-Aliases: history, when did, sessions between, chronology.
+Follow-up actions: `sessions.read`, `sessions.search`, `timeline.query`.
 
-Follow-up actions: `sessions.query`, `memory.query`, `activity.query`.
+Input schema:
+
+```json
+{
+  "$defs": {
+    "Origin": {
+      "description": "Archive source-origin tokens.",
+      "enum": [
+        "claude-code-session",
+        "codex-session",
+        "gemini-cli-session",
+        "hermes-session",
+        "antigravity-session",
+        "beads-issue",
+        "grok-export",
+        "chatgpt-export",
+        "claude-ai-export",
+        "claude-design-session",
+        "aistudio-drive",
+        "unknown-export"
+      ],
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "continuation": {
+      "anyOf": [
+        {
+          "maxLength": 65536,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "deadline_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Unix timestamp after which the call is refused."
+    },
+    "expression": {
+      "anyOf": [
+        {
+          "maxLength": 8192,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "limit": {
+      "default": 100,
+      "maximum": 1000,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "offset": {
+      "default": 0,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "operation": {
+      "const": "sessions.timeline",
+      "default": "sessions.timeline",
+      "type": "string"
+    },
+    "origin": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Origin"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Caller-chosen correlation id."
+    },
+    "since": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "until": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "type": "object"
+}
+```
+
+Output: the response envelope's `data` field is `SessionsResult`; the full envelope schema is the `sinnix://gateway/v2/actions/timeline.query` resource and `sinnix-agent-gateway catalog timeline.query --schema`.
+
+Examples:
+
+Indexed session events in a time window:
+
+```json
+{
+  "limit": 50,
+  "origin": "codex-session",
+  "since": "2026-09-01T00:00:00Z",
+  "until": "2026-09-02T00:00:00Z"
+}
+```
+
+### `sessions.list`
+
+Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.
+
+Family: `query`. Owner: `polylogue`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+
+Follow-up actions: `sessions.read`, `sessions.search`, `timeline.query`.
+
+Input schema:
+
+```json
+{
+  "$defs": {
+    "Origin": {
+      "description": "Archive source-origin tokens.",
+      "enum": [
+        "claude-code-session",
+        "codex-session",
+        "gemini-cli-session",
+        "hermes-session",
+        "antigravity-session",
+        "beads-issue",
+        "grok-export",
+        "chatgpt-export",
+        "claude-ai-export",
+        "claude-design-session",
+        "aistudio-drive",
+        "unknown-export"
+      ],
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "continuation": {
+      "anyOf": [
+        {
+          "maxLength": 65536,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "deadline_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Unix timestamp after which the call is refused."
+    },
+    "expression": {
+      "anyOf": [
+        {
+          "maxLength": 8192,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "limit": {
+      "default": 50,
+      "maximum": 1000,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "max_messages": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "min_messages": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "min_words": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "offset": {
+      "default": 0,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "operation": {
+      "const": "sessions.list",
+      "default": "sessions.list",
+      "type": "string"
+    },
+    "origin": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Origin"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "repo": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Caller-chosen correlation id."
+    },
+    "since": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "sort": {
+      "anyOf": [
+        {
+          "enum": [
+            "date",
+            "tokens",
+            "messages",
+            "words",
+            "longest"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "tag": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "until": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "type": "object"
+}
+```
+
+Output: the response envelope's `data` field is `SessionsResult`; the full envelope schema is the `sinnix://gateway/v2/actions/sessions.list` resource and `sinnix-agent-gateway catalog sessions.list --schema`.
+
+Examples:
+
+Recent indexed project sessions:
+
+```json
+{
+  "limit": 20,
+  "repo": "sinnix",
+  "sort": "date"
+}
+```
+
+### `sessions.search`
+
+Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.
+
+Family: `query`. Owner: `polylogue`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+
+Follow-up actions: `sessions.read`, `sessions.search`, `timeline.query`.
+
+Input schema:
+
+```json
+{
+  "$defs": {
+    "Origin": {
+      "description": "Archive source-origin tokens.",
+      "enum": [
+        "claude-code-session",
+        "codex-session",
+        "gemini-cli-session",
+        "hermes-session",
+        "antigravity-session",
+        "beads-issue",
+        "grok-export",
+        "chatgpt-export",
+        "claude-ai-export",
+        "claude-design-session",
+        "aistudio-drive",
+        "unknown-export"
+      ],
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "continuation": {
+      "anyOf": [
+        {
+          "maxLength": 65536,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "deadline_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Unix timestamp after which the call is refused."
+    },
+    "expression": {
+      "anyOf": [
+        {
+          "maxLength": 8192,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "limit": {
+      "default": 50,
+      "maximum": 1000,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "max_messages": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "min_messages": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "min_words": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "offset": {
+      "default": 0,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "operation": {
+      "const": "sessions.search",
+      "default": "sessions.search",
+      "type": "string"
+    },
+    "origin": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Origin"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "repo": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Caller-chosen correlation id."
+    },
+    "since": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "sort": {
+      "anyOf": [
+        {
+          "enum": [
+            "date",
+            "tokens",
+            "messages",
+            "words",
+            "longest"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "tag": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "until": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "type": "object"
+}
+```
+
+Output: the response envelope's `data` field is `SessionsResult`; the full envelope schema is the `sinnix://gateway/v2/actions/sessions.search` resource and `sinnix-agent-gateway catalog sessions.search --schema`.
+
+Examples:
+
+Find sessions discussing pagination:
+
+```json
+{
+  "expression": "pagination",
+  "limit": 20,
+  "repo": "sinnix"
+}
+```
+
+### `sessions.read`
+
+Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.
+
+Family: `query`. Owner: `polylogue`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+
+Follow-up actions: `sessions.read`, `sessions.search`, `timeline.query`.
 
 Input schema:
 
@@ -19784,18 +25051,18 @@ Input schema:
       ],
       "default": null
     },
-    "cursor": {
+    "continuation": {
       "anyOf": [
         {
-          "maxLength": 8192,
+          "maxLength": 65536,
+          "minLength": 1,
           "type": "string"
         },
         {
           "type": "null"
         }
       ],
-      "default": null,
-      "description": "Continuation returned by the preceding identical timeline query."
+      "default": null
     },
     "deadline_at": {
       "anyOf": [
@@ -19809,10 +25076,27 @@ Input schema:
       "default": null,
       "description": "Unix timestamp after which the call is refused."
     },
-    "end": {
+    "limit": {
+      "default": 50,
+      "maximum": 1000,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "offset": {
+      "default": 0,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "operation": {
+      "const": "sessions.read",
+      "default": "sessions.read",
+      "type": "string"
+    },
+    "reason": {
       "anyOf": [
         {
-          "maxLength": 64,
+          "maxLength": 2000,
+          "minLength": 1,
           "type": "string"
         },
         {
@@ -19821,32 +25105,489 @@ Input schema:
       ],
       "default": null
     },
-    "limit": {
-      "default": 100,
-      "minimum": 1,
-      "type": "integer"
+    "ref": {
+      "maxLength": 8192,
+      "minLength": 1,
+      "type": "string"
     },
-    "providers": {
+    "request_id": {
       "anyOf": [
         {
-          "items": {
-            "enum": [
-              "claude-code",
-              "codex",
-              "polylogue",
-              "sinex",
-              "lynchpin"
-            ],
-            "type": "string"
-          },
-          "minItems": 1,
-          "type": "array"
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Caller-chosen correlation id."
+    }
+  },
+  "required": [
+    "ref"
+  ],
+  "type": "object"
+}
+```
+
+Output: the response envelope's `data` field is `SessionsResult`; the full envelope schema is the `sinnix://gateway/v2/actions/sessions.read` resource and `sinnix-agent-gateway catalog sessions.read --schema`.
+
+Examples:
+
+Read an indexed session message page:
+
+```json
+{
+  "limit": 25,
+  "offset": 0,
+  "ref": "session:example-session"
+}
+```
+
+### `sessions.raw.list`
+
+Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.
+
+Family: `query`. Owner: `polylogue`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+
+Follow-up actions: `sessions.read`, `sessions.search`, `timeline.query`.
+
+Input schema:
+
+```json
+{
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
         },
         {
           "type": "null"
         }
       ],
       "default": null
+    },
+    "continuation": {
+      "anyOf": [
+        {
+          "maxLength": 8192,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "deadline_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Unix timestamp after which the call is refused."
+    },
+    "limit": {
+      "default": 100,
+      "maximum": 1000,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "operation": {
+      "const": "sessions.raw.list",
+      "default": "sessions.raw.list",
+      "type": "string"
+    },
+    "origin": {
+      "enum": [
+        "claude-code-session",
+        "codex-session"
+      ],
+      "type": "string"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Caller-chosen correlation id."
+    }
+  },
+  "required": [
+    "origin"
+  ],
+  "type": "object"
+}
+```
+
+Output: the response envelope's `data` field is `SessionsResult`; the full envelope schema is the `sinnix://gateway/v2/actions/sessions.raw.list` resource and `sinnix-agent-gateway catalog sessions.raw.list --schema`.
+
+Examples:
+
+List original Codex session sources:
+
+```json
+{
+  "limit": 20,
+  "origin": "codex-session"
+}
+```
+
+### `sessions.raw.search`
+
+Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.
+
+Family: `query`. Owner: `polylogue`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+
+Follow-up actions: `sessions.read`, `sessions.search`, `timeline.query`.
+
+Input schema:
+
+```json
+{
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "continuation": {
+      "anyOf": [
+        {
+          "maxLength": 8192,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "deadline_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Unix timestamp after which the call is refused."
+    },
+    "limit": {
+      "default": 100,
+      "maximum": 1000,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "operation": {
+      "const": "sessions.raw.search",
+      "default": "sessions.raw.search",
+      "type": "string"
+    },
+    "origin": {
+      "enum": [
+        "claude-code-session",
+        "codex-session"
+      ],
+      "type": "string"
+    },
+    "query": {
+      "maxLength": 1000,
+      "minLength": 1,
+      "type": "string"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "reference": {
+      "anyOf": [
+        {
+          "maxLength": 8192,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Caller-chosen correlation id."
+    },
+    "scan_bytes": {
+      "default": 8388608,
+      "maximum": 8388608,
+      "minimum": 1,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "origin",
+    "query"
+  ],
+  "type": "object"
+}
+```
+
+Output: the response envelope's `data` field is `SessionsResult`; the full envelope schema is the `sinnix://gateway/v2/actions/sessions.raw.search` resource and `sinnix-agent-gateway catalog sessions.raw.search --schema`.
+
+Examples:
+
+Search original Claude Code transcripts:
+
+```json
+{
+  "limit": 20,
+  "origin": "claude-code-session",
+  "query": "pagination",
+  "scan_bytes": 1048576
+}
+```
+
+### `sessions.raw.read`
+
+Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.
+
+Family: `query`. Owner: `polylogue`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+
+Follow-up actions: `sessions.read`, `sessions.search`, `timeline.query`.
+
+Input schema:
+
+```json
+{
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "deadline_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Unix timestamp after which the call is refused."
+    },
+    "max_bytes": {
+      "default": 64000,
+      "maximum": 64000,
+      "minimum": 4,
+      "type": "integer"
+    },
+    "offset": {
+      "default": 0,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "operation": {
+      "const": "sessions.raw.read",
+      "default": "sessions.raw.read",
+      "type": "string"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "reference": {
+      "maxLength": 8192,
+      "minLength": 1,
+      "type": "string"
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Caller-chosen correlation id."
+    }
+  },
+  "required": [
+    "reference"
+  ],
+  "type": "object"
+}
+```
+
+Output: the response envelope's `data` field is `SessionsResult`; the full envelope schema is the `sinnix://gateway/v2/actions/sessions.raw.read` resource and `sinnix-agent-gateway catalog sessions.raw.read --schema`.
+
+Examples:
+
+Read a bounded original transcript page:
+
+```json
+{
+  "max_bytes": 16000,
+  "offset": 0,
+  "reference": "codex:2026/09/01/example-session.jsonl"
+}
+```
+
+### `sessions.raw.timeline`
+
+Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.
+
+Family: `query`. Owner: `polylogue`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+
+Follow-up actions: `sessions.read`, `sessions.search`, `timeline.query`.
+
+Input schema:
+
+```json
+{
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "continuation": {
+      "anyOf": [
+        {
+          "maxLength": 8192,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "deadline_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Unix timestamp after which the call is refused."
+    },
+    "limit": {
+      "default": 100,
+      "maximum": 1000,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "operation": {
+      "const": "sessions.raw.timeline",
+      "default": "sessions.raw.timeline",
+      "type": "string"
+    },
+    "origins": {
+      "items": {
+        "enum": [
+          "claude-code-session",
+          "codex-session"
+        ],
+        "type": "string"
+      },
+      "maxItems": 2,
+      "minItems": 1,
+      "type": "array"
     },
     "query": {
       "anyOf": [
@@ -19889,14 +25630,132 @@ Input schema:
     },
     "scan_bytes": {
       "default": 8388608,
-      "maximum": 67108864,
+      "maximum": 8388608,
       "minimum": 1,
       "type": "integer"
     },
-    "start": {
+    "since": {
       "anyOf": [
         {
-          "maxLength": 64,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "until": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "type": "object"
+}
+```
+
+Output: the response envelope's `data` field is `SessionsResult`; the full envelope schema is the `sinnix://gateway/v2/actions/sessions.raw.timeline` resource and `sinnix-agent-gateway catalog sessions.raw.timeline --schema`.
+
+Examples:
+
+Original sources modified in a time window:
+
+```json
+{
+  "limit": 20,
+  "origins": [
+    "claude-code-session",
+    "codex-session"
+  ],
+  "since": "2026-09-01T00:00:00Z",
+  "until": "2026-09-02T00:00:00Z"
+}
+```
+
+### `memory.raw.get`
+
+Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.
+
+Family: `query`. Owner: `polylogue`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+
+Follow-up actions: `sessions.read`, `sessions.search`, `timeline.query`.
+
+Input schema:
+
+```json
+{
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "deadline_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Unix timestamp after which the call is refused."
+    },
+    "max_bytes": {
+      "default": 64000,
+      "maximum": 64000,
+      "minimum": 4,
+      "type": "integer"
+    },
+    "offset": {
+      "default": 0,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "operation": {
+      "const": "memory.raw.get",
+      "default": "memory.raw.get",
+      "type": "string"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "reference": {
+      "maxLength": 8192,
+      "minLength": 1,
+      "type": "string"
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
           "type": "string"
         },
         {
@@ -19904,23 +25763,315 @@ Input schema:
         }
       ],
       "default": null,
-      "description": "RFC 3339 with timezone."
+      "description": "Caller-chosen correlation id."
+    }
+  },
+  "required": [
+    "reference"
+  ],
+  "type": "object"
+}
+```
+
+Output: the response envelope's `data` field is `SessionsResult`; the full envelope schema is the `sinnix://gateway/v2/actions/memory.raw.get` resource and `sinnix-agent-gateway catalog memory.raw.get --schema`.
+
+Examples:
+
+Read one original memory source:
+
+```json
+{
+  "max_bytes": 16000,
+  "offset": 0,
+  "reference": "claude-code:example-project/example-session.jsonl"
+}
+```
+
+### `memory.raw.search`
+
+Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.
+
+Family: `query`. Owner: `polylogue`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+
+Follow-up actions: `sessions.read`, `sessions.search`, `timeline.query`.
+
+Input schema:
+
+```json
+{
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "deadline_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Unix timestamp after which the call is refused."
+    },
+    "limit": {
+      "default": 100,
+      "maximum": 1000,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "operation": {
+      "const": "memory.raw.search",
+      "default": "memory.raw.search",
+      "type": "string"
+    },
+    "origins": {
+      "items": {
+        "enum": [
+          "claude-code-session",
+          "codex-session"
+        ],
+        "type": "string"
+      },
+      "maxItems": 2,
+      "minItems": 1,
+      "type": "array"
+    },
+    "query": {
+      "maxLength": 1000,
+      "minLength": 1,
+      "type": "string"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Caller-chosen correlation id."
+    },
+    "scan_bytes": {
+      "default": 8388608,
+      "maximum": 8388608,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "source_cursors": {
+      "anyOf": [
+        {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "propertyNames": {
+            "enum": [
+              "claude-code-session",
+              "codex-session"
+            ]
+          },
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "query"
+  ],
+  "type": "object"
+}
+```
+
+Output: the response envelope's `data` field is `SessionsResult`; the full envelope schema is the `sinnix://gateway/v2/actions/memory.raw.search` resource and `sinnix-agent-gateway catalog memory.raw.search --schema`.
+
+Examples:
+
+Find pagination notes across original sources:
+
+```json
+{
+  "limit": 20,
+  "origins": [
+    "claude-code-session",
+    "codex-session"
+  ],
+  "query": "pagination"
+}
+```
+
+### `sessions.resume`
+
+Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.
+
+Family: `query`. Owner: `polylogue`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+
+Follow-up actions: `sessions.read`, `sessions.search`, `timeline.query`.
+
+Input schema:
+
+```json
+{
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "cwd": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "deadline_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Unix timestamp after which the call is refused."
+    },
+    "operation": {
+      "const": "context.resume",
+      "default": "context.resume",
+      "type": "string"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "recent_files": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 100,
+      "type": "array"
+    },
+    "related_limit": {
+      "default": 5,
+      "maximum": 20,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "repo_path": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Caller-chosen correlation id."
+    },
+    "session_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     }
   },
   "type": "object"
 }
 ```
 
-Output: the response envelope's `data` field is `TimelineResult`; the full envelope schema is the `sinnix://gateway/v2/actions/timeline.query` resource and `sinnix-agent-gateway catalog timeline.query --schema`.
+Output: the response envelope's `data` field is `SessionsResult`; the full envelope schema is the `sinnix://gateway/v2/actions/sessions.resume` resource and `sinnix-agent-gateway catalog sessions.resume --schema`.
 
 Examples:
 
-Yesterday's sessions:
+Resume work in a checkout:
 
 ```json
 {
-  "end": "2026-09-05T00:00:00Z",
-  "start": "2026-09-04T00:00:00Z"
+  "recent_files": [
+    "README.md"
+  ],
+  "related_limit": 3,
+  "repo_path": "/realm/project/sinnix"
 }
 ```
 
@@ -19928,7 +26079,7 @@ Yesterday's sessions:
 
 Task closure, verified delivery and acceptance remain separate. Missing evidence is unknown; bounded closure cannot establish an exact denominator. Historical task state is read at its resolved owner revision.
 
-Family: `query`. Owner: `beads+lynchpin`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `lynchpin`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Follow-up actions: `beads.query`, `beads.get`, `context.compose`.
 
@@ -20106,6 +26257,8 @@ Input schema:
     "refresh_id": {
       "anyOf": [
         {
+          "maxLength": 512,
+          "minLength": 1,
           "type": "string"
         },
         {
@@ -20173,7 +26326,7 @@ Campaign evidence:
 
 Native parent, model and token fields remain unknown when absent from stored evidence. Each owner product retains its coverage, provenance and ingestion watermark.
 
-Family: `query`. Owner: `polylogue`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `polylogue`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Follow-up actions: `sessions.query`, `context.compose`.
 
@@ -20268,7 +26421,7 @@ Session orchestration:
 
 Verify the tamper-evident audit hash chain end to end.
 
-Family: `status`. Owner: `audit`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `status`. Owner: `audit`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: audit chain, integrity, tamper check.
 
@@ -20350,7 +26503,7 @@ Verify:
 
 Read one principal-scoped audit receipt by ref or id.
 
-Family: `get`. Owner: `audit`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `get`. Owner: `audit`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: receipt, what happened in that call.
 
@@ -20459,7 +26612,7 @@ By ref:
 
 Read one immutable stored response snapshot by ref or id.
 
-Family: `get`. Owner: `results`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `get`. Owner: `results`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: result snapshot, replay response.
 
@@ -20568,7 +26721,7 @@ By id:
 
 Search the generated machine capability index or describe one capability exactly.
 
-Family: `catalog`. Owner: `capability-index`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `catalog`. Owner: `capability-index`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: what can this machine do, scripts, services, which command, capability index.
 

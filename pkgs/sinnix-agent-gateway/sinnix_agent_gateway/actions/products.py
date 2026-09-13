@@ -5,13 +5,13 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any, Literal
 
-import anyio
 from pydantic import Field, model_validator
 
 from ..action import OBSERVER_OPERATOR, Action, Example, RequestControls
 from ..capabilities import Capability, PolicyError
 from ..contracts import VerbFamily
-from ..locators import ProjectLocator, bead_ref
+from ..generated_lynchpin_inputs import CampaignInput as OwnerCampaignInput
+from ..locators import ProjectLocator
 from ..mcp_broker import McpBrokerError
 from ..results import ProtocolError
 from ..schemas import GatewayModel
@@ -39,7 +39,7 @@ async def owner_product(
 ) -> OwnerProduct:
     source_ref = f"sinnix://mcp/{owner}/tools/{tool}"
     try:
-        result = await runtime.mcp_broker.call(
+        response = await runtime.mcp_broker.owner_result(
             owner,
             tool,
             arguments,
@@ -55,12 +55,11 @@ async def owner_product(
             reason=str(exc),
             source_ref=source_ref,
         )
-    response = result.get("response")
     if not isinstance(response, dict) or response.get("isError"):
         return OwnerProduct(
             owner=owner,
             availability="unavailable",
-            reason="Owner returned an error or an artifact beyond the inline bound.",
+            reason="Owner returned an error.",
             source_ref=source_ref,
         )
     data = response.get("structuredContent")
@@ -153,8 +152,14 @@ async def _orchestration(
             await owner_product(
                 runtime,
                 "polylogue",
-                "get",
-                {"ref": reference, "projection": "orchestration"},
+                "query",
+                {
+                    "projection": "session-operations",
+                    "session_operation": {
+                        "operation": "sessions.orchestration",
+                        "ref": reference,
+                    },
+                },
                 deadline_at=inp.deadline_at,
             )
         )
@@ -175,26 +180,16 @@ class HistoricalSelector(GatewayModel):
         return self.revision or self.timestamp or ""
 
 
-class CampaignInput(RequestControls):
+class CampaignInput(RequestControls, OwnerCampaignInput):
     project: ProjectLocator
-    roots: list[str] = Field(min_length=1, max_length=100)
     at: HistoricalSelector | None = None
     baseline: HistoricalSelector | None = None
-    relation: Literal["blocks", "parent-child"] = "blocks"
-    direction: Literal["prerequisites", "dependents"] = "prerequisites"
-    max_nodes: int = Field(default=500, ge=1, le=1000)
-    max_depth: int = Field(default=50, ge=1, le=100)
-    refresh_id: str | None = None
 
 
 class CampaignResult(GatewayModel):
-    projection_version: int = 1
+    projection_version: int = 2
     project: str
-    closure: dict[str, Any]
-    baseline: dict[str, Any] | None = None
-    scope_delta: dict[str, Any] | None = None
-    scope_accounting: OwnerProduct | None = None
-    evidence: OwnerProduct
+    product: OwnerProduct
     affordances: list[str] = Field(
         default_factory=lambda: [
             "beads.get",
@@ -208,102 +203,33 @@ class CampaignResult(GatewayModel):
 async def _campaign(runtime: Runtime, inp: CampaignInput) -> CampaignResult:
     project = inp.project.resolve(runtime)
     runtime.projects._project(project)
-    closure_reader = getattr(runtime.beads, "campaign_closure", None)
-    if closure_reader is None:
-        raise ProtocolError(
-            "unavailable", "Beads owner has no campaign closure capability"
-        )
-
-    def read(at: HistoricalSelector | None) -> dict[str, Any]:
-        return closure_reader(
-            project_id=project,
-            roots=inp.roots,
-            at=at.owner_value() if at else None,
-            relation=inp.relation,
-            direction=inp.direction,
-            max_nodes=inp.max_nodes,
-            max_depth=inp.max_depth,
-        )
-
-    closure = await anyio.to_thread.run_sync(lambda: read(inp.at))
-    baseline = (
-        await anyio.to_thread.run_sync(lambda: read(inp.baseline))
-        if inp.baseline is not None
-        else None
-    )
-    delta = None
-    if baseline is not None:
-        before = {str(row["id"]): row for row in baseline.get("nodes", [])}
-        after = {str(row["id"]): row for row in closure.get("nodes", [])}
-        retained = sorted(before.keys() & after.keys())
-        delta = {
-            "added": sorted(after.keys() - before.keys()),
-            "removed": sorted(before.keys() - after.keys()),
-            "retained": retained,
-            "closed": [
-                key
-                for key in retained
-                if before[key].get("status") != "closed"
-                and after[key].get("status") == "closed"
-            ],
-            "reopened": [
-                key
-                for key in retained
-                if before[key].get("status") == "closed"
-                and after[key].get("status") != "closed"
-            ],
-            "complete": baseline.get("complete") is True
-            and closure.get("complete") is True,
-        }
-    references = [
-        row.get("ref") or bead_ref(project, str(row["id"]))
-        for row in closure.get("nodes", [])
-    ]
-    evidence = await owner_product(
+    runtime.principal.require(Capability.TASK_READ)
+    product = await owner_product(
         runtime,
         "lynchpin",
         "lynchpin_project",
         {
-            "action": "campaign_evidence",
+            "action": "campaign_progress",
             "project": project,
-            "bead_refs": references,
-            "task_snapshot": closure,
+            "roots": inp.roots,
+            "at": inp.at.owner_value() if inp.at else None,
+            "baseline": inp.baseline.owner_value() if inp.baseline else None,
+            "relation": inp.relation,
+            "direction": inp.direction,
+            "max_nodes": inp.max_nodes,
+            "max_depth": inp.max_depth,
             **({"refresh_id": inp.refresh_id} if inp.refresh_id else {}),
         },
         deadline_at=inp.deadline_at,
     )
-    accounting = (
-        await owner_product(
-            runtime,
-            "lynchpin",
-            "lynchpin_project",
-            {
-                "action": "campaign_scope_delta",
-                "project": project,
-                "task_snapshot": closure,
-                "baseline_snapshot": baseline,
-                **({"refresh_id": inp.refresh_id} if inp.refresh_id else {}),
-            },
-            deadline_at=inp.deadline_at,
-        )
-        if baseline is not None
-        else None
-    )
-    return CampaignResult(
-        project=project,
-        closure=closure,
-        baseline=baseline,
-        scope_delta=delta,
-        scope_accounting=accounting,
-        evidence=evidence,
-    )
+    return CampaignResult(project=project, product=product)
 
 
 ACTIONS = (
     Action(
         name="campaign.progress",
         family=VerbFamily.QUERY,
-        owner="beads+lynchpin",
+        owner="lynchpin",
         summary="Compare explicit campaign closure and historical scope with owner-backed delivery and acceptance evidence.",
         Input=CampaignInput,
         Output=CampaignResult,
@@ -328,7 +254,7 @@ ACTIONS = (
         Output=OrchestrationResult,
         handler=_orchestration,
         principals=OBSERVER_OPERATOR,
-        resource_kinds=("session",),
+        resource_kinds=(),
         affordances=("sessions.query", "context.compose"),
         documentation="Native parent, model and token fields remain unknown when absent from stored evidence. Each owner product retains its coverage, provenance and ingestion watermark.",
         examples=(

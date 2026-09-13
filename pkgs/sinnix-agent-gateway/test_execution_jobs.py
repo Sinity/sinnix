@@ -72,7 +72,7 @@ def test_v2_get_reads_a_canonical_ref_through_the_action_that_owns_the_kind(
 
     with pytest.raises(ProtocolError, match="canonical resource was not found"):
         anyio.run(lambda: runtime.v2_get("sinnix://nope/1"))
-    with pytest.raises(ProtocolError, match="no single-ref reader"):
+    with pytest.raises(ProtocolError, match="canonical resource was not found"):
         anyio.run(lambda: runtime.v2_get("sinnix://sessions/claude/abc"))
 
 

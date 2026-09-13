@@ -598,3 +598,35 @@ def test_below_live_path_returns_the_report_dict(monkeypatch) -> None:
     out = below_module.collect_below("10 min ago", "10 min", 10, offline=False)
     assert out["available"] is True
     assert out["cgroup_peaks"][0]["cgroup"] == "/sys/fs/cgroup/x.slice"
+
+
+def test_current_profile_never_fans_out_expensive_collectors(monkeypatch):
+    for name in (
+        "collect_below",
+        "collect_config_drift",
+        "collect_chrome_io",
+        "collect_storage",
+        "collect_blocked_tasks",
+        "collect_systemd_units",
+        "collect_resource_slices",
+        "collect_sinex_xtask",
+        "collect_polylogue_live_attempts",
+        "collect_agent_gateway",
+    ):
+        monkeypatch.setattr(
+            cli, name, lambda *a, **k: pytest.fail("expensive background collector")
+        )
+    monkeypatch.setattr(cli, "collect_pressure", lambda _: {"memory": 5})
+    monkeypatch.setattr(
+        cli,
+        "collect_current_units",
+        lambda _: (_ for _ in ()).throw(RuntimeError("manager down")),
+    )
+    monkeypatch.setattr(cli, "collect_runtime_inventory", lambda _: {"surfaces": {}})
+    report = cli.collect_report(
+        cli.parse_args(["--format", "json", "--section", "current"])
+    )
+    assert report["live_pressure"] == {"memory": 5}
+    assert report["sections"]["live_pressure"]["available"] is True
+    assert report["sections"]["systemd_units"]["available"] is False
+    assert report["runtime_inventory"] == {"surfaces": {}}

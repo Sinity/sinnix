@@ -58,18 +58,19 @@ let
     fi
   '';
   loadCheckTargets = outputName: ''
-    if ! _check_names=$(${pkgs.nix}/bin/nix eval "$_flake_dir#${outputName}.${system}" \
-        --apply builtins.attrNames \
+    if ! _check_derivations=$(${pkgs.nix}/bin/nix eval "$_flake_dir#${outputName}.${system}" \
+        --apply 'checks: builtins.mapAttrs (_: check: check.drvPath) checks' \
         --json); then
-      echo "sinnix: failed to discover ${outputName}" >&2
+      echo "sinnix: failed to evaluate ${outputName}" >&2
       exit 1
     fi
-    if ! _check_targets=$(printf '%s' "$_check_names" | ${pkgs.jq}/bin/jq -er \
-        'if type == "array" and length > 0 and all(.[]; type == "string" and length > 0) then .[] | "${outputName}.${system}.\(.)" else error("expected nonempty check names") end'); then
-      echo "sinnix: invalid or empty ${outputName} discovery" >&2
+    if ! _check_targets=$(printf '%s' "$_check_derivations" | ${pkgs.jq}/bin/jq -er \
+        'if type == "object" and length > 0 and all(to_entries[]; (.key | length > 0) and (.value | type == "string" and startswith("/nix/store/") and endswith(".drv"))) then to_entries[] | .value + "^*" else error("expected nonempty check derivations") end'); then
+      echo "sinnix: invalid or empty ${outputName} evaluation" >&2
       exit 1
     fi
     mapfile -t ${outputName}_targets <<<"$_check_targets"
+    printf '%s' "$_check_derivations" | ${pkgs.jq}/bin/jq -r 'keys[] | "Selected ${outputName}: \(.)"'
   '';
   avoidRepoCwdForActivation = ''
     # nixos-rebuild-ng can trip over a git checkout cwd during activation.
@@ -107,8 +108,8 @@ let
     fi
   '';
   rebuildDefaultArgs = ''
-    rebuild_jobs="''${SINNIX_REBUILD_MAX_JOBS:-4}"
-    rebuild_cores="''${SINNIX_REBUILD_CORES:-16}"
+    rebuild_jobs="''${SINNIX_REBUILD_MAX_JOBS:-}"
+    rebuild_cores="''${SINNIX_REBUILD_CORES:-}"
     if command -v sinnix-rebuild-override >/dev/null 2>&1; then
       while IFS='=' read -r _override_name _override_value; do
         case "$_override_name" in
@@ -118,8 +119,11 @@ let
         esac
       done < <(sinnix-rebuild-override consume)
     fi
+    rebuild_args=()
+    if [[ -n "$rebuild_jobs" ]]; then rebuild_args+=(--max-jobs "$rebuild_jobs"); fi
+    if [[ -n "$rebuild_cores" ]]; then rebuild_args+=(--cores "$rebuild_cores"); fi
   '';
-  # Single source of truth for rebuild concurrency + resource containment, so
+  # Native Nix settings supply concurrency defaults; overrides are explicit.
   # Every activation executable takes this lock and runs under the same idle
   # scheduling, so no app or devshell path becomes an escape hatch around
   # containment. The lock is a correctness guard against two concurrent
@@ -141,7 +145,7 @@ let
   # however it is indented at the call site.
   rebuildContainmentFlags =
     lib.concatStringsSep " \\\n    " [
-      ''--setenv=NIX_CONFIG="eval-cache = false"''
+      ''--setenv=NIX_CONFIG="''${NIX_CONFIG:-}"''
       "--setenv=SINNIX_REBUILD_ACTIVE=1"
       ''--setenv=SINNIX_SECRET_DECLARATIONS="$SINNIX_SECRET_DECLARATIONS"''
       "--slice=nix-build.slice"
@@ -184,8 +188,7 @@ let
           ${rebuildContainmentFlags}
           ${pkgs.nixos-rebuild}/bin/nixos-rebuild build-vm \
             --flake "$_flake_dir#sinnix-prime" \
-            --max-jobs "$rebuild_jobs" \
-            --cores "$rebuild_cores" \
+            "''${rebuild_args[@]}" \
             --impure \
             "''${nix_override_args[@]}"
       '';
@@ -209,8 +212,7 @@ let
             ${pkgs.nh}/bin/nh os test \
             "''${_invoke_flake_dir}#sinnix-prime" \
             --no-nom \
-            --max-jobs "$rebuild_jobs" \
-            --cores "$rebuild_cores" \
+            "''${rebuild_args[@]}" \
             "''${nh_extra_args[@]}"
       '';
     };
@@ -235,8 +237,7 @@ let
             ${pkgs.nh}/bin/nh os boot \
             "''${_invoke_flake_dir}#sinnix-prime" \
             --no-nom \
-            --max-jobs "$rebuild_jobs" \
-            --cores "$rebuild_cores" \
+            "''${rebuild_args[@]}" \
             "''${nh_extra_args[@]}" || _rebuild_status=$?
         exit "$_rebuild_status"
       '';
@@ -262,8 +263,7 @@ let
             ${pkgs.nh}/bin/nh os switch \
             "''${_invoke_flake_dir}#sinnix-prime" \
             --no-nom \
-            --max-jobs "$rebuild_jobs" \
-            --cores "$rebuild_cores" \
+            "''${rebuild_args[@]}" \
             "''${nh_extra_args[@]}" || _rebuild_status=$?
         ${sinexCachePush}
         exit "$_rebuild_status"
@@ -519,15 +519,9 @@ in
         done
         ${loadCheckTargets "checks"}
         cd "$_flake_dir"
-        for target in "''${checks_targets[@]}"; do
-          echo "Running default check: $target"
-          if [ "$_check_no_build" = 1 ]; then
-            ${pkgs.nix}/bin/nix eval "$_flake_dir#$target.drvPath" --raw
-          else
-            NIX_CONFIG="eval-cache = false" SINNIX_REBUILD_ACTIVE=1 \
-              ${scriptPkgs.nix-safe}/bin/nix-safe build "$_flake_dir#$target" --no-link
-          fi
-        done
+        if [ "$_check_no_build" = 0 ]; then
+          ${pkgs.nix}/bin/nix build --no-link --accept-flake-config "''${checks_targets[@]}"
+        fi
         echo "Default check tier complete."
       '';
     };
@@ -536,9 +530,7 @@ in
       script = ''
         _flake_dir='git+file:///realm/project/sinnix?ref=master'
         ${loadCheckTargets "checks"}
-        for target in "''${checks_targets[@]}"; do
-          ${pkgs.nix}/bin/nix build "$_flake_dir#$target" --no-link --accept-flake-config
-        done
+        ${pkgs.nix}/bin/nix build --no-link --accept-flake-config "''${checks_targets[@]}"
       '';
     };
     lint = {
@@ -589,7 +581,7 @@ in
     };
 
     check-heavy = {
-      description = "Run heavy non-default checks sequentially to keep evaluation memory bounded";
+      description = "Evaluate and build the heavy non-default check tier";
       script = ''
         ${resolveFlakeDir}
         if [ "''${AGENTCTL_PRINCIPAL:-}" = agent-control ] \
@@ -600,17 +592,14 @@ in
 
         ${loadCheckTargets "heavyChecks"}
 
-        for target in "''${heavyChecks_targets[@]}"; do
-          echo "Running heavy check: $target"
-          ${scriptPkgs.nix-safe}/bin/nix-safe build "$_flake_dir#$target"
-        done
+        ${pkgs.nix}/bin/nix build --no-link --accept-flake-config "''${heavyChecks_targets[@]}"
 
         echo "Heavy check suite complete."
       '';
     };
 
     check-all = {
-      description = "Run the default semantic checks, then the heavy non-default suite sequentially";
+      description = "Evaluate both semantic tiers once and build their selected derivations";
       script = ''
         ${resolveFlakeDir}
         if [ "''${AGENTCTL_PRINCIPAL:-}" = agent-control ] \
@@ -619,20 +608,10 @@ in
         fi
         cd "$_flake_dir"
 
-        echo "Running default semantic checks..."
         ${loadCheckTargets "checks"}
-
-        for target in "''${checks_targets[@]}"; do
-          echo "Running default check: $target"
-          ${scriptPkgs.nix-safe}/bin/nix-safe build "$_flake_dir#$target"
-        done
-
-        echo "Running heavy checks..."
         ${loadCheckTargets "heavyChecks"}
-        for target in "''${heavyChecks_targets[@]}"; do
-          echo "Running heavy check: $target"
-          ${scriptPkgs.nix-safe}/bin/nix-safe build "$_flake_dir#$target"
-        done
+        ${pkgs.nix}/bin/nix build --no-link --accept-flake-config \
+          "''${checks_targets[@]}" "''${heavyChecks_targets[@]}"
 
         echo "Full non-host semantic check suite complete."
       '';

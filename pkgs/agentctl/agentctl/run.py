@@ -40,17 +40,14 @@ from enum import Enum
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping, Sequence
 
-from . import pueue
+from . import artifacts, pueue
 from .launch_input import QueueInputError, read_input
 from .limits import SYSTEMCTL_TIMEOUT_SECONDS
 from .pueue import PueueError
 
-# The bounded artifacts a queued command may leave behind. A command that
-# prints more is truncated with a marker, never allowed to fill the disk.
-# `job clean` is the only retention rule.
+# Default transport bounds. Captured artifacts are retained in full.
 MAX_LOG_BYTES = 8_000_000
 MAX_RESULT_BYTES = 64_000
-OVERFLOW_MARKER = "\n[agentctl: output truncated]\n"
 
 # Exit statuses of the wrapper itself. 124 is timeout(1)'s, 130 is a
 # SIGINT-shaped cancellation, 126 a command that could not be observed, and
@@ -290,21 +287,6 @@ def append_event(spool_path: Path | None, event: Mapping[str, Any]) -> None:
         return
 
 
-def _bound(path: Path, limit: int) -> None:
-    """Truncate a captured artifact to its limit, marking that it overflowed."""
-    try:
-        size = path.stat().st_size
-    except OSError:
-        return
-    if size <= limit:
-        return
-    marker = OVERFLOW_MARKER.encode()
-    with open(path, "r+b") as handle:
-        handle.truncate(max(limit - len(marker), 0))
-        handle.seek(0, os.SEEK_END)
-        handle.write(marker)
-
-
 def systemd_environment() -> dict[str, str]:
     """The wrapper's environment with the user manager reachable.
 
@@ -491,7 +473,9 @@ def _run_bare(
 
 
 def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
-    """Run one queued command and leave its bounded artifacts behind."""
+    """Run one queued command, retaining complete output for this invocation."""
+    marker = cancel_marker_for(launch["log_path"])
+    launch = artifacts.begin(launch, launch_input)
     log_path = Path(launch["log_path"])
     spool_path = (
         Path(launch["event_spool_path"]) if launch.get("event_spool_path") else None
@@ -505,11 +489,31 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
         else log_path
     )
     log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def refused() -> int:
+        record = {
+            "outcome": "refused",
+            "exit_code": REFUSED_EXIT_CODE,
+            "attempt": launch["attempt"],
+        }
+        outcome_path_for(log_path).write_text(json.dumps(record, sort_keys=True))
+        append_event(
+            spool_path,
+            {
+                "kind": "queue-task",
+                "job_id": launch["job_id"],
+                "attempt": launch["attempt"],
+                "phase": "finished",
+                **record,
+            },
+        )
+        return REFUSED_EXIT_CODE
+
     if not Path(launch["working_directory"]).is_dir():
         log_path.write_text(
             f"working directory is gone: {launch['working_directory']}\n"
         )
-        return REFUSED_EXIT_CODE
+        return refused()
     # This is execution evidence, not the cache key captured by `job start`.
     # It is therefore collected for every operation, including cache=none.
     start_git = git_observation(Path(launch["working_directory"]))
@@ -521,7 +525,7 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
             scratch_dir.mkdir(mode=0o700, exist_ok=True)
         except OSError as error:
             log_path.write_text(f"could not create the scratch directory: {error}\n")
-            return REFUSED_EXIT_CODE
+            return refused()
 
     # The pueue group comes from `PUEUE_GROUP`, which pueued exports into every
     # task it spawns, so a launch input written by another repository is
@@ -529,11 +533,11 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
     pool = unit_pool(os.environ.get("PUEUE_GROUP")) or unit_pool(launch.get("pool"))
     unit = unit_for(launch_input, pool) if pool else None
     daemon = pueue.daemon_tag()
-    marker = cancel_marker_for(log_path)
     marker.unlink(missing_ok=True)
     event = {
         "kind": "queue-task",
         "job_id": launch["job_id"],
+        "attempt": launch["attempt"],
         "task_id": None,
         "label": launch.get("label", ""),
         "job_kind": launch.get("kind", "declared-operation"),
@@ -572,7 +576,7 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
         if executable is None:
             log.write(f"could not start the command: {argv[0]} not found\n".encode())
             remove_scratch(scratch_dir)
-            return REFUSED_EXIT_CODE
+            return refused()
         argv[0] = executable
         try:
             if unit is None or pool is None:
@@ -611,7 +615,7 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
         except OSError as error:
             log.write(f"could not start the command: {error}\n".encode())
             remove_scratch(scratch_dir)
-            return REFUSED_EXIT_CODE
+            return refused()
         if outcome is Outcome.TIMEOUT:
             log.write(f"timed out after {launch['timeout_seconds']} seconds\n".encode())
     marker.unlink(missing_ok=True)
@@ -637,9 +641,6 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
         remove_scratch(scratch_dir)
     outcome_path_for(log_path).write_text(json.dumps(record, sort_keys=True))
     append_event(spool_path, {**event, "phase": "finished", **record})
-    _bound(log_path, MAX_LOG_BYTES)
-    if result_path is not None:
-        _bound(result_path, MAX_RESULT_BYTES)
     return status
 
 

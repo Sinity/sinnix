@@ -78,6 +78,13 @@ class JobView(GatewayModel):
     checkout_path: str | None = None
     checkout_ref: str | None = None
     state: JobState = Field(default_factory=JobState)
+    attempt: int | None = None
+    artifacts: dict[str, Any] = Field(default_factory=dict)
+    attempts: list[dict[str, Any]] = Field(default_factory=list)
+    attempt_count: int | None = None
+    next_attempt_offset: int | None = None
+    queue_present: bool | None = None
+    attempt_outcome: dict[str, Any] | None = None
     enqueued_at: str | None = None
     started_at: str | None = None
     ended_at: str | None = None
@@ -139,6 +146,19 @@ def _job_view(payload: Mapping[str, Any]) -> JobView:
             exit_code=state.get("exit_code"),
             dependencies=state.get("dependencies"),
         ),
+        **{
+            key: payload[key]
+            for key in (
+                "attempt",
+                "artifacts",
+                "attempts",
+                "attempt_count",
+                "next_attempt_offset",
+                "queue_present",
+            )
+            if key in payload
+        },
+        attempt_outcome=payload.get("outcome"),
         enqueued_at=payload.get("enqueued_at"),
         started_at=payload.get("started_at"),
         ended_at=payload.get("ended_at"),
@@ -275,12 +295,19 @@ def _list(runtime: Runtime, inp: ListInput) -> JobPage:
 
 class GetInput(RequestControls):
     target: JobLocator
+    attempt: int | None = Field(default=None, ge=1)
+    attempt_offset: int = Field(default=0, ge=0)
+    attempt_limit: int = Field(default=100, ge=1, le=100)
     projection: Literal["summary", "log", "result"] = "summary"
     offset: int = Field(default=0, ge=0, description="Log byte offset.")
     max_bytes: int = Field(default=64_000, ge=1, le=262_144)
 
 
 class JobLog(GatewayModel):
+    attempt: int | None = None
+    path: str | None = None
+    size_bytes: int | None = None
+    base64: str | None = None
     ref: str
     job_id: int
     content: str
@@ -293,6 +320,7 @@ class JobLog(GatewayModel):
 
 
 class JobResult(GatewayModel):
+    page: dict[str, Any] | None = None
     kind: str | None = Field(default=None, description="exit or artifact.")
     value: Any = None
 
@@ -309,6 +337,7 @@ def _log(
     offset: int,
     max_bytes: int,
     launch_reference: str | None = None,
+    attempt: int | None = None,
 ) -> JobLog:
     raw = _job(
         runtime,
@@ -317,10 +346,11 @@ def _log(
         launch_reference,
         offset=offset,
         max_bytes=max_bytes,
+        **({"attempt": attempt} if attempt is not None else {}),
     )
     content = str(raw.get("content") or "")
     truncated = bool(raw.get("truncated"))
-    returned = len(content.encode())
+    returned = raw.get("returned_bytes", len(content.encode()))
     # A reference-addressed read answers about whatever id the job is at now.
     job_id = int(raw.get("job_id", job_id))
     return JobLog(
@@ -331,7 +361,12 @@ def _log(
         max_bytes=max_bytes,
         returned_bytes=returned,
         truncated=truncated,
-        next_offset=offset + returned if truncated else None,
+        next_offset=raw.get("next_offset", offset + returned if truncated else None),
+        **{
+            key: raw[key]
+            for key in ("attempt", "path", "size_bytes", "base64")
+            if key in raw
+        },
         affordances=["jobs.get", "jobs.logs"],
     )
 
@@ -339,18 +374,38 @@ def _log(
 def _get(runtime: Runtime, inp: GetInput) -> JobDetail:
     runtime.principal.require(Capability.JOB_READ)
     job_id, _, reference = inp.target.resolve()
-    view = _job_view(_job(runtime, "job.get", job_id, reference))
+    selectors = {}
+    if inp.attempt is not None:
+        selectors["attempt"] = inp.attempt
+    if inp.attempt_offset or inp.attempt_limit != 100:
+        selectors.update(
+            attempt_offset=inp.attempt_offset, attempt_limit=inp.attempt_limit
+        )
+    view = _job_view(_job(runtime, "job.get", job_id, reference, **selectors))
     detail = JobDetail(**view.model_dump(), projection=inp.projection)
     if inp.projection == "log":
-        detail.log = _log(runtime, job_id, inp.offset, inp.max_bytes, reference)
+        detail.log = _log(
+            runtime, job_id, inp.offset, inp.max_bytes, reference, inp.attempt
+        )
     elif inp.projection == "result":
-        raw = _job(runtime, "job.result", job_id, reference, max_bytes=inp.max_bytes)
-        detail.result = JobResult(kind=raw.get("kind"), value=raw.get("value"))
+        raw = _job(
+            runtime,
+            "job.result",
+            job_id,
+            reference,
+            max_bytes=inp.max_bytes,
+            offset=inp.offset,
+            **({"attempt": inp.attempt} if inp.attempt is not None else {}),
+        )
+        detail.result = JobResult(
+            kind=raw.get("kind"), value=raw.get("value"), page=raw.get("page")
+        )
     return detail
 
 
 class LogsInput(RequestControls):
     target: JobLocator
+    attempt: int | None = Field(default=None, ge=1)
     offset: int = Field(default=0, ge=0)
     max_bytes: int = Field(default=64_000, ge=1, le=262_144)
 
@@ -358,7 +413,7 @@ class LogsInput(RequestControls):
 def _logs(runtime: Runtime, inp: LogsInput) -> JobLog:
     runtime.principal.require(Capability.JOB_READ)
     job_id, _, reference = inp.target.resolve()
-    return _log(runtime, job_id, inp.offset, inp.max_bytes, reference)
+    return _log(runtime, job_id, inp.offset, inp.max_bytes, reference, inp.attempt)
 
 
 # ------------------------------------------------------------------ wait
@@ -513,7 +568,8 @@ class CleanResult(GatewayModel):
     job_id: int
     cleaned: bool
     removed: list[str] = Field(
-        default_factory=list, description="Artifact paths the clean deleted."
+        default_factory=list,
+        description="Queue entries removed; retained attempt artifacts remain readable.",
     )
     affordances: list[str] = Field(default_factory=list)
 
@@ -559,6 +615,9 @@ def _run_operation(runtime: Runtime, inp: OperationRunInput) -> JobView:
         operation=inp.operation,
         workspace_id=workspace,
         parameters={"argv": inp.operation_args} if inp.operation_args else None,
+        owner_request_key=runtime.owner_request_key(
+            "operations.run", inp.idempotency_key
+        ),
     )
     return _job_view(result)
 
@@ -766,7 +825,7 @@ ACTIONS: tuple[Action, ...] = (
         name="jobs.clean",
         family=VerbFamily.OPERATE,
         owner="systemd-jobs",
-        summary="Delete one terminal job and the log, result and launch input it owns.",
+        summary="Remove one terminal job from the queue while retaining its launch input and attempt artifacts.",
         Input=CleanInput,
         Output=CleanResult,
         handler=_clean,

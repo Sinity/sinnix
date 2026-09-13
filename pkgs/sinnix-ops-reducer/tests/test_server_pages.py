@@ -91,3 +91,79 @@ def test_snapshot_state_query_projects_the_named_keys(
 def test_snapshot_without_query_is_unprojected(hub_server: str, http_get) -> None:
     body = http_get(hub_server + "/v1/snapshot")[2]
     assert "systemd_units" in json.loads(body)["state"]
+
+
+def test_prepare_and_execute_share_the_http_target_contract(
+    hub_server_factory, tmp_path
+):
+    import urllib.error
+    import urllib.request
+    from urllib.parse import quote
+
+    from sinnix_ops_reducer.actions import ActionService
+
+    inventory = tmp_path / "inventory.json"
+    inventory.write_text(
+        json.dumps(
+            {
+                "schema": "sinnix-runtime-inventory-v1",
+                "surfaces": {
+                    "fixture": {
+                        "unit": "fixture.service",
+                        "manager": "user",
+                        "observe": {"restartable": True},
+                    }
+                },
+            }
+        )
+    )
+    live = {
+        "LoadState": "loaded",
+        "ActiveState": "active",
+        "SubState": "running",
+        "InvocationID": "first",
+    }
+    calls = []
+    actions = ActionService(
+        lambda: {"sequence": 999},
+        inventory,
+        tmp_path / "receipts.json",
+        adapter=lambda *_: calls.append("restart") or {},
+        unit_state_prober=lambda *_: live,
+    )
+    url = hub_server_factory(inventory_path=inventory, actions=actions)
+
+    def post(route, payload):
+        request = urllib.request.Request(
+            url + route,
+            json.dumps(payload).encode(),
+            {"Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=5) as response:
+                return response.status, json.load(response)
+        except urllib.error.HTTPError as error:
+            return error.code, json.load(error)
+
+    status, prepared = post(
+        "/v1/actions/prepare",
+        {"action": "restart", "target": {"unit": "fixture"}, "parameters": {}},
+    )
+    assert status == 200
+    assert prepared["expected_target"]["properties"]["InvocationID"] == "first"
+    prepared.pop("observed_at")
+    request = prepared | {
+        "idempotency_key": "http / # %2F",
+        "operator_reason": "fixture",
+    }
+    assert post("/v1/actions", request)[0] == 201
+    with urllib.request.urlopen(
+        url + "/v1/actions/" + quote(request["idempotency_key"], safe="")
+    ) as response:
+        assert json.load(response)["idempotency_key"] == request["idempotency_key"]
+    live["InvocationID"] = "second"
+    assert post("/v1/actions", request)[0] == 201
+    request["idempotency_key"] = "http-stale"
+    assert post("/v1/actions", request)[0] == 409
+    assert post("/v1/actions", request)[0] == 409
+    assert calls == ["restart"]

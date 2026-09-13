@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 from typing import Any
 
 from .shell import (
@@ -93,7 +94,7 @@ def job_row(job: dict[str, Any], now: dt.datetime) -> str:
     controls = ""
     if job.get("terminal") is not True:
         controls = (
-            f"<button class=\"act danger\" onclick=\"act('interrupt','job_id',"
+            f'<button class="act danger" data-expected-target="{esc(json.dumps(job.get("expected_target")))}" onclick="act(\'interrupt\',\'job_id\','
             f"'{esc(str(job.get('job_id')))}',this)\">interrupt</button>"
         )
     headline = (

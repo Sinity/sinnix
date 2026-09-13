@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from types import SimpleNamespace
 
 import anyio
 import pytest
@@ -24,11 +23,11 @@ class Broker:
         self.failure = failure
         self.calls = []
 
-    async def call(self, owner, tool, arguments, **kwargs):
+    async def owner_result(self, owner, tool, arguments, **kwargs):
         self.calls.append((owner, tool, arguments, kwargs))
         if self.failure:
             raise McpBrokerError("owner unavailable")
-        return {"response": {"structuredContent": self.data}}
+        return {"structuredContent": self.data}
 
 
 @pytest.mark.parametrize(
@@ -108,7 +107,13 @@ def test_orchestration_preserves_unknown_usage_and_deduplicates(tmp_path, monkey
     )
     assert len(result.sessions) == 1
     assert result.sessions[0].data["usage"]["tokens"] is None
-    assert broker.calls[0][2] == {"ref": "session:a", "projection": "orchestration"}
+    assert broker.calls[0][2] == {
+        "projection": "session-operations",
+        "session_operation": {
+            "operation": "sessions.orchestration",
+            "ref": "session:a",
+        },
+    }
 
 
 def test_mcp_product_response_is_a_principal_scoped_immutable_result(
@@ -156,31 +161,21 @@ def test_owner_refusal_is_unavailable(tmp_path, monkeypatch, data):
     assert result.sessions[0].data == data
 
 
-def test_campaign_joins_selected_history_and_keeps_incomplete_scope(
+def test_campaign_owner_acquires_history_and_preserves_incomplete_scope(
     tmp_path, monkeypatch
 ):
     _, runtime, _ = make_server(tmp_path, "observer", monkeypatch)
-    calls = []
-
-    def closure(**arguments):
-        calls.append(arguments)
-        old = arguments["at"] == "older"
-        return {
-            "nodes": [{"id": "fixture-1", "status": "open" if old else "closed"}],
-            "complete": old,
-            "provenance_edges": [
-                {"from": "fixture-2", "to": "fixture-1", "relation": "split_from"}
-            ],
-            "provenance_coverage": {
-                "complete": old,
-                "state": "complete" if old else "bounded",
-            },
-            "temporal": {"resolved_revision": arguments["at"], "known_at": None},
-        }
-
-    runtime.beads = SimpleNamespace(campaign_closure=closure)
+    owner = {
+        "closure": {
+            "nodes": [{"id": "fixture-1", "status": "closed"}],
+            "complete": False,
+        },
+        "baseline": {"temporal": {"resolved_revision": "older"}},
+        "scope_delta": {"closed": ["fixture-1"], "complete": False},
+        "items": [{"task_status": "closed", "evidence_state": "unknown"}],
+    }
     runtime.mcp_broker = Broker(
-        {"items": [{"task_status": "closed", "evidence_state": "unknown"}]}
+        {"ok": True, "data": owner, "meta": {"owner": "lynchpin"}}
     )
     result = anyio.run(
         products._campaign,
@@ -192,41 +187,42 @@ def test_campaign_joins_selected_history_and_keeps_incomplete_scope(
             baseline={"revision": "older"},
         ),
     )
-    assert [row["at"] for row in calls] == ["newer", "older"]
-    assert result.scope_delta["closed"] == ["fixture-1"]
-    assert result.scope_delta["complete"] is False
-    sent = runtime.mcp_broker.calls[0][2]
-    assert sent["bead_refs"] == ["sinnix://projects/fixture/beads/fixture-1"]
-    assert sent["task_snapshot"]["temporal"]["resolved_revision"] == "newer"
-    assert (
-        sent["task_snapshot"]["provenance_edges"] == result.closure["provenance_edges"]
-    )
-    assert sent["task_snapshot"]["provenance_coverage"]["complete"] is False
-    accounting = runtime.mcp_broker.calls[1][2]
-    assert accounting["action"] == "campaign_scope_delta"
-    assert accounting["task_snapshot"] == result.closure
-    assert accounting["baseline_snapshot"] == result.baseline
-    assert result.evidence.data["items"][0]["evidence_state"] == "unknown"
+    assert result.product.data == owner
+    assert runtime.mcp_broker.calls[0][2] == {
+        "action": "campaign_progress",
+        "project": "fixture",
+        "roots": ["fixture-1"],
+        "at": "newer",
+        "baseline": "older",
+        "relation": "blocks",
+        "direction": "prerequisites",
+        "max_nodes": 500,
+        "max_depth": 50,
+    }
+    assert len(runtime.mcp_broker.calls) == 1
 
 
-def test_structured_sessions_do_not_use_legacy_file_search(tmp_path, monkeypatch):
+def test_structured_sessions_use_native_owner_pagination(tmp_path, monkeypatch):
     _, runtime, _ = make_server(tmp_path, "observer", monkeypatch)
-    runtime.mcp_broker = Broker()
-    runtime.sessions = None
+    runtime.mcp_broker = Broker(
+        {"items": [], "continuation": "owner-next", "coverage": {"complete": False}}
+    )
     result = anyio.run(
         activity._sessions,
         runtime,
         activity.SessionsInput(
-            request={"operation": "structured", "expression": "late match", "limit": 3}
+            request={
+                "operation": "sessions.search",
+                "expression": "late match",
+                "limit": 3,
+            }
         ),
     )
-    assert result.data.provider == "polylogue"
-    assert result.data.truncated is None
-    assert runtime.mcp_broker.calls[0][2] == {
-        "expression": "late match",
-        "limit": 3,
-        "projection": "sessions",
-    }
+    assert result.data.owner_product.data["continuation"] == "owner-next"
+    sent = runtime.mcp_broker.calls[0][2]["session_operation"]
+    assert sent["operation"] == "sessions.search"
+    assert sent["expression"] == "late match"
+    assert sent["limit"] == 3
 
 
 def test_context_owner_failure_is_persisted_as_unavailable(tmp_path, monkeypatch):
@@ -274,15 +270,18 @@ def test_historical_context_owner_contract_preserves_partial_and_unknown(
     )
     sent = runtime.mcp_broker.calls[0][2]
     assert sent == {
-        "action": intent.replace(".", "_"),
+        "action": "project_context",
+        "intent": intent,
         "project": "fixture",
+        "roots": [],
+        "at": None,
         "refresh_id": "fixture-generation",
     }
     component = result.components[0]
     assert component.status == ("available" if outcome == "partial" else "unavailable")
     if outcome == "partial":
-        assert component.data == owner_data
-        assert component.data["counts"]["exact"] is None
+        assert component.data["data"] == owner_data
+        assert component.data["data"]["counts"]["exact"] is None
     assert (
         runtime.results.read(result.snapshot_ref.rsplit("/", 1)[1])["rows"][0]["intent"]
         == intent

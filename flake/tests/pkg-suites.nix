@@ -35,6 +35,7 @@
     in
     {
       checks = {
+        beads-owner-contract = sinnixScriptRegistry.packageSet.beads.ownerContractCheck;
         # Provably fails when: is_near_duplicate's threshold boundary stops
         # being inclusive. Verified by flipping `<= threshold` to `< threshold`
         # in hashing.py -- caught by

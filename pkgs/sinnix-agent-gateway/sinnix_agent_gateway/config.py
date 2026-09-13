@@ -68,6 +68,7 @@ class GatewayConfig:
     capability_index: Path = Path("/etc/sinnix/capability-index.json")
     observe_command: str = "sinnix-observe"
     max_result_bytes: int = 262_144
+    package_manifest_path: Path | None = None
     approved_manifest_hash: str | None = None
     approved_manifest_principal: str = "observer"
     connector_snapshot_path: Path | None = None
@@ -248,6 +249,9 @@ class GatewayConfig:
             ),
             observe_command=raw.get("observeCommand", "sinnix-observe"),
             max_result_bytes=int(raw.get("maxResultBytes", 262_144)),
+            package_manifest_path=Path(raw["packageManifestPath"])
+            if raw.get("packageManifestPath")
+            else None,
             approved_manifest_hash=raw.get("approvedManifestHash"),
             approved_manifest_principal=raw.get(
                 "approvedManifestPrincipal", "observer"

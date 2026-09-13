@@ -593,33 +593,30 @@ _CONTEXT_KEYS = {
 }
 
 
-def _context(runtime: Runtime, inp: ContextInput) -> ProjectContext:
+async def _context(runtime: Runtime, inp: ContextInput) -> ProjectContext:
+    from .contexts import ComposeInput, _compose
+
     project_id = inp.target.resolve(runtime)
     ref = project_ref(project_id)
-    context = owner(runtime.compose_context, ref, inp.intent)
-    components = [
-        ContextComponent(
-            **{key: value for key, value in row.items() if key in _COMPONENT_KEYS},
-            extra={
-                key: value for key, value in row.items() if key not in _COMPONENT_KEYS
-            },
-        )
-        for row in context["components"]
-    ]
+    context = await _compose(
+        runtime,
+        ComposeInput(
+            intent=inp.intent,
+            project={"project": project_id},
+            deadline_at=inp.deadline_at,
+        ),
+    )
     return ProjectContext(
         ref=ref,
         project_ref=ref,
         project_id=project_id,
         intent=inp.intent,
-        context_schema=context["schema"],
-        target_ref=context["target_ref"],
-        snapshot_ref=context["snapshot_ref"],
-        components=components,
-        component_plan=context["component_plan"],
-        total_budget_bytes=context["total_budget_bytes"],
-        extra={
-            key: value for key, value in context.items() if key not in _CONTEXT_KEYS
-        },
+        context_schema=context.context_schema,
+        target_ref=context.target_ref,
+        snapshot_ref=context.snapshot_ref,
+        components=[ContextComponent(**row.model_dump()) for row in context.components],
+        component_plan=context.component_plan,
+        total_budget_bytes=context.total_budget_bytes,
         affordances=["projects.get", "beads.query", "projects.diff", "projects.tree"],
     )
 

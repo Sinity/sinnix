@@ -98,6 +98,7 @@ let
             "campaign_scope_delta"
             "verification_regression"
             "project_trajectory"
+            "project_context"
           ];
       env = {
         LYNCHPIN_REPO_ROOT = "/realm/project/sinity-lynchpin";
@@ -122,6 +123,10 @@ let
         {
           tool = "query";
           arguments.projection = "sessions";
+        }
+        {
+          tool = "query";
+          arguments.projection = "session-operations";
         }
         {
           tool = "get";

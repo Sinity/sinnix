@@ -1,6 +1,25 @@
 # Internal backup component. Public options and shared policy live in modules/backup.nix.
-{ context }:
-with context;
+{
+  pkgs,
+  lib,
+  borgRepoRoot,
+  polylogueBackupRoot,
+  realmSnapshots,
+  persistSnapshots,
+  borgSnapshotBindRoot,
+  borgPersistSnapshotBind,
+  borgRealmSnapshotBind,
+  borgDrainStateRoot,
+  borgRepoPersistPath,
+  borgRepoRealmPath,
+  borgRepoRootSnapshotsPath,
+  borgRepoSinexBlobsPath,
+  borgRepoPolylogueStatePath,
+  btrfsImageRoot,
+  borgCacheDir,
+  borgGlobalLock,
+  mkBackupJob,
+}:
 [
   {
     system.activationScripts.borgRepositoryDirectories.text = ''

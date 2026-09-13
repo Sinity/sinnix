@@ -4,6 +4,7 @@ import http.client
 import json
 import socket
 from typing import Any, Callable
+from urllib.parse import quote
 
 from .capabilities import Capability, Principal
 from .config import GatewayConfig
@@ -38,7 +39,12 @@ class MachineActionService:
         self.connection_factory = connection_factory
 
     def _request(
-        self, method: str, path: str, body: bytes | None = None
+        self,
+        method: str,
+        path: str,
+        body: bytes | None = None,
+        *,
+        missing_ok: bool = False,
     ) -> dict[str, Any]:
         headers = {"Content-Type": "application/json"} if body is not None else {}
         try:
@@ -61,6 +67,8 @@ class MachineActionService:
             raise MachineActionError(
                 "ops reducer returned a malformed response"
             ) from exc
+        if response.status == 404 and missing_ok:
+            return {}
         if response.status >= 400:
             message = payload.get("error") if isinstance(payload, dict) else None
             if isinstance(message, str):
@@ -71,7 +79,7 @@ class MachineActionService:
         return payload
 
     def snapshot(self) -> dict[str, Any]:
-        """Read the authority revision required by a subsequent machine action."""
+        """Read current reducer observation status."""
         self.principal.require(Capability.MACHINE_READ)
         payload = self._request("GET", "/v1/revision")
         if (
@@ -93,11 +101,46 @@ class MachineActionService:
             "sources": payload.get("sources", {}),
         }
 
+    def prepare(
+        self,
+        action: str,
+        target: dict[str, Any],
+        parameters: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        self.principal.require(Capability.MACHINE_READ)
+        request = {"action": action, "target": target, "parameters": parameters or {}}
+        payload = self._request(
+            "POST",
+            "/v1/actions/prepare",
+            json.dumps(request, separators=(",", ":")).encode(),
+        )
+        if (
+            payload.get("action") != action
+            or payload.get("target") != target
+            or not isinstance(payload.get("expected_target"), dict)
+            or not payload["expected_target"]
+            or not isinstance(payload.get("observed_at"), str)
+        ):
+            raise MachineActionError(
+                "ops reducer returned malformed action preparation"
+            )
+        return payload
+
+    def lookup(self, idempotency_key: str) -> dict[str, Any] | None:
+        """Read the retained owner outcome without submitting an action again."""
+        self.principal.require(Capability.MACHINE_ACTION)
+        return (
+            self._request(
+                "GET", "/v1/actions/" + quote(idempotency_key, safe=""), missing_ok=True
+            )
+            or None
+        )
+
     def execute(
         self,
         action: str,
         target: dict[str, Any],
-        expected_revision: int,
+        expected_target: dict[str, Any],
         idempotency_key: str,
         operator_reason: str,
         parameters: dict[str, Any] | None = None,
@@ -106,7 +149,7 @@ class MachineActionService:
         request = {
             "action": action,
             "target": target,
-            "expected_revision": expected_revision,
+            "expected_target": expected_target,
             "idempotency_key": idempotency_key,
             "operator_reason": operator_reason,
             "parameters": parameters or {},

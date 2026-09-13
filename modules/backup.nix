@@ -121,13 +121,12 @@ let
   protectedRealmArchivePaths = sinexBeadsArchivePaths ++ [ elicitStateArchivePath ];
   borgArchiveMaxAgeSec = 6 * 60 * 60;
   borgSnapshotQueueMaxAgeSec = 6 * 60 * 60;
-  # sinex-blobs runs on its own daily timer (05:40), not the 4h-floor
-  # persist/realm drain cadence, so it needs its own budget rather than
+  # sinex-blobs runs on its own daily timer (05:40), independently of
+  # the persist/realm snapshot drain, so it needs its own budget rather than
   # sharing borgArchiveMaxAgeSec: budget 3x cadence so one missed/delayed
   # run doesn't false-positive, same convention as the capture
   # staleAfterSeconds entries below.
   borgDailyArchiveMaxAgeSec = 3 * 24 * 60 * 60;
-  borgDrainMinIntervalSec = 4 * 60 * 60;
   # Every unit in this module is the same shape: a oneshot a timer wakes,
   # never restarted by activation (a switch mid-drain would abandon a bind
   # mount and a held Borg lock), inside the backup envelope. Only
@@ -308,6 +307,8 @@ let
     ${borgStaleLockRecovery}
   '';
 
+  snapshotCoverage = "${pkgs.python3}/bin/python3 ${./lib/backup/snapshot-coverage.py}";
+
   mkSnapshotDrainScript =
     {
       label,
@@ -317,36 +318,17 @@ let
       snapshotGlob,
       bindTarget,
       archivePrefix,
-      minIntervalSec,
       exclude,
+      noncanonical,
     }:
+    let
+      coveragePolicy = pkgs.writeText "${label}-snapshot-coverage.json" (builtins.toJSON noncanonical);
+    in
     ''
       set -euo pipefail
-      shopt -s nullglob
-
+      export LC_ALL=C
       ${mkBorgCommonScript repo}
-
-      # 0755, not 0700: the reducer health sweep runs as the operator and
-      # watches the marker files here as capture lanes; timestamps are not
-      # secrets, and an unreadable lane reads as stale forever.
       install -d -m 0755 -o root -g root ${lib.escapeShellArg borgDrainStateRoot}
-
-      # The coalescing gate runs FIRST, before the global Borg lock. A wake
-      # inside the min-interval window has no work to do, so it must cost a
-      # single stat -- not a lock acquisition that contends with whatever real
-      # Borg operation is running. This is what makes a frequent retry timer
-      # free: see the drain timers for why the retry granularity matters.
-      stamp=${lib.escapeShellArg "${borgDrainStateRoot}/${label}.stamp"}
-      now="$(date +%s)"
-      if [ -e "$stamp" ]; then
-        last="$(stat -c %Y "$stamp")"
-        age=$((now - last))
-        if [ "$age" -lt ${toString minIntervalSec} ]; then
-          echo "Last ${label} Borg drain was $age seconds ago; keeping snapshots queued for coalescing"
-          exit 0
-        fi
-      fi
-
       acquire_borg_global_lock_or_skip "${label} Borg drain"
 
       cleanup_snapshot_bind_mount() {
@@ -354,93 +336,69 @@ let
           umount ${lib.escapeShellArg bindTarget}
         fi
       }
-      cleanup_snapshot_bind_mount || true
-
+      cleanup_snapshot_bind_mount
+      trap cleanup_snapshot_bind_mount EXIT
       install -d -m 0700 -o root -g root ${lib.escapeShellArg repoPath}
       install -d -m 0700 -o root -g root ${lib.escapeShellArg bindTarget}
-
       recover_stale_borg_locks
-
       if [ ! -e ${lib.escapeShellArg "${repoPath}/config"} ]; then
         with_borg_lock borg init --encryption repokey-blake2 "$BORG_REPO"
       fi
 
-      trap cleanup_snapshot_bind_mount EXIT
-
-      snapshot="$(
-        find ${lib.escapeShellArg snapshotDir} -maxdepth 1 -mindepth 1 -type d -name ${lib.escapeShellArg snapshotGlob} -printf '%f\n' \
-          | sort \
-          | tail -n 1
-      )"
-
-      if [ -z "$snapshot" ]; then
-        exit 0
-      fi
-
-      snapshot_path=${lib.escapeShellArg snapshotDir}/"$snapshot"
-      archive_name=${lib.escapeShellArg archivePrefix}-"$snapshot"
-
-      if with_borg_lock borg list --short --glob-archives "$archive_name" "$BORG_REPO" | grep -Fxq "$archive_name"; then
-        echo "Archive $archive_name already exists"
-      else
-
-        cleanup_snapshot_bind_mount || true
-        mount --bind "$snapshot_path" ${lib.escapeShellArg bindTarget}
-
-        # Membership by property, not by path. The exclude list below is a
-        # safety net for things that do not self-describe; these two flags are
-        # the primary mechanism, and they evaluate a directory borg has never
-        # seen before.
-        #
-        # --exclude-caches honours CACHEDIR.TAG (bford.info/cachedir/spec.html),
-        # which cargo, uv, ruff, pytest and mypy already write unprompted --
-        # 94 directories under /realm carry one today, and the path list was
-        # missing several of them purely because of what they were named
-        # (.lynchpin/cache is not .cache; .sinex/trybuild-target is not target;
-        # health/genome/cache was 285G of exactly this).
-        #
-        # .nobackup is sinnix's marker for regenerable-but-not-a-cache:
-        # scratch trees where CACHEDIR.TAG would be a lie about what the
-        # directory is.
-        #
-        # Untagged means backed up. A new dataset is therefore over-preserved
-        # rather than silently lost, which is the correct direction for the
-        # failure to point.
-        if with_borg_lock borg create \
-          --compression auto,zstd,1 \
-          --lock-wait ${toString borgLockWaitSec} \
-          --exclude-caches \
-          --exclude-if-present .nobackup \
-          ${mkBorgExcludeArgs bindTarget exclude} \
-          "::$archive_name" ${lib.escapeShellArg "${bindTarget}/./"}; then
-          cleanup_snapshot_bind_mount
-        else
-          echo "borg create failed for ${label} snapshot $snapshot; subvolume kept on disk" >&2
-          exit 1
+      # Capture one ordered queue per wake. No timestamp gate can suppress
+      # backlog, and the existing unit timeout/resource envelope bounds work.
+      queue="$(find ${lib.escapeShellArg snapshotDir} -maxdepth 1 -mindepth 1 -type d -name ${lib.escapeShellArg snapshotGlob} -printf '%f\n' | sort)"
+      failed=0
+      while IFS= read -r snapshot; do
+        [ -n "$snapshot" ] || continue
+        snapshot_path=${lib.escapeShellArg snapshotDir}/"$snapshot"
+        archive_name=${lib.escapeShellArg archivePrefix}-"$snapshot"
+        if ! snapshot_uuid="$(${snapshotCoverage} identity "$snapshot_path")"; then
+          failed=1
+          continue
         fi
-      fi
-
-      find ${lib.escapeShellArg snapshotDir} -maxdepth 1 -mindepth 1 -type d -name ${lib.escapeShellArg snapshotGlob} -printf '%f\n' \
-        | sort \
-        | while IFS= read -r queued_snapshot; do
-          if [[ "$queued_snapshot" > "$snapshot" ]]; then
+        mount --bind "$snapshot_path" ${lib.escapeShellArg bindTarget}
+        archives="$(with_borg_lock borg list --short "$BORG_REPO")"
+        if ! printf '%s\n' "$archives" | grep -Fxq "$archive_name"; then
+          if ! with_borg_lock borg create \
+            --compression auto,zstd,1 \
+            --lock-wait ${toString borgLockWaitSec} \
+            --comment "sinnix-snapshot-v1:$snapshot_uuid" \
+            --exclude-caches \
+            --exclude-if-present .nobackup \
+            ${mkBorgExcludeArgs bindTarget exclude} \
+            "::$archive_name" ${lib.escapeShellArg "${bindTarget}/./"}; then
+            echo "borg create failed for ${label} snapshot $snapshot; subvolume kept on disk" >&2
+            cleanup_snapshot_bind_mount
+            failed=1
             continue
           fi
-          echo "Deleting ${label} snapshot $queued_snapshot covered by $archive_name"
-          btrfs subvolume delete ${lib.escapeShellArg snapshotDir}/"$queued_snapshot"
-        done
-
-      # Compaction is deliberately batched in borgbackup-maintenance.service.
-      # Running it on every path wake would turn "continuous" backups into
-      # repeated HDD churn.
-      marker=${lib.escapeShellArg "${borgDrainStateRoot}/${label}.last-success"}
-      {
-        printf 'archive=%s\n' "$archive_name"
-        printf 'snapshot=%s\n' "$snapshot"
-        printf 'epoch=%s\n' "$(date +%s)"
-      } > "$marker.tmp"
-      mv "$marker.tmp" "$marker"
-      touch "$stamp"
+        fi
+        # Neither a matching name nor a successful create acknowledges bytes.
+        # Verification reads every canonical file from both immutable sources,
+        # compares metadata and binds the proof to UUID + immutable archive ID.
+        if ! proof="$(${snapshotCoverage} verify ${lib.escapeShellArg bindTarget} "$archive_name" "$snapshot_uuid" ${coveragePolicy})"; then
+          cleanup_snapshot_bind_mount
+          failed=1
+          continue
+        fi
+        cleanup_snapshot_bind_mount
+        if [ "$(${snapshotCoverage} identity "$snapshot_path")" != "$snapshot_uuid" ]; then
+          echo "Snapshot identity changed; retaining $snapshot_path" >&2
+          failed=1
+          continue
+        fi
+        btrfs subvolume delete "$snapshot_path"
+        marker=${lib.escapeShellArg "${borgDrainStateRoot}/${label}.last-success"}
+        {
+          printf 'archive=%s\n' "$archive_name"
+          printf 'snapshot=%s\n' "$snapshot"
+          printf 'coverage=%s\n' "$proof"
+          printf 'epoch=%s\n' "$(date +%s)"
+        } > "$marker.tmp"
+        mv "$marker.tmp" "$marker"
+      done <<< "$queue"
+      exit "$failed"
     '';
 
   persistExcludes = [
@@ -539,6 +497,34 @@ let
     "**/dist"
     "**/*.pyc"
     "**/.Trash-1000"
+  ];
+
+  # These named roots have an existing cache/scratch producer policy. Broad
+  # globs and inherited CACHEDIR.TAG/.nobackup annotations are not evidence
+  # that unknown matching material is noncanonical. Missing such material
+  # therefore retains its snapshot. Dedicated live Sinex state and Steam user
+  # state are also not excused by a cache classification.
+  # Intersect an explicit classification with the real creation exclusions:
+  # adding another exclusion never silently authorizes snapshot deletion.
+  persistNoncanonical = lib.intersectLists persistExcludes [
+    "home/sinity/.cache/huggingface"
+    "home/sinity/.cache/spotify"
+    "root/.cache/borg"
+    "home/sinity/.config/chrome-ws/Default/Service Worker"
+    "home/sinity/.config/chrome-ws/Default/GPUCache"
+    "home/sinity/.cache"
+    "home/sinity/.npm/_cacache"
+    "home/sinity/.local/share/nvim/mason"
+    "home/sinity/.local/share/hyprland/logs"
+    "var/lib/systemd/coredump"
+  ];
+  realmNoncanonical = lib.intersectLists realmExcludes [
+    "library/games/steam/steamapps"
+    "state/cache"
+    "health/genome/cache"
+    "state/containers"
+    "tmp"
+    "worktrees"
   ];
 
   # Borg excludes are glob patterns relative to /realm. Test both an item and
@@ -762,77 +748,6 @@ let
 
   '';
 
-  backupContext = {
-    inherit
-      pkgs
-      lib
-      config
-      options
-      helpers
-      realmRoot
-      sinexBlobRepositoryPath
-      borgRepoRoot
-      scriptPkgs
-      username
-      polylogueStateRoot
-      polylogueBackupRoot
-      machineTelemetryBackupRoot
-      machineTelemetryBackupMarker
-      polylogueDbNames
-      polylogueDbExcludes
-      realmSnapshots
-      persistSnapshots
-      borgSnapshotBindRoot
-      borgPersistSnapshotBind
-      borgRealmSnapshotBind
-      borgDrainStateRoot
-      borgIntegrityReceipt
-      borgRepoPersistPath
-      borgRepoRealmPath
-      borgRepoRootSnapshotsPath
-      borgRepoSinexBlobsPath
-      borgRepoPolylogueStatePath
-      btrfsImageRoot
-      btrfsImageMinBytes
-      borgRepoPersist
-      borgRepoRealm
-      borgRepoRootSnapshots
-      borgRepoSinexBlobs
-      borgRepoPolylogueState
-      borgPassphrasePath
-      outerRealmMountUnit
-      borgLockWaitSec
-      borgCacheDir
-      borgStaleLockMinutes
-      borgGlobalLock
-      sinexProjectPath
-      sinexBeadsDoltArchivePath
-      sinexBeadsIssuesArchivePath
-      sinexBeadsDrillLog
-      sinexBeadsArchivePaths
-      elicitStateArchivePath
-      protectedRealmArchivePaths
-      borgArchiveMaxAgeSec
-      borgSnapshotQueueMaxAgeSec
-      borgDailyArchiveMaxAgeSec
-      borgDrainMinIntervalSec
-      mkBackupJob
-      mkBorgExcludeArgs
-      borgStaleLockRecovery
-      mkBorgCommonScript
-      mkSnapshotDrainScript
-      persistExcludes
-      realmExcludes
-      borgGlobToRegex
-      protectedPathAndAncestors
-      realmExcludeMatchesProtectedPath
-      mkSinexBeadsDrillScript
-      mkSnapshotQueueProbeScript
-      mkIntegrityStuckProbeScript
-      btrbkConfig
-      ;
-  };
-
 in
 {
   options.sinnix.backup.enable = (lib.mkEnableOption "workstation snapshot and archive backups") // {
@@ -902,16 +817,18 @@ in
               source = "persist-source";
             };
             borg-realm-archives = {
+              # Historical canonical contents selected by the actual Borg
+              # exclusions. This is not a full copy of /realm: nested dedicated
+              # subvolumes have separate backup jobs, and every deletion needs
+              # the per-snapshot coverage proof above.
               path = borgRepoRealmPath;
-              class = "exact-copy";
-              source = "realm-source";
+              class = "canonical";
               preservation = "indefinite";
               backup = "direct";
             };
             borg-persist-archives = {
               path = borgRepoPersistPath;
-              class = "exact-copy";
-              source = "persist-source";
+              class = "canonical";
               preservation = "indefinite";
               backup = "direct";
             };
@@ -988,8 +905,7 @@ in
                   name = "borg-persist-archive";
                   path = "${borgDrainStateRoot}/persist.last-success";
                   eventDriven = true;
-                  # Same budget the retired borgbackup-status "persist"
-                  # archive_freshness check used: 3x the 4h drain floor.
+                  # Preserve the existing archive freshness budget.
                   staleAfterSeconds = borgArchiveMaxAgeSec;
                   data = {
                     class = "derived";
@@ -1066,7 +982,7 @@ in
                   name = "borg-sinex-blobs-archive";
                   path = "${borgDrainStateRoot}/sinex-blobs.last-success";
                   eventDriven = true;
-                  # sinex-blobs runs on its own daily 05:40 timer, not the 4h-floor
+                  # sinex-blobs runs on its own daily 05:40 timer, independently of the
                   # persist/realm drain cadence, so it keeps the daily budget the
                   # retired borgbackup-status check used for it (3x cadence).
                   staleAfterSeconds = borgDailyArchiveMaxAgeSec;
@@ -1223,10 +1139,114 @@ in
         }
 
       ]
-      ++ (import ./lib/backup/snapshots.nix { context = backupContext; })
-      ++ (import ./lib/backup/archives.nix { context = backupContext; })
-      ++ (import ./lib/backup/acknowledgement.nix { context = backupContext; })
-      ++ (import ./lib/backup/verification.nix { context = backupContext; })
+      ++ (import ./lib/backup/snapshots.nix {
+        inherit
+          pkgs
+          lib
+          borgRepoRoot
+          polylogueBackupRoot
+          realmSnapshots
+          persistSnapshots
+          borgSnapshotBindRoot
+          borgPersistSnapshotBind
+          borgRealmSnapshotBind
+          borgDrainStateRoot
+          borgRepoPersistPath
+          borgRepoRealmPath
+          borgRepoRootSnapshotsPath
+          borgRepoSinexBlobsPath
+          borgRepoPolylogueStatePath
+          btrfsImageRoot
+          borgCacheDir
+          borgGlobalLock
+          mkBackupJob
+          ;
+      })
+      ++ (import ./lib/backup/archives.nix {
+        inherit
+          pkgs
+          lib
+          sinexBlobRepositoryPath
+          scriptPkgs
+          username
+          polylogueStateRoot
+          polylogueBackupRoot
+          machineTelemetryBackupRoot
+          machineTelemetryBackupMarker
+          polylogueDbNames
+          polylogueDbExcludes
+          borgDrainStateRoot
+          borgRepoRealmPath
+          borgRepoSinexBlobsPath
+          borgRepoPolylogueStatePath
+          borgRepoPersist
+          borgRepoRealm
+          borgRepoRootSnapshots
+          borgRepoSinexBlobs
+          borgRepoPolylogueState
+          borgPassphrasePath
+          outerRealmMountUnit
+          borgLockWaitSec
+          borgCacheDir
+          borgGlobalLock
+          mkBackupJob
+          mkBorgExcludeArgs
+          borgStaleLockRecovery
+          mkBorgCommonScript
+          ;
+      })
+      ++ (import ./lib/backup/acknowledgement.nix {
+        inherit
+          pkgs
+          realmSnapshots
+          persistSnapshots
+          borgPersistSnapshotBind
+          borgRealmSnapshotBind
+          borgRepoPersistPath
+          borgRepoRealmPath
+          borgRepoRootSnapshotsPath
+          borgRepoPersist
+          borgRepoRealm
+          borgRepoRootSnapshots
+          borgPassphrasePath
+          outerRealmMountUnit
+          borgLockWaitSec
+          borgCacheDir
+          mkBackupJob
+          mkBorgCommonScript
+          mkSnapshotDrainScript
+          snapshotCoverage
+          persistExcludes
+          realmExcludes
+          persistNoncanonical
+          realmNoncanonical
+          ;
+      })
+      ++ (import ./lib/backup/verification.nix {
+        inherit
+          pkgs
+          lib
+          config
+          sinexBlobRepositoryPath
+          scriptPkgs
+          borgDrainStateRoot
+          borgIntegrityReceipt
+          btrfsImageRoot
+          btrfsImageMinBytes
+          borgRepoPersist
+          borgRepoRealm
+          borgRepoSinexBlobs
+          borgPassphrasePath
+          outerRealmMountUnit
+          borgCacheDir
+          protectedRealmArchivePaths
+          mkBackupJob
+          mkBorgCommonScript
+          realmExcludes
+          realmExcludeMatchesProtectedPath
+          mkSinexBeadsDrillScript
+          ;
+      })
     )
   );
 }

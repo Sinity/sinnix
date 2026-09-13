@@ -269,6 +269,16 @@ class ObserveService:
             if self.config.approved_manifest_principal == principal_name
             else None
         )
+        if self.config.package_manifest_path is not None:
+            try:
+                artifact = json.loads(self.config.package_manifest_path.read_text())
+                approved_hash = (
+                    artifact.get("manifest", {}).get("sha256")
+                    if artifact.get("principal") == principal_name
+                    else None
+                )
+            except (OSError, ValueError):
+                approved_hash = None
         snapshot = self._connector_snapshot()
         observed_hash = (
             snapshot["manifest_sha256"]
@@ -311,7 +321,7 @@ class ObserveService:
                     "principal": principal_name,
                     "sha256": live_manifest_hash,
                 },
-                "nix_approved": (
+                "package_generated": (
                     {
                         "principal": self.config.approved_manifest_principal,
                         "sha256": approved_hash,
@@ -328,13 +338,13 @@ class ObserveService:
                     else None
                 ),
                 "comparisons": {
-                    "live_to_nix_approved": self._comparison(
+                    "live_to_package_generated": self._comparison(
                         live_manifest_hash, approved_hash
                     ),
                     "live_to_chatgpt_observed": self._comparison(
                         live_manifest_hash, observed_hash
                     ),
-                    "nix_approved_to_chatgpt_observed": self._comparison(
+                    "package_generated_to_chatgpt_observed": self._comparison(
                         approved_hash, observed_hash
                     ),
                 },

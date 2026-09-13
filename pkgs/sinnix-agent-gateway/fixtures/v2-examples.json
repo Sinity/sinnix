@@ -1,5 +1,5 @@
 {
-  "action_catalog_hash": "0aead88fc7ca66ee7955e3f150bc27037a0158ff8c698ea944657d19e6aa21c9",
+  "action_catalog_hash": "19ccdfa0ccf89ac27206323b65535c2ab3e6940704a8795fb670a7d5c8f8c154",
   "examples": [
     {
       "action": "gateway.status",
@@ -486,84 +486,6 @@
       "title": "By title"
     },
     {
-      "action": "beads.change",
-      "family": "change",
-      "input": {
-        "change": {
-          "operation": "create",
-          "priority": "2",
-          "project": {
-            "project": "sinnix"
-          },
-          "title": "Port beads actions",
-          "type": "task"
-        },
-        "idempotency_key": "create-1"
-      },
-      "title": "Create"
-    },
-    {
-      "action": "beads.change",
-      "family": "change",
-      "input": {
-        "change": {
-          "operation": "comment",
-          "target": {
-            "id": "sinnix-abc1"
-          },
-          "text": "landed in gateway-overhaul"
-        },
-        "idempotency_key": "comment-1"
-      },
-      "title": "Comment"
-    },
-    {
-      "action": "beads.change",
-      "family": "change",
-      "input": {
-        "change": {
-          "operation": "close",
-          "reason": "shipped",
-          "target": {
-            "id": "sinnix-abc1"
-          }
-        },
-        "expected": {
-          "expected_status": "in_progress"
-        },
-        "idempotency_key": "close-1"
-      },
-      "title": "Close with reason"
-    },
-    {
-      "action": "beads.changeset",
-      "family": "change",
-      "input": {
-        "idempotency_key": "changeset-1",
-        "project": {
-          "project": "sinnix"
-        },
-        "steps": [
-          {
-            "bind": "epic",
-            "operation": "create",
-            "parameters": {
-              "title": "Epic",
-              "type": "epic"
-            }
-          },
-          {
-            "operation": "create",
-            "parameters": {
-              "parent": "$epic",
-              "title": "Child"
-            }
-          }
-        ]
-      },
-      "title": "Epic with one child"
-    },
-    {
       "action": "beads.operate",
       "family": "operate",
       "input": {
@@ -591,6 +513,469 @@
         }
       },
       "title": "Restore a backup"
+    },
+    {
+      "action": "beads.read",
+      "family": "query",
+      "input": {
+        "at": "HEAD",
+        "depth": 3,
+        "direction": "dependencies",
+        "limit": 50,
+        "offset": 0,
+        "project": {
+          "project": "sinnix"
+        },
+        "relations": [
+          "blocks"
+        ],
+        "roots": [
+          "sinnix-abc1"
+        ]
+      },
+      "title": "Page a pinned dependency closure"
+    },
+    {
+      "action": "beads.comment",
+      "family": "change",
+      "input": {
+        "body": {
+          "author": "example-worker",
+          "text": "Focused regression checks passed."
+        },
+        "idempotency_key": "example-addComment-1",
+        "path": {
+          "id": "sinnix-abc1"
+        },
+        "project": {
+          "project": "sinnix"
+        }
+      },
+      "title": "Append one comment to an issue's thread"
+    },
+    {
+      "action": "beads.dependencies.add",
+      "family": "change",
+      "input": {
+        "body": {
+          "actor": "example-worker",
+          "edges": [
+            {
+              "depends_on_id": "sinnix-abc1",
+              "issue_id": "sinnix-abc2",
+              "type": "blocks"
+            }
+          ]
+        },
+        "idempotency_key": "example-addDependencies-1",
+        "project": {
+          "project": "sinnix"
+        }
+      },
+      "title": "Assert dependency edges as one act"
+    },
+    {
+      "action": "beads.changeset",
+      "family": "change",
+      "input": {
+        "body": {
+          "actor": "example-worker",
+          "items": [
+            {
+              "create": {
+                "key": "implementation",
+                "title": "Implement bounded result paging"
+              },
+              "kind": "create"
+            },
+            {
+              "create": {
+                "key": "verification",
+                "title": "Verify result paging"
+              },
+              "kind": "create"
+            },
+            {
+              "dep_add": {
+                "source": {
+                  "key": "verification"
+                },
+                "target": {
+                  "key": "implementation"
+                },
+                "type": "blocks"
+              },
+              "kind": "dep_add"
+            }
+          ]
+        },
+        "idempotency_key": "example-applyBatch-1",
+        "project": {
+          "project": "sinnix"
+        }
+      },
+      "title": "Apply an ordered, heterogeneous plan as one act"
+    },
+    {
+      "action": "beads.batch.close",
+      "family": "change",
+      "input": {
+        "body": {
+          "actor": "example-worker",
+          "items": [
+            {
+              "id": "sinnix-abc1",
+              "reason": "Acceptance checks passed"
+            }
+          ]
+        },
+        "idempotency_key": "example-batchCloseIssues-1",
+        "project": {
+          "project": "sinnix"
+        }
+      },
+      "title": "Close many issues as one act"
+    },
+    {
+      "action": "beads.graph.create",
+      "family": "change",
+      "input": {
+        "body": {
+          "actor": "example-worker",
+          "items": [
+            {
+              "title": "Add a bounded reader"
+            },
+            {
+              "title": "Document reader pagination"
+            }
+          ]
+        },
+        "idempotency_key": "example-batchCreateIssues-1",
+        "project": {
+          "project": "sinnix"
+        }
+      },
+      "title": "Create many issues as one act"
+    },
+    {
+      "action": "beads.claim",
+      "family": "change",
+      "input": {
+        "body": {
+          "actor": "example-worker"
+        },
+        "idempotency_key": "example-claimIssue-1",
+        "path": {
+          "id": "sinnix-abc1"
+        },
+        "project": {
+          "project": "sinnix"
+        }
+      },
+      "title": "Claim an issue for an actor"
+    },
+    {
+      "action": "beads.claim_next",
+      "family": "change",
+      "input": {
+        "body": {
+          "actor": "example-worker"
+        },
+        "idempotency_key": "example-claimNextIssue-1",
+        "project": {
+          "project": "sinnix"
+        },
+        "query": {
+          "sort": "priority",
+          "unassigned": true
+        }
+      },
+      "title": "Claim the next ready issue"
+    },
+    {
+      "action": "beads.close",
+      "family": "change",
+      "input": {
+        "body": {
+          "actor": "example-worker",
+          "expected_version": 7,
+          "reason": "Acceptance checks passed"
+        },
+        "idempotency_key": "example-closeIssue-1",
+        "path": {
+          "id": "sinnix-abc1"
+        },
+        "project": {
+          "project": "sinnix"
+        }
+      },
+      "title": "Close one issue"
+    },
+    {
+      "action": "beads.metadata.compare_set",
+      "family": "change",
+      "input": {
+        "body": {
+          "actor": "example-worker",
+          "expected": "pending",
+          "key": "verification",
+          "value": "passed"
+        },
+        "idempotency_key": "example-compareAndSetMetadata-1",
+        "path": {
+          "id": "sinnix-abc1"
+        },
+        "project": {
+          "project": "sinnix"
+        }
+      },
+      "title": "Conditionally set one metadata key on an issue"
+    },
+    {
+      "action": "beads.dependencies.count",
+      "family": "query",
+      "input": {
+        "project": {
+          "project": "sinnix"
+        },
+        "query": {
+          "direction": "out",
+          "issue_id": [
+            "sinnix-abc1"
+          ],
+          "type": [
+            "blocks"
+          ]
+        }
+      },
+      "title": "Count the dependency edges around several issues"
+    },
+    {
+      "action": "beads.create",
+      "family": "change",
+      "input": {
+        "body": {
+          "actor": "example-worker",
+          "issue_type": "task",
+          "priority": 2,
+          "title": "Add bounded result paging"
+        },
+        "idempotency_key": "example-createIssue-1",
+        "project": {
+          "project": "sinnix"
+        }
+      },
+      "title": "Create one issue"
+    },
+    {
+      "action": "beads.memory.forget",
+      "family": "change",
+      "input": {
+        "idempotency_key": "example-forgetMemory-1",
+        "path": {
+          "key": "reader-checks"
+        },
+        "project": {
+          "project": "sinnix"
+        }
+      },
+      "title": "Forget one stored memory"
+    },
+    {
+      "action": "beads.graph",
+      "family": "query",
+      "input": {
+        "project": {
+          "project": "sinnix"
+        },
+        "query": {
+          "direction": "both",
+          "max_depth": 3,
+          "root_id": "sinnix-abc1"
+        }
+      },
+      "title": "Walk the dependency tree of one issue"
+    },
+    {
+      "action": "beads.memory.get",
+      "family": "query",
+      "input": {
+        "path": {
+          "key": "reader-checks"
+        },
+        "project": {
+          "project": "sinnix"
+        }
+      },
+      "title": "Get one stored memory"
+    },
+    {
+      "action": "beads.blockers",
+      "family": "query",
+      "input": {
+        "project": {
+          "project": "sinnix"
+        },
+        "query": {
+          "issue_id": [
+            "sinnix-abc1"
+          ]
+        }
+      },
+      "title": "Read the blocking decoration of several issues"
+    },
+    {
+      "action": "beads.dependencies",
+      "family": "query",
+      "input": {
+        "project": {
+          "project": "sinnix"
+        },
+        "query": {
+          "issue_id": [
+            "sinnix-abc1"
+          ],
+          "type": [
+            "blocks"
+          ]
+        }
+      },
+      "title": "List the stored dependency edges of several issues"
+    },
+    {
+      "action": "beads.cycles",
+      "family": "query",
+      "input": {
+        "project": {
+          "project": "sinnix"
+        }
+      },
+      "title": "List dependency cycles"
+    },
+    {
+      "action": "beads.memories",
+      "family": "query",
+      "input": {
+        "project": {
+          "project": "sinnix"
+        },
+        "query": {
+          "search": "reader"
+        }
+      },
+      "title": "List the workspace's stored memories"
+    },
+    {
+      "action": "beads.related",
+      "family": "query",
+      "input": {
+        "path": {
+          "id": "sinnix-abc1"
+        },
+        "project": {
+          "project": "sinnix"
+        },
+        "query": {
+          "direction": "out",
+          "type": [
+            "blocks"
+          ]
+        }
+      },
+      "title": "List one issue's neighbors in a named direction"
+    },
+    {
+      "action": "beads.unclaim",
+      "family": "change",
+      "input": {
+        "body": {
+          "actor": "example-worker",
+          "expected_assignee": "example-worker"
+        },
+        "idempotency_key": "example-releaseIssue-1",
+        "path": {
+          "id": "sinnix-abc1"
+        },
+        "project": {
+          "project": "sinnix"
+        }
+      },
+      "title": "Give back the claim on an issue"
+    },
+    {
+      "action": "beads.memory.remember",
+      "family": "change",
+      "input": {
+        "body": {
+          "content": "The reader contract includes bounded pages and continuation tokens.",
+          "key": "reader-checks"
+        },
+        "idempotency_key": "example-rememberMemory-1",
+        "project": {
+          "project": "sinnix"
+        }
+      },
+      "title": "Store one memory"
+    },
+    {
+      "action": "beads.dependencies.remove",
+      "family": "change",
+      "input": {
+        "body": {
+          "actor": "example-worker",
+          "depends_on_id": "sinnix-abc1",
+          "issue_id": "sinnix-abc2"
+        },
+        "idempotency_key": "example-removeDependency-1",
+        "project": {
+          "project": "sinnix"
+        }
+      },
+      "title": "Remove one dependency edge"
+    },
+    {
+      "action": "beads.reopen",
+      "family": "change",
+      "input": {
+        "body": {
+          "actor": "example-worker",
+          "expected_version": 8,
+          "reason": "A pagination regression remains"
+        },
+        "idempotency_key": "example-reopenIssue-1",
+        "path": {
+          "id": "sinnix-abc1"
+        },
+        "project": {
+          "project": "sinnix"
+        }
+      },
+      "title": "Reopen one issue"
+    },
+    {
+      "action": "beads.update",
+      "family": "change",
+      "input": {
+        "body": {
+          "actor": "example-worker",
+          "expected_version": 7,
+          "patch": {
+            "add_labels": [
+              "verified"
+            ],
+            "append_notes": "Focused regression checks passed."
+          }
+        },
+        "idempotency_key": "example-updateIssue-1",
+        "path": {
+          "id": "sinnix-abc1"
+        },
+        "project": {
+          "project": "sinnix"
+        }
+      },
+      "title": "Edit the fields of one issue"
     },
     {
       "action": "jobs.list",
@@ -1374,10 +1759,29 @@
       "title": "Last 50 lines"
     },
     {
+      "action": "machine.prepare",
+      "family": "get",
+      "input": {
+        "request": {
+          "action": "restart"
+        },
+        "target": "sinnix://machine/units/user/example.service"
+      },
+      "title": "Prepare unit restart"
+    },
+    {
       "action": "machine.operate",
       "family": "operate",
       "input": {
-        "expected_revision": 42,
+        "expected_target": {
+          "kind": "unit",
+          "manager": "user",
+          "properties": {
+            "ActiveState": "active",
+            "InvocationID": "example-invocation"
+          },
+          "unit": "example.service"
+        },
         "idempotency_key": "restart-example",
         "reason": "apply the approved restart",
         "request": {
@@ -1391,7 +1795,15 @@
       "action": "machine.operate",
       "family": "operate",
       "input": {
-        "expected_revision": 42,
+        "expected_target": {
+          "kind": "unit",
+          "manager": "user",
+          "properties": {
+            "ActiveState": "active",
+            "InvocationID": "example-invocation"
+          },
+          "unit": "example.service"
+        },
         "idempotency_key": "policy-example",
         "reason": "bound the runaway",
         "request": {
@@ -1408,7 +1820,15 @@
       "family": "operate",
       "input": {
         "action": "restart",
-        "expected_revision": 42,
+        "expected_target": {
+          "kind": "unit",
+          "manager": "user",
+          "properties": {
+            "ActiveState": "active",
+            "InvocationID": "example-invocation"
+          },
+          "unit": "example.service"
+        },
         "idempotency_key": "restart-example-2",
         "reason": "apply config",
         "target": {
@@ -1466,7 +1886,11 @@
         "idempotency_key": "stop-4242",
         "reason": "runaway rg",
         "request": {
-          "expected_revision": 17,
+          "expected_target": {
+            "kind": "process",
+            "pid": 4242,
+            "start_ticks": 12345
+          },
           "operation": "stop"
         },
         "target": {
@@ -1620,56 +2044,142 @@
       "family": "query",
       "input": {
         "request": {
-          "limit": 20,
-          "operation": "structured",
+          "operation": "sessions.list",
           "repo": "sinnix"
         }
       },
-      "title": "Structured project sessions"
-    },
-    {
-      "action": "sessions.query",
-      "family": "query",
-      "input": {
-        "request": {
-          "limit": 20,
-          "operation": "list",
-          "provider": "claude-code"
-        }
-      },
-      "title": "Recent Claude Code sessions"
-    },
-    {
-      "action": "sessions.query",
-      "family": "query",
-      "input": {
-        "request": {
-          "operation": "search",
-          "provider": "codex",
-          "query": "gateway"
-        }
-      },
-      "title": "Search"
+      "title": "Project sessions"
     },
     {
       "action": "memory.query",
       "family": "query",
       "input": {
         "request": {
-          "operation": "search",
+          "operation": "memory.raw.search",
           "query": "screenshot probe"
         }
       },
-      "title": "Search all sources"
+      "title": "Search original sources"
     },
     {
       "action": "timeline.query",
       "family": "query",
       "input": {
-        "end": "2026-09-05T00:00:00Z",
-        "start": "2026-09-04T00:00:00Z"
+        "limit": 50,
+        "origin": "codex-session",
+        "since": "2026-09-01T00:00:00Z",
+        "until": "2026-09-02T00:00:00Z"
       },
-      "title": "Yesterday's sessions"
+      "title": "Indexed session events in a time window"
+    },
+    {
+      "action": "sessions.list",
+      "family": "query",
+      "input": {
+        "limit": 20,
+        "repo": "sinnix",
+        "sort": "date"
+      },
+      "title": "Recent indexed project sessions"
+    },
+    {
+      "action": "sessions.search",
+      "family": "query",
+      "input": {
+        "expression": "pagination",
+        "limit": 20,
+        "repo": "sinnix"
+      },
+      "title": "Find sessions discussing pagination"
+    },
+    {
+      "action": "sessions.read",
+      "family": "query",
+      "input": {
+        "limit": 25,
+        "offset": 0,
+        "ref": "session:example-session"
+      },
+      "title": "Read an indexed session message page"
+    },
+    {
+      "action": "sessions.raw.list",
+      "family": "query",
+      "input": {
+        "limit": 20,
+        "origin": "codex-session"
+      },
+      "title": "List original Codex session sources"
+    },
+    {
+      "action": "sessions.raw.search",
+      "family": "query",
+      "input": {
+        "limit": 20,
+        "origin": "claude-code-session",
+        "query": "pagination",
+        "scan_bytes": 1048576
+      },
+      "title": "Search original Claude Code transcripts"
+    },
+    {
+      "action": "sessions.raw.read",
+      "family": "query",
+      "input": {
+        "max_bytes": 16000,
+        "offset": 0,
+        "reference": "codex:2026/09/01/example-session.jsonl"
+      },
+      "title": "Read a bounded original transcript page"
+    },
+    {
+      "action": "sessions.raw.timeline",
+      "family": "query",
+      "input": {
+        "limit": 20,
+        "origins": [
+          "claude-code-session",
+          "codex-session"
+        ],
+        "since": "2026-09-01T00:00:00Z",
+        "until": "2026-09-02T00:00:00Z"
+      },
+      "title": "Original sources modified in a time window"
+    },
+    {
+      "action": "memory.raw.get",
+      "family": "query",
+      "input": {
+        "max_bytes": 16000,
+        "offset": 0,
+        "reference": "claude-code:example-project/example-session.jsonl"
+      },
+      "title": "Read one original memory source"
+    },
+    {
+      "action": "memory.raw.search",
+      "family": "query",
+      "input": {
+        "limit": 20,
+        "origins": [
+          "claude-code-session",
+          "codex-session"
+        ],
+        "query": "pagination"
+      },
+      "title": "Find pagination notes across original sources"
+    },
+    {
+      "action": "sessions.resume",
+      "family": "query",
+      "input": {
+        "recent_files": [
+          "README.md"
+        ],
+        "related_limit": 3,
+        "repo_path": "/realm/project/sinnix"
+      },
+      "title": "Resume work in a checkout"
     },
     {
       "action": "campaign.progress",

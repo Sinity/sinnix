@@ -1,27 +1,42 @@
 # Internal backup component. Public options and shared policy live in modules/backup.nix.
-{ context }:
-with context;
+{
+  pkgs,
+  realmSnapshots,
+  persistSnapshots,
+  borgPersistSnapshotBind,
+  borgRealmSnapshotBind,
+  borgRepoPersistPath,
+  borgRepoRealmPath,
+  borgRepoRootSnapshotsPath,
+  borgRepoPersist,
+  borgRepoRealm,
+  borgRepoRootSnapshots,
+  borgPassphrasePath,
+  outerRealmMountUnit,
+  borgLockWaitSec,
+  borgCacheDir,
+  mkBackupJob,
+  mkBorgCommonScript,
+  mkSnapshotDrainScript,
+  snapshotCoverage,
+  persistExcludes,
+  realmExcludes,
+  persistNoncanonical,
+  realmNoncanonical,
+}:
 [
   # ─── Borg Snapshot Drainers ───
   #
   # btrbk is the producer. Borg is the durability gate. Local snapshots are
   # never deleted by btrbk rotation; a snapshot leaves disk only after this
-  # drain has either found or created the matching Borg archive.
+  # drain has verified its canonical contents in a UUID-bound Borg archive.
   #
   # Backups are scheduled bulk I/O and must stay below interactive work;
   # unthrottled they saturate /realm enough to visibly stall the desktop.
   #
-  # The drain timers are RETRY granularity, not work cadence: how often a
-  # drain actually copies anything is set by borgDrainMinIntervalSec (4h),
-  # and a wake inside that window exits after one stat without touching the
-  # Borg lock. What the timer period buys is recovery margin. A drain that
-  # loses the global lock race skips outright and waits for its next wake,
-  # while the health budget (borgArchiveMaxAgeSec / borgSnapshotQueueMaxAgeSec,
-  # 6h) starts counting from the last SUCCESS -- so the 4h floor leaves only
-  # ~2h of slack. At the old hourly period two consecutive lock races spent
-  # most of it and a third breached the budget; at 20 minutes, six retries
-  # fit in the same slack. Both stay off btrbk's :00/:30 wakes and off each
-  # other so the two drains never race for the lock they now rarely take.
+  # Each retry drains the captured queue oldest first. A recent success never
+  # suppresses an unarchived snapshot. The registered resource/timeout policy
+  # bounds each wake, so interruption leaves the remaining queue intact.
   (mkBackupJob "borgbackup-job-persist" {
     description = "Drain /persist btrbk snapshots into Borg";
     unit = {
@@ -34,7 +49,12 @@ with context;
         outerRealmMountUnit
       ];
     };
-    serviceConfig.TimeoutStopSec = "15s";
+    serviceConfig = {
+      # One wake may drain a backlog, but must yield the shared Borg lock.
+      # A timeout leaves the current snapshot and remaining queue intact.
+      TimeoutStartSec = "4h";
+      TimeoutStopSec = "15s";
+    };
     path = with pkgs; [
       borgbackup
       btrfs-progs
@@ -51,8 +71,8 @@ with context;
       snapshotGlob = "persist.*";
       bindTarget = borgPersistSnapshotBind;
       archivePrefix = "persist";
-      minIntervalSec = borgDrainMinIntervalSec;
       exclude = persistExcludes;
+      noncanonical = persistNoncanonical;
     };
     timer = {
       onCalendar = "*-*-* *:05,25,45:00";
@@ -72,7 +92,12 @@ with context;
         outerRealmMountUnit
       ];
     };
-    serviceConfig.TimeoutStopSec = "15s";
+    serviceConfig = {
+      # One wake may drain a backlog, but must yield the shared Borg lock.
+      # A timeout leaves the current snapshot and remaining queue intact.
+      TimeoutStartSec = "4h";
+      TimeoutStopSec = "15s";
+    };
     path = with pkgs; [
       borgbackup
       btrfs-progs
@@ -89,8 +114,8 @@ with context;
       snapshotGlob = "realm.*";
       bindTarget = borgRealmSnapshotBind;
       archivePrefix = "realm";
-      minIntervalSec = borgDrainMinIntervalSec;
       exclude = realmExcludes;
+      noncanonical = realmNoncanonical;
     };
     timer = {
       onCalendar = "*-*-* *:15,35,55:00";
@@ -111,7 +136,10 @@ with context;
       ];
       requires = [ outerRealmMountUnit ];
     };
-    serviceConfig.TimeoutStopSec = "15s";
+    serviceConfig = {
+      TimeoutStartSec = "4h";
+      TimeoutStopSec = "15s";
+    };
     environment = {
       BORG_PASSCOMMAND = "${pkgs.coreutils}/bin/cat ${borgPassphrasePath}";
       BORG_REPO = borgRepoRootSnapshots;
@@ -132,6 +160,8 @@ with context;
       util-linux
     ];
     script = ''
+      set -euo pipefail
+      shopt -s nullglob
       ${mkBorgCommonScript borgRepoRootSnapshots}
       acquire_borg_global_lock_or_skip "root snapshot Borg drain"
       recover_stale_borg_locks
@@ -139,8 +169,10 @@ with context;
       PERSIST_DEV="/dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02"
       TMP_ROOT=$(mktemp -d)
       cleanup() {
-        umount "$TMP_ROOT" 2>/dev/null || true
-        rm -rf "$TMP_ROOT"
+        if mountpoint -q "$TMP_ROOT"; then
+          umount "$TMP_ROOT" || return
+        fi
+        rmdir "$TMP_ROOT"
       }
       trap cleanup EXIT
 
@@ -152,29 +184,58 @@ with context;
       fi
 
       delete_archived_snapshot() {
-        snap_dir="$1"
-        if btrfs subvolume show "$snap_dir" >/dev/null 2>&1; then
-          btrfs subvolume delete "$snap_dir"
-        else
-          rm -rf --one-file-system "$snap_dir"
-        fi
+        # Root snapshots use the same exact-coverage gate. Legacy archives
+        # without UUID bindings, writable snapshots and ordinary directories
+        # remain on disk; no fallback recursive deletion is safe here.
+        ${snapshotCoverage} verify "$snap_dir" "$archive_name" "$snapshot_uuid" \
+          ${
+            pkgs.writeText "root-snapshot-coverage.json" (
+              builtins.toJSON [
+                "dev"
+                "mnt"
+                "neo-outer-realm"
+                "nix"
+                "outer-realm"
+                "persist"
+                "proc"
+                "realm"
+                "root/.cache"
+                "run"
+                "swap"
+                "sys"
+                "tmp"
+                "var/cache"
+              ]
+            )
+          } || return 1
+        [ "$(${snapshotCoverage} identity "$snap_dir")" = "$snapshot_uuid" ] || return 1
+        btrfs subvolume delete "$snap_dir"
       }
 
       backed_up=0
+      failed=0
       for snap_dir in "$TMP_ROOT"/.snapshots/root.*; do
         [ -d "$snap_dir" ] || continue
         snap_name=$(basename "$snap_dir")
         archive_name="root-$snap_name"
+        if ! snapshot_uuid="$(${snapshotCoverage} identity "$snap_dir")"; then
+          failed=1
+          continue
+        fi
 
         if with_borg_lock borg list --short --glob-archives "$archive_name" "$BORG_REPO" | grep -Fxq "$archive_name"; then
-          echo "Archive $archive_name already exists; deleting archived snapshot $snap_name"
-          delete_archived_snapshot "$snap_dir"
-          backed_up=$((backed_up + 1))
+          echo "Archive $archive_name already exists; verifying snapshot $snap_name"
+          if delete_archived_snapshot; then
+            backed_up=$((backed_up + 1))
+          else
+            failed=1
+          fi
           continue
         fi
 
         if with_borg_lock borg create \
           --compression auto,zstd,1 \
+          --comment "sinnix-snapshot-v1:$snapshot_uuid" \
           --lock-wait ${toString borgLockWaitSec} \
           --exclude "$snap_dir/dev" \
           --exclude "$snap_dir/home/*/.cache" \
@@ -191,15 +252,20 @@ with context;
           --exclude "$snap_dir/sys" \
           --exclude "$snap_dir/tmp" \
           --exclude "$snap_dir/var/cache" \
-          "::$archive_name" "$snap_dir"; then
-          delete_archived_snapshot "$snap_dir"
-          backed_up=$((backed_up + 1))
+          "::$archive_name" "$snap_dir/./"; then
+          if delete_archived_snapshot; then
+            backed_up=$((backed_up + 1))
+          else
+            failed=1
+          fi
         else
           echo "borg create failed for $snap_name; subvolume kept on disk" >&2
+          failed=1
         fi
       done
 
       # Compaction is batched by borgbackup-maintenance.service.
+      exit "$failed"
     '';
   })
 

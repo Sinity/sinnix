@@ -19,7 +19,7 @@ def test_generated_prompts_use_canonical_refs_and_principal_filtered_catalog() -
                     "resource_kinds": ["bead"],
                 },
                 {
-                    "name": "beads.change",
+                    "name": "beads.update",
                     "verb": "change",
                     "effect": "change",
                     "route": "beads.write",

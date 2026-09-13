@@ -266,45 +266,28 @@ ops_get() {
   curl -fsS -m 3 --unix-socket "$OPS_SOCKET" "http://localhost$1" 2>/dev/null
 }
 
-ops_snapshot_sequence() {
-  ops_get /v1/snapshot | jq -r '.sequence // empty' 2>/dev/null
-}
-
-# start/stop delegate the target unit's own lifecycle to the ops-reducer's
-# bounded action API instead of calling systemctl directly: the API already
-# enforces the one admission rule that matters here (the target must be an
-# attested runtime-inventory unit declaring observe.restartable) and records
-# an idempotent receipt, which is exactly what the hub's own AI panel
-# buttons rely on -- running both paths would let this CLI accept a start
-# the browser's admission check would have refused, or vice versa.
+# All backend lifecycle actions use the reducer's admission and receipts.
 ops_action() {
   local action="$1" unit="$2" reason="$3"
-  local seq body resp http_code err attempt
-  for attempt in 1 2; do
-    seq="$(ops_snapshot_sequence)"
-    if [[ -z "$seq" ]]; then
-      echo "sinnix-ai: ops-reducer socket unavailable at $OPS_SOCKET" >&2
+  local body prepared resp http_code err
+  body="$(jq -nc --arg action "$action" --arg unit "$unit" \
+    '{action:$action,target:{unit:$unit},parameters:{}}')"
+  prepared="$(curl --fail-with-body -sS -m 15 --unix-socket "$OPS_SOCKET" \
+    -H 'Content-Type: application/json' -d "$body" \
+    'http://localhost/v1/actions/prepare')" || {
+      echo "sinnix-ai: target observation failed: $prepared" >&2
       return 1
-    fi
-    body="$(jq -nc \
-      --arg action "$action" --arg unit "$unit" --argjson seq "$seq" \
-      --arg key "$(cat /proc/sys/kernel/random/uuid)" --arg reason "$reason" \
-      '{action:$action,target:{unit:$unit},expected_revision:$seq,idempotency_key:$key,operator_reason:$reason,parameters:{}}')"
-    resp="$(curl -sS -m 15 --unix-socket "$OPS_SOCKET" -X POST \
-      -H 'Content-Type: application/json' -d "$body" \
-      -w $'\n%{http_code}' "http://localhost/v1/actions")"
-    http_code="${resp##*$'\n'}"
-    resp="${resp%$'\n'*}"
-    if [[ "$http_code" -ge 200 && "$http_code" -lt 300 ]]; then
-      return 0
-    fi
-    err="$(jq -r '.error // "unknown error"' <<<"$resp" 2>/dev/null || echo "unknown error")"
-    if [[ "$http_code" == 409 && "$err" == *"expected_revision"* && "$attempt" == 1 ]]; then
-      continue # the reducer refreshed between our GET and POST; retry once with a fresh sequence
-    fi
-    echo "sinnix-ai: $action $unit refused ($http_code): $err" >&2
-    return 1
-  done
+    }
+  body="$(jq -c --arg key "$(cat /proc/sys/kernel/random/uuid)" --arg reason "$reason" \
+    'del(.observed_at) + {idempotency_key:$key,operator_reason:$reason}' <<<"$prepared")"
+  resp="$(curl -sS -m 15 --unix-socket "$OPS_SOCKET" \
+    -H 'Content-Type: application/json' -d "$body" \
+    -w $'\n%{http_code}' 'http://localhost/v1/actions')"
+  http_code="${resp##*$'\n'}"
+  resp="${resp%$'\n'*}"
+  if [[ "$http_code" -ge 200 && "$http_code" -lt 300 ]]; then return 0; fi
+  err="$(jq -r '.error // "unknown error"' <<<"$resp" 2>/dev/null || echo "unknown error")"
+  echo "sinnix-ai: $action $unit refused ($http_code): $err" >&2
   return 1
 }
 

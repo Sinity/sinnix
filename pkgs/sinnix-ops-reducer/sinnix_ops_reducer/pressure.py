@@ -298,6 +298,25 @@ def sample(proc: Path = PROC) -> Sample:
     )
 
 
+def from_observation(value: dict[str, Any]) -> Sample:
+    memory = value.get("meminfo_mb") or {}
+    total, free = memory.get("SwapTotal"), memory.get("SwapFree")
+
+    def psi(resource: str, kind: str) -> float | None:
+        return (value.get(resource) or {}).get(kind, {}).get("avg10")
+
+    return Sample(
+        swap_used_mb=total - free if total is not None and free is not None else None,
+        swap_total_mb=total,
+        mem_avail_mb=memory.get("MemAvailable"),
+        mem_total_mb=memory.get("MemTotal"),
+        memory_psi_full=psi("memory", "full"),
+        memory_psi_some=psi("memory", "some"),
+        io_psi_full=psi("io", "full"),
+        cpu_psi_some=psi("cpu", "some"),
+    )
+
+
 # --------------------------------------------------------------------------
 # the regime
 # --------------------------------------------------------------------------

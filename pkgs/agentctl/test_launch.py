@@ -443,17 +443,14 @@ def test_clean_finds_a_task_pueue_forgot_by_its_launch_input(
     input_path = launch.launch_input_path(task)
     fake_pueue.remove([started["job_id"]])
 
-    cleaned = launch.clean(config, started["job_id"])
+    cleaned = launch.clean(config, started["job_id"], started["reference"])
 
     assert cleaned["cleaned"] and cleaned["job_id"] == started["job_id"]
-    assert set(cleaned["removed"]) == {
-        str(input_path),
-        written["log_path"],
-        written["result_path"],
-    }
-    assert not input_path.exists()
-    with pytest.raises(JobError, match="pueue has no task"):
-        launch.clean(config, started["job_id"])
+    assert cleaned["removed"] == []
+    assert input_path.exists()
+    assert Path(written["log_path"]).read_text() == "x"
+    assert Path(written["result_path"]).read_text() == "x"
+    assert launch.clean(config, started["job_id"], started["reference"])["retained"]
 
 
 def test_clean_leaves_the_launch_input_of_a_job_the_queue_moved(
@@ -487,7 +484,7 @@ def test_clean_leaves_the_launch_input_of_a_job_the_queue_moved(
     assert launch.get_job(doomed["job_id"])["reference"] == survivor["reference"]
 
 
-def test_clean_by_reference_deletes_the_job_it_names_and_no_other(
+def test_clean_by_reference_removes_only_the_named_queue_entry(
     fake_pueue: FakePueue, config: Config, project_root: Path
 ) -> None:
     """A reference names one job's artifacts wherever the queue put the job."""
@@ -502,7 +499,7 @@ def test_clean_by_reference_deletes_the_job_it_names_and_no_other(
     cleaned = launch.clean(config, first["job_id"], first["reference"])
 
     assert cleaned["reference"] == first["reference"]
-    assert not (config.inputs_dir / f"{first['reference']}.json").exists()
+    assert (config.inputs_dir / f"{first['reference']}.json").exists()
     assert (config.inputs_dir / f"{second['reference']}.json").exists()
     assert fake_pueue.removed == [second["job_id"]]
 
@@ -547,24 +544,25 @@ def test_a_read_by_reference_answers_about_that_job_after_a_reorder(
     cancelled = launch.cancel(config, asked, reference=reference)
 
     assert cancelled["reference"] == reference
-    assert fake_pueue.removed == [second["job_id"]], (
-        "the cancel dropped the task at the id it was handed, not its own job"
-    )
+    assert fake_pueue.removed == [
+        second["job_id"]
+    ], "the cancel dropped the task at the id it was handed, not its own job"
     assert (config.jobs_dir / f"{second['reference']}.log").exists()
 
 
-def test_a_reference_the_queue_no_longer_carries_is_refused(
+def test_a_retained_reference_remains_readable_after_the_queue_forgets_it(
     fake_pueue: FakePueue, config: Config, project_root: Path
 ) -> None:
     project = load_project_adapter(project_root)
     started = launch.start_operation(config, project, project.operation("check"))
     fake_pueue.remove([started["job_id"]])
 
-    with pytest.raises(JobError, match="pueue has no task for job"):
-        launch.get_job(started["job_id"], config, started["reference"])
+    view = launch.get_job(started["job_id"], config, started["reference"])
+    assert view["queue_present"] is False
+    assert view["reference"] == started["reference"]
 
 
-def test_clean_deletes_a_terminal_task_and_everything_it_left(
+def test_clean_removes_a_terminal_queue_task_and_retains_its_evidence(
     fake_pueue: FakePueue, config: Config, project_root: Path
 ) -> None:
     project = load_project_adapter(project_root)
@@ -589,7 +587,8 @@ def test_clean_deletes_a_terminal_task_and_everything_it_left(
     cleaned = launch.clean(config, started["job_id"])
 
     assert cleaned["cleaned"] is True
-    assert not any(path.exists() for path in artifacts)
+    assert not cancel_marker_for(log).exists()
+    assert all(path.exists() for path in artifacts if path != cancel_marker_for(log))
     assert fake_pueue.removed == [started["job_id"]]
 
 
@@ -740,9 +739,9 @@ def test_cancelling_a_queued_task_drops_it_out_of_the_queue(
     assert fake_pueue.task(started["job_id"]) is None
     assert cancelled["state"] == "removed"
     assert cancelled["phase"] == "cancelled" and cancelled["terminal"] is True
-    assert cancelled["removed"] == [str(input_path)]
-    assert not input_path.exists()
-    assert list(config.inputs_dir.iterdir()) == []
+    assert cancelled["removed"] == []
+    assert input_path.exists()
+    assert list(config.inputs_dir.iterdir()) == [input_path]
 
 
 def test_a_task_whose_launch_input_agentctl_did_not_write_names_its_own_scope(
@@ -970,11 +969,11 @@ def test_every_read_by_task_id_answers_about_the_job_that_id_now_holds(
     assert launch.logs(config, moved).strip() == "second log"
     cancelled = launch.cancel(config, moved)
     assert cancelled["reference"] == second["reference"]
-    assert cancelled["removed"] == [
-        str(config.jobs_dir / f"{second['reference']}.log"),
-        str(config.jobs_dir / f"{second['reference']}.result"),
-        str(config.inputs_dir / f"{second['reference']}.json"),
-    ]
+    assert cancelled["removed"] == []
+    assert (
+        config.jobs_dir / f"{second['reference']}.log"
+    ).read_text() == "second log\n"
+    assert (config.inputs_dir / f"{second['reference']}.json").exists()
     assert (config.jobs_dir / f"{first['reference']}.log").exists()
 
 

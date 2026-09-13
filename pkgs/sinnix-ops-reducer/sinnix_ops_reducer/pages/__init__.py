@@ -45,7 +45,7 @@ from .pressure import render_pressure
 from .probes import load_json
 from .services import render_services
 from .shaders import render_shaders
-from .shell import PAGES
+from .shell import PAGES, esc
 from .work import LanesSource, render_work
 
 MANIFEST_SCHEMA = "sinnix-hub-manifest-v1"
@@ -134,22 +134,50 @@ def render(
     )
     route = canonical(path)
     if route == "/work/":
-        return render_work(manifest, snapshot, inventory, generated, lanes_source)
-    if route == "/pressure/":
-        return render_pressure(manifest, snapshot, inventory, generated)
-    if route == "/services/":
-        return render_services(manifest, inventory, generated)
-    if route == "/ai/":
-        return render_ai(manifest, inventory, generated)
-    if route == "/shaders/":
-        return render_shaders(manifest, generated)
-    if route == "/capabilities/":
-        return render_capabilities(
+        document = render_work(manifest, snapshot, inventory, generated, lanes_source)
+    elif route == "/pressure/":
+        document = render_pressure(manifest, snapshot, inventory, generated)
+    elif route == "/services/":
+        document = render_services(manifest, inventory, generated)
+    elif route == "/ai/":
+        document = render_ai(manifest, inventory, generated)
+    elif route == "/shaders/":
+        document = render_shaders(manifest, generated)
+    elif route == "/capabilities/":
+        document = render_capabilities(
             manifest,
             capability_view(capability_index_path, usage_census_path),
             generated,
         )
-    return render_dashboard(manifest, snapshot, snapshot_error, inventory, generated)
+    else:
+        document = render_dashboard(
+            manifest, snapshot, snapshot_error, inventory, generated
+        )
+    return observation_notice(document, snapshot)
+
+
+def observation_notice(document: str, snapshot: dict[str, Any] | None) -> str:
+    if not isinstance(snapshot, dict):
+        return document
+    sections = snapshot.get("sections") or {}
+    rows = []
+    for name, state in sections.items():
+        if not isinstance(state, dict):
+            continue
+        stamp = state.get("observed_at") or "never observed"
+        status = "available" if state.get("available") else "unavailable"
+        reason = state.get("degradation")
+        rows.append(
+            f"<li>{esc(name)}: {status}, {esc(stamp)}{(': ' + esc(str(reason))) if reason else ''}</li>"
+        )
+    if not rows:
+        return document
+    notice = (
+        '<details class="card"><summary>Observation times and availability</summary><ul>'
+        + "".join(rows)
+        + "</ul></details>"
+    )
+    return document.replace("<main>", "<main>" + notice, 1)
 
 
 __all__ = [

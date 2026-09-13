@@ -161,3 +161,17 @@ def test_watchdog_period_is_half_of_watchdog_usec(monkeypatch):
     assert watchdog_period() == 0.0
     monkeypatch.delenv("WATCHDOG_USEC")
     assert watchdog_period() == 0.0
+
+
+def test_unit_probe_timeout_bounds_a_wedged_manager(tmp_path, monkeypatch):
+    import subprocess
+    import sys
+
+    from sinnix_lib.systemd import show_units
+
+    binary = tmp_path / "systemctl"
+    binary.write_text(f"#!{sys.executable}\nimport time\ntime.sleep(5)\n")
+    binary.chmod(0o700)
+    monkeypatch.setenv("PATH", str(tmp_path))
+    with pytest.raises(subprocess.TimeoutExpired):
+        show_units(["fixture.service"], timeout=0.05)

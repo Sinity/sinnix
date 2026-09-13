@@ -23,6 +23,7 @@ from .sources.pressure import collect_blocked_tasks, collect_pressure
 from .sources.sqlite_util import clear_sqlite_errors, sqlite_errors
 from .sources.storage import collect_storage
 from .sources.systemd import (
+    collect_current_units,
     collect_resource_slices,
     collect_runtime_inventory,
     collect_systemd_units,
@@ -93,7 +94,36 @@ def collect_report(args: argparse.Namespace) -> dict[str, Any]:
     section = getattr(args, "section", None)
     if section is not None and section != "overview":
         report = _report_header(args)
-        if section == "pressure":
+        if section == "current":
+            report["sections"] = {}
+            for key, collector in (
+                ("live_pressure", lambda: collect_pressure(args.offline)),
+                ("systemd_units", lambda: collect_current_units(args.offline)),
+                ("runtime_inventory", lambda: collect_runtime_inventory(args.offline)),
+            ):
+                try:
+                    report[key] = collector()
+                    if (
+                        isinstance(report[key], dict)
+                        and report[key].get("available") is False
+                    ):
+                        raise RuntimeError(
+                            report[key].get("reason") or "collector unavailable"
+                        )
+                    report["sections"][key] = {
+                        "available": True,
+                        "observed_at": utc_ts(),
+                        "degradation": None,
+                    }
+                except Exception as error:
+                    report["sections"][key] = {
+                        "available": False,
+                        "observed_at": None,
+                        "degradation": str(error)[:240],
+                    }
+        elif section == "drift":
+            report["config_drift"] = collect_config_drift()
+        elif section == "pressure":
             report["live_pressure"] = collect_pressure(args.offline)
         elif section == "blocked_tasks":
             report["blocked_tasks"] = _page(collect_blocked_tasks(args.offline), args)
@@ -196,6 +226,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--section",
         choices=[
             "overview",
+            "current",
+            "drift",
             "pressure",
             "blocked_tasks",
             "storage",

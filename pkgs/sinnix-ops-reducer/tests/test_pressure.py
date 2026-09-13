@@ -669,3 +669,32 @@ def test_run_facts_read_systemds_own_timestamps_and_live_state() -> None:
     # Still running: there is no completed duration yet, and it is the one that
     # can actually be parked.
     assert facts["btrbk.service"] == {"last_duration_seconds": None, "active": True}
+
+
+def test_pressure_page_uses_owner_observation_without_resampling(monkeypatch):
+    from sinnix_ops_reducer.pages.pressure import render_pressure
+
+    monkeypatch.setattr(
+        pressure, "sample", lambda: pytest.fail("duplicate live pressure probe")
+    )
+    snapshot = {
+        "state": {
+            "live_pressure": {
+                "meminfo_mb": {
+                    "SwapTotal": 100,
+                    "SwapFree": 10,
+                    "MemTotal": 200,
+                    "MemAvailable": 120,
+                },
+                "memory": {"full": {"avg10": 0}},
+                "io": {"full": {"avg10": 0}},
+            }
+        }
+    }
+    reading = pressure.from_observation(snapshot["state"]["live_pressure"])
+    assert reading.swap_used_mb == 90
+    assert reading.mem_avail_mb == 120
+    document = render_pressure(
+        {}, snapshot, {}, "2026-01-01T00:00:00Z", processes=[], runs=[]
+    )
+    assert "SWAP" in document

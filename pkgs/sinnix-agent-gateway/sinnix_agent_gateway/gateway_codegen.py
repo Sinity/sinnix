@@ -201,7 +201,7 @@ Every gateway action is one MCP tool named after the action; its input schema in
 - CLI: `sinnix-agent-gateway call <action> --input '{{...}}'` or `--set key=value` (values parse as JSON); `--principal` selects authority. `sinnix-agent-gateway catalog <action> --schema` prints the live schemas, `--example` the examples, `catalog --complete <prefix>` lists names.
 - Discovery: `gateway.catalog` with a plain-words `query` finds actions, resources and brokered MCP tools; `gateway.status` reports contract hashes and route availability.
 
-Effectful actions (families change, operate, run) require `idempotency_key`; replaying the same key with the same request returns the stored response. Preconditions such as `expected_sha256` or checkout `head` fail with `precondition_failed` instead of overwriting.
+Effectful actions (families change, operate, run) require `idempotency_key`. Confirmed responses replay unchanged. Pending calls refuse concurrent execution; interrupted calls become indeterminate and never retry their effects automatically. `operations.run` reconciles through its durable agentctl launch identity; reducer-backed machine actions and process stop reconcile only exact confirmed owner receipts. Other interrupted mutations remain indeterminate. Preconditions are owner-specific checks, best effort unless the owner explicitly guarantees atomic comparison and mutation.
 
 ## Actions
 

@@ -1,13 +1,7 @@
-# Provably fails when: the drain stops deleting snapshots it has proven into
-# an archive (verified by removing the `btrfs subvolume delete` from
-# mkSnapshotDrainScript), stops bind-mounting the snapshot it archives, stops
-# writing the freshness marker its capture lane watches, or changes realm
-# archive membership -- tmp/ and worktrees/ must be absent from the archive
-# while inbox/ and a tmp/ nested inside a dataset stay present.
-#
-# Borg backup drain-hook runtime checks — exercises the realm/persist
-# btrbk-snapshot-drain shell logic (extracted from the systemd unit scripts)
-# against mocked mount/borg/btrfs binaries.
+# Real Borg fixtures exercise exact canonical coverage and rendered snapshot
+# drain scripts. Only mount/btrfs are mocked; no production data is touched.
+# Unique older bytes, same-name changes, restart, archive collision, and
+# unclassified exclusions must all pass through the deletion gate.
 { inputs, ... }:
 let
   inherit (inputs.nixpkgs) lib;
@@ -490,461 +484,46 @@ in
             }
           ];
 
-      backupBorgHookRuntime = mkRuntimeCheck system {
-        name = "backup-borg-hook-runtime-check";
-        nativeBuildInputs = [
-          pkgs.bash
-          pkgs.coreutils
-          pkgs.findutils
-          pkgs.gnugrep
-          pkgs.jq
-          pkgs.util-linux
-        ];
-        script = ''
-          mkdir -p \
-            "$TMPDIR/mock-bin" \
-            "$TMPDIR/logs" \
-            "$TMPDIR/bind" \
-            "$TMPDIR/repos" \
-            "$TMPDIR/state" \
-            "$TMPDIR/state/borg-cache" \
-            "$TMPDIR/realm-snapshots" \
-            "$TMPDIR/persist-snapshots" \
-            "$TMPDIR/realm-empty" \
-            "$TMPDIR/live-cas/objects/ab" \
-            "$TMPDIR/live-polylogue/blob/objects/cd"
-          printf 'production-shaped-cas-object\n' > "$TMPDIR/live-cas/objects/ab/cdef"
-          printf 'production-shaped-blob-object\n' > "$TMPDIR/live-polylogue/blob/objects/cd/ef01"
-          printf 'live sqlite content, excluded here on purpose\n' > "$TMPDIR/live-polylogue/source.db"
-
-          cat > "$TMPDIR/mock-bin/mountpoint" <<'EOF'
-          #!${pkgs.bash}/bin/bash
-          set -euo pipefail
-          path="''${@: -1}"
-          if [ -e "$path/.mounted" ]; then
-            exit 0
-          fi
-          exit 1
-          EOF
-
-          cat > "$TMPDIR/mock-bin/mount" <<'EOF'
-          #!${pkgs.bash}/bin/bash
-          set -euo pipefail
-          source_path="''${@: -2:1}"
-          target_path="''${@: -1}"
-          mkdir -p "$target_path"
-          cp -a "$source_path/." "$target_path/"
-          touch "$target_path/.mounted"
-          printf '%s => %s\n' "$source_path" "$target_path" >> "$TMPDIR/logs/mount.log"
-          EOF
-
-          cat > "$TMPDIR/mock-bin/umount" <<'EOF'
-          #!${pkgs.bash}/bin/bash
-          set -euo pipefail
-          target_path="$1"
-          rm -f "$target_path/.mounted"
-          printf '%s\n' "$target_path" >> "$TMPDIR/logs/umount.log"
-          EOF
-
-          cat > "$TMPDIR/mock-bin/borg" <<'EOF'
-          #!${pkgs.bash}/bin/bash
-          set -euo pipefail
-          printf '%s\n' "$*" >> "$TMPDIR/logs/borg.log"
-          command="$1"
-          shift
-          case "$command" in
-            init)
-              repo="''${@: -1}"
-              repo_path="''${repo#file://}"
-              mkdir -p "$repo_path"
-              touch "$repo_path/config"
-              ;;
-            list)
-              archive_ref=""
-              for arg in "$@"; do
-                case "$arg" in
-                  *::*) archive_ref="$arg"; break ;;
-                esac
-              done
-              if [ -n "$archive_ref" ]; then
-                repo="''${archive_ref%%::*}"
-                archive="''${archive_ref##*::}"
-                repo_path="''${repo#file://}"
-                after_archive=0
-                for arg in "$@"; do
-                  if [ "$after_archive" -eq 0 ]; then
-                    [ "$arg" = "$archive_ref" ] && after_archive=1
-                    continue
-                  fi
-                  test -e "$repo_path/archives/$archive/$arg"
-                  printf '%s\n' "$arg"
-                done
-              else
-                repo="''${@: -1}"
-                repo_path="''${repo#file://}"
-                if [ -d "$repo_path/archives" ]; then
-                  find "$repo_path/archives" -mindepth 1 -maxdepth 1 -type d -printf '%f\n'
-                fi
-              fi
-              ;;
-            create)
-              archive=""
-              source_path="''${@: -1}"
-              excludes=()
-              while [ "$#" -gt 0 ]; do
-                case "$1" in
-                  ::*) archive="''${1#::}"; shift ;;
-                  --exclude) excludes+=("$2"); shift 2 ;;
-                  --exclude-if-present) shift 2 ;;
-                  *) shift ;;
-                esac
-              done
-              repo="''${BORG_REPO:?BORG_REPO must be set}"
-              repo_path="''${repo#file://}"
-              test -n "$archive"
-              test -d "$source_path"
-              mkdir -p "$repo_path/archives/$archive"
-              # borg matches exclude patterns against the full source path it
-              # walks, with the leading separator stripped, and stops
-              # recursing into a directory that matches -- so an entry is
-              # archived only when neither it nor any ancestor matches. In
-              # fnmatch style `*` crosses path separators, which is exactly
-              # what bash `[[ ... == pattern ]]` does with an unquoted
-              # pattern.
-              source_root="''${source_path%/}"
-              source_root="''${source_root%/.}"
-              source_root="''${source_root%/}"
-              while IFS= read -r -d "" entry; do
-                relative="''${entry#$source_root/}"
-                walked="''${source_root#/}/$relative"
-                excluded=0
-                for pattern in ''${excludes[@]+"''${excludes[@]}"}; do
-                  pattern="''${pattern#/}"
-                  if [[ "$walked" == $pattern || "$walked" == $pattern/* ]]; then
-                    excluded=1
-                    break
-                  fi
-                done
-                [ "$excluded" -eq 1 ] && continue
-                mkdir -p "$repo_path/archives/$archive/$(dirname "$relative")"
-                cp -a "$entry" "$repo_path/archives/$archive/$relative"
-              done < <(find "$source_root" -mindepth 1 -type f -print0)
-              ;;
-            extract)
-              archive_ref="$1"
-              archive="''${archive_ref##*::}"
-              repo="''${archive_ref%%::*}"
-              shift
-              destination="$PWD"
-              repo_path="''${repo#file://}"
-              mkdir -p "$destination"
-              if [ "$#" -eq 0 ]; then
-                cp -a "$repo_path/archives/$archive/." "$destination/"
-              else
-                for archive_path in "$@"; do
-                  test -e "$repo_path/archives/$archive/$archive_path"
-                  mkdir -p "$(dirname "$destination/$archive_path")"
-                  cp -a "$repo_path/archives/$archive/$archive_path" "$destination/$archive_path"
-                done
-              fi
-              ;;
-            break-lock)
-              repo="''${@: -1}"
-              repo_path="''${repo#file://}"
-              rm -rf "$repo_path/lock.exclusive"
-              ;;
-            prune | compact)
-              ;;
-            *)
-              echo "unexpected borg command: $*" >&2
-              exit 64
-              ;;
-          esac
-          EOF
-
-          cat > "$TMPDIR/mock-bin/btrfs" <<'EOF'
-          #!${pkgs.bash}/bin/bash
-          set -euo pipefail
-          printf '%s\n' "$*" >> "$TMPDIR/logs/btrfs.log"
-          if [ "$1" = subvolume ] && [ "$2" = delete ]; then
-            rm -rf "$3"
-            exit 0
-          fi
-          echo "unexpected btrfs command: $*" >&2
-          exit 64
-          EOF
-
-          cat > "$TMPDIR/mock-bin/git" <<'EOF'
-          #!${pkgs.bash}/bin/bash
-          set -euo pipefail
-          if [ "$1" = "-c" ]; then
-            test "$2" = "safe.directory=$TMPDIR/sinex-source"
-            shift 2
-          fi
-          test "$1" = "-C"
-          test "$3" = "rev-parse"
-          test "$4" = "HEAD"
-          printf '%s\n' synthetic-source-git-head
-          EOF
-
-          cat > "$TMPDIR/mock-bin/dolt" <<'EOF'
-          #!${pkgs.bash}/bin/bash
-          set -euo pipefail
-          printf '%s\n' '{"rows":[{"commit_hash":"synthetic-dolt-commit"}]}'
-          EOF
-
-          chmod +x \
-            "$TMPDIR/mock-bin/mountpoint" \
-            "$TMPDIR/mock-bin/mount" \
-            "$TMPDIR/mock-bin/umount" \
-            "$TMPDIR/mock-bin/borg" \
-            "$TMPDIR/mock-bin/btrfs" \
-            "$TMPDIR/mock-bin/git" \
-            "$TMPDIR/mock-bin/dolt"
-
-          export PATH="$TMPDIR/mock-bin:$PATH"
-
-          mkdir -p \
-            "$TMPDIR/realm-snapshots/realm.2026-04-02T010000" \
-            "$TMPDIR/realm-snapshots/realm.2026-04-02T011500/project/sinex/.beads/dolt/.dolt" \
-            "$TMPDIR/realm-snapshots/realm.2026-04-02T011500/tmp/work" \
-            "$TMPDIR/realm-snapshots/realm.2026-04-02T011500/worktrees/agent-checkout" \
-            "$TMPDIR/realm-snapshots/realm.2026-04-02T011500/inbox/download" \
-            "$TMPDIR/realm-snapshots/realm.2026-04-02T011500/data/project/tmp" \
-            "$TMPDIR/persist-snapshots/persist.2026-04-02T010000" \
-            "$TMPDIR/persist-snapshots/persist.2026-04-02T011500"
-          printf 'scratch\n' > "$TMPDIR/realm-snapshots/realm.2026-04-02T011500/tmp/work/analysis-output"
-          printf 'checkout\n' > "$TMPDIR/realm-snapshots/realm.2026-04-02T011500/worktrees/agent-checkout/file"
-          printf 'downloaded\n' > "$TMPDIR/realm-snapshots/realm.2026-04-02T011500/inbox/download/landed.bin"
-          printf 'nested\n' > "$TMPDIR/realm-snapshots/realm.2026-04-02T011500/data/project/tmp/kept"
-          printf '{"id":"synthetic-bead"}\n' > "$TMPDIR/realm-snapshots/realm.2026-04-02T011500/project/sinex/.beads/issues.jsonl"
-          printf 'synthetic Dolt state\n' > "$TMPDIR/realm-snapshots/realm.2026-04-02T011500/project/sinex/.beads/dolt/.dolt/HEAD"
-
-          cat > "$TMPDIR/run-realm-hook.sh" <<'EOF'
-          #!${pkgs.bash}/bin/bash
-          set -euo pipefail
-          ${realmBorgDrainScript}
-          EOF
-
-          cat > "$TMPDIR/run-persist-hook.sh" <<'EOF'
-          #!${pkgs.bash}/bin/bash
-          set -euo pipefail
-          ${persistBorgDrainScript}
-          EOF
-
-          cat > "$TMPDIR/run-missing-realm-hook.sh" <<'EOF'
-          #!${pkgs.bash}/bin/bash
-          set -euo pipefail
-          ${missingRealmBorgDrainScript}
-          EOF
-
-          cat > "$TMPDIR/run-sinex-blob-backup.sh" <<'EOF'
-          #!${pkgs.bash}/bin/bash
-          set -euo pipefail
-          ${sinexBlobBorgScript}
-          EOF
-
-          cat > "$TMPDIR/run-sinex-beads-drill.sh" <<'EOF'
-          #!${pkgs.bash}/bin/bash
-          set -euo pipefail
-          ${sinexBeadsDrillScript}
-          EOF
-
-          cat > "$TMPDIR/run-live-holder-lock.sh" <<'EOF'
-          #!${pkgs.bash}/bin/bash
-          set -euo pipefail
-          ${liveHolderLockScript}
-          EOF
-
-          cat > "$TMPDIR/run-dead-holder-lock.sh" <<'EOF'
-          #!${pkgs.bash}/bin/bash
-          set -euo pipefail
-          ${deadHolderLockScript}
-          EOF
-
-          cat > "$TMPDIR/run-polylogue-state-backup.sh" <<'EOF'
-          #!${pkgs.bash}/bin/bash
-          set -euo pipefail
-          ${polylogueStateBorgScript}
-          EOF
-
-          chmod +x \
-            "$TMPDIR/run-realm-hook.sh" \
-            "$TMPDIR/run-persist-hook.sh" \
-            "$TMPDIR/run-missing-realm-hook.sh" \
-            "$TMPDIR/run-sinex-blob-backup.sh" \
-            "$TMPDIR/run-sinex-beads-drill.sh" \
-            "$TMPDIR/run-polylogue-state-backup.sh" \
-            "$TMPDIR/run-live-holder-lock.sh" \
-            "$TMPDIR/run-dead-holder-lock.sh"
-
-          "$TMPDIR/run-realm-hook.sh"
-          "$TMPDIR/run-persist-hook.sh"
-          "$TMPDIR/run-sinex-blob-backup.sh"
-          "$TMPDIR/run-sinex-beads-drill.sh"
-          "$TMPDIR/run-polylogue-state-backup.sh"
-
-          grep -q "$TMPDIR/realm-snapshots/realm.2026-04-02T011500 => $TMPDIR/bind/realm" "$TMPDIR/logs/mount.log"
-          grep -q "$TMPDIR/persist-snapshots/persist.2026-04-02T011500 => $TMPDIR/bind/persist" "$TMPDIR/logs/mount.log"
-          grep -q "$TMPDIR/bind/realm" "$TMPDIR/logs/umount.log"
-          grep -q "$TMPDIR/bind/persist" "$TMPDIR/logs/umount.log"
-          grep -q "create .*::realm-realm.2026-04-02T011500" "$TMPDIR/logs/borg.log"
-          grep -q "create .*::persist-persist.2026-04-02T011500" "$TMPDIR/logs/borg.log"
-          # Realm archive membership. inbox/ is the control: a realm
-          # exclusion broad enough to reach it fails here, and so does one
-          # broad enough to take a tmp/ nested inside a real dataset.
-          mkdir -p "$TMPDIR/restore-realm"
-          (
-            cd "$TMPDIR/restore-realm"
-            borg extract "file://$TMPDIR/repos/borg-realm-v2::realm-realm.2026-04-02T011500"
-          )
-          assert_archived() {
-            if ! test -f "$TMPDIR/restore-realm/$1"; then
-              echo "realm archive is missing $1" >&2
-              exit 1
-            fi
-          }
-          # `! cmd` is exempt from set -e, so a negative claim has to exit by
-          # hand or it can never fail the build.
-          refute_archived() {
-            if test -e "$TMPDIR/restore-realm/$1"; then
-              echo "realm archive still contains $1" >&2
-              exit 1
-            fi
-          }
-          assert_archived inbox/download/landed.bin
-          assert_archived data/project/tmp/kept
-          assert_archived project/sinex/.beads/issues.jsonl
-          refute_archived tmp
-          refute_archived worktrees
-
-          grep -q "subvolume delete $TMPDIR/realm-snapshots/realm.2026-04-02T010000" "$TMPDIR/logs/btrfs.log"
-          grep -q "subvolume delete $TMPDIR/persist-snapshots/persist.2026-04-02T010000" "$TMPDIR/logs/btrfs.log"
-          archive_name="$(borg list --short file://$TMPDIR/repos/borg-sinex-blobs-v1)"
-          case "$archive_name" in sinex-blobs-*) ;; *) exit 1 ;; esac
-          mkdir -p "$TMPDIR/restore"
-          (
-            cd "$TMPDIR/restore"
-            borg extract "file://$TMPDIR/repos/borg-sinex-blobs-v1::$archive_name"
-          )
-          cmp "$TMPDIR/live-cas/objects/ab/cdef" "$TMPDIR/restore/objects/ab/cdef"
-          grep -q "create .* $TMPDIR/live-cas" "$TMPDIR/logs/borg.log"
-          if grep -q "/realm/sinex/state/blob-repository" "$TMPDIR/logs/borg.log"; then
-            echo "sinex blob job used a hardcoded CAS path" >&2
-            exit 1
-          fi
-          polylogue_archive="$(borg list --short file://$TMPDIR/repos/borg-polylogue-state-v1)"
-          case "$polylogue_archive" in polylogue-state-*) ;; *) exit 1 ;; esac
-          mkdir -p "$TMPDIR/restore-polylogue"
-          (
-            cd "$TMPDIR/restore-polylogue"
-            borg extract "file://$TMPDIR/repos/borg-polylogue-state-v1::$polylogue_archive"
-          )
-          cmp "$TMPDIR/live-polylogue/blob/objects/cd/ef01" "$TMPDIR/restore-polylogue/blob/objects/cd/ef01"
-          if test -e "$TMPDIR/restore-polylogue/source.db"; then
-            echo "polylogue state archive contains the live source.db" >&2
-            exit 1
-          fi
-          test -f "$TMPDIR/state/borg-drain/polylogue-state.last-success"
-
-          beads_drill_log="$(find "$TMPDIR/realm-data" -name borg_beads_drill.jsonl -print -quit)"
-          test -n "$beads_drill_log"
-          jq -e '
-            .type == "sinex_beads_restore_drill" and
-            .archive == "realm-realm.2026-04-02T011500" and
-            .source_git_head == "synthetic-source-git-head" and
-            .dolt_commit == "synthetic-dolt-commit" and
-            .ok == true
-          ' "$beads_drill_log" >/dev/null
-
-          # A repository lock is broken on the evidence Borg itself writes:
-          # one empty file per holder inside lock.exclusive, named
-          # "<hostid>.<pid>-<threadid>". The live holder here carries the comm
-          # of the wrapped Borg binary, which is what production runs.
-          mkdir -p \
-            "$TMPDIR/live-holder/repo" \
-            "$TMPDIR/live-holder/snapshots" \
-            "$TMPDIR/dead-holder/repos/borg-realm-v2"
-          touch \
-            "$TMPDIR/live-holder/repo/config" \
-            "$TMPDIR/dead-holder/repos/borg-realm-v2/config"
-
-          # The trailing `true` keeps the holder in its own process: bash execs
-          # a lone final command in place, which would rename it to `sleep`.
-          cp "$(command -v bash)" "$TMPDIR/mock-bin/.borg-wrapped"
-          "$TMPDIR/mock-bin/.borg-wrapped" \
-            -c 'touch "$TMPDIR/live-holder.ready"; sleep 600; true' \
-            </dev/null >/dev/null 2>&1 &
-          live_holder_pid=$!
-          # The marker is written after the holder has replaced its image, so
-          # its name is settled before anything reads it.
-          for _ in $(seq 100); do
-            if [ -e "$TMPDIR/live-holder.ready" ]; then
-              break
-            fi
-            sleep 0.1
-          done
-          test "$(cat "/proc/$live_holder_pid/comm")" = .borg-wrapped
-
-          "$TMPDIR/mock-bin/.borg-wrapped" -c 'exit 0' &
-          dead_holder_pid=$!
-          wait "$dead_holder_pid"
-          if [ -e "/proc/$dead_holder_pid" ]; then
-            echo "the dead-holder case needs a pid that is really gone" >&2
-            exit 1
-          fi
-
-          # Past the staleness threshold, and with a host id whose node
-          # component matches nothing on this machine -- Borg's own node id is
-          # not stable, so only the hostname in front of it may be compared.
-          stale_mtime="$(date -d '-5 hours' +%Y%m%d%H%M)"
-          live_holder="$(uname -n)@281474976710655.$live_holder_pid-0"
-          dead_holder="$(uname -n)@281474976710655.$dead_holder_pid-0"
-          mkdir -p "$TMPDIR/live-holder/repo/lock.exclusive"
-          touch "$TMPDIR/live-holder/repo/lock.exclusive/$live_holder"
-          touch -t "$stale_mtime" "$TMPDIR/live-holder/repo/lock.exclusive"
-          mkdir -p "$TMPDIR/dead-holder/repos/borg-realm-v2/lock.exclusive"
-          touch "$TMPDIR/dead-holder/repos/borg-realm-v2/lock.exclusive/$dead_holder"
-          touch -t "$stale_mtime" "$TMPDIR/dead-holder/repos/borg-realm-v2/lock.exclusive"
-
-          "$TMPDIR/run-live-holder-lock.sh" > "$TMPDIR/live-holder.log" 2>&1
-          "$TMPDIR/run-dead-holder-lock.sh" > "$TMPDIR/dead-holder.log" 2>&1
-          kill "$live_holder_pid"
-
-          if grep -q "break-lock file://$TMPDIR/live-holder/repo" "$TMPDIR/logs/borg.log"; then
-            echo "the guard broke a repository lock whose recorded holder was running" >&2
-            exit 1
-          fi
-          if [ ! -d "$TMPDIR/live-holder/repo/lock.exclusive" ]; then
-            echo "the live holder's lock directory did not survive the drain" >&2
-            exit 1
-          fi
-          if ! grep -q "is held by $live_holder; refusing break-lock" "$TMPDIR/live-holder.log"; then
-            echo "the guard did not name the recorded holder it refused to evict" >&2
-            exit 1
-          fi
-
-          if ! grep -q "break-lock file://$TMPDIR/dead-holder/repos/borg-realm-v2" "$TMPDIR/logs/borg.log"; then
-            echo "a stale lock whose recorded holder is gone was never handed to break-lock" >&2
-            exit 1
-          fi
-          if [ -d "$TMPDIR/dead-holder/repos/borg-realm-v2/lock.exclusive" ]; then
-            echo "a stale lock whose recorded holder is gone was not broken" >&2
-            exit 1
-          fi
-
-          set +e
-          "$TMPDIR/run-missing-realm-hook.sh" > "$TMPDIR/missing-realm.log" 2>&1
-          missing_status=$?
-          set -e
-
-          test "$missing_status" -eq 0
-          if grep -q "borg create failed" "$TMPDIR/missing-realm.log"; then
-            echo "empty snapshot queue reported a failed borg create" >&2
-            exit 1
-          fi
-        '';
-      };
+      backupBorgHookRuntime =
+        assert lib.assertMsg (lib.all
+          (name: backupRuntimeEval.config.systemd.services.${name}.serviceConfig.TimeoutStartSec == "4h")
+          [
+            "borgbackup-job-realm"
+            "borgbackup-job-persist"
+            "borgbackup-root-snapshots"
+          ]
+        ) "Snapshot backlog drains must have a finite per-wake deadline";
+        mkRuntimeCheck system {
+          name = "backup-borg-hook-runtime-check";
+          nativeBuildInputs = [
+            pkgs.bash
+            pkgs.borgbackup
+            pkgs.coreutils
+            pkgs.findutils
+            pkgs.gnugrep
+            pkgs.python3
+            pkgs.jq
+            pkgs.util-linux
+          ];
+          script = ''
+            ${pkgs.python3}/bin/python3 ${./backup_snapshot_coverage.py} \
+              --verifier ${../../modules/lib/backup/snapshot-coverage.py} \
+              --scripts ${
+                pkgs.writeText "backup-fixture-scripts.json" (
+                  builtins.toJSON {
+                    realm = realmBorgDrainScript;
+                    persist = persistBorgDrainScript;
+                    missing = missingRealmBorgDrainScript;
+                    sinex = sinexBlobBorgScript;
+                    polylogue = polylogueStateBorgScript;
+                    beads = sinexBeadsDrillScript;
+                    liveLock = liveHolderLockScript;
+                    deadLock = deadHolderLockScript;
+                  }
+                )
+              }
+          '';
+        };
 
       # The freshness/liveness questions the retired borgbackup-status script
       # asked are now capture lanes and livenessProbes on the surfaces that

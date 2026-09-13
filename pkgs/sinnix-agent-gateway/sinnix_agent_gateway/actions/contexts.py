@@ -76,19 +76,6 @@ class ComposedContext(GatewayModel):
     components: list[ContextComponent]
     component_plan: list[dict[str, Any]] = Field(default_factory=list)
     total_budget_bytes: int
-    project: Any = Field(
-        default=None,
-        description="Flattened when every orientation component is available.",
-    )
-    tasks: Any = None
-    authority: Any = None
-    job: Any = None
-    result: Any = None
-    events: Any = None
-    runtime: Any = None
-    transitions: Any = None
-    receipts: Any = None
-    jobs: Any = None
     affordances: list[str] = Field(default_factory=list)
 
 
@@ -105,135 +92,142 @@ _AFFORDANCES: dict[str, list[str]] = {
 
 
 async def _compose(runtime: Runtime, inp: ComposeInput) -> ComposedContext:
-    launch_reference = None
-    if inp.job is not None:
-        _, ref, launch_reference = inp.job.resolve()
-    else:
-        assert inp.project is not None
-        ref = project_ref(inp.project.resolve(runtime))
-    if inp.intent in {
-        "campaign.progress",
-        "session.orchestration",
-        "verification.regression",
-        "project.trajectory",
-    }:
-        from ..contexts import ComponentResult, ComponentSpec
-        from .products import (
-            CampaignInput,
-            OrchestrationInput,
-            _campaign,
-            _orchestration,
-            owner_product,
-        )
+    from ..capabilities import Capability
+    from ..contexts import source_revision
+    from .products import (
+        CampaignInput,
+        OrchestrationInput,
+        OwnerProduct,
+        _campaign,
+        _orchestration,
+        owner_product,
+    )
 
+    if inp.job is not None:
+        runtime.principal.require(Capability.JOB_READ)
+        job_id, ref, launch_reference = inp.job.resolve()
+        identity = {"job_id": job_id, "max_bytes": 64000}
+        if launch_reference is not None:
+            identity["launch_reference"] = launch_reference
+        try:
+            value = runtime._job("job.result", identity)
+        except ProtocolError as exc:
+            if exc.code not in {"owner_failed", "unavailable", "deadline"}:
+                raise
+            product = OwnerProduct(
+                owner="agentctl",
+                availability="unavailable",
+                reason=str(exc),
+                source_ref=ref,
+            )
+        else:
+            key = "launch_reference" if launch_reference is not None else "job_id"
+            if str(value.get(key)) != str(identity[key]):
+                raise ProtocolError(
+                    "owner_failed", "job owner response names another job"
+                )
+            ref = f"sinnix://jobs/{value['job_id']}"
+            product = OwnerProduct(
+                owner="agentctl", availability="available", data=value, source_ref=ref
+            )
+
+    else:
         assert inp.project is not None
         project = inp.project.resolve(runtime)
         runtime.projects._project(project)
-        if inp.intent == "campaign.progress":
-            try:
-                value = (
-                    await _campaign(
-                        runtime,
-                        CampaignInput(
-                            project=inp.project,
-                            roots=inp.roots,
-                            at=inp.at,
-                            baseline=inp.baseline,
-                            refresh_id=inp.refresh_id,
-                            deadline_at=inp.deadline_at,
-                        ),
-                    )
-                ).model_dump()
-                result = ComponentResult.available("campaign", value, source_ref=ref)
-            except ProtocolError as exc:
-                if exc.code not in {
-                    "unavailable",
-                    "owner_failed",
-                    "unsupported_capability",
-                }:
-                    raise
-                result = ComponentResult.unavailable(
-                    "campaign", str(exc), source_ref=ref
-                )
-        elif inp.intent == "session.orchestration":
-            value = (
-                await _orchestration(
-                    runtime,
-                    OrchestrationInput(
-                        session_refs=inp.session_refs, deadline_at=inp.deadline_at
-                    ),
-                )
-            ).model_dump()
-            if any(row["availability"] == "available" for row in value["sessions"]):
-                result = ComponentResult.available(
-                    "orchestration", value, source_ref="sinnix://mcp/polylogue"
-                )
-            else:
-                result = ComponentResult.unavailable(
-                    "orchestration",
-                    "; ".join(
-                        row.get("reason") or "Owner unavailable"
-                        for row in value["sessions"]
-                    ),
-                    source_ref="sinnix://mcp/polylogue",
-                )
-        else:
-            product = await owner_product(
+        ref = project_ref(project)
+    if inp.intent == "job.review":
+        pass
+    elif inp.intent == "campaign.progress":
+        product = (
+            await _campaign(
                 runtime,
-                "lynchpin",
-                "lynchpin_project",
-                {
-                    "action": inp.intent.replace(".", "_"),
-                    "project": project,
-                    **({"refresh_id": inp.refresh_id} if inp.refresh_id else {}),
-                },
+                CampaignInput(
+                    project=inp.project,
+                    roots=inp.roots,
+                    at=inp.at,
+                    baseline=inp.baseline,
+                    refresh_id=inp.refresh_id,
+                    deadline_at=inp.deadline_at,
+                ),
+            )
+        ).product
+    elif inp.intent == "session.orchestration":
+        value = await _orchestration(
+            runtime,
+            OrchestrationInput(
+                session_refs=inp.session_refs,
                 deadline_at=inp.deadline_at,
-            )
-            result = (
-                ComponentResult.available(
-                    "evidence", product.data, source_ref=product.source_ref
-                )
-                if product.availability == "available"
-                else ComponentResult.unavailable(
-                    "evidence",
-                    product.reason or "Owner unavailable",
-                    source_ref=product.source_ref,
-                )
-            )
-        context = runtime.context_composer.compose(
-            inp.intent, ref, [ComponentSpec(result.name, 56000, lambda: result)]
+            ),
         )
-        context = runtime.persist_context({"ref": ref, **context})
+        product = OwnerProduct(
+            owner="polylogue",
+            availability="available"
+            if any(item.availability == "available" for item in value.sessions)
+            else "unavailable",
+            reason=None
+            if any(item.availability == "available" for item in value.sessions)
+            else "Requested session products are unavailable",
+            data=value.model_dump(),
+            source_ref="sinnix://mcp/polylogue",
+        )
+    elif inp.intent == "incident":
+        runtime.principal.require(Capability.MACHINE_READ)
+        value = runtime.observe.machine_query("overview")
+        product = OwnerProduct(
+            owner="sinnix-observe",
+            availability="unavailable"
+            if value.get("available") is False
+            else "available",
+            data=value,
+            reason=value.get("reason"),
+            source_ref="sinnix://machine/overview",
+        )
     else:
-        context = runtime.compose_context(
-            ref, inp.intent, launch_reference=launch_reference
+        runtime.principal.require(Capability.TASK_READ)
+        product = await owner_product(
+            runtime,
+            "lynchpin",
+            "lynchpin_project",
+            {
+                "action": "project_context",
+                "project": project,
+                "intent": inp.intent,
+                "roots": inp.roots,
+                "at": inp.at.owner_value() if inp.at else None,
+                **({"refresh_id": inp.refresh_id} if inp.refresh_id else {}),
+            },
+            deadline_at=inp.deadline_at,
         )
+    # Persistence identifies this observation. Domain components, ordering,
+    # coverage and budgets remain exactly as the owner returned them.
+    context = runtime.persist_context(
+        {
+            "schema": "sinnix.owner-context.v2",
+            "ref": ref,
+            "target_ref": ref,
+            "intent": inp.intent,
+            "total_budget_bytes": runtime.config.max_result_bytes,
+            "component_plan": [],
+            "components": [
+                {
+                    "name": product.owner,
+                    "status": product.availability,
+                    "source_revision": source_revision(product.model_dump()),
+                    "source_ref": product.source_ref,
+                    "data": product.model_dump(),
+                    "reason": product.reason,
+                }
+            ],
+        }
+    )
     return ComposedContext(
-        ref=context["ref"],
-        intent=context["intent"],
-        target_ref=context["target_ref"],
-        snapshot_ref=context["snapshot_ref"],
-        context_schema=context.get("schema"),
-        components=[ContextComponent(**row) for row in context["components"]],
-        component_plan=list(context.get("component_plan") or []),
-        total_budget_bytes=int(context["total_budget_bytes"]),
         **{
-            key: context[key]
-            for key in ComposedContext.model_fields
-            if key in context
-            and key
-            not in {
-                "ref",
-                "intent",
-                "target_ref",
-                "snapshot_ref",
-                "components",
-                "component_plan",
-                "total_budget_bytes",
-                "affordances",
-                "context_schema",
-            }
+            key: value
+            for key, value in context.items()
+            if key in ComposedContext.model_fields
         },
+        context_schema=context["schema"],
         affordances=_AFFORDANCES[inp.intent],
     )
 
@@ -265,7 +259,7 @@ ACTIONS: tuple[Action, ...] = (
             "review job",
             "incident",
         ),
-        documentation="Each component is budgeted and isolated: an unavailable owner marks its component unavailable with a reason instead of failing the call. The snapshot is persisted under snapshot_ref.",
+        documentation="The selected owner supplies domain composition, source coverage and partial results. The gateway preserves its product and availability in an immutable observation under snapshot_ref.",
         examples=(
             Example(
                 title="Orient in sinnix",

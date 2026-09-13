@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from sinnix_lib.process import run
+from sinnix_lib.systemd import show_units
 from sinnix_lib.values import int_or_none
 
 from ..runtime_inventory import (
@@ -186,3 +187,56 @@ def collect_runtime_inventory(offline: bool) -> dict[str, Any]:
     if offline:
         return {"offline": True}
     return load_inventory()
+
+
+CURRENT_PROPERTIES = (
+    "Id",
+    "LoadState",
+    "ActiveState",
+    "SubState",
+    "InvocationID",
+    "MainPID",
+    "Slice",
+)
+
+
+def collect_current_units(offline: bool) -> list[dict[str, Any]]:
+    """Two manager reads; no per-unit commands or health probe fanout."""
+    if offline:
+        return []
+    rows = []
+    for manager in ("system", "user"):
+        units = managed_units(manager)
+        states = show_units(
+            units, user=manager == "user", properties=CURRENT_PROPERTIES, timeout=1
+        )
+        if units and not states:
+            raise RuntimeError(f"{manager} systemd manager unavailable")
+        for unit, props in states.items():
+            rows.append(
+                {
+                    "unit": unit,
+                    "manager": manager,
+                    "load_state": props.get("LoadState"),
+                    "active_state": props.get("ActiveState"),
+                    "sub_state": props.get("SubState"),
+                    "main_pid": int_or_none(props.get("MainPID")),
+                    "slice": props.get("Slice"),
+                    "expected_target": {
+                        "kind": "unit",
+                        "unit": unit,
+                        "manager": manager,
+                        "properties": {
+                            key: props[key]
+                            for key in (
+                                "LoadState",
+                                "ActiveState",
+                                "SubState",
+                                "InvocationID",
+                            )
+                            if key in props
+                        },
+                    },
+                }
+            )
+    return rows

@@ -24,6 +24,7 @@ class Reducer:
         source: Callable[[], dict[str, Any]],
         state_path: Path | None = None,
         max_events: int = 256,
+        section_source: Callable[[str], dict[str, Any]] | None = None,
         ambient_source: Callable[[], dict[str, Any]] | None = None,
         agent_jobs_source: Callable[[], dict[str, Any]] | None = None,
         clodex_usage_source: Callable[[], tuple[dict[str, Any], dict[str, Any]]]
@@ -33,6 +34,7 @@ class Reducer:
         self.token_path = token_path
         self.state_path = state_path
         self.source = source
+        self.section_source = section_source
         self.events: deque[dict[str, Any]] = deque(maxlen=max_events)
         self.sequence = self._load_state()
         self.previous_health: dict[str, str] = {}
@@ -76,7 +78,6 @@ class Reducer:
             if not isinstance(report, dict):
                 raise ValueError("collector returned a non-object")
             report = dict(report)
-            report["agentctl"] = agent_jobs
             source_health = {
                 "status": "healthy",
                 "source": "sinnix-observe",
@@ -93,6 +94,33 @@ class Reducer:
                 "freshness": "unknown",
                 "degradation": str(error)[:240],
             }
+        previous = self.snapshot()
+        section_health = dict(report.pop("sections", {}))
+        old_sections = previous.get("sections", {})
+        old_state = previous.get("state") or {}
+        if source_health["status"] != "healthy":
+            for key, old_health in old_sections.items():
+                if old_health.get("source") == "sinnix-observe":
+                    section_health[key] = {
+                        **old_health,
+                        "available": False,
+                        "degradation": source_health["degradation"],
+                    }
+        for key in report:
+            if key not in {"schema", "generated_at", "window", "sources"}:
+                section_health.setdefault(
+                    key,
+                    {
+                        "available": True,
+                        "observed_at": observed_at,
+                        "degradation": None,
+                    },
+                )
+        for key, health in section_health.items():
+            health["source"] = "sinnix-observe"
+            if not health.get("available") and key in old_state:
+                report[key] = old_state[key]
+                health["observed_at"] = old_sections.get(key, {}).get("observed_at")
         self.sequence += 1
         ambient, ambient_health = self._ambient_snapshot(observed_at)
         anchor = self._anchor_snapshot(observed_at)
@@ -113,15 +141,31 @@ class Reducer:
             },
             "state": {
                 **report,
+                "agentctl": agent_jobs,
                 **({"clodex": clodex} if self.clodex_usage_source is not None else {}),
                 "ambient_intelligence": ambient,
                 "session_anchor": anchor,
                 "hyprland_automation": hyprland,
-            }
-            if source_health["status"] == "healthy"
-            else None,
+            },
+            "sections": section_health,
             "degradation": source_health["degradation"],
         }
+        for key, health in (
+            ("agentctl", agent_jobs_health),
+            ("clodex", clodex_health),
+            ("ambient_intelligence", ambient_health),
+        ):
+            snapshot["sections"][key] = {
+                **health,
+                "available": health["status"] == "healthy",
+            }
+        for key in ("session_anchor", "hyprland_automation"):
+            snapshot["sections"][key] = {
+                "available": True,
+                "observed_at": observed_at,
+                "source": "desktop-events",
+                "degradation": None,
+            }
         # Durability: file and directory. status.json is the hub's published
         # view of the host, so after a crash it must resolve to the newest
         # observation rather than to the previous cycle's.
@@ -189,6 +233,23 @@ class Reducer:
                 or not isinstance(value.get("groups"), dict)
             ):
                 raise ValueError("job plane collector returned an invalid payload")
+            value = {
+                **value,
+                "jobs": [
+                    {
+                        **job,
+                        "expected_target": {
+                            "kind": "job",
+                            "launch_reference": job["reference"],
+                            "attempt": job["attempt"],
+                        },
+                    }
+                    if isinstance(job.get("reference"), str)
+                    and isinstance(job.get("attempt"), int)
+                    else job
+                    for job in value["jobs"]
+                ],
+            }
             return (
                 value,
                 {
@@ -268,6 +329,57 @@ class Reducer:
                 "freshness": "unknown",
                 "degradation": str(error)[:240],
             }
+
+    def observe(self, section: str) -> dict[str, Any]:
+        """Detailed read through the observation owner; never called by refresh."""
+        allowed = {
+            "pressure",
+            "blocked_tasks",
+            "storage",
+            "units",
+            "slices",
+            "runtime_inventory",
+            "gateway",
+            "browser",
+            "ingestion",
+            "workloads",
+            "drift",
+        }
+        if section not in allowed:
+            raise ValueError("unknown observation section")
+        if self.section_source is None:
+            raise RuntimeError("detailed observation source unavailable")
+        return self.section_source(section)
+
+    def page_snapshot(self, sections: tuple[str, ...]) -> dict[str, Any]:
+        snapshot = self.snapshot()
+        value = {
+            **snapshot,
+            "state": dict(snapshot.get("state") or {}),
+            "sections": dict(snapshot.get("sections") or {}),
+        }
+        for section in sections:
+            try:
+                report = self.observe(section)
+                for key, item in report.items():
+                    if key in {"schema", "generated_at", "window", "sources"}:
+                        continue
+                    if isinstance(item, dict) and "rows" in item and "cursor" in item:
+                        item = item["rows"]
+                    value["state"][key] = item
+                    value["sections"][key] = {
+                        "available": True,
+                        "observed_at": report.get("generated_at"),
+                        "source": "sinnix-observe",
+                        "degradation": None,
+                    }
+            except Exception as error:
+                value["sections"][section] = {
+                    "available": False,
+                    "observed_at": None,
+                    "degradation": str(error)[:240],
+                }
+        return value
 
     def snapshot(self) -> dict[str, Any]:
         if self._snapshot:

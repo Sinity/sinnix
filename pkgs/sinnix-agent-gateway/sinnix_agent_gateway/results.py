@@ -17,6 +17,7 @@ from sinnix_lib.atomic import atomic_publish
 from .artifacts import ArtifactService
 from .capabilities import Capability, Principal
 from .config import GatewayConfig
+from .payloads import retain
 from .schemas import StableErrorCode, V2ToolEnvelope
 
 # `StableErrorCode` types `V2Error.code`, so it is the enum the published
@@ -200,7 +201,7 @@ class ResultSnapshotWriter:
 
 
 class ResultService:
-    """Own immutable, principal-scoped snapshots of bounded V2 responses."""
+    """Retain full principal-scoped observations and budget their presentation."""
 
     schema = "sinnix.gateway-result.v3"
     cursor_ttl_seconds = 3_600
@@ -216,6 +217,8 @@ class ResultService:
         self.artifacts = artifacts or ArtifactService(config, principal)
         config.initialize_state()
         self.root = config.state_dir / "results"
+        self.payloads_root = config.state_dir / "payloads"
+        self.payloads_root.mkdir(mode=0o700, exist_ok=True)
         self.snapshots_root = self.root / "snapshots"
         self.snapshots_root.mkdir(mode=0o700, exist_ok=True)
         self.snapshots_root.chmod(0o700)
@@ -489,6 +492,8 @@ class ResultService:
         if outcome not in {"ok", "error"}:
             raise ResultError("result outcome must be ok or error", "invalid_request")
         request = request or RequestContext.create(hashlib.sha256(b"{}").hexdigest())
+        full_payload = payload
+        full_meta = dict(meta or {})
         artifact: dict[str, Any] | None = None
         try:
             self.require_payload_bound(payload)
@@ -578,7 +583,31 @@ class ResultService:
         # Durability: file and directory. The result id is returned to the
         # client as the gateway's own record of what it did, so the name has
         # to resolve after a crash, not just the bytes behind it.
-        atomic_publish(self._path(result_id), encoded, fsync=True)
+        # Payload identity is exact canonical JSON bytes, not semantic equality.
+        # Observation identity, timestamps, attribution and coverage stay separate.
+        full_envelope = {**envelope, "result": dict(envelope["result"])}
+        full_envelope["data" if outcome == "ok" else "error"] = full_payload
+        full_envelope["page"] = (
+            dict(page) if page is not None else self._page(full_payload)
+        )
+        full_envelope["meta"] = {
+            **metadata,
+            **full_meta,
+        }
+        full_envelope["result"]["sha256"] = self._digest(full_envelope)
+        payload_bytes = _canonical(full_payload)
+        payload_sha256 = hashlib.sha256(payload_bytes).hexdigest()
+        retain(self.payloads_root, payload_bytes)
+        observation = {
+            "schema": "sinnix.gateway-observation.v1",
+            "payload_sha256": payload_sha256,
+            "envelope": {
+                key: value
+                for key, value in full_envelope.items()
+                if key not in {"data", "error"}
+            },
+        }
+        atomic_publish(self._path(result_id), _canonical(observation), fsync=True)
         return envelope
 
     def finish_snapshot(self, writer: ResultSnapshotWriter) -> dict[str, Any]:
@@ -672,6 +701,28 @@ class ResultService:
             return self._read_snapshot(result_id)
         except (OSError, json.JSONDecodeError) as exc:
             raise ResultError("malformed result snapshot") from exc
+        if envelope.get("schema") == "sinnix.gateway-observation.v1":
+            digest = envelope.get("payload_sha256")
+            stored = envelope.get("envelope")
+            if (
+                not isinstance(digest, str)
+                or len(digest) != 64
+                or any(c not in "0123456789abcdef" for c in digest)
+                or not isinstance(stored, dict)
+                or stored.get("result", {}).get("principal") != self.principal.name
+            ):
+                raise ResultError("malformed or unavailable result snapshot")
+            try:
+                payload_bytes = (self.payloads_root / digest).read_bytes()
+                if hashlib.sha256(payload_bytes).hexdigest() != digest:
+                    raise ValueError("payload digest mismatch")
+                payload = json.loads(payload_bytes)
+            except (OSError, ValueError) as exc:
+                raise ResultError("malformed result payload") from exc
+            envelope = {**stored, "data": None, "error": None}
+            envelope["data" if stored["result"]["outcome"] == "ok" else "error"] = (
+                payload
+            )
         result = envelope.get("result")
         if (
             not isinstance(result, dict)

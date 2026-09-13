@@ -1,7 +1,7 @@
 """The gateway's job owner: agentctl's launch and batch routes, called in process.
 
 A job is a pueue task and a batch is a run manifest. Direct adapter calls
-return bounded mappings and raise typed owner errors.
+return owner mappings and raise typed owner errors.
 """
 
 from __future__ import annotations
@@ -154,6 +154,20 @@ def job_payload(job: Mapping[str, Any]) -> dict[str, Any]:
         "enqueued_at": job.get("enqueued_at"),
         "started_at": job.get("started_at"),
         "ended_at": job.get("ended_at"),
+        **{
+            key: job[key]
+            for key in (
+                "attempt",
+                "artifacts",
+                "attempts",
+                "attempt_count",
+                "next_attempt_offset",
+                "queue_present",
+                "outcome",
+                "reused",
+            )
+            if key in job
+        },
     }
 
 
@@ -286,23 +300,21 @@ class LocalJobs:
         except ValueError as error:
             raise JobOwnerError(ErrorCode.INVALID_ARGUMENT, str(error)) from error
         try:
-            encoded = json.dumps(
-                payload, sort_keys=True, separators=(",", ":")
-            ).encode()
+            json.dumps(payload, sort_keys=True, separators=(",", ":"))
         except (TypeError, ValueError) as error:
             raise JobOwnerError(
                 ErrorCode.RESULT_INVALID, "job owner response is not JSON serializable"
             ) from error
-        if len(encoded) > 262_144:
-            raise JobOwnerError(
-                ErrorCode.RESOURCE_EXHAUSTED, "job owner response exceeded its bound"
-            )
         return payload
 
     # These methods deliberately accept keyword arguments so Runtime can pass
     # a typed operation's fields without constructing an envelope.
     def start(self, **arguments: Any) -> dict[str, Any]:
         return self._call(self._start, arguments)
+
+    def reconcile_start(self, owner_request_key: str) -> dict[str, Any] | None:
+        job = launch.lookup_operation_request(self.config, owner_request_key)
+        return job_payload(job) if job is not None else None
 
     def get(self, **arguments: Any) -> dict[str, Any]:
         return self._call(self._get, arguments)
@@ -394,6 +406,11 @@ class LocalJobs:
             operation,
             workspace=workspace,
             extra_argv=extra_argv,
+            **(
+                {"owner_request_key": arguments["owner_request_key"]}
+                if arguments.get("owner_request_key") is not None
+                else {}
+            ),
         )
         return job_payload(job)
 
@@ -403,6 +420,11 @@ class LocalJobs:
                 _require_int(arguments, "job_id"),
                 self.config,
                 _launch_reference(arguments),
+                **{
+                    key: arguments[key]
+                    for key in ("attempt", "attempt_offset", "attempt_limit")
+                    if arguments.get(key) is not None
+                },
             )
         )
 
@@ -421,25 +443,38 @@ class LocalJobs:
         reference = _launch_reference(arguments)
         offset = int(arguments.get("offset") or 0)
         max_bytes = int(arguments.get("max_bytes") or MAX_LOG_BYTES)
-        task = launch.addressed(job_id, reference)
-        raw = launch.task_logs(self.config, task).encode()
-        window = raw[offset : offset + max_bytes]
+        page = launch.read_job_artifact(
+            self.config,
+            job_id,
+            reference,
+            attempt=arguments.get("attempt"),
+            offset=offset,
+            limit=max_bytes,
+        )
+        view = launch.get_job(job_id, self.config, reference, attempt=page["attempt"])
         return {
-            "job_id": str(task.task_id),
-            "launch_reference": launch.launch_reference(task),
-            "content": window.decode("utf-8", "replace"),
-            "offset": offset,
+            **job_payload(view),
+            **page,
+            "content": page["text"],
             "max_bytes": max_bytes,
-            "truncated": offset + len(window) < len(raw),
+            "truncated": page["next_offset"] is not None,
         }
 
     def _result(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         job_id = _require_int(arguments, "job_id")
-        observed = launch.result(self.config, job_id, _launch_reference(arguments))
+        observed = launch.result(
+            self.config,
+            job_id,
+            _launch_reference(arguments),
+            attempt=arguments.get("attempt"),
+            offset=int(arguments.get("offset") or 0),
+            limit=int(arguments.get("max_bytes") or MAX_LOG_BYTES),
+        )
         return {
             **job_payload(observed),
             "kind": observed.get("kind"),
             "value": observed.get("value"),
+            "page": observed.get("page"),
         }
 
     def _cancel(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
