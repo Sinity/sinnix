@@ -32,16 +32,7 @@ let
   manifestPath = "${dataDir}/manifest.json";
   username = config.sinnix.user.name;
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
-
-  machineTelemetry = pkgs.writeTextFile {
-    name = "machine-telemetry";
-    destination = "/bin/machine-telemetry";
-    executable = true;
-    text = ''
-      #!${pkgs.python3.withPackages (p: [ p.nvidia-ml-py scriptPkgs.sinnix-lib ])}/bin/python3
-    ''
-    + builtins.readFile ../../pkgs/machine-telemetry/collector.py;
-  };
+  machineTelemetry = scriptPkgs.machine-telemetry;
 in
 mkServiceModule {
   name = "machine-telemetry";

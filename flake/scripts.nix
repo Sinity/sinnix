@@ -373,6 +373,10 @@ let
       inherit sinnix-lib;
     };
 
+    machine-telemetry = pkgs.callPackage ../pkgs/machine-telemetry/pkg.nix {
+      inherit sinnix-lib;
+    };
+
     sinnix-ops-reducer = pkgs.callPackage ../pkgs/sinnix-ops-reducer/pkg.nix {
       inherit sinnix-lib;
       kittyPackage = pkgs.kitty;

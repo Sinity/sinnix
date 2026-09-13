@@ -96,6 +96,9 @@
         # test_project_tree_and_read_reject_symlink_escape ("DID NOT RAISE
         # ProjectError"; 1 failed, 23 passed); reverted after confirming red.
         sinnix-agent-gateway-suite = sinnixScriptRegistry.packageSet.sinnix-agent-gateway;
+        # The deployed telemetry executable is now a real Python package;
+        # its checkPhase covers the collector code that service launches.
+        machine-telemetry-suite = sinnixScriptRegistry.packageSet.machine-telemetry;
         sqlite-backup-package = sinnixScriptRegistry.packageSet.sinnix-sqlite-backup;
 
         # The shared library every other Python package here depends on, so
