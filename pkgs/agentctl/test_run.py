@@ -263,6 +263,9 @@ def test_a_successful_command_spools_its_start_and_finish(tmp_path: Path) -> Non
     assert spooled[0]["job_id"] == "job-a"
     assert spooled[1]["outcome"] == "success"
     assert outcome_of(tmp_path)["outcome"] == "success"
+    outcome = outcome_path_for(tmp_path / "job-a.log")
+    assert outcome.stat().st_mode & 0o777 == 0o600
+    assert not list(outcome.parent.glob(f".{outcome.name}.atomic-tmp-*"))
 
 
 def test_worker_exports_queue_identity_to_the_child(
@@ -811,6 +814,9 @@ def test_a_vanished_working_directory_refuses_before_running(tmp_path: Path) -> 
 
     assert "working directory is gone" in log_of(tmp_path)
     assert not (tmp_path / "ran").exists()
+    outcome = outcome_path_for(tmp_path / "job-a.log")
+    assert outcome.stat().st_mode & 0o777 == 0o600
+    assert not list(outcome.parent.glob(f".{outcome.name}.atomic-tmp-*"))
 
 
 def test_the_launch_input_survives_for_a_restart(tmp_path: Path) -> None:
