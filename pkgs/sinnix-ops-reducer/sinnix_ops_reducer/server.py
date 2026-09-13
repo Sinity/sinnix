@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
+from sinnix_lib.atomic import atomic_publish
 from sinnix_lib.http import RequestBodyError, read_json_object
 from sinnix_lib.systemd import sd_notify, watchdog_period
 
@@ -43,11 +44,17 @@ def ensure_token(path: Path) -> str:
         token = path.read_text(encoding="utf-8").strip()
     except OSError:
         token = ""
-    if not token:
-        token = secrets.token_urlsafe(32)
-        path.write_text(token + "\n", encoding="utf-8")
+    if token:
+        path.chmod(0o600)
+        return token
+    candidate = secrets.token_urlsafe(32)
+    if atomic_publish(path, (candidate + "\n").encode(), fsync=True, mode=0o600, exclusive=True):
+        return candidate
+    winner = path.read_text(encoding="utf-8").strip()
+    if not winner:
+        raise RuntimeError("token creation race left no usable token")
     path.chmod(0o600)
-    return token
+    return winner
 
 
 class Handler(BaseHTTPRequestHandler):
