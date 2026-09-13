@@ -292,6 +292,68 @@ def test_write_schema_round_trips_the_embedded_document(tmp_path: Path) -> None:
     assert json.loads(written.read_text()) == results.WORKER_SCHEMA
 
 
+def test_codex_schema_requires_nullable_transport_placeholders(tmp_path: Path) -> None:
+    written = results.write_schema(tmp_path / "x" / "worker.schema.json", "worker", codex_strict=True)
+    schema = json.loads(written.read_text())
+    assert set(schema["required"]) == set(schema["properties"])
+    segment = schema["properties"]["model_segments"]["items"]
+    assert set(segment["required"]) == set(segment["properties"])
+    assert set(segment["properties"]["actual_executor_model"]["type"]) == {"string", "null"}
+
+
+def test_load_result_drops_codex_only_null_placeholders(tmp_path: Path) -> None:
+    value = worker_result(
+        schema_version=2,
+        planned_model="gpt-5.6",
+        execution="queued",
+        parent_session_ref=None,
+        child_session_ref=None,
+        attempt=1,
+        actual_executor_model=None,
+        actual_executor_observed_by=None,
+        model_segments=[
+            {
+                "attempt": 1,
+                "planned_model": "gpt-5.6",
+                "actual_executor_model": None,
+                "actual_executor_observed_by": None,
+                "measured_usage": None,
+            }
+        ],
+        measured_usage=None,
+        beads=[
+            {
+                "id": "fx-1",
+                "bead_revision": "sha256:fixture",
+                "acceptance_digest": "sha256:acceptance",
+                "criteria": [
+                    {
+                        "ac_id": "fx-1/ac-1",
+                        "text": "tests pass",
+                        "status": "satisfied",
+                        "evidence": "pytest -q",
+                    }
+                ],
+            }
+        ],
+        verification=[
+            {
+                "command": "pytest -q",
+                "receipt": "3 passed",
+                "tested_sha": SHA,
+                "status": "passed",
+                "coverage": {"ac_ids": ["fx-1/ac-1"], "scope": "fixture"},
+            }
+        ],
+    )
+    path = tmp_path / "codex.json"
+    path.write_text(json.dumps(value))
+    loaded, errors = results.load_result(path, kind="worker")
+    assert errors == []
+    assert loaded is not None and "actual_executor_model" not in loaded
+    assert loaded["measured_usage"] is None
+
+
 @pytest.mark.skipif(
     not SCHEMA_DIR.is_dir(), reason="agent schemas are outside this checkout"
 )

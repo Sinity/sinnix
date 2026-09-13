@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import re
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -160,6 +161,67 @@ JUDGE_SCHEMA: dict[str, Any] = {
 }
 
 SCHEMAS: dict[str, dict[str, Any]] = {"worker": WORKER_SCHEMA, "judge": JUDGE_SCHEMA}
+
+
+def codex_output_schema(kind: str) -> dict[str, Any]:
+    """Make a transport-only strict schema accepted by Codex structured output."""
+    try:
+        schema = deepcopy(SCHEMAS[kind])
+    except KeyError as exc:
+        raise ValueError(f"unknown schema kind: {kind}") from exc
+
+    def nullable(node: dict[str, Any]) -> None:
+        value_type = node.get("type")
+        if isinstance(value_type, str):
+            node["type"] = [value_type, "null"]
+        elif isinstance(value_type, list) and "null" not in value_type:
+            node["type"] = [*value_type, "null"]
+
+    def visit(node: dict[str, Any]) -> None:
+        properties = node.get("properties")
+        if isinstance(properties, dict):
+            original_required = set(node.get("required") or ())
+            for name, child in properties.items():
+                if isinstance(child, dict):
+                    visit(child)
+                    if name not in original_required:
+                        nullable(child)
+            node["required"] = list(properties)
+        items = node.get("items")
+        if isinstance(items, dict):
+            visit(items)
+
+    visit(schema)
+    return schema
+
+
+def _drop_transport_nulls(schema: Mapping[str, Any], value: Any) -> Any:
+    """Remove strict-output null placeholders invalid in the base contract."""
+    if isinstance(value, list):
+        items = schema.get("items")
+        return [
+            _drop_transport_nulls(items, item) if isinstance(items, Mapping) else item
+            for item in value
+        ]
+    if not isinstance(value, dict):
+        return value
+    properties = schema.get("properties")
+    if not isinstance(properties, Mapping):
+        return value
+    normalized: dict[str, Any] = {}
+    for name, item in value.items():
+        child = properties.get(name)
+        if not isinstance(child, Mapping):
+            normalized[name] = item
+            continue
+        value_type = child.get("type")
+        permits_null = value_type == "null" or (
+            isinstance(value_type, list) and "null" in value_type
+        )
+        if item is None and not permits_null:
+            continue
+        normalized[name] = _drop_transport_nulls(child, item)
+    return normalized
 
 _TYPES: dict[str, tuple[type, ...]] = {
     "object": (dict,),
@@ -313,15 +375,17 @@ def load_result(path: Path, *, kind: str) -> tuple[Any, list[str]]:
         return None, [f"{path}: not JSON ({error})"]
     if isinstance(value, dict) and "structured_output" in value:
         value = value["structured_output"]
+    value = _drop_transport_nulls(SCHEMAS[kind], value)
     if kind == "worker":
         return value, validate_worker_result(value)
     return value, validate(SCHEMAS[kind], value)
 
 
-def write_schema(path: Path, kind: str) -> Path:
+def write_schema(path: Path, kind: str, *, codex_strict: bool = False) -> Path:
     """Write ``kind``'s schema document for a backend's structured-output flag."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(SCHEMAS[kind], indent=2) + "\n")
+    schema = codex_output_schema(kind) if codex_strict else SCHEMAS[kind]
+    path.write_text(json.dumps(schema, indent=2) + "\n")
     return path
 
 
