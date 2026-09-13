@@ -2,6 +2,7 @@
 # @sinnix-package
 # description: Compose, apply and clear Hyprland screen shaders from the dots library
 # runtimeInputs: hyprland glslang systemd
+# pythonPackages: @sinnix-lib
 
 """Screen-shader playground for Hyprland.
 
@@ -45,6 +46,8 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+
+from sinnix_lib.atomic import atomic_publish
 
 RUNTIME = Path(os.environ.get("XDG_RUNTIME_DIR", "/run/user/1000")) / "sinnix" / "shader"
 STATE = RUNTIME / "state.json"
@@ -244,7 +247,7 @@ def read_state() -> dict:
 
 def write_state(state: dict) -> None:
     RUNTIME.mkdir(parents=True, exist_ok=True)
-    STATE.write_text(json.dumps(state), encoding="utf-8")
+    atomic_publish(STATE, json.dumps(state).encode(), fsync=True, mode=0o600)
 
 
 def baseline() -> dict:
@@ -381,7 +384,7 @@ def apply(
     # its own filename rather than rewriting one path in place.
     serial = int(state.get("serial", 0)) + 1
     composed = RUNTIME / f"composed-{serial}.glsl"
-    composed.write_text(source, encoding="utf-8")
+    atomic_publish(composed, source.encode(), fsync=True, mode=0o644)
     for stale in RUNTIME.glob("composed-*.glsl"):
         if stale != composed:
             stale.unlink(missing_ok=True)
