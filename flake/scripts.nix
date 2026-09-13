@@ -445,7 +445,9 @@ let
       scorePackage = discovered.registry.sinnix-score.package;
     };
 
-    sinnix-capture-screen = pkgs.callPackage ../pkgs/capture-screen/pkg.nix { };
+    sinnix-capture-screen = pkgs.callPackage ../pkgs/capture-screen/pkg.nix {
+      inherit sinnix-lib;
+    };
 
     # Xiaomi cloud health witness: pinned GPL-3 upstream client + our
     # orchestration entry, run under Bun (pkgs/sinnix-xiaomi-witness).

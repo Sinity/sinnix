@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+from pathlib import Path
 
 from PIL import Image
 from sinnix_capture_screen import capture as capture_module
@@ -113,3 +114,40 @@ def test_run_grim_returns_stderr_as_failure_reason(monkeypatch) -> None:
     png, err = capture_module.run_grim("grim", "DP-3", None)
     assert png is None
     assert "mutually exclusive" in err
+
+
+def test_write_frame_publishes_a_complete_private_frame(tmp_path: Path, monkeypatch) -> None:
+    class Result:
+        returncode = 0
+        stderr = ""
+
+    monkeypatch.setattr(capture_module.subprocess, "run", lambda *_args, **_kwargs: Result())
+    frame = capture_module.write_frame(
+        payload={"ts": 1},
+        webp_bytes=b"RIFFframe",
+        capture_root=tmp_path,
+        lane="screen",
+        sinnix_capture_bin="sinnix-capture",
+        filename="frame.webp",
+    )
+
+    assert frame == tmp_path / "screen" / "frames" / "frame.webp"
+    assert frame.read_bytes() == b"RIFFframe"
+    assert frame.stat().st_mode & 0o777 == 0o600
+    assert not list(frame.parent.glob(".*.atomic-tmp-*"))
+
+
+def test_write_frame_returns_none_when_envelope_write_fails(tmp_path: Path, monkeypatch) -> None:
+    class Result:
+        returncode = 1
+        stderr = "capture writer failed"
+
+    monkeypatch.setattr(capture_module.subprocess, "run", lambda *_args, **_kwargs: Result())
+    assert capture_module.write_frame(
+        payload={"ts": 1},
+        webp_bytes=b"RIFFframe",
+        capture_root=tmp_path,
+        lane="screen",
+        sinnix_capture_bin="sinnix-capture",
+        filename="frame.webp",
+    ) is None
