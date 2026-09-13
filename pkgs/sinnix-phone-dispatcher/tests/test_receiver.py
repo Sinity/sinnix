@@ -13,12 +13,14 @@ write) fails test_envelope_seq_is_continuous_across_lines.
 
 from __future__ import annotations
 
+import base64
 import json
 import socket
 import time
 from pathlib import Path
 
 import pytest
+from sinnix_phone_dispatcher import receiver
 from sinnix_phone_dispatcher.receiver import (
     _PHONE_STREAM_READ_LIMIT,
     _PhoneStreamDemuxer,
@@ -115,3 +117,36 @@ def test_ingest_line_demuxes_by_kind_into_separate_lanes(tmp_path: Path) -> None
     demux.ingest_line(json.dumps({"kind": "notification", "title": "x"}))
     assert (tmp_path / "phone-battery").is_dir()
     assert (tmp_path / "phone-notification").is_dir()
+
+
+def test_speech_recording_is_durably_published_before_transcription(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(receiver, "_phone_stream_transcribe", lambda _wav: None)
+    lane = receiver._PhoneSpeechLane(tmp_path)
+
+    result = lane.ingest({
+        "audio_b64": base64.b64encode(b"\x00\x00").decode(),
+        "rate": 16000,
+        "seconds": 0.1,
+    })
+
+    recording = lane.blob_dir / result["audio_file"]
+    assert recording.read_bytes().startswith(b"RIFF")
+    assert recording.stat().st_mode & 0o777 == 0o660
+    assert not list(lane.blob_dir.glob("*.part"))
+    assert not list(lane.blob_dir.glob(".*.atomic-tmp-*"))
+
+
+def test_speech_publish_failure_leaves_no_claimed_recording(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lane = receiver._PhoneSpeechLane(tmp_path)
+
+    def fail(*_args, **_kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(receiver, "atomic_publish", fail)
+    with pytest.raises(OSError, match="disk full"):
+        lane.ingest({"audio_b64": base64.b64encode(b"\x00\x00").decode()})
+    assert list(lane.blob_dir.iterdir()) == []

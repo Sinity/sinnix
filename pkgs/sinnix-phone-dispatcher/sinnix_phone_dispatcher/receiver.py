@@ -35,6 +35,7 @@ import uuid
 from pathlib import Path
 
 from sinnix_capture.writer import CaptureWriter
+from sinnix_lib.atomic import atomic_publish
 
 #: The STT hub. Loopback: this process and the hub are the same host.
 _STT_ENDPOINT = "http://127.0.0.1:8090/v1/audio/transcriptions"
@@ -140,9 +141,12 @@ class _PhoneSpeechLane:
 
         # Written before transcription, deliberately: the recording must
         # survive a transcription failure.
-        part = self.blob_dir / (name + ".part")
-        part.write_bytes(wav)
-        part.rename(self.blob_dir / name)
+        atomic_publish(
+            self.blob_dir / name,
+            wav,
+            fsync=True,
+            mode=0o660,
+        )
         obj["audio_file"] = name
         obj["bytes"] = len(wav)
 
