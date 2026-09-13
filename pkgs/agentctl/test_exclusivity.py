@@ -3,12 +3,39 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 from agentctl import backpressure, launch
-from agentctl.config import Config
+from agentctl.config import Config, PoolPolicy
 from agentctl.projects import ProjectAdapter, load_project_adapter
-from conftest import FakePueue
+from conftest import FakePueue, read_launch
+
+
+def heavy_policy(config: Config) -> Config:
+    return replace(
+        config,
+        pools={
+            "agent": PoolPolicy(parallel=2),
+            "pytest": PoolPolicy(parallel=2),
+            "pytest-heavy": PoolPolicy(parallel=1, exclusive_with=("agent",)),
+        },
+    )
+
+
+def agent_task(config: Config, project: ProjectAdapter) -> int:
+    return launch.enqueue(
+        config,
+        project=project,
+        operation="worker",
+        label="fixture:worker",
+        group="agent",
+        argv=("true",),
+        working_directory=project.root,
+        timeout_seconds=60,
+        result_kind="exit",
+        environment={},
+    )["job_id"]
 
 
 def _legacy_stash(
@@ -144,3 +171,49 @@ def test_reordered_id_or_a_manual_restash_after_release_is_ambiguous(
         "unverified-hold-identity",
         "no-unresolved-hold-event",
     }
+
+
+def test_heavy_verification_waits_for_an_agent_wave(
+    fake_pueue: FakePueue, config: Config, project_root: Path
+) -> None:
+    project = load_project_adapter(project_root)
+    config = heavy_policy(config)
+    fake_pueue.groups["pytest-heavy"] = 1
+    worker = agent_task(config, project)
+    corpus = replace(project.operation("verify"), pool="pytest-heavy")
+
+    held = launch.start_operation(config, project, corpus)["job_id"]
+
+    task = fake_pueue.task(held)
+    assert task.status == "Stashed"
+    assert read_launch(config, task)["hold"]["waiting_for"] == [worker]
+
+
+def test_affected_verification_stays_admissible_beside_agents(
+    fake_pueue: FakePueue, config: Config, project_root: Path
+) -> None:
+    project = load_project_adapter(project_root)
+    config = heavy_policy(config)
+    agent_task(config, project)
+
+    affected = launch.start_operation(config, project, project.operation("verify"))["job_id"]
+
+    assert fake_pueue.task(affected).group == "pytest"
+    assert fake_pueue.task(affected).status == "Running"
+
+
+def test_heavy_hold_releases_after_the_agent_wave_drains(
+    fake_pueue: FakePueue, config: Config, project_root: Path
+) -> None:
+    project = load_project_adapter(project_root)
+    config = heavy_policy(config)
+    fake_pueue.groups["pytest-heavy"] = 1
+    worker = agent_task(config, project)
+    corpus = replace(project.operation("verify"), pool="pytest-heavy")
+    held = launch.start_operation(config, project, corpus)["job_id"]
+    fake_pueue.kill_directly(worker)
+
+    result = launch.release_holds(config)
+
+    assert [row["task_id"] for row in result["released"]] == [held]
+    assert fake_pueue.task(held).status == "Queued"

@@ -380,6 +380,17 @@ rec {
         ManagedOOMMemoryPressureLimit = "50%";
         ManagedOOMMemoryPressureDurationSec = "30s";
       };
+      agentctl-pytest-heavy = {
+        IOAccounting = true;
+        CPUWeight = 200;
+        IOWeight = 200;
+        MemoryHigh = "6G";
+        MemoryMax = "8G";
+        MemorySwapMax = "0";
+        ManagedOOMMemoryPressure = "kill";
+        ManagedOOMMemoryPressureLimit = "50%";
+        ManagedOOMMemoryPressureDurationSec = "30s";
+      };
       # Short, bounded pytest selections (one file, one worker's focused
       # check): a separate pool so they never queue behind the corpus.
       agentctl-pytest-quick = {

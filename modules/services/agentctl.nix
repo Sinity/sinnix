@@ -60,6 +60,11 @@ mkServiceModule {
             type = lib.types.ints.positive;
             description = "How many tasks this pueue group admits at once.";
           };
+          exclusiveWith = lib.mkOption {
+            type = lib.types.listOf lib.types.str;
+            default = [ ];
+            description = "Pools whose live work holds new launches in this pool until they drain.";
+          };
         };
       }
     );
@@ -69,6 +74,10 @@ mkServiceModule {
       # a paused `agent` pool holds back new workers without stalling landings.
       land-agent.parallel = 2;
       pytest.parallel = 2;
+      pytest-heavy = {
+        parallel = 1;
+        exclusiveWith = [ "agent" ];
+      };
       # Bounded selections stay admissible beside a wave: a worker runs its own
       # focused tests here while its own task occupies the agent pool.
       pytest-quick.parallel = 2;
@@ -81,7 +90,7 @@ mkServiceModule {
       # Polylogue lands several runs at once; each run still lands one at a time.
       polylogue-land.parallel = 3;
     };
-    description = "Each pueue group's parallelism, which `agentctl pools apply` writes into the running daemon.";
+    description = "Each pueue group's width and cross-pool admission policy.";
   };
   extraOptions.workerContract = lib.mkOption {
     type = lib.types.str;
@@ -101,7 +110,10 @@ mkServiceModule {
           worker_contract = cfg.workerContract;
           event_spool = eventSpool;
           agentctl = "${scriptPkgs.agentctl}/bin/agentctl";
-          pools = lib.mapAttrs (_name: pool: pool.parallel) cfg.pools;
+          pools = lib.mapAttrs (_name: pool: {
+            inherit (pool) parallel;
+            exclusive_with = pool.exclusiveWith;
+          }) cfg.pools;
         }
       );
     in

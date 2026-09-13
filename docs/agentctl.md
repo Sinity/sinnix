@@ -157,7 +157,7 @@ the command's own stdout. A launch input naming a scratch path outside its
 tier's root is refused (exit 125): the wrapper removes what it created and
 nothing else. `scratch = "none"`, the default, allocates nothing.
 
-Before starting in a pool whose parallelism is 1 (`pytest`, `bulk`), the
+Before starting in a pool whose parallelism is 1 (`pytest-heavy`, `bulk`), the
 wrapper lists the active units of that pool's slice. A unit whose pueue task
 is terminal is an orphan of a killed wrapper and is stopped (`settled_orphan`
 in the log); a unit whose task is still running, or that no queued task
@@ -170,8 +170,8 @@ real one, plus `AGENTCTL_CONFIG` set to the configuration file this process
 read, so the agentctl calls inside a task (`batch result`, `batch land`) see
 the same projects, state directory and event spool.
 
-Groups admit work: `agent:12 land-agent:2 pytest:2 pytest-quick:2 bulk:2
-normal:2 interactive:4`, plus `<project>-land` of parallelism 1 per
+Groups admit work: `agent:12 land-agent:2 pytest:2 pytest-heavy:1
+pytest-quick:2 bulk:2 normal:2 interactive:4`, plus `<project>-land` of parallelism 1 per
 configured project (`polylogue-land:3`), declared by
 `sinnix.services.agentctl.pools` and carried in `/etc/sinnix/agentctl.json`.
 pueued keeps its groups in its own state, so `agentctl pools apply` writes
@@ -182,10 +182,12 @@ pueued instead would mark every running task Killed. Every part of a unit
 name comes from `pueue status`, from a command that is the wrapper and one
 launch input and nothing else.
 
-Pool declarations contain only parallelism. Pueue is the single queue
-authority: actual task dependencies, external landing stashes and operator
-stashes are preserved exactly as queued. Agentctl no longer adds cross-pool
-admission locks, synthetic stashes, or nested-launch refusals.
+Pueue remains the queue authority. Pool declarations also name the exceptional
+cross-pool admission rule: `pytest-heavy` excludes `agent`, so a full corpus
+job waits behind an implementation wave and a later agent waits behind the
+corpus. Agentctl records only those holds in the launch input and releases
+them after the partner pool drains; operator stashes and dependencies remain
+untouched. Bounded affected verification uses the nonexclusive `pytest` pool.
 
 At the first backpressure pass after this upgrade, agentctl may retire an old
 cross-pool stash only when the task is non-terminal and still stashed _and_
@@ -207,8 +209,8 @@ the ones that bound what the task may consume (`MemoryMax`, `MemoryHigh`,
 reach (`ReadOnlyPaths`, `ReadWritePaths`, `InaccessiblePaths`, one absolute
 path each), and a launch must not start a unit of its own: it would land
 outside the task's cgroup, where a cancel cannot reach it. `agentctl.slice` and
-`agentctl-agent.slice` are never systemd-oomd or swap victims; the pytest
-and bulk slices have fixed memory, swap, CPU and IO budgets,
+`agentctl-agent.slice` are never systemd-oomd or swap victims; the pytest,
+pytest-heavy and bulk slices have fixed memory, swap, CPU and IO budgets,
 `MemorySwapMax=0`, and are killed by systemd-oomd at their own memory
 pressure; they do not choose capacity from instantaneous free RAM.
 
@@ -219,8 +221,10 @@ signal is known to have cleared. Unavailable or malformed PSI never reads as
 zero and cannot reopen a pause. The spool projection uses an inode/offset
 checkpoint, rebuilding from current history after checkpoint loss and
 retaining ownership across spool rotation or truncation.
-The bounded `pytest-quick` pool remains admissible under IO pressure; memory
-pressure can still close it. Pausing admission leaves running tasks active.
+The heavy pool closes before other test and bulk pools under IO or memory
+pressure. The bounded `pytest` and `pytest-quick` pools remain admissible
+under IO pressure; memory pressure can still close them. Pausing admission
+leaves running tasks active.
 Every pause event carries `"owner": "agentctl"` and
 the group, and a group is resumed only when its most recent pause event in
 the spool is agentctl's own: an operator's `pueue pause -g <group>` stays

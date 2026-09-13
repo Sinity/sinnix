@@ -19,10 +19,11 @@ import stat
 import subprocess
 import time
 import uuid
+from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Iterator, Mapping, Sequence
 
-from . import artifacts, gitcmd, manifest, pueue
+from . import artifacts, gitcmd, manifest, pools, pueue
 from .config import Config
 from .launch_input import scratch_path, write_input
 from .limits import CALL_TIMEOUT_SECONDS, SHORT_ID, SYSTEMCTL_TIMEOUT_SECONDS
@@ -52,10 +53,12 @@ QUEUE_RUN_EXECUTABLE = "agentctl-run"
 MAX_LAUNCH_INPUT_BYTES = 1_048_576
 # The label kinds under which a batch queues agents rather than declared operations.
 AGENT_OPERATIONS = frozenset({"worker", "resume", "integrate", "review"})
-# A previous runtime used this marker to stash tasks for cross-pool exclusion.
-# New launches never write it. It remains only so one bounded retirement pass
-# can identify those historical holds without touching ordinary stashes.
+# A stashed task written by AgentCTL's admission policy carries this marker.
 HOLD_REASON = "pool-exclusivity"
+LAUNCHER_POOL_VARIABLE = "AGENTCTL_POOL"
+ADMISSION_LOCK_NAME = "admission.lock"
+ADMISSION_LOCK_SECONDS = 60.0
+ADMISSION_LOCK_POLL_SECONDS = 0.05
 # How long a wait blocks on one task id before re-reading which id the job
 # it waits for is at.
 WAIT_SLICE_SECONDS = 5.0
@@ -236,39 +239,139 @@ def enqueue(
     if result_kind != "exit":
         launch["result_path"] = str(config.jobs_dir / f"{reference}.result")
     input_path = config.inputs_dir / f"{reference}.json"
-    write_input(input_path, launch)
-    if before_enqueue is not None:
-        before_enqueue(reference)
-    try:
-        task_id = pueue.add(
-            group=group,
-            label=label,
-            command=(QUEUE_RUN_EXECUTABLE, str(input_path)),
-            working_directory=working_directory,
-            after=after,
-            stashed=stashed,
-        )
-    except PueueGroupError:
-        # `pueue add` checks the live group catalog before raising this typed
-        # error, so no task could have been admitted under the missing group.
-        if not (owner_request_key is not None and after):
-            input_path.unlink(missing_ok=True)
-        raise
-    except PueueError as error:
-        # The daemon can accept a task before its client loses the response.
-        # Keep the input so a caller can reconcile its exact launch reference
-        # against pueue before trying to submit another task.
-        raise EnqueueUncertain(reference, error) from error
+    with admission_lock(config):
+        hold = None if stashed else _admission_hold(config, group, label=label)
+        if hold is not None:
+            launch["hold"] = hold
+        write_input(input_path, launch)
+        if before_enqueue is not None:
+            before_enqueue(reference)
+        try:
+            task_id = pueue.add(
+                group=group,
+                label=label,
+                command=(QUEUE_RUN_EXECUTABLE, str(input_path)),
+                working_directory=working_directory,
+                after=after,
+                stashed=stashed or hold is not None,
+            )
+        except PueueGroupError:
+            if not (owner_request_key is not None and after):
+                input_path.unlink(missing_ok=True)
+            raise
+        except PueueError as error:
+            raise EnqueueUncertain(reference, error) from error
     # The task id goes back into the input so its artifacts can be found
     # after pueue has forgotten the task.
     launch["queue_task_id"] = task_id
     write_input(input_path, launch)
+    if hold is not None:
+        append_event(
+            config.event_spool,
+            {"kind": "pool-hold", "action": "held", "task_id": task_id, **hold},
+        )
     task = pueue.task(task_id)
     return (
         job_view(task)
         if task is not None
         else {"job_id": task_id, "label": label, "reference": reference}
     )
+
+
+@contextmanager
+def admission_lock(config: Config) -> Iterator[None]:
+    """Serialize the queue observation and enqueue that admission depends on."""
+    path = config.state_dir / ADMISSION_LOCK_NAME
+    path.parent.mkdir(parents=True, exist_ok=True)
+    deadline = time.monotonic() + ADMISSION_LOCK_SECONDS
+    with path.open("a", encoding="utf-8") as handle:
+        while True:
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise JobError(f"another launch has held {path} for over 60s")
+                time.sleep(ADMISSION_LOCK_POLL_SECONDS)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+
+
+def _admission_hold(config: Config, group: str, *, label: str) -> dict[str, Any] | None:
+    partners = pools.exclusive_partners(config.pools, group)
+    if not partners:
+        return None
+    launcher = os.environ.get(LAUNCHER_POOL_VARIABLE)
+    if launcher in partners:
+        raise JobError(
+            f"{label} runs in pool {group!r}, which excludes its launcher {launcher!r}"
+        )
+    blocking = pools.blocking_tasks(config.pools, group, pueue.tasks())
+    if not blocking:
+        return None
+    return {
+        "reason": HOLD_REASON,
+        "pool": group,
+        "excluded_by": list(partners),
+        "waiting_for": list(blocking),
+        "held_at": manifest.now(),
+    }
+
+
+def _hold_of(config: Config, task: Task) -> dict[str, Any] | None:
+    if task.status != "Stashed":
+        return None
+    value = _launch_input(config, task)
+    hold = value.get("hold") if value else None
+    if not isinstance(hold, Mapping) or hold.get("reason") != HOLD_REASON:
+        return None
+    return dict(hold)
+
+
+def release_holds(config: Config) -> dict[str, list[dict[str, Any]]]:
+    """Release only AgentCTL-created cross-pool holds whose partners drained."""
+    try:
+        with admission_lock(config):
+            tasks = pueue.tasks()
+            held = {
+                task.task_id: hold
+                for task in tasks.values()
+                if (hold := _hold_of(config, task)) is not None
+            }
+            released: list[dict[str, Any]] = []
+            waiting: list[dict[str, Any]] = []
+            for task_id, hold in sorted(held.items()):
+                task = tasks[task_id]
+                blockers = pools.blocking_tasks(
+                    config.pools,
+                    task.group,
+                    tasks,
+                    task_id=task_id,
+                    held=frozenset(held),
+                )
+                row = {
+                    "task_id": task_id,
+                    "label": task.label,
+                    "pool": task.group,
+                    "excluded_by": list(
+                        pools.exclusive_partners(config.pools, task.group)
+                    ),
+                    "waiting_for": list(blockers),
+                }
+                if blockers:
+                    waiting.append(row)
+                    continue
+                pueue.enqueue(task_id)
+                released.append(row)
+                append_event(
+                    config.event_spool,
+                    {"kind": "pool-hold", "action": "released", **row},
+                )
+            return {"released": released, "waiting": waiting}
+    except (JobError, PueueError) as error:
+        return {"released": [], "waiting": [{"error": str(error)}]}
 
 
 def retire_legacy_holds(
