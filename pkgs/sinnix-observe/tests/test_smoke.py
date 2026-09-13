@@ -72,6 +72,48 @@ def test_systemd_offline_returns_empty() -> None:
     assert row["active_state"] == "active"
 
 
+def test_systemd_collectors_batch_each_manager(monkeypatch) -> None:
+    calls = []
+
+    def show(units, *, user, properties, timeout):
+        calls.append((tuple(units), user, tuple(properties), timeout))
+        return {
+            unit: {"Id": unit, "LoadState": "not-found" if unit == "gone.service" else "loaded"}
+            for unit in units
+        }
+
+    monkeypatch.setattr(systemd, "show_units", show)
+    monkeypatch.setattr(
+        systemd,
+        "managed_units",
+        lambda manager: [f"{manager}.service", "gone.service"],
+    )
+    monkeypatch.setattr(
+        systemd,
+        "observed_slices",
+        lambda: [("system", "system.slice"), ("user", "user.slice")],
+    )
+
+    units = systemd.collect_systemd_units(offline=False)
+    slices = systemd.collect_resource_slices(offline=False)
+
+    assert {(row["manager"], row["unit"]) for row in units} == {
+        ("system", "system.service"),
+        ("user", "user.service"),
+    }
+    assert {(row["manager"], row["unit"]) for row in slices} == {
+        ("system", "system.slice"),
+        ("user", "user.slice"),
+    }
+    assert [(units, user) for units, user, _properties, _timeout in calls] == [
+        (("system.service", "gone.service"), False),
+        (("user.service", "gone.service"), True),
+        (("system.slice",), False),
+        (("user.slice",), True),
+    ]
+    assert all(properties == systemd.UNIT_PROPERTIES and timeout == 3 for _, _, properties, timeout in calls)
+
+
 def test_noctalia_health_fixture(monkeypatch) -> None:
     validated = Result(("noctalia",), 0, "Config is valid", "")
     monkeypatch.setattr(systemd, "run", lambda *_args, **_kwargs: validated)
