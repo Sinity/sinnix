@@ -54,6 +54,7 @@ import sys
 import time
 from pathlib import Path
 
+from sinnix_lib.ledger import append_jsonl
 from sinnix_lib.process import run
 
 HOME = Path.home()
@@ -491,10 +492,8 @@ def main() -> int:
     stamp = {"ts": now, "window_days": args.window_days}
     if not args.no_write:
         out = Path(args.jsonl_out)
-        out.parent.mkdir(parents=True, exist_ok=True)
-        with out.open("a") as fh:
-            for row in rows:
-                fh.write(json.dumps({**stamp, **row}) + "\n")
+        for row in rows:
+            append_jsonl(out, {**stamp, **row})
 
     order = {"unused-in-window": 0, "no-static-consumers": 1, "unknown": 2,
              "referenced-only": 3, "agent-only": 4, "active": 5}
