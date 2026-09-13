@@ -91,7 +91,6 @@ mkServiceModule {
       # backend is computed centrally in ai-control.nix's
       # gpuInferenceConflicts.
       systemd.services.podman-ocr = {
-        partOf = [ "ocr-proxy.service" ];
       };
     };
 } args
