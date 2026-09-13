@@ -129,7 +129,9 @@ class Spool:
 
     def _record(self, token: str) -> None:
         append_jsonl(
-            self.root / self.token_ledger_name, {"token": token, "ts": utc_ts()}
+            self.root / self.token_ledger_name,
+            {"token": token, "ts": utc_ts()},
+            fsync=True,
         )
         self.seen.add(token)
 

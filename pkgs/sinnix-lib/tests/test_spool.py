@@ -3,6 +3,7 @@
 import json
 
 import pytest
+from sinnix_lib import spool as spool_module
 from sinnix_lib.spool import Spool
 
 
@@ -63,3 +64,22 @@ def test_token_ledger_is_jsonl(spool):
     spool.drain(lambda p: None)
     lines = (spool.root / "processed-tokens.jsonl").read_text().splitlines()
     assert json.loads(lines[0])["token"] == "y"
+
+
+def test_successful_processing_syncs_its_deduplication_token(spool, monkeypatch):
+    """The token reaches stable storage before an item becomes done.
+
+    Mutation: drop ``fsync=True`` from ``Spool._record`` and this assertion
+    fails, leaving a crash window where a redelivery can repeat a side effect.
+    """
+    spool.submit("durable", b"1")
+    calls = []
+    original = spool_module.append_jsonl
+
+    def record(*args, **kwargs):
+        calls.append(kwargs)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(spool_module, "append_jsonl", record)
+    assert spool.drain(lambda _item: None)["processed"] == 1
+    assert calls == [{"fsync": True}]
