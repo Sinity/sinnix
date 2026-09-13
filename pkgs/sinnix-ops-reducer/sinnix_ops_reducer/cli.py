@@ -215,10 +215,11 @@ def main() -> None:
     parser.add_argument(
         "--elicit-command",
         default=None,
+        type=feedback.parse_command_argv,
         help=(
             "Command run (coalesced) when a sinnix-elicit record lands in the "
-            "feedback spool, replacing the periodic drain. Given as a full "
-            "argv, space-separated; absent means nothing is triggered."
+            "feedback spool, replacing the periodic drain. Given as a JSON "
+            "argv array; absent means nothing is triggered."
         ),
     )
     parser.add_argument(
@@ -306,9 +307,7 @@ def main() -> None:
         layer.receipts_path,
         agent_jobs=agentctl,
     )
-    elicit = (
-        CoalescingTrigger(args.elicit_command.split()) if args.elicit_command else None
-    )
+    elicit = CoalescingTrigger(args.elicit_command) if args.elicit_command else None
     feedback_spool = FeedbackSpool(layer.feedback_spool_dir, elicit=elicit)
     fds = list(range(3, 3 + int(os.environ.get("LISTEN_FDS", "0"))))
     serve(

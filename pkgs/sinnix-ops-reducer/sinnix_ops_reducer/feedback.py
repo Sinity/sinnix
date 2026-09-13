@@ -61,6 +61,19 @@ ELICIT_MODEL_DIR_DEFAULT = Path("/realm/state/elicit")
 ELICIT_DOMAIN_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
+def parse_command_argv(raw: str) -> list[str]:
+    """Decode the explicitly serialized command contract for a drain."""
+    try:
+        command = json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise ValueError("command must be a JSON argv array") from error
+    if not isinstance(command, list) or not command or not all(
+        isinstance(argument, str) and argument for argument in command
+    ):
+        raise ValueError("command must be a nonempty JSON argv array of strings")
+    return command
+
+
 def resolve_elicit_model(base_dir: Path, domain: str) -> Path | None:
     """The `model.json` path for *domain* under *base_dir*, or None if the
     domain name is not a plain identifier or the resolved path would not
