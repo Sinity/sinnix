@@ -37,8 +37,8 @@ class FakeTransport:
 
 
 class RecordingExecution(OwnerExecution):
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(self, base_environment: dict[str, str] | None = None) -> None:
+        super().__init__(base_environment)
         self.calls: list[tuple[tuple[str, ...], ExecutionProfile]] = []
 
     def run(self, command: Sequence[str], profile: ExecutionProfile) -> ExecutionResult:
@@ -269,13 +269,19 @@ def test_probe_admission_and_observer_lifetime_share_the_capped_call_budget(
     available: bool,
 ) -> None:
     broker = broker_service(tmp_path, "observer")
-    broker.execution = RecordingExecution()
+    broker.execution = RecordingExecution(
+        {
+            "HOME": str(tmp_path),
+            "LANG": "C.UTF-8",
+            "PATH": "/fixture/bin",
+            "DBUS_SESSION_BUS_ADDRESS": f"unix:path={tmp_path}/bus",
+            "XDG_RUNTIME_DIR": str(tmp_path),
+        }
+    )
     if configured_timeout is not None:
         broker.config.mcp_broker_servers["fixture"]["callTimeoutSeconds"] = (
             configured_timeout
         )
-    monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")
-    monkeypatch.setenv("XDG_RUNTIME_DIR", "/run/user/1000")
     monkeypatch.setattr(
         "sinnix_agent_gateway.mcp_broker.stdio_client",
         lambda *_args, **_kwargs: FakeTransport(),
@@ -302,7 +308,7 @@ def test_probe_admission_and_observer_lifetime_share_the_capped_call_budget(
     monkeypatch.setattr("sinnix_agent_gateway.mcp_broker.asyncio.wait_for", wait_for)
     catalog = anyio.run(broker.catalog)
     fixture = next(row for row in catalog["servers"] if row["name"] == "fixture")
-    assert deadlines == [probe_timeout]
+    assert deadlines == [probe_timeout], fixture
     assert f"--property=RuntimeMaxSec={probe_timeout}" in captured_parameters[0].args
     assert fixture["availability"] == ("available" if available else "unavailable")
     if available:

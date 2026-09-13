@@ -113,7 +113,9 @@ def _beads() -> FakeBd:
     )
 
 
+@pytest.mark.parametrize("cleaned", [False, True])
 def test_file_keeps_claim_separate_from_clean_receipt_observation(
+    cleaned: bool,
     config: Config,
     fake_pueue: FakePueue,
     monkeypatch: pytest.MonkeyPatch,
@@ -121,6 +123,8 @@ def test_file_keeps_claim_separate_from_clean_receipt_observation(
 ) -> None:
     project = resolve_project(config, "fixture")
     job_id, reference = _receipt_job(config, fake_pueue, project)
+    if cleaned:
+        launch.clean(config, job_id, reference)
     monkeypatch.setattr(evidence, "SubprocessBdReader", lambda root: _beads())
     monkeypatch.setattr(
         evidence,
@@ -148,6 +152,9 @@ def test_file_keeps_claim_separate_from_clean_receipt_observation(
     assert record["worker_result"]["verification"][0]["receipt"].endswith(reference)
     observation = record["verification"][0]["observation"]
     assert observation["eligible"] is True
+    assert observation["queue_present"] is not cleaned
+    assert observation["attempt"] == 1
+    assert Path(observation["artifacts"]["outcome"]).is_file()
     assert observation["execution_receipt"]["end"] == {
         "head": SHA,
         "tree": "b" * 40,
@@ -294,3 +301,84 @@ def test_evidence_discover_parser_keeps_project_ref_and_limit_explicit() -> None
     assert arguments.project == "fixture"
     assert arguments.reference == "HEAD~3"
     assert arguments.limit == 7
+
+
+@pytest.mark.parametrize("retained", [True, False])
+def test_cleaned_receipt_never_substitutes_an_unrelated_reused_queue_id(
+    config: Config,
+    fake_pueue: FakePueue,
+    retained: bool,
+) -> None:
+    project = resolve_project(config, "fixture")
+    job_id, reference = _receipt_job(config, fake_pueue, project, start_sha="c" * 40)
+    launch.clean(config, job_id, reference)
+    fake_pueue.next_id = job_id
+    unrelated = launch.enqueue(
+        config,
+        project=project,
+        operation="unrelated",
+        label="fixture:unrelated",
+        group="normal",
+        argv=("true",),
+        working_directory=project.root,
+        timeout_seconds=60,
+        result_kind="exit",
+        environment={},
+    )
+    fake_pueue.succeed(unrelated["job_id"])
+    original_outcome = outcome_path_for(config.jobs_dir / f"{reference}.log")
+    other_outcome = outcome_path_for(config.jobs_dir / f"{unrelated['reference']}.log")
+    successful = json.loads(original_outcome.read_text())
+    successful["execution_receipt"]["start"]["head"] = SHA
+    other_outcome.write_text(json.dumps(successful))
+    assert unrelated["job_id"] == job_id
+    claim = {"receipt": f"agentctl://jobs/{job_id}/{reference}"}
+    if not retained:
+        (config.inputs_dir / f"{reference}.json").unlink()
+        with pytest.raises(launch.JobError, match="does not resolve"):
+            evidence._receipt_observation(config, claim, SHA, project_id="fixture")
+        return
+    observation = evidence._receipt_observation(
+        config, claim, SHA, project_id="fixture"
+    )
+    assert observation["reference"] == reference
+    assert observation["operation"] == "check"
+    assert observation["queue_present"] is False
+    assert observation["eligible"] is False
+    assert observation["execution_receipt"]["start"]["head"] == "c" * 40
+    assert any("endpoints" in gap for gap in observation["gaps"])
+
+
+@pytest.mark.parametrize(
+    "damage", ["missing-outcome", "incomplete-endpoint", "other-project"]
+)
+def test_cleaned_receipt_still_requires_complete_project_bound_execution_evidence(
+    config: Config,
+    fake_pueue: FakePueue,
+    damage: str,
+) -> None:
+    project = resolve_project(config, "fixture")
+    job_id, reference = _receipt_job(config, fake_pueue, project)
+    launch.clean(config, job_id, reference)
+    outcome_path = outcome_path_for(config.jobs_dir / f"{reference}.log")
+    if damage == "missing-outcome":
+        outcome_path.unlink()
+    elif damage == "incomplete-endpoint":
+        outcome = json.loads(outcome_path.read_text())
+        outcome["execution_receipt"].pop("end")
+        outcome_path.write_text(json.dumps(outcome))
+    else:
+        input_path = config.inputs_dir / f"{reference}.json"
+        document = json.loads(input_path.read_text())
+        document["project_id"] = "another-project"
+        input_path.write_text(json.dumps(document))
+    claim = {"receipt": f"agentctl://jobs/{job_id}/{reference}"}
+    if damage == "other-project":
+        with pytest.raises(launch.JobError, match="another project"):
+            evidence._receipt_observation(config, claim, SHA, project_id="fixture")
+    else:
+        observation = evidence._receipt_observation(
+            config, claim, SHA, project_id="fixture"
+        )
+        assert observation["eligible"] is False
+        assert observation["gaps"]
