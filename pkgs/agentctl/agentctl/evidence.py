@@ -75,6 +75,10 @@ def _binding_errors(
             errors.append(
                 f"v2 result {bead_id} bead_revision differs from filing snapshot"
             )
+        if actual.get("acceptance_digest") != binding.get("acceptance_digest"):
+            errors.append(
+                f"v2 result {bead_id} acceptance digest differs from filing snapshot"
+            )
         expected_criteria = {
             (criterion.get("ac_id"), criterion.get("text"))
             for criterion in binding.get("criteria") or ()

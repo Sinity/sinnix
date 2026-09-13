@@ -50,9 +50,10 @@ names, and exits with one result document.
 Validated against `dots/claude/agents/schemas/worker.schema.json`:
 
 When every dispatched bead's `evidence_binding.v2_available` is `true`, use
-this v2 shape. Copy each stable `ac_id`, criterion text and `bead_revision`
-exactly from that snapshot; do not make identifiers from text. The requested
-model is `planned_model`. Omit `actual_executor_model` unless the executor
+this v2 shape. Copy each stable `ac_id`, criterion text, `bead_revision`, and
+`acceptance_digest` exactly from that snapshot. A dispatch identity may bind
+one owner-authored whole acceptance field; it identifies the text but does not
+prove its semantic fulfillment. The requested model is `planned_model`. Omit `actual_executor_model` unless the executor
 observed it, and use `null` for unavailable measured usage. `tested_sha` is
 the actual candidate SHA a command tested, not a guessed future integration
 SHA.
@@ -76,6 +77,7 @@ SHA.
     {
       "id": "<bead id>",
       "bead_revision": "<snapshot evidence_binding.bead_revision>",
+      "acceptance_digest": "<snapshot evidence_binding.acceptance_digest>",
       "criteria": [
         {
           "ac_id": "<snapshot evidence_binding.criteria[].ac_id>",
@@ -102,11 +104,12 @@ SHA.
 }
 ```
 
-When any binding is unavailable, file the legacy result shape (without
-`schema_version`) and leave evidence identity unknown. That means Beads needs
-authoring first: `metadata.acceptance_criteria` is one authoritative nonempty
-list of unique `{id, text}` rows, plus the bead's row revision. Do not duplicate
-the criterion prose elsewhere or derive IDs by hashing freeform text.
+When a historical dispatch has no binding, file the legacy result shape
+(without `schema_version`) and leave evidence identity unknown. It remains
+readable and may publish, but it cannot automatically close a Bead. New
+dispatches bind either Beads' structured criteria or its exact authoritative
+acceptance field and row revision; do not replace that snapshot with worker
+prose.
 
 - `candidate_sha` must equal `git rev-parse HEAD` in the worktree when the
   result is filed.

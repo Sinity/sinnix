@@ -81,6 +81,7 @@ WORKER_SCHEMA: dict[str, Any] = {
                 "properties": {
                     "id": {"type": "string", "minLength": 1},
                     "bead_revision": {"type": "string", "minLength": 1},
+                    "acceptance_digest": {"type": "string", "minLength": 1},
                     "criteria": {
                         "type": "array",
                         "items": {
@@ -238,12 +239,22 @@ def validate_worker_result(obj: Any) -> list[str]:
         errors.append(
             f"$: version {RESULT_SCHEMA_VERSION} actual_executor_model missing actual_executor_observed_by"
         )
+    bead_ids: set[str] = set()
     for bead_index, bead in enumerate(obj.get("beads") or ()):
         if not isinstance(bead, Mapping):
             continue
+        bead_id = bead.get("id")
+        if isinstance(bead_id, str) and bead_id in bead_ids:
+            errors.append(f"$.beads[{bead_index}]: duplicate bead id {bead_id}")
+        elif isinstance(bead_id, str):
+            bead_ids.add(bead_id)
         if "bead_revision" not in bead:
             errors.append(
                 f"$.beads[{bead_index}]: version {RESULT_SCHEMA_VERSION} missing bead_revision"
+            )
+        if "acceptance_digest" not in bead:
+            errors.append(
+                f"$.beads[{bead_index}]: version {RESULT_SCHEMA_VERSION} missing acceptance_digest"
             )
         ac_ids: set[str] = set()
         for criterion_index, criterion in enumerate(bead.get("criteria") or ()):

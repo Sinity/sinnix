@@ -205,6 +205,7 @@ def _evidence_binding(beads: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]
                 "v2_available": binding.get("v2_available") is True,
                 "bead_revision": binding.get("bead_revision"),
                 "criteria": list(binding.get("criteria") or ()),
+                "acceptance_digest": binding.get("acceptance_digest"),
             }
         )
     return records
@@ -214,9 +215,19 @@ def _v2_binding_errors(
     worker: Mapping[str, Any], value: Mapping[str, Any]
 ) -> list[str]:
     """A v2 claim must copy stable owner facts from this worker's launch."""
-    if value.get("schema_version") != results.RESULT_SCHEMA_VERSION:
-        return []
     records = worker.get("evidence_binding")
+    strict = (
+        isinstance(records, list)
+        and bool(records)
+        and all(
+            isinstance(row, Mapping) and row.get("v2_available") is True
+            for row in records
+        )
+    )
+    if not strict:
+        return []
+    if value.get("schema_version") != results.RESULT_SCHEMA_VERSION:
+        return ["strict dispatch requires the bound v2 result contract"]
     if not isinstance(records, list):
         return ["v2 result has no dispatch-time stable acceptance binding"]
     expected = {
@@ -227,7 +238,7 @@ def _v2_binding_errors(
         and row.get("v2_available") is True
     }
     if set(expected) != set(worker.get("beads") or ()):
-        return ["v2 result requires Beads-authored stable acceptance IDs and revisions"]
+        return ["v2 result requires the dispatch acceptance identities and revisions"]
     submitted = {
         row.get("id"): row
         for row in value.get("beads") or ()
@@ -240,6 +251,10 @@ def _v2_binding_errors(
         actual = submitted[bead_id]
         if actual.get("bead_revision") != expected_bead.get("bead_revision"):
             errors.append(f"v2 result {bead_id} bead_revision differs from dispatch")
+        if actual.get("acceptance_digest") != expected_bead.get("acceptance_digest"):
+            errors.append(
+                f"v2 result {bead_id} acceptance digest differs from dispatch"
+            )
         expected_criteria = {
             (criterion.get("ac_id"), criterion.get("text"))
             for criterion in expected_bead.get("criteria") or ()

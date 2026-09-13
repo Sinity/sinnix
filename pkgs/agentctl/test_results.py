@@ -62,6 +62,7 @@ def test_versioned_result_carries_explicit_provenance_and_stable_evidence() -> N
             {
                 "id": "fx-1",
                 "bead_revision": "sha256:fixture",
+                "acceptance_digest": "sha256:acceptance",
                 "criteria": [
                     {
                         "ac_id": "fx-1/ac-1",
@@ -142,6 +143,54 @@ def test_versioned_result_requires_attribution_and_unique_acceptance_ids() -> No
         for error in errors
     )
     assert any("duplicate ac_id ac-1" in error for error in errors)
+
+
+def test_versioned_result_rejects_duplicate_bead_rows() -> None:
+    result = worker_result(
+        schema_version=2,
+        execution="native",
+        attempt=1,
+        model_segments=[],
+        measured_usage=None,
+        beads=[
+            {
+                "id": "fx-1",
+                "bead_revision": "rev",
+                "acceptance_digest": "digest",
+                "criteria": [
+                    {
+                        "ac_id": "one",
+                        "text": "one",
+                        "status": "satisfied",
+                        "evidence": "e",
+                    }
+                ],
+            },
+            {
+                "id": "fx-1",
+                "bead_revision": "rev",
+                "acceptance_digest": "digest",
+                "criteria": [
+                    {
+                        "ac_id": "two",
+                        "text": "two",
+                        "status": "satisfied",
+                        "evidence": "e",
+                    }
+                ],
+            },
+        ],
+        verification=[
+            {
+                "command": "x",
+                "receipt": "ok",
+                "tested_sha": SHA,
+                "status": "passed",
+                "coverage": {"ac_ids": ["one"], "scope": "unit"},
+            }
+        ],
+    )
+    assert any("duplicate bead id fx-1" in error for error in results.validate_worker_result(result))
 
 
 @pytest.mark.parametrize(

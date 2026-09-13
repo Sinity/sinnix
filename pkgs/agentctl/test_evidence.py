@@ -40,6 +40,7 @@ def _claim(*, receipt: str, schema_version: int | None = None) -> dict:
                 {
                     "id": "fx-1",
                     "bead_revision": "17",
+                    "acceptance_digest": "1791badcc7ac5f89d864ebf64b72eaf3b941d4e2eeb80de2c72245a1a0c9d9dc",
                     "criteria": [
                         {
                             "ac_id": "AC-1",
