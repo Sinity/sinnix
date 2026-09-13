@@ -27,7 +27,6 @@
         "sinnix-agent-gateway"
         "agentctl"
         "sinnix-deslop"
-        "sinnix-lifecycle-manifest"
         "sinnix-observe"
         "sinnix-phone-app"
         "sinnix-phone-app-install"
