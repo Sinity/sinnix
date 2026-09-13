@@ -184,13 +184,22 @@ def run_bounded(
             close_stream(process.stdin)
             input_view = memoryview(b"")
 
-        while selector.get_map():
+        # EOF on both pipes does not prove the leader finished: a process may
+        # deliberately close stdout/stderr and continue running. Keep the
+        # deadline in force until it exits, rather than falling through to an
+        # unbounded wait below.
+        while selector.get_map() or process.poll() is None:
             remaining = timeout - (time.monotonic() - started)
             if remaining <= 0:
                 kill(f"timed out after {timeout:g}s", is_timeout=True)
                 # The group is dead; continue draining until EOF without
                 # allowing the post-kill cleanup to become unbounded.
                 remaining = 0.1
+
+            if not selector.get_map():
+                if process.poll() is None:
+                    time.sleep(min(remaining, 0.01))
+                continue
 
             events = selector.select(min(remaining, 0.1))
             if not events:

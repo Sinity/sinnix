@@ -56,6 +56,21 @@ def test_run_timeout_kills_descendants_that_hold_its_pipes():
     assert time.monotonic() - started < 0.4
 
 
+def test_run_timeout_survives_a_leader_that_closes_both_pipes():
+    started = time.monotonic()
+    result = run(
+        [
+            sys.executable,
+            "-c",
+            "import os, time; os.close(1); os.close(2); time.sleep(0.8)",
+        ],
+        timeout=0.05,
+    )
+    assert result.returncode == NO_EXIT_STATUS
+    assert result.error is not None
+    assert time.monotonic() - started < 0.4
+
+
 def test_run_returns_a_result_when_the_binary_is_missing():
     result = run(["sinnix-no-such-binary-4f2a"], timeout=30)
     assert not result.ok
