@@ -22,6 +22,8 @@ import sys
 import time
 from pathlib import Path
 
+from sinnix_lib.atomic import atomic_publish
+
 from .writer import CaptureWriter
 
 # Most specific offered type wins: real image formats, then file-manager
@@ -68,15 +70,10 @@ def store_blob(lane_dir: Path, content: bytes, digest: str) -> Path:
     shard_dir = lane_dir / "blobs" / digest[:BLOB_SHARD_CHARS]
     shard_dir.mkdir(parents=True, exist_ok=True)
     blob_path = shard_dir / digest
-    if not blob_path.exists():
-        # Staged and renamed: the name is a content hash, so a blob
-        # interrupted mid-write would otherwise stay truncated forever --
-        # every later capture of the same content finds the path present
-        # and skips it.
-        tmp_path = shard_dir / f".{digest}.tmp"
-        tmp_path.write_bytes(content)
-        tmp_path.chmod(0o600)
-        os.replace(tmp_path, blob_path)
+    # The name is the digest, so no writer may replace an established blob.
+    # `exclusive` uses a unique temporary and links it into place; concurrent
+    # callbacks either publish these same bytes or observe the completed blob.
+    atomic_publish(blob_path, content, fsync=True, mode=0o600, exclusive=True)
     return blob_path
 
 
@@ -137,7 +134,7 @@ def _is_duplicate(state_path: Path, key: str) -> bool:
         previous = None
     if previous == key:
         return True
-    state_path.write_text(key)
+    atomic_publish(state_path, key.encode(), fsync=True, mode=0o600)
     return False
 
 
@@ -153,7 +150,7 @@ def _is_superseded(state_path: Path, debounce_ms: int) -> bool:
     """
     state_path.parent.mkdir(parents=True, exist_ok=True)
     trigger = f"{time.monotonic_ns()}-{os.getpid()}"
-    state_path.write_text(trigger)
+    atomic_publish(state_path, trigger.encode(), fsync=True, mode=0o600)
     time.sleep(debounce_ms / 1000.0)
     try:
         return state_path.read_text() != trigger

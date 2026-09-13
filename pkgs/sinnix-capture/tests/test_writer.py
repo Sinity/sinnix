@@ -32,6 +32,7 @@ def test_seq_is_monotonic_and_persisted_across_instances(tmp_path: Path) -> None
     e1 = first.write({"n": 1})
     e2 = first.write({"n": 2})
     assert (e1["seq"], e2["seq"]) == (1, 2)
+    assert (tmp_path / "lane-a" / "lane-a.seq").stat().st_mode & 0o777 == 0o600
 
     second = CaptureWriter(tmp_path, "lane-a")
     e3 = second.write({"n": 3})

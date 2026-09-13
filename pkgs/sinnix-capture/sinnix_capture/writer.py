@@ -13,12 +13,12 @@ Layout under ``{capture_root}/{lane}/``:
 from __future__ import annotations
 
 import json
-import os
 import socket
 import time
 from pathlib import Path
 
 from sinnix_lib import ledger
+from sinnix_lib.atomic import atomic_publish
 from sinnix_lib.lock import flock
 
 from .envelope import build_envelope
@@ -91,12 +91,12 @@ class CaptureWriter:
     def _next_seq(self) -> int:
         with flock(self._seq_lock_path):
             seq = self._read_seq() + 1
-            # Written through a temp file and renamed: a rename is atomic,
-            # so a reader (or a killed writer) never observes a truncated
-            # counter, which is how this file went empty in the first place.
-            tmp_path = self._seq_path.with_suffix(".seq.tmp")
-            tmp_path.write_text(str(seq))
-            os.replace(tmp_path, self._seq_path)
+            # The counter governs cross-process sequence allocation, so its
+            # replacement and directory entry are durable before releasing
+            # the lock. Readers see either complete generation of the value.
+            atomic_publish(
+                self._seq_path, str(seq).encode(), fsync=True, mode=0o600
+            )
             return seq
 
     def _record_path(self, ts: float) -> Path:

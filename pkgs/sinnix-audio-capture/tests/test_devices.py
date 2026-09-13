@@ -168,6 +168,7 @@ def test_device_sidecar_records_unsanitized_identity(tmp_path: Path):
     assert record["kind"] == "sink"
     assert record["channel"] == channel_name("sink", BT_OUT)
     assert record["description"] == "WH-1000XM4"
+    assert (tmp_path / "device.json").stat().st_mode & 0o777 == 0o644
 
 
 class _FakeRecorder:

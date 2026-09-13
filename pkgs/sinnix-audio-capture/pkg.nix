@@ -2,6 +2,7 @@
   lib,
   python3Packages,
   sinnix-capture-lib,
+  sinnix-lib,
 }:
 python3Packages.buildPythonApplication {
   pname = "sinnix-audio-capture";
@@ -24,6 +25,7 @@ python3Packages.buildPythonApplication {
     python3Packages.numpy
     python3Packages.silero-vad
     sinnix-capture-lib
+    sinnix-lib
   ];
   nativeCheckInputs = [ python3Packages.pytest ];
   checkPhase = ''
