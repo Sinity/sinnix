@@ -60,6 +60,8 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
+from sinnix_lib.atomic import atomic_publish
+
 from .recorder import run_capture_stream
 from .segment import OpusSegmentWriter, device_profile, opusenc_argv_builder
 from .tee import SeqpacketTee
@@ -275,9 +277,14 @@ def write_device_sidecar(output_dir: Path, device: AudioDevice) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     path = output_dir / DEVICE_SIDECAR_NAME
     record = device.device_record() | {"updated": time.time()}
-    tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
-    tmp.replace(path)
+    atomic_publish(
+        path,
+        (json.dumps(record, indent=2, sort_keys=True) + "\n").encode(),
+        fsync=True,
+        # Device metadata is a human and indexer-facing sidecar; retain the
+        # readable mode the former write_text publication produced.
+        mode=0o644,
+    )
 
 
 def probe_coverage(

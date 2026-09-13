@@ -10,13 +10,14 @@ from __future__ import annotations
 
 import hashlib
 import io
+from concurrent.futures import ThreadPoolExecutor
 import json
 import sys
 from pathlib import Path
 
 import pytest
 from sinnix_capture.cli import main
-from sinnix_capture.selection import pick_mime
+from sinnix_capture.selection import _is_duplicate, pick_mime, store_blob
 
 # The preference order this lane promises, spelled out independently of the
 # table the implementation reads: any permutation of that table has to break
@@ -313,3 +314,26 @@ def test_the_watch_payload_is_drained_before_anything_else(
 
     assert payload.read() == b""
     assert len(lane.records()) == 1
+
+
+def test_blob_store_concurrently_publishes_one_complete_digest(tmp_path: Path) -> None:
+    body = b"concurrent content-addressed blob"
+    digest = hashlib.sha256(body).hexdigest()
+    lane_dir = tmp_path / "clipboard"
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        paths = list(pool.map(lambda _: store_blob(lane_dir, body, digest), range(8)))
+
+    assert paths == [lane_dir / "blobs" / digest[:2] / digest] * 8
+    assert paths[0].read_bytes() == body
+    assert paths[0].stat().st_mode & 0o777 == 0o600
+    assert [path.name for path in paths[0].parent.iterdir()] == [digest]
+
+
+def test_dedup_state_is_published_privately(tmp_path: Path) -> None:
+    state = tmp_path / "gate" / "last"
+
+    assert _is_duplicate(state, "first") is False
+    assert state.read_text() == "first"
+    assert state.stat().st_mode & 0o777 == 0o600
+    assert _is_duplicate(state, "first") is True

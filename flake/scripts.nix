@@ -428,6 +428,7 @@ let
 
     sinnix-audio-capture = pkgs.callPackage ../pkgs/sinnix-audio-capture/pkg.nix {
       sinnix-capture-lib = sinnix-capture;
+      inherit sinnix-lib;
     };
 
     # Prime's half of the phone's dual transport (docs/phone.md). Moved out
