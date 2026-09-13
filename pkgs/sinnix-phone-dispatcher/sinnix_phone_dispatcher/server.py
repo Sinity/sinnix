@@ -19,6 +19,7 @@ from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
 
+from sinnix_lib.http import RequestBodyError, read_body, read_json_object
 from sinnix_lib.ledger import utc_ts
 from sinnix_lib.systemd import sd_notify, watchdog_period
 
@@ -110,9 +111,37 @@ class Handler(BaseHTTPRequestHandler):
         _, _, raw = self.path.partition("?")
         return {k: v[0] for k, v in urllib.parse.parse_qs(raw).items() if v}
 
+    def _read_body(self, max_bytes: int, *, json_object: bool = False) -> bytes | dict[str, Any] | None:
+        """Read one bounded request body and map framing failures to the API."""
+        try:
+            if json_object:
+                return read_json_object(
+                    self.headers, self.rfile, max_bytes=max_bytes
+                )
+            return read_body(self.headers, self.rfile, max_bytes=max_bytes)
+        except RequestBodyError as error:
+            if error.reason == "body_too_large":
+                payload: dict[str, Any] = {"ok": False}
+                declared = self.headers.get("Content-Length")
+                if isinstance(declared, str) and declared.isdecimal():
+                    payload["bytes"] = int(declared)
+                self._send(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, payload)
+            elif json_object and error.reason == "invalid_json":
+                self._send(HTTPStatus.BAD_REQUEST, {"ok": False, "detail": "not JSON"})
+            elif json_object and error.reason == "json_not_object":
+                self._send(
+                    HTTPStatus.BAD_REQUEST,
+                    {"ok": False, "detail": "expected an object"},
+                )
+            else:
+                self._send(
+                    HTTPStatus.BAD_REQUEST,
+                    {"ok": False, "detail": str(error)},
+                )
+            return None
+
     def do_POST(self) -> None:  # noqa: N802
         route = self._route()
-        length = int(self.headers.get("Content-Length") or 0)
 
         # An acknowledgement carries no body -- everything it says is in the
         # query -- so it branches before the JSON parse below, which would
@@ -125,26 +154,22 @@ class Handler(BaseHTTPRequestHandler):
         # Uploads are raw bytes, so they branch before the JSON parse below --
         # and before MAX_BODY, which sizes an intent, not an archive file.
         if route == "/chunk":
-            if length > MAX_UPLOAD:
-                self._send(
-                    HTTPStatus.REQUEST_ENTITY_TOO_LARGE, {"ok": False, "bytes": length}
-                )
+            body = self._read_body(MAX_UPLOAD)
+            if body is None:
                 return
             query = self._query()
             status, payload = store_upload(
                 query.get("lane", "ambient"),
                 query.get("name", ""),
-                self.rfile.read(length),
+                body,
                 self.headers.get("X-Sinnix-Sha256"),
             )
             self._send(status, payload)
             return
 
         if route == "/events":
-            if length > MAX_UPLOAD:
-                self._send(
-                    HTTPStatus.REQUEST_ENTITY_TOO_LARGE, {"ok": False, "bytes": length}
-                )
+            body = self._read_body(MAX_UPLOAD)
+            if body is None:
                 return
             query = self._query()
             try:
@@ -158,24 +183,14 @@ class Handler(BaseHTTPRequestHandler):
             status, payload = append_events(
                 query.get("day", ""),
                 offset,
-                self.rfile.read(length),
+                body,
                 self.headers.get("X-Sinnix-Sha256"),
             )
             self._send(status, payload)
             return
 
-        if length > MAX_BODY:
-            self._send(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, {"ok": False})
-            return
-        try:
-            payload = json.loads(self.rfile.read(length).decode("utf-8", "replace"))
-        except (ValueError, json.JSONDecodeError):
-            self._send(HTTPStatus.BAD_REQUEST, {"ok": False, "detail": "not JSON"})
-            return
-        if not isinstance(payload, dict):
-            self._send(
-                HTTPStatus.BAD_REQUEST, {"ok": False, "detail": "expected an object"}
-            )
+        payload = self._read_body(MAX_BODY, json_object=True)
+        if payload is None:
             return
 
         if route == "/intent":
