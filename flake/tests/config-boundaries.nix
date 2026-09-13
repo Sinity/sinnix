@@ -127,6 +127,109 @@ in
         ];
         assertions = _: [ ];
       };
+      factorySpec = mkFeatureTest {
+        name = "capability-factory";
+        feature = "sinnix.features.cli.polylogue.enable";
+        extraModules = [
+          (
+            {
+              mkFeatureModule,
+              mkServiceModule,
+              lib,
+              ...
+            }:
+            {
+              imports = [
+                (mkFeatureModule {
+                  path = [
+                    "cli"
+                    "factory-fixture"
+                  ];
+                  description = "Capability feature fixture";
+                  subFeatures.nested = {
+                    description = "Nested feature fixture";
+                    default = true;
+                  };
+                  extraOptions.nested.value = lib.mkOption {
+                    type = lib.types.str;
+                    default = "feature-value";
+                  };
+                  configFn = { user, ... }: {
+                    environment.variables.SINNIX_FACTORY_FEATURE_USER = user;
+                  };
+                })
+                (mkServiceModule {
+                  name = "factory-fixture";
+                  description = "Capability service fixture";
+                  surface = {
+                    unit = "sinnix-factory-fixture.service";
+                    resourceClass = "ordinary";
+                  };
+                  extraOptions.nested.value = lib.mkOption {
+                    type = lib.types.str;
+                    default = "service-value";
+                  };
+                  job = {
+                    execStart = "/bin/true";
+                    timer.onCalendar = "hourly";
+                  };
+                  configFn = { user, ... }: {
+                    environment.variables.SINNIX_FACTORY_SERVICE_USER = user;
+                  };
+                })
+              ];
+              sinnix.features.cli.factory-fixture.enable = true;
+              sinnix.services.factory-fixture.enable = true;
+            }
+          )
+        ];
+        assertions = config: [
+          {
+            assertion =
+              config.sinnix.features.cli.factory-fixture.nested.enable
+              && config.sinnix.features.cli.factory-fixture.nested.value == "feature-value";
+            message = "feature factories must merge nested generated and declared options";
+          }
+          {
+            assertion = config.sinnix.services.factory-fixture.nested.value == "service-value";
+            message = "service factories must retain nested declared options";
+          }
+          {
+            assertion =
+              config.environment.variables.SINNIX_FACTORY_FEATURE_USER == config.sinnix.user.name
+              && config.environment.variables.SINNIX_FACTORY_SERVICE_USER == config.sinnix.user.name;
+            message = "capability config functions must receive the configured user";
+          }
+          {
+            assertion =
+              config.systemd.services.sinnix-factory-fixture.serviceConfig.Type == "oneshot"
+              && config.systemd.timers.sinnix-factory-fixture.timerConfig.OnCalendar == "hourly";
+            message = "service factories must still render scheduled jobs";
+          }
+        ];
+      };
+      factoryCollisionSpec = mkFeatureTest {
+        name = "capability-factory-collision";
+        feature = "sinnix.features.cli.polylogue.enable";
+        extraModules = [
+          (
+            { mkServiceModule, lib, ... }:
+            {
+              imports = [
+                (mkServiceModule {
+                  name = "factory-collision";
+                  description = "Capability collision fixture";
+                  extraOptions.docs = lib.mkOption {
+                    type = lib.types.str;
+                    default = "invalid";
+                  };
+                })
+              ];
+            }
+          )
+        ];
+        assertions = _: [ ];
+      };
       dotfiles = evalTestSpec system dotfileSpec;
       secrets = evalTestSpec system secretSpec;
       rejected =
@@ -134,6 +237,8 @@ in
         !(builtins.tryEval (builtins.deepSeq (evalTestSpec system spec).config.assertions true)).success;
       duplicateRejected = rejected duplicateSpec;
       unknownRendererRejected = rejected unknownRendererSpec;
+      factory = evalTestSpec system factorySpec;
+      factoryCollisionRejected = rejected factoryCollisionSpec;
     in
     {
       checks.config-boundaries = pkgs.runCommand "sinnix-config-boundaries" { } ''
@@ -141,6 +246,8 @@ in
         test ${if secrets.config ? age then "1" else "0"} = 1
         test ${if duplicateRejected then "1" else "0"} = 1
         test ${if unknownRendererRejected then "1" else "0"} = 1
+        test ${if factory.config ? system then "1" else "0"} = 1
+        test ${if factoryCollisionRejected then "1" else "0"} = 1
         test ${if emptySecretDeclarations == { } then "1" else "0"} = 1
         test ${if loadedSecretDeclarations.fixture.file == syntheticCiphertext then "1" else "0"} = 1
         touch "$out"

@@ -40,6 +40,49 @@ let
       internal = true;
     };
 
+  # Both user-facing features and fixed services are capabilities.  Keep the
+  # common option ownership and enable semantics here so the two public
+  # factories cannot drift in their treatment of metadata or nested options.
+  mkCapabilityModule =
+    {
+      capabilityPath,
+      description,
+      extraOptions ? { },
+      generatedOptions ? { },
+      meta ? { },
+      docs ? null,
+      enableDefault,
+      configFn,
+    }:
+    args@{ config, ... }:
+    let
+      reservedOptionNames = [
+        "enable"
+        "meta"
+        "docs"
+      ];
+      conflictingOptions = lib.filter (name: extraOptions ? ${name}) reservedOptionNames;
+      capabilityName = builtins.concatStringsSep "." capabilityPath;
+      optionsForPath =
+        if conflictingOptions != [ ] then
+          throw "${capabilityName}: extraOptions must not define generated option(s): ${builtins.concatStringsSep ", " conflictingOptions}"
+        else
+          lib.recursiveUpdate extraOptions generatedOptions
+          // {
+            enable = (lib.mkEnableOption description) // {
+              default = enableDefault config;
+            };
+            meta = mkMetaOption meta;
+            docs = mkDocsOption docs;
+          };
+      cfg = lib.getAttrFromPath capabilityPath config;
+      user = config.sinnix.user.name;
+    in
+    {
+      options = lib.setAttrByPath capabilityPath optionsForPath;
+      config = lib.mkIf cfg.enable (configFn (args // { inherit cfg user; }));
+    };
+
   mkFeatureModule =
     {
       path,
@@ -56,42 +99,24 @@ let
       defaultOnDesktop ? builtins.head path == "desktop",
       configFn,
     }:
-    args@{ config, ... }:
-    let
-      featurePath = [
+    mkCapabilityModule {
+      capabilityPath = [
         "sinnix"
         "features"
       ]
       ++ path;
-      # Merge extraOptions with generated sub-feature options.
-      # Use a recursive merge so nested attrs like `factorio.username`
-      # coexist with generated `factorio.enable`.
-      subFeatureOpts = mkSubFeatureOptions subFeatures;
-      # extraOptions must not define its own top-level `enable`: the `//`
-      # merge below replaces it wholesale, silently discarding whatever a
-      # caller declared there.
-      optionsForPath =
-        if extraOptions ? enable then
-          throw "mkFeatureModule ${builtins.concatStringsSep "." path}: extraOptions must not define 'enable' (generated automatically, default = ${lib.boolToString defaultOn}); use the defaultOn argument instead"
-        else
-          lib.recursiveUpdate extraOptions subFeatureOpts
-          // {
-            enable = (lib.mkEnableOption description) // {
-              default = if defaultOnDesktop then config.sinnix.machine.isDesktop else defaultOn;
-            };
-            meta = mkMetaOption meta;
-            docs = mkDocsOption docs;
-          };
-      cfg = lib.getAttrFromPath featurePath config;
-      user = config.sinnix.user.name;
-    in
-    {
-      options = lib.setAttrByPath featurePath optionsForPath;
-      config = lib.mkIf cfg.enable (configFn (args // { inherit cfg user; }));
+      generatedOptions = mkSubFeatureOptions subFeatures;
+      enableDefault = config: if defaultOnDesktop then config.sinnix.machine.isDesktop else defaultOn;
+      inherit
+        description
+        extraOptions
+        meta
+        docs
+        configFn
+        ;
     };
 
   # Service module factory - like mkFeatureModule but for sinnix.services.*
-  # Services typically don't need `user` passed (they use config.sinnix.user.name directly)
   mkServiceModule =
     {
       name,
@@ -118,46 +143,41 @@ let
       job ? null,
       configFn ? (_: { }),
     }:
-    args@{ config, lib, ... }:
-    let
-      servicePath = [
+    mkCapabilityModule {
+      capabilityPath = [
         "sinnix"
         "services"
         name
       ];
-      optionsForPath = extraOptions // {
-        enable = (lib.mkEnableOption description) // {
-          default = defaultOnDesktop && config.sinnix.machine.isDesktop;
-        };
-        meta = mkMetaOption meta;
-        docs = mkDocsOption docs;
-      };
-      cfg = lib.getAttrFromPath servicePath config;
-      moduleArgs = args // {
-        inherit cfg;
-      };
-      resolve = v: if builtins.isFunction v then v moduleArgs else v;
-      surfaceValue = resolve surface;
-      jobValue = resolve job;
-      mkJobConfig =
-        j:
-        mkScheduledJob {
-          inherit config description;
-          unitName = j.unitName or "sinnix-${name}";
-          surface = surfaceValue;
-        } (builtins.removeAttrs j [ "unitName" ]);
-    in
-    {
-      options = lib.setAttrByPath servicePath optionsForPath;
-      config = lib.mkIf cfg.enable (
+      enableDefault = config: defaultOnDesktop && config.sinnix.machine.isDesktop;
+      inherit
+        description
+        extraOptions
+        meta
+        docs
+        ;
+      configFn =
+        moduleArgs:
+        let
+          inherit (moduleArgs) config;
+          resolve = v: if builtins.isFunction v then v moduleArgs else v;
+          surfaceValue = resolve surface;
+          jobValue = resolve job;
+          mkJobConfig =
+            j:
+            mkScheduledJob {
+              inherit config description;
+              unitName = j.unitName or "sinnix-${name}";
+              surface = surfaceValue;
+            } (builtins.removeAttrs j [ "unitName" ]);
+        in
         lib.mkMerge [
           (lib.optionalAttrs (surfaceValue != null) {
             sinnix.runtime.surfaces.${name} = surfaceValue;
           })
           (lib.optionalAttrs (jobValue != null) (mkJobConfig jobValue))
           (configFn moduleArgs)
-        ]
-      );
+        ];
     };
 
   # AI service specialization. It owns only the repeated surface metadata and
