@@ -165,6 +165,11 @@
           suiteDir = ../../pkgs/sinnix-picker/tests;
           scripts = [ "sinnix-picker" ];
         };
+        ytdlp-suite = mkScriptSuite {
+          name = "sinnix-ytdlp";
+          suiteDir = ../../pkgs/sinnix-ytdlp/tests;
+          scripts = [ "sinnix-ytdlp" ];
+        };
         # Provably fails when: a binding's ranking identity starts tracking
         # source order or its /nix/store action path, a usage prior stops
         # distinguishing "never measured" from "measured zero", operator
