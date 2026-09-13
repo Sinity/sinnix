@@ -110,10 +110,11 @@ let
   serviceBody = {
     description = j.description or description;
     serviceConfig =
-      if manager == "system" then
+      if surface != null then
         systemdLib.mkRuntimeServiceConfig {
           runtimeInventory = config.sinnix.runtime.inventory;
           unit = "${unitName}.service";
+          inherit manager;
           inherit overrides;
         }
       else if j ? resourceClass then

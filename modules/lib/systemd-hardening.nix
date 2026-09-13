@@ -36,6 +36,7 @@
     {
       runtimeInventory,
       unit ? null,
+      manager ? "system",
       resourceClass ? null,
       overrides ? { },
       omit ? [ ],
@@ -50,11 +51,13 @@
           null
         else
           let
-            matchingSurfaces = lib.filterAttrs (_: surface: surface.unit == unit) runtimeInventory.surfaces;
+            matchingSurfaces = lib.filterAttrs (
+              _: surface: surface.unit == unit && (surface.manager or "system") == manager
+            ) runtimeInventory.surfaces;
             surfaceNames = builtins.attrNames matchingSurfaces;
           in
           if surfaceNames == [ ] then
-            throw "unknown Sinnix runtime surface unit: ${unit}"
+            throw "unknown Sinnix runtime surface unit: ${manager}:${unit}"
           else
             matchingSurfaces.${builtins.head surfaceNames};
       resolvedResourceClass = if resourceClass != null then resourceClass else "ordinary";
