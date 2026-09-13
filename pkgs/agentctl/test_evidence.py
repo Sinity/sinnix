@@ -383,3 +383,15 @@ def test_cleaned_receipt_still_requires_complete_project_bound_execution_evidenc
         )
         assert observation["eligible"] is False
         assert observation["gaps"]
+
+
+def test_native_evidence_record_is_private_and_exclusive(tmp_path: Path) -> None:
+    path = tmp_path / "record.json"
+    document = {"schema_version": 1, "kind": "native_evidence"}
+
+    evidence._write_record(path, document)
+    assert json.loads(path.read_text()) == document
+    assert path.stat().st_mode & 0o777 == 0o600
+    with pytest.raises(FileExistsError):
+        evidence._write_record(path, {"replacement": True})
+    assert json.loads(path.read_text()) == document

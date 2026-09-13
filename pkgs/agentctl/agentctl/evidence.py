@@ -15,6 +15,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
+from sinnix_lib.atomic import atomic_publish
+
 from . import gitcmd, github, launch, results
 from .config import Config
 from .launch import JobError
@@ -348,11 +350,8 @@ def _write_record(path: Path, document: Mapping[str, Any]) -> None:
     encoded = json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
     if len(encoded) > MAX_EVIDENCE_BYTES:
         raise JobError(f"native evidence record exceeds {MAX_EVIDENCE_BYTES} bytes")
-    descriptor = os.open(
-        path, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600
-    )
-    with os.fdopen(descriptor, "wb") as handle:
-        handle.write(encoded)
+    if not atomic_publish(path, encoded, exclusive=True, fsync=True, mode=0o600):
+        raise FileExistsError(path)
 
 
 def file(config: Config, project: ProjectAdapter, path: Path) -> dict[str, Any]:
