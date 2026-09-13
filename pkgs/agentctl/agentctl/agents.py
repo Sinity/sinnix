@@ -194,7 +194,9 @@ def queue_agent(
     stem = prompt_name.rsplit(".", 1)[0]
     schema_path = (
         results.write_schema(
-            worktree / WORKTREE_STATE_DIR / f"{schema}.schema.json", schema
+            worktree / WORKTREE_STATE_DIR / f"{schema}.schema.json",
+            schema,
+            codex_strict=backend == "codex",
         )
         if schema
         else None
