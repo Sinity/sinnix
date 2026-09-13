@@ -15,6 +15,7 @@ from .agents import (
     other_worktrees,
     pending_task,
     queue_agent,
+    STRUCTURED_RESULT_BACKENDS,
     queue_landing,
     requeue_landing,
     result_path,
@@ -393,6 +394,20 @@ def _prepare(
             raise BatchRefusal(
                 "runner", f"agent runner is unavailable: {config.agent_runner}"
             )
+        if run.harness == "queued":
+            unsupported = sorted(
+                snapshot.dimensions.backend
+                for snapshot in snapshots.values()
+                if snapshot.dimensions.backend not in STRUCTURED_RESULT_BACKENDS
+            )
+            if unsupported:
+                supported = ", ".join(sorted(STRUCTURED_RESULT_BACKENDS))
+                raise BatchRefusal(
+                    "backend",
+                    "queued workers require structured results; unsupported backend(s): "
+                    + ", ".join(unsupported)
+                    + f"; supported: {supported}",
+                )
         for index, snapshot in snapshots.items():
             run = set_worker(
                 config,

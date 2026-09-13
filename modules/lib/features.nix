@@ -203,6 +203,7 @@ let
         name
         description
         extraOptions
+        meta
         docs
         ;
       surface = {

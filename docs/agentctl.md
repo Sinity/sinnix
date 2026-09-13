@@ -314,7 +314,7 @@ landing task in `<p>-land` with `--after` every worker (label
 
 ```text
 agentctl-run <agent-launch.json>
-<environment.command> run_agent_prompt.sh --agent B --workdir W \
+<environment.command> agentctl-agent --agent B --workdir W \
   --prompt-file W/.agentctl/prompt.md --last-file W/.agentctl/prompt.result.json \
   --model M --reasoning-effort E --output-schema worker.schema.json
 ```
@@ -525,6 +525,7 @@ check failing). The codes:
 | `abandoned`                    | the run was abandoned; nothing runs again                                           |
 | `already_accepted`             | the run has an acceptance record; nothing runs again                                |
 | `ambiguous_run`                | the suffix names more than one run                                                  |
+| `backend`                      | the selected backend cannot satisfy this queued execution contract                  |
 | `candidate_mismatch`           | the worktree HEAD does not descend from the filed candidate, or the tree is dirty   |
 | `check_missing`                | the check the descriptor declares was not reported within ten minutes               |
 | `checks_failed`                | a required PR check failed, or did not finish (`timed_out`)                         |

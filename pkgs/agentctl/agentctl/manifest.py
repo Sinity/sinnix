@@ -30,6 +30,7 @@ REFUSALS: dict[str, str] = {
     "abandoned": "the run was abandoned; nothing runs again",
     "already_accepted": "the run has an acceptance record; nothing runs again",
     "ambiguous_run": "the suffix names more than one run",
+    "backend": "the selected backend cannot satisfy this queued execution contract",
     "candidate_mismatch": "the worktree HEAD does not descend from the result's candidate_sha, or the tree is dirty",
     "check_missing": "the check the descriptor declares was not reported within ten minutes",
     "checks_failed": "a required PR check failed, or did not finish (`timed_out`)",

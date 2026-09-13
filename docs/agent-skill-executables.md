@@ -6,7 +6,7 @@ This audit records every executable beneath `dots/_ai/skills`. pueue, through `a
 | ------------------------------------------------------------ | --------------------------------------------- | ---------------------------------------------------------- |
 | `orchestrate/scripts/build_plan_batch_prompts.py`            | `orchestrate` skill                           | Writes operator-reviewed prompt files only.                |
 | `orchestrate/scripts/probe_agent_runtime.sh`                 | `orchestrate` skill                           | Direct vendor and quota availability probe.                |
-| `agent-runtime/scripts/run_agent_prompt.sh`                  | `agentctl batch start`                        | Private backend argv translator for a worker's agent job.  |
+| `agentctl-agent` (from the AgentCTL package)                 | `agentctl batch start`                        | Private backend argv translator for a worker's agent job.  |
 | `chatgpt-conversations/scripts/sinnix-chatgpt-conversations` | `chatgpt-conversations` skill                 | Read-only conversation extraction from the shared browser. |
 | `desktop-control-plane/scripts/chrome-control.sh`            | Agent module and desktop-control-plane skill  | Visible browser UI helper.                                 |
 | `desktop-control-plane/scripts/hypr-control.sh`              | Agent module and desktop-control-plane skill  | Visible window-manager UI helper.                          |
