@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+from sinnix_lib.atomic import atomic_publish
 from sinnix_lib.ledger import utc_ts
 
 from .external import steer, trigger_score
@@ -26,7 +27,12 @@ def mark_token(token: str, result: str) -> None:
     if not token or not TOKEN_RE.match(token):
         return
     ensure_dirs()
-    (TOKENS_DIR / token).write_text(f"{utc_ts()} {result}\n", encoding="utf-8")
+    atomic_publish(
+        TOKENS_DIR / token,
+        f"{utc_ts()} {result}\n".encode(),
+        fsync=True,
+        mode=0o600,
+    )
 
 
 def execute(intent: dict) -> dict:
@@ -150,6 +156,8 @@ def deliver_job_answer(intent: dict) -> dict:
     answer = str(intent.get("answer") or "")
     if not job_id or not answer:
         return {"ok": False, "detail": "job_answer needs job_id and answer"}
+    if Path(job_id).name != job_id or job_id in {".", ".."}:
+        return {"ok": False, "detail": "job_answer needs a safe job_id"}
     runtime = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
     answers = Path(
         os.environ.get("SINNIX_AGENT_ANSWER_DIR", f"{runtime}/sinnix/agent-answers")
@@ -157,12 +165,12 @@ def deliver_job_answer(intent: dict) -> dict:
     try:
         answers.mkdir(parents=True, exist_ok=True)
         target = answers / f"{job_id}.json"
-        tmp = target.with_suffix(".json.part")
-        tmp.write_text(
-            json.dumps({"job_id": job_id, "answer": answer, "at": utc_ts()}) + "\n",
-            encoding="utf-8",
+        atomic_publish(
+            target,
+            (json.dumps({"job_id": job_id, "answer": answer, "at": utc_ts()}) + "\n").encode(),
+            fsync=True,
+            mode=0o600,
         )
-        tmp.rename(target)
         return {"ok": True, "detail": f"answer left for {job_id}"}
     except OSError as exc:
         return {"ok": False, "detail": f"could not write answer: {exc}"}
