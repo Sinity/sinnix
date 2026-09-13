@@ -141,6 +141,28 @@ def with_browser_cookies(arguments):
     return arguments
 
 
+def same_page_resource(page_url, candidate_url):
+    """Whether a resolver merely returned another spelling of the page."""
+    page = urllib.parse.urlsplit(page_url)
+    candidate = urllib.parse.urlsplit(candidate_url)
+
+    def identity(value):
+        try:
+            port = value.port
+        except ValueError:
+            return None
+        if port is None:
+            port = {"http": 80, "https": 443}.get(value.scheme.lower())
+        return (
+            value.scheme.lower(),
+            (value.hostname or "").lower(),
+            port,
+            value.path.rstrip("/") or "/",
+        )
+
+    return identity(page) is not None and identity(page) == identity(candidate)
+
+
 def main():
     arguments = sys.argv[1:]
     command = ["yt-dlp", *with_browser_cookies(arguments)]
@@ -157,7 +179,7 @@ def main():
         media_url = None
     if not media_url:
         media_url = browser_video_url(pages[0])
-    if not media_url or media_url == pages[0]:
+    if not media_url or same_page_resource(pages[0], media_url):
         return result.returncode
 
     fallback = [media_url if arg == pages[0] else arg for arg in arguments]
