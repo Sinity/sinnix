@@ -162,15 +162,6 @@ mkServiceModule {
           inherit (cfg) maxResultBytes;
           runtimeInventory = "/etc/sinnix/runtime-inventory.json";
           capabilityIndex = "/etc/sinnix/capability-index.json";
-          systemdRunCommand = "${pkgs.systemd}/bin/systemd-run";
-          systemctlCommand = "${pkgs.systemd}/bin/systemctl";
-          observeCommand = "${scriptPkgs.sinnix-observe}/bin/sinnix-observe";
-          hyprControlCommand = "/home/${userName}/.local/bin/sinnix-hypr-control";
-          screenshotControlCommand = "/home/${userName}/.local/bin/sinnix-screenshot-control";
-          kittyControlCommand = "/home/${userName}/.local/bin/sinnix-kitty-control";
-          chromeControlCommand = "/home/${userName}/.local/bin/sinnix-chrome-control";
-          beadsCommand = "${scriptPkgs.beads}/bin/bd";
-          captureCommand = "${scriptPkgs.sinnix-capture}/bin/sinnix-capture";
           inherit mcpBrokerServers;
         }
         // approvals;
@@ -237,6 +228,12 @@ mkServiceModule {
           '';
         }
       ) enabledEndpoints;
+      gatewayPath = lib.makeBinPath [
+        pkgs.systemd
+        scriptPkgs.sinnix-observe
+        scriptPkgs.beads
+        scriptPkgs.sinnix-capture
+      ] + ":/home/${userName}/.local/bin";
       endpointValues = lib.mapAttrsToList (_: endpoint: endpoint) enabledEndpoints;
       duplicateValues =
         field:
@@ -375,6 +372,7 @@ mkServiceModule {
                 "-${endpoint.stateDir}"
               ];
               UMask = "0077";
+              Environment = [ "PATH=${gatewayPath}" ];
             }
             // lib.optionalAttrs (endpoint.principal == "observer") {
               NoNewPrivileges = true;
@@ -383,7 +381,7 @@ mkServiceModule {
               # The user manager's TMPDIR is the NVMe scratch root, read-only
               # under strict; the private /tmp is where this unit's temporary
               # files belong.
-              Environment = [ "TMPDIR=/tmp" ];
+              Environment = [ "TMPDIR=/tmp" "PATH=${gatewayPath}" ];
             };
             Install.WantedBy = lib.optionals endpoint.autoStart [ "default.target" ];
           }
