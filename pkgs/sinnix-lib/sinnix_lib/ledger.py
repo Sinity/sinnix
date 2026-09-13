@@ -31,6 +31,7 @@ def append_jsonl(
     *,
     mode: int = 0o644,
     fsync: bool = False,
+    separators: tuple[str, str] = (",", ":"),
 ) -> None:
     """Append *record* as one compact JSON line, creating parents.
 
@@ -40,7 +41,7 @@ def append_jsonl(
     """
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
-    line = json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n"
+    line = json.dumps(record, sort_keys=True, separators=separators) + "\n"
     fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_APPEND, mode)
     try:
         os.write(fd, line.encode("utf-8"))

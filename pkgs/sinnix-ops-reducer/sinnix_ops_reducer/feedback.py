@@ -183,16 +183,10 @@ class FeedbackSpool:
                 "user_agent": agent,
                 "payload": payload,
             }
-            self.directory.mkdir(parents=True, exist_ok=True)
             target = self.directory / f"{received:%Y-%m-%d}.jsonl"
-            with target.open("a", encoding="utf-8") as handle:
-                handle.write(json.dumps(envelope, sort_keys=True) + "\n")
-                handle.flush()
-                os.fsync(handle.fileno())
-            # The retired daemon ran under UMask 0022 and the reducer runs
-            # under 0077; the spool is read by whatever an agent happens to be
-            # running as, so keep the mode the readers were written against.
-            os.chmod(target, 0o644)
+            # The spool is read directly by agents, so preserve its readable
+            # spacing while sharing the durable append contract.
+            append_jsonl(target, envelope, mode=0o644, fsync=True, separators=(",", ": "))
         if self.elicit is not None and is_elicit(payload):
             self.elicit.trigger()
         return {
