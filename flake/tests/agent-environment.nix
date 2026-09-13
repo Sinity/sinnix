@@ -7,6 +7,7 @@
     { system, ... }:
     let
       pkgs = inputs.nixpkgs.legacyPackages.${system};
+      agentctl = inputs.self.packages.${system}.agentctl;
       script = ../../scripts/sinnix-agent-environment-doc;
       data = pkgs.writeText "agent-environment-fixture.json" (
         builtins.toJSON {
@@ -93,7 +94,7 @@
             printf 'fixture prompt' > "$TMPDIR/prompt"
             export CODEX_ARGS="$TMPDIR/codex-args"
             export PATH="$TMPDIR/bin:$PATH"
-            ${pkgs.bash}/bin/bash ${../../dots/_ai/skills/agent-runtime/scripts/run_agent_prompt.sh} \
+            ${agentctl}/bin/agentctl-agent \
               --agent codex \
               --workdir "$TMPDIR/worktree" \
               --prompt-file "$TMPDIR/prompt" \
@@ -105,7 +106,7 @@
               { previous = $0 }
               END { exit !found }
             ' "$CODEX_ARGS"
-            AGENT_RUNNER_PATH=${../../dots/_ai/skills/agent-runtime/scripts/run_agent_prompt.sh} \
+            AGENT_RUNNER_PATH=${agentctl}/bin/agentctl-agent \
               AGENT_BOOTSTRAP_PATH=${../../scripts/sinnix-agent-npm-bootstrap} \
               python3 ${../../scripts/tests/test_agent_output.py}
             touch "$out"

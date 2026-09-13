@@ -49,7 +49,7 @@ mkServiceModule {
   };
   extraOptions.agentRunner = lib.mkOption {
     type = lib.types.str;
-    default = "${config.sinnix.paths.dotsRoot}/_ai/skills/agent-runtime/scripts/run_agent_prompt.sh";
+    default = "${scriptPkgs.agentctl}/bin/agentctl-agent";
     description = "The backend adapter agentctl queues for batch workers and reviewers; it turns a prompt file into one backend invocation.";
   };
   extraOptions.pools = lib.mkOption {

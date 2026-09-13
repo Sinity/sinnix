@@ -31,6 +31,10 @@ PUSH_TIMEOUT_SECONDS = 2_400
 # The agent kinds that must not publish or mutate tasks: their environment
 # cannot push, has no forwarded credential, and sees a read-only `bd`.
 RESTRICTED_KINDS = frozenset({"worker", "resume", "review"})
+# These backends implement the schema-to-result-file contract used by batch
+# workers and landing reviewers. The remaining interactive backends can still
+# run unstructured prompts, but must not be admitted for a typed result.
+STRUCTURED_RESULT_BACKENDS = frozenset({"claude", "codex"})
 BD_SHIM = """#!/bin/sh
 # agentctl: agents read Beads and never write them.
 self=$(dirname "$0")
@@ -141,6 +145,12 @@ def _agent_argv(
     if not config.agent_runner.is_file() or not os.access(config.agent_runner, os.X_OK):
         raise BatchRefusal(
             "runner", f"agent runner is unavailable: {config.agent_runner}"
+        )
+    if schema_path is not None and backend not in STRUCTURED_RESULT_BACKENDS:
+        supported = ", ".join(sorted(STRUCTURED_RESULT_BACKENDS))
+        raise BatchRefusal(
+            "backend",
+            f"backend {backend!r} cannot produce structured results; supported: {supported}",
         )
     argv = [
         str(config.agent_runner),
