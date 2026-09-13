@@ -132,7 +132,6 @@ mkAiService {
           description = "Speech-to-text hub (Parakeet TDT via sherpa-onnx)";
           wantedBy = [ ]; # on-demand, socket-activated via stt-proxy
           after = [ "network.target" ];
-          partOf = [ "stt-proxy.service" ];
           serviceConfig = lib.mkMerge [
             {
               User = user;

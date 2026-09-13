@@ -148,6 +148,9 @@ in
   systemd.services = lib.mkMerge [
     (forEachProxy (proxy: {
       ${proxy.proxy} = proxy.service;
+      ${lib.removeSuffix ".service" proxy.backendUnit}.partOf = [
+        "${proxy.proxy}.service"
+      ];
     }))
     exclusivityConflicts
   ];

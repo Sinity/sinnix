@@ -84,7 +84,6 @@ mkAiService {
         # down this container's cgroup. Conflicts= against every other
         # GPU-inference backend is computed centrally in ai-control.nix's
         # gpuInferenceConflicts.
-        partOf = [ "tts-proxy.service" ];
       };
     };
 } args

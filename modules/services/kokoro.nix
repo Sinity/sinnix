@@ -77,7 +77,6 @@ mkAiService {
       # kokoro-proxy tears this container down too, releasing its cgroup
       # instead of idling resident.
       systemd.services.podman-kokoro = {
-        partOf = [ "kokoro-proxy.service" ];
       };
     };
 } args

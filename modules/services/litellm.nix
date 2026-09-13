@@ -89,7 +89,6 @@ mkServiceModule {
       # endpoints. Requiring Ollama here would start its GPU occupant whenever
       # LiteLLM starts and evict direct backends such as Muse Glimmer.
       systemd.services.litellm = {
-        partOf = [ "litellm-proxy.service" ];
         wantedBy = lib.mkIf (!cfg.autoStart) (lib.mkForce [ ]);
       };
     };

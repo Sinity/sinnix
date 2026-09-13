@@ -92,7 +92,6 @@ mkServiceModule {
       # backend is computed centrally in ai-control.nix's
       # gpuInferenceConflicts.
       systemd.services.podman-musicgen = {
-        partOf = [ "musicgen-proxy.service" ];
       };
     };
 } args

@@ -117,7 +117,6 @@ mkServiceModule {
       # GPU-inference backend is computed centrally in ai-control.nix's
       # gpuInferenceConflicts.
       systemd.services.podman-comfyui = {
-        partOf = [ "comfyui-proxy.service" ];
       };
     };
 } args

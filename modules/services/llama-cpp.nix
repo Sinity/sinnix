@@ -89,7 +89,6 @@ mkServiceModule {
         description = profile.description;
         wantedBy = [ ];
         after = [ "network.target" ];
-        partOf = [ "${name}-proxy.service" ];
         serviceConfig = lib.mkMerge [
           { ExecStart = mkExecStart profile; }
           (
