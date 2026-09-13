@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Iterator, Mapping, TextIO
 
 from sinnix_lib.lock import flock
+from sinnix_lib.atomic import atomic_publish_at
 from .owner_execution import ExecutionProfile, OwnerExecution, OwnerRoute
 
 from .capabilities import Capability, Principal
@@ -63,7 +64,11 @@ def _is_excluded(path: Path) -> bool:
     parts = path.parts
     if any(part.lower() in SENSITIVE_PARTS for part in parts):
         return True
-    if any(part.startswith(".") and ".gateway-tmp-" in part for part in parts):
+    if any(
+        part.startswith(".")
+        and (".gateway-tmp-" in part or ".atomic-tmp-" in part)
+        for part in parts
+    ):
         return True
     if parts in LOCAL_ONLY_FILES:
         return True
@@ -157,25 +162,6 @@ def _temporary_name(target_name: str) -> str:
     return f".{target_name}.gateway-tmp-{os.urandom(16).hex()}"
 
 
-def _open_temporary(parent: int, target_name: str) -> tuple[str, int]:
-    for _ in range(8):
-        name = _temporary_name(target_name)
-        try:
-            return name, os.open(
-                name,
-                os.O_WRONLY
-                | os.O_CREAT
-                | os.O_EXCL
-                | os.O_NOFOLLOW
-                | getattr(os, "O_CLOEXEC", 0),
-                0o600,
-                dir_fd=parent,
-            )
-        except FileExistsError:
-            continue
-    raise ProjectError("could not allocate a private project temporary")
-
-
 def _unlink_at(parent: int, name: str) -> None:
     try:
         os.unlink(name, dir_fd=parent)
@@ -188,29 +174,7 @@ def _unlink_at(parent: int, name: str) -> None:
 def _atomic_publish(
     parent: int, target_name: str, content: bytes, mode: int = 0o600
 ) -> None:
-    temporary_name: str | None = None
-    descriptor = -1
-    try:
-        temporary_name, descriptor = _open_temporary(parent, target_name)
-        with os.fdopen(descriptor, "wb") as handle:
-            descriptor = -1
-            os.fchmod(handle.fileno(), mode & 0o777)
-            handle.write(content)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(
-            temporary_name,
-            target_name,
-            src_dir_fd=parent,
-            dst_dir_fd=parent,
-        )
-        os.fsync(parent)
-        temporary_name = None
-    finally:
-        if descriptor >= 0:
-            os.close(descriptor)
-        if temporary_name is not None:
-            _unlink_at(parent, temporary_name)
+    atomic_publish_at(parent, target_name, content, fsync=True, mode=mode)
 
 
 def _atomic_publish_symlink(parent: int, target_name: str, target: str) -> None:

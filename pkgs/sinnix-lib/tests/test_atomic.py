@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 from sinnix_lib import atomic
-from sinnix_lib.atomic import atomic_publish
+from sinnix_lib.atomic import atomic_publish, atomic_publish_at
 from sinnix_lib.atomic_json import write_json_atomic
 
 
@@ -104,6 +104,68 @@ def test_exclusive_publish_never_replaces_an_existing_destination(tmp_path):
     assert atomic_publish(destination, b"second", fsync=False, exclusive=True) is False
     assert destination.read_bytes() == b"first"
     assert [path.name for path in tmp_path.iterdir()] == ["cursor-key"]
+
+
+def test_publish_at_uses_the_pinned_directory_and_preserves_mode(tmp_path):
+    parent = tmp_path / "pinned"
+    parent.mkdir()
+    directory = os.open(parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        assert atomic_publish_at(
+            directory, "nested-state", b"payload", fsync=False, mode=0o640
+        )
+    finally:
+        os.close(directory)
+
+    destination = parent / "nested-state"
+    assert destination.read_bytes() == b"payload"
+    assert stat.S_IMODE(destination.stat().st_mode) == 0o640
+    assert list(parent.iterdir()) == [destination]
+
+
+@pytest.mark.parametrize("name", ["", ".", "..", "nested/name", "nested\x00name"])
+def test_publish_at_rejects_non_basename_targets(tmp_path, name):
+    directory = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        with pytest.raises(ValueError):
+            atomic_publish_at(directory, name, b"payload", fsync=False)
+    finally:
+        os.close(directory)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_publish_at_retries_a_temporary_name_collision(tmp_path, monkeypatch):
+    parent = tmp_path / "pinned"
+    parent.mkdir()
+    (parent / ".target.atomic-tmp-collision").write_bytes(b"untouched")
+    names = iter(["collision", "fresh"])
+    monkeypatch.setattr(
+        atomic.uuid,
+        "uuid4",
+        lambda: type("UUID", (), {"hex": next(names)})(),
+    )
+    directory = os.open(parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        assert atomic_publish_at(directory, "target", b"payload", fsync=False)
+    finally:
+        os.close(directory)
+    assert (parent / "target").read_bytes() == b"payload"
+    assert (parent / ".target.atomic-tmp-collision").read_bytes() == b"untouched"
+
+
+def test_publish_at_syncs_the_file_and_pinned_directory(tmp_path, monkeypatch):
+    parent = tmp_path / "pinned"
+    parent.mkdir()
+    synced = []
+    original_fsync = os.fsync
+    monkeypatch.setattr(os, "fsync", lambda descriptor: synced.append(descriptor))
+    directory = os.open(parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        assert atomic_publish_at(directory, "target", b"payload", fsync=True)
+    finally:
+        os.close(directory)
+        monkeypatch.setattr(os, "fsync", original_fsync)
+    assert len(synced) == 2
 
 
 def test_write_json_atomic_syncs_the_file_and_its_directory_when_asked(
