@@ -1031,7 +1031,9 @@ in
             nativeBuildInputs = [ pkgs.python3 ];
           }
           ''
-            export PYTHONPATH="${sinnixScriptRegistry.packageSet.agentctl}/${pkgs.python3.sitePackages}"
+            # agentctl imports sinnix_lib for its atomic publication helpers,
+            # so a hand-built path needs both packages, not just agentctl.
+            export PYTHONPATH="${sinnixScriptRegistry.packageSet.agentctl}/${pkgs.python3.sitePackages}:${sinnixScriptRegistry.packageSet.sinnix-lib}/${pkgs.python3.sitePackages}"
             ${pkgs.python3}/bin/python - <<'PY'
             import json
             from pathlib import Path
