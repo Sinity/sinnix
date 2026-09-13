@@ -159,6 +159,49 @@ let
     else
       ''export ${varName}="${literal}"'';
 
+  # Claude Code's common launch contract. Both native Claude and the Clodex
+  # proxy need the same scratch location and selected profile before their
+  # distinct launch paths. Clodex inserts its child-routing exports after this
+  # fragment, so the argument assembly remains a second shared fragment.
+  mkClaudeScratchPrelude =
+    { profile }:
+    ''
+      if [ -z "''${CLAUDE_CODE_TMPDIR:-}" ]; then
+        if [ -d "${sinnixCfg.paths.realmRoot}" ]; then
+          export CLAUDE_CODE_TMPDIR=${lib.escapeShellArg claudeTmpRoot}
+        else
+          export CLAUDE_CODE_TMPDIR="''${TMPDIR:-/tmp}/claude-code-$UID"
+        fi
+      fi
+      ${pkgs.coreutils}/bin/install -d -m 0700 "$CLAUDE_CODE_TMPDIR"
+
+      export SINNIX_CLAUDE_PROFILE=${lib.escapeShellArg profile}
+    '';
+
+  mkClaudeLaunchArgs = mcpConfigName: ''
+    mcp_args=()
+    MCP_CONFIG="$HOME/.config/claude/${mcpConfigName}.json"
+    if [ -r "$MCP_CONFIG" ]; then
+      mcp_args=(--mcp-config "$MCP_CONFIG" --strict-mcp-config)
+    fi
+
+    claude_args=(
+      "''${mcp_args[@]}"
+    )
+    if [ -d "${sinnixCfg.paths.realmRoot}" ]; then
+      claude_args+=(--add-dir "${sinnixCfg.paths.realmRoot}" "/home/${user}")
+    else
+      claude_args+=(--add-dir "/home/${user}")
+    fi
+  '';
+
+  mkClodexRoutingPrelude = ''
+    # Clodex's proxy child route is opt-in to this wrapper. Keeping these
+    # out of managed settings leaves ordinary native sessions independent.
+    export CLAUDE_CODE_FORK_SUBAGENT=1
+    export CLAUDE_CODE_PROCESS_WRAPPER="$HOME/.local/bin/clodex-claude"
+  '';
+
   mkClaudeCodeWrapper =
     {
       mcpConfigName ? "mcp",
@@ -193,31 +236,7 @@ let
         # captures. Its supported override is CLAUDE_CODE_TMPDIR; without it,
         # concurrent subagents accumulate under /tmp/claude-$UID and can
         # exhaust the workstation's bounded /tmp tmpfs.
-        if [ -z "''${CLAUDE_CODE_TMPDIR:-}" ]; then
-          if [ -d "${sinnixCfg.paths.realmRoot}" ]; then
-            export CLAUDE_CODE_TMPDIR=${lib.escapeShellArg claudeTmpRoot}
-          else
-            export CLAUDE_CODE_TMPDIR="''${TMPDIR:-/tmp}/claude-code-$UID"
-          fi
-        fi
-        ${pkgs.coreutils}/bin/install -d -m 0700 "$CLAUDE_CODE_TMPDIR"
-
-        export SINNIX_CLAUDE_PROFILE=${lib.escapeShellArg profile}
-        mcp_args=()
-        MCP_CONFIG="$HOME/.config/claude/${mcpConfigName}.json"
-        if [ -r "$MCP_CONFIG" ]; then
-          mcp_args=(--mcp-config "$MCP_CONFIG" --strict-mcp-config)
-        fi
-
-        claude_args=(
-          "''${mcp_args[@]}"
-        )
-        if [ -d "${sinnixCfg.paths.realmRoot}" ]; then
-          claude_args+=(--add-dir "${sinnixCfg.paths.realmRoot}" "/home/${user}")
-        else
-          claude_args+=(--add-dir "/home/${user}")
-        fi
-
+        ${mkClaudeScratchPrelude { inherit profile; }}${mkClaudeLaunchArgs mcpConfigName}
         exec "$STATE/npm/bin/claude" "''${claude_args[@]}" "$@"
       '';
       executable = true;
@@ -253,35 +272,9 @@ let
           binaryName = "claude";
         }}
 
-        if [ -z "''${CLAUDE_CODE_TMPDIR:-}" ]; then
-          if [ -d "${sinnixCfg.paths.realmRoot}" ]; then
-            export CLAUDE_CODE_TMPDIR=${lib.escapeShellArg claudeTmpRoot}
-          else
-            export CLAUDE_CODE_TMPDIR="''${TMPDIR:-/tmp}/claude-code-$UID"
-          fi
-        fi
-        ${pkgs.coreutils}/bin/install -d -m 0700 "$CLAUDE_CODE_TMPDIR"
-
-        export SINNIX_CLAUDE_PROFILE=${lib.escapeShellArg profile}
-        # Clodex's proxy child route is opt-in to this wrapper. Keeping these
-        # out of managed settings leaves ordinary native sessions independent.
-        export CLAUDE_CODE_FORK_SUBAGENT=1
-        export CLAUDE_CODE_PROCESS_WRAPPER="$HOME/.local/bin/clodex-claude"
-        mcp_args=()
-        MCP_CONFIG="$HOME/.config/claude/${mcpConfigName}.json"
-        if [ -r "$MCP_CONFIG" ]; then
-          mcp_args=(--mcp-config "$MCP_CONFIG" --strict-mcp-config)
-        fi
-
-        claude_args=(
-          "''${mcp_args[@]}"
-        )
-        if [ -d "${sinnixCfg.paths.realmRoot}" ]; then
-          claude_args+=(--add-dir "${sinnixCfg.paths.realmRoot}" "/home/${user}")
-        else
-          claude_args+=(--add-dir "/home/${user}")
-        fi
-
+        ${
+          mkClaudeScratchPrelude { inherit profile; }
+        }${mkClodexRoutingPrelude}${mkClaudeLaunchArgs mcpConfigName}
         CLAUDE_STATE="$STATE"
         claude_binary="$CLAUDE_STATE/npm/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe"
 
@@ -522,6 +515,9 @@ in
     resolveSecretPath
     mkClaudeBackendEnv
     mkCodexBackendEnv
+    mkClaudeScratchPrelude
+    mkClaudeLaunchArgs
+    mkClodexRoutingPrelude
     mkClaudeCodeWrapper
     mkClodexWrapper
     mkClodexChildWrapper
