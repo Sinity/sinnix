@@ -28,23 +28,19 @@ in
           config:
           let
             hm = hmFor config;
-            policy = builtins.fromJSON (
-              builtins.unsafeDiscardStringContext
-                config.environment.etc."opt/chrome/policies/managed/extra.json".text
-            );
             inventory = config.sinnix.runtime.inventory;
             bindings = builtins.toJSON hm.wayland.windowManager.hyprland.settings.bind;
-            extensionId = "jccgkpdlopfflfchemmfedfokldkeeck";
+            # The id is only known once the CRX is signed, so the policy is
+            # generated with it rather than declared here; the derivation
+            # below checks the pinned id against the packed archive.
+            policySource =
+              toString
+                config.environment.etc."opt/chrome/policies/managed/sinnix-nav-capture.json".source;
           in
           [
             {
-              assertion =
-                policy.ExtensionSettings.${extensionId}.installation_mode == "force_installed"
-                && policy.ExtensionSettings.${extensionId}.override_update_url
-                && lib.hasPrefix "${extensionId};file:///nix/store/" (
-                  builtins.head policy.ExtensionInstallForcelist
-                );
-              message = "The navigation extension must be installed by Chrome's managed extension policy.";
+              assertion = lib.hasSuffix "/policy.json" policySource;
+              message = "The navigation extension policy must come from the generated extension derivation.";
             }
             {
               assertion = builtins.hasAttr "sinnix-nav-capture" hm.systemd.user.services;
@@ -89,6 +85,8 @@ in
       # Force the evaluated module outputs in the check derivation. Keeping
       # this read in the derivation prevents a lazy check from passing when
       # the browser module stops contributing its policy or inventory.
+      navCapturePolicy =
+        evaluated.config.environment.etc."opt/chrome/policies/managed/sinnix-nav-capture.json".source;
       workflow = builtins.unsafeDiscardStringContext (
         builtins.toJSON {
           policy = evaluated.config.environment.etc."opt/chrome/policies/managed/extra.json".text;
@@ -100,11 +98,37 @@ in
       );
     in
     {
-      checks.browser-workflow = pkgs.runCommand "sinnix-browser-workflow" { inherit workflow; } ''
-        ${pkgs.nodejs}/bin/node ${./nav-capture-extension.mjs} \
-          ${../../browser-extensions/nav-capture/background.js} ${toString navigationPort}
-        test -n "$workflow"
-        touch "$out"
-      '';
+      checks.browser-workflow =
+        pkgs.runCommand "sinnix-browser-workflow"
+          {
+            inherit workflow;
+            nativeBuildInputs = [
+              pkgs.go-crx3
+              pkgs.jq
+            ];
+          }
+          ''
+            ${pkgs.nodejs}/bin/node ${./nav-capture-extension.mjs} \
+              ${../../browser-extensions/nav-capture/background.js} ${toString navigationPort}
+            test -n "$workflow"
+
+            # A policy that pins an id the signed archive does not have is the
+            # silent failure this check exists to catch: Chrome just never
+            # matches the forcelist entry.
+            policy=${navCapturePolicy}
+            generated="$(dirname "$policy")"
+            packed="$(crx3 id "$generated/nav-capture.crx")"
+            pinned="$(jq -r '.ExtensionSettings | keys[0]' "$policy")"
+            forced="$(jq -r '.ExtensionInstallForcelist[0] | split(";")[0]' "$policy")"
+            recorded="$(cat "$generated/extension-id")"
+            for found in "$pinned" "$forced" "$recorded"; do
+              if [ "$found" != "$packed" ]; then
+                echo "extension id mismatch: packed=$packed policy=$found" >&2
+                exit 1
+              fi
+            done
+            ${pkgs.gnugrep}/bin/grep -q "appid=\"$packed\"" "$generated/updates.xml"
+            touch "$out"
+          '';
     };
 }
