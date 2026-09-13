@@ -12,15 +12,10 @@ local STREAM_PATH = ENDPOINT .. "/v1/events"
 local SNAPSHOT_STATE_KEYS = table.concat({
   "agentctl",
   "ambient_intelligence",
-  "blocked_tasks",
-  "config_drift",
-  "gaps_summary",
   "live_pressure",
-  "resource_slices",
   "runtime_inventory",
   "session_anchor",
   "systemd_units",
-  "workload_rows",
 }, ",")
 local SNAPSHOT_PATH = ENDPOINT .. "/v1/snapshot?state=" .. SNAPSHOT_STATE_KEYS
 local RECEIPTS_PATH = ENDPOINT .. "/v1/receipts?limit=5"

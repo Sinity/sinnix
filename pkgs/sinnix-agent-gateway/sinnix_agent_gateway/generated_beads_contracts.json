@@ -1,0 +1,2273 @@
+{
+  "generator": "datamodel-code-generator==0.80.0",
+  "model_sha256": "8a41ea770a634bff833af95ca89f793fbd0e4b131fe9c12f9c47985b377859a5",
+  "source": {
+    "operations": {
+      "addComment": {
+        "action": "beads.comment",
+        "model": "AddCommentInput",
+        "summary": "Append one comment to an issue's thread",
+        "write": true
+      },
+      "addDependencies": {
+        "action": "beads.dependencies.add",
+        "model": "AddDependenciesInput",
+        "summary": "Assert dependency edges as one act",
+        "write": true
+      },
+      "applyBatch": {
+        "action": "beads.changeset",
+        "model": "ApplyBatchInput",
+        "summary": "Apply an ordered, heterogeneous plan as one act",
+        "write": true
+      },
+      "batchCloseIssues": {
+        "action": "beads.batch.close",
+        "model": "BatchCloseIssuesInput",
+        "summary": "Close many issues as one act",
+        "write": true
+      },
+      "batchCreateIssues": {
+        "action": "beads.graph.create",
+        "model": "BatchCreateIssuesInput",
+        "summary": "Create many issues as one act",
+        "write": true
+      },
+      "claimIssue": {
+        "action": "beads.claim",
+        "model": "ClaimIssueInput",
+        "summary": "Claim an issue for an actor",
+        "write": true
+      },
+      "claimNextIssue": {
+        "action": "beads.claim_next",
+        "model": "ClaimNextIssueInput",
+        "summary": "Claim the next ready issue",
+        "write": true
+      },
+      "closeIssue": {
+        "action": "beads.close",
+        "model": "CloseIssueInput",
+        "summary": "Close one issue",
+        "write": true
+      },
+      "compareAndSetMetadata": {
+        "action": "beads.metadata.compare_set",
+        "model": "CompareAndSetMetadataInput",
+        "summary": "Conditionally set one metadata key on an issue",
+        "write": true
+      },
+      "countDependencyEdges": {
+        "action": "beads.dependencies.count",
+        "model": "CountDependencyEdgesInput",
+        "summary": "Count the dependency edges around several issues",
+        "write": false
+      },
+      "createIssue": {
+        "action": "beads.create",
+        "model": "CreateIssueInput",
+        "summary": "Create one issue",
+        "write": true
+      },
+      "forgetMemory": {
+        "action": "beads.memory.forget",
+        "model": "ForgetMemoryInput",
+        "summary": "Forget one stored memory",
+        "write": true
+      },
+      "getDependencyTree": {
+        "action": "beads.graph",
+        "model": "GetDependencyTreeInput",
+        "summary": "Walk the dependency tree of one issue",
+        "write": false
+      },
+      "getMemory": {
+        "action": "beads.memory.get",
+        "model": "GetMemoryInput",
+        "summary": "Get one stored memory",
+        "write": false
+      },
+      "listBlockingAnnotations": {
+        "action": "beads.blockers",
+        "model": "ListBlockingAnnotationsInput",
+        "summary": "Read the blocking decoration of several issues",
+        "write": false
+      },
+      "listDependencies": {
+        "action": "beads.dependencies",
+        "model": "ListDependenciesInput",
+        "summary": "List the stored dependency edges of several issues",
+        "write": false
+      },
+      "listDependencyCycles": {
+        "action": "beads.cycles",
+        "model": "ListDependencyCyclesInput",
+        "summary": "List dependency cycles",
+        "write": false
+      },
+      "listMemories": {
+        "action": "beads.memories",
+        "model": "ListMemoriesInput",
+        "summary": "List the workspace's stored memories",
+        "write": false
+      },
+      "listRelatedIssues": {
+        "action": "beads.related",
+        "model": "ListRelatedIssuesInput",
+        "summary": "List one issue's neighbors in a named direction",
+        "write": false
+      },
+      "releaseIssue": {
+        "action": "beads.unclaim",
+        "model": "ReleaseIssueInput",
+        "summary": "Give back the claim on an issue",
+        "write": true
+      },
+      "rememberMemory": {
+        "action": "beads.memory.remember",
+        "model": "RememberMemoryInput",
+        "summary": "Store one memory",
+        "write": true
+      },
+      "removeDependency": {
+        "action": "beads.dependencies.remove",
+        "model": "RemoveDependencyInput",
+        "summary": "Remove one dependency edge",
+        "write": true
+      },
+      "reopenIssue": {
+        "action": "beads.reopen",
+        "model": "ReopenIssueInput",
+        "summary": "Reopen one issue",
+        "write": true
+      },
+      "updateIssue": {
+        "action": "beads.update",
+        "model": "UpdateIssueInput",
+        "summary": "Edit the fields of one issue",
+        "write": true
+      }
+    },
+    "owner_read": {
+      "additionalProperties": false,
+      "properties": {
+        "aggregate": {
+          "additionalProperties": false,
+          "properties": {
+            "group_by": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "type": "object"
+        },
+        "at": {
+          "type": "string"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "direction": {
+          "type": "string"
+        },
+        "expression": {
+          "type": "string"
+        },
+        "filters": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "include": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "include_closed": {
+          "type": "boolean"
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "max_edges": {
+          "type": "integer"
+        },
+        "native_filters": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "offset": {
+          "type": "integer"
+        },
+        "order": {
+          "additionalProperties": false,
+          "properties": {
+            "field": {
+              "type": "string"
+            },
+            "reverse": {
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        },
+        "projection": {
+          "type": "string"
+        },
+        "provenance": {
+          "type": "boolean"
+        },
+        "relations": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "roots": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "view": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "request_schema": {
+      "$defs": {
+        "AddCommentInput": {
+          "additionalProperties": false,
+          "properties": {
+            "body": {
+              "$ref": "#/$defs/AddCommentRequest"
+            },
+            "path": {
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "description": "Exact canonical issue id. No fuzzy, prefix or substring resolution.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "path",
+            "body"
+          ],
+          "type": "object"
+        },
+        "AddCommentRequest": {
+          "additionalProperties": false,
+          "description": "One comment to append. The issue is named by the path, so it is not a member here: a body carrying it too would give one request two spellings of one anchor and a question about what to do when they disagree.",
+          "properties": {
+            "author": {
+              "description": "Who is signing the comment. CALLER-ASSERTED, and not the authenticated principal \u2014 see the operation description.\n\nTrimmed of surrounding space, then refused when the result is empty, when it exceeds 256 bytes or 255 characters (the storage column), or when it carries a control character. The bounds and the character rule are `actor`'s, unchanged, because the value lands in a column of the same width that every renderer of the thread prints, where an unfiltered C1 introducer is an escape-sequence payload.",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F\\u2028\\u2029]+$",
+              "type": "string"
+            },
+            "text": {
+              "description": "The comment body, stored VERBATIM: newlines, surrounding space and unicode all survive, and nothing trims the value that lands in the row.\n\nNO LENGTH BOUND AND NO CHARACTER RULE, unlike `author` beside it, and both absences are the column: this one is `LONGTEXT` rather than a 255-character field, and a comment that is a stack trace or a diff is an ordinary comment. The only cap is the 1 MiB every body on this surface shares.\n\nBOTH PLANES AGREE ABOUT THAT, which is worth stating because they did not. `wisp_comments.text` was left `TEXT` \u2014 65535 bytes \u2014 when the durable column was widened, so a comment past that limit wrote fine against an issue and failed against a wisp, on an operation that resolves its anchor across both planes deliberately. A caller therefore could not know which side of the bound it was on until the write failed. The ephemeral column is widened to match, so this member's bound is one number rather than two.\n\nBlank after trimming is a `400` \u2014 a comment of nothing but whitespace carries no information and is almost always a shell quoting accident \u2014 and blankness is judged on a TRIMMED COPY while the stored value is untrimmed, so a comment that merely begins with a newline is a comment.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "author",
+            "text"
+          ],
+          "type": "object"
+        },
+        "AddDependenciesInput": {
+          "additionalProperties": false,
+          "properties": {
+            "body": {
+              "$ref": "#/$defs/AddDependenciesRequest"
+            }
+          },
+          "required": [
+            "body"
+          ],
+          "type": "object"
+        },
+        "AddDependenciesRequest": {
+          "additionalProperties": false,
+          "properties": {
+            "actor": {
+              "description": "Who is asserting the edges, under `ClaimRequest.actor`'s rules and for the same reasons: the server trims it, refuses an empty result, anything longer than 256 BYTES, and any control character including newline. It is attributed on each `dependency_added` event a genuinely new edge records, and interpolated into the storage commit message.",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F\\u2028\\u2029]+$",
+              "type": "string"
+            },
+            "edges": {
+              "description": "The edges to assert, in the caller's order. An empty array is a `400` rather than a successful no-op: a write request that writes nothing is a client bug, and answering it cheerfully is how a client whose own list filtered to nothing silently stops wiring anything.\n\nThe 100-edge cap is a bound on how long one request may hold a write transaction, not a statement about batch semantics. Split a larger graph; each request is atomic on its own \u2014 but note that splitting it changes what the cycle gate can see, since the gate runs over one request at a time.\n\nA per-edge refusal names its offender as `edges[i].member`.",
+              "items": {
+                "$ref": "#/$defs/DependencyEdge"
+              },
+              "maxItems": 100,
+              "minItems": 1,
+              "type": "array"
+            }
+          },
+          "required": [
+            "actor",
+            "edges"
+          ],
+          "type": "object"
+        },
+        "ApplyBatchInput": {
+          "additionalProperties": false,
+          "properties": {
+            "body": {
+              "$ref": "#/$defs/ApplyBatchRequest"
+            }
+          },
+          "required": [
+            "body"
+          ],
+          "type": "object"
+        },
+        "ApplyBatchRequest": {
+          "additionalProperties": false,
+          "properties": {
+            "actor": {
+              "description": "Who is applying the plan, under `ClaimRequest.actor`'s rules and for the same reasons: the server trims it, refuses an empty result, anything longer than 256 BYTES (the `maxLength` above counts characters \u2014 the byte limit is the binding one), and any control character including newline.\n\nIt is attributed to every item and to the ONE history entry the request records, because a batch is one act by one caller.",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F\\u2028\\u2029]+$",
+              "type": "string"
+            },
+            "force_id_prefix": {
+              "default": false,
+              "description": "Permits an explicit `create.id` outside the workspace's configured issue prefix, for EVERY create item in the request. Without it such an id is refused by the role and arrives as a `400`.",
+              "type": "boolean"
+            },
+            "items": {
+              "description": "The items to apply, IN THE ORDER THEY ARE TO BE APPLIED. An empty array is a `400` rather than a successful no-op: a write request that writes nothing is a client bug, and answering it cheerfully is how a client whose own plan filtered to nothing silently stops writing.\n\nThe 100-item cap bounds how long one request may hold a write transaction, not batch semantics. Split a larger plan; each request is atomic on its own \u2014 but splitting it changes what the end gate can see, since the gate runs over one request at a time.\n\nA per-item refusal names its offender as `items[i].kind.member`.",
+              "items": {
+                "$ref": "#/$defs/ApplyItem"
+              },
+              "maxItems": 100,
+              "minItems": 1,
+              "type": "array"
+            },
+            "provenance": {
+              "description": "Labels the version-control history entry this request records, under `updateIssue`'s rule: it changes how the entry READS, never whether one is recorded. Empty composes a default naming how many items of each kind landed and no ids.",
+              "maxLength": 255,
+              "type": "string"
+            },
+            "skip_per_edge_cycle_check": {
+              "default": false,
+              "description": "Drops the PER-EDGE cycle probe for a caller wiring a large graph, exactly as it does on `POST /v0/beads/dependencies:add`.\n\nIT NEVER DROPS THE END GATE, which runs once after every item and re-validates the whole graph this request built, and it never drops the self-dependency refusal. It trades per-edge attribution for speed, not validation for speed.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "actor",
+            "items"
+          ],
+          "type": "object"
+        },
+        "ApplyCloseItem": {
+          "additionalProperties": false,
+          "description": "Closes one existing issue, under `POST /v0/beads/issues/{id}:close`'s rules including first-close-wins.",
+          "properties": {
+            "expected_version": {
+              "description": "Requires the row's `revision` to equal this value, evaluated as-modified and checked before the idempotent close. A miss refuses the whole request with `409 precondition_failed`, and `ApplyUpdateItem.expected_version`'s already-written rule applies here identically.\n\nTHERE IS DELIBERATELY NO `expected_status` HERE. A close is idempotent \u2014 re-closing a closed issue is `changed: false` \u2014 so a guard spelled to refuse an already-closed row is asking for a REFUSAL where this verb answers with a no-op. That belongs on an `update` item whose `patch.status` crosses into the done category.\n\nDECODE IT AS A 64-BIT INTEGER, on `ApplyUpdateItem.expected_version`'s terms, including its note that a corrupted token here costs the whole plan.",
+              "format": "int64",
+              "type": "integer"
+            },
+            "force": {
+              "default": false,
+              "description": "Bypasses close policy \u2014 the open-children refusal and the live-blocker refusal \u2014 and nothing else.\n\nCLOSE POLICY EVALUATES AT THIS ITEM, against the row as this request has already changed it. A LATER item that gives a closed parent an open child is NOT refused: the policy is a gate on the closing act, not an invariant the store maintains.",
+              "type": "boolean"
+            },
+            "reason": {
+              "description": "Why the issue is closed, stored and read back as `close_reason`. THE FIRST CLOSE WINS: an idempotent re-close writes neither this nor `session`.",
+              "maxLength": 255,
+              "type": "string"
+            },
+            "session": {
+              "description": "The working session that closed the issue, stored and read back as `closed_by_session`, under the same first-close-wins rule.",
+              "maxLength": 255,
+              "type": "string"
+            },
+            "target": {
+              "$ref": "#/$defs/Ref"
+            }
+          },
+          "required": [
+            "target"
+          ],
+          "type": "object"
+        },
+        "ApplyCreateItem": {
+          "additionalProperties": false,
+          "description": "Creates one issue and optionally NAMES it, so later items can reach the row without knowing an id the request has not minted yet.\n\nIt publishes the whole create vocabulary rather than `POST /v0/beads/issues:batchCreate`'s narrow one, and the additions are the point: `status`, `sender`, `metadata`, `ephemeral` and `no_history` are the members whose absence there makes that operation unusable for a caller composing a real plan.\n\nTHE EDGES ARE NOT HERE. An issue's dependencies and its parent are `dep_add` ITEMS, so the order of every edge in the request is total and there is exactly one spelling for an edge. An item carrying comments or dependencies on the issue is a `400`.\n\n`metadata` is the issue's own metadata document and must be a JSON OBJECT where it is present at all. It is stored as sent; the resolved ids `metadata_refs` splices are written over its top-level keys after every id in the request exists.",
+          "properties": {
+            "acceptance_criteria": {
+              "type": "string"
+            },
+            "assignee": {
+              "maxLength": 255,
+              "type": "string"
+            },
+            "defer_until": {
+              "description": "RFC 3339. The issue is hidden from ready work until then.",
+              "format": "date-time",
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "design": {
+              "type": "string"
+            },
+            "due_at": {
+              "description": "RFC 3339.",
+              "format": "date-time",
+              "type": "string"
+            },
+            "ephemeral": {
+              "default": false,
+              "description": "Creates the issue on the EPHEMERAL plane rather than the durable one. Per item, exactly as it is for `POST /v0/beads/issues:batchCreate`, so one request may create durable issues and ephemeral ones together.\n\nThe two planes hold their edges in different tables, so a `dep_add` between two rows this request creates on OPPOSITE planes is refused with everything else the request asked for. Mutually exclusive with `no_history`.",
+              "type": "boolean"
+            },
+            "estimated_minutes": {
+              "description": "An estimate in minutes. Absent leaves it unset.",
+              "type": "integer"
+            },
+            "external_ref": {
+              "maxLength": 255,
+              "type": "string"
+            },
+            "id": {
+              "description": "An explicit id for the new row, CREATE-ONLY: an id that already names a stored row is a `409` `already_exists` and the whole request is refused \u2014 never an adoption and never an overwrite. To act on a row that already exists, send an `update` item referencing it by `{\"id\": \u2026}`. The id is checked against the workspace's configured issue prefix unless the request sets `force_id_prefix`.\n\nAbsent is the ordinary case and the server mints one. This is the member `POST /v0/beads/issues:batchCreate` deliberately does not publish, which is why that operation can never adopt or overwrite a stored row and this one can be refused for trying.",
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            },
+            "issue_type": {
+              "description": "Issue type. Spelled `issue_type` rather than `type`, matching the member `Issue` carries, and validated against the built-ins plus the workspace's configured custom types by the ROLE \u2014 this server cannot read that vocabulary without a transaction, so it checks only what this schema declares and an unknown one arrives as a `400`.",
+              "maxLength": 255,
+              "type": "string"
+            },
+            "key": {
+              "description": "This item's name inside the request. OPTIONAL \u2014 an item nothing refers to needs no name \u2014 and unique across the request's create items; a repeat is a `400`. It is what a later `Ref.key` resolves to, and the response's `keys` member is where the id it was bound to is read.",
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            },
+            "labels": {
+              "description": "The complete label set the issue is created with. Authoritative, not a patch \u2014 a create has nothing to add to.",
+              "items": {
+                "maxLength": 255,
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "metadata": {
+              "$ref": "#/$defs/MetadataValue"
+            },
+            "metadata_refs": {
+              "additionalProperties": {
+                "$ref": "#/$defs/Ref"
+              },
+              "description": "Splices resolved ids into this issue's metadata: each entry writes the id its `Ref` resolves to as the WHOLE VALUE of one top-level metadata key.\n\nIT IS THE ONE PLACE A KEY MAY REACH FORWARD, or name this item's own `key` \u2014 see the operation's description. A ref here that names a key NO item declares is still a `400`.\n\nIT IS A TYPED MAP, NOT TEMPLATING. A `${key}` placeholder inside a JSON string would have no escape for a literal dollar-brace, would collide with every other templating language a caller's own values might carry, and could not be type-checked at all. This is one key, one whole value, one level deep.\n\nThe splice is applied AFTER the row is created, so a consumer of the event stream sees a create and then an update on the spliced row.",
+              "type": "object"
+            },
+            "no_history": {
+              "default": false,
+              "description": "Creates the issue on the ephemeral plane WITHOUT history, and without the garbage collection an ordinary ephemeral row is eligible for. Mutually exclusive with `ephemeral`.",
+              "type": "boolean"
+            },
+            "notes": {
+              "type": "string"
+            },
+            "owner": {
+              "description": "The human owner, which is a different member from `assignee`: the assignee is who is working it now, the owner is who it is attributed to.",
+              "maxLength": 255,
+              "type": "string"
+            },
+            "priority": {
+              "description": "0 is P0/critical. Absent means the workspace default.",
+              "maximum": 4,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "sender": {
+              "description": "Who sent this, for the message-shaped rows a plan creates. Stored verbatim and interpreted by nothing on this surface.",
+              "maxLength": 255,
+              "type": "string"
+            },
+            "status": {
+              "description": "The status the issue is created in, from this workspace's own configured vocabulary. Absent means the workspace default.",
+              "maxLength": 255,
+              "type": "string"
+            },
+            "title": {
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "title"
+          ],
+          "type": "object"
+        },
+        "ApplyDepAddItem": {
+          "additionalProperties": false,
+          "description": "Asserts ONE dependency edge, under `POST /v0/beads/dependencies:add`'s rules. An edge from a row to itself is a `400`.\n\nA TARGET NEED NOT BE A ROW THIS DATABASE HOLDS: an `external:` reference and an id belonging to another repository are legitimate targets, so only an absence this database can SEE is refused. A SOURCE has no such latitude \u2014 an edge follows its source, so a source this database holds no row for has no plane to land in.\n\n`metadata` is the edge's type-specific JSON blob, and an OBJECT where it is present at all. Most edge types carry none.\n\nA WAITS-FOR EDGE IS NORMALIZED RATHER THAN STORED AS ASKED. An absent, empty or `{}` `metadata` on a `waits-for` edge is STORED as `{\"gate\":\"all-children\"}`, because a stored waits-for row must be self-describing: readers predating the gate's introduction do not default a missing one, so an empty gate is a row those readers get wrong. A metadata that names a gate keeps it, along with the spawner and also-blocks members a caller may carry, and a gate that is neither `all-children` nor `any-children` is a `400`. Nothing else about that member is interpreted.\n\nTHERE IS NO TYPED `waits_for` MEMBER, and that is the shape rather than an omission: every measured caller already carries the gate as metadata, a typed spelling lowers to these same bytes, and the blob carries members a two-field typed member could not express. One spelling, and it is this one.",
+          "properties": {
+            "metadata": {
+              "$ref": "#/$defs/MetadataValue"
+            },
+            "source": {
+              "$ref": "#/$defs/Ref"
+            },
+            "target": {
+              "$ref": "#/$defs/Ref"
+            },
+            "type": {
+              "description": "The edge type, from the same OPEN vocabulary `Dependency.type` carries: checked for BEING a storable value, never for membership of a known-types list, so a workspace's own type passes.",
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "source",
+            "target",
+            "type"
+          ],
+          "type": "object"
+        },
+        "ApplyItem": {
+          "additionalProperties": false,
+          "description": "One item of a plan: a `kind` naming what it does, plus exactly one payload member matching it.\n\nIT IS A TAGGED SINGLE-SHAPE OBJECT rather than a polymorphic one, and the spelling is deliberate. This document uses no `oneOf`, `anyOf` or `allOf` anywhere: a component carrying a composition keyword alongside the `x-go-type` pins the response schemas depend on silently loses the pin, and the generated result is a second wire struct that drifts from the canonical one. So the union is carried as four OPTIONAL members with a required tag rather than as a schema alternation.\n\nWHAT A CLIENT MUST DO, since no validator can enforce it from this schema alone: send `kind`, send the ONE member `kind` names, and send no other. An item carrying no payload does nothing; an item carrying a payload its `kind` does not name has two halves that disagree; an item carrying two payloads cannot say which it meant. All three are a `400` and nothing in the request is written. A generated client's type will make all four members constructible at once \u2014 that is the cost of the spelling, and checking it is the client's.\n\nREADING one is the same rule from the other side: dispatch on `kind` and read only that member. The other three are absent.",
+          "properties": {
+            "close": {
+              "$ref": "#/$defs/ApplyCloseItem"
+            },
+            "create": {
+              "$ref": "#/$defs/ApplyCreateItem"
+            },
+            "dep_add": {
+              "$ref": "#/$defs/ApplyDepAddItem"
+            },
+            "kind": {
+              "description": "Which member below is read. A CLOSED set, unlike a dependency `type`: every value here is a verb this operation implements, and an unknown one is a request the server cannot execute rather than a workspace's own vocabulary.",
+              "enum": [
+                "create",
+                "update",
+                "close",
+                "dep_add"
+              ],
+              "type": "string"
+            },
+            "update": {
+              "$ref": "#/$defs/ApplyUpdateItem"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        "ApplyLabelPatch": {
+          "additionalProperties": false,
+          "description": "An ordered label edit: `replace` first, then `add`, then `remove`, so REMOVAL WINS when the same label appears in more than one member.\n\nIt is the full patch rather than `IssuePatchBody.labels`' complete replacement because a plan edits a set it did not compose: replacing would mean reading the labels back first, and the read this operation exists to avoid is exactly that one.\n\nRepetition is free in both directions \u2014 a label named twice in one member is applied once, and removing a label the issue does not carry is a no-op. An EMPTY-STRING entry is dropped rather than refused: a label row holding \"\" renders as nothing and matches nothing, so refusing the whole request for one stray entry would fail an otherwise-good edit.",
+          "properties": {
+            "add": {
+              "description": "Labels to add after any replacement.",
+              "items": {
+                "maxLength": 255,
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "remove": {
+              "description": "Labels to remove after replacement and addition.",
+              "items": {
+                "maxLength": 255,
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "replace": {
+              "description": "The complete starting label set. An empty array CLEARS every label; omitting the member leaves the current set as the starting point.",
+              "items": {
+                "maxLength": 255,
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "type": "object"
+        },
+        "ApplyMetadataPatch": {
+          "additionalProperties": false,
+          "description": "A metadata edit. `replace` is mutually exclusive with the other three; without it the edits apply as `merge`, then `set` in key order, then `unset`, so UNSETTING A KEY WINS over setting or merging it. Sending `replace` beside any of the others is a `400`.\n\n`replace` replaces the whole document. Present holding `null`, `{}` or an empty value CLEARS metadata \u2014 and clearing STORES THE EMPTY JSON DOCUMENT rather than SQL null, so \"created with no metadata\" and \"given metadata and then cleared\" are the same stored value; a reader must treat absent, empty and `{}` as one value on the way out. `merge` must be a nonempty JSON OBJECT and is merged into the current document.",
+          "properties": {
+            "merge": {
+              "$ref": "#/$defs/MetadataValue"
+            },
+            "replace": {
+              "$ref": "#/$defs/MetadataValue"
+            },
+            "set": {
+              "additionalProperties": {
+                "$ref": "#/$defs/MetadataValue"
+              },
+              "description": "Individual top-level keys to write, in deterministic key order. A value present holding `null` writes JSON null; a key is removed with `unset`, never by sending a null here.",
+              "type": "object"
+            },
+            "unset": {
+              "description": "Top-level keys to remove, applied after every other edit.",
+              "items": {
+                "maxLength": 255,
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "type": "object"
+        },
+        "ApplyPatchBody": {
+          "additionalProperties": false,
+          "description": "The fields an `update` item writes. Every member is optional and PRESENCE is the signal: a member present is written, a member absent is untouched. An empty object is a `400` \u2014 a write that writes nothing is a client bug.\n\nIt mirrors `IssuePatchBody` member for member and diverges in exactly two places now that `PATCH /v0/beads/issues/{id}` publishes `status`, `assignee` and the same `metadata` algebra.\n\n`owner` is published here and not there, which is an accident of order rather than a decision: nothing has asked for it on the single patch.\n\n`labels` is a full patch rather than a complete replacement, and that one is a real difference: a plan has to be able to REMOVE one label without knowing the rest of the set, because it edits a set it did not compose. A caller patching one row it just read already knows the set.\n\n`parent_id` is deliberately absent, and its absence is this operation's one-edge-one-spelling rule: a parent is a `dep_add` item of type `parent-child`, so the order of every edge in the request stays total. The single patch has no ordering to express and publishes it directly. `persistence` is absent from both \u2014 moving a row between planes mid-plan is a different act from writing its fields, and nothing has asked for it here.",
+          "properties": {
+            "acceptance_criteria": {
+              "type": "string"
+            },
+            "append_notes": {
+              "description": "Appends to the notes rather than replacing them. Mutually exclusive with `notes`.",
+              "type": "string"
+            },
+            "assignee": {
+              "description": "The assignee. A transfer away from a live foreign in-progress owner is refused with `409 already_claimed` unless `force_assignee_transfer` is set or `expected_assignee` matched.",
+              "maxLength": 255,
+              "type": "string"
+            },
+            "defer_until": {
+              "description": "RFC 3339. Explicit `null` CLEARS the deferral.",
+              "format": "date-time",
+              "nullable": true,
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "design": {
+              "type": "string"
+            },
+            "due_at": {
+              "description": "RFC 3339. Explicit `null` CLEARS the due date.",
+              "format": "date-time",
+              "nullable": true,
+              "type": "string"
+            },
+            "estimated_minutes": {
+              "description": "Explicit `null` CLEARS the estimate.",
+              "nullable": true,
+              "type": "integer"
+            },
+            "external_ref": {
+              "description": "Explicit `null` CLEARS the reference.",
+              "maxLength": 255,
+              "nullable": true,
+              "type": "string"
+            },
+            "issue_type": {
+              "description": "The issue type, from this workspace's own configured vocabulary. A type outside it is refused by the ROLE and reaches the client as a `400`.",
+              "maxLength": 255,
+              "type": "string"
+            },
+            "labels": {
+              "$ref": "#/$defs/ApplyLabelPatch"
+            },
+            "metadata": {
+              "$ref": "#/$defs/ApplyMetadataPatch"
+            },
+            "notes": {
+              "description": "Replaces the notes. Mutually exclusive with `append_notes`; sending both is a `400`.",
+              "type": "string"
+            },
+            "owner": {
+              "maxLength": 255,
+              "type": "string"
+            },
+            "priority": {
+              "maximum": 4,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "status": {
+              "description": "The issue's status, from this workspace's own configured vocabulary.\n\nA STATUS THAT CROSSES INTO THE DONE CATEGORY ANSWERS TO CLOSE POLICY: the item is refused with `409 not_closable` for open children or a live blocker unless `force_close_policy` is set. A done-to-done change and a move OUT of the done category are unaffected \u2014 which is how a plan reopens a row, since there is no reopen item.",
+              "maxLength": 255,
+              "type": "string"
+            },
+            "title": {
+              "description": "Must not be blank after trimming; the length bound is what the column holds.",
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "ApplyUpdateItem": {
+          "additionalProperties": false,
+          "description": "Patches one existing issue, under `PATCH /v0/beads/issues/{id}`'s rules.\n\nThe two carry the same preconditions and the same force flags; what is this operation's alone is that its guards evaluate AS-MODIFIED \u2014 against the row as earlier items of this same request have already changed it \u2014 and that a miss takes the whole plan down rather than one write.",
+          "properties": {
+            "expected_assignee": {
+              "description": "Requires the issue's assignee to equal this value, evaluated as-modified. A match AUTHORIZES the requested `patch.assignee` transfer: this compare-and-set replaces the ordinary anti-steal fence, so it must not be combined with `force_assignee_transfer`. A miss refuses the whole request with `409 precondition_failed`.",
+              "maxLength": 255,
+              "type": "string"
+            },
+            "expected_status": {
+              "description": "Requires the issue's status to equal this value, evaluated AS-MODIFIED \u2014 against the row as this request has already changed it at this item's position. A miss refuses the whole request with `409 precondition_failed`.",
+              "maxLength": 255,
+              "type": "string"
+            },
+            "expected_version": {
+              "description": "Requires the row's `revision` to equal this value before the patch. A miss refuses the WHOLE request with `409 precondition_failed`.\n\nIT IS A `400`, NOT A `409`, ON A ROW THIS REQUEST HAS ALREADY WRITTEN \u2014 including one an earlier item created. The token is minted by the write, so mid-request there is no value a caller could send: the pre-request token is stale by construction and a row this request just created never had one the caller could read. Refusing statically says so; answering with a mismatch would send the caller looking for a concurrent writer that does not exist.\n\n`expected_status` and `expected_assignee` carry no such rule, because a caller CAN know what its own earlier item set them to.\n\nDECODE IT AS A 64-BIT INTEGER, for the reason `UpdateIssueRequest.expected_version` spells out. It bites harder here than anywhere else on the surface: a corrupted token refuses the WHOLE plan rather than one write, so a client with a lossy parser loses every item of every batch it guards.",
+              "format": "int64",
+              "type": "integer"
+            },
+            "force_assignee_transfer": {
+              "default": false,
+              "description": "Bypasses ONLY a genuine transfer away from a live foreign in-progress owner. Reasserting the exact current assignee is idempotent and needs no force. It requires `patch.assignee` \u2014 a request setting it without one is a `400` \u2014 and it must be false when `expected_assignee` is sent.",
+              "type": "boolean"
+            },
+            "force_close_policy": {
+              "default": false,
+              "description": "Bypasses ONLY close policy \u2014 the open-children refusal and the live blocker refusal \u2014 for a `patch.status` that crosses into the workspace's done category. It has no effect without such a status change, and it never bypasses validation, the preconditions above, or the assignee fence.",
+              "type": "boolean"
+            },
+            "patch": {
+              "$ref": "#/$defs/ApplyPatchBody"
+            },
+            "target": {
+              "$ref": "#/$defs/Ref"
+            }
+          },
+          "required": [
+            "target",
+            "patch"
+          ],
+          "type": "object"
+        },
+        "BatchCloseIssuesInput": {
+          "additionalProperties": false,
+          "properties": {
+            "body": {
+              "$ref": "#/$defs/BatchCloseRequest"
+            }
+          },
+          "required": [
+            "body"
+          ],
+          "type": "object"
+        },
+        "BatchCloseItem": {
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "description": "Exact canonical issue id, resolved across BOTH planes. No fuzzy, prefix or substring resolution \u2014 `IssueID`'s rule.\n\nA DUPLICATE is admissible; see the operation description.",
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            },
+            "reason": {
+              "description": "Why THIS issue is closed. It is per item rather than per request because `bd close a b c --reason x --reason y --reason z` has always mapped them positionally, and one request-wide reason could not express it. `CloseIssueRequest.reason`'s rules and first-close-wins.",
+              "maxLength": 255,
+              "type": "string"
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "type": "object"
+        },
+        "BatchCloseRequest": {
+          "additionalProperties": false,
+          "properties": {
+            "actor": {
+              "description": "Who is closing. `ClaimRequest.actor`'s rules exactly, and the value is recorded against every item.",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F\\u2028\\u2029]+$",
+              "type": "string"
+            },
+            "force": {
+              "default": false,
+              "description": "Bypass close policy \u2014 the open-children refusal and the live-blocker refusal \u2014 for EVERY item, and nothing else. It never bypasses validation and it never bypasses existence: an id that names nothing refuses whether or not this is set. It is request-wide because the flag that spells it is.",
+              "type": "boolean"
+            },
+            "items": {
+              "description": "The issues to close, in the order the caller asked for them. Every item appears in `outcomes` at the same index.\n\nAn EMPTY array is a `400` rather than an empty answer, and the cap is `batchCreateIssues`' cap for its reason: it bounds how long one request may hold a write transaction.",
+              "items": {
+                "$ref": "#/$defs/BatchCloseItem"
+              },
+              "maxItems": 100,
+              "minItems": 1,
+              "type": "array"
+            },
+            "session": {
+              "description": "The working session, recorded against every item that closes, under `CloseIssueRequest.session`'s first-close-wins rule and bounds.",
+              "maxLength": 255,
+              "type": "string"
+            }
+          },
+          "required": [
+            "actor",
+            "items"
+          ],
+          "type": "object"
+        },
+        "BatchCreateDependency": {
+          "additionalProperties": false,
+          "properties": {
+            "target_id": {
+              "description": "The far end of the edge: an issue this workspace holds, an `external:` reference, or an id whose prefix belongs to another repository. Anything else is a `400` and nothing is created.\n\nNOT AN ITEM OF THIS REQUEST. The server assigns every id and an item carries no name, so there is nothing here a caller could write to address one; see the operation's description for the operation that can.",
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": {
+              "description": "The edge type, from the same OPEN vocabulary `Dependency.type` carries. It is spelled `type` because that is the member an edge carries everywhere else on this surface.",
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "target_id",
+            "type"
+          ],
+          "type": "object"
+        },
+        "BatchCreateIssuesInput": {
+          "additionalProperties": false,
+          "properties": {
+            "body": {
+              "$ref": "#/$defs/BatchCreateRequest"
+            }
+          },
+          "required": [
+            "body"
+          ],
+          "type": "object"
+        },
+        "BatchCreateItem": {
+          "additionalProperties": false,
+          "properties": {
+            "acceptance_criteria": {
+              "type": "string"
+            },
+            "assignee": {
+              "maxLength": 255,
+              "type": "string"
+            },
+            "dependencies": {
+              "description": "The edges this issue is created carrying. They are written in the same transaction as the issue, so this operation never publishes an issue whose declared relationships are not there yet.",
+              "items": {
+                "$ref": "#/$defs/BatchCreateDependency"
+              },
+              "maxItems": 100,
+              "type": "array"
+            },
+            "description": {
+              "type": "string"
+            },
+            "design": {
+              "type": "string"
+            },
+            "issue_type": {
+              "description": "Issue type. Spelled `issue_type` rather than `type`, matching the member `Issue` carries, and validated against the built-ins plus the workspace's configured custom types \u2014 an unknown one is a `400`.",
+              "type": "string"
+            },
+            "labels": {
+              "items": {
+                "maxLength": 255,
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "priority": {
+              "description": "0 is P0/critical. Absent means the workspace default.",
+              "maximum": 4,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "title": {
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "title"
+          ],
+          "type": "object"
+        },
+        "BatchCreateRequest": {
+          "additionalProperties": false,
+          "properties": {
+            "actor": {
+              "description": "Who is creating the issues, under `ClaimRequest.actor`'s rules and for the same reasons: the server trims it, refuses an empty result, anything longer than 256 BYTES, and any control character including newline. It is attributed to every item and interpolated into the storage commit message.",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F\\u2028\\u2029]+$",
+              "type": "string"
+            },
+            "items": {
+              "description": "The issues to create, in order. An empty array is a `400` rather than a successful no-op: a write request that writes nothing is a client bug, and answering it with a cheerful empty success is how a client whose own list filtered to nothing silently stops creating anything.\n\nThe 100-item cap is a bound on how long one request may hold a write transaction, not a statement about batch semantics. Split a larger plan; each request is atomic on its own.",
+              "items": {
+                "$ref": "#/$defs/BatchCreateItem"
+              },
+              "maxItems": 100,
+              "minItems": 1,
+              "type": "array"
+            }
+          },
+          "required": [
+            "actor",
+            "items"
+          ],
+          "type": "object"
+        },
+        "ClaimIssueInput": {
+          "additionalProperties": false,
+          "properties": {
+            "body": {
+              "$ref": "#/$defs/ClaimRequest"
+            },
+            "path": {
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "description": "Exact canonical issue id. No fuzzy, prefix or substring resolution.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "path",
+            "body"
+          ],
+          "type": "object"
+        },
+        "ClaimNextIssueInput": {
+          "additionalProperties": false,
+          "properties": {
+            "body": {
+              "$ref": "#/$defs/ClaimNextRequest"
+            },
+            "query": {
+              "additionalProperties": false,
+              "properties": {
+                "assignee": {
+                  "description": "Only issues assigned to this actor.",
+                  "type": "string"
+                },
+                "exclude_label": {
+                  "description": "Labels that must not be present.",
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "exclude_type": {
+                  "description": "Issue types to exclude. Repeat the parameter, or pass a comma-separated list. Ignored when `type` is set.",
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "has_metadata_key": {
+                  "description": "Only issues carrying this top-level metadata key.",
+                  "type": "string"
+                },
+                "include_deferred": {
+                  "default": false,
+                  "description": "Include issues whose `defer_until` is still in the future.",
+                  "type": "boolean"
+                },
+                "include_ephemeral": {
+                  "default": false,
+                  "description": "Include ephemeral (non-synced) rows.",
+                  "type": "boolean"
+                },
+                "label": {
+                  "description": "Labels that must ALL be present (AND).",
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "label_any": {
+                  "description": "Labels of which at least one must be present (OR).",
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "label_pattern": {
+                  "description": "Glob matched against labels.",
+                  "type": "string"
+                },
+                "label_regex": {
+                  "description": "Regular expression matched against labels.",
+                  "type": "string"
+                },
+                "metadata_field": {
+                  "description": "Top-level metadata equality filter as `key=value`, split on the first `=`. Repeatable. An invalid key is a 400.",
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "parent": {
+                  "description": "Restrict to recursive descendants of this issue.",
+                  "type": "string"
+                },
+                "priority": {
+                  "description": "Exact priority (0 is a real value, not \"unset\").",
+                  "type": "integer"
+                },
+                "sort": {
+                  "default": "priority",
+                  "description": "Ready-work ordering. `priority` is priority-first; `hybrid` orders recent issues by priority and older ones by age; `oldest` is creation order. An unrecognized value is a 400.\n\nThe default is the one `bd ready --sort` registers, so a client swapping `bd ready --json` for this operation gets the same items in the same order. The storage layer treats an EMPTY policy as `hybrid`, but that fallback is unreachable from the CLI and is NOT this parameter's default: `hybrid` demotes older high-priority work, so defaulting to it would change the item SET as soon as `limit` truncates \u2014 silently, and only for the clients this API exists to migrate.",
+                  "enum": [
+                    "hybrid",
+                    "priority",
+                    "oldest"
+                  ],
+                  "type": "string"
+                },
+                "type": {
+                  "description": "Issue type. The only normalization is shorthand ALIAS expansion, exactly what `bd ready --type` does: `mr` \u2192 `merge-request`, `feat` \u2192 `feature`, `mol` \u2192 `molecule`, `enhancement` \u2192 `feature`, `dec`/`adr` \u2192 `decision`. Every other value is used as written \u2014 there is NO plural folding, so `bugs` is not `bug`.\n\nAn unrecognized type is not an error here: the type vocabulary is workspace-configurable, and `bd ready` does not validate it either, so it simply matches nothing and `items` comes back empty. (The list operation differs \u2014 `bd list` DOES validate the type, so `GET /v0/beads/issues?type=bugs` is a 400.)\n\nWhen set, `exclude_type` is ignored, and so are the default type exclusions described above.",
+                  "type": "string"
+                },
+                "unassigned": {
+                  "description": "Only issues with no assignee.",
+                  "type": "boolean"
+                }
+              },
+              "type": "object"
+            }
+          },
+          "required": [
+            "body"
+          ],
+          "type": "object"
+        },
+        "ClaimNextRequest": {
+          "additionalProperties": false,
+          "properties": {
+            "actor": {
+              "description": "Who is claiming. `ClaimRequest.actor`'s rules exactly: the server trims it, then refuses an empty result, anything longer than 256 BYTES (the `maxLength` above counts characters \u2014 the byte limit is the binding one), and any control character including newline. The value is persisted as the assignee and interpolated into the storage commit message, so an unvalidated newline would forge audit-trail lines.\n\nIT IS THE ONLY BODY MEMBER, and the FILTER travels in the query string instead. That split is deliberate: the filter vocabulary is `GET /v0/beads/ready`'s and is decoded by the same function, so re-spelling it as a body object would create a second expression of one predicate \u2014 and two spellings of one predicate eventually disagree. The actor cannot go the same way: it is provenance that lands in a column, and this surface has always carried that in a body.",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F\\u2028\\u2029]+$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "actor"
+          ],
+          "type": "object"
+        },
+        "ClaimRequest": {
+          "additionalProperties": false,
+          "properties": {
+            "actor": {
+              "description": "Who is claiming the issue. The server trims it, then refuses an empty result, anything longer than 256 BYTES (the `maxLength` above counts characters \u2014 the byte limit is the binding one), and any control character including newline: Unicode category Cc \u2014 C0, DEL and the C1 block \u2014 plus the U+2028/U+2029 line separators, which is the set the `pattern` above spells.\n\nThe value is persisted as the assignee and interpolated into the storage commit message, so an unvalidated newline would forge audit-trail lines. C1 is refused for that same reason and not for tidiness: U+0085 is a line break on a VT-conformant terminal, and U+009B is the one-byte CSI introducer, which would make an actor an escape-sequence payload in anything that prints an assignee.",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F\\u2028\\u2029]+$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "actor"
+          ],
+          "type": "object"
+        },
+        "CloseIssueInput": {
+          "additionalProperties": false,
+          "properties": {
+            "body": {
+              "$ref": "#/$defs/CloseIssueRequest"
+            },
+            "path": {
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "description": "Exact canonical issue id. No fuzzy, prefix or substring resolution.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "path",
+            "body"
+          ],
+          "type": "object"
+        },
+        "CloseIssueRequest": {
+          "additionalProperties": false,
+          "properties": {
+            "actor": {
+              "description": "Who is closing the issue. `ClaimRequest.actor`'s rules exactly: the server trims it, then refuses an empty result, anything longer than 256 BYTES (the `maxLength` above counts characters \u2014 the byte limit is the binding one), and any control character including newline. The value reaches stored columns, event-stream attribution and the storage commit message, so an unvalidated newline would forge audit-trail lines.",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F\\u2028\\u2029]+$",
+              "type": "string"
+            },
+            "expected_version": {
+              "description": "Requires the row's revision to equal this value BEFORE the close. A miss refuses the whole request with `409 precondition_failed` and writes nothing \u2014 `UpdateIssueRequest.expected_version`'s contract, on the operation that closes one row.\n\nIT IS CHECKED BEFORE THE IDEMPOTENT RE-CLOSE, which is the one place this guard differs from the update's. A re-close of a row somebody else has moved since the caller read it is a `409` and not the 200-with-`already_closed` the same body earns without a guard: a replay whose premise has expired is a refusal the caller wants to see, and it is the only way `already_closed` can be trusted as \"nothing has happened here since\".\n\nThe token is the `revision` this operation's own response carries. Compose the next expectation from the value a write ANSWERED with, never from a number the client incremented itself: the token is OPAQUE and compared for equality alone, so it has no predecessor a client can compute. A first guarded close seeds itself from `GET /v0/beads/issues/{id}`'s `revision` \u2014 the read that sources a guard \u2014 or, for a chain already mid-flight, from an unguarded lifecycle write or `POST /v0/beads/issues:batchApply`'s `ApplyItemResult.revision`.\n\nDECODE IT AS A 64-BIT INTEGER, for the reason `UpdateIssueRequest.expected_version` spells out: an IEEE-754-double parser corrupts it silently, and the corruption only surfaces as a `precondition_failed` on the NEXT request.",
+              "format": "int64",
+              "type": "integer"
+            },
+            "force": {
+              "default": false,
+              "description": "Bypass close policy \u2014 the open-children refusal and the live-blocker refusal \u2014 and nothing else. The refusals are the ROLE's, so this endpoint cannot skip a guard by forgetting one exists. A forced close still reports `open_children`.\n\nIT BYPASSES POLICY, NEVER A PRECONDITION. `expected_version` is still checked with it set, for the reason `issueops.CloseRequest.Force` gives: a caller saying \"close it anyway\" has said nothing about whether the row is still the one it read.",
+              "type": "boolean"
+            },
+            "reason": {
+              "description": "Why the issue is closed. Stored on the issue and read back as `close_reason`. THE FIRST CLOSE WINS: an idempotent re-close writes neither this nor `session`, so a replayed close cannot rewrite the record of why the work ended. Refused for control characters, and bounded by what the column holds rather than by the number above.",
+              "maxLength": 255,
+              "type": "string"
+            },
+            "session": {
+              "description": "The working session that closed the issue, stored and read back as `closed_by_session`, under the same first-close-wins rule and the same bounds as `reason`.",
+              "maxLength": 255,
+              "type": "string"
+            }
+          },
+          "required": [
+            "actor"
+          ],
+          "type": "object"
+        },
+        "CompareAndSetMetadataInput": {
+          "additionalProperties": false,
+          "properties": {
+            "body": {
+              "$ref": "#/$defs/CompareAndSetMetadataRequest"
+            },
+            "path": {
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "description": "Exact canonical issue id. No fuzzy, prefix or substring resolution.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "path",
+            "body"
+          ],
+          "type": "object"
+        },
+        "CompareAndSetMetadataRequest": {
+          "additionalProperties": false,
+          "properties": {
+            "actor": {
+              "description": "Who is performing the swap. `ClaimRequest.actor`'s rules exactly: the server trims it, then refuses an empty result, anything longer than 256 BYTES (the `maxLength` above counts characters \u2014 the byte limit is the binding one), and any control character including newline. It reaches the update event's attribution and the storage commit message, so an unvalidated newline would forge audit-trail lines.\n\nIt is REQUIRED here rather than optional, because a swap is a coordination write between racing callers and the one question asked of its history entry afterwards is which of them won.",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F\\u2028\\u2029]+$",
+              "type": "string"
+            },
+            "expected": {
+              "$ref": "#/$defs/MetadataValue"
+            },
+            "key": {
+              "description": "The single metadata key to read and write. It must match the workspace's metadata-key syntax \u2014 a letter or underscore, then letters, digits, underscores, dots and slashes \u2014 so a key the query layer could not later spell is refused rather than written.\n\nONE KEY, NOT A PATH: a dotted key like `gc.lease` names a top-level key spelled with a dot, not a nested field. The metadata object's nesting is VALUE structure, and this operation swaps whole values.",
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/MetadataValue"
+            }
+          },
+          "required": [
+            "actor",
+            "key"
+          ],
+          "type": "object"
+        },
+        "CountDependencyEdgesInput": {
+          "additionalProperties": false,
+          "properties": {
+            "query": {
+              "additionalProperties": false,
+              "properties": {
+                "direction": {
+                  "description": "Which end of the edge the anchors sit on. `out` counts what each anchor DEPENDS ON \u2014 the direction `bd dep list` reads and the number `bd show` prints as the dependency count. `in` counts what depends on it.\n\nIT IS REQUIRED, and that is the one deliberate unfriendliness on this request. The two answers are about DIFFERENT EDGE SETS, and a workspace where most issues have edges in only one direction returns the same number for both often enough that a caller who meant the other one would not notice for a long time. An absent or unrecognized value is a 400 `invalid_argument` with `param: \"direction\"`, never a count in some default direction.\n\nThe vocabulary is CLOSED \u2014 unlike `type` below \u2014 because it is a property of the edge's shape rather than of a workspace's configuration.",
+                  "enum": [
+                    "out",
+                    "in"
+                  ],
+                  "type": "string"
+                },
+                "issue_id": {
+                  "description": "The anchors to count around. Repeat the parameter; at least one is required and at most 100 are accepted, and either bound is a 400 `invalid_argument` with `param: \"issue_id\"`, `reason: \"invalid_value\"`.\n\nEach value must be an EXACT canonical issue id, for the reason `GET /v0/beads/dependencies` gives. A value that matches nothing is reported on its own anchor rather than refused. An EMPTY value is a 400: the empty string names nothing a caller can have meant, and reporting it as a missing anchor would put a nameless row in an answer keyed by name.\n\nRepeats collapse onto the first mention \u2014 a second entry carries no second fact and would only invite a caller summing the result to count the same edges twice.",
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 100,
+                  "minItems": 1,
+                  "type": "array"
+                },
+                "status": {
+                  "description": "Count only edges whose DEPENDENT \u2014 the issue at the source end, the one doing the depending \u2014 is in this stored status. Empty means every status.\n\nIT IS LEGAL ONLY WITH `direction=in`. Sending it beside `direction=out` is a 400 `invalid_argument` with `param: \"status\"` and `reason: \"invalid_value\"`, rather than a filter that is quietly ignored. The asymmetry is the substrate's and `issueops.EdgeCountRequest.Status` states why: narrowing by status joins the far end of the edge to the row holding its status, and an OUTBOUND edge's far end may be an `external:` reference or an id belonging to another repository \u2014 rows this database does not hold \u2014 so the filter would silently drop every dangling edge.\n\nIt is ONE status, not a comma-separated OR set, and it is NOT validated against the workspace vocabulary: an unrecognized name matches nothing and counts 0 rather than failing, exactly as `GET /v0/beads/issues:count`'s `status` does. A scripted caller counting a status its workspace has since dropped reads 0 and should keep reading 0.",
+                  "type": "string"
+                },
+                "type": {
+                  "description": "Edge types to include. Repeat the parameter. Empty means every type.\n\n`GET /v0/beads/dependencies`'s `type` exactly: the vocabulary is OPEN, so an unrecognized value is not an error and simply matches no edge, while a value no edge could ever carry \u2014 empty, or longer than the column \u2014 is a 400 `invalid_argument`.\n\nThe filter narrows EDGES, never anchors. An anchor whose every edge it rejects comes back present with a count of 0, which is a different fact from an anchor that is not there.",
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "issue_id",
+                "direction"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "query"
+          ],
+          "type": "object"
+        },
+        "CreateIssueDependency": {
+          "additionalProperties": false,
+          "description": "One edge created with the issue. It carries `reverse` where `BatchCreateDependency` does not, because that operation's items have no id a target could point back at and this one's issue does.",
+          "properties": {
+            "metadata": {
+              "$ref": "#/$defs/MetadataValue"
+            },
+            "reverse": {
+              "default": false,
+              "description": "Writes the edge from `target_id` TO the new issue rather than from it. It is what lets a create declare an edge that points INTO the row being minted \u2014 the id no caller could have spelled beforehand \u2014 and it is the member that makes `dependency_cycle` reachable on this operation at all.",
+              "type": "boolean"
+            },
+            "target_id": {
+              "description": "The other endpoint of the edge.",
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": {
+              "description": "The edge type, from the same OPEN vocabulary `Dependency.type` carries: checked for BEING a storable value, never for membership of a known-types list, so a workspace's own type passes.",
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "target_id",
+            "type"
+          ],
+          "type": "object"
+        },
+        "CreateIssueInput": {
+          "additionalProperties": false,
+          "properties": {
+            "body": {
+              "$ref": "#/$defs/CreateIssueRequest"
+            }
+          },
+          "required": [
+            "body"
+          ],
+          "type": "object"
+        },
+        "CreateIssueRequest": {
+          "additionalProperties": false,
+          "description": "One issue, its parent, its explicit edges and its waits-for gate, created as one act.\n\nIt is FLAT rather than nesting the issue's fields under an `issue` member, unlike `UpdateIssueRequest`'s `patch`: a patch has to distinguish a member that is absent from one set to its zero value, and a create has no such distinction to make \u2014 an absent member is the workspace default, which is the same answer a nested object would have given.\n\nThe issue members mirror `ApplyCreateItem` exactly, minus that schema's two plan-only members (`key` and `metadata_refs`, which name items of a request this operation has only one of). What this adds is the edge vocabulary that operation moves into `dep_add` items: `parent_id`, `inherit_labels_from_parent`, `dependencies` and `waits_for`.",
+          "properties": {
+            "acceptance_criteria": {
+              "type": "string"
+            },
+            "actor": {
+              "description": "Who is creating the issue. `ClaimRequest.actor`'s rules exactly: the server trims it, then refuses an empty result, anything longer than 256 BYTES (the `maxLength` above counts characters \u2014 the byte limit is the binding one), and any control character including newline. The value reaches the created edges' author column, the history entry's attribution and the storage commit message, so an unvalidated newline would forge audit-trail lines.\n\nIt is NOT the issue's `created_by`, which this operation does not publish: this is the caller-asserted provenance of the ACT, and the row's own author column is left to the implementation.",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F\\u2028\\u2029]+$",
+              "type": "string"
+            },
+            "assignee": {
+              "maxLength": 255,
+              "type": "string"
+            },
+            "defer_until": {
+              "description": "RFC 3339. The issue is hidden from ready work until then. Not nullable, for `estimated_minutes`' reason.",
+              "format": "date-time",
+              "type": "string"
+            },
+            "dependencies": {
+              "description": "The complete set of explicit edges created with the issue. Authoritative, not a patch. Every edge is written in the same transaction as the row, so an edge this request cannot write means no issue either.\n\nA TARGET NEED NOT BE A ROW THIS DATABASE HOLDS: an `external:` reference and an id belonging to another repository are legitimate targets, so only an absence this database can SEE is refused \u2014 `ApplyDepAddItem`'s rule, unchanged.",
+              "items": {
+                "$ref": "#/$defs/CreateIssueDependency"
+              },
+              "maxItems": 100,
+              "type": "array"
+            },
+            "description": {
+              "type": "string"
+            },
+            "design": {
+              "type": "string"
+            },
+            "due_at": {
+              "description": "RFC 3339. Not nullable, for `estimated_minutes`' reason.",
+              "format": "date-time",
+              "type": "string"
+            },
+            "ephemeral": {
+              "default": false,
+              "description": "Creates the issue on the EPHEMERAL plane rather than the durable one, exactly as it does for `POST /v0/beads/issues:batchApply`. Mutually exclusive with `no_history`.",
+              "type": "boolean"
+            },
+            "estimated_minutes": {
+              "description": "An estimate in minutes. Absent leaves it unset. NOT nullable, unlike `IssuePatchBody.estimated_minutes`: a create has nothing to clear, so `null` here would be a second spelling of omission and is a `400`.",
+              "type": "integer"
+            },
+            "external_ref": {
+              "description": "e.g. `gh-9`. Not nullable, for `estimated_minutes`' reason.",
+              "maxLength": 255,
+              "type": "string"
+            },
+            "force_id_prefix": {
+              "default": false,
+              "description": "Permits an explicit `id` outside the workspace's configured issue prefix. It bypasses ONLY that check: it is not a force on the create-only guard, so an occupied id is still a `409`.",
+              "type": "boolean"
+            },
+            "id": {
+              "description": "An explicit id for the new row, CREATE-ONLY: an id that already names a stored row is a `409` `already_exists` and nothing is written \u2014 never an adoption and never an overwrite. It is checked against the workspace's configured issue prefix unless `force_id_prefix` is set. Absent is the ordinary case and the server mints one.",
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            },
+            "inherit_labels_from_parent": {
+              "default": false,
+              "description": "Copies the parent's labels onto the new issue at creation, on top of `labels`. It has no effect without `parent_id`.\n\nThe DEFAULT IS FALSE and diverges from `bd create --parent`, whose default is to inherit. A wire caller sends what it means: this operation has no `--no-inherit-labels` to turn off, and a create that silently acquired labels the request never named would be a set the caller has to read back to learn.",
+              "type": "boolean"
+            },
+            "issue_type": {
+              "description": "Issue type. Spelled `issue_type` rather than `type`, matching the member `Issue` carries, and validated against the built-ins plus the workspace's configured custom types by the ROLE \u2014 this server cannot read that vocabulary without a transaction, so it checks only what this schema declares and an unknown one arrives as a `400`.\n\nSEND ONE. The member is optional in this schema and the role validates the EMPTY type against the same vocabulary as any other, where it is neither a built-in nor a configured type \u2014 so an omitted `issue_type` is refused with everything else the request asked for. It stays optional because the vocabulary belongs to the workspace and a deployment may configure a default this server cannot read, but it is not optional in practice on any workspace shipped today. `POST /v0/beads/issues:batchCreate` has the same property and does not say so, which is why this member does.",
+              "maxLength": 255,
+              "type": "string"
+            },
+            "labels": {
+              "description": "The complete label set the issue is created with. Authoritative, not a patch \u2014 a create has nothing to add to. `inherit_labels_from_parent` adds the parent's labels on top of it.",
+              "items": {
+                "maxLength": 255,
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "metadata": {
+              "$ref": "#/$defs/MetadataValue"
+            },
+            "no_history": {
+              "default": false,
+              "description": "Creates the issue on the ephemeral plane WITHOUT history, and without the garbage collection an ordinary ephemeral row is eligible for. Mutually exclusive with `ephemeral`.",
+              "type": "boolean"
+            },
+            "notes": {
+              "type": "string"
+            },
+            "owner": {
+              "description": "The human owner, which is a different member from `assignee`: the assignee is who is working it now, the owner is who it is attributed to.",
+              "maxLength": 255,
+              "type": "string"
+            },
+            "parent_id": {
+              "description": "Creates a typed `parent-child` edge from the new issue to this target. It must not duplicate an edge `dependencies` already spells; naming the same pair twice with two types is a `400`.",
+              "maxLength": 255,
+              "type": "string"
+            },
+            "priority": {
+              "description": "0 is P0/critical. Absent means the workspace default.",
+              "maximum": 4,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "sender": {
+              "description": "Who sent this, for the message-shaped rows an orchestrator creates. Stored verbatim and interpreted by nothing on this surface.",
+              "maxLength": 255,
+              "type": "string"
+            },
+            "status": {
+              "description": "The status the issue is created in, from this workspace's own configured vocabulary. Absent means the workspace's own default, which is `open` today \u2014 unlike `issue_type`, the role fills this one in before it validates.",
+              "maxLength": 255,
+              "type": "string"
+            },
+            "title": {
+              "description": "The issue's title. Must not be blank after trimming.",
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            },
+            "waits_for": {
+              "$ref": "#/$defs/CreateIssueWaitsFor"
+            }
+          },
+          "required": [
+            "actor",
+            "title"
+          ],
+          "type": "object"
+        },
+        "CreateIssueWaitsFor": {
+          "additionalProperties": false,
+          "description": "A typed `waits-for` edge from the new issue to a spawner whose children gate it. It records a readiness primitive; it does not define scheduling or execution policy.\n\nIT IS A TYPED MEMBER HERE AND A METADATA BLOB ON `POST /v0/beads/issues:batchApply`, and the difference follows the ROLE rather than taste: `CreateRequest.WaitsFor` is a typed field that gets the gate defaulted and the \"must not duplicate an explicit edge\" check, while that operation's `dep_add` item is one generic edge with no typed field to reach. One spelling per operation, and each is its role's.",
+          "properties": {
+            "gate": {
+              "description": "The readiness condition: `all-children` or `any-children`. Absent or empty defaults to `all-children`. A value that is neither is refused by the ROLE and reaches the client as a `400`.",
+              "maxLength": 255,
+              "type": "string"
+            },
+            "spawner_id": {
+              "description": "The dependency target whose children are observed. It must not duplicate an edge `dependencies` or `parent_id` already spells.",
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "spawner_id"
+          ],
+          "type": "object"
+        },
+        "DependencyEdge": {
+          "additionalProperties": false,
+          "description": "One directed edge, as a REQUEST names it. It is not `Dependency`, which is the stored row `GET /v0/beads/dependencies` returns and carries the columns storage assigned; this is the three members a caller supplies.",
+          "properties": {
+            "depends_on_id": {
+              "description": "The edge's TARGET \u2014 the issue depended upon. An exact canonical id, an `external:` reference, or an id belonging to another repository. Only an absence this database can SEE is refused. It must differ from `issue_id`.",
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            },
+            "issue_id": {
+              "description": "The edge's SOURCE \u2014 the issue that depends on the other end. An EXACT canonical id, and one this database holds: an edge follows its source, so a source that names nothing is a `400`.",
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": {
+              "description": "The edge type, from the same OPEN vocabulary `Dependency.type` carries: checked for being a storable value, never for membership of a known-types list, so a workspace's own type passes.",
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "issue_id",
+            "depends_on_id",
+            "type"
+          ],
+          "type": "object"
+        },
+        "ForgetMemoryInput": {
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "additionalProperties": false,
+              "properties": {
+                "key": {
+                  "description": "Exact memory key, used verbatim. It occupies one path segment and is percent-decoded once. Keys may contain spaces, dots and unicode \u2014 the plane stores what `bd remember --key` was given \u2014 and a key carrying a CONTROL character is refused here rather than looked up; see the operation description.",
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "key"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "path"
+          ],
+          "type": "object"
+        },
+        "GetDependencyTreeInput": {
+          "additionalProperties": false,
+          "properties": {
+            "query": {
+              "additionalProperties": false,
+              "properties": {
+                "direction": {
+                  "default": "down",
+                  "description": "Which way to follow edges. `down` (the default) walks what the root DEPENDS ON; `up` walks what depends ON it; `both` walks each way and returns one list.\n\nFor `both` the two walks are independent and the answer is their concatenation: every up node except the root, then the whole down tree beginning with the root. The root appears once. The two halves may repeat a node between them \u2014 an issue that both blocks and is blocked by something in the other half \u2014 so a client aggregating `items` must not assume the ids are distinct. Both walks see ONE database state.\n\nAny other value is a 400 `invalid_argument`: the vocabulary is closed.",
+                  "enum": [
+                    "down",
+                    "up",
+                    "both"
+                  ],
+                  "type": "string"
+                },
+                "max_depth": {
+                  "default": 50,
+                  "description": "How many LEVELS to descend, counting the root as level one: `max_depth=1` is the root alone. A node beyond the bound is ABSENT rather than present and flagged.\n\nZero and negative values are a 400 `invalid_argument` rather than \"unbounded\": the answer to an unbounded recursive walk on a large workspace is the request that takes the database down.",
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "root_id": {
+                  "description": "The issue to walk from. It must be an EXACT canonical issue id: there is no fuzzy, prefix or substring resolution on this surface, for the reason `GET /v0/beads/issues/{id}` gives. An empty value is a 400 `invalid_argument`; a value that matches no issue and no wisp is a 404 `not_found`, because there is one anchor here and no other answer to preserve.",
+                  "type": "string"
+                },
+                "status": {
+                  "description": "Prune the walked tree to the nodes carrying this status AND the ancestor chain of each survivor, so the answer is still a tree.\n\nIt is a POST-WALK PRUNE, not a filter on the walk, and the difference is observable: a matching node BEHIND a non-matching one is still reached, and the non-matcher is kept as its ancestor. A prune that matches nothing returns NO items at all, root included.\n\nThe value is not checked against the workspace's status vocabulary; an unrecognized status simply matches nothing.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "root_id"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "query"
+          ],
+          "type": "object"
+        },
+        "GetMemoryInput": {
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "additionalProperties": false,
+              "properties": {
+                "key": {
+                  "description": "Exact memory key, used verbatim. It occupies one path segment and is percent-decoded once. Keys may contain spaces, dots and unicode \u2014 the plane stores what `bd remember --key` was given \u2014 and a key carrying a CONTROL character is refused here rather than looked up; see the operation description.",
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "key"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "path"
+          ],
+          "type": "object"
+        },
+        "IssuePatchBody": {
+          "additionalProperties": false,
+          "description": "The fields to write. Every member is optional and PRESENCE is the signal: a member present is written, a member absent is untouched. An empty object is a `400` \u2014 a write that writes nothing is a client bug.\n\nThis is a deliberate SUBSET of the fields an issue carries; the members it does not spell are future surface rather than oversights, and `updateIssue`'s own description says which and why.\n\nIt now agrees with `ApplyPatchBody` on every member it publishes, and the two differ only in the SHAPE of two of them: `labels` is complete replacement here and an ordered add/remove/replace patch there, because that operation edits a set it did not compose. Everything else \u2014 down to the `metadata` algebra and the four nullable members \u2014 is one definition, so a caller cannot get a different answer for the same edit depending on which operation it sent.",
+          "properties": {
+            "acceptance_criteria": {
+              "type": "string"
+            },
+            "add_labels": {
+              "description": "Labels to add, applied AFTER any `labels` replacement.\n\nIT IS NOT MUTUALLY EXCLUSIVE WITH `labels`, and that is the difference from `append_notes`, which is. The role defines an order over all three label edits, so sending a replacement and an addition together has a defined result; notes have no such algebra, so there the two are a contradiction and are refused.\n\nIT IS WHY THIS PAIR EXISTS. A caller that reads a row, adds one label and writes the whole set back silently drops any label another writer added in between \u2014 and `bd label add` and every agent that tags work concurrently are exactly that caller. A replacement can only be composed safely by a writer that knows it is alone.\n\nRepetition is free: a label named twice is applied once, and adding one the issue already carries changes no labels. (Whether the RESPONSE reports `changed: false` is a fact about the whole patch \u2014 see `remove_labels`.) An EMPTY-STRING entry is DROPPED rather than refused \u2014 a label row carrying `\"\"` renders as nothing and matches nothing, so writing one would only store junk, and refusing the whole update would let one stray entry fail an otherwise-good edit.",
+              "items": {
+                "maxLength": 255,
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "append_notes": {
+              "description": "Appends to the notes rather than replacing them. Mutually exclusive with `notes`.",
+              "type": "string"
+            },
+            "assignee": {
+              "description": "The assignee. A transfer away from a live foreign in-progress owner is refused with `409 already_claimed` unless `force_assignee_transfer` is set or `expected_assignee` matched. Setting it to the empty string unassigns.\n\n`{id}:claim` remains the operation that ACQUIRES work: it carries its own eligibility rules and sets the status with the assignee in one act. This member is the raw write, fenced.",
+              "maxLength": 255,
+              "type": "string"
+            },
+            "defer_until": {
+              "description": "RFC 3339. Explicit `null` CLEARS the deferral.",
+              "format": "date-time",
+              "nullable": true,
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "design": {
+              "type": "string"
+            },
+            "due_at": {
+              "description": "RFC 3339. Explicit `null` CLEARS the due date.",
+              "format": "date-time",
+              "nullable": true,
+              "type": "string"
+            },
+            "estimated_minutes": {
+              "description": "Explicit `null` CLEARS the estimate.",
+              "nullable": true,
+              "type": "integer"
+            },
+            "external_ref": {
+              "description": "Explicit `null` CLEARS the reference.",
+              "maxLength": 255,
+              "nullable": true,
+              "type": "string"
+            },
+            "issue_type": {
+              "description": "The issue type, from this workspace's own configured vocabulary. A type outside it is refused by the ROLE and reaches the client as a `400` \u2014 this server cannot read the vocabulary without a transaction, so it checks only what this schema declares.",
+              "maxLength": 255,
+              "type": "string"
+            },
+            "labels": {
+              "description": "COMPLETE REPLACEMENT of the label set. An empty array clears every label.\n\nIt is the REPLACE half of the same ordered edit `ApplyPatchBody` spells as `labels.replace`, and `add_labels`/`remove_labels` are the other two. All three may travel together and are applied in that order \u2014 replace, then add, then remove \u2014 so REMOVAL WINS when one label appears in more than one of them. That is the role's own algebra, not this operation's arrangement of it.\n\nTHE SHAPE DIFFERS FROM `ApplyPatchBody`'s, which nests the three under one `labels` object, and the difference is historical rather than meaningful. This member shipped as a bare array; nesting it now would RE-TYPE a published member, which is the one kind of change this document has no additive route for. Two flat siblings is the shape that could be added \u2014 and it is the shape `notes` and `append_notes` already use for the same replace/increment pair.",
+              "items": {
+                "maxLength": 255,
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "metadata": {
+              "$ref": "#/$defs/ApplyMetadataPatch"
+            },
+            "notes": {
+              "description": "Replaces the notes. Mutually exclusive with `append_notes`; sending both is a `400`.",
+              "type": "string"
+            },
+            "parent_id": {
+              "description": "Replaces the issue's parents atomically: a nonempty value makes THAT issue the only parent, and an EMPTY STRING removes every parent-child edge the issue has. Labels are not inherited \u2014 that is a create-time choice (`CreateIssueRequest.inherit_labels_from_parent`) and a reparent does not re-run it.\n\nIT IS A GRAPH EDIT, and it earns the graph's refusals: a new parent this workspace holds no row for is a `400`, a pair that already carries an edge of another type is `409 dependency_exists`, and a move under the issue's own descendant is `409 dependency_cycle` \u2014 the PLAIN one, carrying no `issue_id`/`blocker_id`/ `blocker_is_ancestor`, because the hierarchy refusal answers only to blocking edges and this member writes a `parent-child` edge. Naming the issue itself is a `400`. One call rather than a remove-then-add pair, which is the whole reason it is here: the two-call spelling leaves the issue parentless if the second call fails.",
+              "maxLength": 255,
+              "type": "string"
+            },
+            "priority": {
+              "maximum": 4,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "remove_labels": {
+              "description": "Labels to remove, applied AFTER `labels` and `add_labels`, so REMOVAL WINS over both.\n\nRemoving a label the issue does not carry CHANGES NO LABELS; it is not a `404` and not a conflict. Whether the RESPONSE reports `changed: false` is a fact about the whole patch, not about this member \u2014 a request that also moved a title changed the row. The same repetition and empty-string rules as `add_labels` apply, and a value longer than the column is refused here as it is there \u2014 the length rule is about what a label may BE, not about whether this particular row happens to carry one.",
+              "items": {
+                "maxLength": 255,
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "status": {
+              "description": "The issue's status, from this workspace's own configured vocabulary.\n\nA STATUS THAT CROSSES INTO THE DONE CATEGORY ANSWERS TO CLOSE POLICY: the update is refused with `409 not_closable` for open children or a live blocker unless `force_close_policy` is set. A done-to-done change and a move OUT of the done category are unaffected.\n\nIT IS NOT A SECOND SPELLING OF `{id}:close` AND `{id}:reopen`. Those two carry semantics a status write has nowhere to put \u2014 the reason and session under first-close-wins, the done-status normalization, the `already_closed`/`already_open` idempotence flags \u2014 and they remain the operations to reach for when what you mean is \"close this\". This member is for the edit that moves a status ALONGSIDE other fields in one transaction, which is the thing two calls cannot do. `ApplyPatchBody.status` has meant exactly this since `issues:batchApply` landed.",
+              "maxLength": 255,
+              "type": "string"
+            },
+            "title": {
+              "description": "The issue's title. Must not be blank after trimming; the length bound is what the column holds.",
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "ListBlockingAnnotationsInput": {
+          "additionalProperties": false,
+          "properties": {
+            "query": {
+              "additionalProperties": false,
+              "properties": {
+                "issue_id": {
+                  "description": "The issues to annotate. Repeat the parameter; at least one is required and at most 100 are accepted, and either bound is a 400 `invalid_argument` with `param: \"issue_id\"`, `reason: \"invalid_value\"`.\n\nEach value must be an EXACT canonical issue id: there is no fuzzy, prefix or substring resolution on this surface, for the reason `GET /v0/beads/issues/{id}` gives. A value that matches nothing gets a bare entry rather than being refused. An empty value is a 400.\n\nRepeats collapse: an id named twice is one entry, at the position of its first mention.",
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 100,
+                  "minItems": 1,
+                  "type": "array"
+                }
+              },
+              "required": [
+                "issue_id"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "query"
+          ],
+          "type": "object"
+        },
+        "ListDependenciesInput": {
+          "additionalProperties": false,
+          "properties": {
+            "query": {
+              "additionalProperties": false,
+              "properties": {
+                "issue_id": {
+                  "description": "The issues to read edges for. Repeat the parameter; at least one is required and at most 100 are accepted, and either bound is a 400 `invalid_argument` with `param: \"issue_id\"`, `reason: \"invalid_value\"`.\n\nEach value must be an EXACT canonical issue id: there is no fuzzy, prefix or substring resolution on this surface, for the reason `GET /v0/beads/issues/{id}` gives. A value that matches nothing is reported in `missing` rather than refused. An empty value is a 400.\n\nRepeats collapse: an id named twice is one entry in `missing` at most once, and its edges appear once.",
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 100,
+                  "minItems": 1,
+                  "type": "array"
+                },
+                "type": {
+                  "description": "Edge types to include. Repeat the parameter. Empty means every type.\n\nThe vocabulary is OPEN \u2014 a workspace configures its own edge types \u2014 so an unrecognized value is not an error here: it simply matches no edge. What IS refused, with a 400 `invalid_argument`, is a value no edge could ever carry: empty, or longer than the column.\n\nThe filter narrows EDGES, never the named issues. An issue whose every edge the filter rejects is still not in `missing`.",
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "issue_id"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "query"
+          ],
+          "type": "object"
+        },
+        "ListDependencyCyclesInput": {
+          "additionalProperties": false,
+          "properties": {},
+          "type": "object"
+        },
+        "ListMemoriesInput": {
+          "additionalProperties": false,
+          "properties": {
+            "query": {
+              "additionalProperties": false,
+              "properties": {
+                "search": {
+                  "description": "Narrows the answer to memories that MATCH: a memory matches when the lowercase of its key, or the lowercase of its value, contains the lowercase of this term. Absent or empty means everything, and a term nothing matches is a `200` with an empty `items`.\n\nIT IS A SUBSTRING MATCH, NOT THE `issues:query` EXPRESSION LANGUAGE, and it is spelled `search` rather than `q` FOR THAT REASON. On `GET /v0/beads/issues:query`, `q` is a boolean expression over issue fields that is refused when it does not parse; here there is nothing to parse, no vocabulary and no refusal \u2014 every string is a legal search term, `status=open` included, and it is matched literally. Two names because two questions: a client that sent this operation the other `q` would otherwise get a literal substring search back instead of an error.\n\nThe term reaches the role UNFOLDED. Case folding is the role's, so that this surface and `bd memories` cannot come to disagree about what matching means; a client sends what its user typed.",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            }
+          },
+          "type": "object"
+        },
+        "ListRelatedIssuesInput": {
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "description": "Exact canonical issue id. No fuzzy, prefix or substring resolution.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id"
+              ],
+              "type": "object"
+            },
+            "query": {
+              "additionalProperties": false,
+              "properties": {
+                "direction": {
+                  "description": "Which way this issue's edges are walked. `out` answers the issues it DEPENDS ON \u2014 the `dependencies` member of `GET /v0/beads/issues/{id}`. `in` answers the issues that depend on it \u2014 that read's `dependents` member.\n\nIT IS REQUIRED AND HAS NO DEFAULT, on `GET /v0/beads/dependencies:count`'s terms and for the reason `issueops.RelationDirection` gives: the two answers have the same shape and the same member names, so a caller handed the inverse graph has nothing to notice. An absent or unrecognized value is a 400 `invalid_argument` with `param: \"direction\"`, never a walk in some default direction.\n\nThe vocabulary is CLOSED \u2014 unlike `type` below \u2014 because it is a property of the edge's shape rather than of a workspace's configuration.",
+                  "enum": [
+                    "out",
+                    "in"
+                  ],
+                  "type": "string"
+                },
+                "type": {
+                  "description": "Edge types to include. Repeat the parameter. Empty means every type.\n\n`GET /v0/beads/dependencies`'s `type` exactly: the vocabulary is OPEN, so an unrecognized value is not an error and simply matches no edge, while a value no edge could ever carry \u2014 empty, or longer than the column \u2014 is a 400 `invalid_argument` with `param: \"type\"`.\n\nThe filter narrows EDGES, never the anchor. An issue whose every edge it rejects is answered with an empty `items` and not with a 404, which is a different fact from an id that names nothing.",
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "direction"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "path",
+            "query"
+          ],
+          "type": "object"
+        },
+        "MetadataValue": {
+          "description": "One metadata value: ANY JSON value \u2014 string, number, boolean, null, array or object \u2014 because typed values enter through the explicit JSON metadata path and persist in older rows. It is not a string, and a client must not decode it as one.\n\nWhere a member of this type is OMITTED, the key is absent; where it is present holding `null`, the key exists and holds null. Those are different states and this surface reports both.",
+          "nullable": true,
+          "x-go-type": "json.RawMessage",
+          "x-go-type-skip-optional-pointer": true
+        },
+        "OwnerReadInput": {
+          "additionalProperties": false,
+          "properties": {
+            "aggregate": {
+              "additionalProperties": false,
+              "properties": {
+                "group_by": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "type": "object"
+            },
+            "at": {
+              "type": "string"
+            },
+            "depth": {
+              "type": "integer"
+            },
+            "direction": {
+              "type": "string"
+            },
+            "expression": {
+              "type": "string"
+            },
+            "filters": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "include": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "include_closed": {
+              "type": "boolean"
+            },
+            "limit": {
+              "type": "integer"
+            },
+            "max_edges": {
+              "type": "integer"
+            },
+            "native_filters": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "offset": {
+              "type": "integer"
+            },
+            "order": {
+              "additionalProperties": false,
+              "properties": {
+                "field": {
+                  "type": "string"
+                },
+                "reverse": {
+                  "type": "boolean"
+                }
+              },
+              "type": "object"
+            },
+            "projection": {
+              "type": "string"
+            },
+            "provenance": {
+              "type": "boolean"
+            },
+            "relations": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "roots": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "view": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "Ref": {
+          "additionalProperties": false,
+          "description": "Names ONE issue, either by an id that already exists or by the `key` a create item earlier in the same request gave itself.\n\nEXACTLY ONE OF THE TWO IS SET, and both cases the schema cannot express are a `400`: both members set is a caller that cannot say which it meant, and neither set is a reference to nothing. (Spelling that as a schema alternation would need `oneOf`, which this document does not use \u2014 see `ApplyItem`.)\n\nA KEY REACHES BACKWARD ONLY where the ref ADDRESSES a row \u2014 an `update.target`, a `close.target`, either endpoint of a `dep_add`. The one exception is `create.metadata_refs`, whose values may reach forward or name their own item's key; the operation's description says why.",
+          "properties": {
+            "id": {
+              "description": "An id that already exists, EXACTLY. There is no fuzzy, prefix or cross-repo resolution on this surface.",
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            },
+            "key": {
+              "description": "The `key` a create item in THIS REQUEST gave itself. It is not an id, it is not stored anywhere, and it is resolved to the id the request minted \u2014 which the response's `keys` member reports.",
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "ReleaseIssueInput": {
+          "additionalProperties": false,
+          "properties": {
+            "body": {
+              "$ref": "#/$defs/ReleaseIssueRequest"
+            },
+            "path": {
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "description": "Exact canonical issue id. No fuzzy, prefix or substring resolution.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "path",
+            "body"
+          ],
+          "type": "object"
+        },
+        "ReleaseIssueRequest": {
+          "additionalProperties": false,
+          "properties": {
+            "actor": {
+              "description": "Who is releasing the claim. `ClaimRequest.actor`'s rules exactly: the server trims it, then refuses an empty result, anything longer than 256 BYTES (the `maxLength` above counts characters \u2014 the byte limit is the binding one), and any control character including newline. The value reaches the event the release records and the storage commit message, so an unvalidated newline would forge audit-trail lines.\n\nIt is REQUIRED, and for one reason beyond the audit trail: a release is the moment work stops being owned, and the one question asked of its history entry afterwards is who let it go. On the unconditional path it is ALSO the ownership fence's subject \u2014 see the operation description.",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F\\u2028\\u2029]+$",
+              "type": "string"
+            },
+            "expected_assignee": {
+              "description": "Compare-and-set on the holder: the release proceeds only while the issue is still assigned to this actor, and otherwise refuses with `409` / `precondition_failed` naming this value, having written nothing.\n\nA MATCH REPLACES THE OWNERSHIP FENCE, so `actor` need not be the holder. Sending it beside `force` is a 400: the two are answers to the same question and they disagree.\n\nTHE COMPARISON IS SEPARATOR-INSENSITIVE AND NOTHING ELSE. A run of `.`, `_` or `-` matches any other such run, so `agent-a`, `agent_a` and `agent.a` are one holder \u2014 that is deliberate, so a caller naming the holder under a different layer's spelling is a match rather than a mismatch. THE ONE EXCEPTION IS AN EXACT `--` RUN: that is gascity's session-name encoding of a rig-qualified agent's `/`, so it decodes to `/` instead of collapsing. `a--b` matches `a/b`, and no longer matches `a__b` or `a-b`. Those name different identities \u2014 `a--b` is the agent `b` on rig `a`, `a__b` is the dotted alias `a.b` \u2014 so treating them as one holder was a widening, and removing it is the point of the exception. Longer or mixed runs, `__` included, still collapse. NOTHING ELSE IS FORGIVEN: the value is not trimmed and not case-folded, so `\" agent-a\"` and `Agent-a` are both refusals. The server trims only far enough to tell a blank expectation from a real one and never sends the trimmed form on, so a caller that pads its expectation loses EVERY time rather than intermittently. Compose it from a holder a read gave you.\n\nTHE EMPTY STRING IS A 400, and this is the one place this member disagrees with `UpdateIssueRequest.expected_assignee`, where an empty string is a real guard meaning \"expected unassigned\". Here \"release a row nobody holds\" describes no release at all; a caller that wants to assert a row is unheld is asking a READER a question, not asking this operation to do nothing. Absent, and only absent, selects the unconditional path.\n\nIT IS NOT LENGTH- OR PATTERN-BOUNDED the way `actor` is, and the asymmetry is deliberate: this value is COMPARED and never stored, so a value no assignee column could hold simply cannot match, and refusing it at the edge would be a refusal the role does not have.",
+              "type": "string"
+            },
+            "force": {
+              "default": false,
+              "description": "Bypass the ownership fence, so an actor that is not the holder may release the claim. It is the escape hatch `bd unclaim --force` spells, for an abandoned claim whose holder crashed.\n\nIT BYPASSES THE FENCE AND NOTHING ELSE. It does not make an unheld row releasable, it does not make a closed one releasable, and it never bypasses a precondition \u2014 sending it beside `expected_assignee` is a 400 rather than a silent win for either.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "actor"
+          ],
+          "type": "object"
+        },
+        "RememberMemoryInput": {
+          "additionalProperties": false,
+          "properties": {
+            "body": {
+              "$ref": "#/$defs/RememberRequest"
+            }
+          },
+          "required": [
+            "body"
+          ],
+          "type": "object"
+        },
+        "RememberRequest": {
+          "additionalProperties": false,
+          "description": "What to remember, and optionally under what key.",
+          "properties": {
+            "content": {
+              "description": "The memory itself, stored VERBATIM: newlines, surrounding space and unicode all survive. Flattening it to one line is what a front door does when it prints, not what this plane does when it stores.\n\nEmpty after trimming is a `400`. So is content from which no key can be derived when `key` is omitted \u2014 `\"!!!\"` derives to nothing \u2014 and the recovery for that one is to send a `key`.",
+              "type": "string"
+            },
+            "key": {
+              "description": "The key to store under. OMIT IT to have the server derive one from `content`; the response's `key` is then how the caller learns where the memory landed.\n\nSupplied, it is used verbatim \u2014 no trimming, no slugging, no charset restriction. A key carrying a control character is storable this way and by `bd remember --key`, and is then unreachable through `GET`/`DELETE /v0/beads/memories/{key}`, which refuse one: see those operations.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "content"
+          ],
+          "type": "object"
+        },
+        "RemoveDependencyInput": {
+          "additionalProperties": false,
+          "properties": {
+            "body": {
+              "$ref": "#/$defs/RemoveDependencyRequest"
+            }
+          },
+          "required": [
+            "body"
+          ],
+          "type": "object"
+        },
+        "RemoveDependencyRequest": {
+          "additionalProperties": false,
+          "properties": {
+            "actor": {
+              "description": "Who is removing the edge, under `ClaimRequest.actor`'s rules and for the same reasons: the server trims it, refuses an empty result, anything longer than 256 BYTES, and any control character including newline. It is attributed on the `dependency_removed` event a real removal records, and interpolated into the storage commit message.",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F\\u2028\\u2029]+$",
+              "type": "string"
+            },
+            "depends_on_id": {
+              "description": "The edge's TARGET \u2014 the issue depended upon. An exact canonical id, under `issue_id`'s rule.",
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            },
+            "issue_id": {
+              "description": "The edge's SOURCE \u2014 the issue that depends on the other end. An EXACT canonical id: there is no fuzzy, prefix or substring resolution on this surface.",
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "actor",
+            "issue_id",
+            "depends_on_id"
+          ],
+          "type": "object"
+        },
+        "ReopenIssueInput": {
+          "additionalProperties": false,
+          "properties": {
+            "body": {
+              "$ref": "#/$defs/ReopenIssueRequest"
+            },
+            "path": {
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "description": "Exact canonical issue id. No fuzzy, prefix or substring resolution.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "path",
+            "body"
+          ],
+          "type": "object"
+        },
+        "ReopenIssueRequest": {
+          "additionalProperties": false,
+          "properties": {
+            "actor": {
+              "description": "Who is reopening the issue. `ClaimRequest.actor`'s rules exactly: the server trims it, then refuses an empty result, anything longer than 256 BYTES (the `maxLength` above counts characters \u2014 the byte limit is the binding one), and any control character including newline. The value reaches the `reopened` event's attribution and the storage commit message, so an unvalidated newline would forge audit-trail lines.",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F\\u2028\\u2029]+$",
+              "type": "string"
+            },
+            "expected_version": {
+              "description": "Requires the row's revision to equal this value BEFORE the reopen. A miss refuses the whole request with `409 precondition_failed` and writes nothing \u2014 `CloseIssueRequest.expected_version`'s contract, on the close's mirror.\n\nIT IS CHECKED BEFORE THE NON-DONE NO-OP, the mirror of the close's check-before-the-idempotent-re-close, and for the same reason: a reopen of a row somebody else has moved is a `409` rather than the 200-with-`already_open` the same body earns unguarded, which is what lets `already_open` be read as \"nothing has happened here since\".\n\nThe token is the `revision` this operation's own response carries; compose the next expectation from a value a write ANSWERED with and never from one the client computed. DECODE IT AS A 64-BIT INTEGER, for the reason `UpdateIssueRequest.expected_version` spells out.",
+              "format": "int64",
+              "type": "integer"
+            },
+            "reason": {
+              "description": "Why the issue is being reopened. Recorded on the `reopened` EVENT this move records \u2014 not on a field of the issue, and not carried in the response, so a caller that wants it back reads the issue's events. Refused for control characters, and bounded by what the column holds rather than by the number above.",
+              "maxLength": 255,
+              "type": "string"
+            }
+          },
+          "required": [
+            "actor"
+          ],
+          "type": "object"
+        },
+        "UpdateIssueInput": {
+          "additionalProperties": false,
+          "properties": {
+            "body": {
+              "$ref": "#/$defs/UpdateIssueRequest"
+            },
+            "path": {
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "description": "Exact canonical issue id. No fuzzy, prefix or substring resolution.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "path",
+            "body"
+          ],
+          "type": "object"
+        },
+        "UpdateIssueRequest": {
+          "additionalProperties": false,
+          "properties": {
+            "actor": {
+              "description": "Who is editing the issue. `ClaimRequest.actor`'s rules exactly: the server trims it, then refuses an empty result, anything longer than 256 BYTES (the `maxLength` above counts characters \u2014 the byte limit is the binding one), and any control character including newline. The value reaches the history entry's attribution and the storage commit message, so an unvalidated newline would forge audit-trail lines.",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F\\u2028\\u2029]+$",
+              "type": "string"
+            },
+            "expected_assignee": {
+              "description": "Requires the issue's assignee to equal this value before the patch. A match AUTHORIZES the requested `patch.assignee` transfer: this compare-and-set replaces the ordinary anti-steal fence, so it must not be combined with `force_assignee_transfer`. A miss refuses the whole request with `409 precondition_failed`.",
+              "maxLength": 255,
+              "type": "string"
+            },
+            "expected_status": {
+              "description": "Requires the issue's status to equal this value before the patch. A miss refuses the whole request with `409 precondition_failed`.\n\nUnlike `expected_version` this one is readable: `Issue.status` is on every read of this surface, so a caller can guard a status transition without any token at all.",
+              "maxLength": 255,
+              "type": "string"
+            },
+            "expected_version": {
+              "description": "Requires the row's revision to equal this value before the patch. A miss refuses the WHOLE request with `409 precondition_failed` and writes nothing \u2014 `ApplyUpdateItem.expected_version`'s contract, on the operation that patches one row.\n\nThe token is the `revision` this operation's own response carries, and the same one `GET /v0/beads/issues/{id}` publishes \u2014 which is where a first guarded write seeds itself, rather than from an unguarded one or from `POST /v0/beads/issues:batchApply`'s `ApplyItemResult.revision`. Compose the next expectation from the value the write ANSWERED with, never from a number the client incremented itself: the token is OPAQUE and compared for equality alone, so it has no predecessor a client can compute.\n\nDECODE IT AS A 64-BIT INTEGER. Live tokens run past 5e17, where an IEEE-754 double's ulp is already 64, so a parser that decodes JSON numbers as doubles \u2014 JavaScript's `JSON.parse`, Go's `any`, Python's `float` \u2014 hands back a value NEAR the token that is not it, and the guard is refused against a row nothing else touched.",
+              "format": "int64",
+              "type": "integer"
+            },
+            "force_assignee_transfer": {
+              "default": false,
+              "description": "Bypasses ONLY a genuine transfer away from a live foreign in-progress owner. Reasserting the exact current assignee is idempotent and needs no force. It requires `patch.assignee` \u2014 a request setting it without one is a `400` \u2014 and it must be false when `expected_assignee` is sent.",
+              "type": "boolean"
+            },
+            "force_close_policy": {
+              "default": false,
+              "description": "Bypasses ONLY close policy \u2014 the open-children refusal and the live blocker refusal \u2014 for a `patch.status` that crosses into the workspace's done category. It has no effect without such a status change, and it never bypasses validation, the preconditions above, or the assignee fence.",
+              "type": "boolean"
+            },
+            "patch": {
+              "$ref": "#/$defs/IssuePatchBody"
+            }
+          },
+          "required": [
+            "actor",
+            "patch"
+          ],
+          "type": "object"
+        }
+      },
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ListDependenciesInput"
+        },
+        {
+          "$ref": "#/$defs/ListBlockingAnnotationsInput"
+        },
+        {
+          "$ref": "#/$defs/ListDependencyCyclesInput"
+        },
+        {
+          "$ref": "#/$defs/GetDependencyTreeInput"
+        },
+        {
+          "$ref": "#/$defs/AddDependenciesInput"
+        },
+        {
+          "$ref": "#/$defs/CountDependencyEdgesInput"
+        },
+        {
+          "$ref": "#/$defs/RemoveDependencyInput"
+        },
+        {
+          "$ref": "#/$defs/CreateIssueInput"
+        },
+        {
+          "$ref": "#/$defs/UpdateIssueInput"
+        },
+        {
+          "$ref": "#/$defs/AddCommentInput"
+        },
+        {
+          "$ref": "#/$defs/ListRelatedIssuesInput"
+        },
+        {
+          "$ref": "#/$defs/CompareAndSetMetadataInput"
+        },
+        {
+          "$ref": "#/$defs/ClaimIssueInput"
+        },
+        {
+          "$ref": "#/$defs/CloseIssueInput"
+        },
+        {
+          "$ref": "#/$defs/ReleaseIssueInput"
+        },
+        {
+          "$ref": "#/$defs/ReopenIssueInput"
+        },
+        {
+          "$ref": "#/$defs/ApplyBatchInput"
+        },
+        {
+          "$ref": "#/$defs/BatchCloseIssuesInput"
+        },
+        {
+          "$ref": "#/$defs/BatchCreateIssuesInput"
+        },
+        {
+          "$ref": "#/$defs/ClaimNextIssueInput"
+        },
+        {
+          "$ref": "#/$defs/ListMemoriesInput"
+        },
+        {
+          "$ref": "#/$defs/RememberMemoryInput"
+        },
+        {
+          "$ref": "#/$defs/ForgetMemoryInput"
+        },
+        {
+          "$ref": "#/$defs/GetMemoryInput"
+        },
+        {
+          "$ref": "#/$defs/OwnerReadInput"
+        }
+      ]
+    }
+  }
+}

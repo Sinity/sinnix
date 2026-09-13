@@ -41,18 +41,24 @@ async def build_manifest(config: GatewayConfig, principal_name: str) -> dict[str
 
 
 def verify_approval(config: GatewayConfig, principal_name: str) -> dict[str, object]:
-    """The approved manifest hash covers every tool and its schemas."""
+    """Check deployed code against its package-generated principal manifest."""
     if config.approved_manifest_principal != principal_name:
         raise ValueError(
             "approval principal does not match the selected gateway principal"
         )
-    if config.approved_manifest_hash is None:
-        raise ValueError("a tool manifest approval is required")
+    expected = config.approved_manifest_hash
+    if config.package_manifest_path is not None:
+        artifact = json.loads(config.package_manifest_path.read_text())
+        if artifact.get("principal") != principal_name:
+            raise ValueError(
+                "package manifest principal does not match selected principal"
+            )
+        expected = artifact.get("manifest", {}).get("sha256")
+    if not isinstance(expected, str) or not expected:
+        raise ValueError("a package tool manifest is required")
     live = anyio.run(build_manifest, config, principal_name)["sha256"]
-    if live != config.approved_manifest_hash:
-        raise ValueError(
-            f"tool manifest drift: expected {config.approved_manifest_hash}, got {live}"
-        )
+    if live != expected:
+        raise ValueError(f"tool manifest drift: expected {expected}, got {live}")
     return {
         "principal": principal_name,
         "tool_manifest_hash": live,

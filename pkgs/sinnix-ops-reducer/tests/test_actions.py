@@ -25,7 +25,7 @@ def inventory(path: Path) -> None:
                 "surfaces": {
                     "safe": {
                         "unit": "safe.service",
-                        "manager": "user",
+                        "manager": "system",
                         "observe": {"restartable": True},
                         "effectiveResources": {"CPUWeight": 5},
                     },
@@ -43,10 +43,31 @@ def inventory(path: Path) -> None:
 def request(
     action: str, target: dict[str, str], revision: int = 1, key: str = "k1"
 ) -> dict:
+    if "process" in target:
+        expected = {"kind": "process", **target["process"]}
+    elif "job_id" in target:
+        expected = {"kind": "job", "launch_reference": "launch-fixture", "attempt": 1}
+    else:
+        properties = {
+            "LoadState": "loaded",
+            "ActiveState": "active" if revision else "inactive",
+            "SubState": "running",
+            "InvocationID": "invocation-fixture",
+        }
+        if action in {"freeze", "thaw", "park"}:
+            properties["FreezerState"] = "running"
+        if action in {"set_policy", "reset_policy"}:
+            properties["CPUWeight"] = "5"
+        expected = {
+            "kind": "unit",
+            "unit": "safe.service",
+            "manager": "system",
+            "properties": properties,
+        }
     return {
         "action": action,
         "target": target,
-        "expected_revision": revision,
+        "expected_target": expected,
         "idempotency_key": key,
         "operator_reason": "test fixture",
         "parameters": {},
@@ -56,21 +77,31 @@ def request(
 def fake_unit_state_prober(unit: str, manager: str) -> dict[str, str]:
     """Stand-in for ActionService._live_unit_state_prober so receipt tests
     never shell out to the live systemd manager for a fixture unit."""
-    return {"LoadState": "loaded", "ActiveState": "active", "SubState": "running"}
+    return {
+        "LoadState": "loaded",
+        "ActiveState": "active",
+        "SubState": "running",
+        "InvocationID": "invocation-fixture",
+        "FreezerState": "running",
+        "CPUWeight": "5",
+    }
 
 
 class FakeAgentJobs:
     def __init__(self, jobs: list[dict]) -> None:
-        self.jobs = {str(job["job_id"]): job for job in jobs}
+        self.jobs = {
+            str(job["job_id"]): {"reference": "launch-fixture", "attempt": 1, **job}
+            for job in jobs
+        }
         self.cancelled: list[str] = []
 
-    def get(self, job_id: str) -> dict:
+    def get(self, job_id: str, *, reference=None) -> dict:
         try:
             return self.jobs[job_id]
         except KeyError as error:
             raise AgentCtlError("unknown job") from error
 
-    def cancel(self, job_id: str) -> dict:
+    def cancel(self, job_id: str, *, reference=None, expected_attempt=None) -> dict:
         job = self.get(job_id)
         self.cancelled.append(job_id)
         return job | {
@@ -167,7 +198,7 @@ def test_action_rejects_unknown_pid_stale_revision_and_unsafe_unit(
             {
                 "action": "restart",
                 "target": {"pid": "123"},
-                "expected_revision": 1,
+                "expected_target": {"fixture": True},
                 "idempotency_key": "x",
                 "operator_reason": "x",
             }
@@ -423,12 +454,12 @@ def test_receipts_append_prior_lines_never_rewritten(tmp_path: Path) -> None:
 
     actions.execute(request("restart", {"unit": "safe"}, key="k1"))
     after_first = ledger.read_bytes()
-    # Marker line + one receipt line.
-    assert len(after_first.splitlines()) == 2
+    # Marker line + pending and confirmed receipts.
+    assert len(after_first.splitlines()) == 3
 
     actions.execute(request("restart", {"unit": "safe"}, key="k2"))
     after_second = ledger.read_bytes()
-    assert len(after_second.splitlines()) == 3
+    assert len(after_second.splitlines()) == 5
     # Append-only: everything written for the first action is byte-identical
     # in the file after the second action, not re-serialized alongside it.
     assert after_second[: len(after_first)] == after_first
@@ -645,7 +676,7 @@ def test_process_target_shape_is_validated_and_restricted_to_stop() -> None:
             {
                 "action": "stop",
                 "target": {"unit": "safe", "process": {"pid": 123, "start_ticks": 5}},
-                "expected_revision": 1,
+                "expected_target": {"fixture": True},
                 "idempotency_key": "both",
                 "operator_reason": "x",
                 "parameters": {},
@@ -923,3 +954,261 @@ def test_process_stop_kills_a_real_process(tmp_path: Path) -> None:
         if proc.poll() is None:
             proc.kill()
             proc.wait(timeout=5)
+
+
+def test_unrelated_refresh_does_not_invalidate_observed_target(tmp_path):
+    inventory_path = tmp_path / "inventory.json"
+    inventory(inventory_path)
+    reducer = Reducer(tmp_path / "status.json", tmp_path / "token", lambda: {})
+    reducer.refresh()
+    calls = []
+    actions = ActionService(
+        reducer.snapshot,
+        inventory_path,
+        tmp_path / "receipts.json",
+        adapter=lambda *_: calls.append("restart") or {},
+        unit_state_prober=fake_unit_state_prober,
+    )
+    prepared = actions.prepare(
+        {"action": "restart", "target": {"unit": "safe"}, "parameters": {}}
+    )
+    reducer.refresh()
+    receipt = actions.execute(
+        {key: value for key, value in prepared.items() if key != "observed_at"}
+        | {"idempotency_key": "refresh", "operator_reason": "fixture"}
+    )
+    assert receipt["status"] == "confirmed"
+    assert calls == ["restart"]
+
+
+def test_new_unit_invocation_and_job_attempt_refuse_old_action(tmp_path):
+    inventory_path = tmp_path / "inventory.json"
+    inventory(inventory_path)
+    properties = fake_unit_state_prober("", "")
+    jobs = FakeAgentJobs([{"job_id": "job-1", "terminal": False}])
+    calls = []
+    actions = ActionService(
+        lambda: {"sequence": 99},
+        inventory_path,
+        tmp_path / "receipts.json",
+        adapter=lambda *_: calls.append("mutation") or {},
+        agent_jobs=jobs,
+        unit_state_prober=lambda *_: properties,
+    )
+    for action, target, mutate in (
+        (
+            "restart",
+            {"unit": "safe"},
+            lambda: properties.update(InvocationID="new-invocation"),
+        ),
+        (
+            "interrupt",
+            {"job_id": "job-1"},
+            lambda: jobs.jobs["job-1"].update(attempt=2),
+        ),
+    ):
+        prepared = actions.prepare(
+            {"action": action, "target": target, "parameters": {}}
+        )
+        mutate()
+        raw = {
+            key: value for key, value in prepared.items() if key != "observed_at"
+        } | {"idempotency_key": action, "operator_reason": "fixture"}
+        for _ in range(2):
+            with pytest.raises(ActionError, match="expected_target is stale"):
+                actions.execute(raw)
+    assert calls == []
+
+
+def test_uncertain_adapter_is_never_replayed_as_success(tmp_path):
+    inventory_path = tmp_path / "inventory.json"
+    inventory(inventory_path)
+    calls = []
+
+    def adapter(*_):
+        calls.append("dispatched")
+        raise TimeoutError("reply lost")
+
+    actions = ActionService(
+        lambda: {},
+        inventory_path,
+        tmp_path / "receipts.json",
+        adapter=adapter,
+        unit_state_prober=fake_unit_state_prober,
+    )
+    raw = request("restart", {"unit": "safe"})
+    for _ in range(2):
+        with pytest.raises(ActionError, match="indeterminate"):
+            actions.execute(raw)
+    assert calls == ["dispatched"]
+    assert actions.lookup("k1")["status"] == "indeterminate"
+
+
+def test_process_replaced_between_resolution_and_dispatch_is_not_signalled(tmp_path):
+    identities = iter(
+        [(55, "fixture.scope", "agent.slice"), (56, "fixture.scope", "agent.slice")]
+    )
+    signals = []
+    actions = make_process_actions(
+        tmp_path,
+        lambda _: next(identities),
+        signaler=lambda *args: signals.append(args),
+    )
+    with pytest.raises(ActionError, match="identity changed"):
+        actions.execute(request("stop", {"process": {"pid": 502, "start_ticks": 55}}))
+    assert signals == []
+
+
+def test_canonical_unit_manager_is_never_retargeted(tmp_path):
+    inventory_path = tmp_path / "inventory.json"
+    inventory_path.write_text(
+        json.dumps(
+            {
+                "schema": "sinnix-runtime-inventory-v1",
+                "surfaces": {
+                    "system-copy": {
+                        "unit": "shared.service",
+                        "manager": "system",
+                        "observe": {"restartable": True},
+                    },
+                    "user-copy": {
+                        "unit": "shared.service",
+                        "manager": "user",
+                        "observe": {"restartable": True},
+                    },
+                    "system-only": {
+                        "unit": "system-only.service",
+                        "manager": "system",
+                        "observe": {"restartable": True},
+                    },
+                },
+            }
+        )
+    )
+    calls = []
+    actions = ActionService(
+        lambda: {},
+        inventory_path,
+        tmp_path / "receipts.json",
+        adapter=lambda _request, resolved: (
+            calls.append(resolved["surface"]["manager"]) or {}
+        ),
+        unit_state_prober=fake_unit_state_prober,
+    )
+    for manager in ("user", "system"):
+        prepared = actions.prepare(
+            {
+                "action": "restart",
+                "target": {"unit": "shared.service", "manager": manager},
+                "parameters": {},
+            }
+        )
+        assert prepared["expected_target"]["manager"] == manager
+        prepared.pop("observed_at")
+        actions.execute(
+            prepared | {"idempotency_key": manager, "operator_reason": "fixture"}
+        )
+    assert calls == ["user", "system"]
+    for unit in ("system-only.service", "system-only"):
+        with pytest.raises(ActionError, match="not in"):
+            actions.prepare(
+                {
+                    "action": "restart",
+                    "target": {"unit": unit, "manager": "user"},
+                    "parameters": {},
+                }
+            )
+    with pytest.raises(ActionError, match="multiple managers"):
+        actions.prepare(
+            {
+                "action": "restart",
+                "target": {"unit": "shared.service"},
+                "parameters": {},
+            }
+        )
+    assert calls == ["user", "system"]
+
+
+def test_canonical_manager_search_survives_opposite_scope_surface_id_collision(
+    tmp_path,
+):
+    inventory_path = tmp_path / "inventory.json"
+    inventory_path.write_text(
+        json.dumps(
+            {
+                "schema": "sinnix-runtime-inventory-v1",
+                "surfaces": {
+                    "shared.service": {
+                        "unit": "shared.service",
+                        "manager": "system",
+                        "observe": {"restartable": True},
+                    },
+                    "user-copy": {
+                        "unit": "shared.service",
+                        "manager": "user",
+                        "observe": {"restartable": True},
+                    },
+                },
+            }
+        )
+    )
+    calls = []
+    actions = ActionService(
+        lambda: {},
+        inventory_path,
+        tmp_path / "receipts.json",
+        adapter=lambda _request, resolved: (
+            calls.append(resolved["surface"]["manager"]) or {}
+        ),
+        unit_state_prober=fake_unit_state_prober,
+    )
+    prepared = actions.prepare(
+        {
+            "action": "restart",
+            "target": {"unit": "shared.service", "manager": "user"},
+            "parameters": {},
+        }
+    )
+    assert prepared["expected_target"]["manager"] == "user"
+    prepared.pop("observed_at")
+    actions.execute(
+        prepared | {"idempotency_key": "collision", "operator_reason": "fixture"}
+    )
+    assert calls == ["user"]
+
+
+def test_pressure_actions_refuse_user_scope_before_dispatch(tmp_path):
+    inventory_path = tmp_path / "inventory.json"
+    inventory_path.write_text(
+        json.dumps(
+            {
+                "schema": "sinnix-runtime-inventory-v1",
+                "surfaces": {
+                    "system": {"unit": "shared.service", "manager": "system"},
+                    "user": {"unit": "shared.service", "manager": "user"},
+                },
+            }
+        )
+    )
+    calls = []
+    actions = ActionService(
+        lambda: {},
+        inventory_path,
+        tmp_path / "receipts.json",
+        adapter=lambda *_: calls.append("mutation") or {},
+        unit_state_prober=fake_unit_state_prober,
+    )
+    for action, parameters in (
+        ("freeze", {}),
+        ("thaw", {}),
+        ("park", {"deadline_seconds": 10}),
+    ):
+        with pytest.raises(ActionError, match="only supports system-manager"):
+            actions.prepare(
+                {
+                    "action": action,
+                    "target": {"unit": "shared.service", "manager": "user"},
+                    "parameters": parameters,
+                }
+            )
+    assert calls == []

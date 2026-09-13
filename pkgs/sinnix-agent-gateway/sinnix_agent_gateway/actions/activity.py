@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import time
 from datetime import datetime, timezone
@@ -11,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import Field
 
+from .. import generated_polylogue_inputs as session_owner
 from ..action import (
     ALL_PRINCIPALS,
     OBSERVER_OPERATOR,
@@ -23,17 +23,12 @@ from ..capabilities import Capability, PolicyError
 from ..captures import CaptureLane
 from ..catalog import search_rows
 from ..contracts import VerbFamily
-from ..memory import MemoryError
 from ..results import ProtocolError
 from ..schemas import GatewayModel
-from ..sessions import SessionError
-from ..timeline import TimelineError
+from .products import OwnerProduct, owner_product
 
 if TYPE_CHECKING:
     from ..runtime import Runtime
-
-Provider = Literal["claude-code", "codex"]
-MemorySource = Literal["claude-code", "codex", "polylogue", "sinex", "lynchpin"]
 
 
 def _owner_error(exc: ValueError) -> ProtocolError:
@@ -390,349 +385,181 @@ def _activity(runtime: Runtime, inp: ActivityInput) -> Activity:
     )
 
 
-# ---------------------------------------------------------------- sessions
-
-
-class SessionsListOp(GatewayModel):
-    operation: Literal["list"] = "list"
-    provider: Provider
-    limit: int = Field(default=100, ge=1)
-    cursor: str | None = Field(
-        default=None,
-        max_length=8_192,
-        description="page.next_cursor from this provider and limit. Omit to observe current files.",
-    )
-
-
-class SessionsReadOp(GatewayModel):
-    operation: Literal["read"] = "read"
-    reference: str = Field(
-        min_length=1,
-        max_length=8_192,
-        description="provider:relative/path.jsonl from a list or search row.",
-    )
-    offset: int = Field(
-        default=0, ge=0, description="Raw byte offset; use next_offset to continue."
-    )
-    max_bytes: int = Field(
-        default=64_000,
-        ge=1,
-        description="Source byte limit; pages stop at UTF-8 boundaries. If a character cannot fit, increase this limit. Malformed bytes are replaced with U+FFFD.",
-    )
-
-
-class SessionsSearchOp(GatewayModel):
-    operation: Literal["search"] = "search"
-    provider: Provider
-    query: str = Field(
-        min_length=1,
-        max_length=1_000,
-        description="Literal text. Searches every session file through bounded resumable scan pages.",
-    )
-    max_results: int = Field(
-        default=100,
-        ge=1,
-        description="Maximum matches in this page; response byte bounds may return fewer.",
-    )
-    reference: str | None = Field(
-        default=None,
-        min_length=1,
-        max_length=8_192,
-        description="Optional session reference to search instead of the provider's full history.",
-    )
-    cursor: str | None = Field(
-        default=None,
-        max_length=8_192,
-        description="Continuation returned by the preceding identical search.",
-    )
-    scan_bytes: int = Field(
-        default=8 * 1_024 * 1_024,
-        ge=1,
-        description="Maximum transcript bytes to inspect in this call; continue to cover more.",
-    )
-
-
-class SessionsStructuredOp(GatewayModel):
-    operation: Literal["structured"] = "structured"
-    expression: str | None = Field(
-        default=None,
-        max_length=1000,
-        description="Owner-ranked free-text search; omit for exhaustive filtered listing.",
-    )
-    origin: str | None = None
-    repo: str | None = None
-    since: str | None = None
-    until: str | None = None
-    sort: str | None = None
-    limit: int = Field(default=100, ge=1, le=500)
+# Session parsing, scan cursors and cross-source ordering are Polylogue products.
 
 
 class SessionsInput(RequestControls):
     request: (
-        SessionsListOp | SessionsReadOp | SessionsSearchOp | SessionsStructuredOp
+        session_owner.SessionList
+        | session_owner.SessionSearch
+        | session_owner.SessionRead
+        | session_owner.RawList
+        | session_owner.RawSearch
+        | session_owner.RawRead
     ) = Field(discriminator="operation")
 
 
-class SessionRow(GatewayModel):
-    reference: str
-    bytes: int
-    mtime_ns: int = Field(description="File modification time in Unix nanoseconds.")
-
-
-class SessionMatch(GatewayModel):
-    reference: str
-    line: int
-    offset: int = Field(description="Byte offset accepted by the read operation.")
-    text: str
-
-
 class SessionsResult(GatewayModel):
-    operation: Literal["list", "read", "search", "structured"]
-    provider: str
-    sessions: list[SessionRow] | None = None
-    matches: list[SessionMatch] | None = None
-    reference: str | None = None
-    offset: int | None = None
-    bytes: int | None = None
-    next_offset: int | None = None
-    content: str | None = None
-    scanned_bytes: int | None = None
-    next_cursor: str | None = None
-    truncated: bool | None = Field(
-        description="Null when the structured owner has not declared truncation; consult its coverage envelope."
-    )
-    owner_product: dict[str, Any] | None = None
-    affordances: list[str] = Field(default_factory=list)
-
-
-def _session_list(
-    runtime: Runtime, op: SessionsListOp
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    runtime.principal.require(Capability.SESSION_READ)
-    query_sha256 = hashlib.sha256(
-        json.dumps(
-            {"action": "sessions.query", **op.model_dump(exclude={"cursor"})},
-            sort_keys=True,
-        ).encode()
-    ).hexdigest()
-    if op.cursor:
-        snapshot = runtime.results.continue_snapshot(
-            op.cursor, query_sha256=query_sha256
-        )
-    else:
-        rows = runtime.sessions.inventory(op.provider)
-        revision = hashlib.sha256(json.dumps(rows, sort_keys=True).encode()).hexdigest()
-        writer = runtime.results.start_snapshot(
-            query_sha256=query_sha256, source_revision=revision, page_size=op.limit
-        )
-        try:
-            for row in rows:
-                writer.append(row)
-            snapshot = runtime.results.finish_snapshot(writer)
-        except Exception:
-            writer.abort()
-            raise
-    return (
-        {
-            "provider": op.provider,
-            "sessions": snapshot["rows"],
-            "truncated": snapshot["next_cursor"] is not None,
-        },
-        {
-            "kind": "snapshot",
-            "cursor": snapshot["cursor"],
-            "next_cursor": snapshot["next_cursor"],
-            "total": snapshot["row_count"],
-            "expires_at": snapshot["expires_at"],
-            "snapshot_ref": snapshot["snapshot_ref"],
-        },
+    operation: str
+    owner_product: OwnerProduct
+    affordances: list[str] = Field(
+        default_factory=lambda: ["sessions.read", "sessions.search", "timeline.query"]
     )
 
 
 async def _sessions(runtime: Runtime, inp: SessionsInput) -> ActionResult:
-    op = inp.request
-    if isinstance(op, SessionsStructuredOp):
-        from .products import owner_product
-
-        runtime.principal.require(Capability.SESSION_READ)
-        product = await owner_product(
-            runtime,
-            "polylogue",
-            "query",
-            {
-                **op.model_dump(exclude={"operation"}, exclude_none=True),
-                "projection": "sessions",
-            },
-            deadline_at=inp.deadline_at,
-        )
-        return ActionResult(
-            SessionsResult(
-                operation="structured",
-                provider="polylogue",
-                truncated=(product.data or {}).get("truncated"),
-                owner_product=product.model_dump(),
-                affordances=["sessions.orchestration", "sessions.query"],
-            )
-        )
-    page = None
-    try:
-        if isinstance(op, SessionsListOp):
-            payload, page = _session_list(runtime, op)
-        elif isinstance(op, SessionsReadOp):
-            payload = runtime.sessions.read(op.reference, op.offset, op.max_bytes)
-        else:
-            payload = runtime.sessions.search(
-                op.provider,
-                op.query,
-                op.max_results,
-                cursor=op.cursor,
-                cursor_key=runtime.results.cursor_key,
-                scan_bytes=op.scan_bytes,
-                reference=op.reference,
-            )
-    except (SessionError, PolicyError) as exc:
-        raise _owner_error(exc) from exc
+    runtime.principal.require(Capability.SESSION_READ)
+    product = await owner_product(
+        runtime,
+        "polylogue",
+        "query",
+        {
+            "projection": "session-operations",
+            "session_operation": inp.request.model_dump(mode="json"),
+        },
+        deadline_at=inp.deadline_at,
+    )
     return ActionResult(
-        SessionsResult(
-            operation=op.operation,
-            **payload,
-            affordances=["sessions.query", "memory.query", "timeline.query"],
-        ),
-        page=page
-        or (
-            {
-                "kind": "cursor",
-                "cursor": op.cursor,
-                "next_cursor": payload["next_cursor"],
-            }
-            if isinstance(op, SessionsSearchOp)
-            else None
-        ),
+        SessionsResult(operation=inp.request.operation, owner_product=product)
     )
-
-
-# ------------------------------------------------------------------ memory
-
-
-class MemorySearchOp(GatewayModel):
-    operation: Literal["search"] = "search"
-    query: str = Field(min_length=1, max_length=1_000)
-    providers: list[MemorySource] | None = Field(default=None, min_length=1)
-    limit: int = Field(default=100, ge=1)
-    source_cursors: dict[Provider, str | None] | None = Field(
-        default=None,
-        description="Per-provider continuations returned by the preceding identical memory search.",
-    )
-    scan_bytes: int = Field(default=8 * 1_024 * 1_024, ge=1)
-
-
-class MemoryGetOp(GatewayModel):
-    operation: Literal["get"] = "get"
-    reference: str = Field(min_length=1, max_length=8_192)
-    offset: int = Field(default=0, ge=0)
-    max_bytes: int = Field(default=64_000, ge=1, le=262_144)
 
 
 class MemoryInput(RequestControls):
-    request: MemorySearchOp | MemoryGetOp = Field(discriminator="operation")
-
-
-class MemoryResult(GatewayModel):
-    operation: Literal["search", "get"]
-    query: str | None = None
-    sources: list[dict[str, Any]] | None = None
-    matches: list[dict[str, Any]] | None = None
-    source: str | None = None
-    authority: str | None = None
-    availability: str | None = None
-    object_reference: str | None = None
-    offset: int | None = None
-    bytes: int | None = None
-    content: str | None = None
-    truncated: bool
-    next_cursors: dict[str, str | None] | None = None
-    affordances: list[str] = Field(default_factory=list)
-
-
-def _memory(runtime: Runtime, inp: MemoryInput) -> MemoryResult:
-    op = inp.request
-    try:
-        if isinstance(op, MemorySearchOp):
-            payload = runtime.memory.search(
-                op.query,
-                list(op.providers) if op.providers else None,
-                op.limit,
-                source_cursors=op.source_cursors,
-                cursor_key=runtime.results.cursor_key,
-                scan_bytes=op.scan_bytes,
-            )
-        else:
-            payload = runtime.memory.get(op.reference, op.offset, op.max_bytes)
-    except (MemoryError, PolicyError) as exc:
-        raise _owner_error(exc) from exc
-    return MemoryResult(
-        operation=op.operation,
-        **payload,
-        affordances=["memory.query", "sessions.query"],
+    request: session_owner.RawMemorySearch | session_owner.RawRead = Field(
+        discriminator="operation"
     )
 
 
-# ---------------------------------------------------------------- timeline
+async def _memory(runtime: Runtime, inp: MemoryInput) -> ActionResult:
+    return await _sessions(runtime, inp)
 
 
-class TimelineInput(RequestControls):
-    start: str | None = Field(
-        default=None, max_length=64, description="RFC 3339 with timezone."
-    )
-    end: str | None = Field(default=None, max_length=64)
-    query: str | None = Field(default=None, min_length=1, max_length=1_000)
-    providers: list[MemorySource] | None = Field(default=None, min_length=1)
-    limit: int = Field(default=100, ge=1)
-    cursor: str | None = Field(
-        default=None,
-        max_length=8_192,
-        description="Continuation returned by the preceding identical timeline query.",
-    )
-    scan_bytes: int = Field(default=8 * 1_024 * 1_024, ge=1, le=64 * 1_024 * 1_024)
+class TimelineInput(RequestControls, session_owner.SessionTimeline):
+    pass
 
 
-class TimelineResult(GatewayModel):
-    available: bool = True
-    reason: str | None = None
-    time_basis: str | None = None
-    start: str | None = None
-    end: str | None = None
-    query: str | None = None
-    sources: list[dict[str, Any]] | None = None
-    entries: list[dict[str, Any]] | None = None
-    truncated: bool = False
-    next_cursor: str | None = None
-    affordances: list[str] = Field(default_factory=list)
-
-
-def _timeline(runtime: Runtime, inp: TimelineInput) -> ActionResult:
-    try:
-        payload = runtime.timeline.query(
-            inp.start,
-            inp.end,
-            inp.query,
-            list(inp.providers) if inp.providers else None,
-            inp.limit,
-            cursor=inp.cursor,
-            cursor_key=runtime.results.cursor_key,
-            scan_bytes=inp.scan_bytes,
-        )
-    except (TimelineError, PolicyError) as exc:
-        raise _owner_error(exc) from exc
-    return ActionResult(
-        TimelineResult(
-            **payload, affordances=["sessions.query", "memory.query", "activity.query"]
-        ),
-        page={
-            "kind": "cursor",
-            "cursor": inp.cursor,
-            "next_cursor": payload.get("next_cursor"),
+async def _timeline(runtime: Runtime, inp: TimelineInput) -> ActionResult:
+    runtime.principal.require(Capability.SESSION_READ)
+    product = await owner_product(
+        runtime,
+        "polylogue",
+        "query",
+        {
+            "projection": "session-operations",
+            "session_operation": inp.model_dump(
+                mode="json", exclude=set(RequestControls.model_fields)
+            ),
         },
+        deadline_at=inp.deadline_at,
+    )
+    return ActionResult(SessionsResult(operation=inp.operation, owner_product=product))
+
+
+_SESSION_EXAMPLES: dict[str, Example] = {
+    "timeline.query": Example(
+        title="Indexed session events in a time window",
+        input={
+            "origin": "codex-session",
+            "since": "2026-09-01T00:00:00Z",
+            "until": "2026-09-02T00:00:00Z",
+            "limit": 50,
+        },
+    ),
+    "sessions.list": Example(
+        title="Recent indexed project sessions",
+        input={"repo": "sinnix", "sort": "date", "limit": 20},
+    ),
+    "sessions.search": Example(
+        title="Find sessions discussing pagination",
+        input={"expression": "pagination", "repo": "sinnix", "limit": 20},
+    ),
+    "sessions.read": Example(
+        title="Read an indexed session message page",
+        input={"ref": "session:example-session", "offset": 0, "limit": 25},
+    ),
+    "sessions.raw.list": Example(
+        title="List original Codex session sources",
+        input={"origin": "codex-session", "limit": 20},
+    ),
+    "sessions.raw.search": Example(
+        title="Search original Claude Code transcripts",
+        input={
+            "origin": "claude-code-session",
+            "query": "pagination",
+            "limit": 20,
+            "scan_bytes": 1048576,
+        },
+    ),
+    "sessions.raw.read": Example(
+        title="Read a bounded original transcript page",
+        input={
+            "reference": "codex:2026/09/01/example-session.jsonl",
+            "offset": 0,
+            "max_bytes": 16000,
+        },
+    ),
+    "sessions.raw.timeline": Example(
+        title="Original sources modified in a time window",
+        input={
+            "origins": ["claude-code-session", "codex-session"],
+            "since": "2026-09-01T00:00:00Z",
+            "until": "2026-09-02T00:00:00Z",
+            "limit": 20,
+        },
+    ),
+    "memory.raw.get": Example(
+        title="Read one original memory source",
+        input={
+            "reference": "claude-code:example-project/example-session.jsonl",
+            "offset": 0,
+            "max_bytes": 16000,
+        },
+    ),
+    "memory.raw.search": Example(
+        title="Find pagination notes across original sources",
+        input={
+            "query": "pagination",
+            "origins": ["claude-code-session", "codex-session"],
+            "limit": 20,
+        },
+    ),
+    "sessions.resume": Example(
+        title="Resume work in a checkout",
+        input={
+            "repo_path": "/realm/project/sinnix",
+            "recent_files": ["README.md"],
+            "related_limit": 3,
+        },
+    ),
+}
+
+
+def _session_action(name: str, model: type, summary: str) -> Action:
+    """Bind one declared owner model to one discoverable action."""
+    from pydantic import create_model
+
+    selector = {
+        "timeline.query": "sessions.timeline",
+        "sessions.resume": "context.resume",
+    }.get(name, name)
+    Input = create_model(
+        name.replace(".", "_") + "Input",
+        __base__=(RequestControls, model),
+        operation=(Literal[selector], selector),
+    )
+    return Action(
+        name=name,
+        family=VerbFamily.QUERY,
+        owner="polylogue",
+        summary=summary,
+        Input=Input,
+        Output=SessionsResult,
+        handler=_timeline,
+        principals=OBSERVER_OPERATOR,
+        resource_kinds=(),
+        affordances=("sessions.read", "sessions.search", "timeline.query"),
+        examples=(_SESSION_EXAMPLES[name],),
+        documentation="Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.",
     )
 
 
@@ -792,91 +619,97 @@ ACTIONS: tuple[Action, ...] = (
     Action(
         name="sessions.query",
         family=VerbFamily.QUERY,
-        owner="sessions",
-        summary="Query structured Polylogue session evidence or use compatible local transcript list, read and search operations.",
+        owner="polylogue",
+        summary="Read indexed session pages or explicit original-source fallback through Polylogue.",
         Input=SessionsInput,
         Output=SessionsResult,
         handler=_sessions,
         principals=OBSERVER_OPERATOR,
-        resource_kinds=("session",),
-        affordances=("sessions.query", "memory.query", "timeline.query"),
-        aliases=(
-            "claude sessions",
-            "codex sessions",
-            "transcript",
-            "session log",
-            "recent work",
-        ),
-        documentation="operation=structured queries Polylogue's sessions projection and retains owner coverage and provenance. The owner does not support sessions continuation. Legacy list cursors continue a newest-first snapshot for one hour; legacy reads return next_offset and legacy searches expose their bounded file coverage.",
+        resource_kinds=(),
+        affordances=("sessions.read", "sessions.search", "timeline.query"),
         examples=(
             Example(
-                title="Structured project sessions",
-                input={
-                    "request": {
-                        "operation": "structured",
-                        "repo": "sinnix",
-                        "limit": 20,
-                    }
-                },
-            ),
-            Example(
-                title="Recent Claude Code sessions",
-                input={
-                    "request": {
-                        "operation": "list",
-                        "provider": "claude-code",
-                        "limit": 20,
-                    }
-                },
-            ),
-            Example(
-                title="Search",
-                input={
-                    "request": {
-                        "operation": "search",
-                        "provider": "codex",
-                        "query": "gateway",
-                    }
-                },
+                title="Project sessions",
+                input={"request": {"operation": "sessions.list", "repo": "sinnix"}},
             ),
         ),
     ),
     Action(
         name="memory.query",
         family=VerbFamily.QUERY,
-        owner="memory",
-        summary="Search session-derived memory across providers or fetch one object by reference, with source provenance.",
+        owner="polylogue",
+        summary="Search original session sources or read one source object with explicit coverage.",
         Input=MemoryInput,
-        Output=MemoryResult,
+        Output=SessionsResult,
         handler=_memory,
         principals=OBSERVER_OPERATOR,
-        resource_kinds=("session",),
-        affordances=("memory.query", "sessions.query"),
-        aliases=("remember", "recall", "what did we decide", "semantic search"),
+        resource_kinds=(),
+        affordances=("memory.raw.search", "sessions.raw.read"),
         examples=(
             Example(
-                title="Search all sources",
-                input={"request": {"operation": "search", "query": "screenshot probe"}},
+                title="Search original sources",
+                input={
+                    "request": {
+                        "operation": "memory.raw.search",
+                        "query": "screenshot probe",
+                    }
+                },
             ),
         ),
     ),
-    Action(
-        name="timeline.query",
-        family=VerbFamily.QUERY,
-        owner="timeline",
-        summary="Session evidence ordered by file mtime within an RFC 3339 window, per provider, without claiming unavailable upstreams.",
-        Input=TimelineInput,
-        Output=TimelineResult,
-        handler=_timeline,
-        principals=OBSERVER_OPERATOR,
-        resource_kinds=("session",),
-        affordances=("sessions.query", "memory.query", "activity.query"),
-        aliases=("history", "when did", "sessions between", "chronology"),
-        examples=(
-            Example(
-                title="Yesterday's sessions",
-                input={"start": "2026-09-04T00:00:00Z", "end": "2026-09-05T00:00:00Z"},
-            ),
-        ),
+    _session_action(
+        "timeline.query",
+        session_owner.SessionTimeline,
+        "Read the indexed session event timeline from Polylogue.",
+    ),
+    _session_action(
+        "sessions.list",
+        session_owner.SessionList,
+        "Page indexed session summaries with native archive filters.",
+    ),
+    _session_action(
+        "sessions.search",
+        session_owner.SessionSearch,
+        "Search indexed sessions with native archive ranking and pagination.",
+    ),
+    _session_action(
+        "sessions.read",
+        session_owner.SessionRead,
+        "Read a page of messages from one canonical session reference.",
+    ),
+    _session_action(
+        "sessions.raw.list",
+        session_owner.RawList,
+        "List original session files through the archive owner's explicit fallback.",
+    ),
+    _session_action(
+        "sessions.raw.search",
+        session_owner.RawSearch,
+        "Search original session transcripts with source-bound continuations.",
+    ),
+    _session_action(
+        "sessions.raw.read",
+        session_owner.RawRead,
+        "Read an original session transcript byte page.",
+    ),
+    _session_action(
+        "sessions.raw.timeline",
+        session_owner.RawTimeline,
+        "Read original session evidence ordered by file modification time.",
+    ),
+    _session_action(
+        "memory.raw.get",
+        session_owner.RawRead,
+        "Read one original memory source object by native reference.",
+    ),
+    _session_action(
+        "memory.raw.search",
+        session_owner.RawMemorySearch,
+        "Search across original session sources with independent coverage.",
+    ),
+    _session_action(
+        "sessions.resume",
+        session_owner.ResumeContext,
+        "Read the archive owner's resume context for a session or checkout.",
     ),
 )

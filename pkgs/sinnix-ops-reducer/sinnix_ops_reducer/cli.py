@@ -278,6 +278,7 @@ def main() -> None:
     observe_command = list(args.observe_command)
     if len(observe_command) == 1:
         observe_command += ["--format", "json", "--limit", "10"]
+    observe_command += ["--section", "current"]
     root = args.runtime_dir / "sinnix"
     root.mkdir(parents=True, exist_ok=True)
     layer = StateLayer.build(
@@ -290,6 +291,9 @@ def main() -> None:
         layer.token_path,
         observe_source(observe_command),
         layer.reducer_state_path,
+        section_source=lambda section: observe_source(
+            [*observe_command[:-2], "--section", section], timeout=60
+        )(),
         ambient_source=product_source(args.ambient_product),
         agent_jobs_source=agentctl.snapshot,
         clodex_usage_source=lambda: clodex_usage(args.clodex_usage),

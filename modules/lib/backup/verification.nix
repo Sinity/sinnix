@@ -1,6 +1,27 @@
 # Internal backup component. Public options and shared policy live in modules/backup.nix.
-{ context }:
-with context;
+{
+  pkgs,
+  lib,
+  config,
+  sinexBlobRepositoryPath,
+  scriptPkgs,
+  borgDrainStateRoot,
+  borgIntegrityReceipt,
+  btrfsImageRoot,
+  btrfsImageMinBytes,
+  borgRepoPersist,
+  borgRepoRealm,
+  borgRepoSinexBlobs,
+  borgPassphrasePath,
+  outerRealmMountUnit,
+  borgCacheDir,
+  protectedRealmArchivePaths,
+  mkBackupJob,
+  mkBorgCommonScript,
+  realmExcludes,
+  realmExcludeMatchesProtectedPath,
+  mkSinexBeadsDrillScript,
+}:
 [
   {
     assertions =

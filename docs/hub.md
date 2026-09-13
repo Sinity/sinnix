@@ -250,8 +250,11 @@ to the next render pass and logs nothing when it fails.
 Every button on every page posts to `/ops/v1/actions` — the ops-reducer's existing
 bounded action API. That API already owns admission (targets must be attested
 runtime-inventory units that declare `observe.restartable`), optimistic
-concurrency (`expected_revision` must match the snapshot the operator saw),
-idempotency keys, and durable receipts. The hub adds no shell-out, no `sudo`,
+target checks (`expected_target` binds the observed unit manager and invocation,
+job launch and attempt, or process PID and start time), idempotency keys, and
+durable receipts. An unrelated refresh does not invalidate an action. Buttons
+use the displayed target token; `/ops/v1/actions/prepare` supplies one when the
+caller has no target observation. The hub adds no shell-out, no `sudo`,
 and no privileged helper.
 
 `start`, `stop`, and `restart` are one verb set behind that gate, sharing the
@@ -401,16 +404,19 @@ state those pages show, so the timer bought nothing but staleness: a page is
 now as current as the moment it was asked for.
 
 Inputs are the reducer's live snapshot, the runtime inventory, a Nix-generated
-manifest, and live systemd state. A missing input degrades the page rather than
-failing the request: `/` says plainly when it cannot tell whether anything is
-wrong.
+manifest, and live systemd state. Background refresh reads current pressure and
+batched unit state; expensive diagnostics run when their page or section is
+requested. Source failures retain the other healthy sections and expose the
+failed component's coverage. Collector sampling and capture cadence are separate
+from these dashboard reads.
 
 Serving the pages over the reducer's Unix socket is what keeps the auth model
 intact. The reducer treats that socket as authorized — it is 0600 in the
 operator's runtime directory — and still demands a bearer token on its loopback
 TCP listener, so the page routes expose exactly what the action API already
 exposed there. POSTs to `/ops/*` keep the same-origin gate and the reducer's
-`expected_revision` check unchanged.
+target identity check. Pressure freeze/thaw/park actions use the system manager,
+as required by their owning helper.
 
 The visual language is sinnix's own: the same CSS custom properties, status
 tones, stat tiles, badges and A−/A+ controls as the generated reports, in the

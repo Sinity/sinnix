@@ -1,6 +1,35 @@
 # Internal backup component. Public options and shared policy live in modules/backup.nix.
-{ context }:
-with context;
+{
+  pkgs,
+  lib,
+  sinexBlobRepositoryPath,
+  scriptPkgs,
+  username,
+  polylogueStateRoot,
+  polylogueBackupRoot,
+  machineTelemetryBackupRoot,
+  machineTelemetryBackupMarker,
+  polylogueDbNames,
+  polylogueDbExcludes,
+  borgDrainStateRoot,
+  borgRepoRealmPath,
+  borgRepoSinexBlobsPath,
+  borgRepoPolylogueStatePath,
+  borgRepoPersist,
+  borgRepoRealm,
+  borgRepoRootSnapshots,
+  borgRepoSinexBlobs,
+  borgRepoPolylogueState,
+  borgPassphrasePath,
+  outerRealmMountUnit,
+  borgLockWaitSec,
+  borgCacheDir,
+  borgGlobalLock,
+  mkBackupJob,
+  mkBorgExcludeArgs,
+  borgStaleLockRecovery,
+  mkBorgCommonScript,
+}:
 [
   # ─── Sinex blob-repository Borg job ───
   # A CAS lives outside the /realm snapshot stream, so Borg reads the live
@@ -57,7 +86,7 @@ with context;
         # captures, above) gates freshness off this marker, same convention
         # as the btrbk drain jobs' "$label.last-success" (mkSnapshotDrainScript
         # above) -- without it, sinex-blobs had zero freshness gating despite
-        # being on a daily timer just like persist/realm are on their 4h floor.
+        # being on its own daily timer.
         install -d -m 0755 -o root -g root ${lib.escapeShellArg borgDrainStateRoot}
         marker=${lib.escapeShellArg "${borgDrainStateRoot}/sinex-blobs.last-success"}
         {

@@ -463,10 +463,7 @@ def test_job_logs_reads_the_log_of_the_job_the_reference_addresses(
     mine = task(44, reference)
     occupant = task(44, "fixture-other-0badc0de")
 
-    def addressed(task_id: int, ref: str | None = None) -> pueue.Task:
-        return mine if ref == reference else occupant
-
-    monkeypatch.setattr(launch, "addressed", addressed)
+    monkeypatch.setattr(launch.pueue, "tasks", lambda: {44: mine, 45: occupant})
     monkeypatch.setattr(launch.pueue, "log", lambda _task_id: "")
 
     answer = _call(adapter, "job.logs", {"job_id": 41, "launch_reference": reference})

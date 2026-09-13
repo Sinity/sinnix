@@ -466,7 +466,12 @@ def render_ai(
             f"<strong>{esc(service.get('name'))}</strong>",
             meta,
             lifecycle_controls(
-                unit, bool(service.get("restartable")), installed, active
+                unit,
+                bool(service.get("restartable")),
+                installed,
+                active,
+                str(service.get("manager", "system")),
+                info,
             ),
             "bad" if tone == "bad" else "",
         )

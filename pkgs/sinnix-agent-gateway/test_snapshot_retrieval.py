@@ -12,8 +12,8 @@ import anyio
 from conftest import error, ok
 from sinnix_agent_gateway.app import create_server
 from sinnix_agent_gateway.capabilities import Capability
-from sinnix_agent_gateway.contexts import ContextComposer
 from test_actions_beads import commands, fixture
+from test_contexts import historical_context
 
 
 def read_resource(server, reference: str) -> dict:
@@ -89,9 +89,7 @@ def test_historical_context_refs_remain_publicly_readable_without_rewrite(
     tmp_path: Path,
 ) -> None:
     config, _ = fixture(tmp_path)
-    snapshot = ContextComposer().compose(
-        "project.orientation", "sinnix://projects/fixture", []
-    )
+    snapshot = historical_context()
     reference = snapshot["snapshot_ref"]
     path = (
         config.state_dir
@@ -181,9 +179,7 @@ def test_published_prompt_accepts_its_declared_target(tmp_path: Path) -> None:
 
 def test_historical_context_read_requires_audit_capability(tmp_path: Path) -> None:
     config, _ = fixture(tmp_path)
-    snapshot = ContextComposer().compose(
-        "project.orientation", "sinnix://projects/fixture", []
-    )
+    snapshot = historical_context()
     reference = snapshot["snapshot_ref"]
     path = (
         config.state_dir

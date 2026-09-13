@@ -20,3 +20,6 @@
 *.gif binary
 *.webp binary
 *.ico binary
+
+# Unified patch context prefixes precede Go tabs and empty context lines.
+pkgs/beads/*.patch -whitespace

@@ -47,7 +47,7 @@
 # bearer token on its loopback TCP listener, so proxying the page paths through
 # the socket exposes exactly what the action API already exposed there and
 # nothing more: the same-origin gate below and the reducer's own
-# expected_revision check remain the whole admission story for POSTs.
+# target identity check remain the admission checks for POSTs.
 #
 # ── Why it cannot be seen from the LAN ──────────────────────────────────────
 # Two independent layers, either of which alone would suffice:
@@ -70,7 +70,7 @@
 # Every button on every page posts to the ops-reducer's existing action API
 # through a reverse-proxied path. That API owns admission (targets must be
 # attested runtime-inventory units, queued jobs, or admitted
-# processes), optimistic concurrency (expected_revision), idempotency keys, and
+# processes), target identity checks (expected_target), idempotency keys, and
 # receipts. The hub adds no shell-out, no sudo, and no privileged helper.
 {
   mkServiceModule,
@@ -302,7 +302,7 @@ mkServiceModule {
           # Same-origin gate on the action API. A browser sends Origin on POST
           # even same-origin, so this cannot be a blanket "reject any Origin";
           # it rejects any Origin that is not one of the hub's own. Together
-          # with the reducer's expected_revision check -- which needs a prior
+          # with the reducer's expected_target check -- which needs a prior
           # read that CORS denies cross-origin -- a blind cross-site POST has
           # nothing to work with.
           handle_path /ops/* {

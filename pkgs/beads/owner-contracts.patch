@@ -1,0 +1,1876 @@
+--- /dev/null
++++ b/cmd/bd/owner.go
+@@ -0,0 +1,137 @@
++package main
++
++import (
++	"encoding/json"
++	"fmt"
++	"io"
++	"os"
++
++	"github.com/spf13/cobra"
++	"github.com/steveyegge/beads/internal/eventsjournal"
++	"github.com/steveyegge/beads/internal/httpapi"
++	"github.com/steveyegge/beads/internal/storage"
++	"github.com/steveyegge/beads/internal/storage/contextinfo"
++	storageops "github.com/steveyegge/beads/internal/storage/issueops"
++)
++
++func ownerDecode(in any) error {
++	decoder := json.NewDecoder(io.LimitReader(os.Stdin, 4<<20))
++	decoder.DisallowUnknownFields()
++	if err := decoder.Decode(in); err != nil {
++		return err
++	}
++	var extra any
++	if err := decoder.Decode(&extra); err != io.EOF {
++		return fmt.Errorf("expected one JSON request")
++	}
++	return nil
++}
++
++var ownerCmd = &cobra.Command{Use: "owner", Short: "Typed local issue operations and immutable analytical reads", GroupID: "maint"}
++var ownerSchemaCmd = &cobra.Command{Use: "schema", Short: "Print machine-readable owner contracts", Args: cobra.NoArgs, Annotations: map[string]string{skipStoreAnnotation: "1"}, RunE: func(cmd *cobra.Command, args []string) error {
++	schema, err := httpapi.OwnerSchema()
++	if err != nil {
++		return err
++	}
++	schema["x-beads-owner-read"] = storageops.OwnerReadSchema()
++	return outputJSON(schema)
++}}
++var ownerCallCmd = &cobra.Command{Use: "call operation", Short: "Invoke a published operation with a JSON request on stdin", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
++	var in httpapi.OwnerCall
++	if err := ownerDecode(&in); err != nil {
++		return err
++	}
++	if store == nil {
++		return fmt.Errorf("owner call requires a local store")
++	}
++	writes, err := httpapi.OwnerOperationWrites(args[0])
++	if err != nil {
++		return err
++	}
++	if writes {
++		CheckReadonly("owner call")
++	}
++
++	cwd, err := os.Getwd()
++	if err != nil {
++		return err
++	}
++	info, err := contextinfo.NewContextProvider(cwd, Version).ContextUseCase().GetContextInfo(rootCtx)
++	if err != nil {
++		return err
++	}
++	journalEnabled := eventsjournal.EnabledFor(info.BeadsDir)
++	roles, err := serveIssueRoles(store, journalEnabled)
++	if err != nil {
++		return err
++	}
++	body, status, err := httpapi.InvokeOwner(rootCtx, httpapi.Config{
++		Reader:               roles.reader,
++		Workspace:            info,
++		SchemaVersion:        JSONSchemaVersion,
++		EventsJournal:        roles.eventsJournal,
++		EventsJournalEnabled: journalEnabled,
++		Claimer:              roles.claimer,
++		BatchCloser:          roles.batchCloser,
++		ReadyClaimer:         roles.readyClaimer,
++		Releaser:             roles.releaser,
++		Lifecycle:            roles.lifecycle,
++		Settings:             roles.settings,
++		Stats:                roles.stats,
++		CycleDetector:        roles.cycles,
++		EdgeReader:           roles.edges,
++		GraphCounter:         roles.edgeCounter,
++		Relations:            roles.relations,
++		Commenter:            roles.commenter,
++		BlockingAnnotator:    roles.blocking,
++		TreeWalker:           roles.tree,
++		ReadyCounter:         roles.readyCounter,
++		Counter:              roles.counter,
++		Querier:              roles.querier,
++		Sweeper:              roles.sweeper,
++		Deleter:              roles.deleter,
++		BatchCreator:         roles.batchCreator,
++		DependencyEditor:     roles.dependencyEditor,
++		MetadataCAS:          roles.metadataCAS,
++		BatchApplier:         roles.batchApplier,
++		Memories:             roles.memories,
++	}, args[0], in)
++	if err != nil {
++		return err
++	}
++	fmt.Println(string(body))
++	if status >= 400 {
++		return SilentExit()
++	}
++	return nil
++}}
++var ownerReadCmd = &cobra.Command{Use: "read", Short: "Read issues and dependency closure at one exact revision", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
++	var in storageops.OwnerReadRequest
++	if err := ownerDecode(&in); err != nil {
++		return err
++	}
++	source := store
++	for {
++		wrapped, ok := source.(interface{ Unwrap() storage.DoltStorage })
++		if !ok {
++			break
++		}
++		source = wrapped.Unwrap()
++	}
++	db, ok := source.(storage.RawDBAccessor)
++	if !ok {
++		return fmt.Errorf("owner read requires SQL snapshot access")
++	}
++	result, err := storageops.ReadOwner(rootCtx, db.DB(), in)
++	if err != nil {
++		return err
++	}
++	return outputJSON(result)
++}}
++
++func init() {
++	readOnlyCommands["read"] = true
++
++	ownerCmd.AddCommand(ownerSchemaCmd, ownerCallCmd, ownerReadCmd)
++	rootCmd.AddCommand(ownerCmd)
++}
+--- /dev/null
++++ b/cmd/bd/owner_contract_test.go
+@@ -0,0 +1,48 @@
++//go:build cgo
++
++package main
++
++import (
++	"path/filepath"
++	"testing"
++
++	"github.com/steveyegge/beads/internal/storage/embeddeddolt"
++	"github.com/steveyegge/beads/internal/types"
++)
++
++func TestOwnerContractTextBatchCloseRollsBackOnBlocker(t *testing.T) {
++	t.Setenv("DOLT_ROOT_PATH", t.TempDir())
++	ctx := t.Context()
++	st, err := embeddeddolt.Open(ctx, filepath.Join(t.TempDir(), ".beads"), "owner", "main")
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer st.Close()
++	if err := st.SetConfig(ctx, "issue_prefix", "owner"); err != nil {
++		t.Fatal(err)
++	}
++	seedBatchTestIssues(t, ctx, st, "owner-a", "owner-b")
++	if err := st.AddDependency(ctx, &types.Dependency{IssueID: "owner-a", DependsOnID: "owner-b", Type: types.DepBlocks}, "operator"); err != nil {
++		t.Fatal(err)
++	}
++	if err := runBatchScriptInTx(t, ctx, st, "update owner-b priority=0\nclose owner-a blocked\n"); err == nil {
++		t.Fatal("closed an issue with an open blocker")
++	}
++	row, err := st.GetIssue(ctx, "owner-b")
++	if err != nil {
++		t.Fatal(err)
++	}
++	if row.Priority != 2 {
++		t.Fatalf("earlier batch edit survived refusal: %d", row.Priority)
++	}
++	if err := runBatchScriptInTx(t, ctx, st, "close owner-b done\nclose owner-a done\n"); err != nil {
++		t.Fatal(err)
++	}
++	row, err = st.GetIssue(ctx, "owner-a")
++	if err != nil {
++		t.Fatal(err)
++	}
++	if row.Status != types.StatusClosed {
++		t.Fatalf("allowed close did not land: %s", row.Status)
++	}
++}
+--- a/cmd/bd/batch.go
++++ b/cmd/bd/batch.go
+@@ -60,8 +60,8 @@
+ (or a configured done status) is refused when it still has open children or
+ a live blocker, the same as 'bd close'; 'force=true' overrides that refusal.
+ Because the batch is one transaction, an unforced refusal rolls back EVERY
+-operation in the batch, not just the offending line. Note the asymmetry with
+-'close <id>', which does not apply that policy at all.
++operation in the batch, not just the offending line. The same close policy
++also applies to 'close <id>'.
+ 
+ Tokens are whitespace-separated. Double-quoted strings ("like this") may
+ contain spaces; use \" to embed a quote and \\ for a backslash.
+@@ -364,7 +364,7 @@
+ 		if len(op.args) > 1 {
+ 			reason = strings.Join(op.args[1:], " ")
+ 		}
+-		if err := tx.CloseIssue(ctx, id, reason, actorName, ""); err != nil {
++		if err := tx.UpdateIssue(ctx, id, map[string]interface{}{"status": "closed", "close_reason": reason}, actorName); err != nil {
+ 			return result, err
+ 		}
+ 		result.Target = id
+--- a/cmd/bd/batch_proxied_server.go
++++ b/cmd/bd/batch_proxied_server.go
+@@ -82,15 +82,11 @@
+ 		if err != nil {
+ 			return result, err
+ 		}
+-		// Deliberately the UNCHECKED close, matching the classic batch's
+-		// issueops.CloseIssueInTx: `close <id>` in a batch does not apply close
+-		// policy at all (the asymmetry with `update status=closed` is documented
+-		// in the command's help and is contract, not oversight).
+-		params := domain.CloseIssueParams{Reason: reason}
++		updates := map[string]interface{}{"status": "closed", "close_reason": reason}
+ 		if isWisp {
+-			_, err = issues.CloseWisp(ctx, resolved, params, actorName)
++			err = issues.UpdateWisp(ctx, resolved, updates, actorName)
+ 		} else {
+-			_, err = issues.CloseIssue(ctx, resolved, params, actorName)
++			err = issues.UpdateIssue(ctx, resolved, updates, actorName)
+ 		}
+ 		if err != nil {
+ 			return result, err
+--- /dev/null
++++ b/internal/httpapi/owner.go
+@@ -0,0 +1,153 @@
++package httpapi
++
++import (
++	"bytes"
++	"context"
++	_ "embed"
++	"encoding/json"
++	"fmt"
++	"io"
++	"log"
++	"net/http"
++	"net/url"
++	"os"
++	"strings"
++
++	"gopkg.in/yaml.v3"
++)
++
++//go:embed spec/openapi.v0.yaml
++var ownerSpec []byte
++
++// OwnerSchema publishes the same input contracts used by the HTTP handlers.
++func OwnerSchema() (map[string]any, error) {
++	var document map[string]any
++	err := yaml.Unmarshal(ownerSpec, &document)
++	return document, err
++}
++
++type OwnerCall struct {
++	Path  map[string]string `json:"path,omitempty"`
++	Query map[string]any    `json:"query,omitempty"`
++	Body  json.RawMessage   `json:"body,omitempty"`
++}
++
++type ownerResponse struct {
++	header http.Header
++	body   bytes.Buffer
++	status int
++}
++
++func (w *ownerResponse) Header() http.Header         { return w.header }
++func (w *ownerResponse) WriteHeader(status int)      { w.status = status }
++func (w *ownerResponse) Write(b []byte) (int, error) { return w.body.Write(b) }
++
++// InvokeOwner runs one published operation locally without opening a listener.
++// Body validation, transactional writes, and failure codes remain the HTTP
++// adapter's existing contract. The CLI owns process lifetime and authorization.
++func InvokeOwner(ctx context.Context, cfg Config, operation string, in OwnerCall) (json.RawMessage, int, error) {
++	if err := checkDatabaseSource(cfg); err != nil {
++		return nil, 0, err
++	}
++	if cfg.Stderr == nil {
++		cfg.Stderr = io.Discard
++	}
++	if cfg.Stdout == nil {
++		cfg.Stdout = os.Stdout
++	}
++	prefix, err := newIDPrefix()
++	if err != nil {
++		return nil, 0, err
++	}
++	s := &Server{
++		cfg:               cfg,
++		provider:          cfg.Provider,
++		issueReader:       cfg.Reader,
++		issueClaimer:      cfg.Claimer,
++		issueBatchCloser:  cfg.BatchCloser,
++		issueReadyClaimer: cfg.ReadyClaimer,
++		issueReleaser:     cfg.Releaser,
++		issueLifecycle:    cfg.Lifecycle,
++		settings:          cfg.Settings,
++		issueStats:        cfg.Stats,
++		issueCycles:       cfg.CycleDetector,
++		issueEdges:        cfg.EdgeReader,
++		issueEdgeCounter:  cfg.GraphCounter,
++		issueRelations:    cfg.Relations,
++		issueCommenter:    cfg.Commenter,
++		issueBlocking:     cfg.BlockingAnnotator,
++		issueTree:         cfg.TreeWalker,
++		issueReadyCounter: cfg.ReadyCounter,
++		issueCounter:      cfg.Counter,
++		issueQuerier:      cfg.Querier,
++		issueSweeper:      cfg.Sweeper,
++		issueDeleter:      cfg.Deleter,
++		issueBatchCreator: cfg.BatchCreator,
++		issueDependencies: cfg.DependencyEditor,
++		issueMetadataCAS:  cfg.MetadataCAS,
++		issueBatchApplier: cfg.BatchApplier,
++		workspaceMemories: cfg.Memories,
++		eventsJournal:     cfg.EventsJournal,
++
++		sem:        make(chan struct{}, maxInflight),
++		semTimeout: semAcquireTimeout,
++		semWarn:    saturationWarn,
++
++		closing:         make(chan struct{}),
++		maxWatchStreams: maxWatchStreams,
++
++		log:      log.New(cfg.Stderr, "bd serve: ", log.LstdFlags|log.LUTC),
++		stdout:   cfg.Stdout,
++		ctxBody:  contextResponse(cfg.Workspace, cfg.SchemaVersion, Capabilities()),
++		hosts:    newHostPolicy(nil, cfg.AllowedHosts),
++		auth:     cfg.Auth,
++		idPrefix: prefix,
++		maxConns: maxConns,
++	}
++
++	for _, rt := range routeTable {
++		if rt.op != operation {
++			continue
++		}
++		if rt.streaming {
++			return nil, 0, fmt.Errorf("streaming operation unavailable on one-shot CLI")
++		}
++		values := url.Values{}
++		for key, value := range in.Query {
++			if array, ok := value.([]any); ok {
++				for _, item := range array {
++					values.Add(key, fmt.Sprint(item))
++				}
++			} else {
++				values.Set(key, fmt.Sprint(value))
++			}
++		}
++		path := rt.specPath
++		for key, value := range in.Path {
++			path = strings.ReplaceAll(path, "{"+key+"}", url.PathEscape(value))
++		}
++		request, err := http.NewRequestWithContext(ctx, rt.method, "http://localhost"+path+"?"+values.Encode(), bytes.NewReader(in.Body))
++		if err != nil {
++			return nil, 0, err
++		}
++		request.Header.Set("Content-Type", "application/json")
++		for key, value := range in.Path {
++			request.SetPathValue(key, value)
++		}
++		out := &ownerResponse{header: make(http.Header), status: http.StatusOK}
++		s.route(rt).ServeHTTP(out, request)
++		return json.RawMessage(out.body.Bytes()), out.status, nil
++	}
++	return nil, 0, fmt.Errorf("unknown owner operation %q", operation)
++}
++
++// OwnerOperationWrites derives local readonly enforcement from the same route
++// methods the published HTTP contract uses.
++func OwnerOperationWrites(operation string) (bool, error) {
++	for _, rt := range routeTable {
++		if rt.op == operation {
++			return rt.method != "GET" && rt.method != "HEAD", nil
++		}
++	}
++	return false, fmt.Errorf("unknown owner operation %q", operation)
++}
+--- /dev/null
++++ b/internal/httpapi/owner_test.go
+@@ -0,0 +1,63 @@
++package httpapi
++
++import (
++	"context"
++	"encoding/json"
++	"net/http"
++	"testing"
++
++	"github.com/steveyegge/beads/internal/types"
++	"github.com/steveyegge/beads/issueops"
++)
++
++func TestOwnerContractBatchUsesTypedRole(t *testing.T) {
++	applier := &roleBatchApplier{result: issueops.ApplyBatchResult{Items: []issueops.ItemResult{{Kind: issueops.ItemCreate, IssueID: "bd-one", Changed: true}}, Keys: map[string]string{"root": "bd-one"}}}
++	body, status, err := InvokeOwner(context.Background(), rolesConfig(Config{BatchApplier: applier}), "applyBatch", OwnerCall{Body: json.RawMessage(`{"actor":"operator","items":[{"kind":"create","create":{"key":"root","title":"One"}},{"kind":"update","update":{"target":{"key":"root"},"expected_version":42,"patch":{"notes":"updated"}}}]}`)})
++	if err != nil || status != http.StatusOK {
++		t.Fatalf("status=%d err=%v body=%s", status, err, body)
++	}
++	requests := applier.requests()
++	if len(requests) != 1 {
++		t.Fatalf("requests=%d", len(requests))
++	}
++	if requests[0].Items[1].Update.Target.Key != "root" || *requests[0].Items[1].Update.ExpectedVersion != 42 {
++		t.Fatal("binding or version guard lost")
++	}
++	var result map[string]any
++	if err := json.Unmarshal(body, &result); err != nil {
++		t.Fatal(err)
++	}
++}
++
++func TestOwnerContractUpdateGuardAndValidation(t *testing.T) {
++	lifecycle := &roleLifecycle{updateResult: issueops.UpdateResult{Issue: &types.Issue{ID: "bd-one"}}}
++	cfg := rolesConfig(Config{Lifecycle: lifecycle})
++	body, status, err := InvokeOwner(context.Background(), cfg, "updateIssue", OwnerCall{Path: map[string]string{"id": "bd-one"}, Body: json.RawMessage(`{"actor":"operator","expected_version":42,"patch":{"description":"new body"}}`)})
++	if err != nil || status != http.StatusOK {
++		t.Fatalf("status=%d err=%v body=%s", status, err, body)
++	}
++	requests := lifecycle.updateRequests()
++	if len(requests) != 1 || *requests[0].ExpectedVersion != 42 {
++		t.Fatalf("guard not forwarded: %+v", requests)
++	}
++	_, status, err = InvokeOwner(context.Background(), cfg, "updateIssue", OwnerCall{Path: map[string]string{"id": "bd-one"}, Body: json.RawMessage(`{"actor":"operator","patch":{"unknown":"x"}}`)})
++	if err != nil || status != http.StatusBadRequest || len(lifecycle.updateRequests()) != 1 {
++		t.Fatalf("invalid body reached role: status=%d err=%v", status, err)
++	}
++}
++
++func TestOwnerContractSchemaPublishesMutationInputs(t *testing.T) {
++	document, err := OwnerSchema()
++	if err != nil {
++		t.Fatal(err)
++	}
++	paths := document["paths"].(map[string]any)
++	for _, path := range []string{"/v0/beads/issues:batchApply", "/v0/beads/issues/{id}"} {
++		if paths[path] == nil {
++			t.Fatalf("missing contract %s", path)
++		}
++	}
++	if _, err := json.Marshal(document); err != nil {
++		t.Fatal(err)
++	}
++}
+--- /dev/null
++++ b/internal/storage/issueops/owner_read.go
+@@ -0,0 +1,928 @@
++package issueops
++
++import (
++	"context"
++	"database/sql"
++	"encoding/json"
++	"fmt"
++	"reflect"
++	"regexp"
++	"sort"
++	"strconv"
++	"strings"
++	"time"
++
++	"github.com/steveyegge/beads/internal/query"
++)
++
++type OwnerReadRequest struct {
++	At            string              `json:"at,omitempty"`
++	Expression    string              `json:"expression,omitempty"`
++	Filters       map[string]any      `json:"filters,omitempty"`
++	NativeFilters map[string]any      `json:"native_filters,omitempty"`
++	Projection    string              `json:"projection,omitempty"`
++	View          string              `json:"view,omitempty"`
++	Order         OwnerReadOrder      `json:"order,omitempty"`
++	Aggregate     *OwnerReadAggregate `json:"aggregate,omitempty"`
++	Include       []string            `json:"include,omitempty"`
++	Roots         []string            `json:"roots,omitempty"`
++	Direction     string              `json:"direction,omitempty"`
++	Relations     []string            `json:"relations,omitempty"`
++	Depth         *int                `json:"depth,omitempty"`
++	Limit         *int                `json:"limit,omitempty"`
++	Offset        int                 `json:"offset,omitempty"`
++	IncludeClosed bool                `json:"include_closed,omitempty"`
++	Provenance    bool                `json:"provenance,omitempty"`
++	MaxEdges      int                 `json:"max_edges,omitempty"`
++}
++type OwnerReadOrder struct {
++	Field   string `json:"field,omitempty"`
++	Reverse bool   `json:"reverse,omitempty"`
++}
++type OwnerReadAggregate struct {
++	GroupBy []string `json:"group_by,omitempty"`
++}
++
++// OwnerReadSchema is derived from the request type used by the decoder.
++func OwnerReadSchema() map[string]any { return ownerTypeSchema(reflect.TypeOf(OwnerReadRequest{})) }
++func ownerTypeSchema(t reflect.Type) map[string]any {
++	if t.Kind() == reflect.Pointer {
++		return ownerTypeSchema(t.Elem())
++	}
++	switch t.Kind() {
++	case reflect.Struct:
++		props := map[string]any{}
++		for i := 0; i < t.NumField(); i++ {
++			f := t.Field(i)
++			name := strings.Split(f.Tag.Get("json"), ",")[0]
++			props[name] = ownerTypeSchema(f.Type)
++		}
++		return map[string]any{"type": "object", "properties": props, "additionalProperties": false}
++	case reflect.Map:
++		return map[string]any{"type": "object", "additionalProperties": true}
++	case reflect.Slice:
++		return map[string]any{"type": "array", "items": ownerTypeSchema(t.Elem())}
++	case reflect.Bool:
++		return map[string]any{"type": "boolean"}
++	case reflect.Int:
++		return map[string]any{"type": "integer"}
++	default:
++		return map[string]any{"type": "string"}
++	}
++}
++
++type ownerReadPlan struct {
++	revision string
++	working  bool
++	now      time.Time
++	args     []any
++}
++
++var ownerColumns = map[string]string{
++	"id": "id", "title": "title", "status": "status", "priority": "priority", "type": "issue_type", "issue_type": "issue_type", "assignee": "assignee", "owner": "owner", "created": "created_at", "created_at": "created_at", "updated": "updated_at", "updated_at": "updated_at", "closed": "closed_at", "closed_at": "closed_at", "started": "started_at", "started_at": "started_at", "description": "description", "design": "design", "acceptance_criteria": "acceptance_criteria", "notes": "notes", "pinned": "pinned", "ephemeral": "ephemeral", "template": "is_template", "spec": "spec_id", "mol_type": "mol_type", "external_ref": "external_ref", "wisp_type": "wisp_type", "due_at": "due_at", "defer_until": "defer_until",
++}
++var ownerExactHash = regexp.MustCompile(`^[a-zA-Z0-9]{16,64}$`)
++var ownerDuration = regexp.MustCompile(`^(\d+)([hdw])$`)
++
++func (p *ownerReadPlan) table(name string) string {
++	if p.working {
++		return name
++	}
++	return name + " AS OF '" + p.revision + "'"
++}
++func (p *ownerReadPlan) bind(value any) string { p.args = append(p.args, value); return "?" }
++func (p *ownerReadPlan) atom(field, op string, value any) (string, error) {
++	switch value.(type) {
++	case nil, string, bool, float64, int, int64, json.Number:
++	default:
++		return "", fmt.Errorf("filter values must be scalar")
++	}
++
++	if op != "=" && op != "!=" && op != ">" && op != "<" && op != ">=" && op != "<=" {
++		return "", fmt.Errorf("unsupported comparison %q", op)
++	}
++	if field == "label" || field == "parent" {
++		if op != "=" && op != "!=" {
++			return "", fmt.Errorf("%s supports equality only", field)
++		}
++		negate := op == "!="
++		var predicate string
++		if field == "label" {
++			predicate = "EXISTS (SELECT 1 FROM " + p.table("labels") + " l WHERE l.issue_id=i.id"
++			if value == "none" {
++				negate = !negate
++			} else {
++				predicate += " AND l.label=" + p.bind(value)
++			}
++			predicate += ")"
++		} else {
++			predicate = "EXISTS (SELECT 1 FROM " + p.table("dependencies") + " d WHERE d.issue_id=i.id AND d.type='parent-child' AND d.depends_on_issue_id=" + p.bind(value) + ")"
++		}
++		if negate {
++			predicate = "NOT (" + predicate + ")"
++		}
++		return predicate, nil
++	}
++	column, ok := ownerColumns[field]
++	if !ok {
++		return "", fmt.Errorf("unsupported filter field %q", field)
++	}
++	column = "i." + column
++	if value == "none" && (field == "assignee" || field == "description") {
++		return "COALESCE(" + column + ",'') " + op + " ''", nil
++	}
++	if text, ok := value.(string); ok {
++		switch field {
++		case "created", "created_at", "updated", "updated_at", "closed", "closed_at", "started", "started_at", "due_at", "defer_until":
++			if duration := ownerDuration.FindStringSubmatch(text); duration != nil {
++				n, _ := strconv.Atoi(duration[1])
++				hours := map[string]int{"h": 1, "d": 24, "w": 168}[duration[2]]
++				value = p.now.Add(-time.Duration(n*hours) * time.Hour)
++			} else if strings.Contains(text, "T") {
++				parsed, err := time.Parse(time.RFC3339Nano, text)
++				if err != nil {
++					return "", err
++				}
++				value = parsed.UTC()
++			}
++		}
++		if field == "title" || field == "description" || field == "notes" {
++			if op == "=" || op == "!=" {
++				operator := "LIKE"
++				if op == "!=" {
++					operator = "NOT LIKE"
++				}
++				return column + " " + operator + " " + p.bind("%"+ownerLikeLiteral(text)+"%") + " ESCAPE '!'", nil
++			}
++		}
++		if (field == "id" || field == "spec") && strings.ContainsAny(text, "*?") {
++			operator := "LIKE"
++			if op == "!=" {
++				operator = "NOT LIKE"
++			}
++			return column + " " + operator + " " + p.bind(strings.NewReplacer("*", "%", "?", "_").Replace(ownerLikeLiteral(text))) + " ESCAPE '!'", nil
++		}
++	}
++	if value == nil {
++		if op == "=" {
++			return column + " IS NULL", nil
++		}
++		if op == "!=" {
++			return column + " IS NOT NULL", nil
++		}
++	}
++	return column + " " + op + " " + p.bind(value), nil
++}
++func (p *ownerReadPlan) expression(node query.Node) (string, error) {
++	switch n := node.(type) {
++	case *query.ComparisonNode:
++		value := any(n.Value)
++		if n.Value == "true" {
++			value = true
++		}
++		if n.Value == "false" {
++			value = false
++		}
++		return p.atom(n.Field, n.Op.String(), value)
++	case *query.NotNode:
++		value, err := p.expression(n.Operand)
++		return "NOT (" + value + ")", err
++	case *query.AndNode:
++		left, err := p.expression(n.Left)
++		if err != nil {
++			return "", err
++		}
++		right, err := p.expression(n.Right)
++		return "(" + left + " AND " + right + ")", err
++	case *query.OrNode:
++		left, err := p.expression(n.Left)
++		if err != nil {
++			return "", err
++		}
++		right, err := p.expression(n.Right)
++		return "(" + left + " OR " + right + ")", err
++	default:
++		return "", fmt.Errorf("unsupported query node")
++	}
++}
++func (p *ownerReadPlan) filters(node map[string]any) (string, error) {
++	if len(node) == 0 {
++		return "TRUE", nil
++	}
++	keys := make([]string, 0, len(node))
++	for key := range node {
++		keys = append(keys, key)
++	}
++	sort.Strings(keys)
++	predicates := []string{}
++	for _, key := range keys {
++		value := node[key]
++		switch key {
++		case "and", "or":
++			children, ok := value.([]any)
++			if !ok || len(children) == 0 || len(node) != 1 {
++				return "", fmt.Errorf("boolean filter requires children")
++			}
++			parts := []string{}
++			for _, child := range children {
++				object, ok := child.(map[string]any)
++				if !ok {
++					return "", fmt.Errorf("filter child must be an object")
++				}
++				part, err := p.filters(object)
++				if err != nil {
++					return "", err
++				}
++				parts = append(parts, "("+part+")")
++			}
++			return strings.Join(parts, " "+strings.ToUpper(key)+" "), nil
++		case "not":
++			child, ok := value.(map[string]any)
++			if !ok || len(node) != 1 {
++				return "", fmt.Errorf("not requires one filter")
++			}
++			part, err := p.filters(child)
++			return "NOT (" + part + ")", err
++		default:
++			op := "="
++			if object, ok := value.(map[string]any); ok {
++				for k := range object {
++					if k != "op" && k != "value" {
++						return "", fmt.Errorf("unknown comparison member %q", k)
++					}
++				}
++				if object["op"] != nil {
++					op = fmt.Sprint(object["op"])
++				}
++				value = object["value"]
++			}
++			part, err := p.atom(key, op, value)
++			if err != nil {
++				return "", err
++			}
++			predicates = append(predicates, "("+part+")")
++		}
++	}
++	return strings.Join(predicates, " AND "), nil
++}
++func (p *ownerReadPlan) blockers() string {
++	return "EXISTS (SELECT 1 FROM " + p.table("dependencies") + " d LEFT JOIN " + p.table("issues") + " b ON b.id=d.depends_on_issue_id WHERE d.issue_id=i.id AND d.type='blocks' AND (b.id IS NULL OR b.status NOT IN ('closed','tombstone')))"
++}
++func ownerTrue(values map[string]any, key string) bool { return values[key] == true }
++func (p *ownerReadPlan) native(values map[string]any) ([]string, error) {
++	parts := []string{}
++	keys := make([]string, 0, len(values))
++	for key := range values {
++		keys = append(keys, key)
++	}
++	sort.Strings(keys)
++	add := func(field, op string, value any) error {
++		part, err := p.atom(field, op, value)
++		if err == nil {
++			parts = append(parts, part)
++		}
++		return err
++	}
++	for _, key := range keys {
++		value := values[key]
++		if value == nil {
++			continue
++		}
++		if flag, ok := value.(bool); ok && !flag {
++			return nil, fmt.Errorf("native boolean filters must be true when supplied")
++		}
++		switch key {
++		case "all", "include_gates", "include_infra", "include_templates", "include_ephemeral", "include_deferred", "stale_days":
++			continue
++		case "label", "exclude_label", "label_any", "exclude_type":
++			array, ok := value.([]any)
++			if !ok {
++				return nil, fmt.Errorf("%s requires array", key)
++			}
++			sub := []string{}
++			for _, v := range array {
++				field, op := "label", "="
++				if key == "exclude_type" {
++					field = "type"
++				}
++				if strings.HasPrefix(key, "exclude") {
++					op = "!="
++				}
++				part, err := p.atom(field, op, v)
++				if err != nil {
++					return nil, err
++				}
++				sub = append(sub, part)
++			}
++			join := " AND "
++			if key == "label_any" {
++				join = " OR "
++			}
++			if len(sub) > 0 {
++				parts = append(parts, "("+strings.Join(sub, join)+")")
++			}
++		case "priority", "priority_min", "priority_max":
++			n, err := strconv.Atoi(strings.TrimPrefix(strings.ToUpper(fmt.Sprint(value)), "P"))
++			if err != nil {
++				return nil, err
++			}
++			op := map[string]string{"priority": "=", "priority_min": ">=", "priority_max": "<="}[key]
++			if err = add("priority", op, n); err != nil {
++				return nil, err
++			}
++		case "id", "status":
++			sub := []string{}
++			for _, v := range strings.Split(fmt.Sprint(value), ",") {
++				part, err := p.atom(key, "=", v)
++				if err != nil {
++					return nil, err
++				}
++				sub = append(sub, part)
++			}
++			parts = append(parts, "("+strings.Join(sub, " OR ")+")")
++		case "no_assignee", "unassigned", "no_labels", "empty_description":
++			field := map[string]string{"no_assignee": "assignee", "unassigned": "assignee", "no_labels": "label", "empty_description": "description"}[key]
++			if err := add(field, "=", "none"); err != nil {
++				return nil, err
++			}
++		case "title_contains", "desc_contains", "notes_contains":
++			field := map[string]string{"title_contains": "title", "desc_contains": "description", "notes_contains": "notes"}[key]
++			if err := add(field, "=", value); err != nil {
++				return nil, err
++			}
++		case "no_pinned":
++			parts = append(parts, "COALESCE(i.pinned,FALSE)=FALSE")
++		case "no_parent":
++			parts = append(parts, "NOT EXISTS (SELECT 1 FROM "+p.table("dependencies")+" d WHERE d.issue_id=i.id AND d.type='parent-child')")
++		case "deferred":
++			parts = append(parts, "i.defer_until IS NOT NULL")
++		case "overdue":
++			parts = append(parts, "i.due_at < "+p.bind(p.now)+" AND i.status <> 'closed'")
++		case "ready", "gated":
++			part := p.blockers()
++			if key == "ready" {
++				part = "NOT " + part
++			}
++			parts = append(parts, part)
++		case "spec":
++			parts = append(parts, "i.spec_id LIKE "+p.bind(ownerLikeLiteral(fmt.Sprint(value))+"%")+" ESCAPE '!'")
++		case "external_contains":
++			parts = append(parts, "i.external_ref LIKE "+p.bind("%"+ownerLikeLiteral(fmt.Sprint(value))+"%")+" ESCAPE '!'")
++		case "label_pattern", "label_regex":
++			operator, pattern := "LIKE", fmt.Sprint(value)
++			if key == "label_regex" {
++				operator = "REGEXP"
++			} else {
++				pattern = strings.NewReplacer("*", "%", "?", "_").Replace(ownerLikeLiteral(pattern))
++			}
++			suffix := ""
++			if key == "label_pattern" {
++				suffix = " ESCAPE '!'"
++			}
++			parts = append(parts, "EXISTS (SELECT 1 FROM "+p.table("labels")+" l WHERE l.issue_id=i.id AND l.label "+operator+" "+p.bind(pattern)+suffix+")")
++		case "has_metadata_key", "metadata_field":
++			array := []any{value}
++			if key == "metadata_field" {
++				var ok bool
++				array, ok = value.([]any)
++				if !ok {
++					return nil, fmt.Errorf("metadata_field requires array")
++				}
++			}
++			for _, v := range array {
++				k, expected, _ := strings.Cut(fmt.Sprint(v), "=")
++				encoded, _ := json.Marshal(k)
++				part := "JSON_EXTRACT(i.metadata," + p.bind("$."+string(encoded)) + ")"
++				if key == "has_metadata_key" {
++					part += " IS NOT NULL"
++				} else {
++					part = "JSON_UNQUOTE(" + part + ")=" + p.bind(expected)
++				}
++				parts = append(parts, part)
++			}
++		default:
++			field, op := key, "="
++			if strings.HasSuffix(key, "_before") || strings.HasSuffix(key, "_after") {
++				idx := strings.LastIndex(key, "_")
++				field = key[:idx]
++				op = ">"
++				if key[idx+1:] == "before" {
++					op = "<"
++				}
++				if field == "due" {
++					field = "due_at"
++				}
++				if field == "defer" {
++					field = "defer_until"
++				}
++			}
++			if err := add(field, op, value); err != nil {
++				return nil, err
++			}
++		}
++	}
++	return parts, nil
++}
++func ownerRows(ctx context.Context, db DBTX, statement string, args ...any) ([]map[string]any, error) {
++	rows, err := db.QueryContext(ctx, statement, args...)
++	if err != nil {
++		return nil, err
++	}
++	defer rows.Close()
++	columns, err := rows.Columns()
++	if err != nil {
++		return nil, err
++	}
++	out := []map[string]any{}
++	for rows.Next() {
++		values := make([]any, len(columns))
++		pointers := make([]any, len(columns))
++		for i := range values {
++			pointers[i] = &values[i]
++		}
++		if err := rows.Scan(pointers...); err != nil {
++			return nil, err
++		}
++		row := map[string]any{}
++		for i, column := range columns {
++			value := values[i]
++			if b, ok := value.([]byte); ok {
++				value = string(b)
++			}
++			if t, ok := value.(time.Time); ok {
++				value = t.UTC().Format(time.RFC3339Nano)
++			}
++			if column == "metadata" {
++				if text, ok := value.(string); ok {
++					var decoded any
++					if json.Unmarshal([]byte(text), &decoded) == nil {
++						value = decoded
++					}
++				}
++			}
++			row[column] = value
++		}
++		if token, ok := row["row_lock"]; ok {
++			row["revision"] = token
++			row["bead_revision"] = fmt.Sprint(token)
++			row["bead_revision_domain"] = "beads_row_revision"
++			row["bead_revision_coverage"] = "partial_update_coverage"
++			delete(row, "row_lock")
++		}
++		out = append(out, row)
++	}
++	return out, rows.Err()
++}
++
++// ReadOwner pins all tables to one resolved commit, including auxiliary reads.
++// SQL interpolation is confined to validated table/column vocabularies and the
++// resolved hash; caller values are always bound parameters.
++func ReadOwner(ctx context.Context, db *sql.DB, in OwnerReadRequest) (map[string]any, error) {
++	limit := 1000
++	if in.Limit != nil {
++		limit = *in.Limit
++	}
++	if limit < 0 || limit > 100000 || in.Offset < 0 {
++		return nil, fmt.Errorf("invalid page bounds")
++	}
++	if limit == 0 {
++		limit = 100000
++	}
++	if in.MaxEdges == 0 {
++		in.MaxEdges = 100000
++	}
++	if in.MaxEdges < 1 || in.MaxEdges > 100000 {
++		return nil, fmt.Errorf("invalid edge bound")
++	}
++	if in.Direction == "" {
++		in.Direction = "dependencies"
++	}
++	if in.Direction != "dependencies" && in.Direction != "dependents" && in.Direction != "both" {
++		return nil, fmt.Errorf("invalid closure direction")
++	}
++	depth := 1000
++	if in.Depth != nil {
++		depth = *in.Depth
++	}
++	if depth < 0 || depth > 1000 {
++		return nil, fmt.Errorf("invalid closure depth")
++	}
++	p := &ownerReadPlan{now: time.Now().UTC()}
++	requested := in.At
++	p.working = requested == ""
++	semantics := "exact_revision"
++	var effective any
++	if p.working {
++		semantics = "working_snapshot"
++		if err := db.QueryRowContext(ctx, "SELECT DOLT_HASHOF_DB()").Scan(&p.revision); err != nil {
++			return nil, err
++		}
++	} else if parsed, err := time.Parse(time.RFC3339Nano, requested); err == nil {
++		p.now = parsed.UTC()
++		semantics = "latest_reachable_commit_at_or_before"
++		rows, err := ownerRows(ctx, db, "SELECT commit_hash, date AS committed_at FROM DOLT_LOG('HEAD') WHERE date <= ? ORDER BY date DESC, commit_order DESC LIMIT 1", p.now)
++		if err != nil {
++			return nil, err
++		}
++		if len(rows) == 0 {
++			return nil, fmt.Errorf("no reachable revision at or before requested time")
++		}
++		p.revision = fmt.Sprint(rows[0]["commit_hash"])
++		effective = rows[0]["committed_at"]
++	} else {
++		if err := db.QueryRowContext(ctx, "SELECT DOLT_HASHOF(?)", requested).Scan(&p.revision); err != nil {
++			return nil, err
++		}
++	}
++	if !ownerExactHash.MatchString(p.revision) {
++		return nil, fmt.Errorf("owner resolved invalid revision")
++	}
++	temporal := map[string]any{"requested": requested, "resolved_revision": p.revision, "effective_at": effective, "observed_at": time.Now().UTC().Format(time.RFC3339Nano), "semantics": semantics, "watermark": p.revision, "pinned": !p.working}
++	predicate, err := p.filters(in.Filters)
++	if err != nil {
++		return nil, err
++	}
++	parts := []string{predicate}
++	native, err := p.native(in.NativeFilters)
++	if err != nil {
++		return nil, err
++	}
++	parts = append(parts, native...)
++	if in.Expression != "" {
++		node, err := query.Parse(in.Expression)
++		if err != nil {
++			return nil, err
++		}
++		part, err := p.expression(node)
++		if err != nil {
++			return nil, err
++		}
++		parts = append(parts, part)
++	}
++	view := in.View
++	if view == "" {
++		view = "all"
++	}
++	switch view {
++	case "all", "query", "recent":
++	case "open":
++		parts = append(parts, "i.status='open'")
++	case "ready":
++		parts = append(parts, "i.status='open'", "NOT "+p.blockers())
++	case "blocked":
++		parts = append(parts, p.blockers())
++	case "overdue":
++		parts = append(parts, "i.due_at < "+p.bind(p.now)+" AND i.status <> 'closed'")
++	case "deferred":
++		parts = append(parts, "i.defer_until IS NOT NULL")
++	case "unassigned":
++		parts = append(parts, "COALESCE(i.assignee,'')=''")
++	case "epic_progress":
++		parts = append(parts, "i.issue_type='epic'")
++	case "stale_claims":
++		days := 30
++		if value, ok := in.NativeFilters["stale_days"]; ok {
++			n, err := strconv.Atoi(fmt.Sprint(value))
++			if err != nil {
++				return nil, err
++			}
++			days = n
++		}
++		parts = append(parts, "i.status='in_progress'", "i.updated_at < "+p.bind(p.now.Add(-time.Duration(days)*24*time.Hour)))
++	case "changed_since":
++		if in.NativeFilters["updated_after"] == nil {
++			return nil, fmt.Errorf("changed_since requires updated_after")
++		}
++	default:
++		return nil, fmt.Errorf("unsupported query view %q", view)
++	}
++	if view != "all" && view != "query" && !in.IncludeClosed && !ownerTrue(in.NativeFilters, "all") {
++		parts = append(parts, "i.status NOT IN ('closed','tombstone')")
++	}
++	if !ownerTrue(in.NativeFilters, "include_deferred") && view != "all" && view != "deferred" && !ownerTrue(in.NativeFilters, "deferred") {
++		parts = append(parts, "(i.defer_until IS NULL OR i.defer_until <= "+p.bind(p.now)+")")
++	}
++	// An explicit closure addresses durable members irrespective of display filters.
++	if len(in.Roots) == 0 {
++		for _, item := range []struct{ key, sql string }{{"include_gates", "i.issue_type <> 'gate'"}, {"include_infra", "i.issue_type NOT IN ('agent','role','message')"}, {"include_templates", "COALESCE(i.is_template,FALSE)=FALSE"}, {"include_ephemeral", "COALESCE(i.ephemeral,FALSE)=FALSE"}} {
++			if !ownerTrue(in.NativeFilters, item.key) && !(item.key == "include_gates" && in.NativeFilters["type"] == "gate") {
++				parts = append(parts, item.sql)
++			}
++		}
++	}
++	base := " FROM " + p.table("issues") + " i WHERE (" + strings.Join(parts, ") AND (") + ")"
++	closure := map[string]any{"complete": in.Offset == 0, "missing_ids": []string{}, "truncated": false}
++	edges := []map[string]any{}
++	if len(in.Roots) > 0 {
++		var err error
++		edges, err = ownerRows(ctx, db, "SELECT * FROM "+p.table("dependencies")+" ORDER BY issue_id, depends_on_issue_id, type LIMIT ?", in.MaxEdges+1)
++		if err != nil {
++			return nil, err
++		}
++		if len(edges) > in.MaxEdges {
++			edges = edges[:in.MaxEdges]
++			closure["complete"] = false
++			closure["truncated"] = true
++		}
++		ids, selected, cut := ownerClosure(in.Roots, edges, in.Direction, in.Relations, depth)
++		edges = selected
++		if cut {
++			closure["complete"] = false
++			closure["truncated"] = true
++		}
++		p.args = nil
++		placeholders := []string{}
++		for _, id := range ids {
++			placeholders = append(placeholders, p.bind(id))
++		}
++		base = " FROM " + p.table("issues") + " i WHERE i.id IN (" + strings.Join(placeholders, ",") + ")"
++		closure["requested_ids"] = ids
++	}
++	var total int
++	if err := db.QueryRowContext(ctx, "SELECT COUNT(*)"+base, p.args...).Scan(&total); err != nil {
++		return nil, err
++	}
++	selected := "i.*"
++	group := ""
++	if in.Aggregate != nil {
++		columns := []string{}
++		seen := map[string]bool{}
++		for _, field := range in.Aggregate.GroupBy {
++			if !strings.Contains("|status|type|priority|assignee|owner|", "|"+field+"|") || seen[field] {
++				return nil, fmt.Errorf("unsupported or duplicate grouping %q", field)
++			}
++			seen[field] = true
++			columns = append(columns, "i."+ownerColumns[field])
++		}
++		selected = strings.Join(append(columns, "COUNT(*) AS count"), ", ")
++		if len(columns) > 0 {
++			group = " GROUP BY " + strings.Join(columns, ", ") + " ORDER BY " + strings.Join(columns, ", ")
++		}
++	} else {
++		field := in.Order.Field
++		if field == "" {
++			field = "priority"
++			if view == "recent" {
++				field = "updated"
++			}
++		}
++		if !strings.Contains("|priority|created|updated|closed|status|id|title|type|assignee|", "|"+field+"|") {
++			return nil, fmt.Errorf("unsupported order")
++		}
++		descending := field == "created" || field == "updated" || field == "closed"
++		descending = descending != in.Order.Reverse
++		direction := " ASC"
++		if descending {
++			direction = " DESC"
++		}
++		group = " ORDER BY i." + ownerColumns[field] + direction + ", i.id ASC"
++	}
++	args := append(append([]any{}, p.args...), limit+1, in.Offset)
++	items, err := ownerRows(ctx, db, "SELECT "+selected+base+group+" LIMIT ? OFFSET ?", args...)
++	if err != nil {
++		return nil, err
++	}
++	more := len(items) > limit
++	if more {
++		items = items[:limit]
++		closure["complete"] = false
++		closure["truncated"] = true
++	}
++	if in.Aggregate == nil {
++		seen := map[string]bool{}
++		for _, row := range items {
++			id := fmt.Sprint(row["id"])
++			seen[id] = true
++			labels, err := ownerRows(ctx, db, "SELECT label FROM "+p.table("labels")+" WHERE issue_id=? ORDER BY label", id)
++			if err != nil {
++				return nil, err
++			}
++			values := []any{}
++			for _, label := range labels {
++				values = append(values, label["label"])
++			}
++			row["labels"] = values
++			includes, err := p.includes(ctx, db, id, in.Include)
++			if err != nil {
++				return nil, err
++			}
++			if len(includes) > 0 {
++				row["includes"] = includes
++			}
++		}
++		if ids, ok := closure["requested_ids"].([]string); ok {
++			missing := []string{}
++			if !more && in.Offset == 0 {
++				for _, id := range ids {
++					if !seen[id] {
++						missing = append(missing, id)
++					}
++				}
++			}
++			closure["missing_ids"] = missing
++			if len(missing) > 0 {
++				closure["complete"] = false
++			}
++		}
++	}
++	for _, edge := range edges {
++		edge["depends_on_id"] = ownerEdgeTarget(edge)
++	}
++	provenanceEdges := []map[string]any{}
++	provenanceCoverage := map[string]any{"state": "not_requested", "complete": false, "revision": p.revision}
++	if in.Provenance && in.Aggregate == nil {
++		provenanceEdges, provenanceCoverage, err = p.provenance(ctx, db, items, in.MaxEdges, closure["complete"] == true)
++		if err != nil {
++			return nil, err
++		}
++	}
++	leaves := []string{}
++	if len(in.Roots) > 0 {
++		outgoing := map[string]bool{}
++		for _, edge := range edges {
++			if in.Direction != "dependents" {
++				outgoing[fmt.Sprint(edge["issue_id"])] = true
++			}
++			if in.Direction != "dependencies" {
++				outgoing[ownerEdgeTarget(edge)] = true
++			}
++		}
++		for _, row := range items {
++			id := fmt.Sprint(row["id"])
++			if !outgoing[id] && closure["complete"] == true {
++				leaves = append(leaves, id)
++			}
++		}
++		sort.Strings(leaves)
++	}
++	closure["graph_leaves"] = leaves
++
++	readiness := map[string]any{}
++	cycles := [][]string{}
++	frontier := []map[string]any{}
++	if len(in.Roots) > 0 {
++		readiness, err = p.readiness(ctx, db, items, in.MaxEdges)
++		if err != nil {
++			return nil, err
++		}
++		cycles = ownerCycles(items, edges)
++		if closure["truncated"] == true {
++			frontier = append(frontier, map[string]any{"reason": "closure_bound"})
++		}
++		for _, id := range closure["missing_ids"].([]string) {
++			frontier = append(frontier, map[string]any{"id": id, "reason": "missing"})
++		}
++	}
++	statuses := map[string]int{}
++	for _, row := range items {
++		statuses[fmt.Sprint(row["status"])]++
++	}
++	readinessCounts := map[string]int{}
++	for _, value := range readiness {
++		readinessCounts[fmt.Sprint(value.(map[string]any)["state"])]++
++	}
++	counts := map[string]any{"nodes": len(items), "edges": len(edges), "provenance_edges": len(provenanceEdges), "cycles": len(cycles), "statuses": statuses, "readiness": readinessCounts}
++	coverage := map[string]any{"complete": closure["complete"], "state": map[bool]string{true: "complete", false: "partial"}[closure["complete"] == true]}
++	if in.Projection != "" && in.Projection != "full" && in.Projection != "summary" {
++		return nil, fmt.Errorf("unsupported projection")
++	}
++	if in.Projection == "summary" && in.Aggregate == nil {
++		keep := map[string]bool{}
++		for _, key := range []string{"id", "title", "status", "priority", "issue_type", "assignee", "owner", "created_at", "updated_at", "closed_at", "metadata", "defer_until", "due_at", "labels", "revision", "bead_revision", "bead_revision_domain", "bead_revision_coverage", "includes"} {
++			keep[key] = true
++		}
++		for _, row := range items {
++			for key := range row {
++				if !keep[key] {
++					delete(row, key)
++				}
++			}
++		}
++	}
++
++	if p.working {
++		var after string
++		if err := db.QueryRowContext(ctx, "SELECT DOLT_HASHOF_DB()").Scan(&after); err != nil {
++			return nil, err
++		}
++		if after != p.revision {
++			return nil, fmt.Errorf("source_changed: working snapshot changed during read")
++		}
++	}
++	return map[string]any{"revision": p.revision, "temporal": temporal, "items": items, "edges": edges, "total": total, "total_exact": true, "has_more": more, "closure": closure, "aggregate": in.Aggregate != nil, "provenance_edges": provenanceEdges, "provenance_coverage": provenanceCoverage, "graph_leaves": leaves, "readiness": readiness, "cycles": cycles, "frontier": frontier, "coverage": coverage, "counts": counts}, nil
++}
++func ownerEdgeTarget(edge map[string]any) string {
++	for _, key := range []string{"depends_on_issue_id", "depends_on_external", "depends_on_wisp_id", "depends_on_id"} {
++		if value, ok := edge[key]; ok && value != nil && value != "" {
++			return fmt.Sprint(value)
++		}
++	}
++	return ""
++}
++func ownerClosure(roots []string, edges []map[string]any, direction string, relations []string, depth int) ([]string, []map[string]any, bool) {
++	seen := map[string]bool{}
++	frontier := append([]string{}, roots...)
++	for _, id := range roots {
++		seen[id] = true
++	}
++	allowed := map[string]bool{}
++	for _, relation := range relations {
++		allowed[strings.ReplaceAll(relation, "_", "-")] = true
++	}
++	picked := map[int]bool{}
++	truncated := false
++	for level := 0; len(frontier) > 0; level++ {
++		next := []string{}
++		current := map[string]bool{}
++		for _, id := range frontier {
++			current[id] = true
++		}
++		for index, edge := range edges {
++			if ownerProvenanceRelation(fmt.Sprint(edge["type"])) {
++				continue
++			}
++			if len(allowed) > 0 && !allowed[fmt.Sprint(edge["type"])] {
++				continue
++			}
++			from, to := fmt.Sprint(edge["issue_id"]), ownerEdgeTarget(edge)
++			targets := []string{}
++			if direction != "dependents" && current[from] {
++				targets = append(targets, to)
++			}
++			if direction != "dependencies" && current[to] {
++				targets = append(targets, from)
++			}
++			for _, target := range targets {
++				if level >= depth {
++					if !seen[target] {
++						truncated = true
++					}
++					continue
++				}
++				picked[index] = true
++				if target != "" && !seen[target] {
++					seen[target] = true
++					next = append(next, target)
++				}
++			}
++		}
++		if level >= depth {
++			break
++		}
++		frontier = next
++	}
++	ids := []string{}
++	for id := range seen {
++		ids = append(ids, id)
++	}
++	sort.Strings(ids)
++	selected := []map[string]any{}
++	for index, edge := range edges {
++		if picked[index] {
++			selected = append(selected, edge)
++		}
++	}
++	return ids, selected, truncated
++}
++func (p *ownerReadPlan) includes(ctx context.Context, db DBTX, id string, names []string) (map[string]any, error) {
++	out := map[string]any{}
++	for _, name := range names {
++		var statement string
++		switch name {
++		case "comments":
++			statement = "SELECT * FROM " + p.table("comments") + " WHERE issue_id=? ORDER BY created_at,id"
++		case "dependencies", "dependents", "children", "blockers":
++			source, target := "issue_id", "depends_on_issue_id"
++			if name == "dependents" || name == "children" {
++				source, target = target, source
++			}
++			statement = "SELECT i.*,d.type AS dependency_type FROM " + p.table("dependencies") + " d LEFT JOIN " + p.table("issues") + " i ON i.id=d." + target + " WHERE d." + source + "=?"
++			if name == "children" {
++				statement += " AND d.type='parent-child'"
++			}
++			if name == "blockers" {
++				statement += " AND d.type='blocks' AND (i.id IS NULL OR i.status NOT IN ('closed','tombstone'))"
++			}
++			statement += " ORDER BY i.id"
++		case "history", "events":
++			out[name] = map[string]any{"state": "unavailable", "reason": "not exposed at an exact historical revision", "revision": p.revision}
++			continue
++		default:
++			return nil, fmt.Errorf("unsupported include %q", name)
++		}
++		rows, err := ownerRows(ctx, db, statement, id)
++		if err != nil {
++			return nil, err
++		}
++		out[name] = map[string]any{"state": "complete", "items": rows, "count": len(rows), "truncated": false, "revision": p.revision}
++	}
++	return out, nil
++}
++
++func ownerProvenanceRelation(kind string) bool {
++	return kind == "discovered-from" || kind == "split-from" || kind == "supersedes" || kind == "residual-of"
++}
++
++func ownerLikeLiteral(value string) string {
++	return strings.NewReplacer("!", "!!", "%", "!%", "_", "!_").Replace(value)
++}
+--- /dev/null
++++ b/internal/storage/issueops/owner_read_test.go
+@@ -0,0 +1,94 @@
++package issueops
++
++import (
++	"context"
++	"reflect"
++	"strings"
++	"testing"
++	"time"
++
++	"github.com/DATA-DOG/go-sqlmock"
++	"github.com/steveyegge/beads/internal/query"
++)
++
++func TestOwnerContractClosureDirectionProvenanceAndBounds(t *testing.T) {
++	edges := []map[string]any{
++		{"issue_id": "bd-a", "depends_on_issue_id": "bd-b", "type": "blocks"},
++		{"issue_id": "bd-b", "depends_on_issue_id": "bd-c", "type": "blocks"},
++		{"issue_id": "bd-a", "depends_on_issue_id": "bd-history", "type": "discovered-from"},
++	}
++	ids, selected, truncated := ownerClosure([]string{"bd-a"}, edges, "dependencies", nil, 1)
++	if !reflect.DeepEqual(ids, []string{"bd-a", "bd-b"}) || len(selected) != 1 || !truncated {
++		t.Fatalf("bounded closure %v %v %v", ids, selected, truncated)
++	}
++	ids, _, truncated = ownerClosure([]string{"bd-c"}, edges, "dependents", nil, 4)
++	if !reflect.DeepEqual(ids, []string{"bd-a", "bd-b", "bd-c"}) || truncated {
++		t.Fatalf("reverse closure %v truncated=%v", ids, truncated)
++	}
++}
++
++func TestOwnerContractFiltersBindCallerValues(t *testing.T) {
++	p := &ownerReadPlan{revision: "0123456789abcdefghijklmnopqrstuv", now: time.Now()}
++	hostile := "x' OR TRUE --"
++	statement, err := p.filters(map[string]any{"or": []any{map[string]any{"title": hostile}, map[string]any{"label": "urgent"}}})
++	if err != nil {
++		t.Fatal(err)
++	}
++	if strings.Contains(statement, hostile) || !reflect.DeepEqual(p.args, []any{"%" + hostile + "%", "urgent"}) {
++		t.Fatalf("caller values escaped binding: %s %v", statement, p.args)
++	}
++	node, err := query.Parse("(status=open OR status=closed) AND priority<=2")
++	if err != nil {
++		t.Fatal(err)
++	}
++	if _, err = p.expression(node); err != nil {
++		t.Fatal(err)
++	}
++	if _, err = p.filters(map[string]any{"nonexistent": 1}); err == nil {
++		t.Fatal("unknown field accepted")
++	}
++}
++
++func TestOwnerContractExactRevisionIncludesArePinned(t *testing.T) {
++	db, mock, err := sqlmock.New()
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer db.Close()
++	hash := "0123456789abcdefghijklmnopqrstuv"
++	mock.ExpectQuery(`SELECT DOLT_HASHOF\(\?\)`).WithArgs("HEAD").WillReturnRows(sqlmock.NewRows([]string{"hash"}).AddRow(hash))
++	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM issues AS OF '` + hash + `'`).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
++	mock.ExpectQuery(`SELECT i\.\* FROM issues AS OF '`+hash+`'`).WithArgs(1001, 0).WillReturnRows(sqlmock.NewRows([]string{"id", "row_lock", "acceptance_criteria"}).AddRow("bd-a", int64(9007199254740993), "verified behavior"))
++	mock.ExpectQuery(`SELECT label FROM labels AS OF '` + hash + `'`).WithArgs("bd-a").WillReturnRows(sqlmock.NewRows([]string{"label"}).AddRow("scope"))
++	mock.ExpectQuery(`SELECT \* FROM comments AS OF '` + hash + `'`).WithArgs("bd-a").WillReturnRows(sqlmock.NewRows([]string{"id", "comment"}).AddRow(1, "recorded"))
++	result, err := ReadOwner(context.Background(), db, OwnerReadRequest{At: "HEAD", Include: []string{"comments"}})
++	if err != nil {
++		t.Fatal(err)
++	}
++	item := result["items"].([]map[string]any)[0]
++	if item["bead_revision"] != "9007199254740993" || result["revision"] != hash {
++		t.Fatalf("lost revision: %v", result)
++	}
++	if err := mock.ExpectationsWereMet(); err != nil {
++		t.Fatal(err)
++	}
++}
++
++func TestOwnerContractRejectsChangingWorkingSnapshot(t *testing.T) {
++	db, mock, err := sqlmock.New()
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer db.Close()
++	mock.ExpectQuery(`SELECT DOLT_HASHOF_DB\(\)`).WillReturnRows(sqlmock.NewRows([]string{"hash"}).AddRow("0123456789abcdefghijklmnopqrstuv"))
++	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM issues i`).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
++	mock.ExpectQuery(`SELECT i\.\* FROM issues i`).WithArgs(1001, 0).WillReturnRows(sqlmock.NewRows([]string{"id"}))
++	mock.ExpectQuery(`SELECT DOLT_HASHOF_DB\(\)`).WillReturnRows(sqlmock.NewRows([]string{"hash"}).AddRow("1123456789abcdefghijklmnopqrstuv"))
++	_, err = ReadOwner(context.Background(), db, OwnerReadRequest{})
++	if err == nil || !strings.Contains(err.Error(), "source_changed") {
++		t.Fatalf("accepted changing source: %v", err)
++	}
++	if err := mock.ExpectationsWereMet(); err != nil {
++		t.Fatal(err)
++	}
++}
+--- /dev/null
++++ b/internal/storage/issueops/owner_provenance.go
+@@ -0,0 +1,112 @@
++package issueops
++
++import (
++	"context"
++	"fmt"
++	"sort"
++	"strings"
++)
++
++// ownerProvenance reports evidence edges touching members without changing the
++// dependency closure. Metadata values may name local IDs or external references.
++func (p *ownerReadPlan) provenance(ctx context.Context, db DBTX, items []map[string]any, limit int, membershipComplete bool) ([]map[string]any, map[string]any, error) {
++	members := map[string]bool{}
++	for _, item := range items {
++		members[fmt.Sprint(item["id"])] = true
++	}
++	edges := []map[string]any{}
++	frontier := []map[string]any{}
++	seen := map[string]bool{}
++	appendEdge := func(edge map[string]any) {
++		key := fmt.Sprint(edge["from"]) + "\x00" + fmt.Sprint(edge["to"]) + "\x00" + fmt.Sprint(edge["relation"])
++		if seen[key] {
++			return
++		}
++		seen[key] = true
++		if len(edges) >= limit {
++			if len(frontier) == 0 {
++				frontier = append(frontier, map[string]any{"reason": "edge_bound", "max_edges": limit})
++			}
++			return
++		}
++		edges = append(edges, edge)
++	}
++	if len(members) > 0 {
++		ids := []string{}
++		for id := range members {
++			ids = append(ids, id)
++		}
++		sort.Strings(ids)
++		placeholders := []string{}
++		args := []any{}
++		for _, id := range ids {
++			placeholders = append(placeholders, "?")
++			args = append(args, id)
++		}
++		args = append(args, args...)
++		args = append(args, limit+1)
++		rows, err := ownerRows(ctx, db, "SELECT * FROM "+p.table("dependencies")+" WHERE type IN ('discovered-from','split-from','supersedes','residual-of') AND (issue_id IN ("+strings.Join(placeholders, ",")+") OR depends_on_issue_id IN ("+strings.Join(placeholders, ",")+")) ORDER BY issue_id,depends_on_issue_id,type LIMIT ?", args...)
++		if err != nil {
++			return nil, nil, err
++		}
++		if len(rows) > limit {
++			frontier = append(frontier, map[string]any{"reason": "edge_bound", "max_edges": limit})
++			rows = rows[:limit]
++		}
++		for _, row := range rows {
++			kind := fmt.Sprint(row["type"])
++			target := ownerEdgeTarget(row)
++			targetKind := "bead"
++			if row["depends_on_external"] != nil && row["depends_on_external"] != "" {
++				targetKind = "external"
++			}
++			if row["depends_on_wisp_id"] != nil && row["depends_on_wisp_id"] != "" {
++				targetKind = "wisp"
++			}
++			appendEdge(map[string]any{"from": row["issue_id"], "to": target, "relation": strings.ReplaceAll(kind, "-", "_"), "native_relation": kind, "target_kind": targetKind})
++		}
++		metadata, err := ownerRows(ctx, db, "SELECT id,metadata FROM "+p.table("issues")+" WHERE JSON_EXTRACT(metadata,'$.discovered_from') IS NOT NULL OR JSON_EXTRACT(metadata,'$.split_from') IS NOT NULL OR JSON_EXTRACT(metadata,'$.supersedes') IS NOT NULL OR JSON_EXTRACT(metadata,'$.residual_of') IS NOT NULL ORDER BY id LIMIT ?", limit+1)
++		if err != nil {
++			return nil, nil, err
++		}
++		if len(metadata) > limit {
++			frontier = append(frontier, map[string]any{"reason": "metadata_candidate_bound", "max_candidates": limit})
++			metadata = metadata[:limit]
++		}
++		for _, row := range metadata {
++			source := fmt.Sprint(row["id"])
++			object, ok := row["metadata"].(map[string]any)
++			if !ok {
++				frontier = append(frontier, map[string]any{"reason": "unsupported_metadata_value", "from": source})
++				continue
++			}
++			for _, key := range []string{"discovered_from", "split_from", "supersedes", "residual_of"} {
++				value, present := object[key]
++				if !present {
++					continue
++				}
++				target, ok := value.(string)
++				if !ok || target == "" {
++					frontier = append(frontier, map[string]any{"reason": "unsupported_metadata_value", "from": source, "key": key})
++					continue
++				}
++				if !members[source] && !members[target] {
++					continue
++				}
++				kind := "bead"
++				if strings.Contains(target, "://") {
++					kind = "external"
++				}
++				appendEdge(map[string]any{"from": source, "to": target, "relation": key, "native_relation": nil, "metadata_key": key, "source": "issue_metadata", "target_kind": kind})
++			}
++		}
++	}
++	if !membershipComplete {
++		frontier = append(frontier, map[string]any{"reason": "membership_incomplete"})
++	}
++	state := "complete"
++	if len(frontier) > 0 {
++		state = "partial"
++	}
++	return edges, map[string]any{"state": state, "complete": len(frontier) == 0, "scope": "incoming_and_outgoing_edges_touching_members", "revision": p.revision, "returned": len(edges), "frontier": frontier}, nil
++}
+--- /dev/null
++++ b/internal/storage/issueops/owner_topology.go
+@@ -0,0 +1,137 @@
++package issueops
++
++import (
++	"context"
++	"fmt"
++	"sort"
++	"strings"
++	"time"
++)
++
++func ownerCycles(items []map[string]any, edges []map[string]any) [][]string {
++	adjacency, reverse := map[string][]string{}, map[string][]string{}
++	for _, row := range items {
++		id := fmt.Sprint(row["id"])
++		adjacency[id] = []string{}
++		reverse[id] = []string{}
++	}
++	for _, edge := range edges {
++		from, to := fmt.Sprint(edge["issue_id"]), ownerEdgeTarget(edge)
++		_, fromOK := adjacency[from]
++		_, toOK := adjacency[to]
++		if fromOK && toOK {
++			adjacency[from] = append(adjacency[from], to)
++			reverse[to] = append(reverse[to], from)
++		}
++	}
++	visited := map[string]bool{}
++	finished := []string{}
++	keys := []string{}
++	for key := range adjacency {
++		keys = append(keys, key)
++	}
++	sort.Strings(keys)
++	type frame struct {
++		id   string
++		next int
++	}
++	for _, id := range keys {
++		if visited[id] {
++			continue
++		}
++		visited[id] = true
++		stack := []frame{{id: id}}
++		for len(stack) > 0 {
++			top := &stack[len(stack)-1]
++			if top.next >= len(adjacency[top.id]) {
++				finished = append(finished, top.id)
++				stack = stack[:len(stack)-1]
++				continue
++			}
++			target := adjacency[top.id][top.next]
++			top.next++
++			if !visited[target] {
++				visited[target] = true
++				stack = append(stack, frame{id: target})
++			}
++		}
++	}
++	visited = map[string]bool{}
++	cycles := [][]string{}
++	for i := len(finished) - 1; i >= 0; i-- {
++		id := finished[i]
++		if visited[id] {
++			continue
++		}
++		visited[id] = true
++		component := []string{}
++		pending := []string{id}
++		for len(pending) > 0 {
++			node := pending[len(pending)-1]
++			pending = pending[:len(pending)-1]
++			component = append(component, node)
++			for _, target := range reverse[node] {
++				if !visited[target] {
++					visited[target] = true
++					pending = append(pending, target)
++				}
++			}
++		}
++		self := false
++		for _, target := range adjacency[id] {
++			if target == id {
++				self = true
++			}
++		}
++		if len(component) > 1 || self {
++			sort.Strings(component)
++			cycles = append(cycles, component)
++		}
++	}
++	sort.Slice(cycles, func(i, j int) bool { return strings.Join(cycles[i], "\x00") < strings.Join(cycles[j], "\x00") })
++	return cycles
++}
++
++func (p *ownerReadPlan) readiness(ctx context.Context, db DBTX, items []map[string]any, limit int) (map[string]any, error) {
++	result := map[string]any{}
++	for _, row := range items {
++		id := fmt.Sprint(row["id"])
++		blockers, err := ownerRows(ctx, db, "SELECT d.depends_on_issue_id AS id,b.status FROM "+p.table("dependencies")+" d LEFT JOIN "+p.table("issues")+" b ON b.id=d.depends_on_issue_id WHERE d.issue_id=? AND d.type='blocks' ORDER BY d.depends_on_issue_id LIMIT ?", id, limit+1)
++		if err != nil {
++			return nil, err
++		}
++		unknown := len(blockers) > limit
++		open := []string{}
++		for _, blocker := range blockers {
++			if blocker["status"] == nil {
++				unknown = true
++			} else if blocker["status"] != "closed" && blocker["status"] != "tombstone" {
++				open = append(open, fmt.Sprint(blocker["id"]))
++			}
++		}
++		deferred := false
++		if value := row["defer_until"]; value != nil && value != "" {
++			parsed, err := time.Parse(time.RFC3339Nano, fmt.Sprint(value))
++			if err != nil {
++				unknown = true
++			} else {
++				deferred = parsed.After(p.now)
++			}
++		}
++		state := "ready"
++		switch {
++		case row["status"] == "closed" || row["status"] == "tombstone":
++			state = "closed"
++		case unknown:
++			state = "unknown"
++		case len(open) > 0:
++			state = "blocked"
++		case deferred || row["status"] == "deferred":
++			state = "deferred"
++		case row["status"] != "open":
++			state = "not_open"
++		}
++		result[id] = map[string]any{"state": state, "open_blockers": open, "blockers": open, "blocker_coverage": map[bool]string{true: "partial", false: "complete"}[unknown]}
++	}
++	return result, nil
++}
+--- /dev/null
++++ b/internal/storage/embeddeddolt/owner_contract_test.go
+@@ -0,0 +1,88 @@
++//go:build cgo
++
++package embeddeddolt_test
++
++import (
++	"context"
++	"github.com/steveyegge/beads/backend/conformance"
++	"github.com/steveyegge/beads/internal/storage/embeddeddolt"
++	storageops "github.com/steveyegge/beads/internal/storage/issueops"
++	"github.com/steveyegge/beads/internal/types"
++	"testing"
++	"time"
++)
++
++func TestOwnerContractTransactionalMutationSemantics(t *testing.T) {
++	skipUnlessEmbeddedDolt(t)
++	t.Setenv("DOLT_ROOT_PATH", t.TempDir())
++	env := newTestEnv(t, "owner")
++	fixture := newEmbeddedBatchApplyFixture(t, env, "owner")
++	t.Run("bindings", func(t *testing.T) { conformance.RunBatchApplyBindsEachNamedKeyToItsMintedID(t, t.Context(), fixture) })
++	t.Run("rollback", func(t *testing.T) {
++		conformance.RunBatchApplyRollsBackEverythingWhenTheLastItemRefuses(t, t.Context(), fixture)
++	})
++	t.Run("matching_revision", func(t *testing.T) {
++		conformance.RunBatchApplyExpectedVersionThatMatchesLetsTheItemThrough(t, t.Context(), fixture)
++	})
++	t.Run("stale_revision", func(t *testing.T) {
++		conformance.RunBatchApplyStaleExpectedVersionRefusesTheWholeRequest(t, t.Context(), fixture)
++	})
++	t.Run("close_policy", func(t *testing.T) {
++		conformance.RunBatchApplyClosePolicyEvaluatesAtTheCloseItem(t, t.Context(), fixture)
++	})
++}
++
++func TestOwnerContractHistoricalReadAndWorkingState(t *testing.T) {
++	skipUnlessEmbeddedDolt(t)
++	t.Setenv("DOLT_ROOT_PATH", t.TempDir())
++	env := newTestEnv(t, "oread")
++	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
++	defer cancel()
++	if err := env.store.SetConfig(ctx, "issue_prefix", "oread"); err != nil {
++		t.Fatal(err)
++	}
++	for _, id := range []string{"oread-a", "oread-b"} {
++		if err := env.store.CreateIssue(ctx, &types.Issue{ID: id, Title: "Original", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}, "operator"); err != nil {
++			t.Fatal(err)
++		}
++	}
++	if err := env.store.AddDependency(ctx, &types.Dependency{IssueID: "oread-a", DependsOnID: "oread-b", Type: types.DepBlocks}, "operator"); err != nil {
++		t.Fatal(err)
++	}
++	if err := env.store.Commit(ctx, "seed owner read"); err != nil {
++		t.Fatal(err)
++	}
++	read := func(request storageops.OwnerReadRequest) (map[string]any, error) {
++		db, cleanup, err := embeddeddolt.OpenSQL(ctx, env.dataDir, env.database, "main")
++		if err != nil {
++			return nil, err
++		}
++		defer cleanup()
++		return storageops.ReadOwner(ctx, db, request)
++	}
++	initial, err := read(storageops.OwnerReadRequest{At: "HEAD", Roots: []string{"oread-a"}, Provenance: true})
++	if err != nil {
++		t.Fatal(err)
++	}
++	if initial["total"] != 2 || initial["closure"].(map[string]any)["complete"] != true {
++		t.Fatalf("closure: %v", initial)
++	}
++	revision := initial["revision"].(string)
++	if err := env.store.UpdateIssue(ctx, "oread-a", map[string]any{"title": "Changed"}, "operator"); err != nil {
++		t.Fatal(err)
++	}
++	historic, err := read(storageops.OwnerReadRequest{At: revision, Filters: map[string]any{"id": "oread-a"}})
++	if err != nil {
++		t.Fatal(err)
++	}
++	if historic["items"].([]map[string]any)[0]["title"] != "Original" {
++		t.Fatalf("history drifted: %v", historic)
++	}
++	working, err := read(storageops.OwnerReadRequest{Filters: map[string]any{"id": "oread-a"}})
++	if err != nil {
++		t.Fatal(err)
++	}
++	if working["items"].([]map[string]any)[0]["title"] != "Changed" {
++		t.Fatalf("working update hidden: %v", working)
++	}
++}
+--- /dev/null
++++ b/docs/cli-reference/owner.md
+@@ -0,0 +1,43 @@
++# owner
++
++`bd owner` exposes Beads' structured issue operations to local adapters. It does
++not open a network listener. `owner schema --json` publishes the existing
++OpenAPI operation contracts and the analytical input schema under
++`x-beads-owner-read`.
++
++`bd owner call <operationId> --json` reads one JSON object from stdin:
++
++```json
++{"path":{"id":"bd-example"},"body":{"actor":"operator","expected_version":42,"patch":{"notes":"Updated"}}}
++```
++
++The example calls `updateIssue`. Read parameters go in `query`. The published
++HTTP adapter validates requests and calls the existing typed issue role.
++`applyBatch` accepts its existing ordered create/update/close/dep_add union,
++backward result bindings, and atomic rollback. Its close operations enforce
++normal blocker policy. `expected_version` guards updates in the write
++transaction; it is the native issue revision token, not a database revision.
++
++`bd owner read --json` reads an analytical JSON request from stdin. It accepts
++`view`, `filters` (boolean filter objects), `expression` (the Beads query
++language), `native_filters`, `order`, `aggregate.group_by`, `projection`, and
++`include`. `roots`, `direction`, `relations`, and `depth` select a dependency
++closure. Provenance is requested separately with `provenance: true`; its edges
++do not expand membership. The response includes counts, closure completeness,
++missing members, graph leaves, cycles, and native blocking readiness.
++
++With `at` omitted, reads inspect the working set and reject a changed before/after
++state fingerprint. The response has `temporal.semantics: working_snapshot` and
++`pinned: false`. For reproducible historical reads, pass `at: HEAD`, an exact
++commit, or an RFC3339 timestamp. All tables, labels, comments, and relationship
++includes then use the one resolved commit. Reuse the returned `revision` as
++`at` to keep later requests on that commit. Working fingerprints are not
++advertised as replayable commits.
++
++The default row limit is 1,000; zero requests the maximum 100,000. `has_more`
++reports a row bound. Closure depth and edge bounds report incomplete coverage.
++Historical history/event includes explicitly report unavailable. Issue
++`bead_revision` is a decimal string to preserve the native 64-bit token. Its
++coverage is `partial_update_coverage`: direct restore/compaction and some
++label/reopen paths do not change that token. Use the database revision for a
++complete committed snapshot identity.

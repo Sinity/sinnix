@@ -306,8 +306,8 @@ def test_a_declared_pool_runs_the_child_as_a_service_that_exits_with_its_cgroup(
         "KillMode=control-group",
         "IOAccounting=yes",
         "RuntimeMaxSec=30",
-        f"StandardOutput=append:{tmp_path / 'job-a.log'}",
-        f"StandardError=append:{tmp_path / 'job-a.log'}",
+        f"StandardOutput=append:{(tmp_path / 'job-a.log').resolve()}",
+        f"StandardError=append:{(tmp_path / 'job-a.log').resolve()}",
     ):
         assert argv[argv.index(setting) - 1] == "-p"
     assert log_of(tmp_path) == "1"
@@ -558,8 +558,8 @@ def test_a_typed_result_is_stdout_alone_and_the_log_keeps_the_diagnostics(
     assert json.loads((tmp_path / "job-a.result").read_text()) == {"passed": 4}
     assert "warming up" in log_of(tmp_path)
     argv = fake_systemd.run_argv()
-    assert f"StandardOutput=file:{tmp_path / 'job-a.result'}" in argv
-    assert f"StandardError=append:{tmp_path / 'job-a.log'}" in argv
+    assert f"StandardOutput=file:{(tmp_path / 'job-a.result').resolve()}" in argv
+    assert f"StandardError=append:{(tmp_path / 'job-a.log').resolve()}" in argv
 
 
 def test_the_declared_timeout_is_the_unit_runtime_limit(
@@ -738,7 +738,7 @@ def test_a_pool_without_a_slice_policy_runs_under_the_normal_slice(
     )
 
 
-def test_an_oversized_log_is_truncated_with_a_marker(tmp_path: Path) -> None:
+def test_output_larger_than_eight_mb_is_preserved_completely(tmp_path: Path) -> None:
     launch = write_launch(
         tmp_path, argv=["sh", "-c", f"yes x | head -c {MAX_LOG_BYTES * 3}"]
     )
@@ -746,8 +746,8 @@ def test_an_oversized_log_is_truncated_with_a_marker(tmp_path: Path) -> None:
     assert main([str(launch)]) == 0
 
     log = log_of(tmp_path)
-    assert len(log) <= MAX_LOG_BYTES
-    assert log.endswith("[agentctl: output truncated]\n")
+    assert len(log) == MAX_LOG_BYTES * 3
+    assert log == "x\n" * (MAX_LOG_BYTES * 3 // 2)
 
 
 def test_the_environment_is_exactly_what_the_descriptor_declared(

@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Mapping
 
 import anyio
@@ -21,13 +21,7 @@ from .capabilities import Capability, PolicyError, Principal
 from .capability_index import CapabilityIndexService
 from .captures import CaptureService
 from .config import GatewayConfig
-from .contexts import (
-    CONTEXT_INTENTS,
-    ComponentResult,
-    ComponentSpec,
-    ContextComposer,
-    source_revision,
-)
+from .contexts import source_revision
 from .contracts import EffectMode
 from .desktop import DesktopService
 from .events import EventCursorError, NormalizedEventService
@@ -36,16 +30,13 @@ from .files import HostFileService
 from .locators import decode_file_ref
 from .machine_actions import MachineActionService
 from .mcp_broker import McpBrokerService
-from .memory import MemoryService
 from .observe import ObserveService
 from .projects import ProjectService
 from .redaction import public_error
 from .registry import REGISTRY, RegistryError
 from .results import ProtocolError, RequestContext, ResultError, ResultService
 from .route_preflight import GatewayRoutePreflight
-from .sessions import SessionLogService
 from .terminals import TerminalService
-from .timeline import TimelineService
 from .waits import BoundedWaitService, WaitEvidence, WaitRequest, WaitTarget
 
 DAEMON_ERROR_CLASSES = {
@@ -101,6 +92,16 @@ RESOURCE_READERS: dict[
 }
 
 TOKEN_ESTIMATE_BYTES_PER_TOKEN = 4
+PRE_EFFECT_FAILURES = frozenset(
+    {
+        "invalid_request",
+        "policy_denied",
+        "precondition_failed",
+        "not_found",
+        "unsupported_capability",
+        "conflict",
+    }
+)
 MACHINE_OPERATIONS = (
     "interrupt",
     "freeze",
@@ -113,34 +114,6 @@ MACHINE_OPERATIONS = (
     "start",
     "stop",
 )
-
-
-def _orientation_task_summary(result: Mapping[str, Any]) -> dict[str, Any]:
-    """Keep project orientation useful without embedding full Beads bodies."""
-    items = result.get("items")
-    if not isinstance(items, list):
-        return dict(result)
-    fields = (
-        "id",
-        "ref",
-        "title",
-        "status",
-        "priority",
-        "issue_type",
-        "assignee",
-        "labels",
-        "parent",
-        "task_revision",
-        "etag",
-    )
-    return {
-        **result,
-        "items": [
-            {field: item[field] for field in fields if field in item}
-            for item in items
-            if isinstance(item, Mapping)
-        ],
-    }
 
 
 def canonical_manifest(tools: list[Any]) -> dict[str, Any]:
@@ -195,12 +168,8 @@ class Runtime:
     capability_index: CapabilityIndexService
     captures: CaptureService
     files: HostFileService
-    sessions: SessionLogService
-    memory: MemoryService
-    timeline: TimelineService
     mcp_broker: McpBrokerService
     route_preflight: GatewayRoutePreflight
-    context_composer: ContextComposer = field(default_factory=ContextComposer)
     normalized_events: NormalizedEventService | None = None
     waits: BoundedWaitService | None = None
     tool_manifest: Callable[[], Awaitable[dict[str, Any]]] | None = None
@@ -212,7 +181,6 @@ class Runtime:
     def create(cls, config: GatewayConfig, principal_name: str) -> "Runtime":
         principal = Principal.for_name(principal_name)
         artifacts = ArtifactService(config, principal)
-        sessions = SessionLogService(config, principal)
         projects = ProjectService(config, principal)
         results = ResultService(config, principal, artifacts)
         beads = BeadsService(config, principal, results)
@@ -234,9 +202,6 @@ class Runtime:
             capability_index=CapabilityIndexService(config, principal),
             captures=CaptureService(config, principal),
             files=HostFileService(config, principal),
-            sessions=sessions,
-            memory=MemoryService(principal, sessions),
-            timeline=TimelineService(principal, sessions),
             mcp_broker=McpBrokerService(config, principal, artifacts),
             route_preflight=GatewayRoutePreflight(config),
         )
@@ -449,251 +414,6 @@ class Runtime:
             raise ProtocolError("owner_failed", "job owner response must be an object")
         return dict(result)
 
-    def compose_context(
-        self, reference: str, intent: str, *, launch_reference: str | None = None
-    ) -> dict[str, Any]:
-        if intent == "project":
-            intent = "project.orientation"
-        if intent not in CONTEXT_INTENTS:
-            raise ProtocolError("invalid_request", f"unknown context intent: {intent}")
-        try:
-            resource, values = REGISTRY.resolve(reference)
-        except RegistryError as exc:
-            raise ProtocolError("not_found", "context target is not canonical") from exc
-        if intent == "job.review":
-            if resource.kind != "job":
-                raise ProtocolError(
-                    "invalid_request", "job.review requires a job reference"
-                )
-            project_id = None
-        else:
-            if resource.kind not in {"project", "checkout"}:
-                raise ProtocolError(
-                    "invalid_request", f"{intent} requires a project reference"
-                )
-            project_id = values["project_id"]
-        target_ref = str(resource.ref_template.format(values))
-        declared = dict(CONTEXT_INTENTS[intent].components)
-
-        def component(
-            name: str,
-            fn: Callable[[], Any],
-            source_ref: str | None = None,
-            revision: Callable[[], str] | None = None,
-        ) -> ComponentSpec:
-            def probe() -> ComponentResult:
-                try:
-                    value = fn()
-                except ProtocolError as exc:
-                    if exc.code in {
-                        "invalid_request",
-                        "not_found",
-                        "policy_denied",
-                        "precondition_failed",
-                    }:
-                        raise
-                    return ComponentResult.unavailable(
-                        name, public_error(exc), source_ref=source_ref
-                    )
-                except Exception as exc:
-                    return ComponentResult.unavailable(
-                        name, public_error(exc), source_ref=source_ref
-                    )
-                revision = (
-                    value.get("source_revision") if isinstance(value, Mapping) else None
-                )
-                return ComponentResult.available(
-                    name,
-                    value,
-                    revision=(
-                        revision
-                        if isinstance(revision, str)
-                        else source_revision(value)
-                    ),
-                    source_ref=source_ref,
-                )
-
-            return ComponentSpec(
-                name,
-                declared[name],
-                probe,
-                revision=revision,
-                cache_source_ref=source_ref,
-            )
-
-        project_ref = (
-            REGISTRY.reference("project", {"project_id": project_id})
-            if project_id
-            else None
-        )
-        components: list[ComponentSpec] = []
-        if intent == "project.orientation":
-            assert project_id is not None
-            project_summary: dict[str, Any] | None = None
-
-            def read_project_summary() -> dict[str, Any]:
-                nonlocal project_summary
-                if project_summary is None:
-                    project_summary = self.projects.summary(project_id)
-                return project_summary
-
-            components = [
-                component(
-                    "project",
-                    read_project_summary,
-                    project_ref,
-                    lambda: self.projects.summary_revision(project_id),
-                ),
-                component(
-                    "checkout",
-                    lambda: self.projects.checkout(project_id, "default"),
-                    REGISTRY.reference(
-                        "checkout", {"project_id": project_id, "checkout_id": "default"}
-                    ),
-                ),
-                component(
-                    "tasks",
-                    lambda: _orientation_task_summary(
-                        self.beads.query(
-                            project_ids=[project_id], view="ready", limit=20
-                        )
-                    ),
-                    f"{project_ref}/beads",
-                ),
-                component(
-                    "authority",
-                    lambda: self.project_authority(
-                        project_id, project_summary=read_project_summary()
-                    ),
-                    f"{project_ref}/task-authority",
-                ),
-            ]
-        elif intent == "project.triage":
-            assert project_id is not None
-            components = [
-                component(
-                    "project", lambda: self.projects.summary(project_id), project_ref
-                ),
-                component(
-                    "open_beads",
-                    lambda: self.beads.query(
-                        project_ids=[project_id], view="open", limit=50
-                    ),
-                    f"{project_ref}/beads",
-                ),
-                component(
-                    "stale_claims",
-                    lambda: self.beads.query(
-                        project_ids=[project_id], view="stale_claims", limit=50
-                    ),
-                    f"{project_ref}/beads",
-                ),
-                component(
-                    "changes",
-                    lambda: self.projects.diff(project_id, None, None),
-                    project_ref,
-                ),
-            ]
-        elif intent == "job.review":
-            job_id = values["job_id"]
-            job_observation: dict[str, Any] | None = None
-
-            def read_job(operation: str, **arguments: Any) -> dict[str, Any]:
-                identity = {"job_id": job_id}
-                if launch_reference is not None:
-                    identity["launch_reference"] = launch_reference
-                value = self._job(operation, {**identity, **arguments})
-                key = "launch_reference" if launch_reference is not None else "job_id"
-                if str(value.get(key)) != str(identity[key]):
-                    raise ProtocolError(
-                        "owner_failed",
-                        f"job owner {operation} response names another job",
-                    )
-                return value
-
-            def job_value() -> dict[str, Any]:
-                nonlocal job_observation
-                if job_observation is None:
-                    job_observation = read_job("job.get")
-                return job_observation
-
-            components = [
-                component("job", job_value, target_ref),
-                component(
-                    "result",
-                    lambda: read_job("job.result", max_bytes=64_000),
-                    target_ref,
-                ),
-                component(
-                    "project",
-                    lambda: self.projects.summary(str(job_value().get("project_id"))),
-                    project_ref,
-                ),
-                component("events", lambda: self.audit.tail(50), "sinnix://receipts"),
-            ]
-        else:
-            components = [
-                component(
-                    "runtime",
-                    lambda: self.observe.machine_query("overview"),
-                    "sinnix://machine/overview",
-                ),
-                component(
-                    "transitions",
-                    lambda: (
-                        self.normalized_events.read(limit=50)
-                        if self.normalized_events
-                        else {"events": []}
-                    ),
-                    "sinnix://events",
-                ),
-                component("receipts", lambda: self.audit.tail(50), "sinnix://receipts"),
-                component("jobs", lambda: self._recent_jobs(50), "sinnix://jobs"),
-            ]
-        context = self.context_composer.compose(intent, target_ref, components)
-        by_name = {row["name"]: row for row in context["components"]}
-        if intent == "job.review":
-            for name in ("job", "result"):
-                row = by_name[name]
-                if row["status"] == "available":
-                    row["source_ref"] = REGISTRY.reference(
-                        "job", {"job_id": str(row["data"]["job_id"])}
-                    )
-                    if name == "job":
-                        context["ref"] = context["target_ref"] = row["source_ref"]
-        compatibility: dict[str, Any] = {}
-        if intent == "project.orientation" and all(
-            by_name.get(name, {}).get("status") == "available"
-            for name in ("project", "tasks", "authority")
-        ):
-            compatibility.update(
-                {
-                    "project": by_name["project"]["data"],
-                    "tasks": by_name["tasks"]["data"],
-                    "authority": by_name["authority"]["data"],
-                }
-            )
-        elif intent in {"job.review", "incident"}:
-            compatibility.update(
-                {
-                    name: row["data"]
-                    for name, row in by_name.items()
-                    if row.get("status") == "available" and "data" in row
-                }
-            )
-        if compatibility:
-            candidate = {**context, **compatibility}
-            if (
-                len(
-                    json.dumps(
-                        candidate, sort_keys=True, separators=(",", ":")
-                    ).encode()
-                )
-                <= context["total_budget_bytes"]
-            ):
-                context = candidate
-        return self.persist_context({"ref": target_ref, **context})
-
     def persist_context(self, context: dict[str, Any]) -> dict[str, Any]:
         revision = source_revision(context)
         writer = self.results.start_snapshot(
@@ -858,6 +578,7 @@ class Runtime:
         operation: str | None,
         workspace_id: str | None,
         parameters: Mapping[str, Any] | None,
+        owner_request_key: str | None = None,
     ) -> dict[str, Any]:
         self.principal.require(Capability.JOB_START)
         if self.principal.name not in {"agent-control", "operator"}:
@@ -879,6 +600,8 @@ class Runtime:
             "operation": operation,
             "parameters": dict(parameters or {}),
         }
+        if owner_request_key is not None:
+            arguments["owner_request_key"] = owner_request_key
         if workspace_id is not None:
             arguments["workspace_id"] = workspace_id
         result = self._job("job.start", arguments)
@@ -967,7 +690,7 @@ class Runtime:
                 raise ProtocolError(
                     "invalid_request", "machine unit manager is not recognized"
                 )
-            return canonical_ref, {"unit": values["unit"]}
+            return canonical_ref, {"unit": values["unit"], "manager": values["manager"]}
         if resource.kind == "process":
             try:
                 pid = int(values["pid"])
@@ -989,9 +712,10 @@ class Runtime:
         *,
         action: str,
         target: Mapping[str, Any],
-        expected_revision: int,
+        expected_target: Mapping[str, Any],
         idempotency_key: str,
         operator_reason: str,
+        parameters: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         required = {
             "schema": str,
@@ -1000,11 +724,10 @@ class Runtime:
             "action": str,
             "target": dict,
             "operator_reason": str,
-            "expected_revision": int,
+            "expected_target": dict,
         }
         if any(
             not isinstance(receipt.get(key), value_type)
-            or (key == "expected_revision" and isinstance(receipt.get(key), bool))
             for key, value_type in required.items()
         ):
             raise ProtocolError(
@@ -1014,8 +737,9 @@ class Runtime:
             receipt["idempotency_key"] != idempotency_key
             or receipt["action"] != action
             or receipt["target"] != target
-            or receipt["expected_revision"] != expected_revision
+            or receipt["expected_target"] != expected_target
             or receipt["operator_reason"] != operator_reason
+            or receipt.get("parameters", parameters) != parameters
         ):
             raise ProtocolError(
                 "owner_failed",
@@ -1030,7 +754,9 @@ class Runtime:
                 "action",
                 "target",
                 "operator_reason",
-                "expected_revision",
+                "expected_target",
+                "parameters",
+                "request_hash",
                 "status",
                 "preconditions",
                 "previous_state",
@@ -1039,6 +765,21 @@ class Runtime:
                 "created_at",
             )
             if key in receipt
+        }
+
+    def prepare_machine_action(
+        self,
+        *,
+        reference: str,
+        action: str,
+        parameters: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        canonical_ref, target = self._machine_target(reference)
+        if action not in MACHINE_OPERATIONS:
+            raise ProtocolError("invalid_request", "machine action is not recognized")
+        return {
+            **self.machine_actions.prepare(action, target, dict(parameters or {})),
+            "ref": canonical_ref,
         }
 
     def v2_operate(
@@ -1052,15 +793,11 @@ class Runtime:
         preconditions: Mapping[str, Any] | None,
     ) -> dict[str, Any]:
         canonical_ref, target = self._machine_target(reference)
-        values = self._required_preconditions(preconditions, {"expected_revision"})
-        expected_revision = values.get("expected_revision")
-        if (
-            isinstance(expected_revision, bool)
-            or not isinstance(expected_revision, int)
-            or expected_revision < 0
-        ):
+        values = self._required_preconditions(preconditions, {"expected_target"})
+        expected_target = values.get("expected_target")
+        if not isinstance(expected_target, Mapping) or not expected_target:
             raise ProtocolError(
-                "invalid_request", "expected_revision must be a non-negative integer"
+                "invalid_request", "expected_target must be a nonempty object"
             )
         if not isinstance(action, str) or action not in MACHINE_OPERATIONS:
             raise ProtocolError("invalid_request", "machine action is not recognized")
@@ -1078,16 +815,17 @@ class Runtime:
             self.machine_actions.execute(
                 action,
                 target,
-                expected_revision,
+                expected_target,
                 idempotency_key,
                 reason,
                 dict(parameters),
             ),
             action=action,
             target=target,
-            expected_revision=expected_revision,
+            expected_target=expected_target,
             idempotency_key=idempotency_key,
             operator_reason=reason,
+            parameters=parameters,
         )
         return {"ref": canonical_ref, "action": action, "owner_receipt": owner_receipt}
 
@@ -1422,6 +1160,13 @@ class Runtime:
                 else ACTION_REVISION
             ),
             "preconditions": dict(context.preconditions or {}),
+            "precondition_guarantee": "owner_specific_best_effort",
+            "response_replay": "confirmed_responses_only",
+            "owner_deduplication": (
+                "durable_launch_identity"
+                if action.name == "operations.run"
+                else "not_guaranteed"
+            ),
             "before_refs": before_refs,
             "after_refs": after_refs,
             "before_revision": before_revision,
@@ -1449,12 +1194,12 @@ class Runtime:
                 "read_only_with_observability_persistence"
                 if action.effect is EffectMode.READ
                 else (
-                    result.get("atomicity", "owner_declared")
+                    result.get("atomicity", "best_effort_owner_check")
                     if isinstance(result, Mapping)
                     else (
                         "not_atomic"
                         if error and error.get("code") == "partial_completion"
-                        else "owner_declared"
+                        else "best_effort_owner_check"
                     )
                 )
             ),
@@ -1553,6 +1298,7 @@ class Runtime:
         context: RequestContext,
         *,
         enforce_action_failure_codes: bool = True,
+        effect_started: bool = False,
     ) -> dict[str, Any]:
         if isinstance(exc, OwnerDiagnosticError):
             details = self._diagnostic_payload(exc.response)
@@ -1613,6 +1359,15 @@ class Runtime:
                 "details": {},
                 "diagnostic_refs": [],
             }
+        if effect_started and not (
+            isinstance(exc, PolicyError)
+            or (isinstance(exc, ProtocolError) and error["code"] in PRE_EFFECT_FAILURES)
+        ):
+            error["details"] = {
+                **error["details"],
+                "mutation_outcome": "indeterminate",
+                "retry_safe": False,
+            }
         receipt = self._record_v2_receipt(action, "error", context, error=error)
         return self.results.record(
             action=action.name,
@@ -1624,8 +1379,19 @@ class Runtime:
             request=context,
         )
 
-    def _claim_v2_idempotency(
-        self, action: Action, context: RequestContext
+    def owner_request_key(self, action: str, idempotency_key: str) -> str:
+        return (
+            "gateway-"
+            + hashlib.sha256(
+                json.dumps(
+                    [self.principal.name, action, idempotency_key],
+                    separators=(",", ":"),
+                ).encode()
+            ).hexdigest()
+        )
+
+    async def _claim_v2_idempotency(
+        self, action: Action, context: RequestContext, request: Mapping[str, Any]
     ) -> dict[str, Any] | None:
         if action.effect is EffectMode.READ:
             return None
@@ -1654,20 +1420,128 @@ class Runtime:
                 "idempotency_conflict",
                 "idempotency key was already used with a different request",
             )
-        raise ProtocolError(
-            "conflict", "matching idempotency request is still in progress"
-        )
+        if state == "indeterminate":
+            reducer_stop = (
+                action.name == "processes.signal"
+                and isinstance(request.get("request"), Mapping)
+                and request["request"].get("operation") == "stop"
+            )
+            if (
+                action.name in {"machine.operate", "machine.units.operate"}
+                or reducer_stop
+            ):
+                inp = action.Input.model_validate(request)
+                if reducer_stop:
+                    expected = inp.request.expected_target
+                    reference = f"sinnix://processes/{expected.get('pid')}/{expected.get('start_ticks')}"
+                    if (inp.target.ref is not None and inp.target.ref != reference) or (
+                        inp.target.pid is not None
+                        and inp.target.pid != expected.get("pid")
+                    ):
+                        raise ProtocolError(
+                            "indeterminate",
+                            "Process identity token does not match the original target",
+                        )
+                    verb, parameters = "stop", {}
+                elif action.name == "machine.operate":
+                    reference = inp.target
+                    verb = inp.request.action
+                    parameters = inp.request.parameters()
+                else:
+                    _, _, reference = inp.target.resolve()
+                    verb = inp.action
+                    parameters = {}
+                reference, target = self._machine_target(reference)
+                if not reducer_stop:
+                    expected = inp.expected_target or (inp.preconditions or {}).get(
+                        "expected_target"
+                    )
+                owner_request = {
+                    "action": verb,
+                    "target": target,
+                    "expected_target": expected,
+                    "idempotency_key": context.idempotency_key,
+                    "operator_reason": context.reason,
+                    "parameters": parameters,
+                }
+                expected_hash = hashlib.sha256(
+                    json.dumps(
+                        owner_request, sort_keys=True, separators=(",", ":")
+                    ).encode()
+                ).hexdigest()
+                try:
+                    receipt = await anyio.to_thread.run_sync(
+                        lambda: self.machine_actions.lookup(context.idempotency_key)
+                    )
+                except Exception:
+                    receipt = None
+                if (
+                    isinstance(receipt, Mapping)
+                    and receipt.get("status") == "confirmed"
+                    and receipt.get("request_hash") == expected_hash
+                ):
+                    verified = self._machine_receipt(
+                        receipt,
+                        action=verb,
+                        target=target,
+                        expected_target=expected,
+                        idempotency_key=context.idempotency_key,
+                        operator_reason=context.reason,
+                        parameters=parameters,
+                    )
+                    recovered = {
+                        "ref": reference,
+                        "action": verb,
+                        "owner_receipt": verified,
+                        "affordances": ["machine.query", "audit.receipt"],
+                    }
+                    if reducer_stop:
+                        recovered = {
+                            "ref": reference,
+                            "pid": target["process"]["pid"],
+                            "operation": "stop",
+                            "signal": "TERM",
+                            "delivered": True,
+                            "owner_receipt": verified,
+                            "affordances": ["processes.wait", "audit.receipt"],
+                        }
+                    response = self._v2_success(action, recovered, context)
+                    response = self._complete_v2_idempotency(action, context, response)
+                    return response
+            if action.name == "operations.run":
+                from .actions.jobs import _job_view
+
+                try:
+                    job = await anyio.to_thread.run_sync(
+                        lambda: self.jobs.reconcile_start(
+                            self.owner_request_key(action.name, context.idempotency_key)
+                        )
+                    )
+                except Exception:
+                    job = None
+                if job is not None:
+                    response = self._v2_success(
+                        action, _job_view(job).model_dump(mode="json"), context
+                    )
+                    response = self._complete_v2_idempotency(action, context, response)
+                    return response
+            raise ProtocolError(
+                "indeterminate",
+                "Previous invocation ended without a confirmed outcome; reconcile with the owner before any new effect. This key will not execute again.",
+            )
+        raise ProtocolError("conflict", "matching idempotency request is pending")
 
     def _complete_v2_idempotency(
         self, action: Action, context: RequestContext, response: Mapping[str, Any]
-    ) -> None:
+    ) -> dict[str, Any]:
         if action.effect is not EffectMode.READ and context.idempotency_key is not None:
-            self.audit.complete_idempotency(
+            return self.audit.complete_idempotency(
                 action.name,
                 context.idempotency_key,
                 context.request_sha256,
                 response,
             )
+        return dict(response)
 
     async def execute_v2_async(
         self,
@@ -1678,29 +1552,47 @@ class Runtime:
         context = RequestContext.create(hashlib.sha256(b"{}").hexdigest())
         reserved = False
         try:
-            context = self._request_context(request)
-            if self.principal_name not in action.principals:
-                raise PolicyError(
-                    f"principal {self.principal_name!r} cannot invoke action {action.name!r}"
+            try:
+                context = self._request_context(request)
+                if self.principal_name not in action.principals:
+                    raise PolicyError(
+                        f"principal {self.principal_name!r} cannot invoke action {action.name!r}"
+                    )
+                if context.preconditions and not action.supports_precondition:
+                    raise ProtocolError(
+                        "invalid_request", "action does not support preconditions"
+                    )
+                if (
+                    context.deadline_at is not None
+                    and time.time() >= context.deadline_at
+                ):
+                    raise ProtocolError(
+                        "deadline", "request deadline elapsed before execution"
+                    )
+                replay = await self._claim_v2_idempotency(action, context, request)
+                if replay is not None:
+                    return replay
+                reserved = action.effect is not EffectMode.READ
+                response = self._v2_success(action, await callback(), context)
+            except Exception as exc:
+                response = self._v2_failure(
+                    action, exc, context, effect_started=reserved
                 )
-            if context.preconditions and not action.supports_precondition:
-                raise ProtocolError(
-                    "invalid_request", "action does not support preconditions"
-                )
-            if context.deadline_at is not None and time.time() >= context.deadline_at:
-                raise ProtocolError(
-                    "deadline", "request deadline elapsed before execution"
-                )
-            replay = self._claim_v2_idempotency(action, context)
-            if replay is not None:
-                return replay
-            reserved = action.effect is not EffectMode.READ
-            response = self._v2_success(action, await callback(), context)
-        except Exception as exc:
-            response = self._v2_failure(action, exc, context)
-        if reserved:
-            self._complete_v2_idempotency(action, context, response)
-        return response
+            except BaseException:
+                if reserved and context.idempotency_key is not None:
+                    self.audit.abandon_idempotency(action.name, context.idempotency_key)
+                raise
+            if reserved:
+                if (response.get("error") or {}).get("details", {}).get(
+                    "mutation_outcome"
+                ) == "indeterminate":
+                    self.audit.abandon_idempotency(action.name, context.idempotency_key)
+                else:
+                    response = self._complete_v2_idempotency(action, context, response)
+            return response
+        finally:
+            if reserved and context.idempotency_key is not None:
+                self.audit.release_idempotency(action.name, context.idempotency_key)
 
 
 def _principal_contract(principal_name: str) -> str:

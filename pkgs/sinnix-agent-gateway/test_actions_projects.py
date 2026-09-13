@@ -24,7 +24,7 @@ ACTIONS = validate_actions(
     also_known=(
         "beads.query",
         "beads.get",
-        "beads.change",
+        "beads.update",
         "beads.changeset",
         "beads.operate",
     ),
@@ -463,16 +463,8 @@ def test_context_composes_orientation_and_triage(tmp_path: Path) -> None:
         and orientation["intent"] == "project.orientation"
     )
     assert orientation["snapshot_ref"].startswith("sinnix://results/")
-    by_name = {row["name"]: row for row in orientation["components"]}
-    assert by_name["project"]["status"] == "available"
-    assert by_name["project"]["data"]["changes"]["unstaged"] == 1
-    assert by_name["checkout"]["data"]["checkout"]["checkout_id"] == "default"
-    tasks = by_name["tasks"]
-    assert (
-        tasks["status"] == "unavailable"
-        or tasks["data"]["coverage"]["fixture"]["state"] == "partial"
-    )
-    assert orientation["context_schema"] == "sinnix.gateway-context.v1"
+    assert orientation["components"][0]["name"] == "lynchpin"
+    assert orientation["context_schema"] == "sinnix.owner-context.v2"
 
     triage = ok(
         server,
@@ -487,10 +479,7 @@ def test_context_composes_orientation_and_triage(tmp_path: Path) -> None:
         assert [row["source_revision"] for row in stored["components"]] == [
             row["source_revision"] for row in context["components"]
         ]
-    names = [row["name"] for row in triage["components"]]
-    assert names == ["project", "open_beads", "stale_claims", "changes"]
-    changes = next(row for row in triage["components"] if row["name"] == "changes")
-    assert "dirty" in changes["data"]["diff"]
+    assert [row["name"] for row in triage["components"]] == ["lynchpin"]
     assert (
         error(
             server,

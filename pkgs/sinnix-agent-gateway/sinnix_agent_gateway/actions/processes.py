@@ -298,9 +298,9 @@ def _sockets(pid: int) -> list[Socket]:
                     family=family,
                     local=_hex_addr(parts[1], v6),
                     remote=_hex_addr(parts[2], v6),
-                    state=_TCP_STATES.get(parts[3])
-                    if family.startswith("tcp")
-                    else None,
+                    state=(
+                        _TCP_STATES.get(parts[3]) if family.startswith("tcp") else None
+                    ),
                     inode=int(parts[9]),
                 )
             )
@@ -462,8 +462,8 @@ def _tree(runtime: Runtime, inp: TreeInput) -> ProcessTree:
 
 class ReducerStop(GatewayModel):
     operation: Literal["stop"] = "stop"
-    expected_revision: int = Field(
-        ge=0, description="Revision from machine.query operation=actions."
+    expected_target: dict[str, Any] = Field(
+        description="Target identity from machine.prepare for this process stop."
     )
 
 
@@ -505,7 +505,7 @@ def _signal(runtime: Runtime, inp: SignalInput) -> SignalResult:
             target=ref,
             action="stop",
             parameters={},
-            expected_revision=inp.request.expected_revision,
+            expected_target=inp.request.expected_target,
         )
         return SignalResult(
             ref=ref,
@@ -522,7 +522,12 @@ def _signal(runtime: Runtime, inp: SignalInput) -> SignalResult:
         )
     number = getattr(signal_module, f"SIG{inp.request.signal}")
     try:
-        os.kill(raw["pid"], number)
+        descriptor = os.pidfd_open(raw["pid"])
+        try:
+            ProcessLocator(ref=ref).resolve()
+            signal_module.pidfd_send_signal(descriptor, number)
+        finally:
+            os.close(descriptor)
     except ProcessLookupError as exc:
         raise ProtocolError("not_found", "process exited before the signal") from exc
     except PermissionError as exc:
@@ -677,13 +682,20 @@ ACTIONS: tuple[Action, ...] = (
         affordances=("processes.wait", "processes.get", "audit.receipt"),
         aliases=("kill", "pkill", "terminate", "sigterm", "sigkill"),
         supports_precondition=True,
-        documentation="The reducer path is the attested one and needs expected_revision; the direct path is receipted by the gateway audit chain only.",
+        documentation="The reducer path is the attested one and needs expected_target; the direct path is receipted by the gateway audit chain only.",
         examples=(
             Example(
                 title="Reducer stop",
                 input={
                     "target": {"pid": 4242},
-                    "request": {"operation": "stop", "expected_revision": 17},
+                    "request": {
+                        "operation": "stop",
+                        "expected_target": {
+                            "kind": "process",
+                            "pid": 4242,
+                            "start_ticks": 12345,
+                        },
+                    },
                     "reason": "runaway rg",
                     "idempotency_key": "stop-4242",
                 },

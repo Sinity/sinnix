@@ -127,7 +127,7 @@ mkServiceModule {
     intervalSeconds = lib.mkOption {
       type = lib.types.int;
       default = 10;
-      description = "Minimum interval between bounded sinnix-observe reads.";
+      description = "Interval between lightweight pressure and batched unit observations. Detailed diagnostics run on request.";
     };
 
     feedbackDir = lib.mkOption {

@@ -5,7 +5,7 @@ description: Use when invoking, inspecting, or documenting Sinnix Agent Gateway 
 
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: 0aead88fc7ca66ee7955e3f150bc27037a0158ff8c698ea944657d19e6aa21c9 -->
+<!-- gateway-catalog-sha256: 19ccdfa0ccf89ac27206323b65535c2ab3e6940704a8795fb670a7d5c8f8c154 -->
 
 # Agent Gateway
 
@@ -17,7 +17,7 @@ Every gateway action is one MCP tool named after the action; its input schema in
 - CLI: `sinnix-agent-gateway call <action> --input '{...}'` or `--set key=value` (values parse as JSON); `--principal` selects authority. `sinnix-agent-gateway catalog <action> --schema` prints the live schemas, `--example` the examples, `catalog --complete <prefix>` lists names.
 - Discovery: `gateway.catalog` with a plain-words `query` finds actions, resources and brokered MCP tools; `gateway.status` reports contract hashes and route availability.
 
-Effectful actions (families change, operate, run) require `idempotency_key`; replaying the same key with the same request returns the stored response. Preconditions such as `expected_sha256` or checkout `head` fail with `precondition_failed` instead of overwriting.
+Effectful actions (families change, operate, run) require `idempotency_key`. Confirmed responses replay unchanged. Pending calls refuse concurrent execution; interrupted calls become indeterminate and never retry their effects automatically. `operations.run` reconciles through its durable agentctl launch identity; reducer-backed machine actions and process stop reconcile only exact confirmed owner receipts. Other interrupted mutations remain indeterminate. Preconditions are owner-specific checks, best effort unless the owner explicitly guarantees atomic comparison and mutation.
 
 ## Actions
 
@@ -53,8 +53,17 @@ Effectful actions (families change, operate, run) require `idempotency_key`; rep
 - `projects.export` — Sensitive, local-only, hidden, and symlinked paths are excluded. The export is bounded and includes a manifest with file hashes and the checkout revision.
 - `projects.diff` — Show uncommitted changes in a checkout, optionally against a git ref.
 - `projects.search` — Search project file contents with ripgrep.
-- `beads.closure` — Read a bounded dependency closure, cycles, declared gates and decisions, readiness and incomplete frontier at one revision.
-- `beads.query` — The owner filters, projects and counts before serialization. limit sizes pages of one immutable snapshot of all matching rows; cursors never reread live rows. Snapshot storage and memory scale with the matching data, so use projection or aggregate for broad queries. at pins historical reads to an exact resolved Dolt revision. aggregate counts or groups without fetching issue bodies.
+- `beads.closure` — Read native dependency closure, cycles, readiness and incomplete frontier at one revision.
+- `beads.query` — The owner filters, projects and counts before serialization. limit sizes immutable observation pages; cursors never reread live rows. Owner coverage reports any bounded prefix; beads.read exposes native offset paging. at pins historical reads to an exact resolved Dolt revision. aggregate counts or groups without fetching issue bodies.
+- `beads.read` — Read native Beads queries, counts or dependency closure with owner revisions and paging.
+- `beads.dependencies.count` — The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
+- `beads.graph` — The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
+- `beads.memory.get` — The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
+- `beads.blockers` — The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
+- `beads.dependencies` — The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
+- `beads.cycles` — The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
+- `beads.memories` — The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
+- `beads.related` — The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
 - `jobs.list` — List queued jobs (pueue tasks) newest first, optionally for one project.
 - `batches.list` — List batch runs newest first, with each worker's stage and task.
 - `desktop.screenshot` — full captures the focused output through the HDR-aware screenshot owner; window/rect/monitor targets capture with grim. On HDR outputs a corrected SDR variant is produced and preferred for the image block.
@@ -72,9 +81,19 @@ Effectful actions (families change, operate, run) require `idempotency_key`; rep
 - `artifacts.read` — Read an artifact: text inline with offsets, images as image blocks, other binary as read-only links.
 - `captures.query` — List runtime-declared capture lanes, describe one, or read per-lane record deltas since a time.
 - `activity.query` — Reads sinnix-capture-v1 envelope files under each lane path within the time window; coverage lists which lanes contributed and which have no envelope files.
-- `sessions.query` — operation=structured queries Polylogue's sessions projection and retains owner coverage and provenance. The owner does not support sessions continuation. Legacy list cursors continue a newest-first snapshot for one hour; legacy reads return next_offset and legacy searches expose their bounded file coverage.
-- `memory.query` — Search session-derived memory across providers or fetch one object by reference, with source provenance.
-- `timeline.query` — Session evidence ordered by file mtime within an RFC 3339 window, per provider, without claiming unavailable upstreams.
+- `sessions.query` — Read indexed session pages or explicit original-source fallback through Polylogue.
+- `memory.query` — Search original session sources or read one source object with explicit coverage.
+- `timeline.query` — Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.
+- `sessions.list` — Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.
+- `sessions.search` — Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.
+- `sessions.read` — Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.
+- `sessions.raw.list` — Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.
+- `sessions.raw.search` — Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.
+- `sessions.raw.read` — Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.
+- `sessions.raw.timeline` — Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.
+- `memory.raw.get` — Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.
+- `memory.raw.search` — Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.
+- `sessions.resume` — Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.
 - `campaign.progress` — Task closure, verified delivery and acceptance remain separate. Missing evidence is unknown; bounded closure cannot establish an exact denominator. Historical task state is read at its resolved owner revision.
 - `sessions.orchestration` — Native parent, model and token fields remain unknown when absent from stored evidence. Each owner product retains its coverage, provenance and ingestion watermark.
 
@@ -88,6 +107,7 @@ Effectful actions (families change, operate, run) require `idempotency_key`; rep
 - `terminals.get` — Resolve one terminal by ref, kitty id, title, cwd, pid or focus.
 - `browser.page` — Element refs (g<generation>e<n>) are attached to the DOM for this snapshot; a later snapshot or reload replaces them, and a stale ref fails not_found.
 - `machine.units.get` — Describe one unit via systemctl show: states, main pid, cgroup, restarts, timestamps.
+- `machine.prepare` — Read the selected target identity and action preconditions without changing it.
 - `processes.get` — Describe one process: cmdline, cwd, exe, redacted env, cgroup/unit, parent, children, sockets, cpu and memory.
 - `artifacts.get` — Metadata of one artifact without its bytes.
 - `audit.receipt` — Read one principal-scoped audit receipt by ref or id.
@@ -96,7 +116,7 @@ Effectful actions (families change, operate, run) require `idempotency_key`; rep
 ### context
 
 - `projects.context` — Components are budgeted independently; an unavailable component names its reason and source ref so the caller can follow the direct route.
-- `context.compose` — Each component is budgeted and isolated: an unavailable owner marks its component unavailable with a reason instead of failing the call. The snapshot is persisted under snapshot_ref.
+- `context.compose` — The selected owner supplies domain composition, source coverage and partial results. The gateway preserves its product and availability in an immutable observation under snapshot_ref.
 
 ### events
 
@@ -115,8 +135,22 @@ Effectful actions (families change, operate, run) require `idempotency_key`; rep
 - `files.change` — Copy and move never overwrite an existing destination. Remove supports regular files only.
 - `files.changeset` — All planned sources, destinations and parents are revalidated before the first mutation. Transfers never overwrite. Results are honest about partial completion and no global atomicity is claimed.
 - `projects.change` — Paths stay project-relative and policy-excluded paths (.git, secrets, local-only agent state) are refused. Take expected_dirty_sha256 or expected_head from projects.get, or expected_file_sha256 from projects.read.
-- `beads.change` — expected.expected_task_revision/expected_etag come from beads.get. Use mode=preview to see the compiled command and a preview_digest before applying.
-- `beads.changeset` — No global rollback: each applied step reports its outcome and a compensation hint. Preview first, then apply with the returned preview_digest.
+- `beads.comment` — The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
+- `beads.dependencies.add` — The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
+- `beads.changeset` — The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
+- `beads.batch.close` — The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
+- `beads.graph.create` — The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
+- `beads.claim` — The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
+- `beads.claim_next` — The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
+- `beads.close` — The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
+- `beads.metadata.compare_set` — The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
+- `beads.create` — The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
+- `beads.memory.forget` — The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
+- `beads.unclaim` — The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
+- `beads.memory.remember` — The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
+- `beads.dependencies.remove` — The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
+- `beads.reopen` — The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
+- `beads.update` — The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
 - `mcp.change` — Invoke an upstream request not admitted as read-only by annotation or trusted registry selectors.
 
 ### operate
@@ -130,9 +164,9 @@ Effectful actions (families change, operate, run) require `idempotency_key`; rep
 - `terminals.focus` — Focus one kitty window.
 - `terminals.open` — Open a new kitty window (OS window, split or tab) with an optional cwd and command; returns its ref.
 - `browser.operate` — Operator tabs are never accepted as targets, even when a locator matches one. Element targets take a snapshot ref or a CSS selector.
-- `machine.operate` — expected_revision must match machine.query operation=actions; the reducer receipt is verified against the submitted action and target.
+- `machine.operate` — expected_target must match the target identity returned by machine.prepare; the reducer receipt is verified against the submitted action and target.
 - `machine.units.operate` — Start, stop or restart one unit through the ops reducer (reload and wait are not reducer actions).
-- `processes.signal` — The reducer path is the attested one and needs expected_revision; the direct path is receipted by the gateway audit chain only.
+- `processes.signal` — The reducer path is the attested one and needs expected_target; the direct path is receipted by the gateway audit chain only.
 
 ### run
 
@@ -145,4 +179,4 @@ Effectful actions (families change, operate, run) require `idempotency_key`; rep
 
 The complete schemas and examples are in `docs/generated/agent-gateway-reference.md`.
 
-Catalog revision: `v3-typed-actions`. Catalog SHA-256: `0aead88fc7ca66ee7955e3f150bc27037a0158ff8c698ea944657d19e6aa21c9`.
+Catalog revision: `v3-typed-actions`. Catalog SHA-256: `19ccdfa0ccf89ac27206323b65535c2ab3e6940704a8795fb670a7d5c8f8c154`.

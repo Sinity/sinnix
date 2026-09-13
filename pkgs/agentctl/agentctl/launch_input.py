@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import tempfile
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
@@ -97,15 +98,24 @@ def scratch_path(kind: str, reference: str) -> Path | None:
 
 
 def write_input(path: Path, document: Mapping[str, Any]) -> None:
-    """Write the document privately (0600, never through a symlink)."""
+    """Atomically publish a private input so acknowledgement cannot tear it."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor = os.open(
-        path, os.O_CREAT | os.O_TRUNC | os.O_WRONLY | os.O_NOFOLLOW, 0o600
-    )
-    with os.fdopen(descriptor, "wb") as handle:
-        handle.write(
-            json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
-        )
+    descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(
+                json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
+            )
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
 
 
 def read_input(path: Path) -> dict[str, Any]:

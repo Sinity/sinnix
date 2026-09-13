@@ -7,11 +7,14 @@
       fakeNix = pkgs.writeShellScriptBin "nix" ''
         case "$1" in
           eval)
+            echo eval >> "$EVALUATION_LOG"
             [ "''${DISCOVERY_FAIL:-0}" = 0 ] || exit 7
             printf '%s\n' "$DISCOVERY_JSON"
             ;;
           build)
-            printf '%s\n' "$2" >> "$BUILD_LOG"
+            echo build >> "$BUILD_CALLS"
+            shift
+            printf '%s\n' "$@" >> "$BUILD_LOG"
             exit "''${BUILD_STATUS:-0}"
             ;;
           *) exit 64 ;;
@@ -22,9 +25,7 @@
         pkgs = pkgs // {
           nix = fakeNix;
         };
-        sinnixScriptRegistry.packageSet.nix-safe = pkgs.writeShellScriptBin "nix-safe" ''
-          exec ${fakeNix}/bin/nix "$@"
-        '';
+        sinnixScriptRegistry.packageSet = { };
       };
       commands =
         map
@@ -92,9 +93,11 @@
     {
       checks.check-discovery = pkgs.runCommand "check-discovery" { } ''
         export SINNIX_FLAKE_DIR="$TMPDIR" BUILD_LOG="$TMPDIR/builds"
+        export BUILD_CALLS="$TMPDIR/build-calls" EVALUATION_LOG="$TMPDIR/evaluations"
+        good='{"one":"/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-one.drv","two":"/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-two.drv"}'
         unset AGENTCTL_PRINCIPAL AGENTCTL_OPERATION
         for command in ${pkgs.lib.escapeShellArgs commands}; do
-          for malformed in '[]' '{}' 'null' 'invalid' '[1]' '[""]'; do
+          for malformed in '[]' '{}' 'null' 'invalid' '[1]' '[""]' '{"one":1}' '{"one":"relative.drv"}' '{"one":"/nix/store/value"}'; do
             : > "$BUILD_LOG"
             if DISCOVERY_JSON="$malformed" "$command"; then
               echo "invalid discovery succeeded: $malformed" >&2
@@ -103,20 +106,28 @@
             test ! -s "$BUILD_LOG"
           done
           : > "$BUILD_LOG"
-          if DISCOVERY_FAIL=1 DISCOVERY_JSON='["one"]' "$command"; then
+          if DISCOVERY_FAIL=1 DISCOVERY_JSON="$good" "$command"; then
             echo "evaluation failure succeeded" >&2
             exit 1
           fi
           test ! -s "$BUILD_LOG"
-          DISCOVERY_JSON='["one","two"]' "$command"
-          test -s "$BUILD_LOG"
-          if BUILD_STATUS=9 DISCOVERY_JSON='["one"]' "$command"; then
+          : > "$BUILD_LOG"
+          : > "$BUILD_CALLS"
+          : > "$EVALUATION_LOG"
+          DISCOVERY_JSON="$good" "$command"
+          test "$(wc -l < "$BUILD_CALLS")" = 1
+          expected_evaluations=1
+          case "$command" in *-check-all) expected_evaluations=2 ;; esac
+          test "$(wc -l < "$EVALUATION_LOG")" = "$expected_evaluations"
+          grep -Fxq '/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-one.drv^*' "$BUILD_LOG"
+          grep -Fxq '/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-two.drv^*' "$BUILD_LOG"
+          if BUILD_STATUS=9 DISCOVERY_JSON="$good" "$command"; then
             echo "build failure succeeded" >&2
             exit 1
           fi
         done
         : > "$BUILD_LOG"
-        DISCOVERY_JSON='["one","two"]' ${builtins.head commands} --no-build
+        DISCOVERY_JSON="$good" ${builtins.head commands} --no-build
         test ! -s "$BUILD_LOG"
         export SUDO_HOME="$TMPDIR" ACTIVATION_LOG="$TMPDIR/activation"
         printf '{ }\n' > "$TMPDIR/secret-declarations.nix"
@@ -152,6 +163,16 @@
               exit 1
             fi
           done
+          : > "$ACTIVATION_LOG"
+          ACTIVATION_STATUS=7 "$command" || test "$?" = 7
+          if grep -Eq -- '--max-jobs|--cores|eval-cache = false' "$ACTIVATION_LOG"; then
+            echo "$name overrode native Nix defaults" >&2
+            exit 1
+          fi
+          : > "$ACTIVATION_LOG"
+          SINNIX_REBUILD_MAX_JOBS=1 SINNIX_REBUILD_CORES=3 NIX_CONFIG="eval-cache = true" ACTIVATION_STATUS=7 "$command" || test "$?" = 7
+          grep -Fq -- '--max-jobs 1 --cores 3' "$ACTIVATION_LOG"
+          grep -Fq -- '--setenv=NIX_CONFIG=eval-cache = true' "$ACTIVATION_LOG"
         }
         ${activationCases}
         test -x "${activationExecutables.test-system}"

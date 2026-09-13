@@ -528,6 +528,11 @@ def test_a_landing_queued_behind_a_worker_is_cancelled_by_its_own_reference(
         after=[worker["job_id"]],
     )
 
+    landing_input = config.inputs_dir / f"{landing['reference']}.json"
+    landing_before = landing_input.read_bytes()
+    worker_input = config.inputs_dir / f"{worker['reference']}.json"
+    worker_before = worker_input.read_bytes()
+
     subprocess.run(
         ["pueue", "switch", str(worker["job_id"]), str(landing["job_id"])], check=True
     )
@@ -535,13 +540,19 @@ def test_a_landing_queued_behind_a_worker_is_cancelled_by_its_own_reference(
     cancelled = launch.cancel(config, landing["job_id"], reference=landing["reference"])
 
     assert cancelled["reference"] == landing["reference"]
-    assert cancelled["job_id"] == worker["job_id"], (
-        "the landing did not follow the switch to the worker's old id"
+    assert (
+        cancelled["job_id"] == worker["job_id"]
+    ), "the landing did not follow the switch to the worker's old id"
+    assert pueue.task(cancelled["job_id"]) is None
+    assert landing_input.read_bytes() == landing_before
+    retained = launch.get_job(
+        cancelled["job_id"], config, reference=landing["reference"]
     )
-    assert not (config.inputs_dir / f"{landing['reference']}.json").exists()
+    assert retained["queue_present"] is False
+    assert retained["reference"] == landing["reference"]
     survivor = launch.get_job(landing["job_id"], config, reference=worker["reference"])
     assert not survivor["terminal"], "the cancel reached the worker, not the landing"
-    assert (config.inputs_dir / f"{worker['reference']}.json").exists()
+    assert worker_input.read_bytes() == worker_before
 
 
 def test_kill_reaches_the_whole_process_tree(live_pueue: str, tmp_path: Path) -> None:

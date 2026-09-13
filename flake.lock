@@ -757,16 +757,17 @@
         "nixpkgs": [
           "nixpkgs"
         ],
+        "nixpkgsRepomix": "nixpkgsRepomix",
         "polylogueSrc": [
           "polylogue"
         ]
       },
       "locked": {
-        "lastModified": 1789162907,
-        "narHash": "sha256-mrhOn1fvP3YIzDVsPelxotEMPMiIivtmBSO92cqL9/0=",
+        "lastModified": 1789261763,
+        "narHash": "sha256-Eg0iLHe7vH3rB4b0QEFZtc6FocZNfGWtIl5Zt79WDUs=",
         "ref": "master",
-        "rev": "6f160e9f8aafd6fc0a7be6fbf2400bfb3cb742f5",
-        "revCount": 458,
+        "rev": "842e7a1e943aea766e95d824c2db934f07dd0447",
+        "revCount": 463,
         "type": "git",
         "url": "file:///realm/project/sinity-lynchpin"
       },
@@ -1189,6 +1190,22 @@
         "type": "github"
       }
     },
+    "nixpkgsRepomix": {
+      "locked": {
+        "lastModified": 1789006805,
+        "narHash": "sha256-xB8mKMOx1IA9vTDNLmJZ6n4wCMq/cuWBBOzGCRnqxrU=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "8ce4ef6cb6f871616146b9fe26d2a5ae594e94fe",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
     "nixpkgs_2": {
       "locked": {
         "lastModified": 1762156382,
@@ -1380,11 +1397,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1789158145,
-        "narHash": "sha256-nXaIMqYqpao3fDLbjyfcfb4bYP5chG71x5GoF/Kn8GI=",
+        "lastModified": 1789263852,
+        "narHash": "sha256-vnYd93JFD9pIZYszb71DuMOT4ONlciMUCh9W0xl+Xs4=",
         "owner": "Sinity",
         "repo": "polylogue",
-        "rev": "688a617244a83724ece31044bcb480e26882fd3a",
+        "rev": "be9adec640981f6903fb2ce81ed6407be494b116",
         "type": "github"
       },
       "original": {

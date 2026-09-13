@@ -137,11 +137,6 @@ mkServiceModule {
                 default = 3088;
                 description = "Loopback health, readiness, metrics, and UI port.";
               };
-              approvedManifestHash = lib.mkOption {
-                type = lib.types.nullOr lib.types.str;
-                default = null;
-                description = "Frozen endpoint tool manifest SHA-256 after publication.";
-              };
             };
           }
         )
@@ -209,7 +204,7 @@ mkServiceModule {
           };
           projects = endpointProjects endpoint;
           approvals = {
-            approvedManifestHash = endpoint.approvedManifestHash;
+            packageManifestPath = "${scriptPkgs.sinnix-agent-gateway}/share/sinnix-agent-gateway/manifests/${endpoint.principal}.json";
             approvedManifestPrincipal = endpoint.principal;
           };
         })
@@ -291,10 +286,6 @@ mkServiceModule {
           {
             assertion = endpoint.tunnelId != "";
             message = "sinnix.services.agent-gateway.endpoints.${name}.tunnelId must be set when the endpoint is enabled";
-          }
-          {
-            assertion = endpoint.approvedManifestHash != null;
-            message = "sinnix.services.agent-gateway.endpoints.${name} requires an approved tool manifest hash";
           }
         ]) enabledEndpoints
       );

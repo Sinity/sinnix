@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
+import os
 import sqlite3
 import time
 import uuid
@@ -24,6 +26,7 @@ class AuditService:
         self.principal = principal
         config.initialize_state()
         self.path = config.state_dir / "audit" / "events.sqlite3"
+        self._claims: dict[tuple[str, str], int] = {}
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
@@ -119,43 +122,73 @@ class AuditService:
     def claim_idempotency(
         self, action: str, idempotency_key: str, request_sha256: str
     ) -> tuple[str, dict[str, Any] | None]:
-        """Atomically reserve one mutation identity or return its completed response."""
+        """Reserve one response identity; interrupted effects remain uncertain."""
         if not action or not idempotency_key:
             raise ValueError("action and idempotency key are required")
         now = time.time()
-        with self._connect() as connection:
-            connection.execute("begin immediate")
-            row = connection.execute(
-                "select request_sha256,state,response_json from idempotency where principal = ? and action = ? and idempotency_key = ?",
-                (self.principal.name, action, idempotency_key),
-            ).fetchone()
-            if row is None:
-                connection.execute(
-                    "insert into idempotency(principal,action,idempotency_key,request_sha256,state,response_json,receipt_id,created_at,updated_at) values (?, ?, ?, ?, 'in_progress', null, null, ?, ?)",
-                    (
-                        self.principal.name,
-                        action,
-                        idempotency_key,
-                        request_sha256,
-                        now,
-                        now,
-                    ),
-                )
-                connection.execute("commit")
-                return "new", None
-            if row[0] != request_sha256:
-                connection.execute("commit")
-                return "conflict", None
-            if row[1] != "complete" or row[2] is None:
-                connection.execute("commit")
-                return "in_progress", None
+        identity = (action, idempotency_key)
+        lock_name = hashlib.sha256(
+            _canonical([self.principal.name, *identity])
+        ).hexdigest()
+        descriptor = os.open(
+            self.path.parent / f"{lock_name}.lock", os.O_CREAT | os.O_RDWR, 0o600
+        )
+        try:
             try:
-                response = json.loads(row[2])
-            except json.JSONDecodeError as exc:
-                connection.execute("rollback")
-                raise ValueError("stored idempotency response is malformed") from exc
-            connection.execute("commit")
-            return "replay", response
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                os.close(descriptor)
+                descriptor = None
+            with self._connect() as connection:
+                connection.execute("begin immediate")
+                row = connection.execute(
+                    "select request_sha256,state,response_json from idempotency where principal = ? and action = ? and idempotency_key = ?",
+                    (self.principal.name, action, idempotency_key),
+                ).fetchone()
+                if row is None:
+                    if descriptor is None:
+                        connection.execute("commit")
+                        return "pending", None
+                    connection.execute(
+                        "insert into idempotency(principal,action,idempotency_key,request_sha256,state,response_json,receipt_id,created_at,updated_at) values (?, ?, ?, ?, 'pending', null, null, ?, ?)",
+                        (
+                            self.principal.name,
+                            action,
+                            idempotency_key,
+                            request_sha256,
+                            now,
+                            now,
+                        ),
+                    )
+                    connection.execute("commit")
+                    self._claims[identity] = descriptor
+                    descriptor = None
+                    return "new", None
+                if row[0] != request_sha256:
+                    connection.execute("commit")
+                    return "conflict", None
+                if row[1] not in {"complete", "confirmed"} or row[2] is None:
+                    # The released process lock proves the caller ended, not
+                    # whether its owner accepted the effect. Never rerun here.
+                    state = "indeterminate" if descriptor is not None else "pending"
+                    if state == "indeterminate":
+                        connection.execute(
+                            "update idempotency set state = 'indeterminate', updated_at = ? where principal = ? and action = ? and idempotency_key = ?",
+                            (now, self.principal.name, action, idempotency_key),
+                        )
+                    connection.execute("commit")
+                    return state, None
+                try:
+                    response = json.loads(row[2])
+                except json.JSONDecodeError as exc:
+                    raise ValueError(
+                        "stored idempotency response is malformed"
+                    ) from exc
+                connection.execute("commit")
+                return "replay", response
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
 
     def complete_idempotency(
         self,
@@ -163,7 +196,7 @@ class AuditService:
         idempotency_key: str,
         request_sha256: str,
         response: Mapping[str, Any],
-    ) -> None:
+    ) -> dict[str, Any]:
         receipt = response.get("receipt")
         receipt_id = receipt.get("receipt_id") if isinstance(receipt, Mapping) else None
         if not isinstance(receipt_id, str):
@@ -171,7 +204,7 @@ class AuditService:
         with self._connect() as connection:
             connection.execute("begin immediate")
             updated = connection.execute(
-                "update idempotency set state = 'complete', response_json = ?, receipt_id = ?, updated_at = ? where principal = ? and action = ? and idempotency_key = ? and request_sha256 = ? and state = 'in_progress'",
+                "update idempotency set state = 'confirmed', response_json = ?, receipt_id = ?, updated_at = ? where principal = ? and action = ? and idempotency_key = ? and request_sha256 = ? and state in ('pending', 'in_progress', 'indeterminate')",
                 (
                     json.dumps(response, sort_keys=True, separators=(",", ":")),
                     receipt_id,
@@ -183,9 +216,31 @@ class AuditService:
                 ),
             ).rowcount
             if updated != 1:
-                connection.execute("rollback")
-                raise ValueError("idempotency reservation is unavailable")
+                row = connection.execute(
+                    "select response_json from idempotency where principal = ? and action = ? and idempotency_key = ? and request_sha256 = ? and state in ('confirmed','complete')",
+                    (self.principal.name, action, idempotency_key, request_sha256),
+                ).fetchone()
+                if row is None or row[0] is None:
+                    connection.execute("rollback")
+                    raise ValueError("idempotency reservation is unavailable")
+                response = json.loads(row[0])
             connection.execute("commit")
+        self.release_idempotency(action, idempotency_key)
+        return dict(response)
+
+    def abandon_idempotency(self, action: str, idempotency_key: str) -> None:
+        """Persist uncertainty after interruption; no lease expiry permits retry."""
+        with self._connect() as connection:
+            connection.execute(
+                "update idempotency set state = 'indeterminate', updated_at = ? where principal = ? and action = ? and idempotency_key = ? and state in ('pending','in_progress')",
+                (time.time(), self.principal.name, action, idempotency_key),
+            )
+        self.release_idempotency(action, idempotency_key)
+
+    def release_idempotency(self, action: str, idempotency_key: str) -> None:
+        descriptor = self._claims.pop((action, idempotency_key), None)
+        if descriptor is not None:
+            os.close(descriptor)
 
     def receipt(self, receipt_id: str) -> dict[str, Any]:
         """Return one principal-scoped audit event as a canonical receipt."""

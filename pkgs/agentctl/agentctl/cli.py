@@ -168,6 +168,9 @@ def parser() -> argparse.ArgumentParser:
     )
     start.add_argument("--wait", action="store_true")
     start.add_argument("--timeout-seconds", type=int, default=DEFAULT_WAIT_SECONDS)
+    start.add_argument(
+        "--owner-request-key", help="durable owner identity for an idempotent launch"
+    )
     _output_arguments(start)
     fire = job_verbs.add_parser(
         "fire", help="a timer's launch: skipped while the operation is active"
@@ -193,9 +196,29 @@ def parser() -> argparse.ArgumentParser:
         one = job_verbs.add_parser(name)
         one.add_argument("job_id", type=int)
         _reference_option(one)
+        if name in {"get", "logs", "result"}:
+            one.add_argument(
+                "--attempt", type=int, help="execution attempt (latest by default)"
+            )
+        if name == "cancel":
+            one.add_argument(
+                "--expected-attempt",
+                type=int,
+                help="refuse if the selected launch has advanced to another attempt",
+            )
+        if name == "get":
+            one.add_argument("--attempt-offset", type=int, default=0)
+            one.add_argument("--attempt-limit", type=int, default=100)
+        if name in {"logs", "result"}:
+            one.add_argument(
+                "--offset", type=int, default=0, help="byte offset in the artifact"
+            )
+            one.add_argument(
+                "--limit", type=int, default=65536, help="maximum bytes in this page"
+            )
         _output_arguments(one)
     clean = job_verbs.add_parser(
-        "clean", help="delete a terminal task and its artifacts (never by age)"
+        "clean", help="remove a terminal queue task, retaining execution evidence"
     )
     clean.add_argument("job_id", type=int, nargs="?")
     _reference_option(clean)
@@ -433,6 +456,7 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
             project,
             operation,
             workspace=arguments.workspace,
+            owner_request_key=arguments.owner_request_key,
             extra_argv=(*rest[1:], *getattr(arguments, "extra", [])),
         )
         if arguments.wait:
@@ -471,18 +495,40 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         out.read(rows, out.jobs_table(rows))
         return EXIT_OK
     if verb == "snapshot":
-        snapshot = launch.snapshot_jobs(arguments.limit)
+        snapshot = launch.snapshot_jobs(arguments.limit, config)
         out.read(snapshot, out.jobs_table(snapshot["jobs"]))
         return EXIT_OK
     if verb == "get":
-        job = launch.get_job(arguments.job_id, config, arguments.reference)
+        job = launch.get_job(
+            arguments.job_id,
+            config,
+            arguments.reference,
+            attempt=arguments.attempt,
+            attempt_offset=arguments.attempt_offset,
+            attempt_limit=arguments.attempt_limit,
+        )
         out.read(job, out.job_line(job))
         return EXIT_OK
     if verb == "logs":
-        sys.stdout.write(launch.logs(config, arguments.job_id, arguments.reference))
+        page = launch.read_job_artifact(
+            config,
+            arguments.job_id,
+            arguments.reference,
+            attempt=arguments.attempt,
+            offset=arguments.offset,
+            limit=arguments.limit,
+        )
+        out.read(page, page["text"])
         return EXIT_OK
     if verb == "result":
-        result = launch.result(config, arguments.job_id, arguments.reference)
+        result = launch.result(
+            config,
+            arguments.job_id,
+            arguments.reference,
+            attempt=arguments.attempt,
+            offset=arguments.offset,
+            limit=arguments.limit,
+        )
         value = result.get("value")
         text = (
             out.job_line(result)
@@ -496,7 +542,12 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         out.read(result, text)
         return EXIT_OK
     if verb == "cancel":
-        job = launch.cancel(config, arguments.job_id, reference=arguments.reference)
+        job = launch.cancel(
+            config,
+            arguments.job_id,
+            reference=arguments.reference,
+            expected_attempt=arguments.expected_attempt,
+        )
         out.write(job, f"{out.job_line(job)}; {job['state']}")
         return EXIT_REFUSED if job["state"] == "failed" else EXIT_OK
     if verb == "clean":
@@ -571,9 +622,7 @@ def _batch(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         note = (
             "already prepared; nothing launched"
             if started.get("existing") and not started.get("resumed")
-            else "preparation completed"
-            if started.get("resumed")
-            else "started"
+            else "preparation completed" if started.get("resumed") else "started"
         )
         out.write(started, f"{out.run_lines(started)}\n{note}")
         return EXIT_OK

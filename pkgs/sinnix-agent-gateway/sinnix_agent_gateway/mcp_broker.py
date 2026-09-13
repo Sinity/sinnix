@@ -25,6 +25,7 @@ from .config import (
     GatewayConfig,
     validate_mcp_call_timeout,
 )
+from .payloads import retain
 
 
 class McpBrokerError(ValueError):
@@ -452,12 +453,13 @@ class McpBrokerService:
         directory = self.config.state_dir / "captures" / uuid.uuid4().hex
         directory.mkdir(mode=0o700, parents=True)
         source = directory / "mcp-response.json"
-        source.write_bytes(encoded)
+        retain(self.config.state_dir / "payloads", encoded, link=source)
         receipt = self.artifacts.attest_capture(
             directory,
             source="mcp-upstream",
             target={"server": server_name, "tool": tool_name},
             files=[source],
+            durable=True,
         )
         artifact_id = self.artifacts.register(
             source,
@@ -507,7 +509,7 @@ class McpBrokerService:
         )
         return self.artifacts.register(source, kind="mcp-stderr", owner_id=server_name)
 
-    async def call(
+    async def owner_result(
         self,
         server_name: str,
         tool_name: str,
@@ -614,6 +616,21 @@ class McpBrokerService:
                 f"MCP upstream {server_name} is unavailable: {type(exc).__name__}{diagnostic}"
             ) from exc
         shutil.rmtree(stderr_directory, ignore_errors=True)
+        return response
+
+    async def call(
+        self,
+        server_name: str,
+        tool_name: str,
+        arguments: dict[str, Any],
+        *,
+        write: bool,
+        deadline_at: float | None = None,
+    ) -> dict[str, Any]:
+        """Budget the external presentation after obtaining a lossless owner result."""
+        response = await self.owner_result(
+            server_name, tool_name, arguments, write=write, deadline_at=deadline_at
+        )
         encoded = json.dumps(response, sort_keys=True, separators=(",", ":")).encode()
         result = {
             "server": server_name,

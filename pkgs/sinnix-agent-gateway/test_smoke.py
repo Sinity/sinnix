@@ -295,9 +295,9 @@ def test_gateway_status_reports_distinct_manifest_provenance(tmp_path: Path) -> 
         },
     }
     assert status["manifests"]["comparisons"] == {
-        "live_to_nix_approved": "match",
+        "live_to_package_generated": "match",
         "live_to_chatgpt_observed": "unobserved",
-        "nix_approved_to_chatgpt_observed": "unobserved",
+        "package_generated_to_chatgpt_observed": "unobserved",
     }
 
     snapshot = cfg.state_dir / "connector-snapshot.json"
@@ -342,9 +342,9 @@ def test_gateway_status_reports_distinct_manifest_provenance(tmp_path: Path) -> 
         "v2-test",
     )
     assert status["manifests"]["comparisons"] == {
-        "live_to_nix_approved": "match",
+        "live_to_package_generated": "match",
         "live_to_chatgpt_observed": "mismatch",
-        "nix_approved_to_chatgpt_observed": "mismatch",
+        "package_generated_to_chatgpt_observed": "mismatch",
     }
 
 
@@ -445,13 +445,13 @@ def test_gateway_status_keeps_unapproved_principal_unobserved(tmp_path: Path) ->
         "operator", "capability-hash", "operator-live-hash", "catalog-hash", "v2-test"
     )
 
-    assert status["manifests"]["nix_approved"] is None
+    assert status["manifests"]["package_generated"] is None
     assert status["catalog"]["chatgpt_observed"] is None
     assert set(status["catalog"]["comparisons"].values()) == {"unobserved"}
     assert status["manifests"]["comparisons"] == {
-        "live_to_nix_approved": "unobserved",
+        "live_to_package_generated": "unobserved",
         "live_to_chatgpt_observed": "unobserved",
-        "nix_approved_to_chatgpt_observed": "unobserved",
+        "package_generated_to_chatgpt_observed": "unobserved",
     }
 
 

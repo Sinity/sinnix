@@ -36,9 +36,11 @@ def hub_server_factory(tmp_path: Path) -> Iterator[Callable[..., str]]:
         usage_census_path: Path | None = None,
         feedback: FeedbackSpool | None = None,
         elicit_model_dir: Path | None = None,
+        actions: Any = None,
     ) -> str:
         reducer = Reducer(tmp_path / "status.json", tmp_path / "token", sources)
         reducer.refresh()
+        reducer.actions = actions
         server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         server.reducer = reducer
         server.token = "fixture-token"

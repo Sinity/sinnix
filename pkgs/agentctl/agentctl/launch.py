@@ -3,12 +3,13 @@
 A job is a pueue task in the descriptor's pool with label
 ``<project>:<operation>``. Its id is the pueue task id; pueue's state is the
 job's state. agentctl adds only the launch input `agentctl-run` consumes
-(argv, environment, timeout, artifact paths) and reads the bounded log and
+(argv, environment, timeout, artifact paths) and reads bounded views of the complete log and
 typed result back by the launch reference embedded in the task's command.
 """
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
@@ -22,7 +23,7 @@ import uuid
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Mapping, Sequence
 
-from . import gitcmd, manifest, pueue
+from . import artifacts, gitcmd, manifest, pueue
 from .config import Config
 from .launch_input import scratch_path, write_input
 from .limits import CALL_TIMEOUT_SECONDS, SHORT_ID, SYSTEMCTL_TIMEOUT_SECONDS
@@ -185,6 +186,8 @@ def enqueue(
     binding: Mapping[str, Any] | None = None,
     reference: str | None = None,
     before_enqueue: Callable[[str], None] | None = None,
+    owner_request_key: str | None = None,
+    request_digest: str | None = None,
 ) -> dict[str, Any]:
     """Write the launch input, add the pueue task, return the job view.
 
@@ -217,6 +220,9 @@ def enqueue(
         "log_path": str(log_path),
         "event_spool_path": str(config.event_spool),
     }
+    if owner_request_key is not None:
+        launch["owner_request_key"] = owner_request_key
+        launch["request_digest"] = request_digest
     if unit_properties:
         launch["unit_properties"] = list(unit_properties)
     if tree_receipt is not None:
@@ -246,7 +252,8 @@ def enqueue(
     except PueueGroupError:
         # `pueue add` checks the live group catalog before raising this typed
         # error, so no task could have been admitted under the missing group.
-        input_path.unlink(missing_ok=True)
+        if not (owner_request_key is not None and after):
+            input_path.unlink(missing_ok=True)
         raise
     except PueueError as error:
         # The daemon can accept a task before its client loses the response.
@@ -329,6 +336,51 @@ def retire_legacy_holds(
     return {"retired": retired, "ambiguous": ambiguous, "skipped": skipped}
 
 
+def _owner_reference(key: str) -> str:
+    if not isinstance(key, str) or not key or len(key) > 4096:
+        raise JobError(
+            "owner_request_key must be a nonempty string of at most 4096 characters"
+        )
+    return "request-" + hashlib.sha256(key.encode()).hexdigest()
+
+
+def lookup_operation_request(
+    config: Config, owner_request_key: str
+) -> dict[str, Any] | None:
+    """Reconcile the owner key against retained input and pueue; never submit.
+
+    An input without a queue acknowledgement or execution evidence represents
+    an uncertain submission. An absent queue row alone cannot prove rejection.
+    """
+    reference = _owner_reference(owner_request_key)
+    path = config.inputs_dir / f"{reference}.json"
+    raw = read_bounded(path, MAX_LAUNCH_INPUT_BYTES)
+    if raw is None:
+        if path.exists():
+            raise JobError(f"unreadable owner launch {reference}")
+        return None
+    try:
+        document = json.loads(raw)
+    except (ValueError, UnicodeDecodeError) as error:
+        raise JobError(f"invalid owner launch {reference}") from error
+    if (
+        not isinstance(document, dict)
+        or document.get("owner_request_key") != owner_request_key
+    ):
+        raise JobError(f"owner launch identity mismatch for {reference}")
+    task = find_task(pueue.tasks(), document.get("queue_task_id", -1), reference)
+    if task is not None:
+        return {**get_job(task.task_id, config, reference), "reused": True}
+    if document.get("queue_task_id") is not None or artifacts.attempts(document):
+        return {
+            **get_job(document.get("queue_task_id", -1), config, reference),
+            "reused": True,
+        }
+    raise EnqueueUncertain(
+        reference, PueueError("retained launch has no acknowledged queue task")
+    )
+
+
 def start_operation(
     config: Config,
     project: ProjectAdapter,
@@ -336,16 +388,61 @@ def start_operation(
     *,
     workspace: Path | None = None,
     extra_argv: Sequence[str] = (),
+    owner_request_key: str | None = None,
 ) -> dict[str, Any]:
-    """Launch a declared operation on the project root or a worktree of it."""
-    return _start_operation(
-        config,
-        project,
-        operation,
-        workspace=workspace,
-        extra_argv=extra_argv,
-        stack=(),
-    )
+    """Launch an operation; an optional durable owner key prevents resubmission."""
+    if owner_request_key is None:
+        return _start_operation(
+            config,
+            project,
+            operation,
+            workspace=workspace,
+            extra_argv=extra_argv,
+            stack=(),
+        )
+    reference = _owner_reference(owner_request_key)
+    config.inputs_dir.mkdir(parents=True, exist_ok=True)
+    fingerprint = hashlib.sha256(
+        json.dumps(
+            {
+                "project": project.project_id,
+                "operation": operation.name,
+                "workspace": str((workspace or project.root).resolve()),
+                "extra_argv": list(extra_argv),
+                "descriptor": project.digest,
+            },
+            sort_keys=True,
+        ).encode()
+    ).hexdigest()
+    with (config.inputs_dir / f"{reference}.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        path = config.inputs_dir / f"{reference}.json"
+        raw = read_bounded(path, MAX_LAUNCH_INPUT_BYTES)
+        if raw is not None:
+            try:
+                previous = json.loads(raw)
+            except (ValueError, UnicodeDecodeError) as error:
+                raise JobError(f"invalid owner launch {reference}") from error
+            if (
+                not isinstance(previous, dict)
+                or previous.get("request_digest") != fingerprint
+            ):
+                raise JobError(
+                    "owner_request_key was already used for a different launch request"
+                )
+        existing = lookup_operation_request(config, owner_request_key)
+        if existing is not None:
+            return existing
+        return _start_operation(
+            config,
+            project,
+            operation,
+            workspace=workspace,
+            extra_argv=extra_argv,
+            stack=(),
+            owner_request_key=owner_request_key,
+            request_digest=fingerprint,
+        )
 
 
 def _start_operation(
@@ -356,6 +453,8 @@ def _start_operation(
     workspace: Path | None,
     extra_argv: Sequence[str],
     stack: tuple[str, ...],
+    owner_request_key: str | None = None,
+    request_digest: str | None = None,
 ) -> dict[str, Any]:
     """Start one operation after its declared pueue dependencies."""
     if operation.name in stack:
@@ -376,7 +475,7 @@ def _start_operation(
             environment[key] = value
     tree_receipt = None
     environment_receipt = None
-    if operation.cache == "tree+environment":
+    if operation.cache == "tree+environment" and owner_request_key is None:
         tree_receipt = _tree_receipt(working_directory)
         if tree_receipt["dirty"]:
             tree_receipt = None
@@ -403,6 +502,25 @@ def _start_operation(
                         if key in existing_input
                     },
                 }
+    if owner_request_key is not None and operation.dependencies:
+        # Persist the parent intent before any dependency can be submitted.
+        # A crash here is uncertain, not permission to duplicate dependencies.
+        reference = _owner_reference(owner_request_key)
+        write_input(
+            config.inputs_dir / f"{reference}.json",
+            {
+                "job_id": reference,
+                "owner_request_key": owner_request_key,
+                "request_digest": request_digest,
+                "project_id": project.project_id,
+                "operation": operation.name,
+                "label": label_for(project.project_id, operation.name),
+                "pool": operation.pool,
+                "working_directory": str(working_directory),
+                "log_path": str(config.jobs_dir / f"{reference}.log"),
+                "submission": "preparing-dependencies",
+            },
+        )
     dependency_ids: list[int] = []
     for dependency_name in operation.dependencies:
         try:
@@ -439,6 +557,13 @@ def _start_operation(
         environment=environment,
         scratch=operation.scratch,
         after=dependency_ids,
+        reference=(
+            _owner_reference(owner_request_key)
+            if owner_request_key is not None
+            else None
+        ),
+        owner_request_key=owner_request_key,
+        request_digest=request_digest,
         tree_receipt=tree_receipt,
         environment_receipt=environment_receipt,
     )
@@ -611,7 +736,7 @@ def list_jobs(project_id: str | None = None) -> list[dict[str, Any]]:
     return rows
 
 
-def snapshot_jobs(limit: int) -> dict[str, Any]:
+def snapshot_jobs(limit: int, config: Config | None = None) -> dict[str, Any]:
     """A bounded operator projection of one Pueue status response.
 
     Active tasks receive the available rows first.  Terminal history stays in
@@ -668,7 +793,7 @@ def snapshot_jobs(limit: int) -> dict[str, Any]:
         "schema": "sinnix.agentctl.job-snapshot.v1",
         "limit": limit,
         "groups": groups,
-        "jobs": [_snapshot_row(task) for task in selected],
+        "jobs": [_snapshot_row(task, config) for task in selected],
         "omitted": {
             "total": len(queue.tasks) - len(selected),
             "active": len(active) - returned_active,
@@ -682,9 +807,11 @@ def snapshot_jobs(limit: int) -> dict[str, Any]:
     }
 
 
-def _snapshot_row(task: Task) -> dict[str, Any]:
+def _snapshot_row(task: Task, config: Config | None = None) -> dict[str, Any]:
     """One snapshot row with foreign queue strings bounded for transport."""
     row = job_view(task)
+    if config is not None:
+        row["attempt"] = _artifact_view(config, task)["attempt"]
     shortened = []
     for key in ("label", "operation", "path", "reference"):
         value = row.get(key)
@@ -720,86 +847,284 @@ def _task(task_id: int) -> Task:
     return task
 
 
-def get_job(
-    task_id: int, config: Config | None = None, reference: str | None = None
+def _read_task(config: Config, task_id: int, reference: str | None) -> Task:
+    task = find_task(pueue.tasks(), task_id, reference)
+    if task is not None:
+        return task
+    if reference is None or not REFERENCE.fullmatch(reference):
+        raise JobError(
+            f"pueue has no task {reference or task_id}; archived reads require a reference"
+        )
+    path = config.inputs_dir / f"{reference}.json"
+    raw = read_bounded(path, MAX_LAUNCH_INPUT_BYTES)
+    try:
+        document = json.loads(raw) if raw else None
+    except (ValueError, UnicodeDecodeError):
+        document = None
+    if not isinstance(document, dict):
+        raise JobError(f"no retained launch {reference}")
+    return Task(
+        task_id=document.get("queue_task_id", task_id),
+        label=document.get("label", ""),
+        group=document.get("pool", ""),
+        status="Archived",
+        result=None,
+        exit_code=None,
+        path=document.get("working_directory", ""),
+        dependencies=(),
+        command=shlex.join((QUEUE_RUN_EXECUTABLE, str(path))),
+    )
+
+
+def _artifact_view(
+    config: Config, task: Task, attempt: int | None = None
 ) -> dict[str, Any]:
-    task = addressed(task_id, reference)
-    view = job_view(task)
+    document = _launch_input(config, task) or {}
+    reference = launch_reference(task)
+    if not document.get("log_path") and reference is not None:
+        # Older queue entries can outlive their input while their conventional
+        # state-directory artifacts remain available by the command reference.
+        document = {
+            "log_path": str(config.jobs_dir / f"{reference}.log"),
+            "result_path": str(config.jobs_dir / f"{reference}.result"),
+        }
+    records = artifacts.attempts(document) if document.get("log_path") else []
+    # Retain ownership checks even for externally authored launch inputs.
+    for record in records:
+        record["artifacts"] = {
+            key: value
+            for key, value in record["artifacts"].items()
+            if _task_owned(config, task, Path(value))
+        }
+    selected = (
+        next((record for record in records if record["attempt"] == attempt), None)
+        if attempt is not None
+        else (records[-1] if records else None)
+    )
+    if attempt is not None and selected is None and not (attempt == 0 and not records):
+        raise JobError(f"launch {launch_reference(task)} has no attempt {attempt}")
+    return {
+        "attempt": selected["attempt"] if selected else 0,
+        "artifacts": selected["artifacts"] if selected else {},
+        "attempts": records,
+        "input_path": str(launch_input_path(task)),
+    }
+
+
+def get_job(
+    task_id: int,
+    config: Config | None = None,
+    reference: str | None = None,
+    *,
+    attempt: int | None = None,
+    attempt_offset: int = 0,
+    attempt_limit: int = 100,
+) -> dict[str, Any]:
+    if attempt_offset < 0 or not 1 <= attempt_limit <= 100:
+        raise JobError(
+            "attempt_offset must be nonnegative and attempt_limit must be 1..100"
+        )
+    task = (
+        _read_task(config, task_id, reference)
+        if config
+        else addressed(task_id, reference)
+    )
     if config is None:
-        return view
+        return job_view(task)
+    return _job_detail(config, task, attempt, attempt_offset, attempt_limit)
+
+
+def _job_detail(
+    config: Config,
+    task: Task,
+    attempt: int | None,
+    attempt_offset: int = 0,
+    attempt_limit: int = 100,
+) -> dict[str, Any]:
+    view = job_view(task)
     binding = (_launch_input(config, task) or {}).get("binding")
     if binding:
-        view = {**view, "binding": binding}
-    footprint = (_outcome(config, task).get("outcome") or {}).get("scratch")
-    return {**view, "scratch": footprint} if isinstance(footprint, dict) else view
-
-
-def _artifact(config: Config, task: Task, suffix: str) -> Path | None:
-    """Where a task's log or result lands, when the task owns that path.
-
-    The launch input declares its own paths; a task whose input agentctl wrote
-    keeps them under the state directory, and one written by another repository
-    keeps them in that checkout. A path outside both belongs to someone else
-    and is not this task's artifact to publish.
-    """
-    declared = (_launch_input(config, task) or {}).get(
-        {".log": "log_path", ".result": "result_path"}[suffix]
+        view["binding"] = binding
+    view.update(_artifact_view(config, task, attempt))
+    receipt = _outcome(config, task, view["attempt"]).get("outcome") or {}
+    records = view["attempts"]
+    view["attempts"] = records[attempt_offset : attempt_offset + attempt_limit]
+    view["attempt_count"] = len(records)
+    view["next_attempt_offset"] = (
+        attempt_offset + attempt_limit
+        if attempt_offset + attempt_limit < len(records)
+        else None
     )
+    if receipt:
+        view["outcome"] = receipt
+    view["queue_present"] = task.status != "Archived"
+    if task.status == "Archived":
+        view.update(
+            phase=(
+                "succeeded"
+                if receipt.get("outcome") == "success"
+                else receipt.get("outcome", "unknown")
+            ),
+            terminal=bool(receipt),
+            exit_code=receipt.get("exit_code"),
+        )
+    if isinstance(receipt.get("scratch"), dict):
+        view["scratch"] = receipt["scratch"]
+    return view
+
+
+def _artifact(
+    config: Config, task: Task, suffix: str, attempt: int | None = None
+) -> Path | None:
+    key = {".log": "log", ".result": "result"}[suffix]
+    view = _artifact_view(config, task, attempt)
+    declared = view["artifacts"].get(key)
+    if declared is None and attempt is None:
+        declared = (_launch_input(config, task) or {}).get(key + "_path")
     if isinstance(declared, str) and declared:
         path = Path(declared)
-        return path if _task_owned(config, task, path) else None
+        return path.resolve() if _task_owned(config, task, path) else None
     reference = launch_reference(task)
-    return config.jobs_dir / f"{reference}{suffix}" if reference else None
+    return (
+        config.jobs_dir / f"{reference}{suffix}"
+        if reference and attempt is None
+        else None
+    )
 
 
-def task_logs(config: Config, task: Task) -> str:
-    """The command's bounded log; pueue's own capture holds the wrapper's stderr.
+def read_job_artifact(
+    config: Config,
+    task_id: int,
+    reference: str | None = None,
+    *,
+    attempt: int | None = None,
+    artifact: str = "log",
+    offset: int = 0,
+    limit: int = MAX_RESULT_BYTES,
+) -> dict[str, Any]:
+    """A byte-addressed bounded view and canonical path to the complete artifact.
 
-    Takes the resolved task so a caller that already addressed its job reads
-    that job's log: re-resolving by id would answer about whatever the queue
-    keeps at that position now.
+    Text decodes this page as UTF-8 with replacement; base64 preserves exact
+    bytes, including characters split across byte offsets. Follow next_offset
+    with the returned attempt number to remain on one invocation during retries.
     """
-    path = _artifact(config, task, ".log")
+    task = _read_task(config, task_id, reference)
+    return _read_artifact(config, task, attempt, artifact, offset, limit)
+
+
+def _read_artifact(
+    config: Config,
+    task: Task,
+    attempt: int | None,
+    artifact: str,
+    offset: int,
+    limit: int,
+) -> dict[str, Any]:
+    import base64
+
+    if artifact not in {"log", "result", "outcome"}:
+        raise JobError(f"unknown artifact {artifact!r}")
+    if (
+        isinstance(offset, bool)
+        or not isinstance(offset, int)
+        or offset < 0
+        or isinstance(limit, bool)
+        or not isinstance(limit, int)
+        or not 1 <= limit <= MAX_LOG_BYTES
+    ):
+        raise JobError(
+            f"offset must be nonnegative and limit must be 1..{MAX_LOG_BYTES}"
+        )
+    view = _artifact_view(config, task, attempt)
+    declared = view["artifacts"].get(artifact)
+    path = Path(declared).resolve() if declared else None
+    raw = b""
+    size = 0
+    available = False
+    if path is not None:
+        try:
+            descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+        except OSError:
+            descriptor = None
+        if descriptor is not None:
+            try:
+                status = os.fstat(descriptor)
+                if stat.S_ISREG(status.st_mode):
+                    size = status.st_size
+                    available = True
+                    os.lseek(descriptor, offset, os.SEEK_SET)
+                    raw = os.read(descriptor, limit)
+            finally:
+                os.close(descriptor)
+    next_offset = offset + len(raw)
+    return {
+        "reference": launch_reference(task),
+        "attempt": view["attempt"],
+        "artifact": artifact,
+        "path": str(path) if path else None,
+        "available": available,
+        "offset": offset,
+        "size_bytes": size,
+        "returned_bytes": len(raw),
+        "next_offset": next_offset if next_offset < size else None,
+        "complete": available and offset == 0 and len(raw) == size,
+        "text": raw.decode("utf-8", "replace"),
+        "base64": base64.b64encode(raw).decode("ascii"),
+    }
+
+
+def task_logs(config: Config, task: Task, *, attempt: int | None = None) -> str:
+    path = _artifact(config, task, ".log", attempt)
     raw = read_bounded(path, MAX_LOG_BYTES) if path is not None else None
     text = raw.decode("utf-8", "replace") if raw else ""
-    wrapper = pueue.log(task.task_id)
+    # Pueue's wrapper capture belongs only to the current queue invocation.
+    wrapper = (
+        pueue.log(task.task_id) if attempt is None and task.status != "Archived" else ""
+    )
     if wrapper.strip():
         text = f"{text}\n[wrapper]\n{wrapper}" if text else wrapper
     return text
 
 
-def logs(config: Config, task_id: int, reference: str | None = None) -> str:
-    return task_logs(config, addressed(task_id, reference))
+def logs(
+    config: Config,
+    task_id: int,
+    reference: str | None = None,
+    *,
+    attempt: int | None = None,
+) -> str:
+    return task_logs(config, _read_task(config, task_id, reference), attempt=attempt)
 
 
 def result(
-    config: Config, task_id: int, reference: str | None = None
+    config: Config,
+    task_id: int,
+    reference: str | None = None,
+    *,
+    attempt: int | None = None,
+    offset: int = 0,
+    limit: int = MAX_RESULT_BYTES,
 ) -> dict[str, Any]:
-    """The typed result artifact, or the exit status when the operation declares none."""
-    task = addressed(task_id, reference)
-    view = job_view(task)
-    path = _artifact(config, task, ".result")
-    raw = read_bounded(path, MAX_RESULT_BYTES + 1) if path is not None else None
-    if raw is None:
-        # Exit-only operations still have a wrapper outcome.  Preserve that
-        # bounded receipt so consumers can inspect execution observations
-        # without requiring a typed stdout artifact.
-        return {**view, "kind": "exit", "value": None, **_outcome(config, task)}
-    if len(raw) > MAX_RESULT_BYTES:
-        raise JobError(
-            f"result artifact for task {task.task_id} exceeds {MAX_RESULT_BYTES} bytes"
-        )
-    text = raw.decode("utf-8", "replace")
-    try:
-        value: Any = json.loads(text)
-    except json.JSONDecodeError:
-        value = text
-    return {**view, "kind": "artifact", "value": value, **_outcome(config, task)}
+    """Bound the view only; large typed results remain complete valid artifacts."""
+    task = _read_task(config, task_id, reference)
+    view = _job_detail(config, task, attempt)
+    page = _read_artifact(config, task, view["attempt"], "result", offset, limit)
+    value: Any = None
+    if page["complete"]:
+        try:
+            value = json.loads(page["text"])
+        except json.JSONDecodeError:
+            value = page["text"]
+    return {
+        **view,
+        "kind": "artifact" if page["available"] else "exit",
+        "value": value,
+        "page": page,
+    }
 
 
-def _outcome(config: Config, task: Task) -> dict[str, Any]:
-    """The wrapper's own record of how the run ended, when it left one."""
-    log = _artifact(config, task, ".log")
+def _outcome(config: Config, task: Task, attempt: int | None = None) -> dict[str, Any]:
+    log = _artifact(config, task, ".log", attempt)
     raw = read_bounded(outcome_path_for(log), 4096) if log is not None else None
     try:
         record = json.loads(raw.decode("utf-8")) if raw else None
@@ -823,6 +1148,49 @@ def _unit_active(unit: str) -> bool:
 
 
 def cancel(
+    config: Config,
+    task_id: int,
+    *,
+    reference: str | None = None,
+    expected_attempt: int | None = None,
+    settle_seconds: float | None = None,
+    sleep: Callable[[float], None] = time.sleep,
+) -> dict[str, Any]:
+    """Optionally compare an attempt token while holding its allocation lock."""
+    if expected_attempt is None:
+        return _cancel(
+            config,
+            task_id,
+            reference=reference,
+            settle_seconds=settle_seconds,
+            sleep=sleep,
+        )
+    if reference is None:
+        raise JobError("expected_attempt requires a stable launch reference")
+    task = addressed(task_id, reference)
+    document = _launch_input(config, task) or {}
+    log = document.get("log_path")
+    if not log or not _task_owned(config, task, Path(log)):
+        raise JobError("cannot verify the job's execution attempt")
+    root = artifacts.root_for(Path(log))
+    root.mkdir(parents=True, exist_ok=True)
+    with (root / ".allocation.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        current = _artifact_view(config, task)["attempt"]
+        if current != expected_attempt:
+            raise JobError(
+                f"execution attempt changed: expected {expected_attempt}, found {current}"
+            )
+        return _cancel(
+            config,
+            task.task_id,
+            reference=reference,
+            settle_seconds=settle_seconds,
+            sleep=sleep,
+        )
+
+
+def _cancel(
     config: Config,
     task_id: int,
     *,
@@ -853,7 +1221,7 @@ def cancel(
         except PueueError:
             task = _task(task_id)
         else:
-            removed = _unlink_all(_own_artifacts(config, task))
+            removed = []
             return {
                 **view,
                 "phase": "cancelled",
@@ -863,7 +1231,12 @@ def cancel(
                 "removed": removed,
             }
     unit = unit_of(task)
-    log = _artifact(config, task, ".log")
+    declared_log = (_launch_input(config, task) or {}).get("log_path")
+    log = (
+        Path(declared_log)
+        if declared_log and _task_owned(config, task, Path(declared_log))
+        else None
+    )
     if log is not None:
         marker = cancel_marker_for(log)
         marker.parent.mkdir(parents=True, exist_ok=True)
@@ -908,96 +1281,21 @@ def _unlink_all(paths: Sequence[Path]) -> list[str]:
     return removed
 
 
-def _own_artifacts(config: Config, task: Task) -> list[Path]:
-    paths: list[Path] = []
-    for suffix in (".log", ".result"):
-        artifact = _artifact(config, task, suffix)
-        if artifact is not None:
-            paths.append(artifact)
-    log = _artifact(config, task, ".log")
-    if log is not None:
-        paths.extend((cancel_marker_for(log), outcome_path_for(log)))
-    launch_input = launch_input_path(task)
-    if launch_input is not None and _task_owned(config, task, launch_input):
-        paths.append(launch_input)
-    return paths
-
-
 def clean(config: Config, task_id: int, reference: str | None = None) -> dict[str, Any]:
-    """Delete a terminal task and its artifacts. Ownership, never age.
-
-    A task pueue no longer knows is cleaned by the artifacts its launch
-    input under the state directory still names.
-    """
-    if reference is not None and not REFERENCE.match(reference):
+    """Remove a terminal queue entry; retain its launch and execution evidence."""
+    if reference is not None and not REFERENCE.fullmatch(reference):
         raise JobError(f"{reference!r} is not a launch reference")
-    tasks = pueue.tasks()
-    task = find_task(tasks, task_id, reference)
-    if task is None:
-        removed = _unlink_all(_orphaned_artifacts(config, tasks, task_id, reference))
-        if not removed:
-            raise JobError(f"pueue has no task {reference or task_id}")
-        return {
-            "job_id": task_id,
-            "reference": reference,
-            "cleaned": True,
-            "removed": removed,
-        }
-    if not task.terminal:
+    task = _read_task(config, task_id, reference)
+    if task.status != "Archived" and not task.terminal:
         raise JobError(
             f"task {task.task_id} is still {task.status.lower()}; cancel it first"
         )
-    removed = _unlink_all(_own_artifacts(config, task))
-    pueue.remove([task.task_id])
-    return {**job_view(task), "cleaned": True, "removed": removed}
-
-
-def _orphaned_artifacts(
-    config: Config,
-    tasks: Mapping[int, Task],
-    task_id: int,
-    reference: str | None = None,
-) -> list[Path]:
-    """The artifacts of a launch input no task in the queue still carries.
-
-    An input records the id its job was queued at, and `pueue switch` moves
-    the job to another id afterwards, so a vacant id is no evidence that the
-    job written there is gone. A reference the queue still carries is that
-    evidence: the input it names belongs to a live task and no clean removes
-    it, whatever id either was written with.
-    """
-    if not config.inputs_dir.is_dir():
-        return []
-    live = {launch_reference(task) for task in tasks.values()}
-    candidates = (
-        [config.inputs_dir / f"{reference}.json"]
-        if reference is not None
-        else sorted(config.inputs_dir.glob("*.json"))
-    )
-    for input_path in candidates:
-        if input_path.stem in live:
-            continue
-        raw = read_bounded(input_path, MAX_LAUNCH_INPUT_BYTES)
-        try:
-            value = json.loads(raw.decode("utf-8")) if raw else None
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            continue
-        if not isinstance(value, dict):
-            continue
-        if reference is None and value.get("queue_task_id") != task_id:
-            continue
-        paths = [input_path]
-        for key in ("log_path", "result_path"):
-            declared = value.get(key)
-            if isinstance(declared, str) and declared:
-                path = Path(declared)
-                if path.resolve().is_relative_to(config.state_dir.resolve()):
-                    paths.append(path)
-        log = value.get("log_path")
-        if isinstance(log, str) and log:
-            paths.extend((cancel_marker_for(log), outcome_path_for(log)))
-        return paths
-    return []
+    view = get_job(task.task_id, config, launch_reference(task))
+    if task.status != "Archived":
+        pueue.remove([task.task_id])
+    log = _artifact(config, task, ".log")
+    removed = _unlink_all([cancel_marker_for(log)]) if log is not None else []
+    return {**view, "cleaned": True, "removed": removed, "retained": True}
 
 
 def _live_run_jobs(config: Config, tasks: Mapping[int, Task]) -> set[int]:

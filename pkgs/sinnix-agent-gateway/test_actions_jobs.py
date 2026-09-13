@@ -186,6 +186,10 @@ def test_get_returns_summary_log_range_and_result(
         },
     )["data"]
     assert logged["log"] == {
+        "attempt": None,
+        "path": None,
+        "size_bytes": None,
+        "base64": None,
         "ref": "sinnix://jobs/41",
         "job_id": 41,
         "content": "cd",
@@ -202,7 +206,11 @@ def test_get_returns_summary_log_range_and_result(
     result = call(
         server, "jobs.get", {"target": {"job_id": 41}, "projection": "result"}
     )["data"]
-    assert result["result"] == {"kind": "artifact", "value": {"passed": 3}}
+    assert result["result"] == {
+        "kind": "artifact",
+        "value": {"passed": 3},
+        "page": None,
+    }
     assert [c.operation for c in fake.calls] == [
         "job.get",
         "job.get",
@@ -464,6 +472,7 @@ def test_operations_run_targets_the_root_or_a_linked_worktree(
         "project_id": "fixture",
         "operation": "check",
         "parameters": {},
+        "owner_request_key": runtime.owner_request_key("operations.run", "op-1"),
     }
 
     worktree = tmp_path / "wt"

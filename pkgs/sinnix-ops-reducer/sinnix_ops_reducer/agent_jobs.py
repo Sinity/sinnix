@@ -67,11 +67,36 @@ class AgentCtlClient:
             raise AgentCtlError("agentctl job list did not print a job array")
         return value
 
-    def get(self, job_id: str | int) -> dict[str, Any]:
-        return self._job_response(("job", "get", str(job_id)))
+    def get(self, job_id: str | int, *, reference: str | None = None) -> dict[str, Any]:
+        return self._job_response(
+            (
+                "job",
+                "get",
+                str(job_id),
+                *(("--reference", reference) if reference else ()),
+            )
+        )
 
-    def cancel(self, job_id: str | int) -> dict[str, Any]:
-        return self._job_response(("job", "cancel", str(job_id)))
+    def cancel(
+        self,
+        job_id: str | int,
+        *,
+        reference: str | None = None,
+        expected_attempt: int | None = None,
+    ) -> dict[str, Any]:
+        return self._job_response(
+            (
+                "job",
+                "cancel",
+                str(job_id),
+                *(("--reference", reference) if reference else ()),
+                *(
+                    ("--expected-attempt", str(expected_attempt))
+                    if expected_attempt is not None
+                    else ()
+                ),
+            )
+        )
 
     def projects(self) -> list[str]:
         value = self._call((self.command, "--json", "project", "list"))

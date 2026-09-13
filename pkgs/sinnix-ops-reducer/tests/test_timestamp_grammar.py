@@ -33,7 +33,7 @@ INVENTORY = {
     "surfaces": {
         "safe": {
             "unit": "safe.service",
-            "manager": "user",
+            "manager": "system",
             "observe": {"restartable": True},
         }
     },
@@ -51,7 +51,13 @@ def _action_service(tmp_path: Path, reducer: Reducer) -> ActionService:
         _inventory(tmp_path / "inventory.json"),
         tmp_path / "receipts.json",
         adapter=lambda request, resolved: {"name": request["action"], "status": "fake"},
-        unit_state_prober=lambda unit, manager: {"ActiveState": "active"},
+        unit_state_prober=lambda unit, manager: {
+            "ActiveState": "active",
+            "SubState": "running",
+            "LoadState": "loaded",
+            "InvocationID": "fixture",
+            "FreezerState": "running",
+        },
     )
 
 
@@ -59,7 +65,18 @@ def _request(key: str) -> dict[str, Any]:
     return {
         "action": "freeze",
         "target": {"unit": "safe"},
-        "expected_revision": 1,
+        "expected_target": {
+            "kind": "unit",
+            "unit": "safe.service",
+            "manager": "system",
+            "properties": {
+                "ActiveState": "active",
+                "SubState": "running",
+                "LoadState": "loaded",
+                "InvocationID": "fixture",
+                "FreezerState": "running",
+            },
+        },
         "idempotency_key": key,
         "operator_reason": "timestamp grammar fixture",
         "parameters": {},

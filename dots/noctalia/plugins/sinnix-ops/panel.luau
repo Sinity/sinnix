@@ -22,6 +22,9 @@ end
 
 local function stateValue(name)
   if type(view.snapshot) ~= "table" or type(view.snapshot.state) ~= "table" then return nil end
+  local sections = view.snapshot.sections
+  local section = type(sections) == "table" and sections[name]
+  if type(section) == "table" and section.available == false then return nil end
   return view.snapshot.state[name]
 end
 
@@ -62,18 +65,6 @@ local function memoryText()
   return line
 end
 
-local function stalledText()
-  local tasks = stateValue("blocked_tasks")
-  if type(tasks) ~= "table" then return "Stalled (D-state): unavailable (no blocked_tasks in snapshot)" end
-  if #tasks == 0 then return "Stalled (D-state): none" end
-  local longest = tasks[1]
-  for _, task in ipairs(tasks) do
-    if (task.elapsed_secs or 0) > (longest.elapsed_secs or 0) then longest = task end
-  end
-  local minutes = math.floor((longest.elapsed_secs or 0) / 60)
-  return "Stalled (D-state): " .. tostring(#tasks) .. " tasks, longest " .. tostring(minutes) .. "m (" .. text(longest.comm) .. ")"
-end
-
 -- ## Fleet: units, drift, gaps, governance ##
 
 local function unitsLines()
@@ -92,35 +83,6 @@ local function unitsLines()
   return lines
 end
 
-local function driftText()
-  local drift = stateValue("config_drift")
-  if type(drift) ~= "table" then return "Config drift: unavailable (no config_drift in snapshot)" end
-  if drift.available == false then return "Config drift: unavailable (drift probe reported no data)" end
-  local drifted = {}
-  if type(drift.rows) == "table" then
-    for _, row in ipairs(drift.rows) do
-      if row.status == "drifted" and #drifted < 4 then table.insert(drifted, text(row.check)) end
-    end
-  end
-  local line = "Config drift: " .. text(drift.status) .. ", " .. tostring(drift.drift_count or 0) .. " drifted"
-  if #drifted > 0 then line = line .. " (" .. table.concat(drifted, ", ") .. ")" end
-  if (drift.unavailable_count or 0) > 0 then line = line .. ", " .. tostring(drift.unavailable_count) .. " unchecked" end
-  return line
-end
-
-local function gapsText()
-  local gaps = stateValue("gaps_summary")
-  if type(gaps) ~= "table" then return "Telemetry gaps: unavailable (no gaps_summary in snapshot)" end
-  local total, classes, topName, topCount = 0, 0, nil, 0
-  for name, count in pairs(gaps) do
-    classes = classes + 1
-    total = total + count
-    if count > topCount then topName, topCount = name, count end
-  end
-  if classes == 0 then return "Telemetry gaps: none reported" end
-  return "Telemetry gaps: " .. tostring(total) .. " across " .. tostring(classes) .. " classes; most common " .. tostring(topName) .. " (" .. tostring(topCount) .. ")"
-end
-
 local function governanceText()
   local inventory = stateValue("runtime_inventory")
   if type(inventory) ~= "table" then return "Governance: unavailable (no runtime_inventory in snapshot)" end
@@ -129,8 +91,6 @@ local function governanceText()
     for _ in pairs(inventory.surfaces) do surfaces = surfaces + 1 end
   end
   local captures = type(inventory.captures) == "table" and #inventory.captures or 0
-  local slices = stateValue("resource_slices")
-  local sliceCount = type(slices) == "table" and #slices or 0
   return "Governance: " .. tostring(surfaces) .. " surfaces, " .. tostring(captures) .. " capture lanes, " .. tostring(sliceCount) .. " slices live"
 end
 
@@ -238,10 +198,8 @@ local function render()
   if view.reason ~= nil then
     table.insert(rows, ui.label({ text = "Reason: " .. text(view.reason), color = "on_surface_variant" }))
   end
-  table.insert(rows, infoSection("Now", { pressureText(), memoryText(), stalledText() }))
+  table.insert(rows, infoSection("Now", { pressureText(), memoryText() }))
   local fleet = unitsLines()
-  table.insert(fleet, driftText())
-  table.insert(fleet, gapsText())
   table.insert(fleet, governanceText())
   table.insert(rows, infoSection("Fleet", fleet))
   local agents = {}

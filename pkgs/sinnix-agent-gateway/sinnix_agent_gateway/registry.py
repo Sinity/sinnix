@@ -206,13 +206,6 @@ def build_registry() -> ResourceRegistry:
             True,
         ),
         ResourceSpec(
-            "session",
-            RefTemplate("session", "sinnix://sessions/{provider}/{session_id}"),
-            "sessions",
-            ("summary", "messages"),
-            True,
-        ),
-        ResourceSpec(
             "context_snapshot",
             RefTemplate("context_snapshot", "sinnix://contexts/{snapshot_id}"),
             "context",

@@ -13,6 +13,7 @@ from sinnix_mcp.execution import ExecutionResult
 
 from .capabilities import Capability, Principal
 from .config import GatewayConfig
+from .payloads import retain
 from .redaction import redact
 
 
@@ -63,6 +64,7 @@ class ArtifactService:
         source: str,
         target: dict[str, Any],
         files: list[Path],
+        durable: bool = False,
     ) -> dict[str, Any]:
         directory = directory.resolve(strict=True)
         captures_root = (self.config.state_dir / "captures").resolve()
@@ -87,13 +89,11 @@ class ArtifactService:
             "target": target,
             "files": names,
         }
-        # Durability: atomic only. The receipt can be no more durable than
-        # the capture files it attests, which the gateway does not sync
-        # either; losing it un-attests the directory, which fails closed.
+        # Durable callers sync the payload before attesting it.
         atomic_publish(
             directory / "receipt.json",
             json.dumps(receipt, sort_keys=True, separators=(",", ":")).encode(),
-            fsync=False,
+            fsync=durable,
         )
         return receipt
 
@@ -165,8 +165,11 @@ class ArtifactService:
             or "application/octet-stream",
         }
         metadata_path = directory / "metadata.json"
-        metadata_path.write_text(json.dumps(metadata, sort_keys=True) + "\n")
-        metadata_path.chmod(0o600)
+        atomic_publish(
+            metadata_path,
+            (json.dumps(metadata, sort_keys=True) + "\n").encode(),
+            fsync=True,
+        )
         return artifact_id
 
     def register_json(
@@ -183,9 +186,9 @@ class ArtifactService:
         directory = self.config.state_dir / "captures" / uuid.uuid4().hex
         directory.mkdir(mode=0o700, parents=True)
         source_path = directory / f"{kind}.json"
-        source_path.write_bytes(encoded)
+        retain(self.config.state_dir / "payloads", encoded, link=source_path)
         receipt = self.attest_capture(
-            directory, source=source, target=target, files=[source_path]
+            directory, source=source, target=target, files=[source_path], durable=True
         )
         artifact_id = self.register(source_path, kind=kind, owner_id=owner_id)
         return {

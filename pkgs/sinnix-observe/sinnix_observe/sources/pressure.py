@@ -35,7 +35,14 @@ def collect_pressure(offline: bool) -> dict[str, Any]:
         "memory": parse_psi("/proc/pressure/memory"),
         "io": parse_psi("/proc/pressure/io"),
     }
-    pressure["free_h"] = run(["free", "-h"], timeout=5).stdout
+    pressure["free_h"] = run(["free", "-h"], timeout=1).stdout
+    pressure["meminfo_mb"] = {}
+    for line in (read_text("/proc/meminfo") or "").splitlines():
+        key, _, value = line.partition(":")
+        if key in {"MemTotal", "MemAvailable", "SwapTotal", "SwapFree"}:
+            fields = value.split()
+            if fields and fields[0].isdigit():
+                pressure["meminfo_mb"][key] = int(fields[0]) // 1024
     return pressure
 
 

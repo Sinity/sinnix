@@ -361,7 +361,7 @@ ACTION_SCRIPT = """
 <script>
 // The only privileged client-side logic on the hub. All state above is
 // server-rendered; this drives the ops-reducer's bounded action API
-// (/ops/v1/actions), which enforces expected_revision, idempotency keys, and
+// (/ops/v1/actions), which enforces expected_target, idempotency keys, and
 // per-target admission on its own side. There is no second control plane and
 // no shell-out from this page.
 function hublog(message, tone){
@@ -380,21 +380,29 @@ async function act(verb, kind, id, button, parameters){
   // other target kind (unit/job_id) is a plain string identifier.
   var idText = (typeof id === 'object' && id !== null) ? JSON.stringify(id) : id;
   var label = verb + ' ' + kind + ' ' + idText;
-  if (!confirm(label + '?\\n\\nThis posts a bounded action to the ops-reducer and leaves a receipt.')) return;
   button.disabled = true;
   try {
-    var snap = await fetch('/ops/v1/snapshot', {headers: {'Accept': 'application/json'}});
-    if (!snap.ok) throw new Error('snapshot ' + snap.status);
-    var revision = (await snap.json()).sequence;
     var target = {};
     target[kind] = id;
+    var expected = button.dataset.expectedTarget && JSON.parse(button.dataset.expectedTarget);
+    if (kind === "unit" && (expected || button.dataset.manager)) target.manager = expected ? expected.manager : button.dataset.manager;
+    var observation = {expected_target: expected};
+    if (!expected) {
+      var prepared = await fetch('/ops/v1/actions/prepare', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({action: verb, target: target, parameters: parameters})
+      });
+      observation = await prepared.json();
+      if (!prepared.ok) throw new Error(observation.error || ('HTTP ' + prepared.status));
+    }
+    if (!confirm(label + '?\\nCurrent target: ' + JSON.stringify(observation.expected_target))) return;
     var res = await fetch('/ops/v1/actions', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
         action: verb,
         target: target,
-        expected_revision: revision,
+        expected_target: observation.expected_target,
         idempotency_key: 'hub-' + verb + '-' + kind + '-' + idText + '-' + Date.now(),
         operator_reason: 'operator action from the hub control panel',
         parameters: parameters

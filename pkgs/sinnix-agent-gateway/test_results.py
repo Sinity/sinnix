@@ -463,7 +463,10 @@ def _checkout_preconditions(runtime: Runtime) -> dict[str, str]:
     ("reference", "target"),
     [
         ("sinnix://jobs/job-1", {"job_id": "job-1"}),
-        ("sinnix://machine/units/user/fixture.service", {"unit": "fixture.service"}),
+        (
+            "sinnix://machine/units/user/fixture.service",
+            {"unit": "fixture.service", "manager": "user"},
+        ),
         ("sinnix://processes/42/123", {"process": {"pid": 42, "start_ticks": 123}}),
     ],
 )
@@ -476,7 +479,7 @@ def test_v2_operate_maps_canonical_targets_and_validates_owner_receipts(
     def execute(
         action: str,
         received_target: dict[str, object],
-        expected_revision: int,
+        expected_target: dict[str, object],
         idempotency_key: str,
         operator_reason: str,
         parameters: dict[str, object],
@@ -489,7 +492,7 @@ def test_v2_operate_maps_canonical_targets_and_validates_owner_receipts(
             "action": action,
             "target": received_target,
             "operator_reason": operator_reason,
-            "expected_revision": expected_revision,
+            "expected_target": expected_target,
             "status": "accepted",
             "adapter": {"status": "ok"},
         }
@@ -501,7 +504,7 @@ def test_v2_operate_maps_canonical_targets_and_validates_owner_receipts(
         "parameters": {},
         "reason": "exercise typed operation",
         "idempotency_key": f"operate-{target}",
-        "preconditions": {"expected_revision": 7},
+        "preconditions": {"expected_target": {"kind": "fixture", "generation": 7}},
     }
     response = _execute(
         runtime,
@@ -512,7 +515,7 @@ def test_v2_operate_maps_canonical_targets_and_validates_owner_receipts(
             parameters={},
             reason="exercise typed operation",
             idempotency_key=request["idempotency_key"],
-            preconditions={"expected_revision": 7},
+            preconditions={"expected_target": {"kind": "fixture", "generation": 7}},
         ),
         request,
     )
@@ -538,7 +541,7 @@ def test_v2_operate_rejects_mismatched_owner_receipt(tmp_path) -> None:
         "action": "restart",
         "target": {"unit": "fixture.service"},
         "operator_reason": "exercise typed operation",
-        "expected_revision": 7,
+        "expected_target": {"kind": "fixture", "generation": 7},
     }  # type: ignore[method-assign]
     response = _execute(
         runtime,
@@ -549,7 +552,7 @@ def test_v2_operate_rejects_mismatched_owner_receipt(tmp_path) -> None:
             parameters={},
             reason="exercise typed operation",
             idempotency_key="operate-key",
-            preconditions={"expected_revision": 7},
+            preconditions={"expected_target": {"kind": "fixture", "generation": 7}},
         ),
         {
             "ref": "sinnix://machine/units/user/fixture.service",
@@ -557,7 +560,7 @@ def test_v2_operate_rejects_mismatched_owner_receipt(tmp_path) -> None:
             "parameters": {},
             "reason": "exercise typed operation",
             "idempotency_key": "operate-key",
-            "preconditions": {"expected_revision": 7},
+            "preconditions": {"expected_target": {"kind": "fixture", "generation": 7}},
         },
     )
 

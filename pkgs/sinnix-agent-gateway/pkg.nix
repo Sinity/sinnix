@@ -13,6 +13,9 @@
   sinnix-mcp,
   sinnix-lib,
   agentctl,
+  polylogue-contract-source,
+  lynchpin-contract-source,
+  beads-owner,
   ...
 }:
 let
@@ -157,10 +160,35 @@ python3Packages.buildPythonApplication {
   checkPhase = ''
     runHook preCheck
     export SINNIX_GATEWAY_TEST_EXECUTABLE="$out/bin/sinnix-agent-gateway"
+    python generate_owner_inputs.py \
+      --polylogue ${polylogue-contract-source} \
+      --lynchpin ${lynchpin-contract-source}/lynchpin/mcp/project_contracts.py --check
+    ${beads-owner}/bin/bd owner schema --json > "$TMPDIR/beads-owner-schema.json"
+    python generate_beads_inputs.py "$TMPDIR/beads-owner-schema.json" --check
     # Bare `pytest` (default discovery), not a hardcoded file list, so a new
     # test file runs without needing a pkg.nix edit.
     pytest
     runHook postCheck
+  '';
+
+  postInstall = ''
+    mkdir -p "$out/share/sinnix-agent-gateway/manifests"
+    PYTHONPATH="$out/${python3Packages.python.sitePackages}:$PYTHONPATH" python - "$out/share/sinnix-agent-gateway/manifests" <<'PY'
+    import json
+    import sys
+    import tempfile
+    from pathlib import Path
+    import anyio
+    from sinnix_agent_gateway.capabilities import PRINCIPAL_CAPABILITIES
+    from sinnix_agent_gateway.cli import build_manifest
+    from sinnix_agent_gateway.config import GatewayConfig
+
+    with tempfile.TemporaryDirectory() as state:
+        config = GatewayConfig(projects={}, state_dir=Path(state))
+        for principal in PRINCIPAL_CAPABILITIES:
+            artifact = {"principal": principal, "manifest": anyio.run(build_manifest, config, principal)}
+            (Path(sys.argv[1]) / f"{principal}.json").write_text(json.dumps(artifact, sort_keys=True))
+    PY
   '';
 
   pythonImportsCheck = [
@@ -169,10 +197,8 @@ python3Packages.buildPythonApplication {
     "sinnix_agent_gateway.app"
     "sinnix_agent_gateway.audit"
     "sinnix_agent_gateway.beads"
-    "sinnix_agent_gateway.memory"
     "sinnix_agent_gateway.mcp_broker"
     "sinnix_agent_gateway.projects"
-    "sinnix_agent_gateway.timeline"
   ];
 
   meta = {

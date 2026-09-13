@@ -57,6 +57,7 @@ BASE_TYPED_FAILURES = frozenset(
 KNOWN_TYPED_FAILURES = BASE_TYPED_FAILURES | {
     "precondition_failed",
     "idempotency_conflict",
+    "indeterminate",
     "stale_cursor",
     "source_changed",
     "conflict",

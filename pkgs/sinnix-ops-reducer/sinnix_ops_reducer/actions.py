@@ -3,9 +3,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import secrets
 import signal
 import subprocess
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -25,7 +25,7 @@ RECEIPTS_MIGRATION_SCHEMA = "sinnix-ops-action-receipts-migration-v1"
 # Properties captured for a receipt's previous_state/resulting_state on unit
 # targets -- the target's own live systemd shape, not the
 # whole reducer snapshot (see ActionService._target_state).
-UNIT_STATE_PROPERTIES = ("LoadState", "ActiveState", "SubState")
+UNIT_STATE_PROPERTIES = ("LoadState", "ActiveState", "SubState", "InvocationID")
 
 # Process targets support only stop -- see sinnix-mble / C3 in the
 # 2026-08-18 pressure incident taxonomy. This is the one granularity the
@@ -110,7 +110,7 @@ def process_admitted_slices(inventory: dict[str, Any] | None) -> set[str]:
 ACTION_FIELDS = {
     "action",
     "target",
-    "expected_revision",
+    "expected_target",
     "idempotency_key",
     "operator_reason",
     "parameters",
@@ -156,13 +156,21 @@ def validate_request(value: Any) -> dict[str, Any]:
     if (
         not isinstance(target, dict)
         or not target
-        or set(target) - {"job_id", "unit", "process"}
+        or set(target) - {"job_id", "unit", "process", "manager"}
     ):
-        raise ActionError("target must contain only job_id, unit, or process")
+        raise ActionError(
+            "target must identify a job, unit with optional manager, or process"
+        )
     if sum(key in target for key in ("job_id", "unit", "process")) != 1:
         raise ActionError(
             "target must identify exactly one job, runtime unit, or process"
         )
+    if "manager" in target and (
+        "unit" not in target
+        or not isinstance(target["manager"], str)
+        or target["manager"] not in {"system", "user"}
+    ):
+        raise ActionError("manager requires a unit target and must be system or user")
     if "process" in target:
         process = target["process"]
         if not isinstance(process, dict) or set(process) != {"pid", "start_ticks"}:
@@ -182,9 +190,9 @@ def validate_request(value: Any) -> dict[str, Any]:
         target = {key: _string(item, key, 256) for key, item in target.items()}
     if "process" in target and action not in PROCESS_ACTIONS:
         raise ActionError("process targets only support stop")
-    expected = value["expected_revision"]
-    if not isinstance(expected, int) or isinstance(expected, bool) or expected < 0:
-        raise ActionError("expected_revision must be a non-negative integer")
+    expected = value["expected_target"]
+    if not isinstance(expected, dict) or not expected:
+        raise ActionError("expected_target must be a non-empty object")
     key = _string(value["idempotency_key"], "idempotency_key", 128)
     reason = _string(value["operator_reason"], "operator_reason", 512)
     parameters = value["parameters"]
@@ -229,7 +237,7 @@ def validate_request(value: Any) -> dict[str, Any]:
     return {
         "action": action,
         "target": target,
-        "expected_revision": expected,
+        "expected_target": expected,
         "idempotency_key": key,
         "operator_reason": reason,
         "parameters": parameters,
@@ -281,6 +289,7 @@ class ActionService:
         self.sleeper = sleeper
         self.clock = clock
         self.receipts: dict[str, dict[str, Any]] = self._load_receipts()
+        self._action_lock = threading.RLock()
 
     def _migrate_legacy_receipts(self) -> None:
         """Fold the old whole-file receipts dict into the ledger once.
@@ -322,10 +331,8 @@ class ActionService:
                 continue
             key = record.get("idempotency_key")
             if isinstance(key, str):
-                # Last write wins on replay -- a key is in practice written
-                # exactly once (execute() short-circuits on a prior receipt),
-                # so this is a no-op today and a correctness net if that ever
-                # changes.
+                # The last record completes or marks the pending dispatch.
+                # An interrupted dispatch remains pending and cannot replay.
                 receipts[key] = record
         return receipts
 
@@ -347,7 +354,10 @@ class ActionService:
         target = request["target"]
         if "job_id" in target:
             try:
-                job = self.agent_jobs.get(target["job_id"])
+                job = self.agent_jobs.get(
+                    target["job_id"],
+                    reference=request["expected_target"].get("launch_reference"),
+                )
             except AgentCtlError as error:
                 raise ActionError(
                     f"agentctl job lookup failed: {error}", 503
@@ -360,28 +370,56 @@ class ActionService:
             return self._resolve_process(process["pid"], process["start_ticks"])
         surfaces = self._inventory().get("surfaces", {})
         surface = surfaces.get(target["unit"])
+        manager = target.get("manager")
+        if (
+            isinstance(surface, dict)
+            and manager is not None
+            and surface.get("manager") != manager
+        ):
+            surface = None
         if not isinstance(surface, dict):
-            surface = next(
-                (
-                    candidate
-                    for candidate in surfaces.values()
-                    if isinstance(candidate, dict)
-                    and candidate.get("unit") == target["unit"]
-                ),
-                None,
-            )
+            matches = [
+                candidate
+                for candidate in surfaces.values()
+                if isinstance(candidate, dict)
+                and candidate.get("unit") == target["unit"]
+                and (manager is None or candidate.get("manager") == manager)
+            ]
+            if len({candidate.get("manager") for candidate in matches}) > 1:
+                raise ActionError(
+                    "unit name has multiple managers; use its inventory surface ID", 400
+                )
+            surface = matches[0] if matches else None
         if not isinstance(surface, dict):
             raise ActionError("runtime unit is not in the inventory", 403)
         if request["action"] in LIFECYCLE_ACTIONS and not surface.get(
             "observe", {}
         ).get("restartable", False):
             raise ActionError("runtime unit is not restartable", 403)
+        if (
+            request["action"] in {"freeze", "thaw", "park"}
+            and surface.get("manager") != "system"
+        ):
+            raise ActionError(
+                "pressure parking only supports system-manager units", 403
+            )
         return {"kind": "unit", "surface": surface}
 
     def _live_unit_state_prober(self, unit: str, manager: str) -> dict[str, str]:
-        return show_units(
-            [unit], user=(manager == "user"), properties=UNIT_STATE_PROPERTIES
-        ).get(unit, {})
+        try:
+            return show_units(
+                [unit],
+                user=(manager == "user"),
+                properties=(
+                    "Id",
+                    *UNIT_STATE_PROPERTIES,
+                    "FreezerState",
+                    *POLICY_PROPERTIES,
+                ),
+                timeout=5,
+            ).get(unit, {})
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise ActionError("target systemd manager unavailable", 503) from error
 
     def _resolve_process(self, pid: int, start_ticks: int) -> dict[str, Any]:
         """Admit a `{pid, start_ticks}` process target: live identity AND
@@ -456,6 +494,31 @@ class ActionService:
         return start_ticks, _unit, slice_unit
 
     def _stop_process(self, resolved: dict[str, Any]) -> dict[str, Any]:
+        if self.signaler is not os.kill:
+            return self._signal_process(resolved, self.signaler)
+        # A pidfd pins the kernel process across the final identity check
+        # and signal, including a PID reuse between those two operations.
+        try:
+            descriptor = os.pidfd_open(resolved["pid"])
+        except ProcessLookupError:
+            return {
+                "name": "stop",
+                "status": "noop",
+                "reason": "process already exited",
+            }
+        try:
+            live = self.process_prober(resolved["pid"])
+            if live is None or live[0] != resolved["start_ticks"]:
+                raise ActionError("process identity changed before signal", 409)
+            return self._signal_process(
+                resolved, lambda _pid, sig: signal.pidfd_send_signal(descriptor, sig)
+            )
+        finally:
+            os.close(descriptor)
+
+    def _signal_process(
+        self, resolved: dict[str, Any], signaler: Callable[[int, int], None]
+    ) -> dict[str, Any]:
         """SIGTERM, then SIGKILL only if the same identity (pid AND
         start_ticks) is still alive after `process_stop_grace_seconds`. Hand
         rolled rather than shelling out to `systemctl stop` because a bare
@@ -472,7 +535,7 @@ class ActionService:
             return live is not None and live[0] == start_ticks
 
         try:
-            self.signaler(pid, signal.SIGTERM)
+            signaler(pid, signal.SIGTERM)
         except ProcessLookupError:
             return {
                 "name": "stop",
@@ -502,7 +565,7 @@ class ActionService:
                 "grace_seconds": self.process_stop_grace_seconds,
             }
         try:
-            self.signaler(pid, signal.SIGKILL)
+            signaler(pid, signal.SIGKILL)
         except ProcessLookupError:
             return {
                 "name": "stop",
@@ -571,12 +634,82 @@ class ActionService:
                 "exit_code",
                 "path",
                 "started_at",
+                "reference",
+                "attempt",
                 "ended_at",
             )
             if key in job
         }
 
+    def prepare(self, raw: Any) -> dict[str, Any]:
+        """Read and admit one target without performing an action."""
+        if not isinstance(raw, dict) or set(raw) != {"action", "target", "parameters"}:
+            raise ActionError("prepare requires action, target, and parameters")
+        request = validate_request(
+            {
+                **raw,
+                "expected_target": {"prepare": True},
+                "idempotency_key": "prepare",
+                "operator_reason": "target observation",
+            }
+        )
+        resolved = self._resolve(request, self.snapshot())
+        state = self._target_state(resolved)
+        return {
+            **raw,
+            "expected_target": self._precondition(request, state),
+            "observed_at": utc_ts(),
+        }
+
+    def _precondition(
+        self, request: dict[str, Any], state: dict[str, Any]
+    ) -> dict[str, Any]:
+        kind = state["kind"]
+        if kind == "process":
+            if state.get("alive") is not True:
+                raise ActionError("process identity changed since resolution", 409)
+            return {
+                "kind": kind,
+                "pid": state["pid"],
+                "start_ticks": state["start_ticks"],
+            }
+        if kind == "job":
+            job = state["job"]
+            if not job.get("reference") or not isinstance(job.get("attempt"), int):
+                raise ActionError("job attempt identity unavailable", 503)
+            return {
+                "kind": kind,
+                "launch_reference": job["reference"],
+                "attempt": job["attempt"],
+            }
+        surface, properties = state["surface"], state["systemd"]
+        required = list(UNIT_STATE_PROPERTIES)
+        if request["action"] in {"freeze", "thaw", "park"}:
+            required.append("FreezerState")
+        if request["action"] == "set_policy":
+            required.append(request["parameters"]["property"])
+        if request["action"] == "reset_policy":
+            required.extend(
+                key
+                for key in POLICY_PROPERTIES
+                if surface.get("effectiveResources", {}).get(key) not in (None, "")
+            )
+        if any(key not in properties for key in required):
+            raise ActionError("target live properties unavailable", 503)
+        return {
+            "kind": kind,
+            "unit": surface["unit"],
+            "manager": surface["manager"],
+            "properties": {key: properties[key] for key in required},
+        }
+
     def execute(self, raw: Any) -> dict[str, Any]:
+        # HTTP uses threads; checking and persisting a key must be serialized
+        # with dispatch so simultaneous retries cannot repeat a mutation.
+        with self._action_lock:
+            return self._execute(raw)
+
+    def _execute(self, raw: Any) -> dict[str, Any]:
         request = validate_request(raw)
         digest = hashlib.sha256(
             json.dumps(request, sort_keys=True, separators=(",", ":")).encode()
@@ -587,15 +720,63 @@ class ActionService:
                 raise ActionError(
                     "idempotency key is already bound to another request", 409
                 )
+            if prior.get("status") == "rejected":
+                raise ActionError(
+                    prior.get("error", "action rejected"),
+                    prior.get("error_status", 409),
+                )
+            if prior.get("status") in {"pending", "indeterminate"}:
+                raise ActionError(
+                    "prior action outcome is indeterminate; inspect target and receipt before retrying",
+                    409,
+                )
             return prior
         try:
             snapshot = self.snapshot()
-            if request["expected_revision"] != snapshot.get("sequence"):
-                raise ActionError("expected_revision is stale", 409)
             resolved = self._resolve(request, snapshot)
             previous_target_state = self._target_state(resolved)
-            adapter_receipt = self.adapter(request, resolved)
+            if request["expected_target"] != self._precondition(
+                request, previous_target_state
+            ):
+                raise ActionError(
+                    "expected_target is stale: target identity or state changed", 409
+                )
+            pending = {
+                "schema": "sinnix-ops-action-v1",
+                "receipt_id": str(uuid.uuid4()),
+                "idempotency_key": request["idempotency_key"],
+                "request_hash": digest,
+                "action": request["action"],
+                "target": request["target"],
+                "parameters": request["parameters"],
+                "expected_target": request["expected_target"],
+                "status": "pending",
+                "operator_reason": request["operator_reason"],
+                "created_at": utc_ts(),
+            }
+            append_jsonl(self.receipts_ledger_path, pending, mode=0o600, fsync=True)
+            self.receipts[request["idempotency_key"]] = pending
+            try:
+                adapter_receipt = self.adapter(request, resolved)
+            except Exception as error:
+                uncertain = {
+                    **pending,
+                    "status": "indeterminate",
+                    "error": str(error)[:240],
+                }
+                append_jsonl(
+                    self.receipts_ledger_path, uncertain, mode=0o600, fsync=True
+                )
+                self.receipts[request["idempotency_key"]] = uncertain
+                raise ActionError(
+                    "action outcome is indeterminate; inspect target and receipt", 502
+                ) from error
         except ActionError as error:
+            if (
+                self.receipts.get(request["idempotency_key"], {}).get("status")
+                == "indeterminate"
+            ):
+                raise
             rejected = {
                 "schema": "sinnix-ops-action-v1",
                 "receipt_id": str(uuid.uuid4()),
@@ -603,24 +784,28 @@ class ActionService:
                 "request_hash": digest,
                 "action": request["action"],
                 "target": request["target"],
+                "parameters": request["parameters"],
                 "operator_reason": request["operator_reason"],
-                "expected_revision": request["expected_revision"],
+                "expected_target": request["expected_target"],
                 "status": "rejected",
                 "error": str(error),
+                "error_status": error.status,
                 "created_at": utc_ts(),
             }
             self.receipts[request["idempotency_key"]] = rejected
-            append_jsonl(self.receipts_ledger_path, rejected)
+            append_jsonl(self.receipts_ledger_path, rejected, mode=0o600, fsync=True)
             raise
         receipt = {
+            "status": "confirmed",
             "schema": "sinnix-ops-action-v1",
-            "receipt_id": str(uuid.uuid4()),
+            "receipt_id": pending["receipt_id"],
             "idempotency_key": request["idempotency_key"],
             "request_hash": digest,
             "action": request["action"],
             "target": request["target"],
+            "parameters": request["parameters"],
             "operator_reason": request["operator_reason"],
-            "expected_revision": request["expected_revision"],
+            "expected_target": request["expected_target"],
             "preconditions": {
                 "revision": snapshot.get("sequence"),
                 "resolved": resolved,
@@ -638,7 +823,7 @@ class ActionService:
             "created_at": utc_ts(),
         }
         self.receipts[request["idempotency_key"]] = receipt
-        append_jsonl(self.receipts_ledger_path, receipt)
+        append_jsonl(self.receipts_ledger_path, receipt, mode=0o600, fsync=True)
         return receipt
 
     def lookup(self, key: str) -> dict[str, Any] | None:
@@ -651,7 +836,14 @@ class ActionService:
         if action == "interrupt":
             job_id = resolved["job"]["job_id"]
             try:
-                return {"name": action, "job": self.agent_jobs.cancel(job_id)}
+                return {
+                    "name": action,
+                    "job": self.agent_jobs.cancel(
+                        job_id,
+                        reference=resolved["job"]["reference"],
+                        expected_attempt=request["expected_target"]["attempt"],
+                    ),
+                }
             except AgentCtlError as error:
                 raise ActionError(f"agentctl cancel failed: {error}", 503) from error
         elif resolved.get("kind") == "process":
@@ -750,11 +942,7 @@ class ActionService:
                 *assignments,
             ]
         else:
-            return {
-                "name": action,
-                "status": "accepted",
-                "receipt": secrets.token_hex(8),
-            }
+            raise ActionError("no adapter implements this action", 400)
         result = subprocess.run(
             command, capture_output=True, text=True, timeout=10, check=False
         )

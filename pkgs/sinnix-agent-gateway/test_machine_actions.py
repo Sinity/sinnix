@@ -67,7 +67,12 @@ def test_machine_action_forwards_exact_owner_request(tmp_path: Path) -> None:
     result = actions.execute(
         "restart",
         {"unit": "fixture.service"},
-        17,
+        {
+            "kind": "unit",
+            "unit": "fixture.service",
+            "manager": "user",
+            "properties": {"InvocationID": "fixture-invocation"},
+        },
         "gateway-fixture",
         "verify fixture restart",
     )
@@ -82,7 +87,12 @@ def test_machine_action_forwards_exact_owner_request(tmp_path: Path) -> None:
     assert json.loads(raw_body) == {
         "action": "restart",
         "target": {"unit": "fixture.service"},
-        "expected_revision": 17,
+        "expected_target": {
+            "kind": "unit",
+            "unit": "fixture.service",
+            "manager": "user",
+            "properties": {"InvocationID": "fixture-invocation"},
+        },
         "idempotency_key": "gateway-fixture",
         "operator_reason": "verify fixture restart",
         "parameters": {},
@@ -140,14 +150,19 @@ def test_machine_action_returns_owner_rejection(tmp_path: Path) -> None:
     actions, _ = service(
         tmp_path,
         "operator",
-        FakeResponse(409, {"error": "expected_revision is stale"}),
+        FakeResponse(409, {"error": "expected_target is stale"}),
     )
 
-    with pytest.raises(MachineActionError, match="expected_revision is stale"):
+    with pytest.raises(MachineActionError, match="expected_target is stale"):
         actions.execute(
             "restart",
             {"unit": "fixture.service"},
-            17,
+            {
+                "kind": "unit",
+                "unit": "fixture.service",
+                "manager": "user",
+                "properties": {"InvocationID": "fixture-invocation"},
+            },
             "gateway-fixture",
             "verify fixture restart",
         )
@@ -160,7 +175,72 @@ def test_observer_cannot_submit_machine_action(tmp_path: Path) -> None:
         actions.execute(
             "restart",
             {"unit": "fixture.service"},
-            17,
+            {
+                "kind": "unit",
+                "unit": "fixture.service",
+                "manager": "user",
+                "properties": {"InvocationID": "fixture-invocation"},
+            },
             "gateway-fixture",
             "verify fixture restart",
         )
+
+
+def test_prepare_reads_target_without_mutation_authority(tmp_path: Path) -> None:
+    payload = {
+        "action": "restart",
+        "target": {"unit": "fixture.service"},
+        "parameters": {},
+        "expected_target": {
+            "kind": "unit",
+            "unit": "fixture.service",
+            "manager": "user",
+            "properties": {"InvocationID": "first"},
+        },
+        "observed_at": "2026-09-13T00:00:00Z",
+    }
+    actions, connection = service(tmp_path, "observer", FakeResponse(200, payload))
+    assert actions.prepare("restart", {"unit": "fixture.service"}) == payload
+    assert connection.request_args[:2] == ("POST", "/v1/actions/prepare")
+    assert json.loads(connection.request_args[2]) == {
+        "action": "restart",
+        "target": {"unit": "fixture.service"},
+        "parameters": {},
+    }
+
+
+def test_prepare_rejects_mismatched_target(tmp_path: Path) -> None:
+    actions, _ = service(
+        tmp_path,
+        "observer",
+        FakeResponse(
+            200,
+            {
+                "action": "restart",
+                "target": {"unit": "another.service"},
+                "expected_target": {"kind": "unit"},
+                "observed_at": "now",
+            },
+        ),
+    )
+    with pytest.raises(MachineActionError, match="malformed action preparation"):
+        actions.prepare("restart", {"unit": "fixture.service"})
+
+
+def test_lookup_distinguishes_missing_from_owner_failure(tmp_path: Path) -> None:
+    actions, connection = service(
+        tmp_path, "operator", FakeResponse(404, {"error": "not_found"})
+    )
+    assert actions.lookup("request / #") is None
+    assert connection.request_args[:2] == ("GET", "/v1/actions/request%20%2F%20%23")
+    actions, _ = service(
+        tmp_path, "operator", FakeResponse(503, {"error": "unavailable"})
+    )
+    with pytest.raises(MachineActionError, match="unavailable"):
+        actions.lookup("request")
+
+
+def test_lookup_returns_retained_receipt(tmp_path: Path) -> None:
+    receipt = {"idempotency_key": "one", "status": "accepted"}
+    actions, _ = service(tmp_path, "operator", FakeResponse(200, receipt))
+    assert actions.lookup("one") == receipt

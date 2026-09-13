@@ -118,3 +118,63 @@ def test_job_plane_survives_into_reducer_state(tmp_path: Path) -> None:
         agent_jobs_source=lambda: {"jobs": jobs, "truncated": False},
     ).refresh()
     assert partial["sources"]["agentctl"]["status"] == "unavailable"
+
+
+def test_failed_observe_preserves_jobs_desktop_and_last_good_pressure(tmp_path):
+    values = [{"live_pressure": {"memory": 12}}, RuntimeError("observer failed")]
+
+    def source():
+        value = values.pop(0)
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+    jobs = {"jobs": [{"job_id": 7}], "groups": {}, "truncated": False}
+    reducer = Reducer(
+        tmp_path / "status.json",
+        tmp_path / "token",
+        source,
+        agent_jobs_source=lambda: jobs,
+    )
+    first = reducer.refresh()
+    second = reducer.refresh()
+    assert second["state"]["agentctl"] == jobs
+    assert second["sections"]["agentctl"]["available"] is True
+    assert second["state"]["hyprland_automation"] is not None
+    assert second["state"]["live_pressure"] == {"memory": 12}
+    assert second["sections"]["live_pressure"]["available"] is False
+    assert (
+        second["sections"]["live_pressure"]["observed_at"]
+        == first["sections"]["live_pressure"]["observed_at"]
+    )
+
+
+def test_detailed_sections_only_run_on_request_and_keep_partial_health(tmp_path):
+    calls = []
+
+    def detail(section):
+        calls.append(section)
+        return {"generated_at": "fixture-time", "storage": {"mounts": []}}
+
+    reducer = Reducer(
+        tmp_path / "status.json",
+        tmp_path / "token",
+        lambda: {
+            "live_pressure": {"memory": 12},
+            "sections": {
+                "systemd_units": {
+                    "available": False,
+                    "observed_at": None,
+                    "degradation": "manager down",
+                }
+            },
+        },
+        section_source=detail,
+    )
+    snapshot = reducer.refresh()
+    assert snapshot["sections"]["live_pressure"]["available"] is True
+    assert snapshot["sections"]["systemd_units"]["available"] is False
+    assert calls == []
+    assert reducer.page_snapshot(("storage",))["state"]["storage"] == {"mounts": []}
+    assert calls == ["storage"]
+    assert "storage" not in reducer.snapshot()["state"]

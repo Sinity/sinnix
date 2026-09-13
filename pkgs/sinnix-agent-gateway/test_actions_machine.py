@@ -82,8 +82,7 @@ if "show" in argv:
         print(f"{p}={values.get(p, '')}")
     sys.exit(0)
 sys.exit(2)
-"""
-        % (json.dumps(UNITS), __import__("os").getpid()),
+""" % (json.dumps(UNITS), __import__("os").getpid()),
     )
 
 
@@ -125,8 +124,7 @@ if key:
     rows = report[key]; page = rows[cursor:cursor + limit]
     report[key] = {"total": len(rows), "cursor": cursor, "next_cursor": cursor + len(page) if cursor + len(page) < len(rows) else None, "rows": page}
 print(json.dumps(report))
-"""
-        % json.dumps(report),
+""" % json.dumps(report),
     )
 
 
@@ -175,9 +173,14 @@ def make_runtime(tmp_path: Path, principal: str = "operator") -> Runtime:
         "receipt_id": "owner-receipt",
         "idempotency_key": "restart-alpha",
         "action": "restart",
-        "target": {"unit": "alpha.service"},
+        "target": {"unit": "alpha.service", "manager": "user"},
         "operator_reason": "test",
-        "expected_revision": 17,
+        "expected_target": {
+            "kind": "unit",
+            "unit": "alpha.service",
+            "manager": "user",
+            "properties": {"InvocationID": "fixture-invocation"},
+        },
         "status": "accepted",
     }
     connection = FakeConnection(
@@ -190,6 +193,16 @@ def make_runtime(tmp_path: Path, principal: str = "operator") -> Runtime:
                     "observed_at": "2026-08-25T00:00:00Z",
                     "degradation": None,
                     "sources": {},
+                },
+            ),
+            "/v1/actions/prepare": FakeResponse(
+                200,
+                {
+                    "action": "restart",
+                    "target": {"unit": "alpha.service", "manager": "user"},
+                    "parameters": {},
+                    "expected_target": receipt["expected_target"],
+                    "observed_at": "2026-09-13T00:00:00Z",
                 },
             ),
             "/v1/actions": FakeResponse(201, receipt),
@@ -285,7 +298,12 @@ def test_operate_and_units_operate_go_through_reducer(tmp_path: Path) -> None:
             "target": "sinnix://machine/units/user/alpha.service",
             "request": {"action": "restart"},
             "reason": "test",
-            "expected_revision": 17,
+            "expected_target": {
+                "kind": "unit",
+                "unit": "alpha.service",
+                "manager": "user",
+                "properties": {"InvocationID": "fixture-invocation"},
+            },
             "idempotency_key": "restart-alpha",
         },
     )
@@ -295,8 +313,13 @@ def test_operate_and_units_operate_go_through_reducer(tmp_path: Path) -> None:
     assert (method, path) == ("POST", "/v1/actions")
     assert body == {
         "action": "restart",
-        "target": {"unit": "alpha.service"},
-        "expected_revision": 17,
+        "target": {"unit": "alpha.service", "manager": "user"},
+        "expected_target": {
+            "kind": "unit",
+            "unit": "alpha.service",
+            "manager": "user",
+            "properties": {"InvocationID": "fixture-invocation"},
+        },
         "idempotency_key": "restart-alpha",
         "operator_reason": "test",
         "parameters": {},
@@ -309,7 +332,14 @@ def test_operate_and_units_operate_go_through_reducer(tmp_path: Path) -> None:
             "target": {"name": "alpha"},
             "action": "restart",
             "reason": "test",
-            "preconditions": {"expected_revision": 17},
+            "preconditions": {
+                "expected_target": {
+                    "kind": "unit",
+                    "unit": "alpha.service",
+                    "manager": "user",
+                    "properties": {"InvocationID": "fixture-invocation"},
+                }
+            },
             "idempotency_key": "restart-alpha",
         },
     )
@@ -322,7 +352,12 @@ def test_operate_and_units_operate_go_through_reducer(tmp_path: Path) -> None:
         {
             "target": "sinnix://machine/units/user/alpha.service",
             "request": {"action": "restart"},
-            "expected_revision": 17,
+            "expected_target": {
+                "kind": "unit",
+                "unit": "alpha.service",
+                "manager": "user",
+                "properties": {"InvocationID": "fixture-invocation"},
+            },
             "idempotency_key": "k2",
         },
     )
@@ -349,8 +384,32 @@ def test_observer_cannot_operate(tmp_path: Path) -> None:
             "target": {"name": "alpha"},
             "action": "stop",
             "reason": "r",
-            "expected_revision": 17,
+            "expected_target": {
+                "kind": "unit",
+                "unit": "alpha.service",
+                "manager": "user",
+                "properties": {"InvocationID": "fixture-invocation"},
+            },
             "idempotency_key": "k",
         },
     )
     assert denied["error"]["code"] == "policy_denied"
+
+
+def test_observer_can_prepare_exact_target_precondition(tmp_path: Path) -> None:
+    runtime = make_runtime(tmp_path, "observer")
+    result = call(
+        runtime,
+        "machine.prepare",
+        {
+            "target": "sinnix://machine/units/user/alpha.service",
+            "request": {"action": "restart"},
+        },
+    )
+    assert result["result"]["outcome"] == "ok", result
+    assert (
+        result["data"]["expected_target"]["properties"]["InvocationID"]
+        == "fixture-invocation"
+    )
+    assert result["data"]["ref"] == "sinnix://machine/units/user/alpha.service"
+    assert runtime._fake_connection.requests[-1][:2] == ("POST", "/v1/actions/prepare")

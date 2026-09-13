@@ -13,6 +13,8 @@ import subprocess
 from pathlib import Path
 from typing import Any, Iterable
 
+from sinnix_lib.systemd import show_units as probe_units
+
 
 def load_json(path: Path) -> tuple[dict[str, Any] | None, str | None]:
     try:
@@ -28,58 +30,27 @@ def load_json(path: Path) -> tuple[dict[str, Any] | None, str | None]:
     return value, None
 
 
-def systemctl(manager: str, *arguments: str, timeout: int = 15) -> str | None:
-    binary = shutil.which("systemctl") or "systemctl"
-    scope = "--user" if manager == "user" else "--system"
-    try:
-        result = subprocess.run(
-            [binary, scope, *arguments],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    return result.stdout
-
-
 def show_units(
     manager: str, units: Iterable[str], properties: Iterable[str]
 ) -> dict[str, dict[str, str]]:
-    """`systemctl show` a batch of units, keyed by unit id.
-
-    The manager matters: asking the system manager about a user unit reports
-    not-found, which would render as "not installed" and hide a service that is
-    running perfectly well.
-    """
-    names = [unit for unit in units if unit]
-    if not names:
+    try:
+        return probe_units(
+            [unit for unit in units if unit],
+            user=manager == "user",
+            properties=("Id", *properties),
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
         return {}
-    output = systemctl(
-        manager,
-        "show",
-        *(f"--property={name}" for name in ("Id", *properties)),
-        *names,
-    )
-    if output is None:
-        return {}
-    states: dict[str, dict[str, str]] = {}
-    current: dict[str, str] = {}
-    for line in output.splitlines():
-        if not line.strip():
-            if current.get("Id"):
-                states[current["Id"]] = current
-            current = {}
-            continue
-        key, _, value = line.partition("=")
-        current[key] = value
-    if current.get("Id"):
-        states[current["Id"]] = current
-    return states
 
 
-UNIT_PROPERTIES = ("ActiveState", "SubState", "UnitFileState", "LoadState")
+UNIT_PROPERTIES = (
+    "ActiveState",
+    "SubState",
+    "UnitFileState",
+    "LoadState",
+    "InvocationID",
+)
 
 
 def unit_states(units: list[tuple[str, str]]) -> dict[str, dict[str, str]]:

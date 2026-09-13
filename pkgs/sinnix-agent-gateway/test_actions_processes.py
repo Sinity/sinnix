@@ -126,3 +126,30 @@ def test_signal_is_operator_only_and_never_self(tmp_path: Path) -> None:
         BY_NAME,
     )
     assert refused["error"]["code"] == "policy_denied"
+
+
+def test_reducer_stop_forwards_target_identity(tmp_path: Path, monkeypatch) -> None:
+    rt = runtime(tmp_path)
+    raw, ref = ProcessLocator(pid=os.getpid()).resolve()
+    expected = {"kind": "process", "pid": raw["pid"], "start_ticks": raw["start_ticks"]}
+    requests = []
+
+    def execute(**request):
+        requests.append(request)
+        return {"ref": ref, "action": "stop", "owner_receipt": {"status": "accepted"}}
+
+    monkeypatch.setattr(rt, "v2_operate", execute)
+    result = call(
+        rt,
+        "processes.signal",
+        {
+            "target": {"ref": ref},
+            "request": {"operation": "stop", "expected_target": expected},
+            "reason": "synthetic owner request",
+            "idempotency_key": "stop-current",
+        },
+        BY_NAME,
+    )
+    assert result["result"]["outcome"] == "ok", result
+    assert requests[0]["preconditions"] == {"expected_target": expected}
+    assert requests[0]["reference"] == ref

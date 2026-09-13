@@ -70,6 +70,7 @@ def show_units(
     *,
     user: bool = False,
     properties: Sequence[str] = DEFAULT_PROPERTIES,
+    timeout: float | None = None,
 ) -> dict[str, dict[str, str]]:
     """One batched ``systemctl [--user] show`` call → {unit: {prop: value}}.
 
@@ -81,7 +82,9 @@ def show_units(
     cmd = ["systemctl", *(["--user"] if user else []), "show", *units]
     for prop in properties:
         cmd += ["-p", prop]
-    proc = subprocess.run(cmd, check=False, capture_output=True, text=True)
+    proc = subprocess.run(
+        cmd, check=False, capture_output=True, text=True, timeout=timeout
+    )
     if proc.returncode != 0 and not proc.stdout:
         return {}
     return _parse_blocks(proc.stdout)

@@ -626,7 +626,7 @@ in
 
       # Save pre-wipe @ — never auto-pruned, manual cleanup only
       SNAP_NAME="root.$(${pkgs.coreutils}/bin/date +%Y%m%dT%H%M%S)"
-      ${pkgs.btrfs-progs}/bin/btrfs subvolume snapshot /btrfs_tmp/@ "/btrfs_tmp/.snapshots/$SNAP_NAME"
+      ${pkgs.btrfs-progs}/bin/btrfs subvolume snapshot -r /btrfs_tmp/@ "/btrfs_tmp/.snapshots/$SNAP_NAME"
 
       # Delete nested child subvolumes of @ (required before deleting @)
       ${pkgs.btrfs-progs}/bin/btrfs subvolume list -o /btrfs_tmp/@ \

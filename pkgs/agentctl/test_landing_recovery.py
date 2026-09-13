@@ -92,11 +92,18 @@ def test_terminal_cleanup_retains_live_worker_evidence(
 def test_terminal_runs_release_worker_jobs_for_cleanup(
     harness: Harness, terminal: str
 ) -> None:
-    """Retention ends with the manifest's terminal state."""
+    """A terminal manifest releases queue rows while execution evidence stays."""
     run = prepared_run(harness, "fx-solo")
     worker = run["workers"][0]
     task = harness.pueue.task(worker["task_id"])
     input_path = launch.launch_input_path(task)
+    input_before = input_path.read_bytes()
+    written = read_launch(harness.config, task)
+    log = Path(written["log_path"])
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_text("worker completed before terminal cleanup\n")
+    result_path = Path(worker["result_path"])
+    result_before = result_path.read_bytes()
     manifest.update(
         harness.config,
         run["run_id"],
@@ -106,7 +113,18 @@ def test_terminal_runs_release_worker_jobs_for_cleanup(
     cleaned = launch.clean_terminal(harness.config)
 
     assert [row["job_id"] for row in cleaned] == [task.task_id]
-    assert harness.pueue.task(task.task_id) is None and not input_path.exists()
+    assert harness.pueue.task(task.task_id) is None
+    assert cleaned[0]["reference"] == launch.launch_reference(task)
+    assert cleaned[0]["retained"] is True
+    assert input_path.read_bytes() == input_before
+    assert log.read_text() == "worker completed before terminal cleanup\n"
+    assert result_path.read_bytes() == result_before
+    assert (
+        launch.logs(
+            harness.config, task.task_id, reference=launch.launch_reference(task)
+        )
+        == "worker completed before terminal cleanup\n"
+    )
 
 
 def test_terminal_cleanup_retains_a_verification_in_a_live_worktree(

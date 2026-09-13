@@ -11,7 +11,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 from sinnix_lib.systemd import sd_notify, watchdog_period
 
@@ -410,7 +410,12 @@ class Handler(BaseHTTPRequestHandler):
         what the reducer currently believes, which is the whole reason the
         pages moved here from a timer.
         """
-        snapshot = self.reducer.snapshot()
+        requested = {
+            "/": ("storage", "drift"),
+
+            "/work/": ("workloads", "ingestion", "slices"),
+        }.get(pages.canonical(path), ())
+        snapshot = self.reducer.page_snapshot(requested)
         error = None
         if not snapshot:
             snapshot = None
@@ -467,6 +472,16 @@ class Handler(BaseHTTPRequestHandler):
             )
         elif self.path.startswith(FEEDBACK_ELICIT_PREFIX):
             self._serve_elicit_model(self.path.removeprefix(FEEDBACK_ELICIT_PREFIX))
+        elif route.startswith("/v1/observe/"):
+            try:
+                self._write(
+                    HTTPStatus.OK,
+                    self.reducer.observe(route.removeprefix("/v1/observe/")),
+                )
+            except ValueError as error:
+                self._write(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+            except Exception as error:
+                self._write(HTTPStatus.SERVICE_UNAVAILABLE, {"error": str(error)[:240]})
         elif self.path == "/v1/health":
             self._write(HTTPStatus.OK, self.reducer.health())
         elif self.path == "/v1/health/lanes":
@@ -552,8 +567,8 @@ class Handler(BaseHTTPRequestHandler):
                 HTTPStatus.OK,
                 {"schema": "sinnix-ops-receipts-v1", "receipts": receipts},
             )
-        elif self.path.startswith("/v1/actions/"):
-            key = self.path.removeprefix("/v1/actions/")
+        elif route.startswith("/v1/actions/"):
+            key = unquote(route.removeprefix("/v1/actions/"))
             receipt = self.reducer.actions.lookup(key)
             if receipt is None:
                 self._write(HTTPStatus.NOT_FOUND, {"error": "not_found"})
@@ -583,7 +598,7 @@ class Handler(BaseHTTPRequestHandler):
         if terminals.is_terminal_route(self.path):
             self._serve_terminal_post()
             return
-        if self.path != "/v1/actions":
+        if self.path not in {"/v1/actions", "/v1/actions/prepare"}:
             self._write(HTTPStatus.NOT_FOUND, {"error": "not_found"})
             return
         try:
@@ -591,8 +606,11 @@ class Handler(BaseHTTPRequestHandler):
             if length < 0 or length > 65536:
                 raise ActionError("request body is missing or too large")
             value = json.loads(self.rfile.read(length))
-            self._write(HTTPStatus.CREATED, self.reducer.actions.execute(value))
-        except (json.JSONDecodeError, ActionError) as error:
+            if self.path == "/v1/actions/prepare":
+                self._write(HTTPStatus.OK, self.reducer.actions.prepare(value))
+            else:
+                self._write(HTTPStatus.CREATED, self.reducer.actions.execute(value))
+        except ValueError as error:
             status = error.status if isinstance(error, ActionError) else 400
             self._write(status, {"error": str(error)})
 

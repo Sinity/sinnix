@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from ..actions import POLICY_PROPERTIES
@@ -109,7 +110,12 @@ def unit_status(
 
 
 def lifecycle_controls(
-    unit: str, restartable: bool, installed: bool, active: bool
+    unit: str,
+    restartable: bool,
+    installed: bool,
+    active: bool,
+    manager: str | None = None,
+    properties: dict[str, str] | None = None,
 ) -> str:
     if not installed:
         return (
@@ -121,9 +127,18 @@ def lifecycle_controls(
             "observe.restartable, and the action API refuses lifecycle verbs "
             'for it">not restartable</span>'
         )
+    identity_keys = ("LoadState", "ActiveState", "SubState", "InvocationID")
+    expected = None
+    if manager and properties and all(key in properties for key in identity_keys):
+        expected = {
+            "kind": "unit",
+            "unit": unit,
+            "manager": manager,
+            "properties": {key: properties[key] for key in identity_keys},
+        }
     verbs = ("stop", "restart") if active else ("start",)
     return "".join(
-        f'<button class="act{" danger" if verb == "stop" else ""}" '
+        f'<button class="act{" danger" if verb == "stop" else ""}" data-expected-target="{esc(json.dumps(expected))}" '
         f"onclick=\"act('{verb}','unit','{esc(unit)}',this)\">{verb}</button>"
         for verb in verbs
     )
@@ -165,7 +180,12 @@ def render_services(
         if endpoint:
             meta.append(f"<code>{esc(endpoint)}</code>")
         controls = lifecycle_controls(
-            entry["unit"], entry["restartable"], installed, active
+            entry["unit"],
+            entry["restartable"],
+            installed,
+            active,
+            entry["manager"],
+            info,
         )
         if installed:
             controls += policy_controls(entry["unit"], entry["effective_resources"])
