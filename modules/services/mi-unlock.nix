@@ -34,7 +34,6 @@ mkServiceModule {
     { cfg, ... }:
     let
       scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
-      user = config.sinnix.user.name;
       stateDir = "%S/sinnix-mi-unlock";
       sentinel = "${stateDir}/granted";
       runner = pkgs.writeShellApplication {
@@ -59,53 +58,42 @@ mkServiceModule {
         '';
       };
     in
-    {
-      sinnix.runtime.surfaces.mi-unlock = {
-        unit = "sinnix-mi-unlock.service";
-        manager = "user";
-        resourceClass = "background";
-        observe.enable = true;
-      };
-
-      home-manager.users.${user} = {
-        systemd.user.services.sinnix-mi-unlock = {
-          Unit = {
-            Description = "Apply for Xiaomi bootloader unlock at the quota reset";
-            # Skip entirely once granted.
-            ConditionPathExists = "!%S/sinnix-mi-unlock/granted";
-          };
-          Service = {
-            # The process intentionally waits for the quota boundary after
-            # it has started.  Keep activation asynchronous so a config
-            # switch does not block on the daily observation window.
+    lib.mkMerge [
+      {
+        sinnix.runtime.surfaces.mi-unlock = {
+          unit = "sinnix-mi-unlock.service";
+          manager = "user";
+          resourceClass = "background";
+          observe.enable = true;
+        };
+      }
+      (lib.sinnix.mkScheduledJob
+        {
+          inherit config;
+          unitName = "sinnix-mi-unlock";
+          description = "Apply for Xiaomi bootloader unlock at the quota reset";
+          surface = config.sinnix.runtime.surfaces.mi-unlock;
+        }
+        {
+          manager = "user";
+          resourceClass = "background";
+          execStart = "${runner}/bin/sinnix-mi-unlock-run";
+          serviceConfig = {
+            # The process waits for the quota boundary after it starts.
             Type = "simple";
             StateDirectory = "sinnix-mi-unlock";
-            ExecStart = "${runner}/bin/sinnix-mi-unlock-run";
-            # 75 (EX_TEMPFAIL) is the request script's code for
-            # REFUSED-UNTIL-DEADLINE: the server's ordinary "not in this quota
-            # window" answer, which is what nearly every run gets. Without
-            # this the unit reported failure daily for behaving exactly as
-            # designed, and a real fault would have been indistinguishable
-            # from the routine one. 1 still means a genuine failure.
+            # Exit 75 is the ordinary refusal before the quota window.
             SuccessExitStatus = "75";
-            # A failed application is the ordinary outcome while the pool is
-            # exhausted; retrying within the same day cannot help and would
-            # only add requests, so there is deliberately no Restart.
           };
-        };
-
-        systemd.user.timers.sinnix-mi-unlock = {
-          Unit.Description = "Daily trigger for the Xiaomi unlock window";
-          Timer = {
-            OnCalendar = cfg.onCalendar;
-            AccuracySec = "1s";
-            # Deliberately NOT Persistent: a missed window cannot be caught
-            # up after the fact, and a late run would submit outside the
-            # boundary for no reason.
-            Persistent = false;
+          unit.unitConfig.ConditionPathExists = "!%S/sinnix-mi-unlock/granted";
+          timer = {
+            onCalendar = cfg.onCalendar;
+            accuracySec = "1s";
+            # A missed quota window cannot be caught up after the fact.
+            persistent = false;
+            description = "Daily trigger for the Xiaomi unlock window";
           };
-          Install.WantedBy = [ "timers.target" ];
-        };
-      };
-    };
+        }
+      )
+    ];
 } args
