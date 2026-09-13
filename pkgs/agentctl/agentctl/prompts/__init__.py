@@ -611,10 +611,21 @@ def _owner_revision(value: Any) -> str | None:
 
 
 def _stable_criteria(bead: Mapping[str, Any]) -> tuple[dict[str, str], ...]:
-    """The Beads-authored AC IDs and text, or nothing when they are unavailable."""
+    """The dispatch snapshot's criterion identities and exact text.
+
+    Beads has structured criteria on some records, but its normal public
+    surface is one acceptance string.  That string is still an authoritative
+    dispatch input: bind it as one opaque criterion instead of downgrading a
+    new batch to an unbound result contract.  The digest is an identity, not a
+    claim that AgentCTL understood the prose; review still assesses it.
+    """
     raw = _metadata(bead).get("acceptance_criteria")
     if not isinstance(raw, list) or not raw:
-        return ()
+        raw = bead.get("acceptance_criteria")
+        if not isinstance(raw, str) or not raw:
+            return ()
+        digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+        return ({"ac_id": f"dispatch-{digest}", "text": raw},)
     rows: list[dict[str, str]] = []
     seen: set[str] = set()
     for item in raw:
@@ -636,14 +647,23 @@ def _stable_criteria(bead: Mapping[str, Any]) -> tuple[dict[str, str], ...]:
 
 
 def evidence_binding(bead: Mapping[str, Any]) -> dict[str, Any]:
-    """Stable owner facts a v2 worker may copy, never synthesized identities."""
+    """Immutable acceptance facts retained with one dispatch worker.
+
+    The identity is created from the owner-authored acceptance snapshot at
+    dispatch, rather than requiring a second metadata ledger just to make a
+    batch safe to close.
+    """
     revision = _owner_revision(bead.get("revision"))
     criteria = _stable_criteria(bead)
     available = revision is not None and bool(criteria)
+    digest = hashlib.sha256(
+        json.dumps(list(criteria), separators=(",", ":"), sort_keys=True).encode("utf-8")
+    ).hexdigest()
     return {
         "v2_available": available,
         "bead_revision": revision,
         "criteria": list(criteria),
+        "acceptance_digest": digest if available else None,
         **(
             {}
             if available

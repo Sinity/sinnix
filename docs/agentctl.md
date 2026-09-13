@@ -133,7 +133,7 @@ agentctl evidence file result.json --project <project>
 agentctl evidence list <project> --json
 ```
 
-The result must name a candidate SHA and its Beads tasks. A version-two result uses `execution = "native"` and must copy the Beads row revision and `{ac_id, text}` criteria that `bd show` returns when it is filed. A legacy result is still retained when those stable acceptance IDs are unavailable. Its task snapshot says why the criteria are unavailable; AgentCTL never invents them from title, closure state or prose.
+The result must name a candidate SHA and its Beads tasks. A version-two result uses `execution = "native"` and must copy the Beads row revision, acceptance digest, and `{ac_id, text}` dispatch snapshot. A legacy result remains retained when a historical dispatch has no binding, but cannot automatically close a Bead. AgentCTL binds the exact owner acceptance field when structured criteria are unavailable; it never substitutes worker prose for that snapshot.
 
 Each native verification claim must use a durable AgentCTL job receipt, `agentctl://jobs/<id>/<launch-reference>`, rather than a pass string. Filing resolves that exact launch reference in the selected project, then records whether the job terminated successfully and its execution checkout receipt had unchanged clean endpoints at the candidate SHA. The submitted result remains a claim. The receipt observation is the checked fact.
 
@@ -463,8 +463,9 @@ still running, and creates the landing groups the daemon lacks.
    publication: nothing is merged again. If the target moved, one refresh
    rebases the run on the new base and repeats from step 2; a second
    movement stops with `target_moved_twice`.
-6. Accept: write the acceptance record, `bd close` each bead whose criteria
-   are all satisfied or superseded in its worker's result with the landed
+6. Accept: write the acceptance record, `bd close` each bead whose immutable
+   dispatch acceptance remains current and whose criteria are all satisfied or
+   superseded in its worker's result with the landed
    commit (the merge commit under `pr`, the candidate under `master`),
    `bd comment` the rest with the residual, then `wt remove` the worker and
    integration worktrees. One is kept only when work would go with it -- an

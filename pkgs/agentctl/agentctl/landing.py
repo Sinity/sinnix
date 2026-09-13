@@ -118,6 +118,57 @@ def _worker_results(run: Run) -> list[dict[str, Any]]:
     return [dict(worker["result"]) for worker in run.workers if worker.get("result")]
 
 
+def _closure_verdicts(run: Run, beads: Beads) -> tuple[dict[str, bool], dict[str, str]]:
+    """Closure eligibility from the immutable dispatch snapshot.
+
+    Publication may preserve a legacy worker result, but it cannot turn that
+    worker's free-form criteria into task completion.  A new strict dispatch
+    records a v2 binding; its exact criterion snapshot must still be current
+    when landing decides whether to close the Bead.
+    """
+    claimed = results.satisfied_beads(_worker_results(run))
+    verdicts: dict[str, bool] = {}
+    residuals: dict[str, str] = {}
+    for worker in run.workers:
+        result = worker.get("result")
+        rows = worker.get("evidence_binding")
+        bindings = {
+            row.get("id"): row
+            for row in rows or ()
+            if isinstance(row, Mapping) and isinstance(row.get("id"), str)
+        }
+        for bead_id in worker["beads"]:
+            binding = bindings.get(bead_id)
+            if (
+                not isinstance(result, Mapping)
+                or not isinstance(binding, Mapping)
+                or binding.get("v2_available") is not True
+                or result.get("schema_version") != results.RESULT_SCHEMA_VERSION
+            ):
+                verdicts[bead_id] = False
+                residuals[bead_id] = "no closure-eligible dispatch acceptance binding"
+                continue
+            try:
+                current = prompts.evidence_binding(beads.show(bead_id))
+            except (BatchError, PromptError) as error:
+                verdicts[bead_id] = False
+                residuals[bead_id] = f"current acceptance could not be observed: {error}"
+                continue
+            if any(
+                current.get(key) != binding.get(key)
+                for key in ("bead_revision", "acceptance_digest", "criteria")
+            ):
+                verdicts[bead_id] = False
+                residuals[bead_id] = "acceptance changed after dispatch"
+                continue
+            if claimed.get(bead_id):
+                verdicts[bead_id] = True
+            else:
+                verdicts[bead_id] = False
+                residuals[bead_id] = "dispatch acceptance was not fully satisfied"
+    return verdicts, residuals
+
+
 # A result filed on the run's base commit carries no branch to integrate: the
 # worker either proved its beads already hold (`verified`) or found nothing to
 # do (`no_op`). Its evidence still reaches the reviewer and acceptance.
@@ -454,15 +505,31 @@ def _pr_text(run: Run, beads: Beads) -> tuple[str, str]:
         title = prompts.bead_subject(beads.show(leader))
     except PromptError:
         title = f"chore: batch {run.run_id}"
-    criteria = {
-        entry["id"]: [
-            f"- [{'x' if item.get('status') in {'satisfied', 'superseded'} else ' '}] "
-            f"{str(item.get('text') or '')[: prompts.RESULT_TEXT_CHARS]}"
-            for item in entry.get("criteria") or ()
-        ]
+    claims = {
+        entry["id"]: {
+            str(item.get("ac_id") or ""): item for item in entry.get("criteria") or ()
+        }
         for result in _worker_results(run)
         for entry in result.get("beads") or ()
+        if isinstance(entry, Mapping) and isinstance(entry.get("id"), str)
     }
+    criteria: dict[str, list[str]] = {}
+    for worker in run.workers:
+        for binding in worker.get("evidence_binding") or ():
+            if (
+                not isinstance(binding, Mapping)
+                or binding.get("v2_available") is not True
+            ):
+                continue
+            bead_id = binding.get("id")
+            if not isinstance(bead_id, str):
+                continue
+            criteria[bead_id] = [
+                f"- [{'x' if claims.get(bead_id, {}).get(str(item.get('ac_id')), {}).get('status') in {'satisfied', 'superseded'} else ' '}] "
+                f"{str(item.get('text') or '')[: prompts.RESULT_TEXT_CHARS]}"
+                for item in binding.get("criteria") or ()
+                if isinstance(item, Mapping)
+            ]
     lines = [f"Batch `{run.run_id}` on base `{run.base_commit[:12]}`.", ""]
     for bead_id in run.beads:
         try:
@@ -1114,7 +1181,7 @@ def _accept(
     review_verdict: Mapping[str, Any],
     published: Mapping[str, Any],
 ) -> Run:
-    verdicts = results.satisfied_beads(_worker_results(run))
+    verdicts, closure_residuals = _closure_verdicts(run, beads)
     beads_state: dict[str, dict[str, str]] = {}
     # What reached the default branch: the squash-merge commit under the PR
     # policy, the candidate itself under the master policy.
@@ -1136,9 +1203,8 @@ def _accept(
                 }
         else:
             residual = (
-                f"batch {run.run_id} landed {landed} without satisfying every criterion"
-                if bead_id in verdicts
-                else f"batch {run.run_id} landed {landed}; no worker result covered this bead"
+                f"batch {run.run_id} landed {landed}; "
+                f"{closure_residuals.get(bead_id, 'no closure evidence')}"
             )
             try:
                 beads.comment(bead_id, residual, actor=run.actor)
