@@ -1798,6 +1798,59 @@ def test_manifest_is_written_once_and_updated_under_the_lock(harness: Harness) -
         manifest.load(harness.config, "nope")
 
 
+def test_invalid_manifest_create_publishes_no_final_file(harness: Harness) -> None:
+    """Serialization happens before exclusive publication."""
+    run = manifest.Run.from_dict(
+        {
+            "run_id": "fixture-invalid-create",
+            "project": "fixture",
+            "base_commit": BASE,
+            "created_at": "2026-09-03T08:00:00+00:00",
+            "harness": "queued",
+            "runtime_revision": "fixture",
+            "verify_profile": None,
+            "review_profile": "review",
+            "workers": [{"id": object()}],
+            "landing": {},
+            "acceptance": None,
+            "prepared": False,
+        }
+    )
+    path = manifest.manifest_path(harness.config, run.run_id)
+
+    with pytest.raises(TypeError):
+        manifest.create(harness.config, run)
+
+    assert not path.exists()
+    assert not list(path.parent.glob(f".{path.name}.*.tmp"))
+
+
+def test_duplicate_manifest_creation_preserves_the_first_bytes(harness: Harness) -> None:
+    run = manifest.Run.from_dict({**harness.start("fx-solo")})
+    path = manifest.manifest_path(harness.config, run.run_id)
+    original = path.read_bytes()
+
+    with pytest.raises(BatchRefusal, match="already has a manifest"):
+        manifest.create(harness.config, run)
+
+    assert path.read_bytes() == original
+
+
+def test_invalid_manifest_update_preserves_old_bytes(harness: Harness) -> None:
+    run = manifest.Run.from_dict({**harness.start("fx-solo")})
+    path = manifest.manifest_path(harness.config, run.run_id)
+    original = path.read_bytes()
+
+    def invalidate(document: dict[str, Any]) -> None:
+        document["landing"]["unserializable"] = object()
+
+    with pytest.raises(TypeError):
+        manifest.update(harness.config, run.run_id, invalidate)
+
+    assert path.read_bytes() == original
+    assert not list(path.parent.glob(f".{path.name}.*.tmp"))
+
+
 def test_a_result_must_name_a_commit_that_descends_from_the_run_base(
     harness: Harness,
 ) -> None:

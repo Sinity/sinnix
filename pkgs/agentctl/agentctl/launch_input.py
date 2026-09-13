@@ -10,9 +10,10 @@ from __future__ import annotations
 import json
 import os
 import re
-import tempfile
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
+
+from sinnix_lib.atomic import atomic_publish
 
 from .limits import RESULT_KINDS
 
@@ -100,22 +101,11 @@ def scratch_path(kind: str, reference: str) -> Path | None:
 def write_input(path: Path, document: Mapping[str, Any]) -> None:
     """Atomically publish a private input so acknowledgement cannot tear it."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
-    try:
-        with os.fdopen(descriptor, "wb") as handle:
-            handle.write(
-                json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
-            )
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
-        directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
-        try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
-    finally:
-        Path(temporary).unlink(missing_ok=True)
+    # Serialize before publishing so malformed values leave an existing input
+    # untouched.  launch inputs retain their crash-durable file and directory
+    # fsync contract and private mode.
+    payload = json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
+    atomic_publish(path, payload, fsync=True, mode=0o600)
 
 
 def read_input(path: Path) -> dict[str, Any]:

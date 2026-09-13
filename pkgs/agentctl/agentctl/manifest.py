@@ -17,6 +17,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping
 
+from sinnix_lib.atomic import atomic_publish
+
 from .config import Config
 from .limits import SHORT_ID
 
@@ -201,27 +203,32 @@ def _dump(document: Mapping[str, Any]) -> str:
 
 
 def _write(path: Path, document: Mapping[str, Any]) -> None:
-    temporary = path.with_suffix(".json.tmp")
-    descriptor = os.open(
-        temporary, os.O_CREAT | os.O_TRUNC | os.O_WRONLY | os.O_NOFOLLOW, 0o600
+    # Serialize before publishing so an invalid document cannot disturb the
+    # previous manifest.  atomic_publish owns temporary-file cleanup, mode,
+    # and replacement semantics for all state files.
+    atomic_publish(
+        path,
+        _dump(document).encode(),
+        fsync=False,
+        mode=0o600,
     )
-    with os.fdopen(descriptor, "w") as handle:
-        handle.write(_dump(document))
-    os.replace(temporary, path)
 
 
 def create(config: Config, run: Run) -> None:
     """Write the manifest once; a second writer for the same id is refused."""
     path = manifest_path(config, run.run_id)
     _private_runs_dir(config)
-    try:
-        descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-    except FileExistsError as error:
+    published = atomic_publish(
+        path,
+        _dump(run.to_dict()).encode(),
+        fsync=False,
+        mode=0o600,
+        exclusive=True,
+    )
+    if not published:
         raise BatchRefusal(
             "exists", f"run {run.run_id} already has a manifest"
-        ) from error
-    with os.fdopen(descriptor, "w") as handle:
-        handle.write(_dump(run.to_dict()))
+        )
 
 
 def load(config: Config, run_id: str) -> Run:

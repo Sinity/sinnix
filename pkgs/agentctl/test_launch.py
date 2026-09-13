@@ -11,6 +11,7 @@ import pytest
 from agentctl import launch, pueue
 from agentctl.config import Config, load_config
 from agentctl.launch import JobError
+from agentctl.launch_input import write_input
 from agentctl.projects import load_project_adapter
 from agentctl.pueue import PueueGroupError, Task
 from agentctl.run import (
@@ -24,6 +25,19 @@ from agentctl.run import (
     unit_for,
 )
 from conftest import FakePueue, read_launch
+
+
+def test_invalid_launch_input_preserves_existing_private_bytes(tmp_path: Path) -> None:
+    path = tmp_path / "launch.json"
+    path.write_bytes(b"original")
+    path.chmod(0o644)
+
+    with pytest.raises(TypeError):
+        write_input(path, {"invalid": object()})
+
+    assert path.read_bytes() == b"original"
+    assert path.stat().st_mode & 0o777 == 0o644
+    assert not list(path.parent.glob(f".{path.name}.*.tmp"))
 
 
 def test_start_writes_the_launch_input_and_queues_the_wrapper_in_the_pool(
