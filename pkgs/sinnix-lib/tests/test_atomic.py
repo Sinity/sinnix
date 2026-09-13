@@ -27,11 +27,11 @@ def test_publish_renames_a_complete_temporary_over_the_destination(
     observed: dict[str, object] = {}
     real_replace = os.replace
 
-    def spy(source, target):
+    def spy(source, target, **kwargs):
         observed["source"] = Path(source)
-        observed["source_bytes"] = Path(source).read_bytes()
-        observed["destination_bytes"] = Path(target).read_bytes()
-        real_replace(source, target)
+        observed["source_bytes"] = (tmp_path / source).read_bytes()
+        observed["destination_bytes"] = (tmp_path / target).read_bytes()
+        real_replace(source, target, **kwargs)
 
     monkeypatch.setattr(atomic.os, "replace", spy)
     assert atomic_publish(destination, b"new", fsync=False) is True
