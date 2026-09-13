@@ -657,6 +657,7 @@ in
           "${scriptPkgs.sinnix-config-drift}/bin/sinnix-config-drift"
           "--manifest /etc/sinnix/config.json"
           "--output ${cfg.paths.machineRoot}/config-drift.jsonl"
+          "--user-name ${cfg.user.name}"
           # The user profile's noctalia, so the merged export uses the same
           # binary and schema the running shell does.
           "--noctalia /etc/profiles/per-user/${cfg.user.name}/bin/noctalia"

@@ -1,4 +1,5 @@
 import json
+import shlex
 import stat
 import subprocess
 from pathlib import Path
@@ -16,6 +17,7 @@ def run(
     current_revision="fixture",
     booted_revision="older",
     extra_args=None,
+    systemctl_log=None,
 ):
     proc_root = tmp_path / "root"
     for relative, value in (proc_files or {}).items():
@@ -25,7 +27,10 @@ def run(
     manifest_path = tmp_path / "config.json"
     manifest_path.write_text(json.dumps({"sinnix": {"drift": manifest}}))
     systemctl = tmp_path / "systemctl"
-    systemctl.write_text(f"#!/bin/sh\nprintf '%s\\n' {systemctl_output!r}")
+    log = ""
+    if systemctl_log is not None:
+        log = "printf '%s\\n' \"$@\" > " + shlex.quote(str(systemctl_log)) + "\n"
+    systemctl.write_text("#!/bin/sh\n" + log + "cat <<'EOF'\n" + systemctl_output + "\nEOF\n")
     systemctl.chmod(0o755)
     current = tmp_path / "current"
     booted = tmp_path / "booted"
@@ -116,7 +121,7 @@ def test_slice_and_generation_mismatch_require_reboot(tmp_path):
             "generation": {"revision": "fixture"},
         },
         proc_files={"proc/swaps": "Filename\ttype\tsize\tused\tpriority\n"},
-        systemctl_output="CPUWeight=5",
+        systemctl_output="Id=background.slice\nCPUWeight=5\n\nId=earlyoom.service\nMainPID=0",
     )
     by_check = {row["check"]: row for row in rows}
     assert by_check["slice:system:background.slice"]["match"] is False
@@ -164,3 +169,55 @@ def test_noctalia_state_override_of_a_declared_key_drifts(tmp_path):
     assert (
         "noctalia:bar.default.thickness" not in by_check
     )  # undeclared keys are not checked
+
+
+def test_systemd_snapshot_batches_system_slices_and_earlyoom(tmp_path):
+    command_log = tmp_path / "systemctl.argv"
+    rows = run(
+        tmp_path,
+        {
+            "sysctls": {},
+            "slices": {
+                "system": {
+                    "background": {"CPUWeight": 3},
+                    "nix": {"MemoryMax": "2G"},
+                }
+            },
+            "swap": [],
+            "generation": {"revision": "fixture"},
+            "earlyoom": {"freeMemThreshold": 5, "freeSwapThreshold": 10},
+        },
+        proc_files={"proc/swaps": "Filename\ttype\tsize\tused\tpriority\n"},
+        systemctl_output=(
+            "Id=background.slice\nCPUWeight=3\n\n"
+            "Id=nix.slice\nMemoryMax=2147483648\n\n"
+            "Id=earlyoom.service\nMainPID=0"
+        ),
+        systemctl_log=command_log,
+    )
+    by_check = {row["check"]: row for row in rows}
+    assert by_check["slice:system:background.slice"]["status"] == "matched"
+    assert by_check["slice:system:nix.slice"]["status"] == "matched"
+    assert by_check["earlyoom"]["status"] == "unavailable"
+    assert command_log.read_text().splitlines()[:5] == [
+        "show",
+        "background.slice",
+        "nix.slice",
+        "earlyoom.service",
+        "-p",
+    ]
+
+
+def test_unavailable_systemd_snapshot_stays_explicit(tmp_path):
+    rows = run(
+        tmp_path,
+        {
+            "sysctls": {},
+            "slices": {"system": {"background": {"CPUWeight": 3}}},
+            "swap": [],
+            "generation": {"revision": "fixture"},
+        },
+        proc_files={"proc/swaps": "Filename\ttype\tsize\tused\tpriority\n"},
+    )
+    by_check = {row["check"]: row for row in rows}
+    assert by_check["slice:system:background.slice"]["status"] == "unavailable"

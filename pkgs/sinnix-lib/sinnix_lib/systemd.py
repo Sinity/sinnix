@@ -72,6 +72,7 @@ def show_units(
     user: bool = False,
     properties: Sequence[str] = DEFAULT_PROPERTIES,
     timeout: float | None = None,
+    systemctl: str = "systemctl",
 ) -> dict[str, dict[str, str]]:
     """One batched ``systemctl [--user] show`` call → {unit: {prop: value}}.
 
@@ -80,7 +81,7 @@ def show_units(
     """
     if not units:
         return {}
-    cmd = ["systemctl", *(["--user"] if user else []), "show", *units]
+    cmd = [systemctl, *(["--user"] if user else []), "show", *units]
     for prop in ("Id", *[prop for prop in properties if prop != "Id"]):
         cmd += ["-p", prop]
     proc = subprocess.run(
@@ -98,6 +99,7 @@ def show_units_as_user(
     bus_path: Path | None = None,
     properties: Sequence[str] = DEFAULT_PROPERTIES,
     timeout: float | None = None,
+    systemctl: str = "systemctl",
 ) -> dict[str, dict[str, str]]:
     """Probe another user's manager without opening a PAM session.
 
@@ -120,7 +122,7 @@ def show_units_as_user(
         f"DBUS_SESSION_BUS_ADDRESS=unix:path={bus}",
         f"XDG_RUNTIME_DIR=/run/user/{uid}",
         f"HOME={pw.pw_dir}",
-        "systemctl",
+        systemctl,
         "--user",
         "show",
         *units,
