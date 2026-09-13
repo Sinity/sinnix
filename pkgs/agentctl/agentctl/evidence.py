@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
-from . import gitcmd, github, launch, pueue, results
+from . import gitcmd, github, launch, results
 from .config import Config
 from .launch import JobError
 from .projects import ProjectAdapter
@@ -141,9 +141,13 @@ def _receipt_observation(
             "native verification receipt must be agentctl://jobs/<id>/<launch-reference>"
         )
     task_id, reference = int(match.group(1)), match.group(2)
-    task = launch.find_task(pueue.tasks(), task_id, reference)
-    if task is None:
-        raise JobError(f"native verification receipt does not resolve: {receipt}")
+    try:
+        task = launch._read_task(config, task_id, reference)
+        job = launch.get_job(task.task_id, config, reference)
+    except JobError as error:
+        raise JobError(
+            f"native verification receipt does not resolve: {receipt}"
+        ) from error
     launch_input = launch._launch_input(config, task)
     if launch_input is None:
         raise JobError(
@@ -159,7 +163,7 @@ def _receipt_observation(
         if isinstance(launch_tree, Mapping)
         else None
     )
-    outcome = launch._outcome(config, task).get("outcome")
+    outcome = job.get("outcome")
     execution_receipt = (
         outcome.get("execution_receipt") if isinstance(outcome, Mapping) else None
     )
@@ -184,17 +188,17 @@ def _receipt_observation(
         for endpoint in (start, end)
     )
     clean_candidate = bool(
-        task.terminal
-        and task.succeeded
+        job["terminal"]
+        and job["phase"] == "succeeded"
         and outcome_succeeded
         and isinstance(execution_receipt, Mapping)
         and execution_receipt.get("binding") == "unchanged_endpoints"
         and endpoint_candidate
     )
     gaps: list[str] = []
-    if not task.terminal:
+    if not job["terminal"]:
         gaps.append("receipt job is not terminal")
-    elif not task.succeeded:
+    elif job["phase"] != "succeeded":
         gaps.append("receipt job did not succeed")
     if not outcome_succeeded:
         gaps.append("receipt job outcome is not successful with exit code 0")
@@ -207,10 +211,13 @@ def _receipt_observation(
     return {
         "observed_at": datetime.now(timezone.utc).isoformat(),
         "source": "agentctl",
-        "job_id": task.task_id,
+        "job_id": job["job_id"],
         "reference": reference,
-        "phase": launch.phase_of(task),
-        "exit_code": task.exit_code,
+        "attempt": job["attempt"],
+        "artifacts": job["artifacts"],
+        "queue_present": job["queue_present"],
+        "phase": job["phase"],
+        "exit_code": job["exit_code"],
         "operation": launch_input.get("operation"),
         "argv": list(launch_input.get("argv") or ()),
         # Diagnostic launch-time cache observation only. Eligibility uses the
