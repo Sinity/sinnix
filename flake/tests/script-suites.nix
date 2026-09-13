@@ -150,6 +150,7 @@
           suiteDir = ../../pkgs/sinnix-speaker-verify/tests;
           scripts = [ "sinnix-speaker-verify" ];
           pythonPackages = [ "numpy" ];
+          extraPythonPackages = [ sinnix-lib ];
         };
         reading-stack-suite = mkScriptSuite {
           name = "sinnix-reading-stack";

@@ -8,6 +8,7 @@ groups can reuse an enrollment/cohort file.
 from __future__ import annotations
 
 import importlib.util
+import json
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 
@@ -50,3 +51,53 @@ def test_disjoint_check_rejects_reused_audio(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="reused"):
         MODULE._assert_disjoint({"enrollment": [sample], "genuine": [sample]})
+
+
+def test_enrollment_name_rejects_path_components(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(MODULE, "STORE_DIR", tmp_path / "store")
+    for name in ("../escape", "/tmp/escape", ".", ""):
+        with pytest.raises(ValueError, match="basename"):
+            MODULE._enrollment_path(name)
+
+
+def test_enroll_publishes_private_embedding_state(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(MODULE, "STORE_DIR", tmp_path / "store")
+    monkeypatch.setattr(MODULE, "_load_model", lambda: object())
+    monkeypatch.setattr(MODULE, "_embed", lambda _model, _audio: np.array([3.0, 4.0]))
+    args = type("Args", (), {"audio": ["sample.wav"], "name": "operator"})()
+
+    assert MODULE.cmd_enroll(args) == 0
+    target = MODULE._enrollment_path("operator")
+    assert json.loads(target.read_text())["centroid"] == [0.6, 0.8]
+    assert target.stat().st_mode & 0o777 == 0o600
+    assert not list(target.parent.glob(".*.atomic-tmp-*"))
+
+
+def test_calibrate_publishes_a_private_report(monkeypatch, tmp_path: Path) -> None:
+    groups = {}
+    for label, count in {"enrollment": 2, "genuine": 2, "impostor": 2, "cohort": 3}.items():
+        paths = []
+        for index in range(count):
+            path = tmp_path / label / f"{index}.wav"
+            path.parent.mkdir(exist_ok=True)
+            path.touch()
+            paths.append(path)
+        groups[label] = paths
+
+    monkeypatch.setattr(MODULE, "_audio_files", lambda directory: groups[directory])
+    monkeypatch.setattr(MODULE, "_load_model", lambda: object())
+
+    def embedding(_model, audio):
+        path = Path(audio)
+        if path.parent.name == "cohort":
+            return np.array([[1.0, 0.0], [0.0, 1.0], [-1.0, 0.0]][int(path.stem)])
+        return np.array([-1.0, 0.0]) if path.parent.name == "impostor" else np.array([1.0, 0.0])
+
+    monkeypatch.setattr(MODULE, "_embed", embedding)
+    output = tmp_path / "report.json"
+    args = type("Args", (), {**{label: label for label in groups}, "output": str(output), "max_eer": 0.5})()
+
+    assert MODULE.cmd_calibrate(args) == 0
+    assert json.loads(output.read_text())["version"] == MODULE.CALIBRATION_VERSION
+    assert output.stat().st_mode & 0o777 == 0o600
+    assert not list(output.parent.glob(".*.atomic-tmp-*"))
