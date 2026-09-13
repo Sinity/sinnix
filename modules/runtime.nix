@@ -796,7 +796,6 @@ in
       environment.systemPackages = [
         scriptPkgs.sinnix-config-drift
         scriptPkgs.sinnix-preflight
-        scriptPkgs.sinnix-lifecycle-manifest
       ];
       # setgid: the health transition ledger and its dedup state are written by
       # the ops-reducer (as the operator) and, when the reducer is down, by the

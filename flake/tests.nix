@@ -47,7 +47,6 @@ in
     ./tests/script-suites.nix
     ./tests/file-catalog.nix
     ./tests/pkg-suites.nix
-    ./tests/lifecycle-manifest.nix
     ./tests/ops-reducer.nix
     ./tests/quota.nix
     ./tests/noctalia.nix
