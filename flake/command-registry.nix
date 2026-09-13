@@ -9,6 +9,11 @@
 }:
 let
   inherit (pkgs) lib;
+  mkAppCommand = name: spec:
+    pkgs.writeShellScriptBin name ''
+      set -euo pipefail
+      ${spec.script}
+    '';
   scriptPkgs = sinnixScriptRegistry.packageSet;
   rebuildServicePath = lib.makeBinPath [
     pkgs.coreutils
@@ -481,6 +486,7 @@ let
 in
 {
   inherit
+    mkAppCommand
     scriptPkgs
     resolveFlakeDir
     loadCheckTargets
