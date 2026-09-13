@@ -43,41 +43,56 @@ mkFeatureModule {
       activityRoot = config.sinnix.paths.activityRoot;
       navigationPort = helpers.data.ports.browserNavigation;
       scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
-      navCaptureExtensionId = "jccgkpdlopfflfchemmfedfokldkeeck";
-      navCaptureCrx =
-        pkgs.runCommand "sinnix-nav-capture.crx"
+      # The extension's identity is the hash of the key that signed its CRX, so
+      # it cannot be known before the pack runs. Emitting the archive, its
+      # update manifest and the managed policy from one derivation keeps the
+      # id Chrome computes and the id the policy pins identical by
+      # construction; a hand-written id silently stops matching instead.
+      navCaptureExtension =
+        pkgs.runCommand "sinnix-nav-capture-extension"
           {
-            nativeBuildInputs = [ pkgs.go-crx3 ];
+            nativeBuildInputs = [
+              pkgs.go-crx3
+              pkgs.jq
+            ];
           }
           ''
-            mkdir extension
+            mkdir -p "$out" extension
             cp -R ${../../../browser-extensions/nav-capture}/. extension/
             chmod -R u+w extension
             substituteInPlace extension/background.js --replace-fail \
               '127.0.0.1:8767' '127.0.0.1:${toString navigationPort}'
-            crx3 pack extension --outfile "$out"
+            crx3 pack extension --outfile "$out/nav-capture.crx"
+            id="$(crx3 id "$out/nav-capture.crx")"
+            printf '%s' "$id" > "$out/extension-id"
+            cat > "$out/updates.xml" <<XML
+            <?xml version="1.0" encoding="UTF-8"?>
+            <gupdate xmlns="http://www.google.com/update2/response" protocol="2.0">
+              <app appid="$id">
+                <updatecheck codebase="file://$out/nav-capture.crx" version="0.2.0" />
+              </app>
+            </gupdate>
+            XML
+            jq -n --arg id "$id" --arg url "file://$out/updates.xml" \
+              '{
+                 ExtensionInstallForcelist: [ ($id + ";" + $url) ],
+                 ExtensionSettings: {
+                   ($id): {
+                     installation_mode: "force_installed",
+                     override_update_url: true,
+                     update_url: $url,
+                   },
+                 },
+               }' > "$out/policy.json"
           '';
-      navCaptureUpdate = pkgs.writeText "sinnix-nav-capture-updates.xml" ''
-        <?xml version="1.0" encoding="UTF-8"?>
-        <gupdate xmlns="http://www.google.com/update2/response" protocol="2.0">
-          <app appid="${navCaptureExtensionId}">
-            <updatecheck codebase="file://${navCaptureCrx}" version="0.2.0" />
-          </app>
-        </gupdate>
-      '';
     in
     {
-      programs.chromium = {
-        enable = true;
-        extraOpts = {
-          ExtensionInstallForcelist = [ "${navCaptureExtensionId};file://${navCaptureUpdate}" ];
-          ExtensionSettings.${navCaptureExtensionId} = {
-            installation_mode = "force_installed";
-            override_update_url = true;
-            update_url = "file://${navCaptureUpdate}";
-          };
-        };
-      };
+      programs.chromium.enable = true;
+
+      # Chrome merges every JSON file in its managed policy directory, so the
+      # generated extension policy lands beside chromium's own extra.json.
+      environment.etc."opt/chrome/policies/managed/sinnix-nav-capture.json".source =
+        "${navCaptureExtension}/policy.json";
 
       sinnix.runtime.surfaces = {
         sinnix-nav-capture = {
