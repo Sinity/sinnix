@@ -1,6 +1,7 @@
 """Contracts of the one subprocess wrapper and the lenient scalar reads."""
 
 import sys
+import time
 
 from sinnix_lib.process import NO_EXIT_STATUS, run
 from sinnix_lib.values import float_or_none, int_or_none, read_text
@@ -37,6 +38,21 @@ def test_run_returns_a_result_when_the_command_hangs():
     assert result.returncode == NO_EXIT_STATUS
     assert result.error is not None
     assert "timed out" in result.error
+
+
+def test_run_timeout_kills_descendants_that_hold_its_pipes():
+    started = time.monotonic()
+    result = run(
+        [
+            sys.executable,
+            "-c",
+            "import os, time; os.fork() and os._exit(0); time.sleep(0.8)",
+        ],
+        timeout=0.05,
+    )
+    assert result.returncode == NO_EXIT_STATUS
+    assert result.error is not None
+    assert time.monotonic() - started < 0.4
 
 
 def test_run_returns_a_result_when_the_binary_is_missing():

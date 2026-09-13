@@ -17,6 +17,8 @@ was killed.
 from __future__ import annotations
 
 import subprocess
+import os
+import signal
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -65,22 +67,32 @@ def run(
     """
     args = tuple(argv)
     try:
-        completed = subprocess.run(
+        process = subprocess.Popen(
             list(args),
-            check=False,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            timeout=timeout,
             cwd=cwd,
+            start_new_session=True,
         )
-    except subprocess.TimeoutExpired as exc:
-        return Result(
-            args,
-            NO_EXIT_STATUS,
-            _decoded(exc.stdout),
-            _decoded(exc.stderr),
-            error=f"timed out after {timeout:g}s",
-        )
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired as exc:
+            # A probe's leader can exit while a descendant keeps its pipes
+            # open. Kill the detached group, then collect bounded remaining
+            # output, so a timeout remains a deadline for the whole probe.
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            stdout, stderr = process.communicate()
+            return Result(
+                args,
+                NO_EXIT_STATUS,
+                _decoded(exc.stdout or stdout),
+                _decoded(exc.stderr or stderr),
+                error=f"timed out after {timeout:g}s",
+            )
     except OSError as exc:
         return Result(args, NO_EXIT_STATUS, "", "", error=str(exc))
-    return Result(args, completed.returncode, completed.stdout, completed.stderr)
+    return Result(args, process.returncode, stdout, stderr)
