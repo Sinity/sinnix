@@ -33,7 +33,9 @@ def test_failure_parks_with_error_sidecar(spool):
     assert counts["failed"] == 1
     failed = spool.root / "failed" / "bad.json"
     assert failed.exists()
-    assert "RuntimeError" in failed.with_name("bad.json.error").read_text()
+    error = failed.with_name("bad.json.error")
+    assert "RuntimeError" in error.read_text()
+    assert error.stat().st_mode & 0o777 == 0o600
     # A failed item's token is NOT recorded: moving it back retries it.
     (spool.root / "bad.json").write_bytes(failed.read_bytes())
     counts = spool.drain(lambda p: None)
@@ -48,9 +50,12 @@ def test_token_ledger_survives_restart(spool, tmp_path):
     assert reborn.drain(lambda p: None)["duplicate"] == 1
 
 
-def test_part_files_invisible(spool):
+def test_private_and_incomplete_files_are_invisible(spool):
+    submitted = spool.submit("private.json", b"{}")
+    assert submitted.stat().st_mode & 0o777 == 0o600
     (spool.root / "half.part").write_bytes(b"...")
-    assert list(spool.pending()) == []
+    (spool.root / ".private.json.atomic-tmp-interrupted").write_bytes(b"...")
+    assert list(spool.pending()) == [submitted]
 
 
 def test_token_ledger_is_jsonl(spool):

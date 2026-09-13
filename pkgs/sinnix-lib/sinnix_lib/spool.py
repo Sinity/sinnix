@@ -34,6 +34,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .atomic import atomic_publish
 from .ledger import append_jsonl, iter_jsonl, utc_ts
 from .lock import LockBusy, flock
 
@@ -57,11 +58,9 @@ class Spool:
 
     # -- producer side ----------------------------------------------------
     def submit(self, name: str, data: bytes) -> Path:
-        """Durably add an item: tmp-write then rename into the inbox."""
+        """Durably publish one private item into the inbox."""
         final = self.root / name
-        tmp = final.with_name(final.name + ".part")
-        tmp.write_bytes(data)
-        os.replace(tmp, final)
+        atomic_publish(final, data, fsync=True, mode=0o600)
         return final
 
     # -- consumer side ----------------------------------------------------
@@ -70,6 +69,7 @@ class Spool:
             p
             for p in self.root.iterdir()
             if p.is_file()
+            and not p.name.startswith(".")
             and not p.name.endswith(".part")
             and p.name != self.token_ledger_name
             and not p.name.endswith(".lock")
@@ -112,8 +112,11 @@ class Spool:
                 except Exception:
                     failed = self.root / "failed" / item.name
                     os.replace(claimed, failed)
-                    failed.with_name(failed.name + ".error").write_text(
-                        traceback.format_exc(), encoding="utf-8"
+                    atomic_publish(
+                        failed.with_name(failed.name + ".error"),
+                        traceback.format_exc().encode(),
+                        fsync=True,
+                        mode=0o600,
                     )
                     counts["failed"] += 1
                     continue
