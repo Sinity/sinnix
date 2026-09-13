@@ -19,7 +19,7 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from sinnix_lib.ledger import utc_ts
+from sinnix_lib.ledger import append_jsonl, utc_ts
 
 VALID_KINDS = {"pair", "choice-set", "skip", "incomparable"}
 
@@ -62,9 +62,7 @@ def append_log(path: str | Path, record: dict) -> str:
     path = Path(path)
     record.setdefault("id", str(uuid.uuid4()))
     record.setdefault("at", utc_ts())
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a") as f:
-        f.write(json.dumps(record, sort_keys=True) + "\n")
+    append_jsonl(path, record, fsync=True)
     return record["id"]
 
 
@@ -143,10 +141,8 @@ class Store:
     def add_items(self, items: list[Item]) -> int:
         if not items:
             return 0
-        self.domain_dir.mkdir(parents=True, exist_ok=True)
-        with self.items_path.open("a") as f:
-            for it in items:
-                f.write(json.dumps(it.to_dict(), sort_keys=True) + "\n")
+        for item in items:
+            append_jsonl(self.items_path, item.to_dict(), fsync=True)
         return len(items)
 
     # -- comparisons ---------------------------------------------------------

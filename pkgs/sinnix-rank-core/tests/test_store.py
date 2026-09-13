@@ -63,3 +63,23 @@ def test_append_log_emits_second_precision_utc(tmp_path):
 
     record = json.loads(path.read_text().splitlines()[0])
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", record["at"])
+
+
+def test_store_uses_durable_shared_append_for_items_and_comparisons(tmp_path, monkeypatch):
+    import rank_core.store as store_module
+
+    calls = []
+    original = store_module.append_jsonl
+
+    def record_append(path, record, **kwargs):
+        calls.append((path, record, kwargs))
+        original(path, record, **kwargs)
+
+    monkeypatch.setattr(store_module, "append_jsonl", record_append)
+    store = store_module.Store(tmp_path / "domain")
+    store.add_items([store_module.Item(id="a", label="Alpha")])
+    store.record_comparison(["a"], winner="a")
+
+    assert [call[1]["id"] for call in calls[:1]] == ["a"]
+    assert calls[1][1]["kind"] == "pair"
+    assert all(call[2] == {"fsync": True} for call in calls)
