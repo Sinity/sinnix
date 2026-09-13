@@ -39,6 +39,7 @@ mkServiceModule {
           (lib.sinnix.mkRuntimeServiceConfig {
             runtimeInventory = config.sinnix.runtime.inventory;
             unit = "sinnix-clodex.service";
+            manager = "user";
           })
           // {
             Type = "simple";

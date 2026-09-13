@@ -274,6 +274,7 @@ mkServiceModule {
           (lib.sinnix.mkRuntimeServiceConfig {
             runtimeInventory = config.sinnix.runtime.inventory;
             unit = "polylogued.service";
+            manager = "user";
           })
           // {
             # The upstream unit does not pass its rendered TOML path to the

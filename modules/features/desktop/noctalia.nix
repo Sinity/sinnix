@@ -108,6 +108,7 @@ mkFeatureModule {
           systemd.user.services.noctalia.Service = lib.sinnix.mkRuntimeServiceConfig {
             runtimeInventory = nixosConfig.sinnix.runtime.inventory;
             unit = "noctalia.service";
+            manager = "user";
           };
 
           home.file.".local/share/noctalia/pinned/official/timer".source = "${officialPlugins}/timer";
