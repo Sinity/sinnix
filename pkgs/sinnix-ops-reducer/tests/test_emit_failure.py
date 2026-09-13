@@ -10,8 +10,10 @@ from __future__ import annotations
 import json
 import socketserver
 import threading
+from http.client import HTTPConnection
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import pytest
 from sinnix_ops_reducer import cli, health
@@ -121,3 +123,32 @@ def test_a_dead_reducer_does_not_swallow_the_failure(
     assert json.loads(state.read_text()) == {
         "service:user:usersurf.service": {"status": "failed"}
     }
+
+
+def test_failure_rejects_invalid_content_length_before_emitting(
+    hub_server_factory, tmp_path: Path, monkeypatch
+) -> None:
+    inventory = tmp_path / "inventory.json"
+    inventory.write_text(json.dumps(INVENTORY))
+    calls = []
+    monkeypatch.setattr(
+        health,
+        "emit_failure",
+        lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
+    base = hub_server_factory(inventory_path=inventory)
+    parsed = urlsplit(base)
+    connection = HTTPConnection(parsed.hostname, parsed.port, timeout=5)
+    try:
+        connection.putrequest("POST", "/v1/health/failure")
+        connection.putheader("Content-Type", "application/json")
+        connection.putheader("Content-Length", "not-a-number")
+        connection.endheaders(b'{"unit":"must-not-emit.service"}')
+        response = connection.getresponse()
+        body = json.loads(response.read())
+    finally:
+        connection.close()
+
+    assert response.status == 400
+    assert body == {"error": "request body is missing or too large"}
+    assert calls == []

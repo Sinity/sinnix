@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
+from sinnix_lib.http import RequestBodyError, read_json_object
 from sinnix_lib.systemd import sd_notify, watchdog_period
 
 from . import capabilities, health, pages, terminals
@@ -26,6 +27,14 @@ from .reducer import Reducer
 FEEDBACK_PATH = "/feedback"
 FEEDBACK_ELICIT_PREFIX = "/feedback/elicit/"
 FAILURE_PATH = "/v1/health/failure"
+BODY_LENGTH_ERRORS = frozenset(
+    {
+        "missing_content_length",
+        "invalid_content_length",
+        "negative_content_length",
+        "conflicting_content_length",
+    }
+)
 
 
 def ensure_token(path: Path) -> str:
@@ -85,24 +94,21 @@ class Handler(BaseHTTPRequestHandler):
             )
             return
         try:
-            length = int(self.headers.get("Content-Length", "-1"))
-        except ValueError:
-            length = -1
-        if length < 0:
-            self._write_feedback(
-                HTTPStatus.LENGTH_REQUIRED, {"error": "Content-Length required"}
+            payload = read_json_object(
+                self.headers, self.rfile, max_bytes=FEEDBACK_MAX_BODY
             )
-            return
-        if length > FEEDBACK_MAX_BODY:
-            self._write_feedback(
-                HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
-                {"error": f"payload exceeds {FEEDBACK_MAX_BODY} bytes"},
-            )
-            return
-        raw = self.rfile.read(length)
-        try:
-            payload = json.loads(raw.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        except RequestBodyError as error:
+            if error.reason in BODY_LENGTH_ERRORS:
+                self._write_feedback(
+                    HTTPStatus.LENGTH_REQUIRED, {"error": "Content-Length required"}
+                )
+                return
+            if error.reason == "body_too_large":
+                self._write_feedback(
+                    HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+                    {"error": f"payload exceeds {FEEDBACK_MAX_BODY} bytes"},
+                )
+                return
             self._write_feedback(
                 HTTPStatus.BAD_REQUEST, {"error": f"invalid JSON: {error}"}
             )
@@ -153,12 +159,19 @@ class Handler(BaseHTTPRequestHandler):
         """systemd's OnFailure hook, routed into the process that owns the
         dedup state so the fast path and the sweep cannot drift apart."""
         try:
-            length = int(self.headers.get("Content-Length", "-1"))
-            if length < 0 or length > 4096:
-                raise ValueError("request body is missing or too large")
-            request = json.loads(self.rfile.read(length))
+            request = read_json_object(self.headers, self.rfile, max_bytes=4096)
+        except RequestBodyError as error:
+            message = (
+                "request body is missing or too large"
+                if error.reason in BODY_LENGTH_ERRORS
+                or error.reason == "body_too_large"
+                else str(error)
+            )
+            self._write(HTTPStatus.BAD_REQUEST, {"error": message})
+            return
+        try:
             unit = str(request["unit"])
-        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+        except (KeyError, TypeError, ValueError) as error:
             self._write(HTTPStatus.BAD_REQUEST, {"error": str(error)})
             return
         inventory, _ = pages.load_json(self.server.inventory_path)  # type: ignore[attr-defined]
@@ -370,17 +383,18 @@ class Handler(BaseHTTPRequestHandler):
             return
         pid, win_id = int(match.group(1)), int(match.group(2))
         try:
-            length = int(self.headers.get("Content-Length", "0") or "0")
-        except ValueError:
-            length = 0
-        if length <= 0 or length > terminals.MAX_BODY:
-            self._write(HTTPStatus.BAD_REQUEST, {"error": "missing or oversized body"})
-            return
-        raw = self.rfile.read(length)
-        try:
-            body = json.loads(raw)
-        except json.JSONDecodeError:
-            self._write(HTTPStatus.BAD_REQUEST, {"error": "invalid json"})
+            body = read_json_object(
+                self.headers,
+                self.rfile,
+                max_bytes=terminals.MAX_BODY,
+                require_content_length=False,
+            )
+        except RequestBodyError as error:
+            if error.reason in BODY_LENGTH_ERRORS or error.reason == "body_too_large":
+                message = "missing or oversized body"
+            else:
+                message = "invalid json"
+            self._write(HTTPStatus.BAD_REQUEST, {"error": message})
             return
         text = body.get("text")
         key = body.get("key")
@@ -602,14 +616,15 @@ class Handler(BaseHTTPRequestHandler):
             self._write(HTTPStatus.NOT_FOUND, {"error": "not_found"})
             return
         try:
-            length = int(self.headers.get("Content-Length", "-1"))
-            if length < 0 or length > 65536:
-                raise ActionError("request body is missing or too large")
-            value = json.loads(self.rfile.read(length))
+            value = read_json_object(self.headers, self.rfile, max_bytes=65536)
             if self.path == "/v1/actions/prepare":
                 self._write(HTTPStatus.OK, self.reducer.actions.prepare(value))
             else:
                 self._write(HTTPStatus.CREATED, self.reducer.actions.execute(value))
+        except RequestBodyError as error:
+            if error.reason in BODY_LENGTH_ERRORS or error.reason == "body_too_large":
+                error = ActionError("request body is missing or too large")
+            self._write(HTTPStatus.BAD_REQUEST, {"error": str(error)})
         except ValueError as error:
             status = error.status if isinstance(error, ActionError) else 400
             self._write(status, {"error": str(error)})

@@ -11,9 +11,11 @@ import inspect
 import json
 import threading
 import time
+from http.client import HTTPConnection
 import urllib.error
 import urllib.request
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 from sinnix_ops_reducer.feedback import (
@@ -169,6 +171,25 @@ def test_the_spool_refuses_bodies_it_cannot_trust(hub_server) -> None:
     with pytest.raises(urllib.error.HTTPError) as raised:
         urllib.request.urlopen(request, timeout=10)
     assert raised.value.code == 400
+
+
+def test_spool_rejects_invalid_content_length_before_append(hub_server) -> None:
+    base, spool_dir = hub_server
+    parsed = urlsplit(base)
+    connection = HTTPConnection(parsed.hostname, parsed.port, timeout=5)
+    try:
+        connection.putrequest("POST", "/feedback")
+        connection.putheader("Content-Type", "application/json")
+        connection.putheader("Content-Length", "not-a-number")
+        connection.endheaders(b'{"note":"must not be appended"}')
+        response = connection.getresponse()
+        body = json.loads(response.read())
+    finally:
+        connection.close()
+
+    assert response.status == 411
+    assert body == {"error": "Content-Length required"}
+    assert not list(spool_dir.glob("*.jsonl"))
 
 
 def test_elicit_model_reads_the_domains_own_fit(hub_server, tmp_path: Path) -> None:

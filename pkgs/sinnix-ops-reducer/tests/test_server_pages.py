@@ -8,7 +8,9 @@ routing, content type, and the JSON API still owning /v1/*.
 from __future__ import annotations
 
 import json
+from http.client import HTTPConnection
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -167,3 +169,35 @@ def test_prepare_and_execute_share_the_http_target_contract(
     assert post("/v1/actions", request)[0] == 409
     assert post("/v1/actions", request)[0] == 409
     assert calls == ["restart"]
+
+
+def test_action_rejects_invalid_content_length_before_dispatch(hub_server_factory) -> None:
+    class Actions:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def prepare(self, value):
+            self.calls += 1
+            return value
+
+        def execute(self, value):
+            self.calls += 1
+            return value
+
+    actions = Actions()
+    url = hub_server_factory(actions=actions)
+    parsed = urlsplit(url)
+    connection = HTTPConnection(parsed.hostname, parsed.port, timeout=5)
+    try:
+        connection.putrequest("POST", "/v1/actions")
+        connection.putheader("Content-Type", "application/json")
+        connection.putheader("Content-Length", "not-a-number")
+        connection.endheaders(b'{"action":"restart"}')
+        response = connection.getresponse()
+        body = json.loads(response.read())
+    finally:
+        connection.close()
+
+    assert response.status == 400
+    assert body == {"error": "request body is missing or too large"}
+    assert actions.calls == 0

@@ -8,9 +8,11 @@ post-switch coordinator check.
 from __future__ import annotations
 
 import json
+from http.client import HTTPConnection
 import urllib.error
 import urllib.request
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 from sinnix_ops_reducer import terminals
@@ -169,6 +171,32 @@ def test_send_rejects_a_body_over_the_64kib_cap(hub_server: str) -> None:
     )
     assert status == 400
     assert "oversized" in json.loads(body)["error"]
+
+
+def test_send_rejects_invalid_content_length_before_dispatch(
+    hub_server: str, monkeypatch
+) -> None:
+    calls = []
+    monkeypatch.setattr(
+        terminals,
+        "send_text",
+        lambda pid, win, text: calls.append((pid, win, text)) or True,
+    )
+    parsed = urlsplit(hub_server)
+    connection = HTTPConnection(parsed.hostname, parsed.port, timeout=5)
+    try:
+        connection.putrequest("POST", "/terminals/v1/windows/1/2/send")
+        connection.putheader("Content-Type", "application/json")
+        connection.putheader("Content-Length", "not-a-number")
+        connection.endheaders(b'{"text":"must not be sent"}')
+        response = connection.getresponse()
+        body = json.loads(response.read())
+    finally:
+        connection.close()
+
+    assert response.status == 400
+    assert body == {"error": "missing or oversized body"}
+    assert calls == []
 
 
 def test_send_requires_text_or_key(hub_server: str) -> None:
