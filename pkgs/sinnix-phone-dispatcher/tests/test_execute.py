@@ -114,3 +114,17 @@ def test_shared_text_emits_no_receipt(monkeypatch) -> None:
 
     assert result["ok"] is True
     assert emitted == []
+
+
+def test_job_answer_is_private_and_rejects_path_traversal(monkeypatch, tmp_path) -> None:
+    answers = tmp_path / "answers"
+    monkeypatch.setenv("SINNIX_AGENT_ANSWER_DIR", str(answers))
+
+    result = execute_mod.deliver_job_answer({"job_id": "42", "answer": "yes"})
+    target = answers / "42.json"
+    assert result["ok"] is True
+    assert json.loads(target.read_text())["answer"] == "yes"
+    assert target.stat().st_mode & 0o777 == 0o600
+    assert list(answers.glob("*.part")) == []
+    assert execute_mod.deliver_job_answer({"job_id": "../escape", "answer": "no"})["ok"] is False
+    assert not (tmp_path / "escape.json").exists()
