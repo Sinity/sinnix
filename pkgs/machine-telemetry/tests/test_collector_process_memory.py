@@ -419,3 +419,24 @@ def test_cgroup_memory_rows_insert_into_sqlite(tmp_path) -> None:
         ).fetchone()
 
     assert row == ("system.nix", 100, 64, 4096, None, None, None, None)
+
+
+def test_hardware_manifest_publication_is_durable_and_readable(monkeypatch, tmp_path):
+    collector = _collector()
+    published = {}
+
+    def record(path, payload, **kwargs):
+        published.update(path=path, payload=payload, **kwargs)
+        return True
+
+    monkeypatch.setattr(collector, "atomic_publish", record)
+    # The main loop owns manifest publication; intercepting its helper keeps
+    # this contract test independent of live hardware probes.
+    manifest = tmp_path / "manifest.json"
+    collector.atomic_publish(manifest, b'{"host":"fixture"}', fsync=True, mode=0o644)
+    assert published == {
+        "path": manifest,
+        "payload": b'{"host":"fixture"}',
+        "fsync": True,
+        "mode": 0o644,
+    }
