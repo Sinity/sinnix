@@ -924,26 +924,12 @@ def _dispatch(arguments: argparse.Namespace, config: Config, out: Output) -> int
             if decision.get("action") == "hold"
             else {"released": [], "waiting": []}
         )
-        retirement = launch.retire_legacy_holds(
-            config,
-            backpressure.event_state(
-                config.event_spool, checkpoint=checkpoint
-            ).legacy_holds,
-        )
         decision = {
             **decision,
-            "legacy_holds_retired": retirement["retired"],
-            "legacy_holds_ambiguous": retirement["ambiguous"],
-            "legacy_holds_skipped": retirement["skipped"],
             "holds_released": holds["released"],
             "holds_waiting": holds["waiting"],
         }
         summary = f"backpressure {decision.get('action')}"
-        if retirement["retired"] or retirement["ambiguous"]:
-            summary += (
-                f"; legacy holds: retired {len(retirement['retired'])}, "
-                f"ambiguous {len(retirement['ambiguous'])}"
-            )
         if holds["released"] or holds["waiting"]:
             summary += (
                 f"; pool holds: released {len(holds['released'])}, "
