@@ -5,25 +5,25 @@ from __future__ import annotations
 from typing import Any
 
 from sinnix_lib.process import run
+from sinnix_lib.procfs import parse_colon_numeric, parse_psi as parse_psi_text
 from sinnix_lib.values import float_or_none, int_or_none, read_text
 
 
 def parse_psi(path: str) -> dict[str, Any]:
-    result: dict[str, Any] = {"raw": read_text(path) or ""}
-    for line in result["raw"].splitlines():
+    raw = read_text(path) or ""
+    # Keep the raw kernel text and empty record rows as part of Observe's
+    # public evidence shape; the shared parser owns field validation.
+    result: dict[str, Any] = {"raw": raw}
+    result.update(
+        {
+            record: {key: float(value) for key, value in fields.items()}
+            for record, fields in parse_psi_text(raw).items()
+        }
+    )
+    for line in raw.splitlines():
         parts = line.split()
-        if not parts:
-            continue
-        row: dict[str, float] = {}
-        for item in parts[1:]:
-            if "=" not in item:
-                continue
-            key, value = item.split("=", 1)
-            try:
-                row[key] = float(value)
-            except ValueError:
-                pass
-        result[parts[0]] = row
+        if parts:
+            result.setdefault(parts[0], {})
     return result
 
 
@@ -36,13 +36,13 @@ def collect_pressure(offline: bool) -> dict[str, Any]:
         "io": parse_psi("/proc/pressure/io"),
     }
     pressure["free_h"] = run(["free", "-h"], timeout=1).stdout
-    pressure["meminfo_mb"] = {}
-    for line in (read_text("/proc/meminfo") or "").splitlines():
-        key, _, value = line.partition(":")
-        if key in {"MemTotal", "MemAvailable", "SwapTotal", "SwapFree"}:
-            fields = value.split()
-            if fields and fields[0].isdigit():
-                pressure["meminfo_mb"][key] = int(fields[0]) // 1024
+    meminfo = parse_colon_numeric(read_text("/proc/meminfo"))
+    pressure["meminfo_mb"] = {
+        key: value // 1024
+        for key, value in meminfo.items()
+        if key in {"MemTotal", "MemAvailable", "SwapTotal", "SwapFree"}
+        and value >= 0
+    }
     return pressure
 
 
