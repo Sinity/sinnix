@@ -141,6 +141,19 @@ ACL_XATTR_FIELDS = {
 }
 
 
+# Borg cannot archive a unix socket at all: archiver.py dispatches on file
+# type and answers a socket with "# Ignore unix sockets; return" (verified
+# against borg 1.4.5 -- a socket never appears in a created archive, while a
+# FIFO in the same directory does). A socket carries no bytes, so requiring one
+# to be covered waives no content; it only makes the lane unprovable for as
+# long as any socket exists under the source. This is a property of the file
+# type, not a marker a tool can drop into a directory, so unlike an inherited
+# CACHEDIR.TAG it cannot be used to authorize deleting real content.
+def is_unarchivable_type(mode):
+    """File types Borg silently skips rather than archiving."""
+    return stat.S_ISSOCK(mode)
+
+
 # A nested subvolume is replaced by an inode-2 stub when its parent is
 # snapshotted. The stub's mtime tracks the live subvolume rather than this
 # snapshot's frozen state -- sampled three seconds apart it advances with the
@@ -190,6 +203,7 @@ def verify(source, archive, noncanonical):
     expected = {}
     ignored = set(noncanonical)
     omitted_roots = []
+    unarchivable = []
     nested_stubs = []
     if any(
         p.startswith("/")
@@ -204,6 +218,9 @@ def verify(source, archive, noncanonical):
             omitted_roots.append(relative)
             return
         st = path.lstat()
+        if is_unarchivable_type(st.st_mode):
+            unarchivable.append(relative)
+            return
         expected[relative] = st
         if stat.S_ISDIR(st.st_mode):
             # Btrfs snapshotting replaces a nested subvolume with inode 2.
@@ -313,6 +330,7 @@ def verify(source, archive, noncanonical):
         "canonical_entries": len(expected),
         "content_sha256": digest.hexdigest(),
         "noncanonical_roots": omitted_roots,
+        "unarchivable_entries": unarchivable,
         "nested_subvolume_stubs": nested_stubs,
     }
 
