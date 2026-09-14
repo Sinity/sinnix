@@ -195,6 +195,28 @@ class CoverageFixture(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "mode mismatch"):
             COVERAGE.verify(self.source, "snapshot", [])
 
+    def test_non_utf8_filenames_are_covered(self):
+        # Borg's debug JSON cannot hold a non-UTF-8 name as text and encodes it
+        # as DEL plus hex. Comparing that raw against fsdecode'd walk keys never
+        # matches, which stalled the realm lane on a Facebook export whose name
+        # carries a Latin-1 byte.
+        raw = os.fsencode(self.source) + b"/Micha\xe9 Basiura_0.json"
+        try:
+            with open(raw, "wb") as handle:
+                handle.write(b"exported bytes")
+        except (OSError, UnicodeError) as error:
+            self.skipTest(f"fixture filesystem rejects the name: {error}")
+        self.archive()
+        result = COVERAGE.verify(self.source, "snapshot", [])
+        self.assertEqual(
+            result["canonical_entries"],
+            sum(1 for _ in self.source.rglob("*")) + 1,
+        )
+        # The decode is exact, not a normalisation that would let a different
+        # name pass: the surrogate-escaped form round-trips to the same bytes.
+        decoded = COVERAGE.archive_path({"path": "\x7f" + raw.rsplit(b"/", 1)[1].hex()})
+        self.assertEqual(os.fsencode(decoded), raw.rsplit(b"/", 1)[1])
+
     def test_unclassified_exclusion_is_not_coverage(self):
         hidden = self.source / "project" / "build"
         hidden.mkdir(parents=True)
