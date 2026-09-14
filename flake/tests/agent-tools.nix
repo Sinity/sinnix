@@ -352,9 +352,26 @@ in
         let
           avoidPattern = runtimeDefaults.earlyoomEmergencyAvoidPattern;
           userSlices = runtimeDefaults.slices.user;
+          # "12G" -> bytes, so the hierarchy asserts below compare magnitudes
+          # rather than spellings.
+          sliceBytes =
+            value:
+            let
+              unit = lib.substring (lib.stringLength value - 1) 1 value;
+              number = lib.toInt (lib.substring 0 (lib.stringLength value - 1) value);
+              scale =
+                {
+                  K = 1024;
+                  M = 1024 * 1024;
+                  G = 1024 * 1024 * 1024;
+                }
+                .${unit};
+            in
+            number * scale;
           managedWork = userSlices.agentctl;
           poolSlices = lib.genAttrs [
             "agentctl-agent"
+            "agentctl-land"
             "agentctl-land-agent"
             "agentctl-pytest"
             "agentctl-pytest-heavy"
@@ -394,14 +411,34 @@ in
             && !(poolSlices.agentctl-agent ? ManagedOOMMemoryPressure)
             && !(poolSlices.agentctl-agent ? ManagedOOMSwap)
             && poolSlices.agentctl-agent ? MemoryHigh
-            && poolSlices.agentctl-pytest.MemoryHigh == "6G"
-            && poolSlices.agentctl-pytest.MemoryMax == "8G"
             && poolSlices.agentctl-pytest.MemorySwapMax == "0"
-            && poolSlices.agentctl-pytest.ManagedOOMMemoryPressure == "kill"
+            # The parent of the pytest leaves carries no pressure kill: its PSI
+            # is their aggregate, so a busy sibling would kill the corpus.
+            && !(poolSlices.agentctl-pytest ? ManagedOOMMemoryPressure)
             && poolSlices.agentctl-pytest.CPUWeight == 200
             && poolSlices.agentctl-pytest.IOWeight == 200
-            && poolSlices.agentctl-pytest-heavy.MemoryHigh == "6G"
-            && poolSlices.agentctl-pytest-heavy.MemoryMax == "8G"
+            # The structural invariant the 2026-09-14 corpus OOM exposed: a
+            # child slice's ceiling is meaningless above its parent's, so the
+            # parent must never bind below the widest leaf beneath it.
+            # Provably fails when: agentctl-pytest.MemoryHigh is lowered below
+            # agentctl-pytest-heavy.MemoryHigh (verified by restoring "6G").
+            &&
+              sliceBytes poolSlices.agentctl-pytest.MemoryHigh
+              >= sliceBytes poolSlices.agentctl-pytest-heavy.MemoryHigh
+            &&
+              sliceBytes poolSlices.agentctl-pytest.MemoryHigh
+              >= sliceBytes poolSlices.agentctl-pytest-quick.MemoryHigh
+            &&
+              sliceBytes poolSlices.agentctl-land.MemoryHigh
+              >= sliceBytes poolSlices.agentctl-land-agent.MemoryHigh
+            # The corpus at its sized width (four 2263 MiB workers plus the
+            # master, ~10.05 GiB) must fit beside a saturated agent pool inside
+            # the plane's own ceiling.
+            &&
+              sliceBytes poolSlices.agentctl-pytest-heavy.MemoryHigh
+              + sliceBytes poolSlices.agentctl-agent.MemoryHigh <= sliceBytes managedWork.MemoryHigh
+            && sliceBytes poolSlices.agentctl-pytest-heavy.MemoryHigh >= 12 * 1024 * 1024 * 1024
+            && poolSlices.agentctl-pytest-heavy.MemoryMax == "14G"
             && poolSlices.agentctl-pytest-heavy.MemorySwapMax == "0"
             && poolSlices.agentctl-pytest-heavy.ManagedOOMMemoryPressure == "kill"
             && poolSlices.agentctl-pytest-heavy.CPUWeight == 200
