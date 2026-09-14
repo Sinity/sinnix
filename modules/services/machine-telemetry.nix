@@ -142,6 +142,29 @@ mkServiceModule {
       surfaceUnits = map (surface: surface.unit) config.sinnix.runtime.inventory.observedServices;
       unitArgs = lib.concatStringsSep "," (lib.unique surfaceUnits);
       userUid = "1000";
+      userSliceRoot = "/user.slice/user-${userUid}.slice/user@${userUid}.service";
+      # Slice names encode hierarchy: "agentctl-pytest.slice" is a child of
+      # "agentctl.slice". Derive the pool paths from the declared slice
+      # registry rather than keeping a second copy of the pool list here --
+      # the pools whose MemoryHigh gates test parallelism were invisible for
+      # exactly as long as that list was maintained by hand.
+      userSliceCgroupPath =
+        name:
+        "${userSliceRoot}/${
+          lib.concatStringsSep "/" (
+            lib.imap1 (
+              index: _: "${lib.concatStringsSep "-" (lib.take index (lib.splitString "-" name))}.slice"
+            ) (lib.splitString "-" name)
+          )
+        }";
+      agentctlPoolSliceNames = lib.filter (name: lib.hasPrefix "agentctl-" name) (
+        lib.attrNames config.sinnix.runtime.inventory.slices.user
+      );
+      agentctlPoolCgroups = map (name: {
+        label = "user.${name}";
+        scope = "user";
+        path = userSliceCgroupPath name;
+      }) agentctlPoolSliceNames;
       defaultMonitoredCgroups = [
         {
           label = "system.background";
@@ -161,34 +184,63 @@ mkServiceModule {
         {
           label = "user.agent";
           scope = "user";
-          path = "/user.slice/user-${userUid}.slice/user@${userUid}.service/agent.slice";
+          path = "${userSliceRoot}/agent.slice";
         }
+        # Historical label: this samples the job plane ROOT (agentctl.slice),
+        # not the agentctl-work.slice nested inside it. The name predates the
+        # inner slice and is kept so the existing series stays comparable; the
+        # per-pool children arrive below as user.agentctl-<pool>.
         {
           label = "user.agentctl-work";
           scope = "user";
-          path = "/user.slice/user-${userUid}.slice/user@${userUid}.service/agentctl.slice";
+          path = "${userSliceRoot}/agentctl.slice";
         }
         {
           label = "user.build";
           scope = "user";
-          path = "/user.slice/user-${userUid}.slice/user@${userUid}.service/build.slice";
+          path = "${userSliceRoot}/build.slice";
         }
         {
           label = "user.background";
           scope = "user";
-          path = "/user.slice/user-${userUid}.slice/user@${userUid}.service/background.slice";
+          path = "${userSliceRoot}/background.slice";
         }
         {
           label = "user.nix-build";
           scope = "user";
-          path = "/user.slice/user-${userUid}.slice/user@${userUid}.service/nix-build.slice";
+          path = "${userSliceRoot}/nix-build.slice";
         }
         {
           label = "user.backup";
           scope = "user";
-          path = "/user.slice/user-${userUid}.slice/user@${userUid}.service/backup.slice";
+          path = "${userSliceRoot}/backup.slice";
         }
-      ];
+        # The desktop-side slices the job plane's MemoryHigh is sized
+        # against. Their MemoryLow reservations rest on a one-off 2026-09-02
+        # reading; without a series there is no way to tell whether the
+        # reservation is still the right size.
+        {
+          label = "user.app";
+          scope = "user";
+          path = "${userSliceRoot}/app.slice";
+        }
+        {
+          label = "user.session";
+          scope = "user";
+          path = "${userSliceRoot}/session.slice";
+        }
+        {
+          label = "user.desktop";
+          scope = "user";
+          path = "${userSliceRoot}/desktop.slice";
+        }
+        {
+          label = "user.desktop-shell";
+          scope = "user";
+          path = "${userSliceRoot}/desktop-shell.slice";
+        }
+      ]
+      ++ agentctlPoolCgroups;
       cgroupSpecs = defaultMonitoredCgroups ++ cfg.extraMonitoredCgroups;
       cgroupArgs = lib.concatStringsSep "," (
         map (item: "${item.label}|${item.scope}|${item.path}") cgroupSpecs

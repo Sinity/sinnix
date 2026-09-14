@@ -56,6 +56,7 @@ in
     ./tests/fstrim.nix
     ./tests/hyprland-rules.nix
     ./tests/hyprland-lua-tools.nix
+    ./tests/machine-telemetry-cgroups.nix
     ./tests/memory-audit.nix
     ./tests/sinex-nats-security.nix
     ./tests/sinex-postgres-dump.nix
