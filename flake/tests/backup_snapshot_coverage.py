@@ -176,6 +176,25 @@ class CoverageFixture(unittest.TestCase):
         finally:
             sock.close()
 
+    def test_fifos_are_covered_not_rejected(self):
+        # Borg archives a FIFO (as metadata alone) but the verifier used to
+        # reject the type outright, which made the realm lane unprovable over
+        # a single netdata timer FIFO.
+        os.mkfifo(self.source / "timer.fifo")
+        self.archive()
+        before = COVERAGE.verify(self.source, "snapshot", [])
+        # It is covered, not exempted: the socket exemption must not have
+        # swallowed it, and it counts toward the canonical entry total.
+        self.assertNotIn("timer.fifo", before.get("unarchivable_entries", []))
+        self.assertEqual(
+            before["canonical_entries"],
+            sum(1 for _ in self.source.rglob("*")) + 1,
+        )
+        # Its metadata is still proved: a changed mode must be caught.
+        os.chmod(self.source / "timer.fifo", 0o600)
+        with self.assertRaisesRegex(ValueError, "mode mismatch"):
+            COVERAGE.verify(self.source, "snapshot", [])
+
     def test_unclassified_exclusion_is_not_coverage(self):
         hidden = self.source / "project" / "build"
         hidden.mkdir(parents=True)
