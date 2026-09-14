@@ -63,7 +63,8 @@ if [[ -z "$locked_rev" || -z "$locked_url" ]]; then
   exit 1
 fi
 
-mkdir -p -m 0700 "$state_dir"
+mkdir -p "$state_dir"
+chmod 0700 "$state_dir"
 last_rev_file="$state_dir/last-built-rev"
 last_rev=""
 if [[ -r "$last_rev_file" ]]; then

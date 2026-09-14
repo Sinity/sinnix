@@ -1,5 +1,5 @@
-# @sinnix-package: skip
 #!/usr/bin/env bash
+# @sinnix-package: skip
 set -euo pipefail
 
 usage() {
@@ -7,7 +7,7 @@ usage() {
   exit 2
 }
 
-data= skills_root= agents_root= output=
+data='' skills_root='' agents_root='' output=''
 while (($#)); do
   case "$1" in
     --data) data=${2-}; shift 2 ;;

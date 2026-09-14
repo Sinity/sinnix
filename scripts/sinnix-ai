@@ -161,8 +161,8 @@ pin_summary() {
   fi
 }
 
-# Populates REG_NAME/REG_REGISTERED/REG_UNIT/REG_MANAGER/REG_ENDPOINT/
-# REG_IDLE/REG_ADMISSION/REG_RESTARTABLE/REG_HAS_PROXY for one service name.
+# Populates REG_NAME/REG_REGISTERED/REG_UNIT/REG_ENDPOINT/REG_IDLE/
+# REG_ADMISSION/REG_HAS_PROXY for one service name.
 # REG_REGISTERED=0 means the name is a known AI service on this system but
 # has no live surface here (module disabled) -- distinct from an unknown
 # name entirely, which is rejected before this runs.
@@ -176,17 +176,15 @@ lookup() {
   surface="$(inventory_json | jq -c --arg n "$name" '.surfaces[$n] // null')"
   if [[ "$surface" == "null" ]]; then
     REG_REGISTERED=0
-    REG_UNIT=""; REG_MANAGER="system"; REG_ENDPOINT=""; REG_IDLE=""
-    REG_ADMISSION=""; REG_RESTARTABLE="false"; REG_HAS_PROXY=0
+    REG_UNIT=""; REG_ENDPOINT=""; REG_IDLE=""
+    REG_ADMISSION=""; REG_HAS_PROXY=0
     return
   fi
   REG_REGISTERED=1
   REG_UNIT="$(jq -r '.unit' <<<"$surface")"
-  REG_MANAGER="$(jq -r '.manager // "system"' <<<"$surface")"
   REG_ENDPOINT="$(jq -r '.activation.publicEndpoint // empty' <<<"$surface")"
   REG_IDLE="$(jq -r '.activation.idleTimeout // empty' <<<"$surface")"
   REG_ADMISSION="$(jq -r '.activation.exclusiveResource // empty' <<<"$surface")"
-  REG_RESTARTABLE="$(jq -r '.observe.restartable // false' <<<"$surface")"
   if unit_installed "${REG_NAME}-proxy.service"; then REG_HAS_PROXY=1; else REG_HAS_PROXY=0; fi
 }
 
@@ -306,10 +304,10 @@ cmd_start() {
       sudo systemctl start "${REG_NAME}-proxy.socket"
     fi
     ops_action start "$REG_UNIT" "sinnix-ai start $REG_NAME"
-    local host="" port="" i responding="no"
+    local host="" port="" responding="no"
     if [[ -n "$REG_ENDPOINT" ]]; then host="${REG_ENDPOINT%%:*}"; port="${REG_ENDPOINT##*:}"; fi
     if [[ -n "$port" ]]; then
-      for i in $(seq 1 30); do
+      for _ in $(seq 1 30); do
         responding="$(port_alive "$host" "$port")"
         [[ "$responding" == yes ]] && break
         sleep 1
