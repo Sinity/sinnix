@@ -69,7 +69,10 @@ mkServiceModule {
   extraOptions = {
     schedule = args.lib.mkOption {
       type = args.lib.types.str;
-      default = "weekly";
+      # Not the "weekly" alias: systemd expands it to Mon 00:00:00 exactly,
+      # which is also where nix-gc and every other weekly job land, and a
+      # multi-TB walk is the worst possible thing to start in that pile-up.
+      default = "Sat 05:00";
       description = ''
         How often to re-walk the system. Weekly, not daily: a full scan of
         /realm and /outer-realm is multi-TB and multi-million-file, and the
