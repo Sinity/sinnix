@@ -129,6 +129,27 @@ class CoverageFixture(unittest.TestCase):
         # one: this is the comparison that keeps the fix from being a skip.
         self.assertEqual(COVERAGE.archived_acl_markers({}), set())
 
+    def test_nested_subvolume_stub_mtime_is_not_coverage(self):
+        # Snapshotting a subvolume replaces each nested subvolume with an
+        # inode-2 stub whose mtime follows the live subvolume, not the frozen
+        # snapshot: sampled seconds apart on this host it advanced with the
+        # wall clock, so it can never match what Borg archived. A build sandbox
+        # cannot create a btrfs subvolume, so the exemption is exercised
+        # directly rather than through a fixture that would have to skip.
+        self.assertEqual(
+            COVERAGE.metadata_keys_for("ordinary/path", frozenset()),
+            ("mode", "uid", "gid", "mtime"),
+        )
+        stub = ".btrfs/snapshot/persist.20260913T023000+0200"
+        self.assertEqual(
+            COVERAGE.metadata_keys_for(stub, frozenset({stub})),
+            ("mode", "uid", "gid"),
+        )
+        # Ownership and mode remain compared for a stub: only the mtime is
+        # meaningless, and dropping the rest would stop proving anything.
+        self.assertIn("mode", COVERAGE.metadata_keys_for(stub, frozenset({stub})))
+        self.assertIn("uid", COVERAGE.metadata_keys_for(stub, frozenset({stub})))
+
     def test_unclassified_exclusion_is_not_coverage(self):
         hidden = self.source / "project" / "build"
         hidden.mkdir(parents=True)
