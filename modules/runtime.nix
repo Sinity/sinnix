@@ -727,8 +727,6 @@ in
             in
             !(shapeIsValid && referencesExist)
           ) rows;
-        in
-        let
           # A class only becomes real when some module writes it onto the unit.
           # nix-gc declared `background` for months while nixpkgs owned the
           # unit and nothing applied it, so it ran at the default IOWeight of

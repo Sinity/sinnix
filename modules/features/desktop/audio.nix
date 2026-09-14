@@ -1,5 +1,5 @@
 # System audio: PipeWire/WirePlumber routing, Bluetooth (A2DP, SBC-XQ, mSBC),
-# real-time priority, and USB DAC quantum settings.
+# and real-time priority.
 #
 # ── sinnix-prime signal path (not obvious from the device names) ────────────
 # The Teufel Ultima 40 Aktiv speakers are wired by ANALOG AUX to the FiiO
@@ -13,11 +13,15 @@
 #      `pw-cli set-param <device-id> Profile
 #      '{ index: <output:analog-stereo index>, save: true }'`.
 #   2. ALSA refuses to start the FiiO with "Start error: No space left on
-#      device" in a ~1Hz loop. Despite the wording this is USB ISOCHRONOUS
-#      BANDWIDTH exhaustion, not disk: the DAC is a 12 Mbps full-speed device
-#      sharing bus 1 with two hubs, storage, and (when attached for adb) the
-#      phone. Freeing bus-1 load stops it; moving the DAC to the bus-2 xHCI
-#      controller would isolate it permanently.
+#      device" in a ~1Hz loop, or dmesg repeats `Not enough bandwidth for
+#      altsetting 2` / `usb_set_interface failed (-28)`. Despite the wording
+#      this is USB ISOCHRONOUS BANDWIDTH exhaustion, not disk: the DAC is a
+#      12 Mbps full-speed device whose playback and capture endpoints share
+#      one 1023 byte/frame budget, so 24-bit in both directions does not fit.
+#      The observed trigger (2026-09-14) was the DAC's own unused line-in
+#      winning the default-source election and being opened by Chrome/Steam;
+#      the `13-fiio-no-capture` rule below disables that node. Moving the DAC
+#      to the bus-2 xHCI controller would raise the ceiling permanently.
 # The Ultima 40 is ALSO Bluetooth-pairable (7C:96:D2:C2:A3:E7). Connecting it
 # over BT while the aux path is live contends for the same speakers and can
 # trigger failure mode 2 -- prefer one path at a time.
@@ -92,6 +96,29 @@ mkFeatureModule {
                 }
               ];
             };
+            # The E10's line-in is unused (nothing is plugged into it), but it
+            # advertises as an ordinary Audio/Source and can win WirePlumber's
+            # default-source election over the Yeti. Whatever then opens the
+            # default mic -- Chrome, Steam voice -- pins a 24-bit isochronous
+            # IN endpoint on a 12 Mbps full-speed device, and playback's
+            # altsetting can no longer fit the 1023 byte/frame budget: the
+            # ~1Hz `usb_set_interface failed (-28)` loop of failure mode 2.
+            # Disabling the capture node removes the contention at the source;
+            # the DAC's playback sink is untouched.
+            "13-fiio-no-capture" = {
+              "monitor.alsa.rules" = [
+                {
+                  matches = [
+                    { "node.name" = "~alsa_input[.]usb-FiiO_DigiHug_USB_Audio.*"; }
+                  ];
+                  actions = {
+                    update-props = {
+                      "node.disabled" = true;
+                    };
+                  };
+                }
+              ];
+            };
           };
         };
       };
@@ -155,16 +182,6 @@ mkFeatureModule {
         "audio"
         "bluetooth"
       ];
-
-      environment.etc."wireplumber/60-force-quantum.lua".text = ''
-        rule = {
-          matches = {
-            { { "node.name", "matches", "alsa_output.usb-2cc2_*" }, },
-          },
-          apply_properties = { ["clock.force-quantum"] = 384 },
-        }
-        table.insert(alsa_monitor.rules, rule)
-      '';
 
     };
 } args
