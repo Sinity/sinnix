@@ -406,8 +406,8 @@ in
             && poolSlices.agentctl-pytest-heavy.ManagedOOMMemoryPressure == "kill"
             && poolSlices.agentctl-pytest-heavy.CPUWeight == 200
             && poolSlices.agentctl-pytest-heavy.IOWeight == 200
-            && poolSlices.agentctl-bulk.MemoryHigh == "10G"
-            && poolSlices.agentctl-bulk.MemoryMax == "14G"
+            && poolSlices.agentctl-bulk.MemoryHigh == "16G"
+            && poolSlices.agentctl-bulk.MemoryMax == "20G"
             && poolSlices.agentctl-bulk.MemorySwapMax == "0"
             && poolSlices.agentctl-bulk.ManagedOOMMemoryPressure == "kill"
             && poolSlices.agentctl-bulk.CPUWeight == 100

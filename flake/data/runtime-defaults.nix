@@ -406,12 +406,21 @@ rec {
         ManagedOOMMemoryPressureLimit = "50%";
         ManagedOOMMemoryPressureDurationSec = "30s";
       };
+      # Sized from 30 days of cgroup_memory_sample (2026-09-14), not from a
+      # guess: user.build p95 9.35G / p99 12.10G / peak 16.43G, and the
+      # agentctl work slice p99 14.63G / peak 18.86G. At MemoryHigh 10G a full
+      # `check` peaked at 10.6G, crossed the throttle line into sustained
+      # reclaim (82k high events), drove its own memory PSI past the 50% limit
+      # below, and systemd-oomd killed 18 of its processes -- a kill loop the
+      # hard MemoryMax never even participated in. The ceiling stays at the
+      # parent plane's own MemoryHigh so a genuine runaway is still bounded,
+      # and swap stays at zero so it is killed rather than paging the desktop.
       agentctl-bulk = {
         IOAccounting = true;
         CPUWeight = 100;
         IOWeight = 100;
-        MemoryHigh = "10G";
-        MemoryMax = "14G";
+        MemoryHigh = "16G";
+        MemoryMax = "20G";
         MemorySwapMax = "0";
         ManagedOOMMemoryPressure = "kill";
         ManagedOOMMemoryPressureLimit = "50%";
