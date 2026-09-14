@@ -141,6 +141,26 @@ ACL_XATTR_FIELDS = {
 }
 
 
+# Borg's --exclude-caches drops a directory tagged per the CACHEDIR.TAG spec,
+# and it drops the whole thing: verified against borg 1.4.5, a tagged directory
+# leaves neither its contents, nor the tag file, nor its own directory entry in
+# the archive. The drain passes --exclude-caches, so the verifier must apply
+# the same rule or it reports the archive as missing content that Borg was
+# instructed never to take -- as it did for ~/.cargo/git (96853 entries), which
+# Cargo tags. This is a property, not a path, so it cannot be expressed in the
+# declared noncanonical roots.
+CACHEDIR_TAG_SIGNATURE = b"Signature: 8a477f597d28d172789f06886806bc55"
+
+
+def is_cache_directory(path):
+    """Whether Borg's --exclude-caches would drop this directory."""
+    try:
+        with open(path / "CACHEDIR.TAG", "rb") as handle:
+            return handle.read(len(CACHEDIR_TAG_SIGNATURE)) == CACHEDIR_TAG_SIGNATURE
+    except OSError:
+        return False
+
+
 # A nested subvolume is replaced by an inode-2 stub when its parent is
 # snapshotted. The stub's mtime tracks the live subvolume rather than this
 # snapshot's frozen state -- sampled three seconds apart it advances with the
@@ -190,6 +210,7 @@ def verify(source, archive, noncanonical):
     expected = {}
     ignored = set(noncanonical)
     omitted_roots = []
+    cache_roots = []
     nested_stubs = []
     if any(
         p.startswith("/")
@@ -204,6 +225,9 @@ def verify(source, archive, noncanonical):
             omitted_roots.append(relative)
             return
         st = path.lstat()
+        if stat.S_ISDIR(st.st_mode) and relative != "." and is_cache_directory(path):
+            cache_roots.append(relative)
+            return
         expected[relative] = st
         if stat.S_ISDIR(st.st_mode):
             # Btrfs snapshotting replaces a nested subvolume with inode 2.
@@ -313,6 +337,7 @@ def verify(source, archive, noncanonical):
         "canonical_entries": len(expected),
         "content_sha256": digest.hexdigest(),
         "noncanonical_roots": omitted_roots,
+        "cachedir_tag_roots": cache_roots,
         "nested_subvolume_stubs": nested_stubs,
     }
 
