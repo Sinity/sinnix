@@ -3,6 +3,26 @@
 Canonical coverage excludes only explicitly declared noncanonical roots. Borg
 patterns and cache markers control creation, but do not prove missing data safe.
 The caller holds the Borg lock and rechecks identity before deleting a snapshot.
+
+Behaviours of Borg this file depends on, each established by running borg 1.4.5
+rather than read from its docs, and each the cause of a lane that retained every
+snapshot until it was handled (2026-09-14):
+
+- A POSIX ACL is stored in an item's acl_access/acl_default, never in xattrs.
+- A unix socket is skipped entirely; a FIFO is archived as a mode and nothing
+  else; a device node adds rdev. Sockets therefore cannot be covered, the other
+  two can.
+- "debug dump-archive" encodes a non-UTF-8 path as DEL plus hex. "list
+  --json-lines" cannot, because JSON is Unicode, and substitutes one "?" per
+  undecodable byte; its bpath key is not emitted.
+- An inode-2 stub stands in for a nested subvolume and its mtime tracks the live
+  subvolume, so it never matches what was archived.
+
+The rule that is deliberately NOT taken from Borg is exclusion. --exclude-caches
+and --exclude-if-present decide what creation writes; they never decide what
+coverage may waive, or a tag file dropped anywhere would authorize deleting the
+only copy of whatever sits beside it. Only the declared noncanonical roots do
+that (see modules/backup.nix).
 """
 
 import argparse
