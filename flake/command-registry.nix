@@ -560,12 +560,31 @@ in
         echo "Running statix..."
         ${pkgs.statix}/bin/statix check || lint_failed="$lint_failed statix"
 
+        # scripts/ is not the whole runtime surface: pkgs/ carries
+        # agentctl-agent, which launches every agent, and the capture-router
+        # pollers, while modules/ carries find-flake-root. Those were never
+        # shellchecked though the banner claimed packaged/runtime scripts.
+        # flake/tests is deliberately still excluded -- it has 12 findings
+        # (advisory notes plus SC1010 false positives on the `lane done` verb)
+        # and belongs to a separate cleanup, tracked on sinnix-55zg.
+        # This step announced itself and checked nothing for as long as it has
+        # existed: in this indented string `\\b` reaches ripgrep as a literal
+        # backslash-b, not a word boundary, so the pattern matched zero files
+        # and shellcheck was never handed a target. Exactly the failure the
+        # note above describes -- advertised surface that is dark -- except it
+        # exited 0, so green output was not evidence. One backslash here.
+        #
+        # zsh is out of the alternation because shellcheck cannot parse zsh at
+        # all (SC1071); selecting a .zsh file guarantees a failure it can never
+        # fix. Severity is warning: the style tier is 24 further findings that
+        # belong to a separate pass (sinnix-55zg), and a gate nobody can get
+        # green is how a step ends up inert in the first place.
         echo "Running shellcheck on packaged/runtime scripts..."
-        shellcheck_targets="$(${pkgs.ripgrep}/bin/rg -Il '^#!.*\\b(bash|sh|zsh)\\b' scripts || true)"
+        shellcheck_targets="$(${pkgs.ripgrep}/bin/rg -Il '^#!.*\b(bash|sh)\b' scripts pkgs modules || true)"
         if [ -n "$shellcheck_targets" ]; then
           while IFS= read -r target; do
             [ -n "$target" ] || continue
-            ${pkgs.shellcheck}/bin/shellcheck "$target" || lint_failed="$lint_failed shellcheck:$target"
+            ${pkgs.shellcheck}/bin/shellcheck --severity=warning "$target" || lint_failed="$lint_failed shellcheck:$target"
           done <<<"$shellcheck_targets"
         fi
 
