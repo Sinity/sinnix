@@ -181,7 +181,14 @@ class McpBrokerService:
         self, server: dict[str, Any], server_name: str, environment: dict[str, str]
     ) -> dict[str, Any]:
         """Prove one upstream can initialize and disclose its live tools."""
-        timeout = min(self._call_timeout(server), DEFAULT_MCP_CALL_TIMEOUT_SECONDS)
+        # Discovery stays bounded by the default even when a server declares a
+        # longer call budget, so one slow upstream cannot stall gateway.status
+        # for minutes. That cap means a probe deadline is not always the budget
+        # the call route actually gets, and reporting both as a plain timeout
+        # made a slow start indistinguishable from a dead route (sinnix-4rcy).
+        call_timeout = self._call_timeout(server)
+        timeout = min(call_timeout, DEFAULT_MCP_CALL_TIMEOUT_SECONDS)
+        discovery_truncated = timeout < call_timeout
         parameters, observer_unit = self._parameters(
             server, environment, runtime_max_seconds=timeout
         )
@@ -215,8 +222,24 @@ class McpBrokerService:
             )
             result: dict[str, Any] = {
                 "availability": "unavailable",
-                "failure_class": "timeout",
-                "reason": f"upstream did not complete initialize and tools/list within {timeout} seconds",
+                "failure_class": (
+                    "discovery_timeout" if discovery_truncated else "timeout"
+                ),
+                "reason": (
+                    (
+                        f"upstream did not complete initialize and tools/list "
+                        f"within the {timeout}s discovery budget; this server "
+                        f"declares callTimeoutSeconds {call_timeout}, so the "
+                        f"configured call route is not proven unavailable -- "
+                        f"call it directly to decide, or lower "
+                        f"callTimeoutSeconds so readiness can cover it"
+                    )
+                    if discovery_truncated
+                    else (
+                        f"upstream did not complete initialize and tools/list "
+                        f"within {timeout} seconds"
+                    )
+                ),
             }
             if artifact_id is not None:
                 result["diagnostic_artifact_id"] = artifact_id
