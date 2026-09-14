@@ -14,7 +14,7 @@ in
         name = "runtime-surface-policy";
         feature = "sinnix.features.cli.polylogue.enable";
         extraModules = [
-          ({ ... }: {
+          ({ config, lib, ... }: {
             sinnix.runtime.surfaces = {
               runtime-policy-system = {
                 unit = "runtime-policy-system.service";
@@ -35,7 +35,13 @@ in
                 observe.enable = true;
               };
             };
-            systemd.services.runtime-policy-system = { };
+            # A declared class has to reach its unit, so this fixture applies
+            # it the way a real owning module does; the assertions below still
+            # read the inventory's own projection of the same surface.
+            systemd.services.runtime-policy-system.serviceConfig = lib.sinnix.mkRuntimeServiceConfig {
+              runtimeInventory = config.sinnix.runtime.inventory;
+              unit = "runtime-policy-system.service";
+            };
             home-manager.users.sinity.systemd.user.services.runtime-policy-user = { };
           })
           (
