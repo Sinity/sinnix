@@ -150,6 +150,32 @@ class CoverageFixture(unittest.TestCase):
         self.assertIn("mode", COVERAGE.metadata_keys_for(stub, frozenset({stub})))
         self.assertIn("uid", COVERAGE.metadata_keys_for(stub, frozenset({stub})))
 
+    def test_unix_sockets_are_not_coverage(self):
+        # Borg dispatches on file type and skips a socket outright, so
+        # requiring one to be covered makes the lane permanently unprovable
+        # while waiving no bytes. A FIFO in the same directory is archived and
+        # exemption: it names one file type, not "anything unusual".
+        import socket as socket_module
+
+        sock = socket_module.socket(socket_module.AF_UNIX)
+        try:
+            sock.bind(str(self.source / "live.sock"))
+        except OSError as error:
+            sock.close()
+            self.skipTest(f"fixture filesystem cannot host a unix socket: {error}")
+        try:
+            self.archive()
+            result = COVERAGE.verify(self.source, "snapshot", [])
+            self.assertEqual(result["unarchivable_entries"], ["live.sock"])
+            modes = COVERAGE.is_unarchivable_type
+            self.assertTrue(modes(os.lstat(self.source / "live.sock").st_mode))
+            # Ordinary content is untouched by the exemption: this is a
+            # file-type rule, not a blanket waiver for anything unusual.
+            self.assertFalse(modes(os.lstat(self.source / "same-name").st_mode))
+            self.assertFalse(modes(os.lstat(self.source).st_mode))
+        finally:
+            sock.close()
+
     def test_unclassified_exclusion_is_not_coverage(self):
         hidden = self.source / "project" / "build"
         hidden.mkdir(parents=True)
