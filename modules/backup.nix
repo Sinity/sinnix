@@ -983,7 +983,10 @@ in
                 }
               ];
             };
-            borgbackup-job-sinex-blobs = {
+            # Declared only when the job exists: archives.nix builds this job
+            # under the same predicate, and a surface whose unit is never
+            # configured advertises an envelope nothing applies.
+            borgbackup-job-sinex-blobs = lib.mkIf (sinexBlobRepositoryPath != "") {
               unit = "borgbackup-job-sinex-blobs.service";
               resourceClass = "backup";
               observe = {

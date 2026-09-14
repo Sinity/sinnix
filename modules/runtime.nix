@@ -728,7 +728,55 @@ in
             !(shapeIsValid && referencesExist)
           ) rows;
         in
+        let
+          # A class only becomes real when some module writes it onto the unit.
+          # nix-gc declared `background` for months while nixpkgs owned the
+          # unit and nothing applied it, so it ran at the default IOWeight of
+          # 100 -- a hundred times its declared share -- and starved the jobs
+          # that were correctly throttled. The timer guard above rejects one
+          # shape of inert declaration; this rejects the other.
+          inertResourceClasses = lib.filter (surface: surface != null) (
+            lib.mapAttrsToList (
+              name: surface:
+              let
+                unitName = lib.removeSuffix ".service" surface.unit;
+                applied = config.systemd.services.${unitName}.serviceConfig or { };
+                # Some classes place the unit in a slice that carries the
+                # weights; others put them on the unit itself. Either way the
+                # keys the class declares are the evidence that it arrived.
+                declared = builtins.attrNames (
+                  runtimeDefaults.classes.${surface.resourceClass}.serviceConfig or { }
+                );
+                # A module may drop a single key on purpose -- `omit` exists
+                # for exactly that, and a hard MemoryMax is reserved for real
+                # safety boundaries. The defect is a class that never arrived
+                # at all, so require evidence of application, not every key.
+                arrived = lib.filter (key: applied ? "${key}") declared;
+              in
+              if
+                (surface.manager or "system") == "system"
+                && surface.kind == "service"
+                && surface.resourceClass != "ordinary"
+                # A configuration that never builds the unit has nothing to
+                # govern; the defect is a unit that exists and runs ungoverned.
+                && config.systemd.services ? "${unitName}"
+                && declared != [ ]
+                && arrived == [ ]
+              then
+                "${name} (${surface.unit}, class ${surface.resourceClass})"
+              else
+                null
+            ) surfaces
+          );
+        in
         [
+          {
+            assertion = inertResourceClasses == [ ];
+            message =
+              "sinnix.runtime.surfaces declare a resourceClass that never reaches the unit; "
+              + "the owning module must write it with lib.sinnix.mkRuntimeServiceConfig: "
+              + lib.concatStringsSep ", " inertResourceClasses;
+          }
           {
             assertion = duplicateSurfaceUnitKeys == [ ];
             message =

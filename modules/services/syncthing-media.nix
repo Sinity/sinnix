@@ -20,7 +20,11 @@ mkServiceModule {
     };
   };
   configFn =
-    { config, ... }:
+    {
+      config,
+      lib,
+      ...
+    }:
     let
       username = config.sinnix.user.name;
       stateDir = "/realm/state/syncthing";
@@ -28,6 +32,14 @@ mkServiceModule {
       questMediaDir = "/realm/photos/quest-3/videoshots";
     in
     {
+      # nixpkgs owns syncthing.service, so the surface's `background` class
+      # only reaches it if this module writes it: without this the sync ran at
+      # the default weight, competing with interactive work it should yield to.
+      systemd.services.syncthing.serviceConfig = lib.sinnix.mkRuntimeServiceConfig {
+        runtimeInventory = config.sinnix.runtime.inventory;
+        unit = "syncthing.service";
+      };
+
       services.syncthing = {
         enable = true;
         user = username;
