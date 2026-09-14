@@ -428,6 +428,8 @@ let
     # backup churn if included.
     "home/sinity/.cache"
     # Pure regenerable caches and logs, multi-GB each.
+    "home/sinity/.cargo/registry"
+    "home/sinity/.cargo/git"
     "home/sinity/.npm/_cacache"
     "home/sinity/.local/share/nvim/mason"
     "home/sinity/.local/share/hyprland/logs"
@@ -526,6 +528,14 @@ let
     "home/sinity/.config/chrome-ws/Default/Service Worker"
     "home/sinity/.config/chrome-ws/Default/GPUCache"
     "home/sinity/.cache"
+    # Cargo tags both of these with CACHEDIR.TAG, so --exclude-caches already
+    # kept them out of every archive while nothing classified them. The lane
+    # could not prove coverage and retained every snapshot (96853 entries under
+    # .cargo/git alone). Classified here explicitly, as the policy above
+    # requires: the tag is not the authorization, this line is. Both are
+    # re-fetched by cargo from the network on demand.
+    "home/sinity/.cargo/registry"
+    "home/sinity/.cargo/git"
     "home/sinity/.npm/_cacache"
     "home/sinity/.local/share/nvim/mason"
     "home/sinity/.local/share/hyprland/logs"
