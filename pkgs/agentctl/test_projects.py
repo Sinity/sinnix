@@ -47,6 +47,27 @@ def test_the_fixture_descriptor_loads_every_declared_field(project_root: Path) -
     ]
 
 
+def test_focused_verification_must_run_on_a_worker_worktree(tmp_path: Path) -> None:
+    # A worker's focused verification is always launched with
+    # --workspace <worktree>, and launch refuses a "default" checkout outside
+    # the project root, so such a declaration can never execute for the batch
+    # it exists to serve. It must be refused at declaration time, not once per
+    # packet (sinnix-59zd).
+    root = write_project(tmp_path / "p")
+    descriptor = root / ".agentctl" / "project.toml"
+    # The fixture's focused operation is worktree-capable, so it loads.
+    assert load_project_adapter(root).workspace.verify["focused"] == "verify_quick"
+
+    descriptor.write_text(
+        descriptor.read_text().replace(
+            'exec = ["fixture-verify-quick"]',
+            'exec = ["fixture-verify-quick"]\ncheckout = "default"',
+        )
+    )
+    with pytest.raises(ProjectConfigError, match="must name an operation that runs"):
+        load_project_adapter(root)
+
+
 def test_workspace_artifacts_must_be_relative(tmp_path: Path) -> None:
     root = write_project(tmp_path / "p")
     descriptor = root / ".agentctl" / "project.toml"

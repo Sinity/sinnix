@@ -606,6 +606,22 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
                 f"{descriptor} workspace verification operation(s) are undeclared: "
                 + ", ".join(sorted(unknown_verifiers))
             )
+        # A worker's focused verification is compiled as
+        # `job start <project> <focused> --workspace <worktree>` (start.py's
+        # focused_verification), and launch refuses a "default" checkout
+        # anywhere but the project root. So a focused profile naming a
+        # default-checkout operation cannot execute for the batch it exists to
+        # serve -- every worker's verification would raise JobError. Refuse the
+        # declaration here rather than let each packet discover it (sinnix-59zd).
+        focused = workspace.verify.get("focused")
+        focused_operation = next(
+            (operation for operation in operations if operation.name == focused), None
+        )
+        if focused_operation is not None and focused_operation.checkout == "default":
+            raise ProjectConfigError(
+                f"{descriptor} workspace.verify.focused must name an operation that runs "
+                f'on a worker worktree, but {focused} declares checkout = "default"'
+            )
     visiting: set[str] = set()
     visited: set[str] = set()
 
