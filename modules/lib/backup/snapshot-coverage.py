@@ -284,6 +284,17 @@ def verify(source, archive, noncanonical):
                     raise ValueError(f"archive hardlink mismatch: {path!r}")
             elif item.get("size") != st.st_size:
                 raise ValueError(f"archive size mismatch: {path!r}")
+        elif stat.S_ISFIFO(st.st_mode):
+            # Borg archives a FIFO as metadata alone -- verified against 1.4.5,
+            # its item carries a mode and nothing else, no size and no chunks.
+            # The mode/uid/gid/mtime comparison above is therefore the whole
+            # proof, and rejecting the type instead made the realm lane
+            # unprovable over one netdata timer FIFO.
+            pass
+        elif stat.S_ISCHR(st.st_mode) or stat.S_ISBLK(st.st_mode):
+            # A device node's rdev is its entire content, and Borg records it.
+            if item.get("rdev") != st.st_rdev:
+                raise ValueError(f"archive device mismatch: {path!r}")
         elif not stat.S_ISDIR(st.st_mode):
             raise ValueError(f"unsupported canonical file type: {path!r}")
     missing = expected.keys() - seen
