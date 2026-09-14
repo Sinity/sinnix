@@ -141,6 +141,23 @@ ACL_XATTR_FIELDS = {
 }
 
 
+# A nested subvolume is replaced by an inode-2 stub when its parent is
+# snapshotted. The stub's mtime tracks the live subvolume rather than this
+# snapshot's frozen state -- sampled three seconds apart it advances with the
+# wall clock -- so it can never equal what Borg archived, and comparing it
+# fails every verification forever. The stub's contents are already outside
+# this snapshot's proof (see walk() below), so its mtime carries no coverage
+# meaning either. Ownership and mode stay compared: those are stable.
+METADATA_KEYS = ("mode", "uid", "gid", "mtime")
+
+
+def metadata_keys_for(path, nested_stubs):
+    """The metadata fields that must match the archive for one path."""
+    if path in nested_stubs:
+        return tuple(key for key in METADATA_KEYS if key != "mtime")
+    return METADATA_KEYS
+
+
 def partition_acl_xattrs(names):
     """Split raw listxattr names into ACL markers and ordinary xattr names."""
     markers = set()
@@ -197,6 +214,7 @@ def verify(source, archive, noncanonical):
                 walk(child, str(PurePosixPath(relative) / child.name))
 
     walk(source, ".")
+    nested_stub_paths = frozenset(nested_stubs)
     seen = set()
     for item in command_items(
         ["borg", "debug", "dump-archive", "::" + archive, "/dev/stdout"],
@@ -212,13 +230,14 @@ def verify(source, archive, noncanonical):
             raise ValueError(f"duplicate archive path: {path!r}")
         seen.add(path)
         st = expected[path]
-        for key, actual in (
-            ("mode", st.st_mode),
-            ("uid", st.st_uid),
-            ("gid", st.st_gid),
-            ("mtime", st.st_mtime_ns),
-        ):
-            if item.get(key) != actual:
+        actual_metadata = {
+            "mode": st.st_mode,
+            "uid": st.st_uid,
+            "gid": st.st_gid,
+            "mtime": st.st_mtime_ns,
+        }
+        for key in metadata_keys_for(path, nested_stub_paths):
+            if item.get(key) != actual_metadata[key]:
                 raise ValueError(f"archive {key} mismatch: {path!r}")
         actual_acls, ordinary_names = partition_acl_xattrs(
             os.listxattr(source / path, follow_symlinks=False)
