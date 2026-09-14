@@ -80,17 +80,42 @@ in
 
       gc = {
         automatic = true;
-        dates = "weekly";
+        # Away from midnight, where the realm backup, the filesystem index and
+        # the store walk all used to land in the same few minutes.
+        dates = "Mon 04:30";
+        randomizedDelaySec = "30min";
         # `--delete-generations +N` is a nix-env flag; nix-collect-garbage
         # rejects it as an unrecognised flag and the whole run silently fails.
         options = "--delete-older-than 30d";
       };
 
-      optimise = {
-        automatic = true;
-        dates = [ "daily" ];
-      };
+      # auto-optimise-store already hardlinks each path as it is added, so a
+      # daily full-store pass re-walks hundreds of GB to find work the daemon
+      # has already done. Measured 2026-09-14: the timer's pass and the GC
+      # overlapped for 50 minutes and drove io.pressure full to ~40%.
+      optimise.automatic = false;
     };
+
+    # nix-gc is declared `background` in the runtime registry, but nothing
+    # applied that class: nixpkgs owns the unit, so it ran in system.slice at
+    # the default IOWeight of 100 -- a hundred times the declared share --
+    # while the correctly throttled realm backup starved behind it.
+    #
+    # Weights alone are not enough here. Store deletion is almost entirely
+    # btrfs metadata churn, and that writeback is issued by the filesystem's
+    # own transaction threads rather than this cgroup, so it escapes weight
+    # accounting. The absolute ceiling is what keeps the root device
+    # answering while the walk runs; / and /nix share one SATA SSD.
+    systemd.services.nix-gc.serviceConfig =
+      (lib.sinnix.mkRuntimeServiceConfig {
+        runtimeInventory = config.sinnix.runtime.inventory;
+        unit = "nix-gc.service";
+      })
+      // {
+        IOSchedulingClass = "idle";
+        IOReadBandwidthMax = "/nix 24M";
+        IOWriteBandwidthMax = "/nix 16M";
+      };
 
     # sccache is not wired as RUSTC_WRAPPER: it bypasses incremental
     # compilation, which every Rust consumer here relies on, and measured no

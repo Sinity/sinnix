@@ -465,10 +465,6 @@ rec {
       unit = "nix-gc.service";
       resourceClass = "background";
     };
-    nix-optimise = {
-      unit = "nix-optimise.service";
-      resourceClass = "background";
-    };
   };
 
   earlyoomPatternFor =
