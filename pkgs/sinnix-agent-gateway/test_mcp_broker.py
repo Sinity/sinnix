@@ -257,8 +257,22 @@ def test_catalog_probes_admitted_servers_and_keeps_exclusions_static(
 
 
 @pytest.mark.parametrize(
-    ("configured_timeout", "handshake_seconds", "probe_timeout", "available"),
-    [(None, 16, 30, True), (3, 4, 3, False), (300, 16, 30, True), (300, 31, 30, False)],
+    (
+        "configured_timeout",
+        "handshake_seconds",
+        "probe_timeout",
+        "available",
+        "failure_class",
+    ),
+    [
+        (None, 16, 30, True, None),
+        (3, 4, 3, False, "timeout"),
+        (300, 16, 30, True, None),
+        # The capped case: discovery gave up at 30s while the configured call
+        # route gets 300s, so readiness has not proven the route unavailable
+        # and must not report it as a plain timeout (sinnix-4rcy).
+        (300, 31, 30, False, "discovery_timeout"),
+    ],
 )
 def test_probe_admission_and_observer_lifetime_share_the_capped_call_budget(
     tmp_path: Path,
@@ -267,6 +281,7 @@ def test_probe_admission_and_observer_lifetime_share_the_capped_call_budget(
     handshake_seconds: int,
     probe_timeout: int,
     available: bool,
+    failure_class: str | None,
 ) -> None:
     broker = broker_service(tmp_path, "observer")
     broker.execution = RecordingExecution(
@@ -314,7 +329,14 @@ def test_probe_admission_and_observer_lifetime_share_the_capped_call_budget(
     if available:
         assert fixture["tool_count"] == fixture["read_only_tool_count"] == 1
     else:
-        assert fixture["failure_class"] == "timeout"
+        assert fixture["failure_class"] == failure_class
+        if failure_class == "discovery_timeout":
+            # The owner error names both budgets, so the reader can tell a slow
+            # start from a dead route without re-deriving the cap.
+            assert f"{probe_timeout}s discovery budget" in fixture["reason"]
+            assert f"callTimeoutSeconds {configured_timeout}" in fixture["reason"]
+        else:
+            assert "discovery budget" not in fixture["reason"]
         assert len(broker.execution.calls) == 1
 
 

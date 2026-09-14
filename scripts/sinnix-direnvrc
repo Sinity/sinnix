@@ -133,6 +133,20 @@ _sinnix_interactive_shell_pid() {
   printf '%s' "$PPID"
 }
 
+# Does this PID own a controlling terminal? Field 7 of /proc/<pid>/stat is
+# tty_nr, and 0 means none. comm (field 2) is parenthesized and may itself
+# contain spaces and parentheses, so cut at the last ") " before counting:
+# the remainder starts at state, making tty_nr its fifth field.
+_sinnix_pid_has_tty() {
+  local pid="$1" rest tty
+  case "$pid" in '' | *[!0-9]*) return 1 ;; esac
+  rest="$(cat "/proc/$pid/stat" 2>/dev/null || true)"
+  [ -n "$rest" ] || return 1
+  rest="${rest##*) }"
+  tty="$(printf '%s\n' "$rest" | awk '{print $5}')"
+  case "$tty" in '' | 0) return 1 ;; *) return 0 ;; esac
+}
+
 _sinnix_register_sinex_dev_owner() {
   local state_dir="$1"
   local project_root="$2"
@@ -141,6 +155,14 @@ _sinnix_register_sinex_dev_owner() {
 
   shell_pid="$(_sinnix_interactive_shell_pid)"
   case "$shell_pid" in '' | *[!0-9]*) return 0 ;; esac
+
+  # A declared AgentCTL operation evaluates this rc too, inside a unit with no
+  # controlling terminal. Registering an owner there spawns the detached
+  # watcher into that job's cgroup, where its sleep child keeps the unit active
+  # with MainPID=0 long after the command exits, holding a queue slot
+  # (sinnix-wp04). The dev database is an interactive-devshell affordance, so
+  # gate on a real terminal rather than on any one launcher's environment.
+  _sinnix_pid_has_tty "$shell_pid" || return 0
 
   owners="$state_dir/owners"
   mkdir -p "$owners" 2>/dev/null || return 0
