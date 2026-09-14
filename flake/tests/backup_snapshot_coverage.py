@@ -97,6 +97,38 @@ class CoverageFixture(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "extended metadata"):
             COVERAGE.verify(self.source, "snapshot", [])
 
+    def test_posix_acls_compare_through_borgs_own_fields(self):
+        # Borg keeps POSIX ACLs in its own acl_access/acl_default item fields
+        # and emits no xattrs entry for them, so a verifier that compares raw
+        # listxattr output against the archived xattrs mismatches forever on
+        # any ACL'd path. The Nix build sandbox cannot create an ACL
+        # ("setfacl: Operation not supported"), so the comparison is exercised
+        # directly rather than through a fixture that would silently skip.
+        markers, ordinary = COVERAGE.partition_acl_xattrs(
+            ["system.posix_acl_access", "user.fixture", "system.posix_acl_default"]
+        )
+        self.assertEqual(
+            markers, {b"system.posix_acl_access", b"system.posix_acl_default"}
+        )
+        self.assertEqual(ordinary, ["user.fixture"])
+        # An archived access ACL, exactly as borg 1.4.5 dumps it.
+        self.assertEqual(
+            COVERAGE.archived_acl_markers(
+                {
+                    "acl_access": "user::rwx\nuser:sinity:rwx:1000\ngroup::r-x",
+                    "acl_default": "",
+                }
+            ),
+            {b"system.posix_acl_access"},
+        )
+        self.assertEqual(
+            COVERAGE.archived_acl_markers({"acl_default": "user::rwx"}),
+            {b"system.posix_acl_default"},
+        )
+        # An archive that carries no ACL must not satisfy a source that has
+        # one: this is the comparison that keeps the fix from being a skip.
+        self.assertEqual(COVERAGE.archived_acl_markers({}), set())
+
     def test_unclassified_exclusion_is_not_coverage(self):
         hidden = self.source / "project" / "build"
         hidden.mkdir(parents=True)
