@@ -431,6 +431,14 @@ let
     "home/sinity/.cargo/registry"
     "home/sinity/.cargo/git"
     "home/sinity/.npm/_cacache"
+    # Python virtualenvs and tool stores, CACHEDIR.TAG'd by their own tooling
+    # and therefore already absent from every archive. Measured shares of the
+    # persist coverage gap on 2026-09-14: venv 13651, .venv 4441, uv 13151,
+    # the nested cargo registry 10366 -- together 41609 of 43057.
+    "home/sinity/.hermes/hermes-agent/venv"
+    "home/sinity/.hermes/hermes-agent/.venv"
+    "home/sinity/.local/share/uv"
+    "home/sinity/.local/state/claude-code/npm/.cargo/registry"
     "home/sinity/.local/share/nvim/mason"
     "home/sinity/.local/share/hyprland/logs"
     "var/lib/systemd/coredump"
@@ -537,6 +545,14 @@ let
     "home/sinity/.cargo/registry"
     "home/sinity/.cargo/git"
     "home/sinity/.npm/_cacache"
+    # Python virtualenvs and tool stores, CACHEDIR.TAG'd by their own tooling
+    # and therefore already absent from every archive. Measured shares of the
+    # persist coverage gap on 2026-09-14: venv 13651, .venv 4441, uv 13151,
+    # the nested cargo registry 10366 -- together 41609 of 43057.
+    "home/sinity/.hermes/hermes-agent/venv"
+    "home/sinity/.hermes/hermes-agent/.venv"
+    "home/sinity/.local/share/uv"
+    "home/sinity/.local/state/claude-code/npm/.cargo/registry"
     "home/sinity/.local/share/nvim/mason"
     "home/sinity/.local/share/hyprland/logs"
     "var/lib/systemd/coredump"
