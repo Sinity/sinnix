@@ -74,14 +74,33 @@ in
     # outside cfg.enable so a bad repair generation cannot omit the protection
     # while Hyprland is active.
     {
-      systemd.user.units = lib.genAttrs protectedUWSMUnits (_: {
+      systemd.user.units = lib.genAttrs protectedUWSMUnits (name: {
         overrideStrategy = lib.mkForce "asDropin";
-        text = lib.mkForce ''
-          [Unit]
-          X-OnlyManualStart=true
-          X-RestartIfChanged=false
-          X-ReloadIfChanged=false
-        '';
+        text = lib.mkForce (
+          ''
+            [Unit]
+            X-OnlyManualStart=true
+            X-RestartIfChanged=false
+            X-ReloadIfChanged=false
+          ''
+          # wayland-wm@ is Type=notify, so systemd's MemoryPressureWatch=auto
+          # default exports MEMORY_PRESSURE_WATCH/MEMORY_PRESSURE_WRITE into
+          # the compositor's environment. Hyprland is the parent of every
+          # process the user then starts from the session, so those variables
+          # are inherited by terminals, agents, and anything they spawn --
+          # processes that live in agent.slice or agentctl.slice and have no
+          # relationship to the compositor's cgroup. A child that honours the
+          # protocol would watch a cgroup it is not a member of, on a "some
+          # 200000 2000000" threshold that ordinary page-cache reclaim meets.
+          # The protocol is per-service by design and Hyprland does not
+          # implement it, so turning the export off here loses nothing and
+          # stops the leak at its only source.
+          + lib.optionalString (name == "wayland-wm@.service") ''
+
+            [Service]
+            MemoryPressureWatch=off
+          ''
+        );
       });
     }
 
