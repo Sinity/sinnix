@@ -496,6 +496,7 @@ in
         mkRuntimeCheck system {
           name = "backup-borg-hook-runtime-check";
           nativeBuildInputs = [
+            pkgs.acl
             pkgs.bash
             pkgs.borgbackup
             pkgs.coreutils

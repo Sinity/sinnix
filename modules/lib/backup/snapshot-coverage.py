@@ -119,6 +119,46 @@ def command_items(command, parser):
         process.wait()
 
 
+# Borg does not round-trip POSIX ACLs through xattrs. It reads
+# system.posix_acl_access / system.posix_acl_default into an item's own
+# acl_access / acl_default fields and emits no "xattrs" entry for them
+# (verified against borg 1.4.5: an ACL'd directory dumps
+# "acl_access": "user::rwx\nuser:sinity:rwx:1000\n..." and no xattrs key).
+# Comparing raw listxattr output against the archived xattrs therefore
+# mismatches forever on any path carrying an extended ACL, which is what
+# stalled the /persist drain once ~/.config/chrome-ws acquired one. Compare
+# ACLs through the fields Borg actually writes, and leave every other xattr
+# an exact comparison.
+#
+# This proves an ACL is present on both sides, not that its entries are
+# identical: Borg stores ACLs as libacl's rendered text, and reproducing that
+# rendering from the raw xattr would couple this check to libacl's and Borg's
+# formatting. Permission drift that reaches the mode bits (an ACL's mask is
+# the group mode) is still caught by the mode comparison above.
+ACL_XATTR_FIELDS = {
+    b"system.posix_acl_access": "acl_access",
+    b"system.posix_acl_default": "acl_default",
+}
+
+
+def partition_acl_xattrs(names):
+    """Split raw listxattr names into ACL markers and ordinary xattr names."""
+    markers = set()
+    ordinary = []
+    for name in names:
+        encoded = os.fsencode(name)
+        if encoded in ACL_XATTR_FIELDS:
+            markers.add(encoded)
+        else:
+            ordinary.append(name)
+    return markers, ordinary
+
+
+def archived_acl_markers(item):
+    """The ACL markers an archived item implies, spelled as listxattr does."""
+    return {name for name, field in ACL_XATTR_FIELDS.items() if item.get(field)}
+
+
 def decode_borg_bytes(value):
     # Borg's debug JSON encodes bytes as DEL followed by hexadecimal.
     if not isinstance(value, str):
@@ -180,9 +220,12 @@ def verify(source, archive, noncanonical):
         ):
             if item.get(key) != actual:
                 raise ValueError(f"archive {key} mismatch: {path!r}")
+        actual_acls, ordinary_names = partition_acl_xattrs(
+            os.listxattr(source / path, follow_symlinks=False)
+        )
         actual_xattrs = {
             os.fsencode(key): os.getxattr(source / path, key, follow_symlinks=False)
-            for key in os.listxattr(source / path, follow_symlinks=False)
+            for key in ordinary_names
         }
         archived_xattrs = {
             decode_borg_bytes(k): decode_borg_bytes(v)
@@ -190,6 +233,8 @@ def verify(source, archive, noncanonical):
         }
         if actual_xattrs != archived_xattrs:
             raise ValueError(f"archive extended metadata mismatch: {path!r}")
+        if actual_acls != archived_acl_markers(item):
+            raise ValueError(f"archive ACL mismatch: {path!r}")
         if stat.S_ISLNK(st.st_mode):
             if item.get("source") != os.readlink(source / path):
                 raise ValueError(f"archive symlink mismatch: {path!r}")
