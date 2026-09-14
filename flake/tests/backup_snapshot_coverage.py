@@ -150,6 +150,30 @@ class CoverageFixture(unittest.TestCase):
         self.assertIn("mode", COVERAGE.metadata_keys_for(stub, frozenset({stub})))
         self.assertIn("uid", COVERAGE.metadata_keys_for(stub, frozenset({stub})))
 
+    def test_cachedir_tagged_directories_match_borg_exclude_caches(self):
+        # The drain passes --exclude-caches, which drops a CACHEDIR.TAG'd
+        # directory whole -- contents, tag file and directory entry. Without
+        # the same rule the verifier reports the archive as missing content
+        # Borg was told never to take (~/.cargo/git, 96853 entries).
+        cached = self.source / "cached"
+        (cached / "sub").mkdir(parents=True)
+        (cached / "CACHEDIR.TAG").write_bytes(
+            b"Signature: 8a477f597d28d172789f06886806bc55\n# tagged by a tool\n"
+        )
+        (cached / "sub" / "inner").write_text("regenerable bytes")
+        # A tag file whose signature is wrong is not a cache marker, so this
+        # directory stays ordinary content and must still be covered.
+        impostor = self.source / "impostor"
+        impostor.mkdir()
+        (impostor / "CACHEDIR.TAG").write_bytes(b"not the spec signature\n")
+        (impostor / "kept").write_text("real bytes")
+
+        self.archive("snapshot", "--exclude-caches")
+        result = COVERAGE.verify(self.source, "snapshot", [])
+        self.assertEqual(result["cachedir_tag_roots"], ["cached"])
+        self.assertFalse(COVERAGE.is_cache_directory(impostor))
+        self.assertTrue(COVERAGE.is_cache_directory(cached))
+
     def test_unclassified_exclusion_is_not_coverage(self):
         hidden = self.source / "project" / "build"
         hidden.mkdir(parents=True)
