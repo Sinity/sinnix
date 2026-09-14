@@ -189,6 +189,34 @@ def archived_acl_markers(item):
     return {name for name, field in ACL_XATTR_FIELDS.items() if item.get(field)}
 
 
+def archive_path(item):
+    """The archived path as os.fsdecode spells it.
+
+    Borg's debug JSON cannot hold a non-UTF-8 name as text, so it encodes such
+    a path as DEL followed by hex -- a Facebook export carrying a Latin-1 byte
+    arrives as "\x7f6163...". Comparing that raw against a walk's
+    fsdecode'd keys never matches, and the realm lane reported it as
+    "unexpected archive path". Decoding to the same surrogate-escaped form the
+    walk produces makes the two comparable; an ordinary ASCII path round-trips
+    unchanged.
+    """
+    return os.fsdecode(decode_borg_bytes(item["path"]))
+
+
+def lossy_borg_path(path):
+    """Borg's own lossy rendering of a path, one "?" per undecodable byte.
+
+    "borg list --json-lines" cannot carry a verbatim path: JSON strings must be
+    valid Unicode, so Borg substitutes each surrogate with "?" and the listing
+    alone cannot name a file whose bytes are not UTF-8. Reproducing the same
+    substitution lets such a listing be matched back to the walk, and any
+    ambiguity it creates is refused rather than guessed (see verify).
+    """
+    return "".join(
+        "?" if "\ud800" <= character <= "\udfff" else character for character in path
+    )
+
+
 def decode_borg_bytes(value):
     # Borg's debug JSON encodes bytes as DEL followed by hexadecimal.
     if not isinstance(value, str):
@@ -237,7 +265,7 @@ def verify(source, archive, noncanonical):
         ["borg", "debug", "dump-archive", "::" + archive, "/dev/stdout"],
         lambda stream: JsonStream(stream).items(),
     ):
-        path = item["path"]
+        path = archive_path(item)
         if path not in expected:
             # Noncanonical material may be over-preserved by Borg.
             if path in ignored or any(path.startswith(p + "/") for p in ignored):
@@ -306,6 +334,13 @@ def verify(source, archive, noncanonical):
     hashed = set()
     hardlinks = {}
     digest = hashlib.sha256()
+    # Only names that Borg cannot spell need the fallback, so the index stays
+    # empty on an ordinary tree and an exact match always wins.
+    lossy_index = {}
+    for candidate in expected:
+        rendered = lossy_borg_path(candidate)
+        if rendered != candidate:
+            lossy_index.setdefault(rendered, []).append(candidate)
     for item in command_items(
         [
             "borg",
@@ -317,8 +352,18 @@ def verify(source, archive, noncanonical):
         ],
         lambda stream: (json.loads(line) for line in stream),
     ):
-        path = item["path"]
-        if path not in expected or not stat.S_ISREG(expected[path].st_mode):
+        path = archive_path(item)
+        if path not in expected:
+            candidates = lossy_index.get(path, ())
+            if len(candidates) > 1:
+                raise ValueError(
+                    f"ambiguous archive path: {path!r} matches "
+                    + ", ".join(repr(c) for c in sorted(candidates))
+                )
+            if not candidates:
+                continue
+            path = candidates[0]
+        if not stat.S_ISREG(expected[path].st_mode):
             continue
         if not item["healthy"]:
             raise ValueError(f"damaged archive file: {path!r}")
