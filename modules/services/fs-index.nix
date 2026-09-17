@@ -16,8 +16,9 @@
 }@args:
 let
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
-  # Regenerable machine artifact (inventory.duckdb, judgments.jsonl), not
-  # operator data -- lives on the state side, not under data/.
+  # Generated indexes live beside authored judgments.jsonl. Only the indexes
+  # are regenerable: preserve the judgment/reference ledgers independently of
+  # scan lifecycle. A state-directory location is not a disposal policy.
   indexDir = "${config.sinnix.paths.stateRoot}/fs-index";
 in
 mkServiceModule {
