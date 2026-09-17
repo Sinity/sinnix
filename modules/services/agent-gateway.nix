@@ -52,6 +52,7 @@ let
       env = server.env or { };
       observerWritablePaths = mcpBrokerObserverWritablePaths.${name} or [ ];
       readOnlyRoutes = server.gatewayReadOnlyRoutes or [ ];
+      readOnlyTools = server.gatewayReadOnlyTools or [ ];
     }
     // lib.optionalAttrs (!brokered) {
       reason =
@@ -233,7 +234,13 @@ mkServiceModule {
           scriptPkgs.beads
           scriptPkgs.sinnix-capture
         ]
+        # Desktop adapters are managed out-of-store scripts. Their shebangs
+        # and tools must see the same profiles as the graphical user session.
+        # Keep the explicit paths above: capture is not necessarily installed
+        # into either profile. AgentCTL tools come from the packaged wrapper.
+        + ":/run/current-system/sw/bin:/etc/profiles/per-user/${userName}/bin"
         + ":/home/${userName}/.local/bin";
+      giTypelibPath = "${pkgs.at-spi2-core}/lib/girepository-1.0:${pkgs.gobject-introspection}/lib/girepository-1.0";
       endpointValues = lib.mapAttrsToList (_: endpoint: endpoint) enabledEndpoints;
       duplicateValues =
         field:
@@ -372,7 +379,10 @@ mkServiceModule {
                 "-${endpoint.stateDir}"
               ];
               UMask = "0077";
-              Environment = [ "PATH=${gatewayPath}" ];
+              Environment = [
+                "PATH=${gatewayPath}"
+                "GI_TYPELIB_PATH=${giTypelibPath}"
+              ];
             }
             // lib.optionalAttrs (endpoint.principal == "observer") {
               NoNewPrivileges = true;
@@ -384,6 +394,7 @@ mkServiceModule {
               Environment = [
                 "TMPDIR=/tmp"
                 "PATH=${gatewayPath}"
+                "GI_TYPELIB_PATH=${giTypelibPath}"
               ];
             };
             Install.WantedBy = lib.optionals endpoint.autoStart [ "default.target" ];

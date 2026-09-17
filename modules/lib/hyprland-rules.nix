@@ -33,6 +33,11 @@ let
     // (lib.optionalAttrs (rule.fullscreen or false) { fullscreen = true; })
     // (lib.optionalAttrs (rule.immediate or false) { immediate = true; })
     // (lib.optionalAttrs (rule.noBlur or false) { no_blur = true; })
+    // (lib.optionalAttrs (rule.noInitialFocus or false) { no_initial_focus = true; })
+    // (lib.optionalAttrs (rule ? focusOnActivate) {
+      focus_on_activate = rule.focusOnActivate;
+    })
+    // (lib.optionalAttrs (rule ? suppressEvent) { suppress_event = rule.suppressEvent; })
     // (lib.optionalAttrs (rule ? size) { size = formatSize rule.size; })
     // (lib.optionalAttrs (rule ? move) { move = formatPos rule.move; })
     // (lib.optionalAttrs (rule ? workspace) { workspace = rule.workspace; })

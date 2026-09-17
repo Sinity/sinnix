@@ -274,8 +274,9 @@ class McpBrokerService:
         schema = getattr(tool, "inputSchema", getattr(tool, "input_schema", None))
         if not isinstance(schema, dict):
             raise McpBrokerError(f"MCP tool {name!r} has no input schema")
-        read_only = (
-            getattr(getattr(tool, "annotations", None), "read_only_hint", None) is True
+        server = self.config.mcp_broker_servers.get(server_name) or {}
+        read_only = self._tool_is_read_only(
+            server if isinstance(server, dict) else {}, tool
         )
         contract: dict[str, Any] = {
             "name": name,
@@ -326,6 +327,7 @@ class McpBrokerService:
         environment = server.get("env", {})
         observer_writable_paths = server.get("observerWritablePaths", [])
         read_only_routes = server.get("readOnlyRoutes", [])
+        read_only_tools = server.get("readOnlyTools", [])
         if (
             not isinstance(command, str)
             or not command
@@ -359,15 +361,35 @@ class McpBrokerService:
                 )
                 for route in read_only_routes
             )
+            or not isinstance(read_only_tools, list)
+            or len(read_only_tools) > 64
+            or any(
+                not isinstance(name, str) or not name or len(name) > 128
+                for name in read_only_tools
+            )
         ):
             raise McpBrokerError("MCP broker server configuration is malformed")
         return server
 
     @staticmethod
+    def _annotated_read_only(tool: Any) -> bool:
+        return (
+            getattr(getattr(tool, "annotations", None), "read_only_hint", None) is True
+        )
+
+    @staticmethod
+    def _tool_is_read_only(server: dict[str, Any], tool: Any) -> bool:
+        if McpBrokerService._annotated_read_only(tool):
+            return True
+        name = getattr(tool, "name", None)
+        admitted = server.get("readOnlyTools", [])
+        return isinstance(name, str) and isinstance(admitted, list) and name in admitted
+
+    @staticmethod
     def _request_is_read_only(
         server: dict[str, Any], tool: Any, arguments: dict[str, Any]
     ) -> bool:
-        if getattr(getattr(tool, "annotations", None), "read_only_hint", None) is True:
+        if McpBrokerService._tool_is_read_only(server, tool):
             return True
         return any(
             route["tool"] == tool.name

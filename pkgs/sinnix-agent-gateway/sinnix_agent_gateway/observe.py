@@ -47,7 +47,7 @@ class ObserveService:
         self.artifacts = artifacts or ArtifactService(config, principal)
         self.execution = OwnerExecution()
 
-    def _connector_snapshot(self) -> dict[str, str] | None:
+    def _connector_snapshot(self) -> dict[str, Any] | None:
         path = self.config.connector_snapshot_path or (
             self.config.state_dir / "connector-snapshot.json"
         )
@@ -70,10 +70,14 @@ class ObserveService:
             action_catalog_sha256, str
         ):
             return None
+        observed_at = snapshot.get("observed_at")
+        if observed_at is not None and not isinstance(observed_at, (int, float, str)):
+            observed_at = None
         return {
             "principal": snapshot["principal"],
             "manifest_sha256": snapshot["manifest_sha256"],
             "action_catalog_sha256": action_catalog_sha256,
+            "observed_at": observed_at,
         }
 
     @staticmethod
@@ -305,6 +309,12 @@ class ObserveService:
                     {
                         "principal": principal_name,
                         "sha256": observed_catalog_hash,
+                        **(
+                            {"observed_at": snapshot.get("observed_at")}
+                            if snapshot is not None
+                            and snapshot.get("observed_at") is not None
+                            else {}
+                        ),
                     }
                     if observed_catalog_hash is not None
                     else None
@@ -332,6 +342,12 @@ class ObserveService:
                     {
                         "principal": principal_name,
                         "sha256": observed_hash,
+                        **(
+                            {"observed_at": snapshot.get("observed_at")}
+                            if snapshot is not None
+                            and snapshot.get("observed_at") is not None
+                            else {}
+                        ),
                     }
                     if observed_hash is not None
                     else None

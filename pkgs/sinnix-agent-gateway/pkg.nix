@@ -10,6 +10,8 @@
   gnutar,
   gzip,
   coreutils,
+  at-spi2-core,
+  gobject-introspection,
   sinnix-lib,
   agentctl,
   polylogue-contract-source,
@@ -129,6 +131,9 @@ python3Packages.buildPythonApplication {
     agentctl
     python3Packages.psutil
     python3Packages.pillow
+    # pyatspi does not propagate pygobject3; both are required for desktop.tree.
+    python3Packages.pyatspi
+    python3Packages.pygobject3
   ];
 
   nativeCheckInputs = [
@@ -143,16 +148,26 @@ python3Packages.buildPythonApplication {
     "--prefix"
     "PATH"
     ":"
-    (lib.makeBinPath [
-      git
-      ripgrep
-      fd
-      file
-      gnused
-      gnutar
-      gzip
-      coreutils
-    ])
+    (lib.makeBinPath (
+      [
+        git
+        ripgrep
+        fd
+        file
+        gnused
+        gnutar
+        gzip
+        coreutils
+        # The imported AgentCTL launch path invokes agentctl-run, while its
+        # own subprocesses need the same runtime as AgentCTL's CLI wrapper.
+        agentctl
+      ]
+      ++ agentctl.runtimeDependencies
+    ))
+    "--prefix"
+    "GI_TYPELIB_PATH"
+    ":"
+    "${at-spi2-core}/lib/girepository-1.0:${gobject-introspection}/lib/girepository-1.0"
   ];
 
   checkPhase = ''

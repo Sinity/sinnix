@@ -1,11 +1,11 @@
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: 33f44ec692ccf317e502d92680d31a81ea2a87701a559ffcee151768af4baca6 -->
+<!-- gateway-catalog-sha256: 68415feafef6607f592c00ebadb84d48e5c9b5c2bd83660f5f822583377e2b5d -->
 # Sinnix Agent Gateway reference
 
 Generated from `sinnix_agent_gateway.actions`. Every action is one MCP tool whose `tools/list` input schema is the one below; the catalog hash changes when any principal-visible action catalog row changes, including its schema, principal set, example or affordance.
 
-Revision: `v3-typed-actions`. Catalog SHA-256: `33f44ec692ccf317e502d92680d31a81ea2a87701a559ffcee151768af4baca6`.
+Revision: `v3-typed-actions`. Catalog SHA-256: `68415feafef6607f592c00ebadb84d48e5c9b5c2bd83660f5f822583377e2b5d`.
 
 ## Invocation
 
@@ -109,7 +109,7 @@ MCP: call the tool named after the action. CLI: `sinnix-agent-gateway call <acti
 | `context.compose`            | `context` | `context`          | `agent-control, observer, operator` | The selected owner supplies domain composition, source coverage and partial results. The gateway preserves its product and availability in an immutable observation under snapshot_ref.                                                                                                                                                          |
 | `desktop.snapshot`           | `status`  | `desktop`          | `observer, operator`                | One observation of the desktop: monitors, workspaces, focus, every window with geometry, and a generation stamp.                                                                                                                                                                                                                                 |
 | `desktop.screenshot`         | `query`   | `desktop`          | `observer, operator`                | full captures the focused output through the HDR-aware screenshot owner; window/rect/monitor targets capture with grim. On HDR outputs a corrected SDR variant is produced and preferred for the image block.                                                                                                                                    |
-| `desktop.tree`               | `query`   | `desktop`          | `observer, operator`                | Fails unavailable when the pyatspi bindings are absent from the gateway environment; Chromium apps expose a tree only when launched with accessibility forced on.                                                                                                                                                                                |
+| `desktop.tree`               | `query`   | `desktop`          | `observer, operator`                | Walks the AT-SPI tree through pyatspi in the gateway environment; Chromium apps expose a tree only when launched with accessibility forced on.                                                                                                                                                                                                   |
 | `desktop.operate`            | `operate` | `desktop`          | `operator`                          | Pointer clicks, drags and scrolls need a virtual pointer tool (ydotool) on the host and fail unavailable without one; cursor moves always work. Window targets are natural locators; ambiguity returns candidates.                                                                                                                               |
 | `terminals.list`             | `catalog` | `terminals`        | `observer, operator`                | Every kitty window with its ref, title, cwd, shell pid, focus and foreground processes.                                                                                                                                                                                                                                                          |
 | `terminals.get`              | `get`     | `terminals`        | `observer, operator`                | Resolve one terminal by ref, kitty id, title, cwd, pid or focus.                                                                                                                                                                                                                                                                                 |
@@ -117,7 +117,7 @@ MCP: call the tool named after the action. CLI: `sinnix-agent-gateway call <acti
 | `terminals.scrollback`       | `query`   | `terminals`        | `observer, operator`                | The last N lines of a terminal's history, screen, or last command output.                                                                                                                                                                                                                                                                        |
 | `terminals.processes`        | `query`   | `terminals`        | `observer, operator`                | Foreground processes of one terminal and whether its shell is at a prompt.                                                                                                                                                                                                                                                                       |
 | `terminals.send`             | `operate` | `terminals`        | `operator`                          | Send text (optionally with Enter or bracketed paste) or key presses to one terminal.                                                                                                                                                                                                                                                             |
-| `terminals.run`              | `run`     | `terminals`        | `operator`                          | Completion and output rely on kitty shell integration (at_prompt, last_cmd_output). exit_status is reported only with capture_exit_status, which appends a visible marker to the command line.                                                                                                                                                   |
+| `terminals.run`              | `run`     | `terminals`        | `operator`                          | wait=true appends a visible completion sentinel and waits for it (or for at_prompt when kitty reports it). Captured shells disable prompt marks, so the sentinel is the reliable completion signal. exit_status is parsed from that sentinel.                                                                                                    |
 | `terminals.wait`             | `wait`    | `terminals`        | `observer, operator`                | Wait until a terminal is at its prompt, shows a regex, finishes a process, or changes title.                                                                                                                                                                                                                                                     |
 | `terminals.focus`            | `operate` | `terminals`        | `operator`                          | Focus one kitty window.                                                                                                                                                                                                                                                                                                                          |
 | `terminals.open`             | `operate` | `terminals`        | `operator`                          | Open a new kitty window (OS window, split or tab) with an optional cwd and command; returns its ref.                                                                                                                                                                                                                                             |
@@ -15297,7 +15297,7 @@ A window by class:
 
 ### `desktop.tree`
 
-Fails unavailable when the pyatspi bindings are absent from the gateway environment; Chromium apps expose a tree only when launched with accessibility forced on.
+Walks the AT-SPI tree through pyatspi in the gateway environment; Chromium apps expose a tree only when launched with accessibility forced on.
 
 Family: `query`. Owner: `desktop`. Principals: `observer, operator`. Typed failures: `conflict, invalid_request, not_found, owner_failed, unavailable`.
 
@@ -17366,7 +17366,7 @@ Interrupt:
 
 ### `terminals.run`
 
-Completion and output rely on kitty shell integration (at_prompt, last_cmd_output). exit_status is reported only with capture_exit_status, which appends a visible marker to the command line.
+wait=true appends a visible completion sentinel and waits for it (or for at_prompt when kitty reports it). Captured shells disable prompt marks, so the sentinel is the reliable completion signal. exit_status is parsed from that sentinel.
 
 Family: `run`. Owner: `terminals`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
@@ -17478,7 +17478,7 @@ Input schema:
     },
     "capture_exit_status": {
       "default": false,
-      "description": "Append an exit-status marker to the command line so the status is reported; the marker is visible in the terminal.",
+      "description": "Deprecated alias: wait=true already appends a visible completion sentinel and reports exit_status from it.",
       "type": "boolean"
     },
     "command": {
@@ -17563,7 +17563,7 @@ Input schema:
     },
     "wait": {
       "default": true,
-      "description": "Wait until the shell is back at a prompt.",
+      "description": "Wait for the completion sentinel, or for at_prompt when kitty reports it.",
       "type": "boolean"
     }
   },

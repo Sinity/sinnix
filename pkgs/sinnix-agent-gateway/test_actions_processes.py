@@ -36,6 +36,9 @@ def child():
             **os.environ,
             "GATEWAY_TOKEN": "sk-abcdefghijklmnopqrstuvwxyz",
             "PLAIN": "value",
+            "AIRVPN_SEED_KEY": "must-not-leak",
+            "KAGGLE_KEY": "must-not-leak",
+            "SINEX_LOCAL_DB": "/realm/state/sinex/local.db",
         },
     )
     yield proc
@@ -64,6 +67,9 @@ def test_list_get_tree(tmp_path: Path, child: subprocess.Popen) -> None:
     assert detail["parent"]["pid"] == os.getpid()
     assert detail["env"]["PLAIN"] == "value"
     assert detail["env"]["GATEWAY_TOKEN"] == "[REDACTED]"
+    assert detail["env"]["AIRVPN_SEED_KEY"] == "[REDACTED]"
+    assert detail["env"]["KAGGLE_KEY"] == "[REDACTED]"
+    assert detail["env"]["SINEX_LOCAL_DB"] == "[REDACTED]"
     assert detail["rss_bytes"] > 0 and detail["threads"] >= 1 and detail["cwd"]
 
     tree = call(

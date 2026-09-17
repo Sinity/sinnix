@@ -35,6 +35,23 @@ in
               assertion = !settings.config.decoration.blur.enabled;
               message = "Global Hyprland blur must remain disabled while Noctalia uses a full-height notification surface.";
             }
+            {
+              assertion =
+                let
+                  rules = (settings.window_rule or [ ]) ++ (settings.config.window_rule or [ ]);
+                in
+                lib.any (
+                  rule:
+                  (rule.name or "") == "agent-terminal-no-focus"
+                  && (rule.no_initial_focus or false)
+                ) rules;
+              message =
+                let
+                  rules = (settings.window_rule or [ ]) ++ (settings.config.window_rule or [ ]);
+                  names = map (rule: toString (rule.name or "?")) rules;
+                in
+                "Agent-opened Kitty OS windows must not take initial focus or activation. window_rule names: ${lib.concatStringsSep ", " names}";
+            }
           ];
       };
       evaluated = evalTestSpec system spec;

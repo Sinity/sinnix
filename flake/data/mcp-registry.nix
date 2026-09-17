@@ -1,6 +1,12 @@
 { lib }:
 let
   pruneAttrs = lib.filterAttrs (_: value: value != null && value != [ ] && value != { });
+  readActions =
+    tool: actions:
+    map (action: {
+      inherit tool;
+      arguments = { inherit action; };
+    }) actions;
 
   # Every server describes itself in one line, the same contract script
   # frontmatter and the module factories carry: the capability index
@@ -85,21 +91,39 @@ let
       tier = "deep-evidence";
       callTimeoutSeconds = 300;
       command = "mcp-lynchpin";
-      # The owner marks this mixed router as converge; these action contracts are read-only.
+      # Mixed routers stay change at the tool grain. These action contracts are
+      # documented reads and are admitted through mcp.call without mcp.change.
       gatewayReadOnlyRoutes =
-        map
-          (action: {
-            tool = "lynchpin_project";
-            arguments = { inherit action; };
-          })
-          [
-            "campaign_evidence"
-            "campaign_progress"
-            "campaign_scope_delta"
-            "verification_regression"
-            "project_trajectory"
-            "project_context"
-          ];
+        readActions "lynchpin_project" [
+          "campaign_evidence"
+          "campaign_progress"
+          "campaign_scope_delta"
+          "verification_regression"
+          "project_trajectory"
+          "project_context"
+          "repos"
+          "files"
+          "commits"
+          "github"
+          "snapshots"
+        ]
+        ++ readActions "lynchpin_evidence" [
+          "coverage"
+          "confidence"
+        ]
+        ++ readActions "lynchpin_personal" [
+          "phone"
+          "health"
+          "media"
+          "reports"
+        ]
+        ++ readActions "lynchpin_machine" [
+          "status"
+          "workloads"
+          "benchmarks"
+          "diagnostics"
+        ]
+        ++ readActions "lynchpin_ops" [ "receipt" ];
       env = {
         LYNCHPIN_REPO_ROOT = "/realm/project/sinity-lynchpin";
         LYNCHPIN_LOCAL_ROOT = "/realm/project/sinity-lynchpin/.lynchpin";
@@ -118,6 +142,15 @@ let
       transport = "stdio";
       tier = "recall";
       command = "mcp-polylogue";
+      # polylogue-mcp is read-only by default and omits MCP tool annotations.
+      gatewayReadOnlyTools = [
+        "query"
+        "read"
+        "get"
+        "explain"
+        "context"
+        "status"
+      ];
       # These owner-declared read projections currently omit MCP tool annotations.
       gatewayReadOnlyRoutes = [
         {

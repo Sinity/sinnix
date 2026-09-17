@@ -19,6 +19,18 @@ let
   scopedWorktrunk = worktrunk.overrideAttrs (old: {
     patches = (old.patches or [ ]) ++ [ ./worktrunk-no-internal-sweep.patch ];
   });
+  # Shared by the CLI wrapper and in-process consumers such as the gateway.
+  # Importing this Python package does not execute its command-line wrapper.
+  runtimeDependencies = [
+    bash
+    git
+    gh
+    beads
+    scopedWorktrunk
+    pueue
+    nix
+    systemd
+  ];
 in
 python3Packages.buildPythonApplication {
   pname = "agentctl";
@@ -29,18 +41,7 @@ python3Packages.buildPythonApplication {
   build-system = [ python3Packages.setuptools ];
   dependencies = [ sinnix-lib ];
   makeWrapperArgs = [
-    "--prefix PATH : ${
-      lib.makeBinPath [
-        bash
-        git
-        gh
-        beads
-        scopedWorktrunk
-        pueue
-        nix
-        systemd
-      ]
-    }"
+    "--prefix PATH : ${lib.makeBinPath runtimeDependencies}"
   ];
   postInstall = ''
     install -Dm755 ${./agentctl-agent} "$out/libexec/agentctl-agent"
@@ -68,6 +69,8 @@ python3Packages.buildPythonApplication {
     pytest
     runHook postCheck
   '';
+
+  passthru = { inherit runtimeDependencies; };
 
   pythonImportsCheck = [ "agentctl" ];
 

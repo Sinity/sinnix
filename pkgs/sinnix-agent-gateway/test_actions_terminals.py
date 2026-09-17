@@ -40,6 +40,11 @@ LISTING = [
                             }
                         ],
                         "columns": 80,
+                        "env": {
+                            "AIRVPN_SEED_KEY": "must-not-leak",
+                            "PATH": "/usr/bin",
+                        },
+                        "user_vars": {"secret": "nope"},
                     },
                     {
                         "id": 9,
@@ -76,6 +81,16 @@ LISTING = [
                         "is_focused": False,
                         "at_prompt": True,
                     },
+                    {
+                        "id": 13,
+                        "title": "captured",
+                        "cwd": "/tmp",
+                        "pid": 400,
+                        "is_active": False,
+                        "is_focused": False,
+                        "at_prompt": False,
+                        "cmdline": ["zsh"],
+                    },
                 ],
             }
         ],
@@ -92,15 +107,31 @@ def fake_terminals(
         f"#!{sys.executable}\n"
         "import json, pathlib, sys\n"
         f"LISTING = json.loads({json.dumps(LISTING)!r})\n"
+        f"STATE = pathlib.Path({str(captured)!r}).with_name('kitty-state.json')\n"
         f"with pathlib.Path({str(captured)!r}).open('a') as output:\n"
         "    output.write(json.dumps(sys.argv[1:]) + '\\n')\n"
         "verb = sys.argv[1]\n"
         "if verb == 'list':\n"
         "    print(json.dumps(LISTING))\n"
+        "elif verb == 'run':\n"
+        "    STATE.write_text(json.dumps({\n"
+        "        'match': sys.argv[sys.argv.index('--match') + 1],\n"
+        "        'command': sys.argv[sys.argv.index('--command') + 1],\n"
+        "    }))\n"
+        "    print('')\n"
         "elif verb == 'capture':\n"
+        "    import re\n"
         "    extent = sys.argv[sys.argv.index('--extent') + 1]\n"
-        "    if extent == 'last_cmd_output':\n"
-        "        print('hello\\n__SINNIX_RC:3__')\n"
+        "    match = sys.argv[sys.argv.index('--match') + 1]\n"
+        "    payload = json.loads(STATE.read_text()) if STATE.exists() else {}\n"
+        "    found = re.search(r'__SINNIX_DONE:([0-9a-f]+):%s__', payload.get('command', ''))\n"
+        "    marker = found.group(1) if found else None\n"
+        "    if extent == 'last_cmd_output' and match == 'id:7' and marker:\n"
+        "        print(f'hello\\n__SINNIX_DONE:{marker}:3__')\n"
+        "    elif extent == 'screen' and match == 'id:13' and marker:\n"
+        "        print(f'prompt\\nhello\\n__SINNIX_DONE:{marker}:0__')\n"
+        "    elif extent == 'last_cmd_output':\n"
+        "        print('hello')\n"
         "    else:\n"
         "        print('\\n'.join(f'line {i} of {extent}' for i in range(1, 6)))\n"
         "elif verb == 'await':\n"
@@ -126,7 +157,7 @@ def fake_terminals(
 def test_list_and_get_resolve_natural_locators(tmp_path, monkeypatch) -> None:
     server, captured = fake_terminals(tmp_path, monkeypatch)
     listing = structured(call(server, "terminals.list", {}))["data"]
-    assert [t["kitty_id"] for t in listing["terminals"]] == [7, 9, 11]
+    assert [t["kitty_id"] for t in listing["terminals"]] == [7, 9, 11, 13]
     assert listing["focused_ref"] == "sinnix://terminals/7"
     first = listing["terminals"][0]
     assert (
@@ -135,6 +166,8 @@ def test_list_and_get_resolve_natural_locators(tmp_path, monkeypatch) -> None:
         and first["tab_id"] == 2
     )
     assert first["extra"] == {"columns": 80}
+    assert "env" not in first and "user_vars" not in first
+    assert "must-not-leak" not in json.dumps(listing)
     assert commands(captured) == [["list", "--json"]]
 
     focused = structured(call(server, "terminals.get", {"target": {"focused": True}}))[
@@ -310,6 +343,30 @@ def test_send_run_and_wait(tmp_path, monkeypatch) -> None:
         )
     )["data"]
     assert exited["satisfied"] is False and exited["waited_seconds"] >= 1
+
+
+def test_run_completes_from_sentinel_when_not_at_prompt(tmp_path, monkeypatch) -> None:
+    server, captured = fake_terminals(tmp_path, monkeypatch)
+    ran = structured(
+        call(
+            server,
+            "terminals.run",
+            {
+                "target": {"kitty_id": 13},
+                "command": ["printf", "hello"],
+                "timeout_seconds": 2,
+                "idempotency_key": "r-sentinel",
+            },
+        )
+    )
+    assert ran["result"]["outcome"] == "ok", ran
+    data = ran["data"]
+    assert data["completed"] is True
+    assert data["exit_status"] == 0
+    assert "hello" in data["output"]
+    assert "__SINNIX_DONE:" not in data["output"]
+    run_vector = [c for c in commands(captured) if c[0] == "run"][0]
+    assert run_vector[-1].startswith("printf hello; printf")
 
 
 def test_focus_and_open(tmp_path, monkeypatch) -> None:

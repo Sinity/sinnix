@@ -6,6 +6,7 @@ import base64
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from mcp.types import CallToolResult, ImageContent
@@ -380,6 +381,55 @@ def test_tree_is_unavailable_without_pyatspi(tmp_path, monkeypatch) -> None:
     payload = structured(call(server, "desktop.tree", {}))
     assert payload["error"]["code"] == "unavailable"
     assert payload["error"]["details"]["window_ref"] == "sinnix://desktop/windows/0xa"
+
+
+class _FakeAccessible:
+    def __init__(self, role: str, name: str, pid=None, text=None, children=None):
+        self._role = role
+        self.name = name
+        self._pid = pid
+        self._text = text
+        self._children = children or []
+
+    def getRoleName(self) -> str:
+        return self._role
+
+    def get_process_id(self):
+        return self._pid
+
+    def getChildCount(self) -> int:
+        return len(self._children)
+
+    def getChildAtIndex(self, index: int):
+        return self._children[index]
+
+    def queryText(self):
+        if self._text is None:
+            raise RuntimeError("no text")
+        return SimpleNamespace(getText=lambda *_args: self._text)
+
+
+def test_tree_walks_fake_pyatspi(tmp_path, monkeypatch) -> None:
+    server, _ = fake_desktop(tmp_path, monkeypatch)
+    application = _FakeAccessible(
+        "application",
+        "kitty",
+        pid=100,
+        children=[_FakeAccessible("frame", "Codex session", text="prompt")],
+    )
+    desktop = _FakeAccessible("desktop", "desktop", children=[application])
+    monkeypatch.setitem(
+        sys.modules,
+        "pyatspi",
+        SimpleNamespace(Registry=SimpleNamespace(getDesktop=lambda _index: desktop)),
+    )
+    payload = structured(call(server, "desktop.tree", {"max_depth": 4}))
+    assert payload["result"]["outcome"] == "ok", payload
+    tree = payload["data"]
+    assert tree["pid"] == 100
+    assert tree["application"] == "kitty"
+    assert tree["root"]["role"] == "application"
+    assert tree["root"]["children"][0]["text"] == "prompt"
 
 
 def test_observer_reads_but_cannot_operate(tmp_path, monkeypatch) -> None:

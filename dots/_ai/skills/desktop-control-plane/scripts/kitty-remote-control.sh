@@ -73,6 +73,36 @@ run_kitty() {
   fi
 }
 
+hyprland_active_address() {
+  command -v hyprctl >/dev/null 2>&1 || return 1
+  command -v jq >/dev/null 2>&1 || return 1
+  hyprctl activewindow -j 2>/dev/null | jq -r '.address // empty'
+}
+
+restore_hyprland_focus() {
+  local address="$1"
+  local quoted
+  [[ -n $address ]] || return 0
+  command -v hyprctl >/dev/null 2>&1 || return 0
+  command -v jq >/dev/null 2>&1 || return 0
+  quoted="$(jq -nr --arg value "address:${address}" '$value | tojson')"
+  hyprctl eval "hl.dispatch(hl.dsp.focus({ window = ${quoted} }))" >/dev/null 2>&1 || true
+}
+
+restore_operator_focus() {
+  local focus_before="$1"
+  local current
+  [[ -n $focus_before ]] || return 0
+  for _ in {1..20}; do
+    current="$(hyprland_active_address || true)"
+    if [[ $current == "$focus_before" ]]; then
+      return 0
+    fi
+    restore_hyprland_focus "$focus_before"
+    sleep 0.05
+  done
+}
+
 poll_for_pattern() {
   local match="$1"
   local pattern="$2"
@@ -578,12 +608,17 @@ launch)
     esac
   done
   args=(launch --type "$window_type" --keep-focus)
+  if [[ $window_type == os-window ]]; then
+    args+=(--os-window-class sinnix-agent-terminal)
+  fi
   [[ -n $cwd ]] && args+=(--cwd "$cwd")
   [[ -n $title ]] && args+=(--title "$title")
   if [[ -n $command_text ]]; then
     args+=(--hold "$SHELL" -c "$command_text")
   fi
+  focus_before="$(hyprland_active_address || true)"
   new_id="$(run_kitty "${args[@]}")"
+  restore_operator_focus "$focus_before"
   need_cmd jq
   jq -nc --argjson id "${new_id:-null}" --arg cwd "$cwd" --arg title "$title" '{id: $id, cwd: $cwd, title: $title}'
   ;;

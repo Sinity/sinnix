@@ -37,6 +37,17 @@ in
     in
     {
       checks = lib.optionalAttrs (system == "x86_64-linux") {
+        agent-gateway-runtime =
+          pkgs.runCommand "agent-gateway-runtime-check"
+            {
+              nativeBuildInputs = [ pkgs.python3 ];
+              gatewayPackage = inputs.self.packages.${system}.sinnix-agent-gateway;
+            }
+            ''
+              python ${./gateway-runtime-path.py} "$gatewayPackage/bin/sinnix-agent-gateway"
+              touch "$out"
+            '';
+
         agent-gateway-approval =
           pkgs.runCommand "agent-gateway-approval-check"
             {
