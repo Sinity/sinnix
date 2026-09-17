@@ -27,6 +27,7 @@ from __future__ import annotations
 from sinnix_lib.atomic import atomic_text_writer
 
 import argparse
+import datetime as dt
 import hashlib
 import json
 import os
@@ -1151,6 +1152,155 @@ def cmd_run(args: argparse.Namespace) -> int:
     return ledger_run(out_dir)
 
 
+
+# Read authored definitions directly. These operations neither inspect payloads
+# nor require a multi-million-row inventory/materialization to be current.
+JUDGMENT_FACETS = ("topic", "role", "maintenance_owner", "preservation")
+JUDGMENT_LIMIT_BYTES = 8 << 20
+
+
+def judgment_target(target: str) -> tuple[str, str]:
+    if target.startswith("sha256:"):
+        digest = target[7:]
+        if not re.fullmatch(r"[0-9a-fA-F]{64}", digest):
+            raise ValueError("sha256 target is not a 64-digit full digest")
+        return "sha256", digest.lower()
+    if not target.startswith("prefix:"):
+        raise ValueError("target must be prefix:/absolute/path or sha256:<full digest>")
+    path = target[7:]
+    if not path.startswith("/") or any(ord(c) < 32 for c in path):
+        raise ValueError("prefix target requires an absolute path without control characters")
+    if path.startswith("//") or os.path.normpath(path) != path.rstrip("/") and path != "/":
+        raise ValueError("prefix target must be normalized; dot segments are not interpreted")
+    return "prefix", path.rstrip("/") or "/"
+
+
+def read_judgments(path: Path) -> dict:
+    with path.open("rb") as handle:
+        raw = handle.read(JUDGMENT_LIMIT_BYTES + 1)
+    if len(raw) > JUDGMENT_LIMIT_BYTES:
+        raise ValueError("judgment ledger exceeds the 8 MiB read bound")
+    valid, issues, total = [], [], 0
+    for number, line in enumerate(raw.decode("utf-8").splitlines(), 1):
+        if not line.strip():
+            continue
+        total += 1
+        if total > 25000:
+            raise ValueError("judgment ledger exceeds the 25,000-record bound")
+        try:
+            record = json.loads(line, parse_constant=lambda x: (_ for _ in ()).throw(ValueError(x)))
+        except ValueError as exc:
+            raise ValueError(f"Malformed JSON at ledger line {number}; no partial result") from exc
+        try:
+            if not isinstance(record, dict):
+                raise ValueError("record is not an object")
+            for key in ("target", "field", "method", "ts", "evidence"):
+                if not isinstance(record.get(key), str) or not record[key].strip():
+                    raise ValueError(f"missing or non-text {key}")
+            if "value" not in record:
+                raise ValueError("record has no value")
+            kind, address = judgment_target(record["target"])
+            timestamp = dt.datetime.fromisoformat(record["ts"].replace("Z", "+00:00"))
+            if timestamp.tzinfo is None:
+                raise ValueError("timestamp must state a timezone")
+            canonical = json.dumps(record, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+            valid.append({"record": record, "line": number,
+                          "record_sha256": hashlib.sha256(canonical.encode()).hexdigest(),
+                          "kind": kind, "address": address, "timestamp": timestamp.timestamp()})
+        except (ValueError, TypeError) as exc:
+            issues.append({"line": number, "reason": str(exc)})
+    return {"path": str(path), "sha256": hashlib.sha256(raw).hexdigest(),
+            "records": total, "valid": valid, "issues": issues}
+
+
+def resolve_judgments(ledger: dict, path: str) -> dict:
+    """Per target: operator tier, then decision time. Per field: specificity.
+
+    Equal-priority conflicting decisions remain ambiguous, rather than using
+    iteration order as a hidden policy. Unknown/withheld child rules mask an
+    inherited value. Path lookup does not guess or calculate a content digest.
+    """
+    _, path = judgment_target("prefix:" + path)
+    grouped = {}
+    for entry in ledger["valid"]:
+        prefix = entry["address"]
+        if entry["kind"] != "prefix" or not (path == prefix or path.startswith(prefix.rstrip("/") + "/")):
+            continue
+        grouped.setdefault((prefix, entry["record"]["field"]), []).append(entry)
+    candidates = {}
+    for (prefix, field), entries in grouped.items():
+        rank = lambda e: (e["record"]["method"] == "operator", e["timestamp"])
+        best = max(map(rank, entries))
+        selected = [e for e in entries if rank(e) == best]
+        candidates.setdefault(field, []).append((prefix, selected))
+    output = {}
+    for field, options in sorted(candidates.items()):
+        prefix, selected = max(options, key=lambda item: len(item[0]))
+        signatures = {json.dumps([e["record"]["value"], e["record"].get("observation") or "known"], sort_keys=True) for e in selected}
+        evidence = [{"line": e["line"], "record_sha256": e["record_sha256"],
+                     "decision": e["record"]} for e in sorted(selected,key=lambda e:e["line"])]
+        if len(signatures) > 1:
+            output[field] = {"status": "ambiguous", "via": prefix, "evidence": evidence}
+        else:
+            record = selected[0]["record"]
+            output[field] = {"status": record.get("observation") or "known",
+                             "value": record["value"], "via": prefix, "evidence": evidence}
+    return output
+
+
+def cmd_judgments(args: argparse.Namespace) -> int:
+    ledger = read_judgments(args.index_dir / "judgments.jsonl")
+    provenance = {k: ledger[k] for k in ("path", "sha256", "records", "issues")}
+    if args.action == "explain":
+        fields = resolve_judgments(ledger, args.path)
+        result = {"schema": "sinnix-fs-judgment-explanation-v1", "path": args.path,
+                  "ledger": provenance,
+                  "facets": {k:v for k,v in fields.items() if k in JUDGMENT_FACETS},
+                  "other_fields": {k:v for k,v in fields.items() if k not in JUDGMENT_FACETS},
+                  "scope": "Lexical path inheritance only; no path stat, symlink traversal, payload read, full digest or backup verification. Dates and methods describe the source decisions, not a new operator ruling."}
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 1 if any(x["status"] == "ambiguous" for x in fields.values()) else 0
+    if args.action == "audit":
+        targets = sorted({e["address"] for e in ledger["valid"] if e["kind"] == "prefix"})
+        locations = []
+        if args.check_paths:
+            for path in targets:
+                try:
+                    info = os.lstat(path)
+                    state = "symlink" if stat.S_ISLNK(info.st_mode) else "present"
+                except FileNotFoundError:
+                    state = "missing"
+                except OSError:
+                    state = "unavailable"
+                locations.append({"path": path, "status": state})
+        modern = {e["address"] for e in ledger["valid"] if e["kind"] == "prefix" and e["record"]["field"] in JUDGMENT_FACETS}
+        result = {"schema": "sinnix-fs-judgment-audit-v1", "ledger": provenance,
+                  "valid_records": len(ledger["valid"]), "prefix_targets":len(targets),
+                  "facet_targets":len(modern), "location_counts":dict(Counter(r["status"] for r in locations)),
+                  "locations":locations, "scope":"Definition audit only; missing historical targets are retained, not relocated or deleted. Path checks are opt-in and do not enumerate descendants."}
+        print(json.dumps(result,ensure_ascii=False,indent=2))
+        return 1 if ledger["issues"] or any(r["status"] in ("missing","unavailable") for r in locations) else 0
+    # A rebuildable Markdown projection of selected orthogonal collection facets.
+    # Historical and non-facet fields remain in the canonical ledger, not erased.
+    targets = sorted({e["address"] for e in ledger["valid"] if e["kind"] == "prefix" and e["record"]["field"] in JUDGMENT_FACETS})
+    def cell(value):
+        return str(value).replace("\\", "\\\\").replace("|", "\\|").replace("\n", " ").replace("\r", " ").replace("<", "&lt;").replace(">", "&gt;")
+    print("# Current collection facets\n")
+    print("Generated from the existing authored judgment ledger, not a second registry. Each value is an inherited, dated classification of the collection's role—not inspection of every member or proof of backup coverage. Unknown values block broader assumptions.\n")
+    print(f"Ledger: `{cell(ledger['path'])}`. Source SHA-256: `{ledger['sha256']}`. {len(targets)} explicitly described locations. {len(ledger['issues'])} invalid historical definitions excluded from resolution.\n")
+    print("| Location | Topic | Role | Maintenance owner | Preservation constraint |")
+    print("|---|---|---|---|---|")
+    for path in targets:
+        fields=resolve_judgments(ledger,path)
+        values=[]
+        for field in JUDGMENT_FACETS:
+            result=fields.get(field,{"status":"not-recorded"})
+            values.append(cell(result.get("value",result["status"])) if result["status"]=="known" else cell(result["status"]))
+        print("| "+cell(path)+" | "+" | ".join(values)+" |")
+    print("\nUse `sinnix-fs judgments explain /absolute/path` for winning rule targets, dates, methods and evidence. A `preservation` classification never authorizes deletion. Native application state, workflow dependencies and independent backup evidence still control actual maintenance.")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(prog="sinnix-fs", description=__doc__,
                                   formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -1203,8 +1353,23 @@ def main() -> int:
     views = sub.add_parser("content-views", help="Correct derived full-hash/sample comparison views without rescanning")
     views.add_argument("--index-dir", type=Path, default=Path("/realm/state/fs-index"))
     views.set_defaults(func=lambda a: content_views_refresh(a.index_dir / "content.duckdb"))
+    judgments = sub.add_parser("judgments", help="Read authored collection classifications without scanning or materializing")
+    judgments.add_argument("--index-dir", type=Path, default=Path("/realm/state/fs-index"))
+    actions = judgments.add_subparsers(dest="action", required=True)
+    explain = actions.add_parser("explain", help="Explain lexical path classification with evidence; no payload access")
+    explain.add_argument("path")
+    audit = actions.add_parser("audit", help="Audit definitions; explicitly request path checks")
+    audit.add_argument("--check-paths", action="store_true")
+    actions.add_parser("report", help="Print a rebuildable Markdown collection-facet view")
+    judgments.set_defaults(func=cmd_judgments)
     args = ap.parse_args()
-    return args.func(args)
+    try:
+        return args.func(args)
+    except (ValueError, OSError) as exc:
+        if args.command != "judgments":
+            raise
+        print(f"sinnix-fs judgments: {exc}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":
