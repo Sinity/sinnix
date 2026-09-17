@@ -210,3 +210,51 @@ def test_references_uses_bounded_existing_text_search(tmp_path: Path) -> None:
     assert result["result"]["outcome"] == "ok", result
     hit = result["data"]["hits"][0]
     assert hit["path"] == str(note) and hit["line_number"] == 1
+
+
+def test_plan_refuses_source_parent_that_cannot_remove(tmp_path,monkeypatch):
+    from sinnix_agent_gateway import files
+    server=create_server(config(tmp_path),'operator')
+    source=tmp_path/'source';source.write_text('payload');destination=tmp_path/'destination'
+    original=files.os.access
+    monkeypatch.setattr(files.os,'access',lambda p,mode,**kw: False if Path(p)==source.parent else original(p,mode,**kw))
+    planned=plan(server,source,destination)
+    assert planned['ready'] is False and 'source parent' in planned['moves'][0]['refusal']
+    assert source.exists() and not destination.exists()
+
+
+def test_plan_refuses_cross_parent_directory_without_directory_write_access(tmp_path,monkeypatch):
+    from sinnix_agent_gateway import files
+    server=create_server(config(tmp_path),'operator')
+    source=tmp_path/'source';source.mkdir();(source/'note').write_text('payload')
+    parent=tmp_path/'destination-parent';parent.mkdir();destination=parent/'source'
+    original=files.os.access
+    monkeypatch.setattr(files.os,'access',lambda p,mode,**kw: False if Path(p)==source else original(p,mode,**kw))
+    planned=plan(server,source,destination)
+    assert planned['ready'] is False and 'source directory' in planned['moves'][0]['refusal']
+    assert source.is_dir() and not destination.exists()
+
+
+def test_changed_source_access_refused_before_planned_mkdir(tmp_path,monkeypatch):
+    from sinnix_agent_gateway import files
+    server=create_server(config(tmp_path),'operator')
+    source=tmp_path/'source';source.write_text('payload');parent=tmp_path/'new-parent';destination=parent/'destination'
+    planned=plan(server,source,destination,mkdirs=[parent]);assert planned['ready']
+    original=files.os.access
+    monkeypatch.setattr(files.os,'access',lambda p,mode,**kw: False if Path(p)==source.parent else original(p,mode,**kw))
+    result=apply(server,planned)
+    assert result['error']['code']=='precondition_failed'
+    assert source.exists() and not parent.exists()
+
+
+def test_oserror_from_move_owner_keeps_structured_partial_receipt(tmp_path,monkeypatch):
+    server=create_server(config(tmp_path),'operator');runtime=server._sinnix_revision_publisher.runtime
+    source=tmp_path/'source';source.write_text('payload');destination=tmp_path/'destination'
+    planned=plan(server,source,destination)
+    def denied(*args,**kwargs):raise PermissionError('fixture owner error')
+    monkeypatch.setattr(runtime.files,'write',denied)
+    result=apply(server,planned)
+    assert result['result']['outcome']=='ok' and result['data']['state']=='partial'
+    assert result['data']['entries'][0]['state']=='failed'
+    assert 'fixture owner error' in result['data']['entries'][0]['error']
+    assert source.exists() and not destination.exists()

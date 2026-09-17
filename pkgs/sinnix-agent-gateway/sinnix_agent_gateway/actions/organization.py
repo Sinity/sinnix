@@ -11,6 +11,7 @@ from ..action import OPERATOR_ONLY, Action, Example, MutationControls, RequestCo
 from ..capabilities import Capability
 from ..contracts import VerbFamily
 from ..locators import FileLocator, encode_file_ref
+from ..files import move_source_refusal
 from ..organization import (
     OrganizationError,
     OrganizationService,
@@ -206,6 +207,13 @@ def _plan_move(
             destination_ref=destination_ref,
             ready=False,
             refusal=f"source is unavailable: {exc}",
+        )
+    access_refusal = move_source_refusal(source, Path(raw_destination).expanduser())
+    if access_refusal is not None:
+        return PlannedMove(
+            index=index, source=str(source), source_ref=encode_file_ref(str(source)),
+            destination=raw_destination, destination_ref=destination_ref,
+            ready=False, refusal=access_refusal,
         )
     if source.is_dir():
         boundary_refusal = _directory_boundary_refusal(runtime, source)
@@ -422,6 +430,10 @@ def _require_preconditions(runtime: Runtime, plan: dict[str, Any]) -> None:
         if not row["ready"]:
             failures.append(
                 {"kind": "move", "index": row["index"], "reason": row["refusal"]}
+            )
+        elif (access_refusal := move_source_refusal(source, destination)) is not None:
+            failures.append(
+                {"kind": "move", "index": row["index"], "reason": access_refusal}
             )
         elif not identity_matches(source, row["identity"]):
             failures.append(

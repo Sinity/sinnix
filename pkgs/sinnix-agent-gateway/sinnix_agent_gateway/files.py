@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import errno
+import ctypes
+import stat
 import hashlib
 import mimetypes
 import os
@@ -33,6 +35,42 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1_048_576), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def move_source_refusal(source: Path, destination: Path) -> str | None:
+    """Readiness hint, not an authorization grant or replacement for rename.
+
+    Moving a directory across parents updates its '..' entry and can require
+    write access to that directory even when both parents are writable.
+    """
+    try:
+        parent = source.parent.stat()
+        current = source.lstat()
+        uid = os.geteuid()
+        if not os.access(source.parent, os.W_OK | os.X_OK, effective_ids=True):
+            return "source parent is not writable/searchable"
+        if parent.st_mode & stat.S_ISVTX and uid not in (0, parent.st_uid, current.st_uid):
+            return "source parent sticky-bit ownership forbids removal"
+        if (stat.S_ISDIR(current.st_mode) and source.parent != destination.parent
+                and not os.access(source, os.W_OK, effective_ids=True)):
+            return "source directory is not writable for a cross-parent rename"
+    except OSError as exc:
+        return f"source move access cannot be established: {exc}"
+    return None
+
+
+def rename_noreplace(source: Path, destination: Path) -> None:
+    """One Linux atomic rename; never emulate it using a hard link and unlink."""
+    try:
+        function = ctypes.CDLL(None, use_errno=True).renameat2
+    except AttributeError as exc:
+        raise FileError("atomic no-replace rename unavailable; no transfer attempted") from exc
+    function.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int,
+                         ctypes.c_char_p, ctypes.c_uint]
+    function.restype = ctypes.c_int
+    if function(-100, os.fsencode(source), -100, os.fsencode(destination), 1) != 0:
+        code = ctypes.get_errno()
+        raise OSError(code, os.strerror(code), str(source))
 
 
 def _copy_exclusive(source: Path, destination: Path) -> None:
@@ -217,15 +255,27 @@ class HostFileService:
             if operation == "copy":
                 _copy_exclusive(target, destination_path)
             else:
+                refusal = move_source_refusal(target, destination_path)
+                if refusal is not None:
+                    raise FileError(refusal)
                 try:
-                    os.link(target, destination_path)
+                    rename_noreplace(target, destination_path)
                 except FileExistsError as exc:
                     raise FileError("destination already exists") from exc
                 except OSError as exc:
                     if exc.errno != errno.EXDEV:
-                        raise
+                        raise FileError(f"atomic move failed without overwriting destination: {exc}") from exc
+                    # Cross-filesystem transfer cannot be globally atomic.
+                    # Preserve both objects and report it if source removal
+                    # fails; do not blindly remove the only complete copy.
                     _copy_exclusive(target, destination_path)
-                target.unlink()
+                    shutil.copystat(target, destination_path, follow_symlinks=False)
+                    if _sha256(destination_path) != before_hash or _sha256(target) != before_hash:
+                        raise FileError("source changed during cross-filesystem copy; source and destination retained for reconciliation")
+                    try:
+                        target.unlink()
+                    except OSError as unlink_error:
+                        raise FileError("cross-filesystem copy exists but source removal failed; both paths retained for reconciliation") from unlink_error
             return {
                 "operation": operation,
                 "path": str(target),

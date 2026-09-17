@@ -279,3 +279,13 @@ The full schemas and examples are in [the generated gateway reference](generated
 | `capabilities.query`         | `catalog` | `capability-index` | `agent-control, observer, operator` | Search the generated machine capability index or describe one capability exactly.                                                                                                                                                                                                                                                                |
 
 <!-- END GENERATED GATEWAY V2 REFERENCE -->
+
+## Filesystem move failure boundaries
+
+Explicit move plans check whether the source parent can remove an entry, including sticky-directory ownership constraints. A cross-parent directory rename additionally checks write access to the source directory because the kernel must update its parent relationship. These checks are repeated before the first planned mutation; they are readiness observations, not permission grants, and the kernel remains the authority at execution.
+
+Same-filesystem file and directory transfers share a single Linux `renameat2(RENAME_NOREPLACE)` operation. They do not emulate a move by creating a hard link and then unlinking the source. A permission failure therefore cannot leave that hard-link intermediate behind, and an existing destination is never overwritten. An unavailable atomic primitive is reported rather than silently substituted.
+
+Cross-filesystem regular-file moves remain an exclusive copy followed by source removal, not a globally atomic operation. The owner verifies copied bytes; if source removal fails, it reports that both paths remain for reconciliation. It does not blindly remove a potentially unique completed copy. File-owner I/O failures are normalized into structured organization failures so a batch returns its partial receipt instead of losing the execution boundary in an uncaught error. No global batch rollback or resistance to adversarial filesystem races is asserted.
+
+After an indeterminate operation, inspect both endpoints and their recorded identities before taking another action. A permission-related failure does not authorize changing ownership, weakening policy, or replaying the same transfer through a more privileged route.
