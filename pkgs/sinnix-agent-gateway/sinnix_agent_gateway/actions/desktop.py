@@ -861,7 +861,7 @@ ACTIONS: tuple[Action, ...] = (
         resource_kinds=("desktop",),
         affordances=("desktop.operate", "desktop.screenshot"),
         aliases=("accessibility tree", "a11y", "widgets", "ui elements"),
-        documentation="Fails unavailable when the pyatspi bindings are absent from the gateway environment; Chromium apps expose a tree only when launched with accessibility forced on.",
+        documentation="Walks the AT-SPI tree through pyatspi in the gateway environment; Chromium apps expose a tree only when launched with accessibility forced on.",
         examples=(Example(title="Active window tree", input={"max_depth": 10}),),
         failure_codes=frozenset(
             {"unavailable", "not_found", "conflict", "invalid_request", "owner_failed"}

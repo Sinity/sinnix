@@ -501,6 +501,53 @@ def test_read_only_subroute_requires_exact_tool_and_explicit_selector(
     assert calls == [("lookup", safe)]
 
 
+def test_read_only_tools_admit_unannotated_tools(
+    tmp_path, monkeypatch
+) -> None:
+    broker = broker_service(tmp_path, "operator")
+    broker.config.mcp_broker_servers["fixture"]["readOnlyTools"] = ["lookup"]
+    calls = []
+
+    class UnannotatedSession(FakeSession):
+        async def list_tools(self):
+            response = await super().list_tools()
+            response.tools[0].annotations = None
+            return response
+
+        async def call_tool(self, name, arguments):
+            calls.append((name, arguments))
+            return await super().call_tool(name, arguments)
+
+    monkeypatch.setattr(
+        "sinnix_agent_gateway.mcp_broker.stdio_client",
+        lambda *args, **kwargs: FakeTransport(),
+    )
+    monkeypatch.setattr(
+        "sinnix_agent_gateway.mcp_broker.ClientSession", UnannotatedSession
+    )
+    result = anyio.run(
+        lambda: broker.call("fixture", "lookup", {"query": "fixture"}, write=False)
+    )
+    assert result["response"]["content"][0]["text"] == "lookup:fixture"
+    catalog = anyio.run(broker.catalog)
+    fixture = next(server for server in catalog["servers"] if server["name"] == "fixture")
+    assert fixture["tools"][0]["effect"] == "read"
+    assert fixture["read_only_tool_count"] == 1
+    with pytest.raises(McpBrokerError, match="declared read-only"):
+        anyio.run(
+            lambda: broker.call("fixture", "lookup", {"query": "fixture"}, write=True)
+        )
+    assert calls == [("lookup", {"query": "fixture"})]
+
+
+@pytest.mark.parametrize("tools", [True, [""], [1], ["x" * 129]])
+def test_read_only_tools_rejects_malformed_configuration(tmp_path, tools) -> None:
+    broker = broker_service(tmp_path, "operator")
+    broker.config.mcp_broker_servers["fixture"]["readOnlyTools"] = tools
+    with pytest.raises(McpBrokerError, match="configuration is malformed"):
+        broker._server("fixture")
+
+
 @pytest.mark.parametrize(
     "routes",
     [

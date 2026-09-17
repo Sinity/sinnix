@@ -5,7 +5,7 @@ description: Use when invoking, inspecting, or documenting Sinnix Agent Gateway 
 
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: 33f44ec692ccf317e502d92680d31a81ea2a87701a559ffcee151768af4baca6 -->
+<!-- gateway-catalog-sha256: 68415feafef6607f592c00ebadb84d48e5c9b5c2bd83660f5f822583377e2b5d -->
 
 # Agent Gateway
 
@@ -67,7 +67,7 @@ Effectful actions (families change, operate, run) require `idempotency_key`. Con
 - `jobs.list` — List queued jobs (pueue tasks) newest first, optionally for one project.
 - `batches.list` — List batch runs newest first, with each worker's stage and task.
 - `desktop.screenshot` — full captures the focused output through the HDR-aware screenshot owner; window/rect/monitor targets capture with grim. On HDR outputs a corrected SDR variant is produced and preferred for the image block.
-- `desktop.tree` — Fails unavailable when the pyatspi bindings are absent from the gateway environment; Chromium apps expose a tree only when launched with accessibility forced on.
+- `desktop.tree` — Walks the AT-SPI tree through pyatspi in the gateway environment; Chromium apps expose a tree only when launched with accessibility forced on.
 - `terminals.screen` — The visible screen text of one terminal.
 - `terminals.scrollback` — The last N lines of a terminal's history, screen, or last command output.
 - `terminals.processes` — Foreground processes of one terminal and whether its shell is at a prompt.
@@ -175,8 +175,8 @@ Effectful actions (families change, operate, run) require `idempotency_key`. Con
 - `batches.start` — backend, model and effort default to the project descriptor's packet defaults. Refused when a bead is claimed or already in a live run. The landing task is queued behind the workers and runs itself.
 - `batches.land` — batches.start already queues the first landing behind the workers; this re-queues one after a landing failed. The landing runs as a job, so wait on landing_job_id rather than on this call.
 - `batches.resume` — backend, model and effort default to the worker's own. Refused while the worker's task is still queued or running.
-- `terminals.run` — Completion and output rely on kitty shell integration (at_prompt, last_cmd_output). exit_status is reported only with capture_exit_status, which appends a visible marker to the command line.
+- `terminals.run` — wait=true appends a visible completion sentinel and waits for it (or for at_prompt when kitty reports it). Captured shells disable prompt marks, so the sentinel is the reliable completion signal. exit_status is parsed from that sentinel.
 
 The complete schemas and examples are in `docs/generated/agent-gateway-reference.md`.
 
-Catalog revision: `v3-typed-actions`. Catalog SHA-256: `33f44ec692ccf317e502d92680d31a81ea2a87701a559ffcee151768af4baca6`.
+Catalog revision: `v3-typed-actions`. Catalog SHA-256: `68415feafef6607f592c00ebadb84d48e5c9b5c2bd83660f5f822583377e2b5d`.

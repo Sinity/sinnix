@@ -29,7 +29,7 @@ from ..locators import (
     proc_snapshot,
     process_ref,
 )
-from ..redaction import redact
+from ..redaction import redact, redact_env
 from ..results import ProtocolError
 from ..schemas import GatewayModel
 from .machine import OperateResult, _operate_via_reducer
@@ -44,17 +44,6 @@ except ImportError:  # pragma: no cover - depends on the environment
 
 _CLK_TCK = os.sysconf("SC_CLK_TCK")
 _PAGE = os.sysconf("SC_PAGE_SIZE")
-_SECRET_KEYS = (
-    "TOKEN",
-    "SECRET",
-    "PASSWORD",
-    "PASSWD",
-    "API_KEY",
-    "APIKEY",
-    "AUTH",
-    "CREDENTIAL",
-    "PRIVATE",
-)
 
 
 def _boot_time() -> float:
@@ -326,13 +315,11 @@ def _environ(pid: int, limit: int) -> tuple[dict[str, str], bool]:
     except OSError:
         return {}, False
     entries = [piece.decode("utf-8", "replace") for piece in raw.split(b"\0") if piece]
-    env: dict[str, str] = {}
+    parsed: dict[str, str] = {}
     for entry in entries[:limit]:
         key, _, value = entry.partition("=")
-        if any(marker in key.upper() for marker in _SECRET_KEYS):
-            value = "[REDACTED]"
-        env[key] = redact(value)[:2_000]
-    return env, len(entries) > limit
+        parsed[key] = value
+    return redact_env(parsed), len(entries) > limit
 
 
 def _get(runtime: Runtime, inp: GetInput) -> ProcessDetail:

@@ -6,6 +6,7 @@ from __future__ import annotations
 import re
 import shlex
 import time
+import uuid
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import Field
@@ -83,6 +84,9 @@ _KNOWN = {
     "cmdline",
     "foreground_processes",
 }
+# Kitty `ls` includes the window environment wholesale. Never copy it into a
+# broadly readable terminal descriptor.
+_SECRET_WINDOW_FIELDS = {"env", "environ", "user_vars"}
 
 
 def _terminal(window: dict[str, Any]) -> Terminal:
@@ -108,7 +112,11 @@ def _terminal(window: dict[str, Any]) -> Terminal:
             for proc in window.get("foreground_processes", []) or []
             if isinstance(proc, dict)
         ],
-        extra={key: value for key, value in window.items() if key not in _KNOWN},
+        extra={
+            key: value
+            for key, value in window.items()
+            if key not in _KNOWN and key not in _SECRET_WINDOW_FIELDS
+        },
         affordances=[
             "terminals.screen",
             "terminals.send",
@@ -337,7 +345,7 @@ def _send(runtime: Runtime, inp: SendInput) -> SendResult:
 # ------------------------------------------------------------------------ run
 
 
-_RC_MARKER = "__SINNIX_RC:"
+_DONE_MARKER = "__SINNIX_DONE:"
 
 
 class RunInput(MutationControls):
@@ -346,12 +354,13 @@ class RunInput(MutationControls):
         description="A shell command line, or an argv list that is shell-quoted for you."
     )
     wait: bool = Field(
-        default=True, description="Wait until the shell is back at a prompt."
+        default=True,
+        description="Wait for the completion sentinel, or for at_prompt when kitty reports it.",
     )
     timeout_seconds: int = Field(default=60, ge=1, le=3_600)
     capture_exit_status: bool = Field(
         default=False,
-        description="Append an exit-status marker to the command line so the status is reported; the marker is visible in the terminal.",
+        description="Deprecated alias: wait=true already appends a visible completion sentinel and reports exit_status from it.",
     )
 
 
@@ -360,18 +369,33 @@ class RunResult(GatewayModel):
     kitty_id: int
     command: str
     completed: bool = Field(
-        description="The shell returned to a prompt within the timeout."
+        description="The completion sentinel appeared, or kitty reported at_prompt, within the timeout."
     )
     exit_status: int | None = Field(
-        default=None, description="Only with capture_exit_status."
+        default=None,
+        description="Parsed from the completion sentinel when wait=true.",
     )
     output: str | None = Field(
-        default=None, description="Last command output per kitty shell integration."
+        default=None,
+        description="Last-command output when kitty reports it; otherwise screen text around the completion sentinel.",
     )
     cwd: str | None = None
     duration_seconds: float | None = None
     terminal: Terminal | None
     affordances: list[str] = Field(default_factory=list)
+
+
+def _strip_marker(text: str, marker_id: str) -> str:
+    return re.sub(
+        r"\n?" + re.escape(f"{_DONE_MARKER}{marker_id}:") + r"\d+__\n?",
+        "",
+        text,
+    ).strip("\n")
+
+
+def _marker_status(text: str, marker_id: str) -> int | None:
+    matches = re.findall(re.escape(f"{_DONE_MARKER}{marker_id}:") + r"(\d+)__", text)
+    return int(matches[-1]) if matches else None
 
 
 def _run(runtime: Runtime, inp: RunInput) -> RunResult:
@@ -380,9 +404,13 @@ def _run(runtime: Runtime, inp: RunInput) -> RunResult:
     command = inp.command if isinstance(inp.command, str) else shlex.join(inp.command)
     if not command.strip():
         raise ProtocolError("invalid_request", "command is empty")
+    # Captured kitty shells disable prompt marks, so at_prompt/last_cmd_output
+    # are not a reliable completion signal. A visible sentinel is.
+    inject_sentinel = inp.wait or inp.capture_exit_status
+    marker_id = uuid.uuid4().hex[:12] if inject_sentinel else None
     line = command
-    if inp.capture_exit_status:
-        line = f"{command}; printf '\\n{_RC_MARKER}%s__\\n' \"$?\""
+    if marker_id is not None:
+        line = f"{command}; printf '\\n{_DONE_MARKER}{marker_id}:%s__\\n' \"$?\""
     started = time.monotonic()
     _owner_call(
         lambda: runtime.terminals.action(
@@ -401,20 +429,30 @@ def _run(runtime: Runtime, inp: RunInput) -> RunResult:
                 raise ProtocolError(
                     "not_found", "terminal disappeared while running the command"
                 )
+            screen = _capture(runtime, kitty_id, "screen", False)
+            if marker_id is not None:
+                status = _marker_status(screen, marker_id)
+                if status is not None:
+                    completed = True
+                    exit_status = status
+                    output = _strip_marker(screen, marker_id)
+                    break
             if terminal.at_prompt:
                 completed = True
                 break
             if time.monotonic() - started >= inp.timeout_seconds:
                 break
             time.sleep(0.3)
-        output = _capture(runtime, kitty_id, "last_cmd_output", False)
-        if inp.capture_exit_status:
-            found = re.findall(re.escape(_RC_MARKER) + r"(\d+)__", output)
-            if found:
-                exit_status = int(found[-1])
-                output = re.sub(
-                    r"\n?" + re.escape(_RC_MARKER) + r"\d+__\n?", "", output
-                )
+        if output is None:
+            last = _capture(runtime, kitty_id, "last_cmd_output", False)
+            if marker_id is not None:
+                status = _marker_status(last, marker_id)
+                if status is not None:
+                    exit_status = status
+                    completed = True
+                    output = _strip_marker(last, marker_id)
+            if output is None:
+                output = last if last.strip() else None
     else:
         terminal = _refresh(runtime, kitty_id)
     return RunResult(
@@ -751,7 +789,7 @@ ACTIONS: tuple[Action, ...] = (
         handler=_run,
         affordances=("terminals.scrollback", "terminals.wait", "terminals.send"),
         aliases=("execute in terminal", "run command", "shell command in kitty"),
-        documentation="Completion and output rely on kitty shell integration (at_prompt, last_cmd_output). exit_status is reported only with capture_exit_status, which appends a visible marker to the command line.",
+        documentation="wait=true appends a visible completion sentinel and waits for it (or for at_prompt when kitty reports it). Captured shells disable prompt marks, so the sentinel is the reliable completion signal. exit_status is parsed from that sentinel.",
         examples=(
             Example(
                 title="Run and wait",

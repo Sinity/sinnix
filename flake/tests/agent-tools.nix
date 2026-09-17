@@ -1319,6 +1319,25 @@ in
             ${pkgs.bash}/bin/bash ${../../flake/tests/kitty-agent-here.sh} "$helper"
             touch "$out"
           '';
+      kittyLaunchKeepFocusFixture =
+        pkgs.runCommand "kitty-launch-keep-focus-fixture"
+          {
+            nativeBuildInputs = [
+              pkgs.bash
+              pkgs.coreutils
+              pkgs.gnugrep
+              pkgs.gnused
+              pkgs.jq
+            ];
+          }
+          ''
+            helper="$TMPDIR/kitty-remote-control.sh"
+            cp ${../../dots/_ai/skills/desktop-control-plane/scripts/kitty-remote-control.sh} "$helper"
+            chmod +x "$helper"
+            patchShebangs "$helper"
+            ${pkgs.bash}/bin/bash ${../../flake/tests/kitty-launch-keep-focus.sh} "$helper"
+            touch "$out"
+          '';
       bdSafetyHookFixture =
         pkgs.runCommand "bd-safety-hook-fixture"
           {
@@ -1581,6 +1600,7 @@ in
         sinex-cache-prebuild-lifecycle = cachePrebuildLifecycleFixture;
         preflight = preflightFixture;
         kitty-agent-here = kittyAgentHereFixture;
+        kitty-launch-keep-focus = kittyLaunchKeepFocusFixture;
         bd-safety-hook = bdSafetyHookFixture;
         bd-dolt-authority = bdDoltAuthorityFixture;
         context-handoff = contextHandoffFixture;

@@ -68,6 +68,15 @@ let
         inactive = 0.70;
       };
     })
+    # Agent-opened OS windows use a distinct class so spawning them does not
+    # activate an existing Kitty window. Focus restore in kitty-remote-control
+    # still runs; this rule keeps the new window itself from taking focus.
+    (mkRule "agent-terminal-no-focus" {
+      class = "^(sinnix-agent-terminal)$";
+      noInitialFocus = true;
+      focusOnActivate = false;
+      suppressEvent = "activate activatefocus";
+    })
     (mkRule "chrome-focus-opacity" {
       class = "^(google-chrome|google-chrome-unstable|chromium-browser|Chromium)$";
       opacity = {

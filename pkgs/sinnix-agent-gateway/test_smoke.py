@@ -308,6 +308,7 @@ def test_gateway_status_reports_distinct_manifest_provenance(tmp_path: Path) -> 
                 "principal": "observer",
                 "manifest_sha256": "approved-fixture-hash",
                 "action_catalog_sha256": "catalog-hash",
+                "observed_at": 1788828936.1,
             }
         )
     )
@@ -322,7 +323,9 @@ def test_gateway_status_reports_distinct_manifest_provenance(tmp_path: Path) -> 
     assert status["catalog"]["chatgpt_observed"] == {
         "principal": "observer",
         "sha256": "catalog-hash",
+        "observed_at": 1788828936.1,
     }
+    assert status["manifests"]["chatgpt_observed"]["observed_at"] == 1788828936.1
     assert set(status["catalog"]["comparisons"].values()) == {"match"}
 
     snapshot.write_text(
