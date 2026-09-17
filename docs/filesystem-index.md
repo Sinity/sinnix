@@ -37,3 +37,21 @@ Authored judgment and reference ledgers are not regenerable simply because they 
 Materialization uses explicit nullable schema columns. Malformed JSON fails staged publication rather than being silently skipped. Existing artifacts remain in place when staging or validation fails; there is no claim that several separately published filesystem artifacts form one global transaction.
 
 The focused tests under `pkgs/sinnix-fs/tests` use synthetic small files and isolated real DuckDB databases. Counterexamples include equal head/tail/size with a different middle, legacy sample demotion, in-flight changes, missing roots, FIFOs, aliases, malformed JSON, quoted filesystem paths, non-traversed collections, and prefix siblings. Test dependencies belong to the existing Nix script-suite declaration, not an undeclared host installation.
+
+## Direct authored classifications
+
+The `judgments` actions read the existing `judgments.jsonl` without opening DuckDB, rescanning directories or reading the classified payload:
+
+```sh
+PYTHONPATH=pkgs/sinnix-lib python3 scripts/sinnix-fs judgments --index-dir /path/to/index explain /absolute/path
+PYTHONPATH=pkgs/sinnix-lib python3 scripts/sinnix-fs judgments --index-dir /path/to/index audit
+PYTHONPATH=pkgs/sinnix-lib python3 scripts/sinnix-fs judgments --index-dir /path/to/index report
+```
+
+`explain` separates topic, role, maintenance_owner and preservation facets from legacy fields. Resolution uses operator precedence within a target, then decision time, followed by the most-specific matching path for each field. An explicit unknown child rule masks broader assumptions. Equal-ranked disagreements are returned as ambiguous rather than selected by row order. This is the conservative direct-lookup contract; existing SQL materializations are not refreshed by the call.
+
+The reply includes source lines, full decisions, record hashes and ledger identity. Lexical resolution deliberately does not dereference aliases, assert path existence, hash contents, or match content-addressed decisions from a guessed digest. `audit --check-paths` explicitly opts into location metadata checks, without enumerating descendants. Absent historical paths remain history; they are not automatically rewritten to similarly named current directories.
+
+Reads are bounded to 8 MiB and 25,000 records. Malformed JSON fails the command without a partial result. Invalid definitions, including filename-shaped sha256 targets and timezone-free timestamps, are reported and excluded from lookup while remaining untouched on disk. Exit 2 indicates input/access failure; exit 1 indicates audit findings or ambiguous explanation.
+
+`report` emits a rebuildable Markdown collection-facet projection; the JSONL remains its only source of truth. Preserve original rows and actor attribution when adding fresh observations. A maintenance owner is not the topic of all data it stores, and a preservation constraint is not a backup certificate or deletion permission.
