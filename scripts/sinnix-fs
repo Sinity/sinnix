@@ -1362,13 +1362,23 @@ def main() -> int:
     audit.add_argument("--check-paths", action="store_true")
     actions.add_parser("report", help="Print a rebuildable Markdown collection-facet view")
     judgments.set_defaults(func=cmd_judgments)
+    from sinnix_lib.note_links import command as note_links_command
+    note_links = sub.add_parser("note-links", help="Plan unambiguous legacy Markdown links without writing notes")
+    note_links.add_argument("--root", type=Path, action="append", required=True)
+    note_links.add_argument("--reference-root", type=Path, action="append", default=[])
+    note_links.add_argument("--exclude-component", action="append", default=[])
+    note_links.add_argument("--max-files", type=int, default=2000)
+    note_links.add_argument("--max-bytes", type=int, default=32 << 20)
+    note_links.add_argument("--max-file-bytes", type=int, default=2 << 20)
+    note_links.add_argument("--max-depth", type=int, default=12)
+    note_links.set_defaults(func=note_links_command)
     args = ap.parse_args()
     try:
         return args.func(args)
     except (ValueError, OSError) as exc:
-        if args.command != "judgments":
+        if args.command not in ("judgments", "note-links"):
             raise
-        print(f"sinnix-fs judgments: {exc}", file=sys.stderr)
+        print(f"sinnix-fs {args.command}: {exc}", file=sys.stderr)
         return 2
 
 
