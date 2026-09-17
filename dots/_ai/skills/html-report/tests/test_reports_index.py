@@ -102,3 +102,13 @@ def test_rebuild_does_not_index_itself(tmp_path):
     out.write_text("<title>DO NOT INDEX ME</title>")
     mod.build(tmp_path, out)
     assert "DO NOT INDEX ME" not in out.read_text()
+
+
+def test_table_has_a_separate_accessible_horizontal_scroll_region(tmp_path):
+    (tmp_path / "long-report.html").write_text("<title>" + "UnbrokenLongTitle" * 30 + "</title>")
+    out = tmp_path / "index.html"
+    assert mod.build(tmp_path, out) == 0
+    page = out.read_text()
+    assert '<div class="table-wrap" role="region" aria-label="Published reports" tabindex="0"><table>' in page
+    assert '</table></div>' in page
+    assert '.table-wrap{max-width:100%;overflow-x:auto}' in page
