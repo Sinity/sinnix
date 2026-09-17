@@ -255,6 +255,7 @@ a{{color:var(--accent)}}
 footer{{color:var(--muted);font-size:.85rem;padding:1rem 0}}
 input{{width:100%;max-width:24rem;margin:.4rem 0;padding:.35rem .6rem;border:1px solid var(--line);
 border-radius:.4rem;background:var(--bg);color:var(--ink)}}
+.table-wrap{{max-width:100%;overflow-x:auto}}
 .nav-grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,19rem),1fr));gap:.55rem;margin:1rem 0}}
 .nav-group{{background:var(--panel);border:1px solid var(--line);border-radius:.4rem;padding:.45rem .7rem;font-size:.88rem}}
 .nav-group summary{{cursor:pointer;font-weight:650}} .nav-group small,.nav-role{{color:var(--muted);font-weight:400;font-size:.75rem}}
@@ -271,8 +272,8 @@ border-radius:.4rem;background:var(--bg);color:var(--ink)}}
 <input id="filter" aria-label="Search subjects and reports" placeholder="Find a subject, file, project or report…  /" oninput="filterAll(this.value)">
 {nav_html}
 <h2>Published reports</h2>
-<table><thead><tr><th>report</th><th>modified</th><th>status</th><th>identity</th><th>size</th></tr></thead>
-<tbody>{"".join(trs)}</tbody></table>
+<div class="table-wrap" role="region" aria-label="Published reports" tabindex="0"><table><thead><tr><th>report</th><th>modified</th><th>status</th><th>identity</th><th>size</th></tr></thead>
+<tbody>{"".join(trs)}</tbody></table></div>
 <footer>regenerate: <code>python3 generators/reports-index.py {reports_dir}</code>
 (html-report skill) — every row measured from the files at generation time</footer>
 </main>
