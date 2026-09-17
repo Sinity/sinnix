@@ -126,3 +126,52 @@ def test_list_is_bounded_and_reports_symlink(tmp_path: Path) -> None:
     assert bounded["truncated"] is True
     assert complete["entries"][-1]["name"] == "link"
     assert complete["entries"][-1]["symlink"] is True
+
+
+def test_same_filesystem_move_has_no_hardlink_unlink_intermediate(tmp_path, monkeypatch):
+    from sinnix_agent_gateway import files
+    source=tmp_path/'source';destination=tmp_path/'destination';source.write_text('payload')
+    inode=source.stat().st_ino
+    def forbidden(*args,**kwargs):
+        raise AssertionError('a same-filesystem move must not create an extra hard link')
+    monkeypatch.setattr(files.os,'link',forbidden)
+    service(tmp_path,'operator').write('move',str(source),destination=str(destination))
+    assert not source.exists() and destination.read_text()=='payload'
+    assert destination.stat().st_ino==inode and destination.stat().st_nlink==1
+
+
+def test_nonwritable_source_parent_refused_before_destination_creation(tmp_path,monkeypatch):
+    from sinnix_agent_gateway import files
+    source=tmp_path/'source';destination=tmp_path/'destination';source.write_text('payload')
+    original=files.os.access
+    monkeypatch.setattr(files.os,'access',lambda p,mode,**kw: False if Path(p)==source.parent else original(p,mode,**kw))
+    with pytest.raises(FileError,match='source parent'):
+        service(tmp_path,'operator').write('move',str(source),destination=str(destination))
+    assert source.read_text()=='payload' and not destination.exists()
+
+
+def test_atomic_move_failure_does_not_leave_a_destination(tmp_path,monkeypatch):
+    import errno
+    from sinnix_agent_gateway import files
+    source=tmp_path/'source';destination=tmp_path/'destination';source.write_text('payload')
+    def refused(*args,**kwargs):raise PermissionError(errno.EACCES,'fixture denial')
+    monkeypatch.setattr(files,'rename_noreplace',refused)
+    with pytest.raises(FileError,match='atomic move failed'):
+        service(tmp_path,'operator').write('move',str(source),destination=str(destination))
+    assert source.read_text()=='payload' and not destination.exists()
+
+
+def test_cross_filesystem_unlink_failure_reports_both_preserved_objects(tmp_path,monkeypatch):
+    import errno
+    from sinnix_agent_gateway import files
+    source=tmp_path/'source';destination=tmp_path/'destination';source.write_text('payload')
+    def cross_device(*args,**kwargs):raise OSError(errno.EXDEV,'fixture crossing')
+    monkeypatch.setattr(files,'rename_noreplace',cross_device)
+    original=Path.unlink
+    def block_source(self,*args,**kwargs):
+        if self==source:raise PermissionError('fixture denied unlink')
+        return original(self,*args,**kwargs)
+    monkeypatch.setattr(Path,'unlink',block_source)
+    with pytest.raises(FileError,match='both paths retained'):
+        service(tmp_path,'operator').write('move',str(source),destination=str(destination))
+    assert source.read_text()==destination.read_text()=='payload'

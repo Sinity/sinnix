@@ -7,7 +7,6 @@ the actual exclusive transfer to :class:`HostFileService`.
 
 from __future__ import annotations
 
-import ctypes
 import hashlib
 import json
 import os
@@ -17,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from .artifacts import ArtifactService
-from .files import FileError, HostFileService
+from .files import FileError, HostFileService, move_source_refusal, rename_noreplace
 
 
 class OrganizationError(ValueError):
@@ -187,7 +186,7 @@ class OrganizationService:
     def move_regular_file(
         self, source: Path, destination: Path, expected_sha256: str
     ) -> dict[str, Any]:
-        """Use the existing exclusive link-or-copy transfer implementation."""
+        """Use the shared atomic-rename or explicit cross-filesystem transfer."""
         try:
             return self.files.write(
                 "move",
@@ -195,35 +194,15 @@ class OrganizationService:
                 destination=str(destination),
                 expected_sha256=expected_sha256,
             )
-        except FileError as exc:
+        except (FileError, OSError) as exc:
             raise OrganizationError(str(exc)) from exc
 
     def move_directory_same_filesystem(self, source: Path, destination: Path) -> None:
-        """Linux renameat2 with NOREPLACE, never a recursive copy fallback."""
+        """Shared no-replace rename, never a recursive copy fallback."""
+        refusal = move_source_refusal(source, destination)
+        if refusal is not None:
+            raise OrganizationError(refusal)
         try:
-            libc = ctypes.CDLL(None, use_errno=True)
-            renameat2 = libc.renameat2
-        except AttributeError as exc:
-            raise OrganizationError(
-                "renameat2 is unavailable; directory moves are unsupported"
-            ) from exc
-        renameat2.argtypes = [
-            ctypes.c_int,
-            ctypes.c_char_p,
-            ctypes.c_int,
-            ctypes.c_char_p,
-            ctypes.c_uint,
-        ]
-        renameat2.restype = ctypes.c_int
-        result = renameat2(
-            -100,
-            os.fsencode(source),
-            -100,
-            os.fsencode(destination),
-            1,  # RENAME_NOREPLACE
-        )
-        if result != 0:
-            error = ctypes.get_errno()
-            raise OrganizationError(
-                f"renameat2 directory move failed: {os.strerror(error)}"
-            )
+            rename_noreplace(source, destination)
+        except (OSError, FileError) as exc:
+            raise OrganizationError(f"atomic directory move failed: {exc}") from exc
