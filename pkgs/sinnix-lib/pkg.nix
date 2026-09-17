@@ -16,6 +16,7 @@ python3Packages.buildPythonPackage {
     "sinnix_lib.http"
     "sinnix_lib.ledger"
     "sinnix_lib.lock"
+    "sinnix_lib.note_links"
     "sinnix_lib.notify"
     "sinnix_lib.paths"
     "sinnix_lib.phone_inbox"

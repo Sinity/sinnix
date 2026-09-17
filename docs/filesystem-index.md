@@ -55,3 +55,20 @@ The reply includes source lines, full decisions, record hashes and ledger identi
 Reads are bounded to 8 MiB and 25,000 records. Malformed JSON fails the command without a partial result. Invalid definitions, including filename-shaped sha256 targets and timezone-free timestamps, are reported and excluded from lookup while remaining untouched on disk. Exit 2 indicates input/access failure; exit 1 indicates audit findings or ambiguous explanation.
 
 `report` emits a rebuildable Markdown collection-facet projection; the JSONL remains its only source of truth. Preserve original rows and actor attribution when adding fresh observations. A maintenance owner is not the topic of all data it stores, and a preservation constraint is not a backup certificate or deletion permission.
+
+## Portable note references
+
+`note-links` is a read-only repair planner for legacy wiki-style Markdown references. It reads only explicitly selected current roots and reference-only roots:
+
+```sh
+PYTHONPATH=pkgs/sinnix-lib python3 scripts/sinnix-fs note-links \
+  --root /path/to/current-notes \
+  --reference-root /path/to/historical-references \
+  --exclude-component native-workspace
+```
+
+Bare references resolve by a unique retained frontmatter ID, explicit alias, or exact scoped filename. Current roots precede historical roots. Path-qualified references require an exact scoped path; there is no basename fallback. Self-references, ambiguous names, unknown pipe syntax, and heading anchors are left unchanged. Frontmatter, code, comments, embeds and escaped references are not rewritten. The parser supports a narrow string-only frontmatter subset and never evaluates YAML tags or anchors.
+
+The output lists source hashes, target hashes and exact character-span proposals. It performs no writes. Reference-only roots supply targets but never source edits; native Git workspaces and declared exclusions remain explicit boundaries. File, byte, directory and depth budgets bound work. An incomplete or malformed scope emits no applicable changes rather than making uniqueness claims over a partial scan. Exit 2 means incomplete input/coverage, exit 1 means references were observed, and exit 0 means none were found.
+
+Applying a chosen proposal remains a separate operation: revalidate every identity-resolution input, preserve source preimages, reject concurrent changes, and check that all intended link destinations still resolve. Preserve newline encoding, original note IDs, and all non-link text. A historical reference remains a historical snapshot even after it becomes clickable; restoring a Git blob does not promote its plans or conclusions into current authority.
