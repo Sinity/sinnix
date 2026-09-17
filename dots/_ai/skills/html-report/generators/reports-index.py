@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Generate index.html over a directory of html-report artifacts.
 
-Usage: reports-index.py <reports-dir> [--out index.html]
+Usage: reports-index.py <reports-dir> [--out index.html] [--navigation-markdown PATH]
+
+Optional navigation.json adds subject links without copying their payloads.
+External collection links can set probe=false to avoid waking their disks.
 
 Reads every *.html recursively (the output index itself and
 *.pl.html translations are grouped under their base report), extracts title,
@@ -19,6 +22,10 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import html as html_mod
+import json
+import stat
+import tempfile
+from html.parser import HTMLParser
 import os
 import re
 import sys
@@ -32,9 +39,133 @@ STATUS_RE = re.compile(
 )
 GENERATED_RE = re.compile(r'generated</dt>\s*<dd>\s*<time[^>]*datetime="([^"]+)"')
 ANY_TIME_RE = re.compile(r'<time[^>]*class="age"[^>]*datetime="([^"]+)"')
-SUPERSEDED_RE = re.compile(r"superseded[- ]by", re.I)
 ACCENT_RE = re.compile(r'<html[^>]*data-accent="([a-z]+)"')
 DATE_IN_NAME_RE = re.compile(r"(\d{4}-\d{2}-\d{2})")
+
+
+
+def atomic_text(path: Path, text: str) -> None:
+    """Publish a complete UTF-8 page without exposing a partially written index."""
+    mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else 0o644
+    fd, temporary = tempfile.mkstemp(prefix="." + path.name + ".", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            os.fchmod(handle.fileno(), mode)
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def explicitly_superseded(text: str) -> bool:
+    """A mention in prose is not a declaration about the report itself."""
+    class Metadata(HTMLParser):
+        found = False
+
+        def handle_starttag(self, tag, attrs):
+            data = dict(attrs)
+            if tag == "meta" and data.get("name", "").lower() in (
+                "superseded-by", "report-superseded-by", "report:superseded-by"
+            ):
+                self.found |= bool((data.get("content") or "").strip())
+            if tag == "html":
+                self.found |= bool((data.get("data-superseded-by") or "").strip())
+            if tag == "link" and "superseded-by" in (data.get("rel") or "").split():
+                self.found |= bool((data.get("href") or "").strip())
+
+    parser = Metadata()
+    parser.feed(text)
+    # The existing report template also permits a metadata definition list.
+    match = re.search(r"<dt\b[^>]*>\s*superseded[- ]by\s*</dt>\s*<dd\b[^>]*>(.*?)</dd>", text, re.I | re.S)
+    target = html_mod.unescape(re.sub(r"<[^>]+>", "", match.group(1))).strip() if match else ""
+    return parser.found or target.casefold() not in ("", "—", "-", "none", "n/a", "unknown", "not applicable")
+
+
+def render_navigation(reports_dir: Path, out: Path) -> tuple[str, list[dict]]:
+    """Read optional links-only configuration; native resources remain authoritative.
+
+    navigation.json may be a symlink to an independently maintained private
+    manifest. probe=false avoids waking offline/automounted storage.
+    """
+    manifest = reports_dir / "navigation.json"
+    if not manifest.exists():
+        return "", []
+    if manifest.stat().st_size > 1024 * 1024:
+        raise ValueError("navigation.json exceeds the 1 MiB input bound")
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    if data.get("schema_version") != 1 or not isinstance(data.get("groups"), list):
+        raise ValueError("navigation.json requires schema_version=1 and groups")
+    if len(data["groups"]) > 32:
+        raise ValueError("navigation.json has too many groups")
+    sections, groups = [], []
+    total = 0
+    esc = html_mod.escape
+    for group in data["groups"]:
+        if not isinstance(group, dict) or not isinstance(group.get("title"), str) or not isinstance(group.get("items"), list):
+            raise ValueError("navigation groups require a title and items")
+        total += len(group["items"])
+        if total > 512:
+            raise ValueError("navigation.json has too many destinations")
+        items, rendered = [], []
+        for item in group["items"]:
+            if not isinstance(item, dict) or not isinstance(item.get("title"), str) or not isinstance(item.get("path"), str):
+                raise ValueError("navigation items require title and absolute filesystem path")
+            raw_path = item["path"]
+            if any(ord(ch) < 32 for ch in raw_path) or not Path(raw_path).is_absolute() or ".." in Path(raw_path).parts:
+                raise ValueError("navigation paths must be absolute, normalized filesystem paths")
+            target = Path(raw_path)
+            status = "not-probed"
+            if item.get("probe", True):
+                try:
+                    target.stat()
+                    status = "available"
+                except FileNotFoundError:
+                    status = "missing"
+                except OSError:
+                    status = "unavailable"
+            role, note = str(item.get("role", "resource")), str(item.get("note", ""))
+            try:
+                target.relative_to(reports_dir)
+                href, cls = quote(os.path.relpath(target, out.parent)), ""
+            except ValueError:
+                href, cls = target.as_uri(), "local-link"
+            items.append({**item, "status": status})
+            rendered.append(
+                f'<li class="nav-item" data-search="{esc(" ".join((group["title"], item["title"], raw_path, role, note)).casefold(), quote=True)}">'
+                f'<a class="{cls}" href="{esc(href, quote=True)}">{esc(item["title"])}</a> '
+                f'<span class="nav-role">{esc(role)}</span>'
+                f'<button type="button" class="copy-path" data-path="{esc(raw_path, quote=True)}" aria-label="Copy path: {esc(item["title"], quote=True)}">Copy path</button>'
+                f'<div class="nav-path">{esc(raw_path)}</div>'
+                + (f'<div class="nav-note">{esc(note)}</div>' if note else '')
+                + (f'<span class="nav-availability">{esc(status)} at generation</span>' if status != "available" else '')
+                + '</li>'
+            )
+        groups.append({"title": group["title"], "items": items})
+        sections.append(f'<details class="nav-group"><summary>{esc(group["title"])} <small>{len(items)}</small></summary><ul>{"".join(rendered)}</ul></details>')
+    if not sections:
+        return "", groups
+    return (
+        '<section aria-label="Subject navigation"><h2>Start with a subject</h2>'
+        '<p class="nav-help">These are links to existing owners, not copied task or source records. '
+        'In the web viewer, use Copy path for files outside reports. Open this index locally for direct file links. '
+        'Availability is checked when generated; external disks marked not-probed are not touched.</p>'
+        '<div class="nav-grid">' + ''.join(sections) + '</div><p id="copy-result" role="status" aria-live="polite"></p></section>', groups
+    )
+
+
+def navigation_markdown(groups: list[dict], destination: Path) -> str:
+    lines = ["# Subject navigation", "", "Generated from the private navigation manifest. Links select existing material; they do not replace its owning application or prove a historical plan was executed.", ""]
+    for group in groups:
+        lines += ["## " + group["title"], ""]
+        for item in group["items"]:
+            label = item["title"].replace("[", "\\[").replace("]", "\\]")
+            href = quote(os.path.relpath(item["path"], destination.parent))
+            lines.append(f'- [{label}]({href}) — {item.get("role", "resource")}. {item.get("note", "")}')
+        lines.append("")
+    return "\n".join(lines) + "\n"
 
 
 def report_meta(p: Path) -> dict:
@@ -52,14 +183,15 @@ def report_meta(p: Path) -> dict:
         "title": title,
         "generated": gen or (name_date.group(1) if name_date else ""),
         "status": (STATUS_RE.search(text) or [None, ""])[1],
-        "superseded": bool(SUPERSEDED_RE.search(text)),
+        "superseded": explicitly_superseded(text),
         "accent": accent,
         "size_kb": p.stat().st_size // 1024,
         "mtime": dt.datetime.fromtimestamp(p.stat().st_mtime),
     }
 
 
-def build(reports_dir: Path, out: Path) -> int:
+def build(reports_dir: Path, out: Path, navigation_out: Path | None = None) -> int:
+    nav_html, nav_groups = render_navigation(reports_dir, out)
     files = sorted(
         [
             p
@@ -123,18 +255,43 @@ a{{color:var(--accent)}}
 footer{{color:var(--muted);font-size:.85rem;padding:1rem 0}}
 input{{width:100%;max-width:24rem;margin:.4rem 0;padding:.35rem .6rem;border:1px solid var(--line);
 border-radius:.4rem;background:var(--bg);color:var(--ink)}}
+.nav-grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,19rem),1fr));gap:.55rem;margin:1rem 0}}
+.nav-group{{background:var(--panel);border:1px solid var(--line);border-radius:.4rem;padding:.45rem .7rem;font-size:.88rem}}
+.nav-group summary{{cursor:pointer;font-weight:650}} .nav-group small,.nav-role{{color:var(--muted);font-weight:400;font-size:.75rem}}
+.nav-group ul{{padding:0;list-style:none;margin:.4rem 0}} .nav-item{{border-top:1px solid var(--line);padding:.55rem 0}}
+.nav-path{{font: .7rem/1.4 ui-monospace,monospace;overflow-wrap:anywhere;color:var(--muted);margin:.2rem 0}}
+.nav-note,.nav-help,.nav-availability{{font-size:.78rem;color:var(--muted)}} .nav-help{{max-width:65rem}}
+.copy-path{{float:right;font-size:.7rem;padding:.15rem .35rem;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:.25rem;cursor:pointer}}
+[hidden]{{display:none!important}} h2{{font-size:1.05rem}} [aria-disabled=true]{{color:var(--ink);text-decoration:none;cursor:default}}
+#copy-result{{font-size:.8rem;min-height:1.2em}}
 </style></head>
 <body><main>
 <h1>Reports — {reports_dir}</h1>
 <p>{len(rows)} reports · generated {now} · superseded rows dimmed</p>
-<input placeholder="filter…" oninput="const q=this.value.toLowerCase();
-document.querySelectorAll('tbody tr').forEach(r=>r.style.display=r.textContent.toLowerCase().includes(q)?'':'none')">
+<input id="filter" aria-label="Search subjects and reports" placeholder="Find a subject, file, project or report…  /" oninput="filterAll(this.value)">
+{nav_html}
+<h2>Published reports</h2>
 <table><thead><tr><th>report</th><th>modified</th><th>status</th><th>identity</th><th>size</th></tr></thead>
 <tbody>{"".join(trs)}</tbody></table>
 <footer>regenerate: <code>python3 generators/reports-index.py {reports_dir}</code>
 (html-report skill) — every row measured from the files at generation time</footer>
 </main>
 <script>
+function filterAll(value){{
+ const q=value.trim().toLowerCase();
+ document.querySelectorAll('tbody tr').forEach(r=>r.hidden=!r.textContent.toLowerCase().includes(q));
+ document.querySelectorAll('.nav-item').forEach(r=>r.hidden=!r.dataset.search.includes(q));
+ document.querySelectorAll('.nav-group').forEach(g=>{{g.hidden=![...g.querySelectorAll('.nav-item')].some(r=>!r.hidden);g.open=Boolean(q)&&!g.hidden}});
+}}
+if(location.protocol!=='file:')document.querySelectorAll('.local-link').forEach(a=>{{a.removeAttribute('href');a.setAttribute('aria-disabled','true');a.title='Use Copy path, or open this index locally'}});
+document.querySelectorAll('.copy-path').forEach(b=>b.addEventListener('click',async()=>{{
+ const result=document.getElementById('copy-result');
+ try{{if(navigator.clipboard&&navigator.clipboard.writeText)await navigator.clipboard.writeText(b.dataset.path);
+ else{{const t=document.createElement('textarea');t.value=b.dataset.path;document.body.appendChild(t);t.select();const ok=document.execCommand('copy');t.remove();if(!ok)throw new Error('Clipboard unavailable')}}
+ result.textContent='Copied: '+b.dataset.path;
+ }}catch(e){{result.textContent='Copy this path: '+b.dataset.path}}
+}}));
+document.addEventListener('keydown',e=>{{const f=document.getElementById('filter');if(e.key==='/'&&!['INPUT','TEXTAREA'].includes(document.activeElement.tagName)){{e.preventDefault();f.focus()}}if(e.key==='Escape'&&document.activeElement===f){{f.value='';filterAll('');f.blur()}}}});
 document.querySelectorAll('th').forEach((th,i)=>th.addEventListener('click',()=>{{
   const tb=th.closest('table');const dir=th.dataset.d=th.dataset.d==='a'?'d':'a';
   const val=td=>td.dataset.v!==undefined?+td.dataset.v:td.textContent.trim();
@@ -144,7 +301,9 @@ document.querySelectorAll('th').forEach((th,i)=>th.addEventListener('click',()=>
 </script>
 </body></html>
 """
-    out.write_text(page)
+    atomic_text(out, page)
+    if navigation_out is not None:
+        atomic_text(navigation_out, navigation_markdown(nav_groups, navigation_out))
     print(f"wrote {out} ({len(rows)} reports)")
     return 0
 
@@ -153,9 +312,10 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("reports_dir", type=Path)
     ap.add_argument("--out", type=Path, default=None)
+    ap.add_argument("--navigation-markdown", type=Path, default=None, help="Also publish a Markdown projection of navigation.json")
     args = ap.parse_args()
     out = args.out or (args.reports_dir / "index.html")
-    return build(args.reports_dir, out)
+    return build(args.reports_dir, out, args.navigation_markdown)
 
 
 if __name__ == "__main__":

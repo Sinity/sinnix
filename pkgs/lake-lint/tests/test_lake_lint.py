@@ -45,7 +45,10 @@ def required_nodes(prefix: Path) -> list[str]:
 def build_lake(prefix: Path) -> list[str]:
     nodes = required_nodes(prefix)
     for node in nodes:
-        Path(node).mkdir(parents=True, exist_ok=True)
+        if Path(node).name == "INVENTORY.md":
+            Path(node).touch()
+        else:
+            Path(node).mkdir(parents=True, exist_ok=True)
     return nodes
 
 
@@ -127,3 +130,66 @@ def test_dangling_unexpected_alias_is_reported(tmp_path):
     result = run(prefix)
     assert result.returncode == 1
     assert f"UNEXPECTED node: {node}" in result.stdout
+
+
+def test_required_directory_cannot_be_a_regular_file(tmp_path):
+    prefix = tmp_path / "lake"
+    build_lake(prefix)
+    node = prefix / "realm" / "health"
+    node.rmdir()
+    node.write_text("not a directory")
+    result = run(prefix)
+    assert result.returncode == 1
+    assert f"WRONG TYPE (expected directory): {node}" in result.stdout
+
+
+def test_inventory_cannot_be_a_directory(tmp_path):
+    prefix = tmp_path / "lake"
+    build_lake(prefix)
+    node = prefix / "realm" / "INVENTORY.md"
+    node.unlink()
+    node.mkdir()
+    result = run(prefix)
+    assert result.returncode == 1
+    assert f"WRONG TYPE (expected regular file): {node}" in result.stdout
+
+
+def test_double_dot_unexpected_directory_is_not_invisible(tmp_path):
+    prefix = tmp_path / "lake"
+    build_lake(prefix)
+    node = prefix / "realm" / "..unclassified"
+    node.mkdir()
+    result = run(prefix)
+    assert result.returncode == 1
+    assert f"UNEXPECTED node: {node}" in result.stdout
+
+
+def test_empty_or_invalid_cache_marker_does_not_hide_data(tmp_path):
+    prefix = tmp_path / "lake"
+    build_lake(prefix)
+    cache = prefix / "realm" / ".cache-looking-data"
+    cache.mkdir()
+    for payload in ("", "not a cache", "Signature: wrong"):
+        (cache / "CACHEDIR.TAG").write_text(payload)
+        assert run(prefix).returncode == 1
+
+
+def test_alias_to_cache_is_still_an_unexpected_node(tmp_path):
+    prefix = tmp_path / "lake"
+    build_lake(prefix)
+    cache = tmp_path / "real-cache"
+    cache.mkdir()
+    (cache / "CACHEDIR.TAG").write_text("Signature: 8a477f597d28d172789f06886806bc55\n")
+    (prefix / "realm" / ".alias").symlink_to(cache, target_is_directory=True)
+    assert run(prefix).returncode == 1
+
+
+def test_symlinked_cache_marker_is_not_a_declaration(tmp_path):
+    prefix = tmp_path / "lake"
+    build_lake(prefix)
+    marker = tmp_path / "marker"
+    marker.write_text("Signature: 8a477f597d28d172789f06886806bc55\n")
+    cache = prefix / "realm" / ".cache-looking-data"
+    cache.mkdir()
+    (cache / "CACHEDIR.TAG").symlink_to(marker)
+    assert run(prefix).returncode == 1
