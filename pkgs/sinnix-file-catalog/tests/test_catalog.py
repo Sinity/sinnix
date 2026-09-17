@@ -244,3 +244,57 @@ def test_relocate_repairs_after_unrelated_payload_is_also_renamed(
     second.rename(second_new)
     result = invoke(catalog, "relocate", str(row[str(first)]["id"]), str(first_new))
     assert result.returncode == 0, result.stderr
+
+
+def test_audit_reports_all_mismatches_without_rebinding(tmp_path: Path) -> None:
+    a, b = tmp_path / "a.txt", tmp_path / "b.txt"
+    a.write_text("first")
+    b.write_text("second")
+    catalog = tmp_path / "catalog.json"
+    assert import_rows(catalog, [observation(a), observation(b)]).returncode == 0
+    data = json.loads(catalog.read_text())
+    data["assets"][0]["identity"]["device"] += 1
+    catalog.write_text(json.dumps(data))
+    b.write_text("replacement payload")
+    before = catalog.read_bytes()
+    result = invoke(catalog, "audit")
+    assert result.returncode == 1
+    audit = json.loads(result.stdout)
+    assert audit["counts"] == {"device_only_mismatch": 1, "identity_mismatch": 1}
+    assert len(audit["findings"]) == 2
+    assert catalog.read_bytes() == before
+    assert invoke(catalog, "validate").returncode != 0
+    # Audit must not silently let a later import accept changed identity.
+    assert import_rows(catalog, [observation(a)]).returncode != 0
+    assert catalog.read_bytes() == before
+
+
+def test_audit_checks_remaining_assets_after_missing_path(tmp_path: Path) -> None:
+    a, b = tmp_path / "a.txt", tmp_path / "b.txt"
+    a.write_text("a")
+    b.write_text("b")
+    catalog = tmp_path / "catalog.json"
+    assert import_rows(catalog, [observation(a), observation(b)]).returncode == 0
+    a.unlink()
+    result = invoke(catalog, "audit", "--all")
+    assert result.returncode == 1
+    audit = json.loads(result.stdout)
+    assert audit["asset_count"] == 2
+    assert audit["counts"]["match"] == 1
+    assert len(audit["findings"]) == 2
+
+
+def test_audit_is_not_a_content_inspection_or_collection_membership_check(tmp_path: Path) -> None:
+    directory = tmp_path / "collection"
+    directory.mkdir()
+    catalog = tmp_path / "catalog.json"
+    assert import_rows(catalog, [observation(directory, kind="collection")]).returncode == 0
+    (directory / "new-member").write_text("membership changed")
+    before = catalog.read_bytes()
+    result = invoke(catalog, "audit")
+    assert result.returncode == 0, result.stderr
+    audit = json.loads(result.stdout)
+    assert audit["counts"] == {"match": 1}
+    assert audit["findings"] == []
+    assert "no payload hash" in audit["scope"]
+    assert catalog.read_bytes() == before

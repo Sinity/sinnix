@@ -331,6 +331,59 @@ def cmd_relocate(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_audit(args: argparse.Namespace) -> int:
+    """Report every location mismatch without reading payloads or changing identity.
+
+    Device-only drift is a diagnosis, never an identity-rebinding waiver.
+    Collection membership is deliberately excluded from identity comparison.
+    """
+    catalog = load_catalog(Path(args.catalog), paths=False)
+    rows: list[dict[str, Any]] = []
+    counts: dict[str, int] = {}
+    for asset in catalog["assets"]:
+        p = Path(asset["current_path"])
+        row: dict[str, Any] = {"id": asset["id"], "path": str(p), "kind": asset["kind"]}
+        try:
+            actual = identity(p)
+            check_path_kind(p, asset["kind"])
+            keys = ("device", "inode") if asset["kind"] == "collection" else (
+                "device", "inode", "size", "mtime_ns", "mode"
+            )
+            differences = [key for key in keys if asset["identity"][key] != actual[key]]
+            row["status"] = (
+                "match" if not differences else
+                "device_only_mismatch" if differences == ["device"] else
+                "identity_mismatch"
+            )
+            if differences:
+                row["differences"] = {
+                    key: {"recorded": asset["identity"][key], "observed": actual[key]}
+                    for key in differences
+                }
+        except FileNotFoundError:
+            row["status"] = "missing"
+        except PermissionError:
+            row["status"] = "unavailable"
+            row["reason"] = "permission denied"
+        except (CatalogError, OSError) as exc:
+            row["status"] = "unavailable"
+            row["reason"] = str(exc)
+        counts[row["status"]] = counts.get(row["status"], 0) + 1
+        if row["status"] != "match" or args.all:
+            rows.append(row)
+    result = {
+        "schema": "sinnix.file-catalog-audit.v1",
+        "observed_at": now(),
+        "catalog_updated_at": catalog.get("updated_at"),
+        "asset_count": len(catalog["assets"]),
+        "counts": counts,
+        "scope": "Filesystem metadata only; no payload hash verification or identity rebinding.",
+        "findings": rows,
+    }
+    print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+    return 0 if counts.get("match", 0) == len(catalog["assets"]) else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--catalog", required=True, help="catalog JSON path")
@@ -340,6 +393,9 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("show"); p.add_argument("id"); p.set_defaults(func=cmd_show)
     p = sub.add_parser("relocate"); p.add_argument("id"); p.add_argument("new_path"); p.set_defaults(func=cmd_relocate)
     p = sub.add_parser("validate"); p.set_defaults(func=lambda a: (load_catalog(Path(a.catalog)) or 0) and 0)
+    p = sub.add_parser("audit", help="Read-only, all-asset metadata mismatch report; never repairs identity")
+    p.add_argument("--all", action="store_true", help="Include matching assets as well as findings")
+    p.set_defaults(func=cmd_audit)
     args = parser.parse_args(argv)
     try: return args.func(args)
     except (CatalogError, OSError) as e: return fail(str(e))
