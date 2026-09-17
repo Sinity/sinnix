@@ -38,7 +38,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections import Counter
+from collections import Counter, deque
 from pathlib import Path
 
 DEFAULT_ROOTS = ["/realm", "/outer-realm"]
@@ -118,7 +118,7 @@ def materialize_pair(
             raise SystemExit(f"materialize produced no rows (duckdb said: {rows!r} "
                              f"{check.stderr.strip()})")
         parquet_check = duckdb_query(
-            staged_db, f"SELECT count(*) FROM read_parquet('{staged_parquet}')",
+            staged_db, f"SELECT count(*) FROM read_parquet({sql_string(staged_parquet)})",
         )
         if (parquet_check.returncode != 0 or parquet_check.stdout.strip() != rows):
             raise SystemExit(f"parquet validation failed for {staged_parquet}: "
@@ -230,9 +230,9 @@ def inventory_scan(roots: list[str], max_depth: int, out_path: Path, progress_ev
     started = time.monotonic()
 
     with atomic_text_writer(out_path, fsync=True, mode=0o600) as out:
-        queue: list[tuple[str, int]] = [(r, 0) for r in roots if os.path.isdir(r)]
+        queue = deque((r, 0) for r in roots)
         while queue:
-            path, depth = queue.pop(0)
+            path, depth = queue.popleft()
             # error rows MUST carry "parent" like ordinary rows do -- without
             # it, the rollup's recursive join (n.parent = d.path) never links
             # an error row to its ancestors, has_error never propagates, and
@@ -249,6 +249,12 @@ def inventory_scan(roots: list[str], max_depth: int, out_path: Path, progress_ev
                 written += 1
                 continue
 
+            if not stat.S_ISDIR(st.st_mode):
+                out.write(json.dumps(safe({"schema": INVENTORY_SCHEMA, "path": path,
+                    "parent": parent, "depth": depth,
+                    "error": "not a directory (root symlinks are not followed)"})) + "\n")
+                written += 1
+                continue
             try:
                 with os.scandir(path) as it:
                     entries = list(it)
@@ -427,8 +433,10 @@ places at once, and there are few enough to index individually.
 
 Three things per file make the strewn-ness visible:
 
-  sha256    exact duplicates, wherever they sit. This is the one that proves
-            "the same file is in six places" rather than suggesting it.
+  sha256    full-file digest for bounded small files; never a sampled hash.
+  sample_sha256  large-file head/tail/size fingerprint; candidate grouping
+            only. Equal samples do NOT establish equal contents. Neither
+            group authorizes deletion or ignores native provenance.
   title     for markdown/HTML, the first heading; for the rest, the filename.
             Lets near-duplicates and topic clusters surface by name.
   head      the first few hundred characters, so a later pass can classify
@@ -439,7 +447,73 @@ anything inside a capture lane (those are streams, described by their lane),
 media, build output, and VCS internals.
 """
 
-CONTENT_SCHEMA = "sinnix-fs-content-v1"
+CONTENT_SCHEMA = "sinnix-fs-content-v2"
+CONTENT_FULL_HASH_LIMIT = 8 << 20
+CONTENT_SAMPLE_BYTES = 1 << 20
+CONTENT_COLUMNS = {
+    "schema": "VARCHAR", "path": "VARCHAR", "dir": "VARCHAR", "name": "VARCHAR",
+    "ext": "VARCHAR", "bytes": "BIGINT", "mtime": "DOUBLE", "sha256": "VARCHAR",
+    "sample_sha256": "VARCHAR", "fingerprint_kind": "VARCHAR", "fingerprint_bytes": "BIGINT",
+    "title": "VARCHAR", "head": "VARCHAR", "magic_type": "VARCHAR", "line_count": "BIGINT",
+    "error": "VARCHAR", "kind": "VARCHAR", "symlink_target": "VARCHAR",
+    "exclusion_reason": "VARCHAR",
+}
+
+
+def sql_string(value: object) -> str:
+    return "'" + str(value).replace("'", "''") + "'"
+
+
+def content_digest_views_sql(*, legacy: bool = False) -> str:
+    """Rebuild only derived comparison views. V1 large hashes were samples.
+
+    The source table remains an observation, not a destructive-cleanup plan.
+    Legacy sample values are not eligible for exact-content grouping.
+    """
+    exact = ("schema = 'sinnix-fs-content-v1' AND bytes BETWEEN 0 AND 8388608"
+             if legacy else "fingerprint_kind = 'sha256-full'")
+    sampled = ("sha256" if legacy else "sample_sha256")
+    sample_condition = ("schema = 'sinnix-fs-content-v1' AND bytes > 8388608"
+                        if legacy else "fingerprint_kind = 'sha256-head-tail-size-v1'")
+    return f"""
+CREATE OR REPLACE VIEW duplicates AS
+SELECT sha256, count(*) AS copies, sum(bytes) AS total_bytes,
+       min(bytes) AS unit_bytes, list(path) AS paths, min(name) AS a_name
+FROM files
+WHERE error IS NULL AND {exact}
+  AND regexp_full_match(sha256, '[0-9a-fA-F]{{64}}')
+GROUP BY sha256, bytes HAVING count(*) > 1
+ORDER BY (count(*)-1) * min(bytes) DESC;
+CREATE OR REPLACE VIEW sampled_duplicate_candidates AS
+SELECT {sampled} AS sample_sha256, count(*) AS candidates, min(bytes) AS unit_bytes,
+       list(path) AS paths,
+       'Sample equality only; full-byte verification and owner review required' AS limitation
+FROM files WHERE error IS NULL AND {sample_condition}
+  AND regexp_full_match({sampled}, '[0-9a-fA-F]{{64}}')
+GROUP BY {sampled}, bytes HAVING count(*) > 1;
+"""
+
+
+def content_views_refresh(db: Path) -> int:
+    """Repair comparison semantics without rescanning or changing file rows."""
+    if not db.is_file():
+        print(f"sinnix-fs content-views: database absent: {db}", file=sys.stderr)
+        return 1
+    probe = duckdb_query(db, "SELECT column_name FROM information_schema.columns WHERE table_name='files'")
+    if probe.returncode:
+        print(probe.stderr, file=sys.stderr)
+        return 1
+    columns = set(probe.stdout.splitlines())
+    if not {"schema", "path", "bytes", "sha256", "error", "name"} <= columns:
+        raise ValueError("content files table does not satisfy the observed v1/v2 contract")
+    legacy = not {"fingerprint_kind", "sample_sha256"} <= columns
+    proc = run_duckdb_file(db, "BEGIN TRANSACTION;\n" + content_digest_views_sql(legacy=legacy) + "COMMIT;", "content-views")
+    if proc.returncode:
+        print(proc.stderr, file=sys.stderr)
+        return 1
+    print(f"sinnix-fs content-views: corrected {'legacy v1' if legacy else 'typed'} comparison views; source rows and payloads unchanged")
+    return 0
+
 
 CONTENT_EXTS = {
     ".md", ".markdown", ".txt", ".org", ".rst", ".adoc",
@@ -474,8 +548,8 @@ CONTENT_EXCLUDE_PREFIXES = (
     "/nix/store/",
 )
 
-# A JSON/CSV bigger than this is data, not a document; a markdown bigger than
-# this is a generated dump. Hash and record it, but do not read it in.
+# Above this bound, omit the content excerpt without inferring the file
+# is disposable or generated. Fingerprint scope is recorded separately.
 CONTENT_MAX_READ_BYTES = 2 << 20
 CONTENT_HEAD_CHARS = 400
 
@@ -484,8 +558,24 @@ CONTENT_TITLE_TAG = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.S)
 CONTENT_YAML_TITLE = re.compile(r"^title:\s*(.+?)\s*$", re.M)
 
 
+# This is a content-inspection boundary, never a deletion or backup exclusion.
+# The directory inventory remains independent; native owners remain queryable.
+# Scratch does not become durable just because a generic text scanner sees it.
+CONTENT_COLLECTION_BOUNDARIES = {
+    "/realm/tmp": "temporary execution workspace; promote retained artifacts before cataloging",
+    "/realm/state/polylogue": "Polylogue owns archive contents and native querying",
+    "/realm/archive/polylogue-old-home": "preserved native Polylogue recovery collection",
+    "/realm/state/stashbox": "Stashbox owns media catalog and derived resources",
+}
+
+
 def content_excluded(path: str) -> str | None:
-    if path.startswith(CONTENT_EXCLUDE_PREFIXES):
+    normalized = path.rstrip("/") or "/"
+    for boundary, reason in CONTENT_COLLECTION_BOUNDARIES.items():
+        if normalized == boundary or normalized.startswith(boundary + "/"):
+            return reason
+    if any(normalized == prefix.rstrip("/") or normalized.startswith(prefix)
+           for prefix in CONTENT_EXCLUDE_PREFIXES):
         return "bulk lane (stream, media, cache or build)"
     parts = set(Path(path).parts)
     hit = parts & CONTENT_EXCLUDE_DIR_PARTS
@@ -515,9 +605,9 @@ def content_magic_type(path: Path) -> str | None:
 
 
 def content_extract(path: Path, size: int, ext: str) -> tuple[str | None, str | None, int | None, str | None]:
-    """(title, head, error) — best effort, never fatal, but never silent either.
+    """(title, head, line_count, error) with a bounded, non-stream read.
 
-    Returns the reason in the third slot instead of swallowing it. A file that
+    Returns the reason in the fourth slot instead of swallowing it. A file that
     could not be read used to be indistinguishable from a file with no title:
     both produced (None, None). That is the same shape as sinnix's other
     silent-success bugs -- the sibling scanner (sinnix-fs inventory) already
@@ -526,7 +616,15 @@ def content_extract(path: Path, size: int, ext: str) -> tuple[str | None, str | 
     if size > CONTENT_MAX_READ_BYTES or ext in {".pdf", ".docx", ".odt", ".epub", ".rtf"}:
         return None, None, None, None
     try:
-        raw = path.read_text(encoding="utf-8", errors="replace")
+        descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0))
+        with os.fdopen(descriptor, "rb") as handle:
+            opened = os.fstat(handle.fileno())
+            if not stat.S_ISREG(opened.st_mode):
+                return None, None, None, "not a regular file"
+            payload = handle.read(CONTENT_MAX_READ_BYTES + 1)
+        if len(payload) > CONTENT_MAX_READ_BYTES:
+            return None, None, None, "grew beyond extraction bound"
+        raw = payload.decode("utf-8", errors="replace")
     except PermissionError:
         return None, None, None, "permission denied"
     except OSError as exc:
@@ -558,29 +656,56 @@ def content_extract(path: Path, size: int, ext: str) -> tuple[str | None, str | 
     return title, head, line_count, None
 
 
-def content_sha256_of(path: Path, size: int) -> str | None:
-    """Full hash for small files; head+tail+size for large ones.
+def content_fingerprint(path: Path, size: int, expected: os.stat_result | None = None) -> dict:
+    """Read a bounded fingerprint of one stable regular file, never a stream.
 
-    A full hash of a 500 MB export costs minutes and buys nothing here: the
-    question is whether two paths hold the same thing, and head+tail+size
-    answers it with no realistic collision among documents.
+    O_NONBLOCK prevents a substituted FIFO from hanging the scan; O_NOFOLLOW
+    and lstat/fstat checks keep symlink aliases out of duplicate candidates.
+    Metadata stability detects ordinary concurrent writes, not adversarial
+    manipulation or the validity of a historical content claim.
     """
-    h = hashlib.sha256()
+    empty = {"sha256": None, "sample_sha256": None,
+             "fingerprint_kind": None, "fingerprint_bytes": 0}
+    def token(st):
+        return (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
     try:
-        with path.open("rb") as f:
-            if size <= 8 << 20:
-                for chunk in iter(lambda: f.read(1 << 20), b""):
-                    h.update(chunk)
+        before = path.lstat()
+        if not stat.S_ISREG(before.st_mode):
+            return {**empty, "error": "not a regular file"}
+        if before.st_size != size or (expected is not None and token(before) != token(expected)):
+            return {**empty, "error": "changed before fingerprint"}
+        flags = os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+        fd = os.open(path, flags)
+        with os.fdopen(fd, "rb") as handle:
+            opened = os.fstat(handle.fileno())
+            if not stat.S_ISREG(opened.st_mode) or token(before) != token(opened):
+                return {**empty, "error": "replaced before fingerprint"}
+            h = hashlib.sha256()
+            if size <= CONTENT_FULL_HASH_LIMIT:
+                payload = handle.read(size + 1)
+                h.update(payload)
+                read_bytes = len(payload)
+                kind, field = "sha256-full", "sha256"
+                if read_bytes != size:
+                    return {**empty, "error": "changed while fingerprinting"}
             else:
-                h.update(f.read(1 << 20))
-                f.seek(-(1 << 20), os.SEEK_END)
-                h.update(f.read(1 << 20))
-                h.update(str(size).encode())
+                head = handle.read(CONTENT_SAMPLE_BYTES)
+                handle.seek(-CONTENT_SAMPLE_BYTES, os.SEEK_END)
+                tail = handle.read(CONTENT_SAMPLE_BYTES)
+                if len(head) != CONTENT_SAMPLE_BYTES or len(tail) != CONTENT_SAMPLE_BYTES:
+                    return {**empty, "error": "short sampled read"}
+                h.update(head); h.update(tail); h.update(str(size).encode())
+                read_bytes = len(head) + len(tail)
+                kind, field = "sha256-head-tail-size-v1", "sample_sha256"
+            after = os.fstat(handle.fileno())
+        if token(before) != token(after) or token(before) != token(path.lstat()):
+            return {**empty, "error": "changed while fingerprinting"}
+        return {**empty, field: h.hexdigest(), "fingerprint_kind": kind,
+                "fingerprint_bytes": read_bytes, "error": None}
     except PermissionError:
-        return "ERR:permission denied"
+        return {**empty, "error": "permission denied"}
     except OSError as exc:
-        return f"ERR:{exc.__class__.__name__}"
-    return h.hexdigest()
+        return {**empty, "error": f"fingerprint failed: {exc.__class__.__name__}"}
 
 
 def content_walk(roots: list[str], out_path: Path, progress_every: int) -> int:
@@ -590,20 +715,65 @@ def content_walk(roots: list[str], out_path: Path, progress_every: int) -> int:
     skipped = 0
     started = time.monotonic()
     with atomic_text_writer(out_path, fsync=True, mode=0o600) as out:
+        def boundary_error(path, reason):
+            nonlocal written, errored
+            out.write(json.dumps(safe({"schema": CONTENT_SCHEMA, "path": str(path),
+                "dir": str(Path(path).parent), "name": Path(path).name,
+                "kind": "directory", "error": reason, "sha256": None,
+                "sample_sha256": None}), ensure_ascii=False) + "\n")
+            written += 1
+            errored += 1
+        boundary_paths: set[str] = set()
+        def boundary_record(path, reason):
+            nonlocal written, skipped
+            path = str(Path(path))
+            if path in boundary_paths:
+                return
+            boundary_paths.add(path)
+            out.write(json.dumps(safe({"schema": CONTENT_SCHEMA, "path": path,
+                "dir": str(Path(path).parent), "name": Path(path).name,
+                "kind": "collection_boundary", "exclusion_reason": reason,
+                "error": None, "sha256": None, "sample_sha256": None,
+                "head": None, "title": None}), ensure_ascii=False) + "\n")
+            written += 1
+            skipped += 1
         for root in roots:
-            for dirpath, dirnames, filenames in os.walk(root, topdown=True):
-                if content_excluded(dirpath + "/"):
-                    dirnames[:] = []
-                    skipped += len(filenames)
+            try:
+                root_stat = Path(root).lstat()
+                if not stat.S_ISDIR(root_stat.st_mode):
+                    boundary_error(root, "not a directory (root aliases are not followed)")
                     continue
-                dirnames[:] = [d for d in dirnames if d not in CONTENT_EXCLUDE_DIR_PARTS]
+            except OSError as exc:
+                boundary_error(root, f"root unavailable: {exc.__class__.__name__}")
+                continue
+            excluded = content_excluded(root)
+            if excluded:
+                boundary_record(root, excluded)
+                continue
+            def walk_error(exc):
+                boundary_error(exc.filename or root, f"directory unreadable: {exc.__class__.__name__}")
+            for dirpath, dirnames, filenames in os.walk(root, topdown=True, onerror=walk_error):
+                excluded = content_excluded(dirpath)
+                if excluded:
+                    boundary_record(dirpath, excluded)
+                    dirnames[:] = []
+                    continue
+                descend = []
+                for child in dirnames:
+                    child_path = os.path.join(dirpath, child)
+                    excluded = content_excluded(child_path)
+                    if excluded:
+                        boundary_record(child_path, excluded)
+                    else:
+                        descend.append(child)
+                dirnames[:] = descend
                 for fn in filenames:
                     ext = Path(fn).suffix.lower()
                     if ext not in CONTENT_EXTS:
                         continue
                     p = Path(dirpath) / fn
                     try:
-                        st = p.stat()
+                        st = p.lstat()
                     except PermissionError:
                         # An unreadable file used to `continue` -- it vanished
                         # from the index entirely, indistinguishable from a file
@@ -614,6 +784,7 @@ def content_walk(roots: list[str], out_path: Path, progress_every: int) -> int:
                             "name": fn, "ext": ext, "error": "permission denied",
                         }), ensure_ascii=False) + "\n")
                         errored += 1
+                        written += 1
                         continue
                     except OSError as exc:
                         out.write(json.dumps(safe({
@@ -622,14 +793,23 @@ def content_walk(roots: list[str], out_path: Path, progress_every: int) -> int:
                             "error": f"stat failed: {exc.__class__.__name__}",
                         }), ensure_ascii=False) + "\n")
                         errored += 1
+                        written += 1
                         continue
-                    if not st.st_size:
+                    if not stat.S_ISREG(st.st_mode):
+                        is_link = stat.S_ISLNK(st.st_mode)
+                        out.write(json.dumps(safe({
+                            "schema": CONTENT_SCHEMA, "path": str(p), "dir": dirpath,
+                            "name": fn, "ext": ext, "bytes": st.st_size,
+                            "kind": "symlink" if is_link else "special",
+                            "error": "alias not traversed" if is_link else "not a regular file",
+                            "sha256": None, "sample_sha256": None,
+                        }), ensure_ascii=False) + "\n")
+                        written += 1
+                        skipped += 1
                         continue
                     title, head, line_count, read_error = content_extract(p, st.st_size, ext)
-                    digest = content_sha256_of(p, st.st_size)
-                    if isinstance(digest, str) and digest.startswith("ERR:"):
-                        read_error = read_error or digest[4:]
-                        digest = None
+                    fingerprint = content_fingerprint(p, st.st_size, expected=st)
+                    read_error = read_error or fingerprint["error"]
                     if read_error:
                         errored += 1
                     # line_count is NULL for anything extract() skipped (too
@@ -645,7 +825,8 @@ def content_walk(roots: list[str], out_path: Path, progress_every: int) -> int:
                         "ext": ext,
                         "bytes": st.st_size,
                         "mtime": st.st_mtime,
-                        "sha256": digest,
+                        **fingerprint,
+                        "kind": "file",
                         "title": title,
                         "head": head,
                         "magic_type": content_magic_type(p),
@@ -660,33 +841,32 @@ def content_walk(roots: list[str], out_path: Path, progress_every: int) -> int:
     # prune-exclusion, `errored` is the scanner failing to see something it was
     # asked to see. Conflating them is how an unreadable subtree reads as an
     # intentionally-excluded one.
-    print(f"sinnix-fs content: {written} files ({skipped} in excluded trees, "
+    print(f"sinnix-fs content: {written} observations ({skipped} boundaries/nonregular entries, "
           f"{errored} unreadable) in {time.monotonic()-started:.0f}s -> {out_path}")
     return written
 
 
 def content_materialize(jsonl: Path, db: Path, parquet: Path) -> None:
+    columns = "{" + ", ".join(sql_string(k) + ": " + sql_string(v) for k, v in CONTENT_COLUMNS.items()) + "}"
+    exact = "regexp_full_match(sha256, '[0-9a-fA-F]{64}') AND error IS NULL AND bytes >= 0 AND ((schema = 'sinnix-fs-content-v2' AND fingerprint_kind = 'sha256-full') OR (schema = 'sinnix-fs-content-v1' AND bytes <= 8388608))"
+    sample = "error IS NULL AND bytes > 8388608 AND ((schema = 'sinnix-fs-content-v2' AND fingerprint_kind = 'sha256-head-tail-size-v1' AND regexp_full_match(sample_sha256, '[0-9a-fA-F]{64}')) OR (schema = 'sinnix-fs-content-v1' AND regexp_full_match(sha256, '[0-9a-fA-F]{64}')))"
     sql = f"""
 DROP TABLE IF EXISTS files;
 CREATE TABLE files AS
-SELECT *,
+SELECT * EXCLUDE (sha256, sample_sha256, fingerprint_kind),
+  CASE WHEN {exact} THEN lower(sha256) ELSE NULL END AS sha256,
+  CASE WHEN {sample} THEN lower(CASE WHEN schema = 'sinnix-fs-content-v1' THEN sha256 ELSE sample_sha256 END) ELSE NULL END AS sample_sha256,
+  CASE WHEN {exact} THEN 'sha256-full' WHEN {sample} THEN 'sha256-head-tail-size-v1' ELSE NULL END AS fingerprint_kind,
   -- Prose a person reads. This is the corpus that enters text embedding and
   -- per-file classification.
   ext IN ('.md','.markdown','.txt','.html','.htm','.pdf','.epub','.rst') AS document_like,
   -- Tabular: classifiable, but not prose. Clusters and embeds differently, so
   -- it stays out of the text corpus by default rather than diluting it.
   ext IN ('.csv','.tsv') AS data_like
-FROM read_json_auto('{jsonl}', ignore_errors=true);
+FROM read_json({sql_string(jsonl)}, format='newline_delimited', columns={columns}, ignore_errors=false);
 
--- The point of the whole exercise: one row per piece of content that exists
--- in more than one place, with every place it exists.
-DROP VIEW IF EXISTS duplicates;
-CREATE VIEW duplicates AS
-SELECT sha256, count(*) AS copies, sum(bytes) AS total_bytes,
-       min(bytes) AS unit_bytes, list(path) AS paths, min(name) AS a_name
-FROM files WHERE sha256 IS NOT NULL
-GROUP BY sha256 HAVING count(*) > 1
-ORDER BY (count(*)-1) * min(bytes) DESC;
+-- Full hashes and large-file samples have deliberately separate views.
+{content_digest_views_sql()}
 
 -- Same name in many directories: near-duplicates the hash cannot catch,
 -- because someone edited one copy.
@@ -708,9 +888,9 @@ SELECT CASE WHEN document_like THEN 'document'
        count(*) AS files, sum(bytes) AS bytes
 FROM files GROUP BY 1;
 
-COPY (SELECT * FROM files) TO '{parquet}' (FORMAT PARQUET);
+COPY (SELECT * FROM files) TO {sql_string(parquet)} (FORMAT PARQUET);
 """
-    rows = materialize_pair(db, parquet, lambda staged_parquet: sql.replace(str(parquet), str(staged_parquet)), "files")
+    rows = materialize_pair(db, parquet, lambda staged_parquet: sql.replace(sql_string(parquet), sql_string(staged_parquet)), "files")
     print(f"sinnix-fs content: materialized {rows} rows -> {db}, {parquet}")
 
 
@@ -762,7 +942,8 @@ Section 4):
 """
 
 LEDGER_SQL = r"""
-INSTALL json; LOAD json;
+-- JSON readers are supplied by the declared DuckDB runtime. No extension
+-- installation or home-directory cache is part of ledger materialization.
 
 DROP TABLE IF EXISTS judgments;
 CREATE TABLE judgments AS
@@ -826,7 +1007,9 @@ FROM (
            pj.method, pj.evidence, pj.prefix AS via_prefix, 1 AS specificity,
            length(pj.prefix) AS match_len
     FROM all_paths p
-    JOIN prefix_judgments pj ON starts_with(p.path, pj.prefix)
+    JOIN prefix_judgments pj ON
+        p.path = rtrim(pj.prefix, '/')
+        OR starts_with(p.path, rtrim(pj.prefix, '/') || '/')
 
     UNION ALL
 
@@ -907,13 +1090,24 @@ def ledger_run(index_dir: Path) -> int:
         if name in existing and existing[name] != LEDGER_OBJECT_KIND[name]
     )
 
+    columns_probe = duckdb_query(content_db, "SELECT column_name FROM information_schema.columns WHERE table_name='files'")
+    if columns_probe.returncode:
+        print(columns_probe.stderr, file=sys.stderr)
+        return 1
+    typed = 'fingerprint_kind' in columns_probe.stdout.splitlines()
+    exact_clause = ("fingerprint_kind = 'sha256-full'" if typed else
+                    "schema = 'sinnix-fs-content-v1' AND bytes BETWEEN 0 AND 8388608")
+
     # inventory.duckdb is opened directly (it already has nodes/rollup); only
     # content.duckdb needs ATTACHing, as a view rather than a copy, so a
     # re-run of either scanner remains the only place that table is written.
     full_sql = f"""
 {precise_drops}
 ATTACH '{content_db}' AS ctn (READ_ONLY);
-CREATE OR REPLACE VIEW files AS SELECT * FROM ctn.files;
+CREATE OR REPLACE VIEW files AS
+SELECT path, CASE WHEN error IS NULL AND {exact_clause}
+  AND regexp_full_match(sha256, '[0-9a-fA-F]{{64}}')
+  THEN sha256 ELSE NULL END AS sha256 FROM ctn.files;
 {sql}
 .print
 SELECT * FROM coverage;
@@ -1006,6 +1200,9 @@ def main() -> int:
     run.add_argument("--out-dir", default="/realm/state/fs-index")
     run.set_defaults(func=cmd_run)
 
+    views = sub.add_parser("content-views", help="Correct derived full-hash/sample comparison views without rescanning")
+    views.add_argument("--index-dir", type=Path, default=Path("/realm/state/fs-index"))
+    views.set_defaults(func=lambda a: content_views_refresh(a.index_dir / "content.duckdb"))
     args = ap.parse_args()
     return args.func(args)
 
