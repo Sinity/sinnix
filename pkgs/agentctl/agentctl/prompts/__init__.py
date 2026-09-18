@@ -969,5 +969,9 @@ def landing_members(
         if worker.get("scope") == "undeclared":
             row["scope"] = "undeclared"
             row["changed_paths"] = list(worker.get("changed_paths") or [])
+        if worker.get("pending_expansion"):
+            row["pending_expansion"] = list(worker["pending_expansion"])
+        if worker.get("outside_scope"):
+            row["outside_scope"] = list(worker["outside_scope"])
         rows.append(row)
     return rows

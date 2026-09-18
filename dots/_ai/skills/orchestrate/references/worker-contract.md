@@ -17,10 +17,12 @@ names, and exits with one result document.
    worker branch; never write to another checkout, `$HOME` outside the
    workspace, or live services. `.agentctl/` holds the prompt, schema and
    result and is never committed. The snapshot's `write_scope` is the
-   bead's estimate of where the change lands, not a fence: edit what the
-   fix needs, and name any file outside it in the result so the reviewer
-   sees it. Other workers' branches merge at landing; a real conflict is
-   found there.
+   bead's estimate of where the change lands. Edit what the fix needs; when
+   a path falls outside that estimate, declare it on the result as
+   `scope_expansion` (paths, the bead each serves, one sentence why) so
+   filing records a pending expansion for the reviewer. An undeclared
+   out-of-scope edit is refused. Other workers' branches merge at landing;
+   a real conflict is found there.
 3. **Verify the change.** Run the snapshot's `verification_commands` when the
    task names them, using the declared operation or job for any shared/heavy
    work. Exact test selectors belong in `verification_commands`;

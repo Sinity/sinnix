@@ -777,6 +777,55 @@ def _scope_check(
     }
 
 
+def _declared_expansion(
+    worker: Mapping[str, Any], value: Mapping[str, Any], scope: Mapping[str, Any]
+) -> list[dict[str, Any]]:
+    """Pending write-scope expansion, or a refusal when outside paths are bare."""
+    outside = [path for path in scope.get("outside_scope") or [] if path]
+    if not outside or scope.get("scope") != "declared":
+        return []
+    raw = value.get("scope_expansion") or []
+    if not isinstance(raw, list):
+        raise BatchRefusal("scope_violation", "scope_expansion must be a list")
+    assigned = set(worker["beads"])
+    covered: set[str] = set()
+    rows: list[dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, Mapping):
+            raise BatchRefusal(
+                "scope_violation", "scope_expansion entries must be objects"
+            )
+        paths = item.get("paths")
+        bead = item.get("bead")
+        reason = item.get("reason")
+        if not isinstance(bead, str) or bead not in assigned:
+            raise BatchRefusal(
+                "scope_violation",
+                f"scope_expansion bead {bead!r} is not this worker's",
+            )
+        if not isinstance(reason, str) or not reason.strip():
+            raise BatchRefusal("scope_violation", "scope_expansion requires a reason")
+        if (
+            not isinstance(paths, list)
+            or not paths
+            or not all(isinstance(path, str) and path for path in paths)
+        ):
+            raise BatchRefusal(
+                "scope_violation",
+                "scope_expansion paths must be a nonempty list of strings",
+            )
+        covered.update(paths)
+        rows.append({"paths": list(paths), "bead": bead, "reason": reason.strip()})
+    uncovered = [path for path in outside if path not in covered]
+    if uncovered:
+        raise BatchRefusal(
+            "scope_violation",
+            "candidate changed paths outside write_scope without declaring them: "
+            + ", ".join(uncovered),
+        )
+    return rows
+
+
 def correct_scope(
     config: Config,
     run_id: str,
@@ -920,6 +969,7 @@ def result(
             raise BatchError("batch result needs the project to read write scopes")
         reader = SubprocessBeads(project.root)
     scope = _scope_check(run, worker, value["candidate_sha"], reader)
+    expansion = _declared_expansion(worker, value, scope)
 
     def record(document: dict[str, Any]) -> None:
         for entry in document["workers"]:
@@ -929,6 +979,8 @@ def result(
                 entry["result_path"] = str(path)
                 entry["result_recorded_at"] = now()
                 entry.update(scope)
+                if expansion:
+                    entry["pending_expansion"] = expansion
 
     run = update(config, run_id, record)
     released = False

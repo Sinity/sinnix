@@ -68,6 +68,25 @@ def test_focused_verification_must_run_on_a_worker_worktree(tmp_path: Path) -> N
         load_project_adapter(root)
 
 
+def test_focused_verification_refuses_a_declared_argument_requirement(
+    tmp_path: Path,
+) -> None:
+    """A focused profile is compiled with no extra argv. arguments=required
+    cannot execute as emitted (sinnix-59zd)."""
+    root = write_project(tmp_path / "p")
+    descriptor = root / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text().replace(
+            'exec = ["fixture-verify-quick"]',
+            'exec = ["fixture-verify-quick"]\narguments = "required"',
+        )
+    )
+    with pytest.raises(
+        ProjectConfigError, match="runs without extra arguments"
+    ):
+        load_project_adapter(root)
+
+
 def test_workspace_artifacts_must_be_relative(tmp_path: Path) -> None:
     root = write_project(tmp_path / "p")
     descriptor = root / ".agentctl" / "project.toml"
@@ -180,6 +199,10 @@ def test_unknown_packet_and_operation_fields_warn_and_load(
         (
             '[operations.bad]\ndescription = "x"\nexec = ["x"]\nscratch = "ssd"\n',
             "scratch is invalid",
+        ),
+        (
+            '[operations.bad]\ndescription = "x"\nexec = ["x"]\narguments = "maybe"\n',
+            "arguments is invalid",
         ),
     ],
 )

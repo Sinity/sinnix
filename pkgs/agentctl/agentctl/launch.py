@@ -571,6 +571,11 @@ def _start_operation(
         raise JobError(
             f"{project.project_id}.{operation.name} runs only on the project's main checkout"
         )
+    if operation.arguments == "required" and not extra_argv:
+        raise JobError(
+            f"{project.project_id}.{operation.name} declares arguments = \"required\" "
+            "but no arguments were supplied"
+        )
     if not working_directory.is_dir():
         raise JobError(f"working directory does not exist: {working_directory}")
     environment = project.environment.values()
@@ -1074,6 +1079,10 @@ def _job_detail(
         )
     if isinstance(receipt.get("scratch"), dict):
         view["scratch"] = receipt["scratch"]
+    disposition = _disposition(config, task)
+    if disposition:
+        view["disposition"] = disposition
+        view.update(_disposition_view(disposition, attempt=attempt, receipt=receipt))
     return view
 
 
@@ -1237,6 +1246,92 @@ def _outcome(config: Config, task: Task, attempt: int | None = None) -> dict[str
     return {"outcome": record} if isinstance(record, dict) else {}
 
 
+# A not-started cancellation is a launch-input disposition, never an attempt
+# outcome file: writing the compatibility outcome path would look like a
+# started attempt and could clobber a previous successful retry's alias.
+NOT_STARTED_CANCEL = {"outcome": Outcome.CANCELLED.value, "started": False}
+
+
+def _disposition_path(input_path: Path) -> Path:
+    return input_path.with_name(input_path.name + ".disposition")
+
+
+def _disposition(config: Config, task: Task) -> dict[str, Any] | None:
+    path = launch_input_path(task)
+    if path is None or not _task_owned(config, task, path):
+        return None
+    raw = read_bounded(_disposition_path(path), MAX_LAUNCH_INPUT_BYTES)
+    if raw is None:
+        return None
+    try:
+        value = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    return dict(value) if isinstance(value, dict) else None
+
+
+def _disposition_view(
+    disposition: Mapping[str, Any],
+    *,
+    attempt: int | None,
+    receipt: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Latest job disposition; a selected attempt keeps its own receipt."""
+    if disposition.get("unresolved"):
+        return {"phase": "unresolved", "started": True}
+    if disposition.get("outcome") != Outcome.CANCELLED.value:
+        return {}
+    started = disposition.get("started")
+    overlay: dict[str, Any] = {
+        "phase": Outcome.CANCELLED.value,
+        "terminal": True,
+        "started": started is not False,
+    }
+    if started is False:
+        overlay["started"] = False
+        if attempt is None:
+            overlay["outcome"] = dict(disposition)
+            overlay["exit_code"] = disposition.get("exit_code", CANCELLED_EXIT_CODE)
+        elif receipt:
+            overlay["outcome"] = dict(receipt)
+    return overlay
+
+
+def _attempt_count(config: Config, task: Task) -> int:
+    document = _launch_input(config, task) or {}
+    if not document.get("log_path"):
+        return 0
+    return len(artifacts.attempts(document))
+
+
+def _unfinished_attempt(config: Config, task: Task) -> bool:
+    """Whether the latest allocated invocation has no outcome yet.
+
+    A previous successful attempt with an outcome is not an active start; a
+    wrapper that has allocated an attempt without finishing one is.
+    """
+    document = _launch_input(config, task) or {}
+    if not document.get("log_path"):
+        return False
+    records = artifacts.attempts(document)
+    if not records or records[-1].get("legacy"):
+        return False
+    outcome = records[-1]["artifacts"].get("outcome")
+    return not (isinstance(outcome, str) and Path(outcome).exists())
+
+
+def _write_disposition(
+    config: Config, task: Task, disposition: Mapping[str, Any]
+) -> None:
+    path = launch_input_path(task)
+    if path is None or not _task_owned(config, task, path):
+        raise JobError("cannot record cancellation disposition")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with (path.with_name(path.name + ".lock")).open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        write_input(_disposition_path(path), dict(disposition))
+
+
 def _unit_active(unit: str) -> bool:
     try:
         completed = subprocess.run(
@@ -1291,7 +1386,155 @@ def cancel(
             reference=reference,
             settle_seconds=settle_seconds,
             sleep=sleep,
+            allocation_locked=True,
         )
+
+
+def _retain_disposition(
+    config: Config, task: Task, disposition: Mapping[str, Any], *, owned: bool
+) -> None:
+    if owned:
+        _write_disposition(config, task, disposition)
+
+
+def _unresolved_cancel(
+    view: Mapping[str, Any],
+    *,
+    unit: str | None,
+    disposition: Mapping[str, Any],
+) -> dict[str, Any]:
+    return {
+        **view,
+        "phase": "unresolved",
+        "started": True,
+        "state": "unresolved",
+        "unit": unit,
+        "disposition": dict(disposition),
+    }
+
+
+def _cancelled_not_started(
+    view: Mapping[str, Any], disposition: Mapping[str, Any]
+) -> dict[str, Any]:
+    return {
+        **view,
+        "phase": Outcome.CANCELLED.value,
+        "terminal": True,
+        "started": False,
+        "state": "removed",
+        "unit": None,
+        "removed": [],
+        "disposition": dict(disposition),
+    }
+
+
+def _cancel_not_started(
+    config: Config,
+    task: Task,
+    view: Mapping[str, Any],
+    *,
+    allocation_locked: bool = False,
+) -> dict[str, Any] | None:
+    """Drop a queued launch and retain cancelled/not-started, or give up.
+
+    Returns None only when the queue still holds a started attempt: the
+    caller must address that attempt. A started attempt whose queue row is
+    already gone is unresolved, never not-started.
+    """
+    intent = {"cancel_requested": True, "confirmed": False}
+    try:
+        _write_disposition(config, task, intent)
+        owned = True
+    except JobError:
+        owned = False
+    document = _launch_input(config, task) or {}
+    log = document.get("log_path")
+    lock_root = None
+    if owned and isinstance(log, str) and _task_owned(config, task, Path(log)):
+        marker = cancel_marker_for(log)
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text("")
+        lock_root = artifacts.root_for(Path(log))
+        lock_root.mkdir(parents=True, exist_ok=True)
+    lock_handle = None
+    if lock_root is not None and not allocation_locked:
+        lock_handle = (lock_root / ".allocation.lock").open("a")
+        fcntl.flock(lock_handle, fcntl.LOCK_EX)
+    try:
+        before = _attempt_count(config, task)
+        current = pueue.task(task.task_id)
+        if current is not None and current.started_at is not None:
+            return None
+        if _unfinished_attempt(config, current if current is not None else task):
+            if current is not None and current.started_at is not None:
+                return None
+            unresolved = {
+                **intent,
+                "unresolved": True,
+                "reason": "runner started during cancel",
+            }
+            target = current if current is not None else task
+            _retain_disposition(config, target, unresolved, owned=owned)
+            return _unresolved_cancel(
+                job_view(target) if current is not None else view,
+                unit=unit_of(target),
+                disposition=unresolved,
+            )
+        if current is not None:
+            try:
+                pueue.remove([current.task_id])
+            except PueueError:
+                current = pueue.task(current.task_id)
+                if current is not None and (
+                    current.started_at is not None
+                    or _unfinished_attempt(config, current)
+                ):
+                    return None
+                if current is not None:
+                    unresolved = {
+                        **intent,
+                        "unresolved": True,
+                        "reason": "queue still holds the not-started launch after remove failed",
+                    }
+                    _retain_disposition(config, current, unresolved, owned=owned)
+                    return _unresolved_cancel(
+                        job_view(current),
+                        unit=unit_of(current),
+                        disposition=unresolved,
+                    )
+        current = pueue.task(task.task_id)
+        started = (
+            _attempt_count(config, task) > before
+            or _unfinished_attempt(config, task)
+            or (current is not None and current.started_at is not None)
+        )
+        if started and current is not None:
+            return None
+        if started:
+            unresolved = {
+                **intent,
+                "unresolved": True,
+                "reason": "runner started during cancel",
+            }
+            _retain_disposition(config, task, unresolved, owned=owned)
+            return _unresolved_cancel(view, unit=unit_of(task), disposition=unresolved)
+        if current is not None:
+            unresolved = {
+                **intent,
+                "unresolved": True,
+                "reason": "queue still holds the launch after remove",
+            }
+            _retain_disposition(config, current, unresolved, owned=owned)
+            return _unresolved_cancel(
+                job_view(current), unit=unit_of(current), disposition=unresolved
+            )
+        confirmed = dict(NOT_STARTED_CANCEL)
+        _retain_disposition(config, task, confirmed, owned=owned)
+        return _cancelled_not_started(view, confirmed)
+    finally:
+        if lock_handle is not None:
+            fcntl.flock(lock_handle, fcntl.LOCK_UN)
+            lock_handle.close()
 
 
 def _cancel(
@@ -1301,6 +1544,7 @@ def _cancel(
     reference: str | None = None,
     settle_seconds: float | None = None,
     sleep: Callable[[float], None] = time.sleep,
+    allocation_locked: bool = False,
 ) -> dict[str, Any]:
     """Make the task not run: drop it while queued, stop its unit while running.
 
@@ -1320,20 +1564,18 @@ def _cancel(
     if task.terminal:
         return {**view, "state": "terminal", "unit": None}
     if task.started_at is None:
-        try:
-            pueue.remove([task_id])
-        except PueueError:
-            task = _task(task_id)
-        else:
-            removed = []
-            return {
-                **view,
-                "phase": "cancelled",
-                "terminal": True,
-                "state": "removed",
-                "unit": None,
-                "removed": removed,
-            }
+        stopped = _cancel_not_started(
+            config, task, view, allocation_locked=allocation_locked
+        )
+        if stopped is not None:
+            return stopped
+        live = pueue.task(task_id)
+        if live is None:
+            raise JobError(
+                "cancel raced runner start and the queue no longer holds the launch"
+            )
+        task = live
+        view = job_view(task)
     unit = unit_of(task)
     declared_log = (_launch_input(config, task) or {}).get("log_path")
     log = (

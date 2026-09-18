@@ -39,6 +39,10 @@ CACHE_KINDS = frozenset({"none", "tree+environment"})
 # Where an operation's job-owned scratch directory lives: nowhere, in RAM, or
 # on the NVMe scratch filesystem. `run` owns the roots and the removal.
 SCRATCH_KINDS = frozenset({"none", "tmpfs", "nvme"})
+# Whether `job start` may be invoked with extra argv. `required` is a
+# declaration that the operation cannot execute without a caller-supplied
+# selector; a focused profile must not name such an operation.
+ARGUMENTS_KINDS = frozenset({"none", "required"})
 
 _TABLES = frozenset(
     {"schema", "project", "environment", "workspace", "packets", "operations"}
@@ -113,6 +117,7 @@ _OPERATION_FIELDS = frozenset(
         "cache",
         "scratch",
         "dependencies",
+        "arguments",
     }
 )
 
@@ -231,6 +236,7 @@ class ProjectOperation:
     cache: str = "none"
     scratch: str = "none"
     dependencies: tuple[str, ...] = ()
+    arguments: str = "none"
 
     def catalog_row(self) -> dict[str, Any]:
         return {
@@ -245,6 +251,7 @@ class ProjectOperation:
             "cache": self.cache,
             "scratch": self.scratch,
             "dependencies": list(self.dependencies),
+            "arguments": self.arguments,
         }
 
 
@@ -523,6 +530,10 @@ def _operation(name: str, definition: Any, descriptor: Path) -> ProjectOperation
         if definition["scratch"] not in SCRATCH_KINDS:
             raise ProjectConfigError(f"operations.{name}.scratch is invalid")
         fields["scratch"] = definition["scratch"]
+    if "arguments" in definition:
+        if definition["arguments"] not in ARGUMENTS_KINDS:
+            raise ProjectConfigError(f"operations.{name}.arguments is invalid")
+        fields["arguments"] = definition["arguments"]
     dependencies = _optional_string_list(
         definition.get("dependencies"), f"operations.{name}.dependencies"
     )
@@ -621,6 +632,12 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
             raise ProjectConfigError(
                 f"{descriptor} workspace.verify.focused must name an operation that runs "
                 f'on a worker worktree, but {focused} declares checkout = "default"'
+            )
+        if focused_operation is not None and focused_operation.arguments == "required":
+            raise ProjectConfigError(
+                f"{descriptor} workspace.verify.focused must name an operation that "
+                f"runs without extra arguments, but {focused} declares "
+                'arguments = "required"'
             )
     visiting: set[str] = set()
     visited: set[str] = set()

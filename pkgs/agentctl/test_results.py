@@ -41,6 +41,24 @@ def test_a_conforming_worker_result_has_no_errors() -> None:
     assert results.validate_worker_result(worker_result()) == []
 
 
+def test_scope_expansion_is_an_optional_declared_list() -> None:
+    assert results.validate_worker_result(
+        worker_result(
+            scope_expansion=[
+                {
+                    "paths": ["docs/x.md"],
+                    "bead": "fx-1",
+                    "reason": "the bead names this document",
+                }
+            ]
+        )
+    ) == []
+    errors = results.validate_worker_result(
+        worker_result(scope_expansion=[{"paths": ["docs/x.md"]}])
+    )
+    assert errors
+
+
 def test_versioned_result_carries_explicit_provenance_and_stable_evidence() -> None:
     result = worker_result(
         schema_version=2,

@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Callable
 
 import pytest
-from agentctl import launch, pueue
+from agentctl import artifacts, launch, pueue
 from agentctl.config import Config, load_config
 from agentctl.launch import JobError
 from agentctl.launch_input import write_input
@@ -100,6 +100,26 @@ def test_extra_argv_is_appended_after_the_declared_exec(
 
     written = read_launch(config, fake_pueue.task(started["job_id"]))
     assert written["argv"] == ["env", "true", "--apply"]
+
+
+def test_an_argument_requiring_operation_is_refused_without_supplied_argv(
+    fake_pueue: FakePueue, config: Config, project_root: Path
+) -> None:
+    descriptor = project_root / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text().replace(
+            'exec = ["true"]',
+            'exec = ["true"]\narguments = "required"',
+        )
+    )
+    project = load_project_adapter(project_root)
+    with pytest.raises(JobError, match="arguments = \"required\""):
+        launch.start_operation(config, project, project.operation("check"))
+    started = launch.start_operation(
+        config, project, project.operation("check"), extra_argv=("--sel",)
+    )
+    written = read_launch(config, fake_pueue.task(started["job_id"]))
+    assert written["argv"] == ["env", "true", "--sel"]
 
 
 def test_cached_operation_reuses_an_active_and_completed_exact_receipt(
@@ -753,9 +773,95 @@ def test_cancelling_a_queued_task_drops_it_out_of_the_queue(
     assert fake_pueue.task(started["job_id"]) is None
     assert cancelled["state"] == "removed"
     assert cancelled["phase"] == "cancelled" and cancelled["terminal"] is True
+    assert cancelled["started"] is False
+    assert cancelled["disposition"] == {
+        "outcome": "cancelled",
+        "started": False,
+    }
     assert cancelled["removed"] == []
     assert input_path.exists()
-    assert list(config.inputs_dir.iterdir()) == [input_path]
+    first = launch.get_job(started["job_id"], config, started["reference"])
+    second = launch.get_job(started["job_id"], config, started["reference"])
+    restarted = launch.get_job(
+        started["job_id"],
+        Config(
+            project_roots=config.project_roots,
+            agent_runner=config.agent_runner,
+            worker_contract=config.worker_contract,
+            event_spool=config.event_spool,
+            state_dir=config.state_dir,
+            agentctl_executable=config.agentctl_executable,
+        ),
+        started["reference"],
+    )
+    for document in (first, second, restarted):
+        assert document["phase"] == "cancelled"
+        assert document["started"] is False
+        assert document["disposition"] == {
+            "outcome": "cancelled",
+            "started": False,
+        }
+        assert document["queue_present"] is False
+    assert input_path in list(config.inputs_dir.iterdir())
+
+
+def test_cancelling_a_queued_retry_keeps_the_previous_attempt_and_its_output(
+    fake_pueue: FakePueue, config: Config, project_root: Path
+) -> None:
+    """Latest disposition is cancelled/not-started; attempt 1 stays readable."""
+    project = load_project_adapter(project_root)
+    started = launch.start_operation(config, project, project.operation("verify"))
+    written = read_launch(config, fake_pueue.task(started["job_id"]))
+    Path(written["log_path"]).parent.mkdir(parents=True, exist_ok=True)
+    Path(written["log_path"]).write_text("first-attempt-log\n")
+    Path(written["result_path"]).write_text('{"passed": 4}')
+    outcome_path_for(written["log_path"]).write_text(
+        json.dumps({"outcome": "success", "exit_code": 0})
+    )
+    fake_pueue.succeed(started["job_id"])
+    original_log = Path(written["log_path"]).read_bytes()
+    original_result = Path(written["result_path"]).read_bytes()
+
+    retried = launch.retry(started["job_id"], started["reference"])
+    assert retried["phase"] == "queued"
+    cancelled = launch.cancel(
+        config, started["job_id"], reference=started["reference"]
+    )
+
+    assert cancelled["phase"] == "cancelled" and cancelled["started"] is False
+    latest = launch.get_job(started["job_id"], config, started["reference"])
+    assert latest["phase"] == "cancelled" and latest["started"] is False
+    previous = launch.get_job(
+        started["job_id"], config, started["reference"], attempt=1
+    )
+    assert previous["outcome"]["outcome"] == "success"
+    assert previous["artifacts"]["result"]
+    page = launch.result(config, started["job_id"], started["reference"], attempt=1)
+    assert page["value"] == {"passed": 4}
+    assert Path(written["log_path"]).read_bytes() == original_log
+    assert Path(written["result_path"]).read_bytes() == original_result
+
+
+def test_cancel_racing_runner_start_does_not_fabricate_not_started(
+    fake_pueue: FakePueue, config: Config, project_root: Path
+) -> None:
+    """Anti-vacuity: an allocated attempt with no outcome is a start, even if
+    pueue still reports the task as queued."""
+    project = load_project_adapter(project_root)
+    started = launch.start_operation(config, project, project.operation("check"))
+    fake_pueue.queue(started["job_id"])
+    document = read_launch(config, fake_pueue.task(started["job_id"]))
+    input_path = launch.launch_input_path(fake_pueue.task(started["job_id"]))
+    assert input_path is not None
+    artifacts.begin(document, str(input_path))
+
+    cancelled = launch.cancel(
+        config, started["job_id"], reference=started["reference"]
+    )
+
+    assert cancelled.get("started") is not False
+    assert cancelled["phase"] == "unresolved"
+    assert cancelled["disposition"]["unresolved"] is True
 
 
 def test_a_task_whose_launch_input_agentctl_did_not_write_names_its_own_scope(
