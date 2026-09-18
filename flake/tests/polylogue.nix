@@ -18,6 +18,9 @@ in
     { system, ... }:
     let
       pkgs = inputs.nixpkgs.legacyPackages.${system};
+      overlayLib = import ../../modules/lib/overlay-helpers.nix { inherit lib; };
+      polyloguePatched =
+        (import ../overlay/package/polylogue.nix { inherit inputs overlayLib; } pkgs pkgs).polylogue;
       testLib = import ../test-lib.nix { inherit inputs lib; };
       inherit (testLib)
         evalTestSpec
@@ -132,6 +135,28 @@ in
                 echo "enrichment hardening retained the default Polylogue hook root" >&2
                 exit 1
               fi
+              touch "$out"
+            '';
+        # Provably fails when: width_within / memory_bounded_worker_cap restore
+        # max(1) (46 MiB slot-531 admits one worker), or either pytest_slot
+        # launch path Popen's before a typed resource-not-ready deferral.
+        polylogue-pytest-admission =
+          pkgs.runCommand "sinnix-polylogue-pytest-admission-check"
+            {
+              nativeBuildInputs = [
+                pkgs.python3
+                polyloguePatched
+              ];
+            }
+            ''
+              set -eu
+              site="$(echo ${polyloguePatched}/lib/python*/site-packages)"
+              test -d "$site/devtools"
+              if grep -Fq 'max(1, int(budget // WORKER_PEAK_MIB))' "$site/devtools/worker_memory.py"; then
+                echo "FAIL: worker_memory.py restored the max(1) floor" >&2
+                exit 1
+              fi
+              PYTHONPATH="$site" python3 ${./pytest_admission.py}
               touch "$out"
             '';
         polylogue-runtime-inventory =

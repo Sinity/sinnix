@@ -133,7 +133,7 @@ mkServiceModule {
       ...
     }:
     let
-      polyloguePkg = inputs.polylogue.packages.${pkgs.stdenv.hostPlatform.system}.polylogue;
+      polyloguePkg = pkgs.polylogue;
       # One source of truth for the daemon's memory ceiling, derived from a
       # single budget knob and used both for upstream's own service.memory*
       # options and for the runtime surface declaration, so the inventory
