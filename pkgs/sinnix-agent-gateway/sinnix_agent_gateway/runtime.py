@@ -652,6 +652,8 @@ class Runtime:
             "truncated": bool(response.get("truncated")),
             "next_cursor": response.get("next_cursor"),
             "snapshot": response.get("snapshot"),
+            "coverage": response.get("coverage"),
+            "omitted": response.get("omitted"),
         }
 
     def _unit_view(self, values: Mapping[str, str]) -> dict[str, Any]:
