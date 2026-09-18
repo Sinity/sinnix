@@ -507,6 +507,10 @@ class LocalJobs:
             rows = [row for row in rows if _sort_key(row) < after]
         page = launch.attach_bindings(self.config, rows[:limit])
         truncated = len(rows) > len(page)
+        active_total = sum(1 for row in rows if not row.get("terminal"))
+        active_returned = sum(1 for row in page if not row.get("terminal"))
+        terminal_total = len(rows) - active_total
+        terminal_returned = len(page) - active_returned
         return {
             "jobs": [job_payload(row) for row in page],
             "total": len(rows),
@@ -515,6 +519,14 @@ class LocalJobs:
             if truncated and page
             else None,
             "snapshot": {"ordering": JOB_LIST_ORDERING, "ceiling": ceiling},
+            "coverage": {
+                "active": {"total": active_total, "returned": active_returned},
+                "terminal": {"total": terminal_total, "returned": terminal_returned},
+            },
+            "omitted": {
+                "active": active_total - active_returned,
+                "terminal": terminal_total - terminal_returned,
+            },
         }
 
     def _retry(self, arguments: Mapping[str, Any]) -> dict[str, Any]:

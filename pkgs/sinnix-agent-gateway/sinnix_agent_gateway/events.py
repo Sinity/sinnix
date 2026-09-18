@@ -22,6 +22,10 @@ MAX_RESPONSE_BYTES = 262_144
 MAX_EVENT_PROJECTS = 16
 MAX_OWNER_REVISIONS = MAX_EVENT_PROJECTS * 2
 MAX_RUNTIME_ROW_BYTES = 1_048_576
+# Job observation uses a fixed owner page so changing the event `limit`
+# cannot fabricate a domain transition, and incompleteness lives on the
+# jobs source rather than the event cursor.
+JOB_OBSERVATION_LIMIT = 100
 
 
 class EventCursorError(ValueError):
@@ -436,35 +440,50 @@ class NormalizedEventService:
                     "reason": str(exc),
                 }
 
-        if self.jobs is not None and len(events) < limit:
+        if self.jobs is not None:
             try:
-                page = self.jobs(min(100, limit), None)
+                page = self.jobs(JOB_OBSERVATION_LIMIT, None)
                 jobs = page.get("jobs", []) if isinstance(page, Mapping) else []
                 observation = {
-                    "snapshot": page.get("snapshot")
-                    if isinstance(page, Mapping)
-                    else None,
                     "jobs": [
                         {"job_id": job.get("job_id"), "state": job.get("state")}
                         for job in jobs
                         if isinstance(job, Mapping)
                         and isinstance(job.get("job_id"), str)
-                    ],
+                    ]
                 }
                 observed_revision = _digest(observation)
+                coverage = page.get("coverage") if isinstance(page, Mapping) else None
+                omitted = page.get("omitted") if isinstance(page, Mapping) else None
+                incomplete = bool(
+                    (isinstance(page, Mapping) and page.get("next_cursor"))
+                    or (
+                        isinstance(omitted, Mapping)
+                        and int(omitted.get("active") or 0) > 0
+                    )
+                )
                 sources["jobs"] = {
                     "availability": "available",
-                    "count": len(jobs) if isinstance(jobs, list) else 0,
+                    "count": len(observation["jobs"]),
                     "revision": observed_revision,
+                    "incomplete": incomplete,
                 }
-                if job_revision != observed_revision:
+                if isinstance(coverage, Mapping):
+                    sources["jobs"]["coverage"] = dict(coverage)
+                if isinstance(omitted, Mapping):
+                    sources["jobs"]["omitted"] = dict(omitted)
+                if isinstance(page, Mapping) and page.get("next_cursor"):
+                    sources["jobs"]["next_cursor"] = page.get("next_cursor")
+                if job_revision != observed_revision and len(events) < limit:
                     event = self._event(
                         event_id=f"jobs:{observed_revision}",
                         kind="job_state",
                         source="jobs",
                         source_revision=observed_revision,
                         data={
-                            "snapshot": observation["snapshot"],
+                            "snapshot": page.get("snapshot")
+                            if isinstance(page, Mapping)
+                            else None,
                             "jobs": observation["jobs"],
                         },
                         exact=False,
@@ -474,8 +493,6 @@ class NormalizedEventService:
                         job_revision = observed_revision
                     else:
                         truncated = True
-                if isinstance(page, Mapping) and page.get("next_cursor"):
-                    truncated = True
             except Exception as exc:
                 sources["jobs"] = {
                     "availability": "unavailable",

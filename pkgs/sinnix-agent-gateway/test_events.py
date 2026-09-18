@@ -236,6 +236,43 @@ def test_event_cursor_state_is_bounded_independently_of_job_population(
     assert job_events[0]["data"]["truncated"] is True
 
 
+def test_event_job_observation_ignores_event_page_size(
+    tmp_path: Path,
+) -> None:
+    """Anti-vacuity: changing only requested page size must not fabricate a
+    job_state domain transition."""
+    events, _projects, _beads, audit = service(tmp_path)
+    calls: list[int] = []
+
+    def jobs(limit: int, _cursor: str | None) -> dict[str, object]:
+        calls.append(limit)
+        return {
+            "jobs": [{"job_id": "job-1", "state": {"phase": "running"}}],
+            "next_cursor": "more",
+            "omitted": {"active": 1, "terminal": 0},
+            "coverage": {
+                "active": {"total": 2, "returned": 1},
+                "terminal": {"total": 0, "returned": 0},
+            },
+        }
+
+    events.jobs = jobs
+    small = events.read(limit=1)
+    large = events.read(limit=50)
+    assert set(calls) == {100}
+    assert small["sources"]["jobs"]["revision"] == large["sources"]["jobs"]["revision"]
+    assert small["sources"]["jobs"]["incomplete"] is True
+    assert small["sources"]["jobs"]["omitted"]["active"] == 1
+    large_jobs = [row for row in large["events"] if row["kind"] == "job_state"]
+    assert len(large_jobs) == 1
+    continued = events.read(limit=50, cursor=large["next_cursor"])
+    assert not [row for row in continued["events"] if row["kind"] == "job_state"]
+    audit.append("fixture.read", "ok", {"target_refs": ["sinnix://projects/fixture"]})
+    with_receipt = events.read(limit=5, cursor=continued["next_cursor"])
+    assert [row for row in with_receipt["events"] if row["kind"] == "gateway_receipt"]
+    assert not [row for row in with_receipt["events"] if row["kind"] == "job_state"]
+
+
 def test_oversized_runtime_row_is_compacted_without_advancing_past_next_row(
     tmp_path: Path,
 ) -> None:
