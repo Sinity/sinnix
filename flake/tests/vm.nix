@@ -33,7 +33,11 @@ in
           nodes.machine =
             { pkgs, ... }:
             {
-              environment.systemPackages = [ pkgs.jq ];
+              environment.systemPackages = [
+                pkgs.jq
+                pkgs.coreutils
+                pkgs.polylogue
+              ];
               sinnix.features.desktop = {
                 activitywatch.enable = false;
                 audio.enable = false;
@@ -74,14 +78,22 @@ in
             machine.wait_for_unit("polylogued.service", "sinity")
 
             machine.succeed(f"{as_user} systemctl --user is-active --quiet polylogued.service")
-            status_command = f"{as_user} ${
-              inputs.polylogue.packages.${system}.polylogue
-            }/bin/polylogued status --format json > /tmp/polylogued-status.json"
-            try:
-                machine.wait_until_succeeds(status_command, timeout=120)
-            finally:
-                machine.succeed("cat /tmp/polylogued-status.json")
-            machine.succeed("jq -e '.daemon == \"polylogued\" and (.live.source_count >= 0)' /tmp/polylogued-status.json >/dev/null")
+            machine.fail(
+                f"{as_user} journalctl --user -u polylogued.service --no-pager | grep -F UnknownServiceError"
+            )
+            # A fresh archive can report ok=false; the bead requires a status
+            # document, not a healthy verdict. timeout covers a hang; test -s
+            # accepts a JSON write even when polylogued exits 1.
+            status_command = (
+                f"{as_user} sh -c 'timeout 30 polylogued status --format json "
+                "> /tmp/polylogued-status.json; test -s /tmp/polylogued-status.json'"
+            )
+            machine.wait_until_succeeds(status_command, timeout=120)
+            machine.succeed(
+                "jq -e '.daemon == \"polylogued\" and (.live.source_count >= 0)' "
+                "/tmp/polylogued-status.json >/dev/null"
+            )
+            print(machine.succeed("jq -c '{daemon, live}' /tmp/polylogued-status.json"))
           '';
         };
         transmission-vm = mkVmCheck system {
