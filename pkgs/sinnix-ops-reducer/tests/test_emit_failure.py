@@ -125,6 +125,77 @@ def test_a_dead_reducer_does_not_swallow_the_failure(
     }
 
 
+def test_explicit_manager_survives_inventory_order_on_http_and_fallback(
+    tmp_path: Path, monkeypatch, capsys, reducer_socket
+) -> None:
+    mixed = {
+        "schema": "sinnix-runtime-inventory-v1",
+        "observedServices": [
+            {"kind": "service", "manager": "system", "unit": "dup.service"},
+            {"kind": "service", "manager": "user", "unit": "dup.service"},
+        ],
+    }
+    reducer_socket["inventory"].write_text(json.dumps(mixed))
+    assert (
+        cli.emit_failure_command(
+            [
+                "--unit",
+                "dup",
+                "--result",
+                "exit-code",
+                "--manager",
+                "user",
+                "--socket",
+                str(reducer_socket["socket"]),
+                "--inventory",
+                str(reducer_socket["inventory"]),
+            ]
+        )
+        == 0
+    )
+    events = transitions(reducer_socket["ledger"])
+    assert events[-1]["evidence"].startswith("manager=user;")
+    state = tmp_path / "state.json"
+    ledger = tmp_path / "events.jsonl"
+    monkeypatch.setattr(health, "state_path", lambda: state)
+    monkeypatch.setattr(health, "ledger_path", lambda: ledger)
+    monkeypatch.setattr(health, "notify_desktop", lambda *args, **kwargs: True)
+    inventory = tmp_path / "inventory.json"
+    inventory.write_text(json.dumps(mixed))
+    assert (
+        cli.emit_failure_command(
+            [
+                "--unit",
+                "dup.service",
+                "--result",
+                "exit-code",
+                "--manager",
+                "system",
+                "--socket",
+                str(tmp_path / "nothing-listening.sock"),
+                "--inventory",
+                str(inventory),
+            ]
+        )
+        == 0
+    )
+    assert "the reducer was unreachable" in capsys.readouterr().err
+    fallback = transitions(ledger)
+    assert fallback[-1]["evidence"].startswith("manager=system;")
+
+
+def test_invalid_manager_is_refused_before_emission(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="manager must be"):
+        health.emit_failure(
+            "x.service",
+            "exit-code",
+            {},
+            health.Emitter(tmp_path / "s.json", tmp_path / "l.jsonl", lambda *_: None),
+            manager="root",
+        )
+    assert not (tmp_path / "l.jsonl").exists()
+
+
 def test_failure_rejects_invalid_content_length_before_emitting(
     hub_server_factory, tmp_path: Path, monkeypatch
 ) -> None:

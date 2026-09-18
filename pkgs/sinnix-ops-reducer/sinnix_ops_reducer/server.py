@@ -186,11 +186,19 @@ class Handler(BaseHTTPRequestHandler):
         inventory, _ = pages.load_json(self.server.inventory_path)  # type: ignore[attr-defined]
         # A fresh emitter per event: emitted_keys is the prune's universe and
         # the fast path must never contribute to it.
+        try:
+            manager = request.get("manager")
+            if manager is not None:
+                manager = health.validated_manager(manager)
+        except ValueError as error:
+            self._write(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+            return
         health.emit_failure(
             unit,
             str(request.get("result") or "unknown"),
             inventory or {},
             self.server.emitter_factory(),  # type: ignore[attr-defined]
+            manager=manager,
         )
         self._write(HTTPStatus.CREATED, {"status": "recorded", "unit": unit})
 

@@ -50,7 +50,13 @@ def append_jsonl(
     )
     fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_APPEND, mode)
     try:
-        os.write(fd, line.encode("utf-8"))
+        payload = line.encode("utf-8")
+        offset = 0
+        while offset < len(payload):
+            written = os.write(fd, payload[offset:])
+            if written <= 0:
+                raise OSError("append_jsonl wrote no bytes")
+            offset += written
         if fsync:
             os.fsync(fd)
     finally:

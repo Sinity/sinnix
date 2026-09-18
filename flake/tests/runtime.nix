@@ -121,6 +121,19 @@ in
               message = "observed system services must receive the system failure-notify template";
             }
             {
+              assertion = lib.hasInfix "sinnix-unit-failure-notify %i" (
+                toString config.systemd.services."sinnix-unit-failure-notify@".serviceConfig.ExecStart
+              );
+              message = "the system failure-notify template must exec the hook with the unit instance";
+            }
+            {
+              assertion = lib.hasInfix "--user" (
+                toString
+                  config.home-manager.users.sinity.systemd.user.services."sinnix-unit-failure-notify@".Service.ExecStart
+              );
+              message = "the user failure-notify template must pass --user to the hook";
+            }
+            {
               # Delivered as a drop-in rather than a unit body: a user surface
               # may be declared through home-manager or through the NixOS-level
               # systemd.user.services, and only a drop-in merges with both.

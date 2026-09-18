@@ -389,26 +389,28 @@ class Emitter:
                 }
                 return
 
+            # Evidence first: an append failure must not confirm debounce, and
+            # a later cache-publish failure may duplicate the ledger line.
+            append_jsonl(
+                self.ledger,
+                {
+                    "schema": SCHEMA,
+                    "ts": utc_ts(),
+                    "type": type_,
+                    "unit": unit,
+                    "status": status,
+                    "ok": status == "healthy",
+                    "evidence": evidence,
+                    "confirmed_after_samples": self.confirm_samples,
+                },
+                mode=0o664,
+            )
             document[key] = {"status": status}
             transition = (confirmed, status)
 
         if transition is None:
             return
         confirmed, status = transition
-        append_jsonl(
-            self.ledger,
-            {
-                "schema": SCHEMA,
-                "ts": utc_ts(),
-                "type": type_,
-                "unit": unit,
-                "status": status,
-                "ok": status == "healthy",
-                "evidence": evidence,
-                "confirmed_after_samples": self.confirm_samples,
-            },
-            mode=0o664,
-        )
         title, body = describe(type_, unit, status, evidence, confirmed)
         if status == "acknowledged":
             # Recorded in the ledger, never paged: the operator already knows,
@@ -976,8 +978,22 @@ def sweep(
     return emitter
 
 
+MANAGERS = frozenset({"user", "system"})
+
+
+def validated_manager(value: object) -> str:
+    if not isinstance(value, str) or value not in MANAGERS:
+        raise ValueError(f"manager must be 'user' or 'system', not {value!r}")
+    return value
+
+
 def emit_failure(
-    unit: str, result: str, inventory: dict[str, Any], emitter: Emitter | None = None
+    unit: str,
+    result: str,
+    inventory: dict[str, Any],
+    emitter: Emitter | None = None,
+    *,
+    manager: str | None = None,
 ) -> None:
     """The OnFailure hook's event: systemd REPORTING a failure rather than the
     sweep sampling for one.
@@ -992,11 +1008,14 @@ def emit_failure(
     """
     if "." not in unit:
         unit = f"{unit}.service"
-    manager = "system"
-    for entry in observed(inventory, "service"):
-        if entry.get("unit") == unit:
-            manager = str(entry.get("manager") or "system")
-            break
+    if manager is not None:
+        manager = validated_manager(manager)
+    else:
+        manager = "system"
+        for entry in observed(inventory, "service"):
+            if entry.get("unit") == unit:
+                manager = str(entry.get("manager") or "system")
+                break
     (emitter or Emitter()).emit(
         f"service:{manager}:{unit}",
         "service_failure",

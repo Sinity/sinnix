@@ -1,6 +1,7 @@
 """Core helper contracts: atomic JSON, ledger, lock, systemd parser and notify."""
 
 import json
+import os
 import socket
 import threading
 
@@ -46,6 +47,22 @@ def test_modify_json_writes_on_clean_exit_only(tmp_path):
             doc["k"] = "clobbered"
             raise RuntimeError
     assert read_json(p) == {"k": "v"}
+
+
+def test_ledger_append_loops_until_the_line_is_complete(tmp_path, monkeypatch):
+    writes: list[int] = []
+    real_write = os.write
+
+    def short_write(fd, data):
+        chunk = data[: max(1, len(data) // 2)] if len(data) > 1 else data
+        writes.append(len(chunk))
+        return real_write(fd, chunk)
+
+    monkeypatch.setattr(os, "write", short_write)
+    p = tmp_path / "l.jsonl"
+    append_jsonl(p, {"n": 1, "payload": "x" * 40})
+    assert len(writes) > 1
+    assert [r["n"] for r in iter_jsonl(p)] == [1]
 
 
 def test_ledger_append_and_torn_tail(tmp_path):
