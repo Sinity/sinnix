@@ -52,8 +52,17 @@ def lane_views(
     return views, errors
 
 
-def post_failure(socket_path: Path, unit: str, result: str) -> bool:
-    body = json.dumps({"unit": unit, "result": result})
+def post_failure(
+    socket_path: Path,
+    unit: str,
+    result: str,
+    *,
+    manager: str | None = None,
+) -> bool:
+    payload: dict[str, str] = {"unit": unit, "result": result}
+    if manager is not None:
+        payload["manager"] = manager
+    body = json.dumps(payload)
     try:
         connection = UnixConnection(str(socket_path))
         connection.request(
@@ -82,6 +91,7 @@ def emit_failure_command(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="sinnix-ops-reducer emit-failure")
     parser.add_argument("--unit", required=True)
     parser.add_argument("--result", default="unknown")
+    parser.add_argument("--manager", choices=("user", "system"))
     parser.add_argument(
         "--socket",
         type=Path,
@@ -93,13 +103,13 @@ def emit_failure_command(argv: list[str]) -> int:
         "--inventory", type=Path, default=Path("/etc/sinnix/runtime-inventory.json")
     )
     args = parser.parse_args(argv)
-    if post_failure(args.socket, args.unit, args.result):
+    if post_failure(args.socket, args.unit, args.result, manager=args.manager):
         return 0
     try:
         inventory = json.loads(args.inventory.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         inventory = {}
-    health.emit_failure(args.unit, args.result, inventory)
+    health.emit_failure(args.unit, args.result, inventory, manager=args.manager)
     print(
         f"sinnix-ops-reducer: recorded {args.unit} failure directly; "
         "the reducer was unreachable",

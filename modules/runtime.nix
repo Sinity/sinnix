@@ -41,11 +41,13 @@ let
       umask 0002
       unit="$1"
       if [ "''${2:-}" = "--user" ]; then
+        manager=user
         result="$(systemctl --user show "$unit" -p Result --value 2>/dev/null || true)"
       else
+        manager=system
         result="$(systemctl show "$unit" -p Result --value 2>/dev/null || true)"
       fi
-      sinnix-ops-reducer emit-failure --unit "$unit" --result "''${result:-unknown}"
+      sinnix-ops-reducer emit-failure --unit "$unit" --result "''${result:-unknown}" --manager "$manager"
     '';
   };
 

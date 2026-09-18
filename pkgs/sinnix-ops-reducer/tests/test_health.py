@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from sinnix_lib.atomic_json import write_json_atomic
 from sinnix_ops_reducer import health, pressure
 
 # Swap with headroom and nothing stalling: the swap lane's healthy path, held
@@ -587,6 +588,79 @@ def test_evidence_fields_survive_a_round_trip() -> None:
     assert title == "x.service stopped working"
     assert "time limit" in body
     assert "journalctl --user -u x.service -e" in body
+
+
+def test_append_failure_does_not_confirm_debounce(tmp_path, monkeypatch) -> None:
+    state = tmp_path / "health-state.json"
+    ledger = tmp_path / "ledger.jsonl"
+    emitter = health.Emitter(state, ledger, lambda *_: None)
+
+    def boom(*_args, **_kwargs):
+        raise OSError("injected append failure")
+
+    monkeypatch.setattr(health, "append_jsonl", boom)
+    with pytest.raises(OSError, match="injected append failure"):
+        emitter.emit(
+            "service:system:x.service",
+            "service_failure",
+            "x.service",
+            "failed",
+            "result=exit",
+            force_confirm=True,
+        )
+    assert not state.exists() or json.loads(state.read_text()) == {}
+    assert not ledger.exists()
+    monkeypatch.undo()
+    health.Emitter(state, ledger, lambda *_: None).emit(
+        "service:system:x.service",
+        "service_failure",
+        "x.service",
+        "failed",
+        "result=exit",
+        force_confirm=True,
+    )
+    assert json.loads(state.read_text()) == {
+        "service:system:x.service": {"status": "failed"}
+    }
+    assert ledger.read_text()
+
+
+def test_cache_publish_failure_after_append_allows_duplicate(
+    tmp_path, monkeypatch
+) -> None:
+    state = tmp_path / "health-state.json"
+    ledger = tmp_path / "ledger.jsonl"
+    emitter = health.Emitter(state, ledger, lambda *_: None)
+    real_write = write_json_atomic
+
+    def fail_once(path, data, **kwargs):
+        if Path(path) == state:
+            raise OSError("injected cache publish failure")
+        return real_write(path, data, **kwargs)
+
+    monkeypatch.setattr("sinnix_lib.atomic_json.write_json_atomic", fail_once)
+    with pytest.raises(OSError, match="injected cache publish failure"):
+        emitter.emit(
+            "service:system:x.service",
+            "service_failure",
+            "x.service",
+            "failed",
+            "result=exit",
+            force_confirm=True,
+        )
+    assert ledger.exists() and ledger.read_text().strip()
+    assert not state.exists() or json.loads(state.read_text() or "{}") == {}
+    monkeypatch.undo()
+    health.Emitter(state, ledger, lambda *_: None).emit(
+        "service:system:x.service",
+        "service_failure",
+        "x.service",
+        "failed",
+        "result=exit",
+        force_confirm=True,
+    )
+    lines = [line for line in ledger.read_text().splitlines() if line]
+    assert len(lines) >= 2
 
 
 def test_newest_mtime_handles_file_lane_paths(tmp_path):
