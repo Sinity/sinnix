@@ -142,6 +142,7 @@ def test_snapshot_carries_beads_dimensions_branch_atlas_and_the_contract(
     assert snapshot.dimensions.effort == "high"
     assert snapshot.dimensions.affected_paths == ("core/x.py", "other/y.py")
     assert snapshot.dimensions.verification_commands == ("devtools test core",)
+    assert "core/x.py" not in (snapshot.batch.get("focused_verification") or "")
     # No sheet matches the affected top-level tokens, so every sheet is offered.
     assert snapshot.atlas_refs == ("atlas/core.md",)
     assert snapshot.worker_contract_path == "contract.md"

@@ -547,6 +547,7 @@ check failing). The codes:
 | `no_candidate_profile`         | the descriptor declares no [workspace].verify.candidate                             |
 | `project`                      | the run belongs to another project                                                  |
 | `publish_rejected`             | the push was rejected for a reason a refresh cannot fix                             |
+| `result_evidence_binding`      | a v2 worker result differs from its dispatch-time stable acceptance binding         |
 | `review_failed`                | the review task did not succeed                                                     |
 | `review_invalid`               | the verdict does not validate against the judge schema                              |
 | `review_rejected`              | the verdict is not `pass`                                                           |
@@ -559,6 +560,7 @@ check failing). The codes:
 | `worker_not_done`              | a worker's task has not finished                                                    |
 | `worker_result_missing`        | a worker filed no valid result                                                      |
 | `workspace`                    | the descriptor declares no [workspace]                                              |
+| `scope_violation`              | the candidate changed paths outside write_scope without declaring scope_expansion   |
 
 ### Result
 
@@ -579,13 +581,16 @@ It then reads `git diff --name-only <base>..<candidate>`: when the worker's
 beads declare `write_scope` (metadata; a list of globs or a `;`-separated
 string), the launch stores their sorted union and each glob's authorizing
 beads. A changed path is inside the scope when it is one of the globs, under
-a directory glob, or an `fnmatch` match of one; the rest are recorded as
-`outside_scope` for the reviewer, never refused. The worker row records
-`scope: declared` or `scope: undeclared` and
-`changed_paths` either way. `batch scope-correct` is the explicit recovery
-route for an already-started run with malformed scope metadata. It requires
-the current candidate commit and records the old scope, corrected scope,
-per-bead authority, timestamp, and candidate before result validation retries.
+a directory glob, or an `fnmatch` match of one; the rest are `outside_scope`.
+An out-of-scope path is accepted when the result declares `scope_expansion`
+(paths, the bead each serves, and one sentence why); `batch status` then
+shows `pending_expansion` for the landing reviewer. An undeclared
+out-of-scope edit is `scope_violation`. A worker with no `write_scope` still
+records `scope: undeclared` and `changed_paths`. `batch scope-correct` is
+the explicit coordinator recovery route for an already-started run with
+malformed scope metadata. It requires the current candidate commit and
+records the old scope, corrected scope, per-bead authority, timestamp, and
+candidate before result validation retries.
 
 ## Descriptors
 
@@ -644,9 +649,11 @@ schedule = "*-*-* 03:17:00"
 An operation declares `description`, `exec` (argv, no shell), `pool` (a
 pueue group), `result` (`exit`, `json`, `pytest`), `timeout_seconds` (1 to
 28,800; default 3,600), `checkout` (`any`, or `default` for operations that
-run only on the main checkout), `schedule` (an `OnCalendar` expression),
-`cache` (`none` or `tree+environment`), `scratch` (`none`, `tmpfs` or
-`nvme`) and `dependencies` (declared operation names). Dependencies are
+run only on the main checkout), `arguments` (`none`, or `required` when the
+operation cannot execute without a caller-supplied selector; a focused
+profile must not name a `required` operation), `schedule` (an `OnCalendar`
+expression), `cache` (`none` or `tree+environment`), `scratch` (`none`,
+`tmpfs` or `nvme`) and `dependencies` (declared operation names). Dependencies are
 queued before their operation and cannot contain cycles. Any other operation
 field is ignored with a warning on stderr. `[environment]` declares `kind`, `command`,
 `inherit`, `unset`, `values` and `require`; a required variable missing at

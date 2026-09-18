@@ -144,7 +144,12 @@ class FakePueue:
         self.restarted.append(task_id)
         task = self._tasks[task_id]
         self._tasks[task_id] = replace(
-            task, status="Queued", result=None, exit_code=None
+            task,
+            status="Queued",
+            result=None,
+            exit_code=None,
+            started_at=None,
+            ended_at=None,
         )
 
     def reset_state(self) -> None:

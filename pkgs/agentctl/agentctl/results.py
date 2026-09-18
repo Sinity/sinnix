@@ -134,6 +134,23 @@ WORKER_SCHEMA: dict[str, Any] = {
                 },
             },
         },
+        "scope_expansion": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["paths", "bead", "reason"],
+                "properties": {
+                    "paths": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {"type": "string", "minLength": 1},
+                    },
+                    "bead": {"type": "string", "minLength": 1},
+                    "reason": {"type": "string", "minLength": 1},
+                },
+            },
+        },
     },
 }
 

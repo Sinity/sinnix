@@ -57,6 +57,46 @@ def test_job_start_get_logs_and_wait_round_trip(
     assert line.startswith("job 1 fixture:check succeeded finished ")
 
 
+def test_cli_cancel_before_start_retains_not_started_across_reads(
+    fake_pueue: FakePueue, cli_config: Config, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert cli.main(["job", "start", "fixture", "check"]) == 0
+    started = json.loads(capsys.readouterr().out)
+    fake_pueue.queue(started["job_id"])
+    assert (
+        cli.main(
+            [
+                "job",
+                "cancel",
+                str(started["job_id"]),
+                "--reference",
+                started["reference"],
+            ]
+        )
+        == 0
+    )
+    cancelled = json.loads(capsys.readouterr().out)
+    assert cancelled["phase"] == "cancelled" and cancelled["started"] is False
+    for _ in range(2):
+        assert (
+            cli.main(
+                [
+                    "--json",
+                    "job",
+                    "get",
+                    str(started["job_id"]),
+                    "--reference",
+                    started["reference"],
+                ]
+            )
+            == 0
+        )
+        document = json.loads(capsys.readouterr().out)
+        assert document["phase"] == "cancelled"
+        assert document["started"] is False
+        assert document["disposition"] == {"outcome": "cancelled", "started": False}
+
+
 def test_job_list_is_newest_first_and_bounded_unless_all(
     fake_pueue: FakePueue, cli_config: Config, capsys: pytest.CaptureFixture[str]
 ) -> None:
