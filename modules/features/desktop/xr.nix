@@ -89,16 +89,15 @@ mkFeatureModule {
           };
         };
         networking.firewall.interfaces.${lanInterface} = {
-          # These services expose only the Quest recording archive and the
-          # external media library. DeoVR uses HTTP byte ranges for direct
-          # LAN playback; both ports stay scoped to the physical LAN and the
-          # user services start on demand.
+          # The Quest archive, WiVRn, and MiniDLNA remain scoped to the
+          # physical LAN. MiniDLNA supplies DeoVR's native folder browser.
           allowedTCPPorts = [
             9757
             9790
-            9791
+            8200
           ];
           allowedUDPPorts = [
+            1900
             5353
             9757
           ];
@@ -111,13 +110,14 @@ mkFeatureModule {
             RestartSec = "5s";
           };
         };
-        systemd.user.services.sinnix-quest-library = {
-          description = "Quest external media library HTTP server";
-          path = [ scriptPkgs.sinnix-quest-library ];
-          serviceConfig = {
-            ExecStart = "${scriptPkgs.sinnix-quest-library}/bin/sinnix-quest-library --root /neo-outer-realm --bind 0.0.0.0 --port 9791";
-            Restart = "on-failure";
-            RestartSec = "5s";
+        services.minidlna = {
+          enable = true;
+          openFirewall = false;
+          settings = {
+            friendly_name = "Sinnix external media";
+            inotify = "yes";
+            media_dir = [ "V,/neo-outer-realm" ];
+            root_container = ".";
           };
         };
         systemd.user.services.sinnix-quest-player = {
