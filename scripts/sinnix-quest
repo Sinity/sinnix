@@ -12,6 +12,8 @@ MEDIA_DIR="${SINNIX_QUEST_MEDIA_DIR:-/realm/photos/quest-3/videoshots}"
 ARCHIVE_DIR="${SINNIX_QUEST_ARCHIVE_DIR:-/realm/archive/quest-3/videoshots}"
 BACKUP_MARKER="${SINNIX_QUEST_BACKUP_MARKER:-/persist/root/.cache/borg-drain/realm.last-success}"
 MEDIA_PORT="${SINNIX_QUEST_MEDIA_PORT:-9790}"
+LIBRARY_DIR="${SINNIX_QUEST_LIBRARY_DIR:-/neo-outer-realm}"
+LIBRARY_PORT="${SINNIX_QUEST_LIBRARY_PORT:-9791}"
 TRANSPORT="${SINNIX_QUEST_TRANSPORT:-auto}"
 
 usage() {
@@ -31,6 +33,9 @@ Commands:
                       show, or remove, verified archive copies older than 30 days
   media serve         serve the archive to DeoVR over LAN and USB ADB reverse
   media stop-serving  stop the archive service and remove USB forwarding
+  library serve       serve the external media library to DeoVR over LAN and USB ADB reverse
+  library stop-serving
+                      stop the external media library service and remove USB forwarding
   video open FILE [OPTIONS]
                       serve a local file to DeoVR through ADB reverse
   video open --clipboard [OPTIONS]
@@ -374,6 +379,27 @@ media() {
   esac
 }
 
+library() {
+  local action="${1:-serve}" target
+  case "$action" in
+    serve)
+      [ -d "$LIBRARY_DIR" ] || { echo "Quest external media library is unavailable: $LIBRARY_DIR" >&2; return 1; }
+      target="$(usb_serial)"
+      systemctl --user start sinnix-quest-library.service
+      adb -s "$target" reverse "tcp:$LIBRARY_PORT" "tcp:$LIBRARY_PORT"
+      echo "DeoVR LAN URL: http://$(ip -o -4 addr show dev enp4s0 | awk '{ split($4, octets, "/"); print octets[1]; exit }'):$LIBRARY_PORT/"
+      echo "DeoVR USB URL: http://localhost:$LIBRARY_PORT/"
+      ;;
+    stop-serving)
+      target="$(usb_serial)"
+      adb -s "$target" reverse --remove "tcp:$LIBRARY_PORT" || true
+      systemctl --user stop sinnix-quest-library.service
+      echo "Quest external media library server stopped"
+      ;;
+    *) echo "unknown library action: $action" >&2; return 2 ;;
+  esac
+}
+
 sync() {
   local target config host_name host_id
   target="$(resolve_target)"
@@ -477,6 +503,7 @@ case "$command" in
   health) health ;;
   storage) storage ;;
   media) shift; media "$@" ;;
+  library) shift; library "$@" ;;
   video|player) shift; exec sinnix-quest-player "$@" ;;
   sync) sync ;;
   network-adb) enable_network_adb ;;
