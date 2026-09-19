@@ -113,8 +113,9 @@ mkFeatureModule {
         };
         systemd.user.services.sinnix-quest-library = {
           description = "Quest external media library HTTP server";
+          path = [ scriptPkgs.sinnix-quest-library ];
           serviceConfig = {
-            ExecStart = "${pkgs.python3}/bin/python3 -m http.server 9791 --bind 0.0.0.0 --directory /neo-outer-realm";
+            ExecStart = "${scriptPkgs.sinnix-quest-library}/bin/sinnix-quest-library --root /neo-outer-realm --bind 0.0.0.0 --port 9791";
             Restart = "on-failure";
             RestartSec = "5s";
           };
