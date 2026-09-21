@@ -552,6 +552,10 @@ class ContextInput(RequestControls):
 
 class ContextComponent(GatewayModel):
     name: str
+    # The owner's terminal state, widened from the composer's own
+    # `products.Availability`; carried through rather than narrowed, because
+    # this projection re-validates a composed component and dropping a state
+    # here would relabel a gap-shaped answer on the `projects.context` route.
     status: str
     data: dict[str, Any] | None = None
     reason: str | None = None
@@ -559,6 +563,8 @@ class ContextComponent(GatewayModel):
     source_revision: str | None = None
     snapshot_ref: str | None = None
     budget_bytes: int | None = None
+    component_failures: dict[str, str] = Field(default_factory=dict)
+    inline_omitted: bool = False
     extra: dict[str, Any] = Field(default_factory=dict)
 
 

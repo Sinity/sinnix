@@ -6,7 +6,8 @@ from pathlib import Path
 from typing import Any, Mapping
 
 
-def _canonical(value: Any) -> bytes:
+def canonical_bytes(value: Any) -> bytes:
+    """The one canonical encoding of an observation: its revision and its size."""
     return json.dumps(
         value, sort_keys=True, separators=(",", ":"), default=str
     ).encode()
@@ -20,7 +21,7 @@ def source_revision(value: Any) -> str:
     observed and is marked as an observation revision in the context output.
     """
 
-    return hashlib.sha256(_canonical(value)).hexdigest()
+    return hashlib.sha256(canonical_bytes(value)).hexdigest()
 
 
 class ContextSnapshotStore:

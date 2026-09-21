@@ -278,7 +278,11 @@ def test_historical_context_owner_contract_preserves_partial_and_unknown(
         "refresh_id": "fixture-generation",
     }
     component = result.components[0]
-    assert component.status == ("available" if outcome == "partial" else "unavailable")
+    # `partial` is a named gap, not an available answer: flattening it to
+    # `available` is what let a gap-shaped context reach a caller as
+    # authoritative. Breaks if the gateway's unavailability set goes back to
+    # deciding only reachable/unreachable.
+    assert component.status == ("degraded" if outcome == "partial" else "unavailable")
     if outcome == "partial":
         assert component.data["data"] == owner_data
         assert component.data["data"]["counts"]["exact"] is None
@@ -346,3 +350,161 @@ def test_shell_wait_preserves_job_identity_and_returns_output(
     assert wait_call.arguments["timeout_seconds"] == 5
     assert wait_call.arguments["launch_reference"] == "fixture-shell-abc"
     assert (data["continuation"] is None) is terminal
+
+
+# ---------------------------------------------------------------- four states
+#
+# The owner decides its terminal outcome once, in {ok, empty, degraded,
+# error}, with `degraded` outranking `empty` so zero rows behind a named gap
+# is never reported as an empty scope. Each test below breaks if the gateway
+# goes back to a two-state unavailability set: both `degraded` and `empty`
+# then fall through to `available` and the distinction is erased at the
+# boundary the owner drew it for.
+
+
+@pytest.mark.parametrize(
+    ("state", "expected"),
+    [
+        ("ok", "available"),
+        ("empty", "empty"),
+        ("degraded", "degraded"),
+        ("error", "unavailable"),
+    ],
+)
+def test_an_owner_terminal_outcome_survives_the_gateway(
+    tmp_path, monkeypatch, state, expected
+):
+    _, runtime, _ = make_server(tmp_path, "observer", monkeypatch)
+    runtime.mcp_broker = Broker(
+        {
+            "sessions": [],
+            "outcome": {"state": state, "reason": "retained history is incomplete"},
+        }
+    )
+    result = anyio.run(
+        products._orchestration,
+        runtime,
+        products.OrchestrationInput(session_refs=["session:a"]),
+    )
+    product = result.sessions[0]
+    assert product.availability == expected
+    if expected != "available":
+        assert product.reason == "retained history is incomplete"
+
+
+def test_zero_rows_without_a_declared_outcome_are_not_inferred_empty(
+    tmp_path, monkeypatch
+):
+    """The gateway reads the owner's decision; it never makes one from the shape
+    of the payload. Breaks if `empty` starts being inferred from an absent row
+    set, which is what makes a broken owner surface indistinguishable from an
+    owner whose scope really holds nothing."""
+    _, runtime, _ = make_server(tmp_path, "observer", monkeypatch)
+    runtime.mcp_broker = Broker({"sessions": [], "coverage": {"complete": True}})
+    result = anyio.run(
+        products._orchestration,
+        runtime,
+        products.OrchestrationInput(session_refs=["session:a"]),
+    )
+    assert result.sessions[0].availability == "available"
+
+
+def test_component_failures_are_carried_and_make_the_answer_degraded(
+    tmp_path, monkeypatch
+):
+    """Polylogue's ContextPreamble carries `component_failures` and no outcome
+    field at all, so named per-component gaps are its only gap signal. Breaks if
+    the gateway drops them: a context assembled from a failed lineage lookup
+    reaches the caller labelled available, with nothing naming what is missing."""
+    _, runtime, _ = make_server(tmp_path, "observer", monkeypatch)
+    failures = {"session_lineage": "TimeoutError: lineage lookup timed out"}
+    runtime.mcp_broker = Broker(
+        {"recent_related_sessions": [], "component_failures": failures}
+    )
+    result = anyio.run(
+        products._orchestration,
+        runtime,
+        products.OrchestrationInput(session_refs=["session:a"]),
+    )
+    product = result.sessions[0]
+    assert product.availability == "degraded"
+    assert product.component_failures == failures
+    assert "session_lineage" in (product.reason or "")
+
+
+@pytest.mark.parametrize(
+    ("parts", "expected"),
+    [
+        ((), "empty"),
+        (("available", "available"), "available"),
+        (("empty", "empty"), "empty"),
+        (("available", "empty"), "available"),
+        (("available", "degraded"), "degraded"),
+        (("empty", "degraded"), "degraded"),
+        (("available", "unavailable"), "degraded"),
+        (("empty", "unavailable"), "degraded"),
+        (("unavailable", "unavailable"), "unavailable"),
+    ],
+)
+def test_a_composite_keeps_its_worst_part(parts, expected):
+    """A composite is only as honest as its worst part. Breaks if composition
+    goes back to `any(part == "available")`, which reports a whole context as
+    available on the strength of one part that answered."""
+    assert products.combine_availability(list(parts)) == expected
+
+
+def test_a_composed_context_carries_the_owner_state_and_its_failures(
+    tmp_path, monkeypatch
+):
+    """The composed context is where the erased label was observed. Breaks if
+    `_compose` stops propagating the product's state or its component failures
+    into the returned component."""
+    _, runtime, _ = make_server(tmp_path, "observer", monkeypatch)
+    failures = {"assertion_guidance": "OperationalError: database is locked"}
+    runtime.mcp_broker = Broker(
+        {"sessions": [], "component_failures": failures, "outcome": {"state": "empty"}}
+    )
+    result = anyio.run(
+        contexts._compose,
+        runtime,
+        contexts.ComposeInput(
+            intent="session.orchestration",
+            project={"project": "fixture"},
+            session_refs=["session:a"],
+        ),
+    )
+    component = result.components[0]
+    assert component.status == "degraded"
+    assert component.component_failures == failures
+
+
+def test_a_composed_context_is_held_to_the_budget_it_declares(tmp_path, monkeypatch):
+    """`total_budget_bytes` was declared and never enforced, which is why a
+    262 KB budget returned a 4 MB result. Breaks if the bound is removed: the
+    returned envelope exceeds the number it reports as its own budget."""
+    import dataclasses
+
+    _, runtime, _ = make_server(tmp_path, "observer", monkeypatch)
+    runtime.config = dataclasses.replace(runtime.config, max_result_bytes=4_096)
+    payload = {"sessions": [], "evidence": "x" * 64_000}
+    runtime.mcp_broker = Broker(payload)
+    result = anyio.run(
+        contexts._compose,
+        runtime,
+        contexts.ComposeInput(
+            intent="session.orchestration",
+            project={"project": "fixture"},
+            session_refs=["session:a"],
+        ),
+    )
+    assert result.total_budget_bytes == 4_096
+    assert len(result.model_dump_json().encode()) <= 4_096
+    assert result.components[0].inline_omitted is True
+    assert result.components[0].data is None
+    # The complete observation is still readable at the snapshot ref: bounding
+    # the in-band copy must not lose the evidence.
+    snapshot = runtime.results.read(result.snapshot_ref.rsplit("/", 1)[1])
+    assert (
+        snapshot["rows"][0]["components"][0]["data"]["data"]["sessions"][0]["data"]
+        == payload
+    )
