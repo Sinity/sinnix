@@ -118,8 +118,18 @@ _OPERATION_FIELDS = frozenset(
         "scratch",
         "dependencies",
         "arguments",
+        "admission",
     }
 )
+
+#: Which tree an operation runs in; `checkout.py` states what each means.
+CHECKOUT_KINDS = frozenset({"any", "default", "candidate"})
+#: An operation's declared memory envelope, in MiB. One key today; the table
+#: exists so a second dimension does not become a second top-level key.
+ADMISSION_FIELDS = frozenset({"memory_mib"})
+#: A declared envelope larger than this is a typo, not a workload: no pool
+#: slice on this workstation is declared anywhere near it.
+MAX_ADMISSION_MEMORY_MIB = 64 * 1024
 
 
 class ProjectEnvironmentError(ProjectConfigError):
@@ -223,6 +233,29 @@ class PacketsPolicy:
 
 
 @dataclass(frozen=True)
+class AdmissionEnvelope:
+    """What an operation says it expects to need, to compare a measurement to.
+
+    The measured side already exists wherever a workload sizes itself -- a
+    Polylogue sizing receipt carries a predicted charge, a budget, and its
+    margin. The declared side did not, so there was nothing on this side of
+    the boundary to compare those numbers against, and a workload wanting the
+    pool's ceiling could only mirror the number by hand from Sinnix's slice
+    definition.
+
+    This is a declaration, not a limit. agentctl records it on the job and
+    exports it to the command; it does not impose a unit `MemoryMax` from it,
+    because silently throttling an operation at a number someone wrote in a
+    descriptor is a different decision from letting it state what it expects.
+    """
+
+    memory_mib: int
+
+    def catalog_row(self) -> dict[str, Any]:
+        return {"memory_mib": self.memory_mib}
+
+
+@dataclass(frozen=True)
 class ProjectOperation:
     name: str
     description: str
@@ -231,12 +264,13 @@ class ProjectOperation:
     result: str = "exit"
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS
     schedule: str | None = None
-    # "default": the operation runs only on the project's main checkout.
+    # Which tree the operation runs in; see `checkout.CHECKOUT_KINDS`.
     checkout: str = "any"
     cache: str = "none"
     scratch: str = "none"
     dependencies: tuple[str, ...] = ()
     arguments: str = "none"
+    admission: AdmissionEnvelope | None = None
 
     def catalog_row(self) -> dict[str, Any]:
         return {
@@ -252,6 +286,7 @@ class ProjectOperation:
             "scratch": self.scratch,
             "dependencies": list(self.dependencies),
             "arguments": self.arguments,
+            "admission": self.admission.catalog_row() if self.admission else None,
         }
 
 
@@ -478,6 +513,27 @@ def _packets(raw: Mapping[str, Any], root: Path, descriptor: Path) -> PacketsPol
     return PacketsPolicy(model_policy=policy_map, **fields)
 
 
+def _admission(name: str, definition: Any, descriptor: Path) -> AdmissionEnvelope:
+    if not isinstance(definition, Mapping):
+        raise ProjectConfigError(f"operations.{name}.admission must be a table")
+    _warn_unknown(
+        descriptor,
+        f"operation {name} admission",
+        set(definition) - ADMISSION_FIELDS,
+    )
+    memory_mib = definition.get("memory_mib")
+    if (
+        not isinstance(memory_mib, int)
+        or isinstance(memory_mib, bool)
+        or not 1 <= memory_mib <= MAX_ADMISSION_MEMORY_MIB
+    ):
+        raise ProjectConfigError(
+            f"operations.{name}.admission.memory_mib must be an integer between "
+            f"1 and {MAX_ADMISSION_MEMORY_MIB}"
+        )
+    return AdmissionEnvelope(memory_mib=memory_mib)
+
+
 def _operation(name: str, definition: Any, descriptor: Path) -> ProjectOperation:
     if not name.isidentifier() or not isinstance(definition, Mapping):
         raise ProjectConfigError(
@@ -507,9 +563,11 @@ def _operation(name: str, definition: Any, descriptor: Path) -> ProjectOperation
             )
         fields["timeout_seconds"] = timeout_seconds
     if "checkout" in definition:
-        if definition["checkout"] not in {"any", "default"}:
+        if definition["checkout"] not in CHECKOUT_KINDS:
             raise ProjectConfigError(f"operations.{name}.checkout is invalid")
         fields["checkout"] = definition["checkout"]
+    if "admission" in definition:
+        fields["admission"] = _admission(name, definition["admission"], descriptor)
     schedule = definition.get("schedule")
     if schedule is not None and (
         not isinstance(schedule, str)
@@ -619,19 +677,22 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
             )
         # A worker's focused verification is compiled as
         # `job start <project> <focused> --workspace <worktree>` (start.py's
-        # focused_verification), and launch refuses a "default" checkout
-        # anywhere but the project root. So a focused profile naming a
-        # default-checkout operation cannot execute for the batch it exists to
-        # serve -- every worker's verification would raise JobError. Refuse the
-        # declaration here rather than let each packet discover it (sinnix-59zd).
+        # focused_verification), and launch refuses any checkout that names its
+        # own tree anywhere but that tree. So a focused profile naming a
+        # `default` or `candidate` operation cannot execute for the batch it
+        # exists to serve -- every worker's verification would raise JobError,
+        # and a `candidate` one would verify the base instead of the worker's
+        # own commit. Refuse the declaration here rather than let each packet
+        # discover it (sinnix-59zd).
         focused = workspace.verify.get("focused")
         focused_operation = next(
             (operation for operation in operations if operation.name == focused), None
         )
-        if focused_operation is not None and focused_operation.checkout == "default":
+        if focused_operation is not None and focused_operation.checkout != "any":
             raise ProjectConfigError(
                 f"{descriptor} workspace.verify.focused must name an operation that runs "
-                f'on a worker worktree, but {focused} declares checkout = "default"'
+                f"on a worker worktree, but {focused} declares "
+                f'checkout = "{focused_operation.checkout}"'
             )
         if focused_operation is not None and focused_operation.arguments == "required":
             raise ProjectConfigError(

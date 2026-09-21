@@ -8,10 +8,11 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 from . import launch, pueue, results
+from .checkout import workspace_of, worktree_path
 from .config import Config
 from .limits import MAX_AGENT_TIMEOUT_SECONDS
 from .manifest import BatchRefusal, Run, land_update, load
-from .projects import ProjectAdapter, WorkspacePolicy
+from .projects import ProjectAdapter
 from .pueue import PueueError
 
 AGENT_GROUP = "agent"
@@ -26,8 +27,6 @@ LANDING_AGENT_PARALLELISM = 2
 # The directory inside a worktree holding what agentctl writes for its agent:
 # the prompt, the result schema and the result. Never committed.
 WORKTREE_STATE_DIR = ".agentctl"
-# A push or fetch runs the repository's pre-push gate.
-PUSH_TIMEOUT_SECONDS = 2_400
 # The agent kinds that must not publish or mutate tasks: their environment
 # cannot push, has no forwarded credential, and sees a read-only `bd`.
 RESTRICTED_KINDS = frozenset({"worker", "resume", "review"})
@@ -83,21 +82,6 @@ def path_properties(
         f"ReadOnlyPaths={project.root}",
         f"ReadWritePaths={project.root / '.git'}",
         *(f"InaccessiblePaths=-{path}" for path in inaccessible),
-    )
-
-
-def workspace_of(project: ProjectAdapter) -> WorkspacePolicy:
-    if project.workspace is None:
-        raise BatchRefusal(
-            "workspace", f"project {project.project_id} declares no [workspace]"
-        )
-    return project.workspace
-
-
-def worktree_path(project: ProjectAdapter, branch: str) -> Path:
-    """`<workspace.root>/<repo>-<branch>`, the placement `wt` is configured for."""
-    return (
-        workspace_of(project).root / f"{project.root.name}-{branch.replace('/', '-')}"
     )
 
 

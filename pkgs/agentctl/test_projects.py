@@ -473,3 +473,106 @@ def test_packets_review_names_the_reviewer_agent_completely(tmp_path: Path) -> N
     descriptor.write_text(base + '\n[packets.review]\nbackend = "claude"\n')
     with pytest.raises(ProjectConfigError, match=r"\[packets.review\]"):
         load_project_adapter(root)
+
+
+# ----------------------------------------------- checkout and admission keys
+
+
+def test_an_operation_may_name_the_candidate_tree(tmp_path: Path) -> None:
+    """`default` refuses a tree; it never selects one. Breaks if the accepted
+    set goes back to {any, default}: an operation cannot say which tree its
+    receipt is evidence about, and a scheduled launch silently uses whatever
+    state the project checkout is in."""
+    root = write_project(tmp_path / "p")
+    descriptor = root / ".agentctl" / "project.toml"
+    base = descriptor.read_text()
+    descriptor.write_text(
+        base
+        + '\n[operations.corpus]\ndescription = "Corpus"\nexec = ["c"]\n'
+        + 'checkout = "candidate"\n'
+    )
+
+    operation = load_project_adapter(root).operation("corpus")
+
+    assert operation.checkout == "candidate"
+    assert operation.catalog_row()["checkout"] == "candidate"
+
+    descriptor.write_text(
+        base
+        + '\n[operations.corpus]\ndescription = "Corpus"\nexec = ["c"]\n'
+        + 'checkout = "worktree"\n'
+    )
+    with pytest.raises(ProjectConfigError, match="checkout is invalid"):
+        load_project_adapter(root)
+
+
+def test_an_operation_may_declare_its_admission_envelope(tmp_path: Path) -> None:
+    """The measured side already exists on every sizing receipt; without this
+    key there is no declared number to compare it against, and a workload can
+    only mirror a pool ceiling by hand. Breaks if `admission` stops being
+    parsed: the declaration is dropped with a warning and the catalog says
+    nothing about what the operation expects."""
+    root = write_project(tmp_path / "p")
+    descriptor = root / ".agentctl" / "project.toml"
+    base = descriptor.read_text()
+    descriptor.write_text(
+        base
+        + '\n[operations.corpus]\ndescription = "Corpus"\nexec = ["c"]\n'
+        + "admission = { memory_mib = 12288 }\n"
+    )
+
+    operation = load_project_adapter(root).operation("corpus")
+
+    assert operation.admission is not None
+    assert operation.admission.memory_mib == 12288
+    assert operation.catalog_row()["admission"] == {"memory_mib": 12288}
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["0", "-1", "65537", '"12288"', "12288.5", "true"],
+)
+def test_an_unusable_admission_envelope_is_refused(tmp_path: Path, value: str) -> None:
+    """Breaks if the bound is dropped: a typo becomes a declaration nothing
+    can satisfy, and the number a receipt compares against is nonsense."""
+    root = write_project(tmp_path / "p")
+    descriptor = root / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text()
+        + '\n[operations.corpus]\ndescription = "Corpus"\nexec = ["c"]\n'
+        + f"admission = {{ memory_mib = {value} }}\n"
+    )
+    with pytest.raises(ProjectConfigError, match="admission.memory_mib"):
+        load_project_adapter(root)
+
+
+def test_every_existing_declaration_keeps_working_without_the_new_keys(
+    project_root: Path,
+) -> None:
+    """The fixture descriptor declares neither key. Breaks if either becomes
+    required, or if the default stops being today's behaviour."""
+    project = load_project_adapter(project_root)
+
+    assert project.operation("check").checkout == "any"
+    assert project.operation("check").admission is None
+    assert project.operation("nightly").checkout == "default"
+    assert project.operation("check").catalog_row()["admission"] is None
+
+
+def test_a_focused_profile_cannot_name_an_operation_that_picks_its_own_tree(
+    tmp_path: Path,
+) -> None:
+    """A worker verifies its own worktree. Breaks if the refusal keeps testing
+    only for `default`: a `candidate` focused operation would verify the base
+    commit and report it as the worker's evidence."""
+    root = write_project(tmp_path / "p")
+    descriptor = root / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text().replace(
+            '[operations.verify_quick]\ndescription = "Fixture quick verification"',
+            '[operations.verify_quick]\ncheckout = "candidate"\n'
+            'description = "Fixture quick verification"',
+        )
+    )
+    with pytest.raises(ProjectConfigError, match='checkout = "candidate"'):
+        load_project_adapter(root)

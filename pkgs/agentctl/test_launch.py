@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 from pathlib import Path
 from typing import Callable
 
@@ -24,7 +25,7 @@ from agentctl.run import (
     outcome_path_for,
     unit_for,
 )
-from conftest import FakePueue, read_launch
+from conftest import FakePueue, read_launch, write_project
 
 
 def test_invalid_launch_input_preserves_existing_private_bytes(tmp_path: Path) -> None:
@@ -1193,3 +1194,158 @@ def test_every_queued_task_carries_the_config_the_launch_was_started_with(
 
     written = read_launch(config, fake_pueue.task(started["job_id"]))
     assert written["environment"]["AGENTCTL_CONFIG"] == str(location)
+
+
+# ------------------------------------------------------- the candidate tree
+
+
+def _candidate_project(tmp_path: Path) -> Path:
+    """A project whose `corpus` operation names the candidate tree.
+
+    `origin/master` is a real remote-tracking ref pointing at the base commit,
+    and the project's own checkout is moved past it and left dirty -- exactly
+    the shape that made a scheduled complete-corpus run report a receipt from
+    the operator's working tree.
+    """
+    root = write_project(tmp_path / "fixture", worktrees=tmp_path / "worktrees")
+    descriptor = root / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text()
+        + '\n[operations.corpus]\ndescription = "Fixture corpus"\n'
+        + 'exec = ["fixture-corpus"]\npool = "bulk"\ncheckout = "candidate"\n'
+        + 'admission = { memory_mib = 12288 }\nschedule = "*-*-* 03:00"\n'
+    )
+    run = lambda *arguments: subprocess.run(  # noqa: E731
+        ["git", "-C", str(root), *arguments], check=True, capture_output=True
+    )
+    subprocess.run(["git", "init", "-q", "-b", "master", str(root)], check=True)
+    run("config", "user.name", "Fixture")
+    run("config", "user.email", "fixture@example.test")
+    run("add", "-A")
+    run("commit", "-q", "-m", "base")
+    base = subprocess.check_output(
+        ["git", "-C", str(root), "rev-parse", "HEAD"], text=True
+    ).strip()
+    run("update-ref", "refs/remotes/origin/master", base)
+    (root / "operator-work.txt").write_text("the operator's uncommitted work\n")
+    run("add", "operator-work.txt")
+    run("commit", "-q", "-m", "ahead of the base")
+    (root / "operator-work.txt").write_text("dirty\n")
+    return root, base
+
+
+def test_a_candidate_operation_resolves_its_own_tree_without_a_workspace(
+    fake_pueue: FakePueue, tmp_path: Path
+) -> None:
+    """A timer's `fire` passes no workspace and never can. Breaks if
+    `candidate` stops selecting a tree: the launch runs in the project
+    checkout -- the operator's branch, ahead of the base and dirty -- and its
+    receipt is not candidate evidence, which is the observed defect."""
+    root, base = _candidate_project(tmp_path)
+    config = Config(
+        project_roots=(root,),
+        agent_runner=root / "contract.md",
+        worker_contract=root / "contract.md",
+        event_spool=tmp_path / "events.jsonl",
+        state_dir=tmp_path / "state",
+        agentctl_executable="/fixture/agentctl",
+    )
+    project = load_project_adapter(root)
+
+    fired = launch.fire(config, project, project.operation("corpus"))
+
+    assert fired["fired"] is True
+    added = fake_pueue.added[0]
+    working = Path(added["working_directory"])
+    assert working != root
+    assert working.parent == tmp_path / "worktrees"
+    head = subprocess.check_output(
+        ["git", "-C", str(working), "rev-parse", "HEAD"], text=True
+    ).strip()
+    assert head == base
+    written = read_launch(config, fake_pueue.task(fired["job_id"]))
+    assert written["checkout"] == {"kind": "candidate", "commit": base}
+    assert written["working_directory"] == str(working)
+
+
+def test_a_candidate_operation_is_reset_to_the_base_on_every_launch(
+    fake_pueue: FakePueue, tmp_path: Path
+) -> None:
+    """Breaks if the tree is created once and then reused as-is: whatever a
+    previous run committed or left modified becomes the next run's subject."""
+    root, base = _candidate_project(tmp_path)
+    config = Config(
+        project_roots=(root,),
+        agent_runner=root / "contract.md",
+        worker_contract=root / "contract.md",
+        event_spool=tmp_path / "events.jsonl",
+        state_dir=tmp_path / "state",
+        agentctl_executable="/fixture/agentctl",
+    )
+    project = load_project_adapter(root)
+    first = launch.start_operation(config, project, project.operation("corpus"))
+    working = Path(fake_pueue.task(first["job_id"]).path)
+    (working / "marker").write_text("a previous run left this behind\n")
+
+    launch.start_operation(config, project, project.operation("corpus"))
+
+    assert (working / "marker").read_text() == ""
+    assert (
+        subprocess.check_output(
+            ["git", "-C", str(working), "rev-parse", "HEAD"], text=True
+        ).strip()
+        == base
+    )
+
+
+def test_a_candidate_operation_refuses_a_caller_supplied_workspace(
+    fake_pueue: FakePueue, tmp_path: Path
+) -> None:
+    """Breaks if a workspace silently overrides the declaration: the operation
+    would report a candidate receipt for a tree it did not choose."""
+    root, _ = _candidate_project(tmp_path)
+    config = Config(
+        project_roots=(root,),
+        agent_runner=root / "contract.md",
+        worker_contract=root / "contract.md",
+        event_spool=tmp_path / "events.jsonl",
+        state_dir=tmp_path / "state",
+        agentctl_executable="/fixture/agentctl",
+    )
+    project = load_project_adapter(root)
+
+    with pytest.raises(JobError, match="does not take a workspace"):
+        launch.start_operation(
+            config,
+            project,
+            project.operation("corpus"),
+            workspace=tmp_path / "elsewhere",
+        )
+
+
+def test_a_declared_admission_envelope_reaches_the_job_and_its_command(
+    fake_pueue: FakePueue, tmp_path: Path
+) -> None:
+    """The declared side of the comparison a sizing receipt already measures.
+    Breaks if the envelope stops being carried: the workload has no declared
+    number to read, and the job record says nothing about what was expected."""
+    root, _ = _candidate_project(tmp_path)
+    config = Config(
+        project_roots=(root,),
+        agent_runner=root / "contract.md",
+        worker_contract=root / "contract.md",
+        event_spool=tmp_path / "events.jsonl",
+        state_dir=tmp_path / "state",
+        agentctl_executable="/fixture/agentctl",
+    )
+    project = load_project_adapter(root)
+
+    started = launch.start_operation(config, project, project.operation("corpus"))
+
+    written = read_launch(config, fake_pueue.task(started["job_id"]))
+    assert written["admission"] == {"memory_mib": 12288}
+    assert written["environment"]["AGENTCTL_ADMISSION_MEMORY_MIB"] == "12288"
+    # A declaration, not a limit: it must not become a unit memory bound.
+    assert not any(
+        item.startswith("Memory") for item in written.get("unit_properties", [])
+    )

@@ -6,9 +6,8 @@ import os
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from . import gitcmd, launch, pueue, results, worktrunk
+from . import checkout, gitcmd, launch, pueue, results, worktrunk
 from .agents import (
-    PUSH_TIMEOUT_SECONDS,
     STRUCTURED_RESULT_BACKENDS,
     WORKTREE_STATE_DIR,
     binding,
@@ -25,6 +24,7 @@ from .agents import (
     write_prompt,
 )
 from .beads import Beads, SubprocessBeads
+from .checkout import CheckoutError
 from .config import Config
 from .launch import JobError
 from .manifest import (
@@ -319,22 +319,15 @@ def result_provenance(
 
 
 def _base_commit(project: ProjectAdapter) -> str:
-    base = workspace_of(project).default_base
-    if base.startswith("origin/"):
-        try:
-            gitcmd.git(
-                project.root,
-                "fetch",
-                "--quiet",
-                "origin",
-                timeout=PUSH_TIMEOUT_SECONDS,
-                error=BatchError,
-            )
-        except BatchError:
-            pass
-    return gitcmd.git(
-        project.root, "rev-parse", "--verify", f"{base}^{{commit}}", error=BatchError
-    )
+    """The commit a batch bases its workers on, as `checkout` resolves it.
+
+    One resolution of "what does `default_base` name right now", shared with
+    the candidate checkout, re-raised as the batch's own refusal class.
+    """
+    try:
+        return checkout.base_commit(project)
+    except CheckoutError as error:
+        raise BatchError(str(error)) from error
 
 
 def _prepare(

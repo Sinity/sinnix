@@ -24,10 +24,12 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Iterator, Mapping, Sequence
 
 from . import artifacts, gitcmd, manifest, pools, pueue
+from .checkout import CheckoutError, candidate_tree
 from .config import Config
 from .launch_input import scratch_path, write_input
 from .limits import CALL_TIMEOUT_SECONDS, SHORT_ID, SYSTEMCTL_TIMEOUT_SECONDS
-from .projects import ProjectAdapter, ProjectOperation
+from .manifest import BatchRefusal
+from .projects import AdmissionEnvelope, ProjectAdapter, ProjectOperation
 from .pueue import PueueError, PueueGroupError, PueueTimeout, Task
 from .run import (
     CANCELLED_EXIT_CODE,
@@ -45,6 +47,7 @@ from .run import (
     unit_for,
     unit_pool,
 )
+from .worktrunk import WorktrunkError
 
 QUEUE_RUN_EXECUTABLE = "agentctl-run"
 # A launch input carries argv and a resolved environment; the largest this
@@ -180,6 +183,8 @@ def enqueue(
     environment: Mapping[str, str],
     kind: str = "declared-operation",
     scratch: str = "none",
+    admission: AdmissionEnvelope | None = None,
+    checkout: Mapping[str, Any] | None = None,
     after: Sequence[int] = (),
     stashed: bool = False,
     unit_properties: Sequence[str] = (),
@@ -227,6 +232,17 @@ def enqueue(
         launch["request_digest"] = request_digest
     if unit_properties:
         launch["unit_properties"] = list(unit_properties)
+    if admission is not None:
+        # The declared envelope, recorded on the job and exported to the
+        # command so a workload's own sizing receipt has a declared number to
+        # compare its measurement against. It bounds nothing by itself.
+        launch["admission"] = admission.catalog_row()
+        environment["AGENTCTL_ADMISSION_MEMORY_MIB"] = str(admission.memory_mib)
+        launch["environment"] = environment
+    if checkout is not None:
+        # Which tree agentctl chose and the commit it reset it to, so a
+        # receipt names the code it is evidence about.
+        launch["checkout"] = dict(checkout)
     if tree_receipt is not None:
         launch["tree_receipt"] = dict(tree_receipt)
     if environment_receipt is not None:
@@ -549,6 +565,38 @@ def start_operation(
         )
 
 
+def _working_directory(
+    project: ProjectAdapter, operation: ProjectOperation, workspace: Path | None
+) -> tuple[Path, str | None]:
+    """The tree this operation runs in, and the commit when agentctl chose it.
+
+    `any` takes the caller's tree. `default` refuses every tree but the
+    project root; it selects nothing, so a caller that passes no workspace
+    still lands in whatever state that checkout is in. `candidate` resolves
+    its own tree, which is the point: a scheduled `job fire` passes no
+    workspace, and correctness must not depend on a caller remembering a flag.
+    """
+    if operation.checkout == "candidate":
+        if workspace is not None and workspace.resolve() != project.root:
+            raise JobError(
+                f"{project.project_id}.{operation.name} resolves its own candidate "
+                "checkout; it does not take a workspace"
+            )
+        try:
+            return candidate_tree(project)
+        except (CheckoutError, WorktrunkError, BatchRefusal) as error:
+            raise JobError(
+                f"{project.project_id}.{operation.name} could not resolve its "
+                f"candidate checkout: {error}"
+            ) from error
+    working_directory = (workspace or project.root).resolve()
+    if operation.checkout == "default" and working_directory != project.root:
+        raise JobError(
+            f"{project.project_id}.{operation.name} runs only on the project's main checkout"
+        )
+    return working_directory, None
+
+
 def _start_operation(
     config: Config,
     project: ProjectAdapter,
@@ -566,11 +614,9 @@ def _start_operation(
             f"{project.project_id} operation dependencies contain a cycle at "
             f"{operation.name}"
         )
-    working_directory = (workspace or project.root).resolve()
-    if operation.checkout == "default" and working_directory != project.root:
-        raise JobError(
-            f"{project.project_id}.{operation.name} runs only on the project's main checkout"
-        )
+    working_directory, candidate_commit = _working_directory(
+        project, operation, workspace
+    )
     if operation.arguments == "required" and not extra_argv:
         raise JobError(
             f"{project.project_id}.{operation.name} declares arguments = \"required\" "
@@ -665,6 +711,10 @@ def _start_operation(
         result_kind=operation.result,
         environment=environment,
         scratch=operation.scratch,
+        admission=operation.admission,
+        checkout={"kind": operation.checkout, "commit": candidate_commit}
+        if candidate_commit is not None
+        else None,
         after=dependency_ids,
         reference=(
             _owner_reference(owner_request_key)
@@ -686,7 +736,14 @@ def _start_operation(
 def fire(
     config: Config, project: ProjectAdapter, operation: ProjectOperation
 ) -> dict[str, Any]:
-    """A timer's launch: skipped while the same operation is still queued or running."""
+    """A timer's launch: skipped while the same operation is still queued or running.
+
+    It passes no workspace and never could: a timer has no caller to supply
+    one. The operation's declared `checkout` is therefore the only thing that
+    decides which tree its receipt is evidence about -- `candidate` resolves
+    a tree at the project's base, `any` and `default` both land in the
+    project's own checkout, whatever state it happens to be in.
+    """
     label = label_for(project.project_id, operation.name)
     active = [
         task
@@ -1051,9 +1108,13 @@ def _job_detail(
     attempt_limit: int = 100,
 ) -> dict[str, Any]:
     view = job_view(task)
-    binding = (_launch_input(config, task) or {}).get("binding")
+    launch_input = _launch_input(config, task) or {}
+    binding = launch_input.get("binding")
     if binding:
         view["binding"] = binding
+    for key in ("admission", "checkout"):
+        if launch_input.get(key):
+            view[key] = launch_input[key]
     view.update(_artifact_view(config, task, attempt))
     receipt = _outcome(config, task, view["attempt"]).get("outcome") or {}
     records = view["attempts"]
