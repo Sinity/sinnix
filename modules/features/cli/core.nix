@@ -18,7 +18,67 @@ mkFeatureModule {
       scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
       userRuntimeDirectory = "/run/user/${toString config.users.users.${user}.uid}";
     in
-    {
+    lib.mkMerge [
+      # Worktree removal is coupled to the landing path: agentctl calls
+      # worktrunk_remove only from landing.py, so every non-landing exit
+      # (abandoned batch worker, baseline checkout, triage tree, a worker
+      # that errored) leaves its directory behind -- each carrying its own
+      # ~450 MB venv, because sharing the checkout venv is forbidden.
+      # `git worktree prune` does not close this: it disowns the metadata
+      # and leaves the directory. 28 such husks holding 72 GB were found
+      # and removed by hand on 2026-09-21.
+      (lib.sinnix.mkScheduledJob
+        {
+          inherit config;
+          unitName = "sinnix-worktree-reap";
+          description = "Remove orphaned worktree directories under /realm/worktrees";
+        }
+        {
+          manager = "user";
+          resourceClass = "background";
+          script = ''
+            set -uo pipefail
+            root=/realm/worktrees
+            [ -d "$root" ] || exit 0
+            for d in "$root"/*; do
+              [ -d "$d" ] || continue
+              # A live worktree always carries .git (file or dir). Since Git
+              # never removes the directory itself, a .git-less entry here is
+              # residue by definition -- this is the whole safety criterion.
+              if [ -e "$d/.git" ]; then continue; fi
+              # Refuse while any process is still working inside it.
+              busy=""
+              for proc in /proc/[0-9]*; do
+                cwd=$(readlink "$proc/cwd" 2>/dev/null) || continue
+                case "$cwd" in
+                  "$d" | "$d"/*)
+                    busy=1
+                    break
+                    ;;
+                esac
+              done
+              if [ -n "$busy" ]; then
+                echo "skip (in use): $d"
+                continue
+              fi
+              echo "reaping: $d"
+              # Verification receipts are written 0o444 and archive templates
+              # read-only; without this the removal fails partway and leaves
+              # a partial tree that looks like a fresh husk next run.
+              chmod -R u+w "$d" 2>/dev/null || true
+              rm -rf "$d"
+            done
+          '';
+          timer = {
+            onCalendar = "*-*-* 04:00:00";
+            persistent = true;
+            randomizedDelaySec = "20min";
+            accuracySec = "5min";
+            description = "Daily orphaned-worktree reclaim";
+          };
+        }
+      )
+      {
       environment.systemPackages =
         (with pkgs; [
           git
@@ -283,5 +343,6 @@ mkFeatureModule {
             };
           };
         };
-    };
+      }
+    ];
 } args
