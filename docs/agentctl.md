@@ -660,20 +660,63 @@ exec = ["devtools", "verify", "--all"]
 pool = "pytest"
 result = "pytest"
 timeout_seconds = 14400
-checkout = "default"
+checkout = "candidate"
+admission = { memory_mib = 12288 }
 schedule = "*-*-* 03:17:00"
 ```
 
 An operation declares `description`, `exec` (argv, no shell), `pool` (a
 pueue group), `result` (`exit`, `json`, `pytest`), `timeout_seconds` (1 to
-28,800; default 3,600), `checkout` (`any`, or `default` for operations that
-run only on the main checkout), `arguments` (`none`, or `required` when the
-operation cannot execute without a caller-supplied selector; a focused
-profile must not name a `required` operation), `schedule` (an `OnCalendar`
-expression), `cache` (`none` or `tree+environment`), `scratch` (`none`,
-`tmpfs` or `nvme`) and `dependencies` (declared operation names). Dependencies are
+28,800; default 3,600), `checkout` (see below), `arguments` (`none`, or
+`required` when the operation cannot execute without a caller-supplied
+selector; a focused profile must not name a `required` operation), `schedule`
+(an `OnCalendar` expression), `cache` (`none` or `tree+environment`),
+`scratch` (`none`, `tmpfs` or `nvme`), `admission` (see below) and
+`dependencies` (declared operation names). Dependencies are
 queued before their operation and cannot contain cycles. Any other operation
-field is ignored with a warning on stderr. `[environment]` declares `kind`, `command`,
+field is ignored with a warning on stderr.
+
+### `checkout`: which tree the receipt is evidence about
+
+| kind | meaning |
+| --- | --- |
+| `any` (default) | runs in the caller's `--workspace`, or the project root |
+| `default` | refuses every tree but the project root |
+| `candidate` | agentctl resolves its own tree |
+
+`default` constrains a tree the caller already chose; it does not select one.
+A launch that passes no workspace -- every timer's `job fire`, which has no
+caller to supply one -- therefore runs in the project checkout in whatever
+state it is in, and its receipt names the operator's branch and uncommitted
+work rather than a candidate.
+
+`candidate` selects the tree: a worktree agentctl owns on
+`agentctl/candidate` under `[workspace] root`, created on first use and
+`reset --hard` to the project's `default_base` (fetched first when remote) at
+every launch. The job record and launch input carry
+`checkout = {kind, commit}`, so a receipt names the commit it ran against. A
+`candidate` operation refuses a caller-supplied workspace, and
+`workspace.verify.focused` must not name one: a worker verifies its own
+worktree, not the base. It requires `[workspace]`. Because the tree keeps its
+untracked build and verification caches, `cache = "tree+environment"` reuse
+does not apply to it: `_tree_receipt` counts untracked files as dirty.
+
+### `admission`: the envelope an operation expects
+
+```toml
+[operations.verify_all]
+admission = { memory_mib = 12288 }
+```
+
+A declaration, not a limit. agentctl records it on the job (`job get` shows
+`admission`) and exports `AGENTCTL_ADMISSION_MEMORY_MIB` to the command; it
+sets no unit `MemoryMax` from it. It exists because the *measured* side
+already does -- a workload that sizes itself records a predicted charge, a
+budget and its margin on every receipt -- while the declared side it should
+be compared against did not, so a workload wanting its pool's ceiling could
+only mirror the number by hand from Sinnix's slice definition. A historical
+"admission estimate" of 14,628,352,000 bytes came from no declaration at all:
+it is 14,285,500 kB, a live `/proc/meminfo` `MemAvailable` reading. `[environment]` declares `kind`, `command`,
 `inherit`, `unset`, `values` and `require`; a required variable missing at
 launch fails the launch with its name. `[workspace]` declares `root`,
 `default_base`, `agent_memory_max` (a systemd size), `verify` (the
@@ -709,7 +752,9 @@ unattended batches declares a scheduled operation whose `exec` runs
 
 Fixed Nix-owned timers can also call `job fire`; their operations do not need
 a descriptor `schedule`. A firing skips an operation that is already queued
-or running, so a slow build does not accumulate duplicate jobs.
+or running, so a slow build does not accumulate duplicate jobs. A timer
+passes no workspace, so a scheduled operation whose receipt must be candidate
+evidence declares `checkout = "candidate"`.
 
 ## Limits
 

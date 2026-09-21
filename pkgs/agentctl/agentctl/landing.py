@@ -18,7 +18,6 @@ from typing import Any, Callable, Mapping, Sequence
 from . import gitcmd, github, launch, prompts, pueue, results, worktrunk
 from .agents import (
     LANDING_AGENT_GROUP,
-    PUSH_TIMEOUT_SECONDS,
     WORKTREE_STATE_DIR,
     binding,
     other_worktrees,
@@ -30,6 +29,7 @@ from .agents import (
     write_prompt,
 )
 from .beads import Beads, SubprocessBeads
+from .checkout import PUSH_TIMEOUT_SECONDS
 from .config import Config
 from .github import GithubError
 from .launch import JobError

@@ -46,5 +46,9 @@ def test_the_documentation_lists_every_code() -> None:
     text = DOC.read_text()
     section = text.split("### Refusals", 1)
     assert len(section) == 2, "docs/agentctl.md has no Refusals section"
-    documented = set(re.findall(r"^\| `([a-z_]+)`", section[1], flags=re.MULTILINE))
+    # Only this section's own table. The scan used to run to the end of the
+    # file, so any later backticked table column counted as a refusal code and
+    # an unrelated documentation edit failed this test.
+    body = re.split(r"^#{2,3} ", section[1], maxsplit=1, flags=re.MULTILINE)[0]
+    documented = set(re.findall(r"^\| `([a-z_]+)`", body, flags=re.MULTILINE))
     assert documented == set(manifest.REFUSALS)
