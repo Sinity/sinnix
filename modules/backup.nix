@@ -520,6 +520,12 @@ let
     "**/dist"
     "**/*.pyc"
     "**/.Trash-1000"
+    # The realm-root trash specifically, as an explicit relative path.
+    # The glob above already stops borg archiving it, but
+    # realmNoncanonical intersects on exact strings and
+    # snapshot-coverage.py refuses a glob outright ("noncanonical roots
+    # must be explicit relative paths"), so the waiver needs this form.
+    ".Trash-1000"
   ];
 
   # These named roots have an existing cache/scratch producer policy. Broad
@@ -564,6 +570,13 @@ let
     "state/containers"
     "tmp"
     "worktrees"
+    # Freedesktop trash: deleted-by-the-operator content. Its absence from an
+    # archive is the intended state, not missing canonical data. Without this
+    # the coverage checker reports "canonical content missing from archive"
+    # and correctly retains every snapshot -- which stalled the realm drain
+    # from 2026-09-14 and starved three other borg repositories behind its
+    # lock. 23 GB / ~1.55M entries at the time of diagnosis.
+    ".Trash-1000"
   ];
 
   # Borg excludes are glob patterns relative to /realm. Test both an item and
