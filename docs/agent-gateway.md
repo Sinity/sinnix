@@ -88,7 +88,11 @@ Campaign provenance points from the new task to its origin and does not expand c
 
 `sessions.list`, `sessions.search`, `sessions.read` and `timeline.query` delegate indexed archive paging, ranking and event timestamps to Polylogue. `sessions.orchestration` preserves native topology, launches, model and usage observations. Explicit `sessions.raw.*` and `memory.raw.search` actions use Polylogue's original-source fallback, which retains source byte offsets, file modification time, independent source coverage and continuations. Raw references do not imply an indexed session identity. `sessions.query` accepts the same typed operation objects under `request`; canonical origins include `claude-code-session` and `codex-session`.
 
-`context.compose` and `projects.context` persist the selected owner's complete product. Lynchpin owns project and campaign context; Polylogue owns session evidence; AgentCTL supplies job review receipts; `sinnix-observe` supplies live incident evidence. A missing owner remains unavailable with its reason. The gateway does not parse transcripts, merge task closures or manufacture domain components.
+`context.compose` and `projects.context` persist the selected owner's complete product. Lynchpin owns project and campaign context; Polylogue owns session evidence; AgentCTL supplies job review receipts; `sinnix-observe` supplies live incident evidence. The gateway does not parse transcripts, merge task closures or manufacture domain components.
+
+A component's `status` is the owner's own terminal state, not a reachability flag: `available`, `degraded` (the owner answered, but named gaps shaped the answer), `empty` (the scope completed and holds nothing) or `unavailable` (no valid answer, with its reason). The gateway maps the owner's declared outcome and never infers one from the shape of the payload, because reading `empty` off an absent row set makes a broken owner surface indistinguishable from an empty scope. Per-component gap names the owner supplies arrive verbatim in `component_failures`, and a component that names any is at least `degraded`. A composite of several products takes its worst part: one part behind a named gap makes the whole answer `degraded`, and `empty` survives only when every part completed and found nothing.
+
+The returned envelope is held to the `total_budget_bytes` it reports. A component whose inline data does not fit is returned with `data: null` and `inline_omitted: true` rather than truncated into something that reads complete; `snapshot_ref` still reads the complete persisted observation.
 
 `shell.run` remains asynchronous by default. With `wait=true`, it waits on the same agentctl job for five seconds by default, capped at thirty seconds, and returns bounded log output. A timeout returns the job locator for continuation without cancelling execution.
 
@@ -145,7 +149,7 @@ the gateway action family cannot suppress a client-side approval policy.
 
 ## Generated reference
 
-This section is generated from the action set. Revision `v3-typed-actions`, catalog SHA-256 `68415feafef6607f592c00ebadb84d48e5c9b5c2bd83660f5f822583377e2b5d`.
+This section is generated from the action set. Revision `v3-typed-actions`, catalog SHA-256 `01cff68d17b415a6bda1729cde5f98b0e31b2f1fff54f27610ea8cd0b8aed047`.
 
 The full schemas and examples are in [the generated gateway reference](generated/agent-gateway-reference.md). The matching agent skill is [agent-gateway](../dots/_ai/skills/agent-gateway/SKILL.md).
 
@@ -279,7 +283,6 @@ The full schemas and examples are in [the generated gateway reference](generated
 | `capabilities.query`         | `catalog` | `capability-index` | `agent-control, observer, operator` | Search the generated machine capability index or describe one capability exactly.                                                                                                                                                                                                                                                                |
 
 <!-- END GENERATED GATEWAY V2 REFERENCE -->
-
 ## Filesystem move failure boundaries
 
 Explicit move plans check whether the source parent can remove an entry, including sticky-directory ownership constraints. A cross-parent directory rename additionally checks write access to the source directory because the kernel must update its parent relationship. These checks are repeated before the first planned mutation; they are readiness observations, not permission grants, and the kernel remains the authority at execution.

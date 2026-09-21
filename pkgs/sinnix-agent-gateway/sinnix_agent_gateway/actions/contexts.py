@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, Mapping
 
 from pydantic import Field, model_validator
 
 from ..action import ALL_PRINCIPALS, Action, Example, RequestControls
 from ..contracts import VerbFamily
+from ..contexts import canonical_bytes
 from ..locators import JobLocator, ProjectLocator, project_ref
 from ..results import ProtocolError
 from ..schemas import GatewayModel
-from .products import HistoricalSelector
+from .products import Availability, HistoricalSelector, combine_availability
 
 if TYPE_CHECKING:
     from ..runtime import Runtime
@@ -57,12 +58,19 @@ class ComposeInput(RequestControls):
 
 class ContextComponent(GatewayModel):
     name: str
-    status: Literal["available", "unavailable"]
+    # The owner's terminal state, not a two-way reachability flag: see
+    # `products.Availability`.
+    status: Availability
     source_revision: str | None = None
     snapshot_ref: str
     source_ref: str | None = None
     data: Any = None
     reason: str | None = None
+    # The owner's own per-component gap names, preserved verbatim.
+    component_failures: dict[str, str] = Field(default_factory=dict)
+    # Set when this component's data did not fit `total_budget_bytes` and was
+    # left in the snapshot instead; `snapshot_ref` reads the complete value.
+    inline_omitted: bool = False
 
 
 class ComposedContext(GatewayModel):
@@ -160,16 +168,33 @@ async def _compose(runtime: Runtime, inp: ComposeInput) -> ComposedContext:
                 deadline_at=inp.deadline_at,
             ),
         )
+        # The composite keeps its parts' worst state instead of asking only
+        # whether any part was available: one session behind a named gap makes
+        # the whole orchestration answer gap-shaped, and every part reporting
+        # an empty scope is an empty answer, not an available one.
+        availability = combine_availability(
+            [item.availability for item in value.sessions]
+        )
         product = OwnerProduct(
             owner="polylogue",
-            availability="available"
-            if any(item.availability == "available" for item in value.sessions)
-            else "unavailable",
-            reason=None
-            if any(item.availability == "available" for item in value.sessions)
-            else "Requested session products are unavailable",
+            availability=availability,
+            reason=next(
+                (
+                    item.reason
+                    for item in value.sessions
+                    if item.availability != "available" and item.reason
+                ),
+                "Requested session products are unavailable"
+                if availability == "unavailable"
+                else None,
+            ),
             data=value.model_dump(),
             source_ref="sinnix://mcp/polylogue",
+            component_failures={
+                name: detail
+                for item in value.sessions
+                for name, detail in item.component_failures.items()
+            },
         )
     elif inp.intent == "incident":
         runtime.principal.require(Capability.MACHINE_READ)
@@ -200,7 +225,9 @@ async def _compose(runtime: Runtime, inp: ComposeInput) -> ComposedContext:
             deadline_at=inp.deadline_at,
         )
     # Persistence identifies this observation. Domain components, ordering,
-    # coverage and budgets remain exactly as the owner returned them.
+    # coverage and the owner's terminal state remain exactly as the owner
+    # returned them; the snapshot holds the complete product whatever its
+    # size, and `_within_budget` bounds only the copy returned in band.
     context = runtime.persist_context(
         {
             "schema": "sinnix.owner-context.v2",
@@ -217,19 +244,52 @@ async def _compose(runtime: Runtime, inp: ComposeInput) -> ComposedContext:
                     "source_ref": product.source_ref,
                     "data": product.model_dump(),
                     "reason": product.reason,
+                    "component_failures": dict(product.component_failures),
                 }
             ],
         }
     )
+    bounded = _within_budget(context)
     return ComposedContext(
         **{
             key: value
-            for key, value in context.items()
+            for key, value in bounded.items()
             if key in ComposedContext.model_fields
         },
-        context_schema=context["schema"],
+        context_schema=bounded["schema"],
         affordances=_AFFORDANCES[inp.intent],
     )
+
+
+def _within_budget(context: Mapping[str, Any]) -> dict[str, Any]:
+    """The returned copy of a composed context, inside `total_budget_bytes`.
+
+    The field was declared and then never enforced, so a composition whose
+    owner product was megabytes returned megabytes to a caller that had been
+    told the budget was 262 KB. Every other bounded action in this package
+    holds itself to `max_result_bytes`; this one now does too.
+
+    A component whose data does not fit is not truncated into something that
+    reads like a complete value: its inline data is dropped, it is marked
+    `inline_omitted`, and `snapshot_ref` still reads the complete observation
+    that was persisted before this ran.
+    """
+    budget = int(context["total_budget_bytes"])
+    if len(canonical_bytes(context)) <= budget:
+        return dict(context)
+    bounded = dict(context)
+    components = []
+    for component in context["components"]:
+        entry = dict(component)
+        entry["data"] = None
+        entry["inline_omitted"] = True
+        entry["reason"] = (
+            entry.get("reason")
+            or f"inline data omitted: over the {budget}-byte context budget"
+        )
+        components.append(entry)
+    bounded["components"] = components
+    return bounded
 
 
 ACTIONS: tuple[Action, ...] = (

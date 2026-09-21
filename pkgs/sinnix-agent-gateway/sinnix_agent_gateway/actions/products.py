@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, Mapping, Sequence
 
 from pydantic import Field, model_validator
 
@@ -20,13 +20,82 @@ if TYPE_CHECKING:
     from ..runtime import Runtime
 
 
+#: What the gateway can say about one owner's product. The four states are
+#: the owner's own terminal-outcome vocabulary, not a gateway invention:
+#: Polylogue decides {ok, empty, degraded, error} once at its operation
+#: boundary, and `degraded` deliberately outranks `empty` so that zero rows
+#: behind a named gap is never reported as an empty scope. Collapsing the
+#: middle two into `available` here erases exactly the distinction that
+#: contract exists to preserve -- it manufactures an authoritative "nothing
+#: to report" out of an answer the owner said was gap-shaped.
+Availability = Literal["available", "degraded", "empty", "unavailable"]
+
+#: The owner outcome tokens that mean the owner produced no valid answer.
+UNAVAILABLE_OUTCOMES = frozenset({"error", "not_found", "unavailable", "unsupported"})
+#: Owner outcome token -> the availability the gateway reports for it. An
+#: outcome the gateway does not know is not silently `available`: it falls to
+#: the unavailability tests below and then to `available` only if none fire.
+OUTCOME_AVAILABILITY: dict[str, Availability] = {
+    "ok": "available",
+    "success": "available",
+    "degraded": "degraded",
+    "partial": "degraded",
+    "empty": "empty",
+}
+#: Worst-first, for composing several products into one.
+_AVAILABILITY_RANK = ("unavailable", "degraded", "empty", "available")
+
+
+def combine_availability(parts: Sequence[Availability]) -> Availability:
+    """The availability of an envelope that holds several owner products.
+
+    This mirrors the owners' own rule rather than inventing a second one: a
+    composite is only as honest as its worst part, so one part behind a named
+    gap makes the whole answer `degraded` even though the others carried real
+    data. `empty` survives only when every part completed over its scope and
+    found nothing, and `unavailable` only when nothing could answer at all.
+    """
+    states = set(parts)
+    if not states:
+        return "empty"
+    if states == {"unavailable"}:
+        return "unavailable"
+    if states & {"unavailable", "degraded"}:
+        return "degraded"
+    if states == {"empty"}:
+        return "empty"
+    return "available"
+
+
+def _component_failures(data: Mapping[str, Any]) -> dict[str, str]:
+    """The owner's per-component gap names, from the product or its result.
+
+    An owner that reports no terminal outcome can still name which of its
+    components failed (Polylogue's ContextPreamble carries
+    ``component_failures`` and no outcome field at all). Those names are the
+    only gap signal such a payload has, and dropping them is how a context
+    answer assembled from a failed lineage lookup reached a caller labelled
+    "ok + available".
+    """
+    for holder in (data, data.get("result"), data.get("preamble")):
+        if not isinstance(holder, Mapping):
+            continue
+        failures = holder.get("component_failures")
+        if isinstance(failures, Mapping) and failures:
+            return {str(key): str(value) for key, value in failures.items()}
+    return {}
+
+
 class OwnerProduct(GatewayModel):
     owner: str
-    availability: Literal["available", "unavailable"]
+    availability: Availability
     data: dict[str, Any] | None = None
     reason: str | None = None
     source_ref: str
     owner_metadata: dict[str, Any] | None = None
+    # The owner's own per-component gap names, preserved verbatim. Empty when
+    # the owner named none.
+    component_failures: dict[str, str] = Field(default_factory=dict)
 
 
 async def owner_product(
@@ -92,12 +161,16 @@ async def owner_product(
         owner_metadata = data.get("meta")
         data = data["data"]
     outcome = data.get("outcome")
+    outcome_reason: str | None = None
     if isinstance(data.get("result"), dict):
         outcome = data["result"].get("outcome", outcome)
     if isinstance(outcome, dict):
+        reason = outcome.get("reason")
+        outcome_reason = str(reason) if reason else None
         outcome = outcome.get("state")
+    failures = _component_failures(data)
     if (
-        outcome in {"error", "not_found", "unavailable", "unsupported"}
+        outcome in UNAVAILABLE_OUTCOMES
         or data.get("ok") is False
         or data.get("status") == "error"
         or data.get("available") is False
@@ -111,17 +184,37 @@ async def owner_product(
                 data.get("reason")
                 or data.get("message")
                 or data.get("error")
+                or outcome_reason
                 or f"Owner outcome: {outcome}"
             ),
             source_ref=source_ref,
             owner_metadata=owner_metadata,
+            component_failures=failures,
+        )
+    # An outcome the owner declared is carried through as the owner decided
+    # it. The gateway never infers one from the shape of the payload: reading
+    # `empty` off an absent row set is what makes a broken owner surface
+    # indistinguishable from an owner whose scope really holds nothing.
+    availability = OUTCOME_AVAILABILITY.get(str(outcome), "available")
+    if failures and availability != "unavailable":
+        # Named component failures are named gaps, whether or not this owner's
+        # payload carries a terminal outcome at all -- and a gap outranks
+        # `empty`, so a scope that found nothing behind a failed component is
+        # reported as gap-shaped rather than as an authoritative nothing.
+        availability = "degraded"
+    reason = outcome_reason
+    if availability == "degraded" and not reason and failures:
+        reason = "; ".join(
+            f"{name}: {detail}" for name, detail in sorted(failures.items())
         )
     return OwnerProduct(
         owner=owner,
-        availability="available",
+        availability=availability,
         data=data,
+        reason=reason,
         source_ref=source_ref,
         owner_metadata=owner_metadata,
+        component_failures=failures,
     )
 
 
