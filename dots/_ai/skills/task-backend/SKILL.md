@@ -48,6 +48,10 @@ live state.
   than emitting one operation at a time. Multi-id closes map `--reason`
   flags positionally; a close refused by an open blocker means close the
   blocker first (or `--force` deliberately, stating why).
+- List-valued metadata (`verification_commands`, `affected_paths`,
+  `write_scope`, `acceptance_criteria`) takes a JSON array of strings or a
+  `;`-separated string; the packet compiler decodes both. A bracketed value
+  that is not an array of non-empty strings is refused, not split.
 - `dispatch_group=<leader-id>` metadata puts beads that share files,
   evidence, or a verification boundary into one worker: `batch start
 <leader>` executes the leader and its open members together, and each

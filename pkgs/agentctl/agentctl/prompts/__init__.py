@@ -164,6 +164,54 @@ def _metadata(bead: Mapping[str, Any]) -> Mapping[str, Any]:
     return value if isinstance(value, Mapping) else {}
 
 
+# A value that opens a JSON array. Beads stores metadata as JSON but hands a
+# list written with `bd update --set-metadata k=<json>` back as the STRING
+# `["a", "b"]`, not as a list. A reader that only splits on ";" therefore
+# compiles a whole array into one bracketed pseudo-command.
+_OPENS_JSON_ARRAY = re.compile(r"^\s*\[")
+
+
+def _decoded_json_array(value: str) -> list[Any] | None:
+    try:
+        decoded = json.loads(value)
+    except ValueError:
+        return None
+    return decoded if isinstance(decoded, list) else None
+
+
+def metadata_list(bead: Mapping[str, Any], name: str) -> tuple[str, ...]:
+    """A bead's metadata field ``name`` as its list of non-empty strings.
+
+    Both shapes an author can legitimately write are accepted, because Beads
+    accepts both: a JSON array of strings (decoded here whether it arrived as
+    a list or as the string ``bd`` stores it) and a ``;``-separated string.
+    Order is the author's; callers that merge several beads decide their own.
+
+    A value that opens a JSON array but is not an array of non-empty strings
+    is refused rather than split on ``;``. Splitting it yields exactly one
+    item that still carries its brackets and quotes -- a shell command no
+    shell can run, a glob that matches nothing -- and nothing downstream can
+    tell that wrong answer from a deliberate one.
+    """
+    value = _metadata(bead).get(name)
+    if isinstance(value, list):
+        return tuple(item for item in value if isinstance(item, str) and item)
+    if not isinstance(value, str):
+        return ()
+    if _OPENS_JSON_ARRAY.match(value):
+        decoded = _decoded_json_array(value)
+        if decoded is None or not all(
+            isinstance(item, str) and item for item in decoded
+        ):
+            raise PromptError(
+                f"{bead.get('id')} metadata {name} opens a JSON array but is not "
+                "an array of non-empty strings; write a JSON array of strings "
+                "or a ';'-separated string"
+            )
+        return tuple(decoded)
+    return tuple(item.strip() for item in value.split(";") if item.strip())
+
+
 def bead_subject(bead: Mapping[str, Any]) -> str:
     """The PR title: the bead title behind its type prefix, within the subject limit."""
     kind = str(bead.get("issue_type") or bead.get("type") or "").lower()
@@ -374,12 +422,7 @@ class Refusal:
 
 def write_scope(bead: Mapping[str, Any]) -> tuple[str, ...]:
     """The globs a bead's worker may write, from metadata ``write_scope``."""
-    value = _metadata(bead).get("write_scope")
-    if isinstance(value, str):
-        return tuple(item.strip() for item in value.split(";") if item.strip())
-    if isinstance(value, list):
-        return tuple(item for item in value if isinstance(item, str) and item)
-    return ()
+    return metadata_list(bead, "write_scope")
 
 
 def scope_authority(beads: Sequence[Mapping[str, Any]]) -> tuple[dict[str, Any], ...]:
@@ -502,11 +545,7 @@ def _policy_dimensions(
     def values(name: str) -> tuple[str, ...]:
         result: set[str] = set()
         for bead in beads:
-            value = _metadata(bead).get(name)
-            if isinstance(value, str):
-                result.update(item.strip() for item in value.split(";") if item.strip())
-            elif isinstance(value, list):
-                result.update(item for item in value if isinstance(item, str) and item)
+            result.update(metadata_list(bead, name))
         return tuple(sorted(result))
 
     effective_backend = backend or policy_backend
@@ -620,6 +659,17 @@ def _stable_criteria(bead: Mapping[str, Any]) -> tuple[dict[str, str], ...]:
     claim that AgentCTL understood the prose; review still assesses it.
     """
     raw = _metadata(bead).get("acceptance_criteria")
+    if isinstance(raw, str) and _OPENS_JSON_ARRAY.match(raw):
+        # The same Beads storage shape as ``metadata_list`` handles: structured
+        # criteria written as a JSON array come back as its string. Without
+        # this, correctly-written structured criteria were silently dropped to
+        # the one-opaque-criterion fallback below.
+        raw = _decoded_json_array(raw)
+        if raw is None:
+            raise PromptError(
+                f"{bead.get('id')} metadata acceptance_criteria opens a JSON "
+                "array but is not one"
+            )
     if not isinstance(raw, list) or not raw:
         raw = bead.get("acceptance_criteria")
         if not isinstance(raw, str) or not raw:
@@ -943,7 +993,7 @@ def member_view(bead: Mapping[str, Any]) -> dict[str, Any]:
         "acceptance_criteria": str(bead.get("acceptance_criteria") or ""),
         "description": str(bead.get("description") or ""),
         "design": str(bead.get("design") or ""),
-        "packet_intent": (bead.get("metadata") or {}).get("packet_intent"),
+        "packet_intent": _metadata(bead).get("packet_intent"),
         "write_scope": list(write_scope(bead)),
     }
 
