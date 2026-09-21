@@ -15,12 +15,15 @@ from agentctl.prompts import (
     bead_digest,
     bead_subject,
     compile_worker_prompt,
+    evidence_binding,
     in_scope,
+    metadata_list,
     public_bead,
     resolve_group,
     resume_prompt,
     scope_violations,
     validate_members,
+    write_scope,
 )
 from conftest import FakeBd, bead
 
@@ -483,3 +486,97 @@ def test_an_effort_outside_the_backends_set_is_refused(project_root: Path) -> No
         ).dimensions.effort
         == "xhigh"
     )
+
+
+def test_a_json_array_metadata_string_compiles_to_its_separate_commands(
+    project_root: Path,
+) -> None:
+    """Beads returns a list written with `--set-metadata k=<json>` as the string
+    `["a", "b"]`. Breaks if the reader goes back to splitting a str on ';' alone:
+    the whole array then becomes one bracketed item no shell can run."""
+    config = PromptConfig.from_project(load_project_adapter(project_root))
+    beads = reader()
+    beads.beads["fx-lead"]["metadata"]["verification_commands"] = json.dumps(
+        ["devtools test tests/a.py", "devtools gate atlas"]
+    )
+    beads.beads["fx-lead"]["metadata"]["write_scope"] = json.dumps(
+        ["core/", "docs/*.md"]
+    )
+
+    snapshot = compile_worker_prompt(
+        "fx-lead", project_id="fixture", reader=beads, config=config
+    )
+
+    assert snapshot.dimensions.verification_commands == (
+        "devtools gate atlas",
+        "devtools test tests/a.py",
+    )
+    assert write_scope(beads.beads["fx-lead"]) == ("core/", "docs/*.md")
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "[devtools test a, devtools gate atlas]",
+        '["devtools test a", 3]',
+        '["devtools test a", ""]',
+        '["unterminated"',
+        '{"not": "an array"}',
+    ],
+)
+def test_a_bracketed_metadata_value_that_is_not_an_array_of_strings_is_refused(
+    project_root: Path, value: str
+) -> None:
+    """A silent wrong answer is worse than a loud refusal. Breaks if the reader
+    falls back to the ';' split for a bracketed value: no error is raised and one
+    pseudo-command reaches the worker as its verification evidence."""
+    config = PromptConfig.from_project(load_project_adapter(project_root))
+    beads = reader()
+    beads.beads["fx-lead"]["metadata"]["verification_commands"] = value
+
+    if value.startswith("{"):
+        # Not bracketed: an object is not a list shape, and stays the ';' split.
+        snapshot = compile_worker_prompt(
+            "fx-lead", project_id="fixture", reader=beads, config=config
+        )
+        assert snapshot.dimensions.verification_commands == (value,)
+        return
+    with pytest.raises(PromptError, match="opens a JSON array"):
+        compile_worker_prompt(
+            "fx-lead", project_id="fixture", reader=beads, config=config
+        )
+
+
+def test_the_semicolon_shape_stays_the_shape_it_always_was() -> None:
+    """Breaks if JSON decoding replaces rather than joins the accepted shapes:
+    every bead already carrying a ';'-separated field would lose its values."""
+    assert metadata_list(
+        bead("fx-a", "A", metadata={"write_scope": " core/x.py ; other/ ; "}),
+        "write_scope",
+    ) == ("core/x.py", "other/")
+    assert metadata_list(bead("fx-b", "B", metadata={}), "write_scope") == ()
+    assert metadata_list(
+        bead("fx-c", "C", metadata={"write_scope": ["core/", 7, ""]}), "write_scope"
+    ) == ("core/",)
+
+
+def test_structured_acceptance_criteria_survive_json_string_storage() -> None:
+    """Breaks if `_stable_criteria` requires an already-decoded list: structured
+    criteria written as JSON fall through to the one-opaque-criterion digest,
+    which silently unbinds the per-AC result contract."""
+    rows = [{"id": "ac-1", "text": "first"}, {"id": "ac-2", "text": "second"}]
+    record = bead(
+        "fx-ac",
+        "AC bead",
+        metadata={"acceptance_criteria": json.dumps(rows)},
+    )
+    record["revision"] = 4
+    record["acceptance_criteria"] = "prose the structured rows supersede"
+
+    binding = evidence_binding(record)
+
+    assert binding["v2_available"] is True
+    assert binding["criteria"] == [
+        {"ac_id": "ac-1", "text": "first"},
+        {"ac_id": "ac-2", "text": "second"},
+    ]
