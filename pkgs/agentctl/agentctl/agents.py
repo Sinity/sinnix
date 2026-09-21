@@ -34,7 +34,7 @@ RESTRICTED_KINDS = frozenset({"worker", "resume", "review"})
 # These backends implement the schema-to-result-file contract used by batch
 # workers and landing reviewers. The remaining interactive backends can still
 # run unstructured prompts, but must not be admitted for a typed result.
-STRUCTURED_RESULT_BACKENDS = frozenset({"claude", "codex"})
+STRUCTURED_RESULT_BACKENDS = frozenset({"claude", "codex", "pi"})
 BD_SHIM = """#!/bin/sh
 # agentctl: agents read Beads and never write them.
 self=$(dirname "$0")

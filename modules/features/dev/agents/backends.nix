@@ -416,6 +416,53 @@ let
       executable = true;
       force = true;
     };
+  # Pi is an interactive/context-experiment harness using its native ChatGPT
+  # OAuth provider. AgentCTL and interactive Pi sessions must consume the
+  # operator's Codex subscription, never quietly switch billing surfaces
+  # because an ambient key happens to exist.
+  #
+  # What this wrapper actually enforces: the ambient OPENAI_API_KEY is removed,
+  # and the separated `--provider` / `--api-key` forms are refused. Pi's own
+  # parser only binds those two flags in their separated form, so `--provider=x`
+  # lands in its unknown-extension-flag map and selects no provider. A
+  # provider-prefixed `--model openai/gpt-4o` does still select a provider; that
+  # is a deliberate interactive affordance, and the AgentCTL route never reaches
+  # it because the adapter supplies --model from the backend registry.
+  mkPiWrapper = {
+    text = ''
+      #!/usr/bin/env bash
+      set -euo pipefail
+
+      ${agentScopePrelude}
+
+      ${mkNpmBootstrap {
+        stateDir = "pi";
+        # Upstream moved scope: @mariozechner/pi-coding-agent is deprecated by
+        # its own npm metadata ("please use @earendil-works/pi-coding-agent
+        # instead going forward") and frozen at 0.73.1 against 0.86.1 here.
+        npmPackage = "@earendil-works/pi-coding-agent";
+        binaryName = "pi";
+      }}
+
+      for argument in "$@"; do
+        case "$argument" in
+          --provider|--api-key)
+            echo "pi: provider and API-key overrides are disabled; use the ChatGPT Plus/Pro (Codex) login" >&2
+            exit 2
+            ;;
+        esac
+      done
+      unset OPENAI_API_KEY
+
+      exec "$STATE/npm/bin/pi" \
+        --provider openai-codex \
+        --append-system-prompt "$HOME/.config/claude/CLAUDE.md" \
+        --skill "$HOME/.config/claude/skills" \
+        "$@"
+    '';
+    executable = true;
+    force = true;
+  };
   mkGrokWrapper = {
     text = ''
       #!/usr/bin/env bash
@@ -523,6 +570,7 @@ in
     mkClodexChildWrapper
     mkClodexServerWrapper
     mkCodexWrapper
+    mkPiWrapper
     mkGrokWrapper
     mkAntigravityWrapper
     hermesBootstrap

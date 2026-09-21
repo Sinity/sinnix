@@ -27,6 +27,7 @@ in
         (map (lane: lane.binName) (lib.attrValues agentLanes.claudeLanes))
         ++ (map (lane: lane.binName) (lib.attrValues agentLanes.codexLanes))
         ++ (map (name: "hermes-${name}") (lib.attrNames agentLanes.hermesProfiles))
+        ++ [ "pi" ]
       );
       # Each lane's wrapper must honour the registry entry it was rendered
       # from: the MCP config file its profile selects, the profile marker the
@@ -733,6 +734,7 @@ in
             for wrapper in \
               ${lib.concatMapStringsSep " \\\n              " (f: ''"$HOME/${f}"'') laneWrapperFiles} \
               "$HOME/.local/bin/gemini" \
+              "$HOME/.local/bin/pi" \
               "$HOME/.local/bin/grok-sinnix" \
               "$HOME/.local/bin/agy-sinnix" \
               "$HOME/.local/bin/hermes"; do
@@ -887,18 +889,19 @@ in
             for wrapper in \
               "$HOME/.local/bin/claude-full" \
               "$HOME/.local/bin/codex" \
-              "$HOME/.local/bin/gemini"; do
+              "$HOME/.local/bin/gemini" \
+              "$HOME/.local/bin/pi"; do
               grep -Fq 'npm/bin/' "$wrapper"
               grep -Fq 'exec "$STATE/npm/bin/' "$wrapper"
               grep -Fq '/proc/self/cgroup' "$wrapper"
               grep -Fq -- '--slice=agent.slice' "$wrapper"
               grep -Fq -- '${runtimeDefaults.agentContainedCasePattern}' "$wrapper"
             done
-            if grep -R 'MemoryHigh\|MemoryMax\|MemorySwapMax' "$HOME/.local/bin/claude-full" "$HOME/.local/bin/codex" "$HOME/.local/bin/gemini"; then
+            if grep -R 'MemoryHigh\|MemoryMax\|MemorySwapMax' "$HOME/.local/bin/claude-full" "$HOME/.local/bin/codex" "$HOME/.local/bin/gemini" "$HOME/.local/bin/pi"; then
               echo "agent wrappers must not hardcode resource limits" >&2
               exit 1
             fi
-            for wrapper in "$HOME/.local/bin/claude-full" "$HOME/.local/bin/codex" "$HOME/.local/bin/gemini"; do
+            for wrapper in "$HOME/.local/bin/claude-full" "$HOME/.local/bin/codex" "$HOME/.local/bin/gemini" "$HOME/.local/bin/pi"; do
               grep -Fq 'sinnix-agent-npm-bootstrap' "$wrapper"
               grep -Fq 'export npm_config_prefix="$STATE/npm"' "$wrapper"
               grep -Fq 'export NPM_CONFIG_PREFIX="$STATE/npm"' "$wrapper"
@@ -907,6 +910,11 @@ in
             grep -Fq '@anthropic-ai/claude-code' "$HOME/.local/bin/claude-full"
             grep -Fq '@openai/codex' "$HOME/.local/bin/codex"
             grep -Fq '@google/gemini-cli' "$HOME/.local/bin/gemini"
+            grep -Fq '@earendil-works/pi-coding-agent' "$HOME/.local/bin/pi"
+            grep -Fq -- '--provider openai-codex' "$HOME/.local/bin/pi"
+            grep -Fq -- '--append-system-prompt "$HOME/.config/claude/CLAUDE.md"' "$HOME/.local/bin/pi"
+            grep -Fq -- '--skill "$HOME/.config/claude/skills"' "$HOME/.local/bin/pi"
+            grep -Fq 'unset OPENAI_API_KEY' "$HOME/.local/bin/pi"
             grep -Fq 'npm install -g "$npm_package"' '${../../scripts/sinnix-agent-npm-bootstrap}'
             grep -Fq 'export npm_config_prefix="$STATE/npm"' '${../../scripts/sinnix-agent-npm-bootstrap}'
 

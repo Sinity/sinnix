@@ -248,6 +248,7 @@ mkFeatureModule {
         mkClodexChildWrapper
         mkClodexServerWrapper
         mkCodexWrapper
+        mkPiWrapper
         mkGrokWrapper
         mkAntigravityWrapper
         agentScopePrelude
@@ -284,10 +285,18 @@ mkFeatureModule {
               directory = ".gemini";
               mode = "0700";
             }
+            # Pi owns OAuth refresh tokens, model-cache metadata and its
+            # branchable JSONL sessions here. Keep this private app state
+            # durable without declaring its selected model or credentials.
+            {
+              directory = ".pi";
+              mode = "0700";
+            }
             # npm installs survive impermanence cold boots so agents do not
             # re-download on every activation.
             ".local/state/claude-code"
             ".local/state/codex"
+            ".local/state/pi"
             ".local/state/gemini"
             ".local/state/sinnix/clodex-credentials"
             {
@@ -476,6 +485,10 @@ mkFeatureModule {
                   executable = true;
                   force = true;
                 };
+
+                # Pi uses its own ChatGPT Plus/Pro OAuth flow. It is a
+                # context-engineering surface, not a second job scheduler.
+                ".local/bin/pi" = mkPiWrapper;
 
                 # Vendor-managed CLIs self-update in place. Keep their canonical
                 # binaries untouched and route use through distinct Nix-managed

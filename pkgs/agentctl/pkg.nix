@@ -43,8 +43,12 @@ python3Packages.buildPythonApplication {
   makeWrapperArgs = [
     "--prefix PATH : ${lib.makeBinPath runtimeDependencies}"
   ];
+  # The backend adapter has exactly one copy in the repository: the
+  # agent-runtime skill script. agentctl's own default config points at that
+  # path (`config.DEFAULT_SKILLS_DIR`), so a second tracked copy here could
+  # only ever drift out of the route that actually runs.
   postInstall = ''
-    install -Dm755 ${./agentctl-agent} "$out/libexec/agentctl-agent"
+    install -Dm755 ${../../dots/_ai/skills/agent-runtime/scripts/run_agent_prompt.sh} "$out/libexec/agentctl-agent"
     sed -i '1c #!${bash}/bin/bash' "$out/libexec/agentctl-agent"
     wrapProgram "$out/libexec/agentctl-agent" \
       --prefix PATH : ${
