@@ -80,7 +80,14 @@ mkServiceModule {
       };
       # Bounded selections stay admissible beside a wave: a worker runs its own
       # focused tests here while its own task occupies the agent pool.
-      pytest-quick.parallel = 2;
+      #
+      # Width is bounded by the slice ceiling, not by cores. Measured on the
+      # live host 2026-09-22 with the corrected 9G slice: two concurrent
+      # focused jobs held 3,680 MiB of 9,216 MiB (40%), with the worse of the
+      # two peaking at 2,867 MiB. Three slots at that peak is 8,601 MiB, still
+      # under the high; four would be 11,468 MiB and would put the pool back
+      # into sustained reclaim, which is what oomd kills for.
+      pytest-quick.parallel = 3;
       bulk.parallel = 2;
       normal.parallel = 2;
       interactive.parallel = 4;
