@@ -437,14 +437,34 @@ rec {
       };
       # Short, bounded pytest selections (one file, one worker's focused
       # check): a separate pool so they never queue behind the corpus.
+      #
+      # SIZE THIS PER SLICE, NOT PER SLOT. `pytest-quick.parallel = 2`, and a
+      # slice ceiling is shared by every job in it, so a "5G" pool gives two
+      # concurrent focused runs ~2.5G each. The earlier note here -- "two slots
+      # at 6G cost what three at 4G did" -- read the ceiling as per-slot; it is
+      # not, and that arithmetic is what put the pool under sustained reclaim.
+      #
+      # MemoryHigh and ManagedOOMMemoryPressure are antagonistic on one cgroup:
+      # memory.high throttles by DELIBERATELY inducing reclaim, and oomd kills
+      # for sustained reclaim. Undersize the high and the two mechanisms fight,
+      # with oomd winning -- on 2026-09-22 it killed 29 focused pytest jobs
+      # between 08:22 and 08:44, at slice pressure 62-71% > 50% for > 30s, one
+      # roughly every 45 s, including runs holding only ~307 MiB. Those jobs
+      # were not runaways; the pool was simply smaller than two legitimate runs.
+      #
+      # A focused run still collects the whole corpus per xdist worker, and one
+      # measured focused worker peaks near 1.3 GiB with the collecting master
+      # on top. Two slots at 4.5G is 9G, which is what this now declares; it
+      # stays under the 12G parent so a concurrent heavy run is still arbitrated
+      # by the parent rather than by killing a healthy child. MemoryMax 10G
+      # keeps the hard bound one step above the throttle line, so a genuine
+      # runaway is still cgroup-OOM-killed deterministically rather than by PSI.
       agentctl-pytest-quick = {
         IOAccounting = true;
         CPUWeight = 200;
         IOWeight = 200;
-        # A focused run still collects the whole corpus per xdist worker; 4G
-        # OOM-killed three runs in a wave. Two slots at 6G cost what three at 4G did.
-        MemoryHigh = "5G";
-        MemoryMax = "6G";
+        MemoryHigh = "9G";
+        MemoryMax = "10G";
         MemorySwapMax = "0";
         ManagedOOMMemoryPressure = "kill";
         ManagedOOMMemoryPressureLimit = "50%";
