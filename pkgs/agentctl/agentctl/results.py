@@ -113,7 +113,7 @@ WORKER_SCHEMA: dict[str, Any] = {
                 "properties": {
                     "command": {"type": "string", "minLength": 1},
                     "receipt": {"type": "string"},
-                    "tested_sha": {"type": "string", "pattern": SHA_PATTERN},
+                    "tested_sha": {"type": ["string", "null"], "pattern": SHA_PATTERN},
                     "status": {
                         "type": "string",
                         "enum": ["passed", "failed", "skipped"],
@@ -358,6 +358,10 @@ def validate_worker_result(obj: Any) -> list[str]:
                 errors.append(
                     f"$.verification[{verification_index}]: version {RESULT_SCHEMA_VERSION} missing {field}"
                 )
+        if verification.get("status") != "skipped" and verification.get("tested_sha") is None:
+            errors.append(
+                f"$.verification[{verification_index}]: executed verification requires tested_sha"
+            )
     for segment_index, segment in enumerate(obj.get("model_segments") or ()):
         if (
             isinstance(segment, Mapping)

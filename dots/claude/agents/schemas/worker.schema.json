@@ -146,7 +146,7 @@
             "type": "string"
           },
           "tested_sha": {
-            "type": "string",
+            "type": ["string", "null"],
             "pattern": "^[0-9a-f]{40}$"
           },
           "status": {
