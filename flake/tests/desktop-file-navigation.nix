@@ -89,6 +89,12 @@ in
               _: unit: (unit.environment or { }) ? XDG_DESKTOP_PORTAL_DIR
             ) config.systemd.user.services;
             expectedBookmarks = map (place: "file://${place.path} ${place.name}") nav.places;
+            expectedCorpusEntrances = {
+              Documents = "${config.sinnix.paths.realmRoot}/documents";
+              Pictures = "${config.sinnix.paths.realmRoot}/photos";
+              Projects = "${config.sinnix.paths.realmRoot}/project";
+              Videos = "${config.sinnix.paths.realmRoot}/library/videos";
+            };
             declaredRoots = [
               config.sinnix.paths.realmRoot
               config.sinnix.paths.neoOuterRealm
@@ -99,6 +105,26 @@ in
             hyprlandPortalConf = config.environment.etc."xdg/xdg-desktop-portal/hyprland-portals.conf".text;
           in
           [
+            {
+              assertion = hm.xdg.userDirs.documents == expectedCorpusEntrances.Documents
+                && hm.xdg.userDirs.pictures == expectedCorpusEntrances.Pictures
+                && hm.xdg.userDirs.projects == expectedCorpusEntrances.Projects
+                && hm.xdg.userDirs.videos == expectedCorpusEntrances.Videos;
+              message = "XDG corpus entrances diverge from the canonical subject collections.";
+            }
+            {
+              assertion = builtins.all (name:
+                toString hm.home.file.${name}.source
+                  == toString (hm.lib.file.mkOutOfStoreSymlink expectedCorpusEntrances.${name})
+                && !(hm.home.file.${name}.force or false)
+              ) (builtins.attrNames expectedCorpusEntrances);
+              message = "Home aliases must share XDG's declared targets without overwriting populated paths.";
+            }
+            {
+              assertion = hm.xdg.userDirs.publicShare == "${hm.home.homeDirectory}/Public"
+                && hm.xdg.userDirs.desktop == "${hm.home.homeDirectory}/Desktop";
+              message = "Private corpus consolidation must not repurpose Public or Desktop.";
+            }
             {
               assertion = builtins.elem nav.manager hm.home.packages;
               message = "The declared file manager is not installed in the Home Manager profile.";
