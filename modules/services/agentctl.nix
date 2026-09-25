@@ -80,7 +80,9 @@ mkServiceModule {
       };
       # Bounded selections stay admissible beside a wave: a worker runs its own
       # focused tests here while its own task occupies the agent pool.
-      pytest-quick.parallel = 2;
+      # Three focused jobs fit below the quick slice's 9G MemoryHigh at their
+      # measured per-job peak; a fourth would exceed it.
+      pytest-quick.parallel = 3;
       bulk.parallel = 2;
       normal.parallel = 3;
       # Long-lived development dependencies must not occupy short-job capacity.
