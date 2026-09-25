@@ -499,7 +499,7 @@ ACTIONS: tuple[Action, ...] = (
                     "beads": ["sinnix-abc1", "sinnix-abc2", "sinnix-abc3"],
                     "workers": [["sinnix-abc1", "sinnix-abc2"], ["sinnix-abc3"]],
                     "backend": "codex",
-                    "model": "gpt-5.6-terra",
+                    "model": "gpt-6-sol",
                     "effort": "high",
                     "idempotency_key": "batch-sinnix-abc1-3",
                 },

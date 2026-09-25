@@ -15,7 +15,7 @@ not an independent comparison with its predecessor.
 
 Example trial: determine whether Luna should start bounded implementation with
 settled design and an executable delivery check. Use the next six eligible
-ordinary tasks, alternating Luna and Terra with the same effort. Assess
+ordinary tasks, alternating Luna and Sol with the same effort. Assess
 reviewed promised delivery, corrective work, interventions and observed usage.
 Stop after six tasks or seven days, whichever comes first. End the Luna arm
 early after two reviewer-confirmed material implementation misses against the

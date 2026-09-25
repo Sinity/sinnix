@@ -1,5 +1,5 @@
 {
-  "action_catalog_hash": "01cff68d17b415a6bda1729cde5f98b0e31b2f1fff54f27610ea8cd0b8aed047",
+  "action_catalog_hash": "a0918f339e50b14129afecb12dca3a7df6832cfe81a8481803b1b1a9c393c094",
   "examples": [
     {
       "action": "gateway.status",
@@ -1200,7 +1200,7 @@
         ],
         "effort": "high",
         "idempotency_key": "batch-sinnix-abc1-3",
-        "model": "gpt-5.6-terra",
+        "model": "gpt-6-sol",
         "project": {
           "project": "sinnix"
         },

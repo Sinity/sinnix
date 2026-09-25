@@ -82,14 +82,16 @@ On an unresolved attempt, inspect the concrete residual before changing models.
 Resolve missing authority, infrastructure or evidence through their owners.
 Reopen a design judgment when implementation exposes a missing decision; use a
 bounded architecture task or design-critical implementation assignment. For a
-concrete implementation miss against settled requirements, consider Terra or
-Astra with the failing case and preserved work. State what the next attempt
-must resolve. Repetition without a new diagnosis does not justify more retries
-or a higher effort setting.
+concrete implementation miss against settled requirements, consider Sol with
+the failing case and preserved work. Reserve Astra for a specific unresolved
+architecture or design decision. State what the next attempt must resolve.
+Repetition without a new diagnosis does not justify more retries or a higher
+effort setting.
 
 Use observed usage and current applicable pricing for cost comparisons; include
 specification, failed attempts, review, interventions, and inherited work.
 Queue delay and agent runtime are separate measurements. Historical completion
 rates confound task selection, revisions, inheritance, and infrastructure.
-Apply the trial protocol before changing a default; keep model choice with the
-accountable agent rather than an automatic router or completion leaderboard.
+Keep model choice with the accountable agent rather than an automatic router
+or completion leaderboard. For an evidence-driven trial, use the
+[trial protocol](experiment-protocol.md).

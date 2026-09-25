@@ -1,11 +1,11 @@
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: 01cff68d17b415a6bda1729cde5f98b0e31b2f1fff54f27610ea8cd0b8aed047 -->
+<!-- gateway-catalog-sha256: a0918f339e50b14129afecb12dca3a7df6832cfe81a8481803b1b1a9c393c094 -->
 # Sinnix Agent Gateway reference
 
 Generated from `sinnix_agent_gateway.actions`. Every action is one MCP tool whose `tools/list` input schema is the one below; the catalog hash changes when any principal-visible action catalog row changes, including its schema, principal set, example or affordance.
 
-Revision: `v3-typed-actions`. Catalog SHA-256: `01cff68d17b415a6bda1729cde5f98b0e31b2f1fff54f27610ea8cd0b8aed047`.
+Revision: `v3-typed-actions`. Catalog SHA-256: `a0918f339e50b14129afecb12dca3a7df6832cfe81a8481803b1b1a9c393c094`.
 
 ## Invocation
 
@@ -13452,7 +13452,7 @@ Two workers, pinned agent:
   ],
   "effort": "high",
   "idempotency_key": "batch-sinnix-abc1-3",
-  "model": "gpt-5.6-terra",
+  "model": "gpt-6-sol",
   "project": {
     "project": "sinnix"
   },

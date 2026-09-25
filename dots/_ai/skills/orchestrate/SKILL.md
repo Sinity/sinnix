@@ -39,14 +39,14 @@ packet expresses intent; check execution against owning launch/session metadata.
 
 | Assignment                                                       | Initial model   | Effort |
 | ---------------------------------------------------------------- | --------------- | ------ |
-| Bounded supervision, evidence collection, settled implementation | `gpt-5.6-luna`  | high   |
-| Substantial implementation, investigation, candidate review      | `gpt-5.6-terra` | high   |
+| Bounded supervision, evidence collection, settled implementation | `gpt-6-luna`  | high   |
+| Substantial implementation, investigation, candidate review      | `gpt-6-sol` | high   |
 | Unresolved architecture, design-critical implementation          | `gpt-6-astra`   | high   |
 
 These are starting assignments to revise from experience. Read
 [allocation guidance](references/model-landscape.md) before choosing or
-escalating a model, and the [trial protocol](references/experiment-protocol.md)
-before changing a default from observed outcomes.
+escalating a model. Use Astra only when a specific unresolved architecture or
+design decision warrants it.
 
 Use additional independent analysis for a named unresolved question involving
 irreversible action, destructive-data risk, no executable oracle, or concrete

@@ -5,7 +5,7 @@
 # MCP servers are registry-generated into full/lean/browser profile files by
 # modules/features/dev/agents/mcp.nix. The wrapper invokes the intended
 # profile explicitly so lean sessions do not inherit the full MCP table.
-model = "gpt-5.6-luna"
+model = "gpt-6-luna"
 model_reasoning_effort = "high"
 approval_policy = "never"
 sandbox_mode = "danger-full-access"
@@ -63,8 +63,8 @@ gpt-5-codex = "gpt-5.3-codex"
 status_line = ["current-dir", "model-with-reasoning", "context-remaining", "context-window-size", "five-hour-limit", "weekly-limit", "session-id"]
 
 [tui.model_availability_nux]
-"gpt-5.6-luna" = 4
-"gpt-5.6-terra" = 4
+"gpt-6-luna" = 4
+"gpt-6-sol" = 4
 
 [features]
 context_management.experimental_mode = true
@@ -81,7 +81,7 @@ apps = true
 enabled = true
 interrupt_message = true
 max_concurrent_threads_per_session = 24
-default_subagent_model = "gpt-5.6-luna"
+default_subagent_model = "gpt-6-luna"
 default_subagent_reasoning_effort = "medium"
 
 [agents.explorer]
