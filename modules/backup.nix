@@ -333,10 +333,12 @@ let
       bindTarget,
       archivePrefix,
       replacementSuffix ? "",
+      excludeByMarker ? true,
       exclude,
       noncanonical,
     }:
     let
+      markerExcludeArgs = lib.optionalString excludeByMarker "--exclude-caches --exclude-if-present .nobackup";
       coveragePolicy = pkgs.writeText "${label}-snapshot-coverage.json" (builtins.toJSON {
         inherit noncanonical;
         chrome_extension_caches = label == "persist";
@@ -388,8 +390,7 @@ let
             --compression auto,zstd,1 \
             --lock-wait ${toString borgLockWaitSec} \
             --comment "sinnix-snapshot-v1:$snapshot_uuid" \
-            --exclude-caches \
-            --exclude-if-present .nobackup \
+            ${markerExcludeArgs} \
             ${mkBorgExcludeArgs bindTarget exclude} \
             "::$archive_name" ${lib.escapeShellArg "${bindTarget}/./"}; then
             echo "borg create failed for ${label} snapshot $snapshot; subvolume kept on disk" >&2
@@ -504,13 +505,10 @@ let
     # measured: borg stops recursing into an excluded directory, so a `+`
     # pattern for the subtree never gets the chance to match, and the archive
     # ends at `media` with nothing beneath it.
-    # Model weights are re-acquirable. The current library/models root carries
-    # CACHEDIR.TAG, so Borg already omits it. Keep its exact path in the
-    # coverage policy too; a cache marker alone cannot authorize deletion.
-    # Private project caches remain excluded by their own tags, but retain
-    # the snapshot until their material is classified explicitly.
-    # Steam has no such marker (games do not self-tag as caches), so its
-    # exclusion names the steamapps path directly.
+    # Model weights are re-acquirable, so the exact library/models root is
+    # excluded and classified noncanonical. Tags in other realm subtrees do
+    # not exclude them; their contents stay covered until explicitly classified.
+    # Steam's exclusion names steamapps directly to retain userdata.
     "library/games/steam/steamapps"
     "library/models"
     # Regenerable-cache root (sinex cargo/dev caches via the
@@ -546,25 +544,13 @@ let
     # there (196 GB in the same archive) and exist nowhere else.
     "tmp"
     "worktrees"
-    "**/inbox/monero"
-    "**/node_modules"
-    "**/target"
-    "**/.venv"
-    "**/.direnv"
-    "**/.ruff_cache"
-    "**/.pytest_cache"
     ".pytest_cache"
     "project/.pytest_cache"
-    "**/.cache"
-    "**/build"
-    "**/dist"
-    "**/*.pyc"
-    "**/.Trash-1000"
-    # The realm-root trash specifically, as an explicit relative path.
-    # The glob above already stops borg archiving it, but
-    # realmNoncanonical intersects on exact strings and
-    # snapshot-coverage.py refuses a glob outright ("noncanonical roots
-    # must be explicit relative paths"), so the waiver needs this form.
+    # A directory name alone does not establish that its contents can be
+    # recreated. Broad exclusions formerly matched source material under
+    # build/, dist/, node_modules/, and other project-local names. The two
+    # pytest roots above are classified separately; nested names stay covered.
+    # Freedesktop trash at the realm root is one such exact root.
     ".Trash-1000"
   ];
 

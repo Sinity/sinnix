@@ -115,7 +115,10 @@
       snapshotGlob = "realm.*";
       bindTarget = borgRealmSnapshotBind;
       archivePrefix = "realm";
-      replacementSuffix = "-coverage-v2";
+      replacementSuffix = "-coverage-v3";
+      # A tag in an unknown realm subtree cannot waive canonical content.
+      # The verifier only permits the exact noncanonical roots below.
+      excludeByMarker = false;
       exclude = realmExcludes;
       noncanonical = realmNoncanonical;
     };
