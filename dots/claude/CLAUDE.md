@@ -61,8 +61,10 @@ generated private analyses in them. Synthetic fixtures stay neutral.
 
 ## Runtime ownership
 
-Load `agent-runtime` before nontrivial job/worktree recovery and `orchestrate`
-before parallel agent work. Consult `agentctl --help` for current verbs.
+Load `agent-runtime` before any nontrivial AgentCTL job or batch work—query,
+start, monitor, retry, resume, land, cancel, or clean. Load `orchestrate` before
+parallel agent work. The skill and `agentctl <verb> --help` define the current
+command flow; do not rely on remembered syntax.
 
 - Short foreground checks run directly. Detached, queued, resource-heavy,
   and shared work runs through declared project operations:
@@ -77,6 +79,12 @@ before parallel agent work. Consult `agentctl --help` for current verbs.
   publication; Beads owns task state. Systemd owns fixed services, timer wake-ups
   and transient units, not queue state. Reconcile these sources instead of
   maintaining another ledger.
+- For a job, inspect `agentctl view <project>`, confirm its declared operation
+  with `agentctl project operations <project>`, then start that operation and
+  retain the returned job ID. Follow that ID through `get`, `logs`, and
+  `result`; a queued job is still running work, so wait on its event or inspect
+  its recorded state instead of repeating `start`. Retry only after reading
+  the terminal result and correcting its named cause.
 - Before DB-backed checks or a push, confirm this worktree's ready `dev_services`
   job with `agentctl job list --active` and its logs; keep it running through
   the pre-push hook. Service ports are checkout-scoped. If PostgreSQL is
