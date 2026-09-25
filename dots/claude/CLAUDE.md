@@ -79,6 +79,8 @@ command flow; do not rely on remembered syntax.
   publication; Beads owns task state. Systemd owns fixed services, timer wake-ups
   and transient units, not queue state. Reconcile these sources instead of
   maintaining another ledger.
+- A paused pool is an admission hold. Use `agentctl backpressure tick` to
+  reconcile it and wait for a release result before dispatching more work.
 - For a job, inspect `agentctl view <project>`, confirm its declared operation
   with `agentctl project operations <project>`, then start that operation and
   retain the returned job ID. Follow that ID through `get`, `logs`, and
