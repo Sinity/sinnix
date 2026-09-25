@@ -58,7 +58,8 @@ do not repeat its `ac_id` for each numbered paragraph. The identity does not
 prove semantic fulfillment. The requested model is `planned_model`. Omit `actual_executor_model` unless the executor
 observed it, and use `null` for unavailable measured usage. `tested_sha` is
 the actual candidate SHA a command tested, not a guessed future integration
-SHA.
+SHA. Use `null` when a command was skipped and no tree was tested; passed or
+failed commands must name their tested SHA.
 
 ```json
 {
