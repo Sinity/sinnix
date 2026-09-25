@@ -305,6 +305,12 @@ def verify(source, archive, noncanonical, chrome_extension_caches=False):
         ["borg", "debug", "dump-archive", "::" + archive, "/dev/stdout"],
         lambda stream: JsonStream(stream).items(),
     ):
+        # Borg's archive stream includes checkpoint parts, marked by the
+        # structural `part` key. Its ordinary item iterator filters them;
+        # debug dump-archive does not. A part is neither a source path nor
+        # proof of the complete file, which must appear separately below.
+        if "part" in item:
+            continue
         path = archive_path(item)
         if path not in expected:
             # Noncanonical material may be over-preserved by Borg.

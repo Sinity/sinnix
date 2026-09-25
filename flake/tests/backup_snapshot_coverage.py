@@ -99,6 +99,36 @@ class CoverageFixture(unittest.TestCase):
             (["run"], True),
         )
 
+    def test_borg_checkpoint_parts_are_not_source_items_or_complete_file_proof(self):
+        self.archive("checkpointed")
+        original = COVERAGE.command_items
+        partial = {"path": "same-name.borg_part_1", "part": 1}
+
+        def with_part(command, parser):
+            if command[1:3] == ["debug", "dump-archive"]:
+                yield partial
+            yield from original(command, parser)
+
+        with patch.object(COVERAGE, "command_items", side_effect=with_part):
+            self.assertEqual(
+                COVERAGE.verify(self.source, "checkpointed", [])["canonical_entries"],
+                3,
+            )
+
+        def part_without_complete_file(command, parser):
+            if command[1:3] == ["debug", "dump-archive"]:
+                yield partial
+                yield from (
+                    item for item in original(command, parser)
+                    if item.get("path") != "same-name"
+                )
+            else:
+                yield from original(command, parser)
+
+        with patch.object(COVERAGE, "command_items", side_effect=part_without_complete_file):
+            with self.assertRaisesRegex(ValueError, "canonical content missing"):
+                COVERAGE.verify(self.source, "checkpointed", [])
+
     def test_extended_attributes(self):
         try:
             os.setxattr(
