@@ -129,7 +129,7 @@ def verified_prune_plan(directory, glob, marker, prefix, replacement_suffix):
     return [
         (name, *details)
         for name, details in sorted(records, key=lambda row: row[1][1:])
-        if details[1] < cutoff[0] or (name == snapshot and details == (uuid, *cutoff))
+        if details[1] < cutoff[0]
     ]
 
 

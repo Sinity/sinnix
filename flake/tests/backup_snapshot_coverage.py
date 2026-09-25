@@ -63,7 +63,7 @@ class CoverageFixture(unittest.TestCase):
             str(self.source) + "/./",
         )
 
-    def test_verified_newest_cutoff_prunes_only_snapshots_at_or_before_it(self):
+    def test_verified_newest_cutoff_prunes_only_older_snapshots(self):
         queue = self.root / "queue"
         queue.mkdir()
         old = "realm.20260402T010000+0000"
@@ -105,7 +105,7 @@ class CoverageFixture(unittest.TestCase):
             self.assertIsNone(COVERAGE.choose_snapshot(queue, "realm.*", marker))
             self.assertEqual(
                 COVERAGE.verified_prune_plan(queue, "realm.*", marker, "realm", "-coverage-v3"),
-                [(old, *details[old]), (new, *details[new])],
+                [(old, *details[old])],
             )
             details[new] = (str(uuid.uuid4()), 20, 102)
             with self.assertRaisesRegex(ValueError, "snapshot identity changed"):
@@ -118,7 +118,7 @@ class CoverageFixture(unittest.TestCase):
                 [name for name, *_ in COVERAGE.verified_prune_plan(
                     queue, "realm.*", marker, "realm", "-coverage-v3"
                 )],
-                [old, new],
+                [old],
             )
             details[rolled_back] = (details[rolled_back][0], 30, 103)
             self.assertEqual(COVERAGE.choose_snapshot(queue, "realm.*", marker), rolled_back)
@@ -126,7 +126,7 @@ class CoverageFixture(unittest.TestCase):
                 [name for name, *_ in COVERAGE.verified_prune_plan(
                     queue, "realm.*", marker, "realm", "-coverage-v3"
                 )],
-                [old, new],
+                [old],
             )
             (queue / later).mkdir()
             self.assertEqual(COVERAGE.choose_snapshot(queue, "realm.*", marker), later)
@@ -636,7 +636,7 @@ elif command=='btrfs':
             self.assertFalse((root / "state/borg-drain/realm.latest-archived").exists())
             run()
             self.assertFalse(old.exists())
-            self.assertFalse(new.exists())
+            self.assertTrue(new.exists())
             self.assertIn("snapshot=" + new.name, (root / "state/borg-drain/realm.latest-archived").read_text())
             self.assertNotIn("realm-" + old.name, subprocess.check_output(
                 ["borg", "list", "--short", str(root / "repos/borg-realm-v2")], env=env, text=True
@@ -668,13 +668,13 @@ elif command=='btrfs':
                 for entry in commands
                 if entry[:3] == ["btrfs", "subvolume", "delete"]
             ]
-            self.assertEqual(deleted, [str(old), str(new)])
+            self.assertEqual(deleted, [str(old)])
 
             rollback = snapshot(
                 "realm.20260401T233000+0000", {"unique": "new bytes after clock rollback"}
             )
             run()
-            self.assertFalse(rollback.exists())
+            self.assertTrue(rollback.exists())
             self.assertIn(
                 "snapshot=" + rollback.name,
                 (root / "state/borg-drain/realm.latest-archived").read_text(),
@@ -738,7 +738,7 @@ elif command=='btrfs':
             run()
             self.assertFalse(older.exists())
             self.assertFalse(middle.exists())
-            self.assertFalse(fresh.exists())
+            self.assertTrue(fresh.exists())
             latest_marker = root / "state/borg-drain/realm.latest-archived"
             self.assertIn("snapshot=" + fresh.name, latest_marker.read_text())
             archives = subprocess.check_output(
@@ -772,7 +772,7 @@ elif command=='btrfs':
             (root / "fail-read").unlink()
             run()
             self.assertFalse(pending.exists())
-            self.assertFalse(newer.exists())
+            self.assertTrue(newer.exists())
             self.assertEqual(extract(newer.name, "same-name"), "newer")
 
             resumed = snapshot("realm.20260405T010000+0000", {"same-name": "resumable"})
@@ -782,7 +782,7 @@ elif command=='btrfs':
             self.assertIn("snapshot=" + resumed.name, latest_marker.read_text())
             (root / "fail-delete").unlink()
             run()
-            self.assertFalse(resumed.exists())
+            self.assertTrue(resumed.exists())
             self.assertEqual(extract(resumed.name, "same-name"), "resumable")
 
             stale = snapshot(
@@ -817,7 +817,7 @@ elif command=='btrfs':
             )
             transient.unlink()
             run()
-            self.assertFalse(stale.exists())
+            self.assertTrue(stale.exists())
             realm_archives = subprocess.check_output(
                 ["borg", "list", "--short", realm_repo], env=env, text=True
             ).splitlines()
@@ -861,7 +861,7 @@ elif command=='btrfs':
             self.assertNotIn("realm-" + gap.name + "-coverage-v3", gap_archives)
             (root / "fail-create").unlink()
             run()
-            self.assertFalse(gap.exists())
+            self.assertTrue(gap.exists())
             self.assertFalse(older_gap.exists())
 
             collision = snapshot(
@@ -887,7 +887,7 @@ elif command=='btrfs':
                 check=True,
             )
             run()
-            self.assertFalse(collision.exists())
+            self.assertTrue(collision.exists())
             collision_archives = subprocess.check_output(
                 ["borg", "list", "--short", repo], env=env, text=True
             ).splitlines()
@@ -927,7 +927,7 @@ elif command=='btrfs':
             )
             (root / "fail-create").unlink()
             run("persist")
-            self.assertFalse(persist.exists())
+            self.assertTrue(persist.exists())
             archived = subprocess.check_output(
                 ["borg", "list", "--short", persist_repo], env=env, text=True
             ).splitlines()
@@ -993,7 +993,7 @@ elif command=='btrfs':
             (root / "fail-persist-unit").touch()
             run("coordinator", ok=False)
             self.assertTrue(queued_persist.exists())
-            self.assertFalse(queued_realm.exists())
+            self.assertTrue(queued_realm.exists())
             calls = [
                 json.loads(line) for line in (root / "logs/commands").read_text().splitlines()
                 if '"systemctl"' in line
@@ -1005,7 +1005,7 @@ elif command=='btrfs':
             )
             (root / "fail-persist-unit").unlink()
             run("coordinator")
-            self.assertFalse(queued_persist.exists())
+            self.assertTrue(queued_persist.exists())
 
 if __name__ == "__main__":
     unittest.main(argv=[sys.argv[0]])
