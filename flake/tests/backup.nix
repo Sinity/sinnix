@@ -166,8 +166,16 @@ in
             to = "$TMPDIR/mock-bin/systemctl start";
           }
         ];
-      realmBorgDrainScript =
-        rewriteBackupHook backupRuntimeEval.config.systemd.services.borgbackup-job-realm.script
+      debtCoordinatorScript = rewriteBackupHook
+        backupRuntimeEval.config.systemd.services.borgbackup-debt-coordinator.script
+        [
+          {
+            from = "systemctl start";
+            to = "$TMPDIR/mock-bin/systemctl start";
+          }
+        ];
+      realmBorgDrainScriptFor = name:
+        rewriteBackupHook backupRuntimeEval.config.systemd.services.${name}.script
           [
             {
               from = "/outer-realm/backup/borg-realm-v2";
@@ -223,8 +231,10 @@ in
               to = "$TMPDIR/bind/realm";
             }
           ];
-      persistBorgDrainScript =
-        rewriteBackupHook backupRuntimeEval.config.systemd.services.borgbackup-job-persist.script
+      realmBorgDrainScript = realmBorgDrainScriptFor "borgbackup-job-realm";
+      realmDebtDrainScript = realmBorgDrainScriptFor "borgbackup-debt-realm";
+      persistBorgDrainScriptFor = name:
+        rewriteBackupHook backupRuntimeEval.config.systemd.services.${name}.script
           [
             {
               from = "/outer-realm/backup/borg-persist-v1";
@@ -275,6 +285,8 @@ in
               to = "$TMPDIR/bind/persist";
             }
           ];
+      persistBorgDrainScript = persistBorgDrainScriptFor "borgbackup-job-persist";
+      persistDebtDrainScript = persistBorgDrainScriptFor "borgbackup-debt-persist";
       missingRealmBorgDrainScript =
         rewriteBackupHook backupRuntimeEval.config.systemd.services.borgbackup-job-realm.script
           [
@@ -510,7 +522,13 @@ in
           && !(builtins.hasAttr "borgbackup-job-persist" backupRuntimeEval.config.systemd.timers)
           && !(builtins.hasAttr "borgbackup-job-realm" backupRuntimeEval.config.systemd.timers)
           && builtins.hasAttr "borgbackup-drain-coordinator" backupRuntimeEval.config.systemd.timers
-        ) "Only the bounded coordinator may schedule snapshot drain cycles";
+          && backupRuntimeEval.config.systemd.services.borgbackup-debt-coordinator.serviceConfig.TimeoutStartSec == "4h15m"
+          && backupRuntimeEval.config.systemd.services.borgbackup-debt-persist.serviceConfig.TimeoutStartSec == "2h"
+          && backupRuntimeEval.config.systemd.services.borgbackup-debt-realm.serviceConfig.TimeoutStartSec == "2h"
+          && backupRuntimeEval.config.systemd.timers.borgbackup-debt-coordinator.timerConfig.OnCalendar == "*-*-* 01:05:00"
+          && !(builtins.hasAttr "borgbackup-debt-persist" backupRuntimeEval.config.systemd.timers)
+          && !(builtins.hasAttr "borgbackup-debt-realm" backupRuntimeEval.config.systemd.timers)
+        ) "Fresh and historical drains must have separate bounded schedules";
         mkRuntimeCheck system {
           name = "backup-borg-hook-runtime-check";
           nativeBuildInputs = [
@@ -533,6 +551,9 @@ in
                     realm = realmBorgDrainScript;
                     persist = persistBorgDrainScript;
                     coordinator = coordinatorScript;
+                    debt_coordinator = debtCoordinatorScript;
+                    debt_realm = realmDebtDrainScript;
+                    debt_persist = persistDebtDrainScript;
                     missing = missingRealmBorgDrainScript;
                     sinex = sinexBlobBorgScript;
                     polylogue = polylogueStateBorgScript;

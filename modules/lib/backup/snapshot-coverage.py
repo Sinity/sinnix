@@ -69,18 +69,40 @@ def snapshot_names(directory, glob):
     )
 
 
-def choose_snapshot(directory, glob, latest_marker, now, freshness_budget):
+def choose_snapshot(directory, glob, latest_marker, mode):
     names = snapshot_names(directory, glob)
     if not names:
         return None
     newest = names[-1]
-    newest_epoch = snapshot_epoch(newest)
     latest_epoch = read_latest_epoch(latest_marker)
-    if latest_epoch is None or (
-        newest_epoch > latest_epoch and now - latest_epoch >= freshness_budget
-    ):
-        return newest
+    if mode == "fresh":
+        return newest if latest_epoch is None or snapshot_epoch(newest) > latest_epoch else None
+    if latest_epoch is None or snapshot_epoch(newest) > latest_epoch:
+        return None
     return names[0]
+
+
+def claim_daily_debt_attempt(marker, now):
+    """Record the daily attempt before Borg starts, including failed attempts."""
+    day = datetime.fromtimestamp(now).strftime("%Y-%m-%d")
+    fields = read_marker_fields(marker)
+    if fields is not None and fields.get("day") == day:
+        return False
+    path = Path(marker)
+    temporary = path.with_name(path.name + f".{os.getpid()}.tmp")
+    try:
+        temporary.write_text(f"day={day}\nepoch={now}\n")
+        with temporary.open("rb") as stream:
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        directory_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return True
 
 
 def debt_progress(directory, glob, marker, latest_marker, now, budget):
@@ -537,7 +559,9 @@ def main():
     select.add_argument("directory")
     select.add_argument("glob")
     select.add_argument("latest_marker")
-    select.add_argument("freshness_budget", type=int)
+    select.add_argument("mode", choices=("fresh", "debt"))
+    claim = sub.add_parser("claim-debt-attempt")
+    claim.add_argument("marker")
     oldest = sub.add_parser("oldest")
     oldest.add_argument("directory")
     oldest.add_argument("glob")
@@ -565,11 +589,13 @@ def main():
         print(identity(args.source))
     elif args.command == "select":
         selected = choose_snapshot(
-            args.directory, args.glob, args.latest_marker,
-            int(datetime.now().timestamp()), args.freshness_budget,
+            args.directory, args.glob, args.latest_marker, args.mode,
         )
         if selected:
             print(selected)
+    elif args.command == "claim-debt-attempt":
+        if not claim_daily_debt_attempt(args.marker, int(datetime.now().timestamp())):
+            return 1
     elif args.command == "oldest":
         names = snapshot_names(args.directory, args.glob)
         if names:

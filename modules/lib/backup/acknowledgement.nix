@@ -34,8 +34,8 @@
   # Backups are scheduled bulk I/O and must stay below interactive work;
   # unthrottled they saturate /realm enough to visibly stall the desktop.
   #
-  # Each wake archives at most one snapshot. Freshness gets priority when
-  # overdue; otherwise the oldest historical debt gets service.
+  # Fresh drains run when a newer acquisition exists. Historical debt has a
+  # separate daily window and one attempted transaction per volume per day.
   (mkBackupJob "borgbackup-job-persist" {
     description = "Drain /persist btrbk snapshots into Borg";
     unit = {
@@ -64,6 +64,7 @@
     ];
     script = mkSnapshotDrainScript {
       label = "persist";
+      mode = "fresh";
       repo = borgRepoPersist;
       repoPath = borgRepoPersistPath;
       snapshotDir = persistSnapshots;
@@ -104,6 +105,7 @@
     ];
     script = mkSnapshotDrainScript {
       label = "realm";
+      mode = "fresh";
       repo = borgRepoRealm;
       repoPath = borgRepoRealmPath;
       snapshotDir = realmSnapshots;
@@ -119,7 +121,60 @@
     };
   })
 
-  # One timer gives both lanes an attempt in each cycle. systemctl start waits
+  (mkBackupJob "borgbackup-debt-persist" {
+    description = "Archive one historical /persist snapshot";
+    unit = {
+      after = [ "persist.mount" outerRealmMountUnit ];
+      requires = [ "persist.mount" outerRealmMountUnit ];
+    };
+    serviceConfig = {
+      TimeoutStartSec = "2h";
+      TimeoutStopSec = "15s";
+    };
+    path = with pkgs; [ borgbackup btrfs-progs coreutils findutils gnugrep util-linux ];
+    script = mkSnapshotDrainScript {
+      label = "persist";
+      mode = "debt";
+      repo = borgRepoPersist;
+      repoPath = borgRepoPersistPath;
+      snapshotDir = persistSnapshots;
+      snapshotGlob = "persist.*";
+      bindTarget = borgPersistSnapshotBind;
+      archivePrefix = "persist";
+      replacementSuffix = "-coverage-v2";
+      exclude = persistExcludes;
+      noncanonical = persistNoncanonical;
+    };
+  })
+
+  (mkBackupJob "borgbackup-debt-realm" {
+    description = "Archive one historical /realm snapshot";
+    unit = {
+      after = [ "realm.mount" outerRealmMountUnit ];
+      requires = [ "realm.mount" outerRealmMountUnit ];
+    };
+    serviceConfig = {
+      TimeoutStartSec = "2h";
+      TimeoutStopSec = "15s";
+    };
+    path = with pkgs; [ borgbackup btrfs-progs coreutils findutils gnugrep util-linux ];
+    script = mkSnapshotDrainScript {
+      label = "realm";
+      mode = "debt";
+      repo = borgRepoRealm;
+      repoPath = borgRepoRealmPath;
+      snapshotDir = realmSnapshots;
+      snapshotGlob = "realm.*";
+      bindTarget = borgRealmSnapshotBind;
+      archivePrefix = "realm";
+      replacementSuffix = "-coverage-v3";
+      excludeByMarker = false;
+      exclude = realmExcludes;
+      noncanonical = realmNoncanonical;
+    };
+  })
+
+  # One timer gives both fresh lanes an attempt in each cycle. systemctl start waits
   # for each oneshot's result; a persist failure must still start realm.
   # This unit never takes the Borg lock. The children own the archive gate.
   (mkBackupJob "borgbackup-drain-coordinator" {
@@ -147,6 +202,38 @@
     '';
     timer = {
       onCalendar = "*-*-* *:05,25,45:00";
+      persistent = false;
+    };
+  })
+
+  # The separate timer can be stopped during a final rebuild without stopping
+  # fresh archival. A run ends before the next 06:00 acquisition even if both
+  # child units hit their two-hour deadlines.
+  (mkBackupJob "borgbackup-debt-coordinator" {
+    description = "Run one daily historical snapshot transaction per volume";
+    unit.unitConfig.PropagatesStopTo = [
+      "borgbackup-debt-persist.service"
+      "borgbackup-debt-realm.service"
+    ];
+    serviceConfig = {
+      TimeoutStartSec = "4h15m";
+      TimeoutStopSec = "15s";
+    };
+    path = [ pkgs.systemd ];
+    script = ''
+      failed=0
+      if ! systemctl start borgbackup-debt-persist.service; then
+        echo "Persist historical snapshot drain failed; continuing to realm" >&2
+        failed=1
+      fi
+      if ! systemctl start borgbackup-debt-realm.service; then
+        echo "Realm historical snapshot drain failed" >&2
+        failed=1
+      fi
+      exit "$failed"
+    '';
+    timer = {
+      onCalendar = "*-*-* 01:05:00";
       persistent = false;
     };
   })

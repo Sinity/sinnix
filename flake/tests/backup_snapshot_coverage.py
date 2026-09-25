@@ -77,6 +77,24 @@ class CoverageFixture(unittest.TestCase):
             "debt_count=1 historical_debt_count=0",
         )
 
+    def test_fresh_and_daily_debt_selection(self):
+        queue = self.root / "queue"
+        queue.mkdir()
+        old = "realm.20260402T010000+0000"
+        new = "realm.20260402T070000+0000"
+        (queue / old).mkdir()
+        (queue / new).mkdir()
+        marker = self.root / "latest"
+        self.assertEqual(COVERAGE.choose_snapshot(queue, "realm.*", marker, "fresh"), new)
+        self.assertIsNone(COVERAGE.choose_snapshot(queue, "realm.*", marker, "debt"))
+        marker.write_text(f"snapshot={new}\n")
+        self.assertIsNone(COVERAGE.choose_snapshot(queue, "realm.*", marker, "fresh"))
+        self.assertEqual(COVERAGE.choose_snapshot(queue, "realm.*", marker, "debt"), old)
+        attempt = self.root / "attempt"
+        self.assertTrue(COVERAGE.claim_daily_debt_attempt(attempt, 1_700_000_000))
+        self.assertFalse(COVERAGE.claim_daily_debt_attempt(attempt, 1_700_003_600))
+        self.assertTrue(COVERAGE.claim_daily_debt_attempt(attempt, 1_700_086_400))
+
     def test_exact_versions_and_metadata(self):
         os.link(self.source / "same-name", self.source / "hardlink")
         (self.source / "symlink").symlink_to("same-name")
@@ -453,7 +471,7 @@ if command=='borg':
     if args[0]=='debug' and (root/'fail-read').exists(): sys.exit(2)
     os.execv(REAL_BORG, [REAL_BORG,*args])
 if command=='systemctl':
-    lane={'borgbackup-job-persist.service':'persist', 'borgbackup-job-realm.service':'realm'}[args[-1]]
+    lane={'borgbackup-job-persist.service':'persist', 'borgbackup-job-realm.service':'realm', 'borgbackup-debt-persist.service':'debt_persist', 'borgbackup-debt-realm.service':'debt_realm'}[args[-1]]
     if lane=='persist' and (root/'fail-persist-unit').exists(): sys.exit(1)
     sys.exit(subprocess.run(['bash',str(root/(lane+'.sh'))],env=os.environ).returncode)
 if command=='mountpoint': sys.exit(0 if (root/'logs/mounted').exists() else 1)
@@ -577,7 +595,7 @@ elif command=='btrfs':
                 env=env, capture_output=True, text=True,
             )
             self.assertEqual(stalled.returncode, 1)
-            run()
+            run("debt_realm")
             self.assertFalse(old.exists())
             self.assertIn("debt_count=0", (root / "state/borg-drain/realm.snapshot-debt").read_text())
             self.assertIn("snapshot=" + old.name, progress_marker.read_text())
@@ -672,24 +690,31 @@ elif command=='btrfs':
             self.assertTrue(middle.exists())
             latest_marker = root / "state/borg-drain/realm.latest-archived"
             self.assertIn("snapshot=" + fresh.name, latest_marker.read_text())
-            run()
+            debt_attempt = root / "state/borg-drain/realm.last-debt-attempt"
+            debt_attempt.unlink(missing_ok=True)
+            run("debt_realm")
             self.assertFalse(debt.exists())
             self.assertTrue(middle.exists())
             self.assertIn("snapshot=" + fresh.name, latest_marker.read_text())
             self.assertEqual(extract(debt.name, "old-only"), "debt bytes")
-            run()
+            self.assertEqual(run("debt_realm").returncode, 0)
+            self.assertTrue(middle.exists())
+            debt_attempt.unlink()
+            run("debt_realm")
             self.assertFalse(middle.exists())
 
             stuck = snapshot("realm.20260401T010000+0000", {"old-only": "stuck debt"})
             (root / "fail-create").touch()
-            run(ok=False)
+            debt_attempt.unlink()
+            run("debt_realm", ok=False)
             self.assertTrue(stuck.exists())
             newer = snapshot("realm.20260404T010000+0000", {"same-name": "newer"})
             (root / "fail-create").unlink()
             run()
             self.assertFalse(newer.exists())
             self.assertTrue(stuck.exists())
-            run()
+            debt_attempt.unlink()
+            run("debt_realm")
             self.assertFalse(stuck.exists())
             self.assertEqual(extract(stuck.name, "old-only"), "stuck debt")
 
@@ -717,10 +742,12 @@ elif command=='btrfs':
             # archive completion leaves the UUID-bound archive reusable.
             resumed = snapshot("realm.20260402T020000+0000", {"same-name": "resumable"})
             (root / "fail-delete").touch()
-            run(ok=False)
+            debt_attempt.unlink()
+            run("debt_realm", ok=False)
             self.assertTrue(resumed.exists())
             (root / "fail-delete").unlink()
-            run()
+            debt_attempt.unlink()
+            run("debt_realm")
             self.assertFalse(resumed.exists())
             self.assertEqual(extract(resumed.name, "same-name"), "resumable")
 
@@ -728,14 +755,17 @@ elif command=='btrfs':
                 "realm.20260402T021500+0000", {"unique": "survives failures"}
             )
             (root / "fail-create").touch()
-            run(ok=False)
+            debt_attempt.unlink()
+            run("debt_realm", ok=False)
             self.assertTrue(failure.exists())
             (root / "fail-create").unlink()
             (root / "fail-read").touch()
-            run(ok=False)
+            debt_attempt.unlink()
+            run("debt_realm", ok=False)
             self.assertTrue(failure.exists())
             (root / "fail-read").unlink()
-            run()
+            debt_attempt.unlink()
+            run("debt_realm")
             self.assertFalse(failure.exists())
             self.assertEqual(extract(failure.name, "unique"), "survives failures")
 
@@ -770,7 +800,8 @@ elif command=='btrfs':
                 check=True,
             )
             transient.unlink()
-            run()
+            debt_attempt.unlink()
+            run("debt_realm")
             self.assertFalse(stale.exists())
             realm_archives = subprocess.check_output(
                 ["borg", "list", "--short", realm_repo], env=env, text=True
@@ -790,7 +821,7 @@ elif command=='btrfs':
             gap = snapshot(
                 "realm.20260402T023000+0000", {"project/build/precious": "canonical"}
             )
-            later = snapshot("realm.20260402T030000+0000", {"same-name": "later"})
+            later = snapshot("realm.20260406T030000+0000", {"same-name": "later"})
             gap_uuid = json.loads((root / "identities.json").read_text())[str(gap)]
             for suffix in ("", "-coverage-v2"):
                 subprocess.run(
@@ -802,11 +833,14 @@ elif command=='btrfs':
                     env=env,
                     check=True,
                 )
+            run()
+            self.assertFalse(later.exists())
             (root / "fail-create").touch()
-            result = run(ok=False)
+            debt_attempt.unlink()
+            result = run("debt_realm", ok=False)
             self.assertIn("borg create failed", result.stderr)
             self.assertTrue(gap.exists())
-            self.assertTrue(later.exists())
+            self.assertFalse(later.exists())
             gap_archives = subprocess.check_output(
                 ["borg", "list", "--short", realm_repo], env=env, text=True
             ).splitlines()
@@ -817,7 +851,7 @@ elif command=='btrfs':
             gap.rename(root / "parked-gap")
 
             collision = snapshot(
-                "realm.20260402T033000+0000", {"same-name": "collision"}
+                "realm.20260406T033000+0000", {"same-name": "collision"}
             )
             repo = str(root / "repos/borg-realm-v2")
             subprocess.run(
@@ -838,9 +872,6 @@ elif command=='btrfs':
                 env=env,
                 check=True,
             )
-            run()
-            self.assertFalse(later.exists())
-            self.assertTrue(collision.exists())
             run()
             self.assertFalse(collision.exists())
             collision_archives = subprocess.check_output(
@@ -943,7 +974,7 @@ elif command=='btrfs':
                 lane="persist",
             )
             queued_realm = snapshot(
-                "realm.20260406T010000+0000", {"unique": "realm after persist failure"},
+                "realm.20260407T010000+0000", {"unique": "realm after persist failure"},
             )
             (root / "fail-persist-unit").touch()
             run("coordinator", ok=False)
@@ -961,6 +992,28 @@ elif command=='btrfs':
             (root / "fail-persist-unit").unlink()
             run("coordinator")
             self.assertFalse(queued_persist.exists())
+
+            old_persist = snapshot(
+                "persist.20260401T010000+0000", {"unique": "daily persist debt"},
+                lane="persist",
+            )
+            old_realm = snapshot(
+                "realm.20260401T010000+0000", {"unique": "daily realm debt"},
+            )
+            (root / "state/borg-drain/persist.last-debt-attempt").unlink(missing_ok=True)
+            debt_attempt.unlink(missing_ok=True)
+            run("debt_coordinator")
+            self.assertFalse(old_persist.exists())
+            self.assertFalse(old_realm.exists())
+            calls = [
+                json.loads(line) for line in (root / "logs/commands").read_text().splitlines()
+                if '"systemctl"' in line
+            ]
+            self.assertEqual(
+                calls[-2:],
+                [["systemctl", "start", "borgbackup-debt-persist.service"],
+                 ["systemctl", "start", "borgbackup-debt-realm.service"]],
+            )
 
 
 if __name__ == "__main__":

@@ -119,16 +119,15 @@ let
   elicitStateArchivePath = "state/elicit";
   # Paths under /realm no exclude pattern may cover, ancestors included.
   protectedRealmArchivePaths = sinexBeadsArchivePaths ++ [ elicitStateArchivePath ];
-  borgArchiveMaxAgeSec = 6 * 60 * 60;
   # A six-hour snapshot can take about an hour to archive after acquisition.
   # Keep data age distinct from the last-success wall clock.
   borgDataFreshnessMaxAgeSec = 8 * 60 * 60;
-  # Debt is allowed to be old while catch-up advances. A day without an
-  # acknowledged oldest snapshot means the historical queue has stopped.
-  borgDebtProgressMaxAgeSec = 24 * 60 * 60;
+  # Debt is allowed to be old while catch-up advances. Give the daily window
+  # scheduling slack, then signal if it misses a full day's progress.
+  borgDebtProgressMaxAgeSec = 36 * 60 * 60;
   # sinex-blobs runs on its own daily timer (05:40), independently of
   # the persist/realm snapshot drain, so it needs its own budget rather than
-  # sharing borgArchiveMaxAgeSec: budget 3x cadence so one missed/delayed
+  # sharing the six-hour snapshot cadence: budget 3x cadence so one missed/delayed
   # run doesn't false-positive, same convention as the capture
   # staleAfterSeconds entries below.
   borgDailyArchiveMaxAgeSec = 3 * 24 * 60 * 60;
@@ -331,6 +330,7 @@ let
   mkSnapshotDrainScript =
     {
       label,
+      mode,
       repo,
       repoPath,
       snapshotDir,
@@ -354,6 +354,11 @@ let
       export LC_ALL=C
       ${mkBorgCommonScript repo}
       install -d -m 0755 -o root -g root ${lib.escapeShellArg borgDrainStateRoot}
+      latest_marker=${lib.escapeShellArg "${borgDrainStateRoot}/${label}.latest-archived"}
+      snapshot="$(${snapshotCoverage} select ${lib.escapeShellArg snapshotDir} ${lib.escapeShellArg snapshotGlob} "$latest_marker" ${lib.escapeShellArg mode})"
+      if [ -z "$snapshot" ]; then
+        exit 0
+      fi
       acquire_borg_global_lock_or_skip "${label} Borg drain"
 
       cleanup_snapshot_bind_mount() {
@@ -370,15 +375,22 @@ let
         with_borg_lock borg init --encryption repokey-blake2 "$BORG_REPO"
       fi
 
-      latest_marker=${lib.escapeShellArg "${borgDrainStateRoot}/${label}.latest-archived"}
       marker=${lib.escapeShellArg "${borgDrainStateRoot}/${label}.last-success"}
       debt_progress_marker=${lib.escapeShellArg "${borgDrainStateRoot}/${label}.last-debt-success"}
+      debt_attempt_marker=${lib.escapeShellArg "${borgDrainStateRoot}/${label}.last-debt-attempt"}
       debt_marker=${lib.escapeShellArg "${borgDrainStateRoot}/${label}.snapshot-debt"}
       ${snapshotCoverage} debt ${lib.escapeShellArg snapshotDir} ${lib.escapeShellArg snapshotGlob} | publish_backup_marker "$debt_marker"
-      # Selection is deterministic over the current queue. A missing or stale
-      # freshness marker selects the newest snapshot; other wakes pay oldest debt.
+      # Recheck after taking the shared lock. A different drain may have
+      # acknowledged the candidate while this unit waited.
       oldest_before="$(${snapshotCoverage} oldest ${lib.escapeShellArg snapshotDir} ${lib.escapeShellArg snapshotGlob})"
-      snapshot="$(${snapshotCoverage} select ${lib.escapeShellArg snapshotDir} ${lib.escapeShellArg snapshotGlob} "$latest_marker" ${toString borgArchiveMaxAgeSec})"
+      snapshot="$(${snapshotCoverage} select ${lib.escapeShellArg snapshotDir} ${lib.escapeShellArg snapshotGlob} "$latest_marker" ${lib.escapeShellArg mode})"
+      if [ -z "$snapshot" ]; then
+        exit 0
+      fi
+      if [ ${lib.escapeShellArg mode} = debt ] && ! ${snapshotCoverage} claim-debt-attempt "$debt_attempt_marker"; then
+        echo "${label} historical debt already attempted today"
+        exit 0
+      fi
       failed=0
       while IFS= read -r snapshot; do
         [ -n "$snapshot" ] || break
@@ -945,6 +957,22 @@ in
                 enable = true;
                 restartable = false;
               };
+            };
+            borgbackup-debt-coordinator = {
+              unit = "borgbackup-debt-coordinator.service";
+              resourceClass = "backup";
+              observe = {
+                enable = true;
+                restartable = false;
+              };
+            };
+            borgbackup-debt-persist = {
+              unit = "borgbackup-debt-persist.service";
+              resourceClass = "backup";
+            };
+            borgbackup-debt-realm = {
+              unit = "borgbackup-debt-realm.service";
+              resourceClass = "backup";
             };
             btrbk = {
               unit = "btrbk.service";
