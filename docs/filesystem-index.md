@@ -76,3 +76,20 @@ Bare references resolve by a unique retained frontmatter ID, explicit alias, or 
 The output lists source hashes, target hashes and exact character-span proposals. It performs no writes. Reference-only roots supply targets but never source edits; native Git workspaces and declared exclusions remain explicit boundaries. File, byte, directory and depth budgets bound work. An incomplete or malformed scope emits no applicable changes rather than making uniqueness claims over a partial scan. Exit 2 means incomplete input/coverage, exit 1 means references were observed, and exit 0 means none were found.
 
 Applying a chosen proposal remains a separate operation: revalidate every identity-resolution input, preserve source preimages, reject concurrent changes, and check that all intended link destinations still resolve. Preserve newline encoding, original note IDs, and all non-link text. A historical reference remains a historical snapshot even after it becomes clickable; restoring a Git blob does not promote its plans or conclusions into current authority.
+
+## Controlled role categories and retained detail
+
+The role facet uses `collection-role-v1`, declared in `ROLE_VOCABULARY` by the filesystem owner. `judgments vocabulary` returns the codes and definitions without opening a ledger or a classified path. Topics remain open-ended; maintenance ownership and preservation constraints retain their own semantics. A role code is never a deletion policy, freshness claim, backup certificate or validation of source assertions.
+
+A category describes the broad function; `detail` retains the original descriptive wording. Normalizing a role is a new attributed rule observation referencing its source decisions, not a claim that all original descriptions are synonymous or freshly inspected. Preserve all prior records, actor attribution and source dates. The direct resolver exposes retained details and full winning evidence. Unknown child classifications continue to mask inherited values; operator precedence and ambiguous equal-ranked decisions are unchanged.
+
+New imports reject unknown known-role codes and non-text details before modifying the ledger. The explicit `--allow-legacy-roles` option admits historical source definitions without pretending they are normalized. Effective noncanonical roles and ambiguity remain audit findings; superseded historical wording is not treated as an active error merely because its bytes remain in the ledger. `--expected-sha256` refuses a reviewed import if the current ledger identity changed.
+
+```sh
+python3 scripts/sinnix-fs judgments vocabulary
+python3 scripts/sinnix-fs judgments report --group-by role
+python3 scripts/sinnix-fs judgments report --role capture
+python3 scripts/sinnix-fs judgments import reviewed.jsonl --expected-sha256 HASH
+```
+
+Path and role reports are projections of the same ledger, including source detail. They do not require native-store traversal or rebuilding large SQL materializations. Existing older binaries can still read the additive records, but do not acquire new validation or grouping behavior until their source/package is updated.

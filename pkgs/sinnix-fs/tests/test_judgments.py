@@ -135,3 +135,117 @@ def test_import_preserves_history_is_idempotent_and_refuses_invalid_batch(tmp_pa
     with pytest.raises(ValueError, match='invalid incoming'):
         fs.cmd_judgments(args)
     assert (tmp_path / 'judgments.jsonl').read_bytes() == updated
+
+
+
+def test_canonical_roles_preserve_original_details_and_other_facets(tmp_path,capsys):
+    fs=load()
+    rows=[decision(field='role',value='very specific legacy capture'),
+          decision(field='preservation',value='do not delete'),
+          decision(field='maintenance_owner',value='actual owner')]
+    old=ledger(fs,tmp_path,rows)
+    before=(tmp_path/'judgments.jsonl').read_bytes()
+    incoming=tmp_path/'normalization.jsonl'
+    new=decision(field='role',value='capture',detail='very specific legacy capture',ts='2026-02-01T00:00:00Z')
+    incoming.write_text(json.dumps(new)+'\n')
+    args=SimpleNamespace(index_dir=tmp_path,action='import',observations=incoming,expected_sha256=old['sha256'])
+    assert fs.cmd_judgments(args)==0
+    assert (tmp_path/'judgments.jsonl').read_bytes().startswith(before)
+    resolved=fs.resolve_judgments(fs.read_judgments(tmp_path/'judgments.jsonl'),'/a/child')
+    assert resolved['role']['value']=='capture'
+    assert resolved['role']['details']==['very specific legacy capture']
+    assert resolved['preservation']['value']=='do not delete'
+    assert resolved['maintenance_owner']['value']=='actual owner'
+
+
+def test_unknown_new_role_refuses_the_entire_import(tmp_path):
+    fs=load();ledger(fs,tmp_path,[decision()]);p=tmp_path/'judgments.jsonl';old=p.read_bytes()
+    source=tmp_path/'incoming.jsonl'
+    source.write_text(json.dumps(decision('/b',field='role',value='capture'))+'\n'+json.dumps(decision('/c',field='role',value='invented novel category'))+'\n')
+    with pytest.raises(ValueError,match='invalid incoming roles'):
+        fs.cmd_judgments(SimpleNamespace(action='import',index_dir=tmp_path,observations=source))
+    assert p.read_bytes()==old
+
+
+def test_explicit_legacy_role_import_remains_audit_finding(tmp_path,capsys):
+    fs=load();ledger(fs,tmp_path,[decision()]);source=tmp_path/'old.jsonl'
+    source.write_text(json.dumps(decision(field='role',value='old descriptive role'))+'\n')
+    assert fs.cmd_judgments(SimpleNamespace(action='import',index_dir=tmp_path,observations=source,allow_legacy_roles=True))==0
+    capsys.readouterr()
+    assert fs.cmd_judgments(SimpleNamespace(action='audit',index_dir=tmp_path,check_paths=False))==1
+    result=json.loads(capsys.readouterr().out)
+    assert result['role_vocabulary']['noncanonical'][0]['value']=='old descriptive role'
+
+
+def test_import_stale_review_hash_refused_without_changes(tmp_path):
+    fs=load();ledger(fs,tmp_path,[decision()]);p=tmp_path/'judgments.jsonl';old=p.read_bytes()
+    source=tmp_path/'new.jsonl';source.write_text(json.dumps(decision('/b'))+'\n')
+    with pytest.raises(ValueError,match='changed since review'):
+        fs.cmd_judgments(SimpleNamespace(action='import',index_dir=tmp_path,observations=source,expected_sha256='0'*64))
+    assert p.read_bytes()==old
+
+
+def test_role_audit_reads_only_effective_winners_and_does_not_erase_history(tmp_path):
+    fs=load();ls=ledger(fs,tmp_path,[decision(field='role',value='legacy spelling'),decision(field='role',value='capture',ts='2026-02-01T00:00:00Z')])
+    summary=fs.effective_role_audit(ls,['/a','/a/child'])
+    assert summary['counts']=={'capture':2} and not summary['noncanonical']
+    assert len(ls['valid'])==2
+
+
+def test_ambiguous_roles_are_not_folded_into_known_categories(tmp_path):
+    fs=load();ls=ledger(fs,tmp_path,[decision(field='role',value='capture'),decision(field='role',value='analysis')])
+    audit=fs.effective_role_audit(ls,['/a'])
+    assert audit['counts']=={'[ambiguous]':1}
+
+
+def test_unknown_role_masks_inheritance_without_forcing_a_category(tmp_path,capsys):
+    fs=load();ledger(fs,tmp_path,[decision(field='role',value='capture')])
+    source=tmp_path/'new.jsonl';source.write_text(json.dumps(decision('/a/b',field='role',value='not established',observation='unknown'))+'\n')
+    assert fs.cmd_judgments(SimpleNamespace(action='import',index_dir=tmp_path,observations=source))==0
+    current=fs.read_judgments(tmp_path/'judgments.jsonl')
+    assert fs.resolve_judgments(current,'/a/b/child')['role']['status']=='unknown'
+
+
+@pytest.mark.parametrize('value',[['capture'],{'category':'capture'},42,None])
+def test_known_role_requires_a_string_code(tmp_path,value):
+    fs=load();ls=ledger(fs,tmp_path,[decision(field='role',value=value)])
+    assert fs.validate_role_decisions(ls)
+
+
+def test_grouped_role_report_retains_detail_and_filters_paths(tmp_path,capsys):
+    fs=load();ledger(fs,tmp_path,[decision('/a',field='role',value='capture',detail='sensor capture'),decision('/b',field='role',value='analysis')])
+    args=SimpleNamespace(action='report',index_dir=tmp_path,group_by='role',role='capture')
+    assert fs.cmd_judgments(args)==0
+    text=capsys.readouterr().out
+    assert '## capture' in text and 'sensor capture' in text
+    assert '| /a |' in text and '| /b |' not in text
+
+
+def test_equal_category_with_distinct_detail_preserves_both_sources(tmp_path):
+    fs=load();ls=ledger(fs,tmp_path,[decision(field='role',value='capture',detail='source A'),decision(field='role',value='capture',detail='source B')])
+    got=fs.resolve_judgments(ls,'/a')['role']
+    assert got['status']=='known' and got['details']==['source A','source B'] and len(got['evidence'])==2
+
+
+def test_vocabulary_needs_no_ledger_or_target_access(tmp_path,monkeypatch,capsys):
+    fs=load()
+    def forbidden(*a,**k):raise AssertionError('unexpected ledger access')
+    monkeypatch.setattr(fs,'read_judgments',forbidden)
+    assert fs.cmd_judgments(SimpleNamespace(action='vocabulary',index_dir=tmp_path))==0
+    out=json.loads(capsys.readouterr().out)
+    assert set(out['roles'])==set(fs.ROLE_VOCABULARY) and 'git-origin' in out['roles']
+
+
+def test_operator_role_is_not_replaced_by_later_normalization(tmp_path,capsys):
+    fs=load();ledger(fs,tmp_path,[decision(field='role',value='special operator role',method='operator')])
+    source=tmp_path/'new.jsonl';source.write_text(json.dumps(decision(field='role',value='capture',ts='2026-02-01T00:00:00Z'))+'\n')
+    assert fs.cmd_judgments(SimpleNamespace(action='import',index_dir=tmp_path,observations=source))==0
+    out=fs.resolve_judgments(fs.read_judgments(tmp_path/'judgments.jsonl'),'/a')['role']
+    assert out['value']=='special operator role'
+
+
+def test_ambiguous_role_makes_definition_audit_nonzero(tmp_path,capsys):
+    fs=load();ledger(fs,tmp_path,[decision(field='role',value='capture'),decision(field='role',value='analysis')])
+    assert fs.cmd_judgments(SimpleNamespace(action='audit',index_dir=tmp_path,check_paths=False))==1
+    out=json.loads(capsys.readouterr().out)
+    assert out['role_vocabulary']['counts']['[ambiguous]']==1
