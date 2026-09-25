@@ -34,9 +34,8 @@
   # Backups are scheduled bulk I/O and must stay below interactive work;
   # unthrottled they saturate /realm enough to visibly stall the desktop.
   #
-  # Each retry drains the captured queue oldest first. A recent success never
-  # suppresses an unarchived snapshot. The registered resource/timeout policy
-  # bounds each wake, so interruption leaves the remaining queue intact.
+  # Each wake archives at most one snapshot. Freshness gets priority when
+  # overdue; otherwise the oldest historical debt gets service.
   (mkBackupJob "borgbackup-job-persist" {
     description = "Drain /persist btrbk snapshots into Borg";
     unit = {
@@ -50,7 +49,7 @@
       ];
     };
     serviceConfig = {
-      # One wake may drain a backlog, but must yield the shared Borg lock.
+      # One wake processes at most one snapshot, then yields the shared lock.
       # A timeout leaves the current snapshot and remaining queue intact.
       TimeoutStartSec = "4h";
       TimeoutStopSec = "15s";
@@ -75,10 +74,6 @@
       exclude = persistExcludes;
       noncanonical = persistNoncanonical;
     };
-    timer = {
-      onCalendar = "*-*-* *:05,25,45:00";
-      persistent = false;
-    };
   })
 
   (mkBackupJob "borgbackup-job-realm" {
@@ -94,7 +89,7 @@
       ];
     };
     serviceConfig = {
-      # One wake may drain a backlog, but must yield the shared Borg lock.
+      # One wake processes at most one snapshot, then yields the shared lock.
       # A timeout leaves the current snapshot and remaining queue intact.
       TimeoutStartSec = "4h";
       TimeoutStopSec = "15s";
@@ -122,8 +117,36 @@
       exclude = realmExcludes;
       noncanonical = realmNoncanonical;
     };
+  })
+
+  # One timer gives both lanes an attempt in each cycle. systemctl start waits
+  # for each oneshot's result; a persist failure must still start realm.
+  # This unit never takes the Borg lock. The children own the archive gate.
+  (mkBackupJob "borgbackup-drain-coordinator" {
+    description = "Run persist and realm snapshot drains in sequence";
+    unit.unitConfig.PropagatesStopTo = [
+      "borgbackup-job-persist.service"
+      "borgbackup-job-realm.service"
+    ];
+    serviceConfig = {
+      TimeoutStartSec = "8h15m";
+      TimeoutStopSec = "15s";
+    };
+    path = [ pkgs.systemd ];
+    script = ''
+      failed=0
+      if ! systemctl start borgbackup-job-persist.service; then
+        echo "Persist snapshot drain failed; continuing to realm" >&2
+        failed=1
+      fi
+      if ! systemctl start borgbackup-job-realm.service; then
+        echo "Realm snapshot drain failed" >&2
+        failed=1
+      fi
+      exit "$failed"
+    '';
     timer = {
-      onCalendar = "*-*-* *:15,35,55:00";
+      onCalendar = "*-*-* *:05,25,45:00";
       persistent = false;
     };
   })

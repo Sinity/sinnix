@@ -1,6 +1,7 @@
 """Synthetic real-Borg coverage and rendered drain regression fixtures."""
 
 import argparse
+from datetime import datetime, timezone
 import errno
 import importlib.util
 import json
@@ -60,6 +61,20 @@ class CoverageFixture(unittest.TestCase):
             *options,
             "::" + name,
             str(self.source) + "/./",
+        )
+
+    def test_fresh_pending_snapshot_is_not_historical_debt(self):
+        queue = self.root / "queue"
+        queue.mkdir()
+        name = "realm." + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%z")
+        (queue / name).mkdir()
+        now = COVERAGE.snapshot_epoch(name) + 60
+        self.assertEqual(
+            COVERAGE.debt_progress(
+                queue, "realm.*", self.root / "missing-debt-marker",
+                self.root / "missing-latest-marker", now, 86400,
+            ),
+            "debt_count=1 historical_debt_count=0",
         )
 
     def test_exact_versions_and_metadata(self):
@@ -437,6 +452,10 @@ if command=='borg':
     if args[0]=='create' and (root/'fail-create').exists(): sys.exit(2)
     if args[0]=='debug' and (root/'fail-read').exists(): sys.exit(2)
     os.execv(REAL_BORG, [REAL_BORG,*args])
+if command=='systemctl':
+    lane={'borgbackup-job-persist.service':'persist', 'borgbackup-job-realm.service':'realm'}[args[-1]]
+    if lane=='persist' and (root/'fail-persist-unit').exists(): sys.exit(1)
+    sys.exit(subprocess.run(['bash',str(root/(lane+'.sh'))],env=os.environ).returncode)
 if command=='mountpoint': sys.exit(0 if (root/'logs/mounted').exists() else 1)
 if command=='mount':
     source,target=args[-2:]; subprocess.run(['cp','-a',source+'/.',target],check=True); (root/'logs/mounted').touch()
@@ -452,7 +471,7 @@ elif command=='btrfs':
         shutil.rmtree(args[2])
     else: sys.exit(64)
 """.replace("PYTHON", sys.executable).replace("REAL_BORG", repr(shutil.which("borg")))
-            for name in ("mountpoint", "mount", "umount", "btrfs", "borg"):
+            for name in ("mountpoint", "mount", "umount", "btrfs", "borg", "systemctl"):
                 (root / "mock-bin" / name).write_text(mock)
                 (root / "mock-bin" / name).chmod(0o755)
             (root / "mock-bin/git").write_text(
@@ -545,9 +564,23 @@ elif command=='btrfs':
                     "project/marked/precious": "source content beside backup marker",
                 },
             )
+            self.assertFalse((root / "state/borg-drain/realm.latest-archived").exists())
+            run()
+            self.assertTrue(old.exists())
+            self.assertFalse(new.exists())
+            self.assertIn("debt_count=1", (root / "state/borg-drain/realm.snapshot-debt").read_text())
+            progress_marker = root / "state/borg-drain/realm.last-debt-success"
+            self.assertFalse(progress_marker.exists())
+            stalled = subprocess.run(
+                [sys.executable, ARGS.verifier, "progress", str(root / "realm-snapshots"),
+                 "realm.*", str(progress_marker), str(root / "state/borg-drain/realm.latest-archived"), "86400"],
+                env=env, capture_output=True, text=True,
+            )
+            self.assertEqual(stalled.returncode, 1)
             run()
             self.assertFalse(old.exists())
-            self.assertFalse(new.exists())
+            self.assertIn("debt_count=0", (root / "state/borg-drain/realm.snapshot-debt").read_text())
+            self.assertIn("snapshot=" + old.name, progress_marker.read_text())
             self.assertEqual(extract(old.name, "old-only"), "historical")
             self.assertEqual(extract(old.name, "same-name"), "old")
             self.assertEqual(extract(new.name, "same-name"), "new")
@@ -577,7 +610,7 @@ elif command=='btrfs':
                 for entry in commands
                 if entry[:3] == ["btrfs", "subvolume", "delete"]
             ]
-            self.assertEqual(deleted, [str(old), str(new)])
+            self.assertEqual(deleted, [str(new), str(old)])
 
             # Direct-source jobs must keep the evaluated CAS path and exclude
             # mutable Polylogue databases. These use real Borg too.
@@ -629,6 +662,56 @@ elif command=='btrfs':
             run("beads")
             receipt = next((root / "realm-data").rglob("borg_beads_drill.jsonl"))
             self.assertTrue(json.loads(receipt.read_text())["ok"])
+
+            debt = snapshot("realm.20260403T010000+0000", {"old-only": "debt bytes"})
+            middle = snapshot("realm.20260403T020000+0000", {"same-name": "middle"})
+            fresh = snapshot("realm.20260403T030000+0000", {"same-name": "fresh"})
+            run()
+            self.assertFalse(fresh.exists())
+            self.assertTrue(debt.exists())
+            self.assertTrue(middle.exists())
+            latest_marker = root / "state/borg-drain/realm.latest-archived"
+            self.assertIn("snapshot=" + fresh.name, latest_marker.read_text())
+            run()
+            self.assertFalse(debt.exists())
+            self.assertTrue(middle.exists())
+            self.assertIn("snapshot=" + fresh.name, latest_marker.read_text())
+            self.assertEqual(extract(debt.name, "old-only"), "debt bytes")
+            run()
+            self.assertFalse(middle.exists())
+
+            stuck = snapshot("realm.20260401T010000+0000", {"old-only": "stuck debt"})
+            (root / "fail-create").touch()
+            run(ok=False)
+            self.assertTrue(stuck.exists())
+            newer = snapshot("realm.20260404T010000+0000", {"same-name": "newer"})
+            (root / "fail-create").unlink()
+            run()
+            self.assertFalse(newer.exists())
+            self.assertTrue(stuck.exists())
+            run()
+            self.assertFalse(stuck.exists())
+            self.assertEqual(extract(stuck.name, "old-only"), "stuck debt")
+
+            pending = snapshot("realm.20260405T010000+0000", {"old-only": "pending"})
+            saved_progress = progress_marker.read_text()
+            progress_marker.write_text("snapshot=" + stuck.name + "\nepoch=1\n")
+            stalled = subprocess.run(
+                [sys.executable, ARGS.verifier, "progress", str(root / "realm-snapshots"),
+                 "realm.*", str(progress_marker), str(latest_marker), "86400"],
+                env=env, capture_output=True, text=True,
+            )
+            self.assertEqual(stalled.returncode, 1)
+            self.assertIn("no progress", stalled.stderr)
+            progress_marker.write_text(saved_progress)
+            healthy = subprocess.run(
+                [sys.executable, ARGS.verifier, "progress", str(root / "realm-snapshots"),
+                 "realm.*", str(progress_marker), str(latest_marker), "86400"],
+                env=env, capture_output=True, text=True,
+            )
+            self.assertEqual(healthy.returncode, 0, healthy.stderr)
+            run()
+            self.assertFalse(pending.exists())
 
             # A recent success cannot suppress new backlog. A crash after
             # archive completion leaves the UUID-bound archive reusable.
@@ -756,6 +839,9 @@ elif command=='btrfs':
                 check=True,
             )
             run()
+            self.assertFalse(later.exists())
+            self.assertTrue(collision.exists())
+            run()
             self.assertFalse(collision.exists())
             collision_archives = subprocess.check_output(
                 ["borg", "list", "--short", repo], env=env, text=True
@@ -851,6 +937,30 @@ elif command=='btrfs':
                     self.assertFalse(dead_lock.exists())
                 finally:
                     holder.terminate()
+
+            queued_persist = snapshot(
+                "persist.20260406T010000+0000", {"unique": "persist after retry"},
+                lane="persist",
+            )
+            queued_realm = snapshot(
+                "realm.20260406T010000+0000", {"unique": "realm after persist failure"},
+            )
+            (root / "fail-persist-unit").touch()
+            run("coordinator", ok=False)
+            self.assertTrue(queued_persist.exists())
+            self.assertFalse(queued_realm.exists())
+            calls = [
+                json.loads(line) for line in (root / "logs/commands").read_text().splitlines()
+                if '"systemctl"' in line
+            ]
+            self.assertEqual(
+                calls[-2:],
+                [["systemctl", "start", "borgbackup-job-persist.service"],
+                 ["systemctl", "start", "borgbackup-job-realm.service"]],
+            )
+            (root / "fail-persist-unit").unlink()
+            run("coordinator")
+            self.assertFalse(queued_persist.exists())
 
 
 if __name__ == "__main__":
