@@ -56,3 +56,21 @@ The renderer embeds the canonical data without external assets or network
 requests. Search, inspection-method filters and related-file controls operate
 locally. Original-file links require local filesystem access. Neither command
 depends on a running indexing service.
+
+## Parallel collection surveys
+
+Workers write separate observation lists. Import a reviewed batch atomically:
+
+```sh
+sinnix-file-catalog --catalog /path/catalog.json import lane-a.json lane-b.json --on-conflict record
+sinnix-file-catalog --catalog /path/catalog.json coverage --kind collection
+sinnix-file-catalog --catalog /path/catalog.json search geology --kind collection --limit 20 --offset 0
+```
+
+Duplicate paths within one batch are refused so the coordinator must reconcile overlapping assignments. `record` preserves existing conflicting annotations and stores proposed values with their incoming inspection evidence in `annotation_conflicts`; compatible new fields and list observations are retained. `error` refuses a conflicting batch. The default `replace` retains the original update behavior for deliberate revisions. All modes enforce file identity and preserve inspection snapshots. A changed device number is still insufficient evidence to rebind an old observation.
+
+Collection surveys can include `facets` (string-valued topic, role, maintenance_owner and preservation), `organization` (action and rationale, with optional proposed_path and dependencies), and evidence-bearing `related_paths`. Related paths do not require the destination to be cataloged and are not identity or equivalence assertions. Search includes all recorded annotations. The HTML report displays these fields, competing annotations, and filters for record kind and inspection coverage.
+
+Optional `coverage` records have status (`sampled`, `metadata_only`, `complete`, `native_boundary`, or `unavailable`), a nonempty scope and unit, discovered_count (nonnegative integer or null), inspected_count (nonnegative integer), and optional string exclusions. Complete coverage requires a known denominator equal to the inspected count within the stated scope. Coverage without an explicit record is `unrecorded`; taxonomy inheritance never establishes inspection completion. The coverage command counts catalog records by kind, status and proposed action. It does not sum overlapping collection populations or imply a filesystem-wide denominator.
+
+This catalog remains a curated observation store. Batch import avoids repeated whole-catalog writes and lookup rebuilding, but publication still serializes one JSON document. Extraction caches and native application records remain with their owners; a corpus-scale search database is not implied by the catalog report.

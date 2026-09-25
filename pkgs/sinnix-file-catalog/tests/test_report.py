@@ -101,3 +101,25 @@ def test_cli_publishes_private_report(tmp_path):
     assert result.stdout.strip() == str(output)
     assert stat.S_IMODE(output.stat().st_mode) == 0o600
     assert "File inspection catalog" in output.read_text(encoding="utf-8")
+
+
+def test_collection_facets_coverage_and_proposals_are_visible(tmp_path):
+    asset = {
+        "id": "collection", "kind": "collection", "current_path": str(tmp_path),
+        "title": "Field notes", "description": "Observations from expeditions",
+        "inspections": [{"method": "collection_survey", "scope": "Two notes", "basis": "Read pages"}],
+        "facets": {"topic": "geology"},
+        "coverage": {"status": "sampled", "scope": "Two of five notes", "unit": "files",
+                     "discovered_count": 5, "inspected_count": 2},
+        "organization": {"action": "navigate", "rationale": "Connect to the research index"},
+        "utility": ["Which sites were observed?"],
+        "related_paths": [{"path": str(tmp_path / "index.md"), "type": "index", "basis": "Explicit link"}],
+    }
+    page = MODULE["render"]({"schema_version": 1, "updated_at": "2026-01-01", "assets": [asset]},
+                            tmp_path / "catalog.json", TEMPLATE, "render")
+    assert 'data-kind="collection"' in page
+    assert 'data-coverage="sampled"' in page
+    assert "2 / 5 files" in page
+    assert "geology" in page
+    assert "Connect to the research index" in page
+    assert "Which sites were observed?" in page
