@@ -115,6 +115,7 @@
       snapshotGlob = "realm.*";
       bindTarget = borgRealmSnapshotBind;
       archivePrefix = "realm";
+      replacementSuffix = "-coverage-v2";
       exclude = realmExcludes;
       noncanonical = realmNoncanonical;
     };

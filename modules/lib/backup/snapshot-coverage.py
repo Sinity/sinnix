@@ -26,6 +26,7 @@ that (see modules/backup.nix).
 """
 
 import argparse
+from collections import Counter
 import hashlib
 import json
 import os
@@ -368,8 +369,12 @@ def verify(source, archive, noncanonical, chrome_extension_caches=False):
             raise ValueError(f"unsupported canonical file type: {path!r}")
     missing = expected.keys() - seen
     if missing:
+        groups = Counter("/".join(path.split("/", 2)[:2]) for path in missing)
+        largest = sorted(groups.items(), key=lambda group: (-group[1], group[0]))[:8]
+        summary = ", ".join(f"{root}={count}" for root, count in largest)
         raise ValueError(
-            f"canonical content missing from archive: {min(missing)!r} ({len(missing)} entries)"
+            f"canonical content missing from archive: {min(missing)!r} "
+            f"({len(missing)} entries; largest roots: {summary})"
         )
 
     hashed = set()

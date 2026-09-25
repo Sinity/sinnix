@@ -504,15 +504,15 @@ let
     # measured: borg stops recursing into an excluded directory, so a `+`
     # pattern for the subtree never gets the chance to match, and the archive
     # ends at `media` with nothing beneath it.
-    # media/model and private project caches used to be listed here
-    # too. They are dropped, not repointed: each now carries a CACHEDIR.TAG
-    # (commit 2dfa8ae6), and --exclude-caches below already excludes them by
-    # that property regardless of where they live -- which is the whole
-    # point of a property-based marker surviving library moves.
-    # Steam has no such marker (games do not self-tag as
-    # caches), so it is the one entry still named by path, repointed to its
-    # new location.
+    # Model weights are re-acquirable. The current library/models root carries
+    # CACHEDIR.TAG, so Borg already omits it. Keep its exact path in the
+    # coverage policy too; a cache marker alone cannot authorize deletion.
+    # Private project caches remain excluded by their own tags, but retain
+    # the snapshot until their material is classified explicitly.
+    # Steam has no such marker (games do not self-tag as caches), so its
+    # exclusion names the steamapps path directly.
     "library/games/steam/steamapps"
+    "library/models"
     # Regenerable-cache root (sinex cargo/dev caches via the
     # /var/cache/sinex bind, nix-build) — pure churn, never backup material.
     "state/cache"
@@ -553,6 +553,8 @@ let
     "**/.direnv"
     "**/.ruff_cache"
     "**/.pytest_cache"
+    ".pytest_cache"
+    "project/.pytest_cache"
     "**/.cache"
     "**/build"
     "**/dist"
@@ -601,11 +603,17 @@ let
   ] ++ chromeCacheRoots);
   realmNoncanonical = lib.intersectLists realmExcludes [
     "library/games/steam/steamapps"
+    "library/models"
     "state/cache"
     "health/genome/cache"
     "state/containers"
     "tmp"
     "worktrees"
+    # Pytest writes these caches from subprocess runs rooted at /realm and
+    # /realm/project. Borg excludes them through **/.pytest_cache; these
+    # exact roots are disposable and may be absent from an archive.
+    ".pytest_cache"
+    "project/.pytest_cache"
     # Freedesktop trash: deleted-by-the-operator content. Its absence from an
     # archive is the intended state, not missing canonical data. Without this
     # the coverage checker reports "canonical content missing from archive"
