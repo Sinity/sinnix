@@ -29,6 +29,7 @@ class Origin(PolylogueStrEnum):
     # sources/parsers/claude/ai_parser.py's design-chat parser.
     CLAUDE_DESIGN_SESSION = "claude-design-session"
     AISTUDIO_DRIVE = "aistudio-drive"
+    OTEL_GENAI = "otel-genai"
     UNKNOWN_EXPORT = "unknown-export"
 
     @classmethod
@@ -41,6 +42,78 @@ class Origin(PolylogueStrEnum):
         except ValueError:
             return cls.UNKNOWN_EXPORT
 
+ROLE_SYNONYMS: dict[str, frozenset[str]] = {
+    "user": frozenset({"user", "human"}),
+    "assistant": frozenset({"assistant", "model", "ai"}),
+    "system": frozenset({"system", "developer"}),
+    "tool": frozenset({"tool", "function", "tool_use", "tool_result", "progress", "result"}),
+    "unknown": frozenset({"unknown"}),
+}
+
+class Role(PolylogueStrEnum):
+    """Canonical session roles."""
+
+    USER = "user"
+    ASSISTANT = "assistant"
+    SYSTEM = "system"
+    TOOL = "tool"
+    UNKNOWN = "unknown"
+
+    @classmethod
+    def normalize(cls, raw: str) -> Role:
+        """Normalize a provider role string to a canonical role."""
+        lowered = raw.strip().lower()
+        if not lowered:
+            raise ValueError("Role cannot be empty. Handle missing roles at parse time.")
+
+        for role_name, synonyms in ROLE_SYNONYMS.items():
+            if lowered in synonyms:
+                return cls(role_name)
+        return cls.UNKNOWN
+
+class MaterialOrigin(PolylogueStrEnum):
+    """Archive-visible authoredness/material-origin axis for messages.
+
+    ``Role`` preserves provider/API envelope truth. Material origin answers
+    what kind of material the row represents for accounting, projections, and
+    user-facing prose filters.
+    """
+
+    HUMAN_AUTHORED = "human_authored"
+    ASSISTANT_AUTHORED = "assistant_authored"
+    OPERATOR_COMMAND = "operator_command"
+    RUNTIME_PROTOCOL = "runtime_protocol"
+    RUNTIME_CONTEXT = "runtime_context"
+    TOOL_RESULT = "tool_result"
+    GENERATED_CONTEXT_PACK = "generated_context_pack"
+    GENERATED_ANALYSIS_PACK = "generated_analysis_pack"
+    UNKNOWN = "unknown"
+
+    @classmethod
+    def normalize(cls, value: object) -> MaterialOrigin:
+        if isinstance(value, MaterialOrigin):
+            return value
+        candidate = (str(value) if value is not None else "").strip().lower().replace("-", "_")
+        if not candidate:
+            return cls.UNKNOWN
+        for item in cls:
+            if item.value == candidate:
+                return item
+        return cls.UNKNOWN
+
+    @classmethod
+    def validate_filter_token(cls, value: object) -> MaterialOrigin:
+        candidate = (str(value) if value is not None else "").strip().lower().replace("-", "_")
+        if not candidate:
+            msg = "Material origin cannot be empty"
+            raise ValueError(msg)
+        for item in cls:
+            if item.value == candidate:
+                return item
+        valid = ", ".join(item.value for item in cls)
+        msg = f"Unknown material origin {str(value)!r}. Valid material origins: {valid}"
+        raise ValueError(msg)
+
 Bound = Annotated[int, Field(ge=1, le=1000)]
 
 Offset = Annotated[int, Field(ge=0)]
@@ -50,6 +123,8 @@ Text = Annotated[str, Field(min_length=1, max_length=8192)]
 Continuation = Annotated[str, Field(min_length=1, max_length=65536)]
 
 RawOrigin = Literal["claude-code-session", "codex-session"]
+
+MessageTypeFilter = Literal["message", "summary", "tool_use", "tool_result", "thinking", "context", "protocol"]
 
 class Request(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -74,8 +149,22 @@ class SessionSearch(SessionList):
     operation: Literal["sessions.search"] = "sessions.search"
 
 class SessionRead(Request):
+    """One bounded transcript window for an exact session reference.
+
+    The three message filters are part of the request identity, not of the
+    window: a continuation minted for ``message_role=("user",)`` cannot resume
+    an unfiltered read, because the two do not name the same row sequence.
+    They live here rather than only on ``Polylogue.get_messages_paginated`` so
+    that routing every surface through the one bound execution route
+    (``polylogue/operations/transcript_window.py``) preserves the selection
+    vocabulary instead of dropping it (polylogue-ijbwq).
+    """
+
     operation: Literal["sessions.read"] = "sessions.read"
     ref: Text
+    message_role: tuple[Role, ...] = ()
+    message_type: MessageTypeFilter | None = None
+    material_origin: tuple[MaterialOrigin, ...] = ()
     limit: Bound = 50
     offset: Offset = 0
     continuation: Continuation | None = None
