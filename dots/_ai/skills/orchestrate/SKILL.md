@@ -27,13 +27,17 @@ packet expresses intent; check execution against owning launch/session metadata.
 2. Choose native work for a bounded or cohesive change, or an external AgentCTL
    batch for independent isolated groups. Allocate only as many owners as the
    dependency graph and host capacity justify; there is no fixed worker count.
+   Put beads that need the same source edits or test selection in one ownership
+   group. Finish its coherent source patch before running the focused selection.
 3. Use one event watch per concern for queued work and wait for completion;
    native work is observed directly. Do not poll.
 4. Read the result and acceptance evidence, then commit native changes or land
-   the external candidate. For task-bound native delivery, file the result
-   through `agentctl evidence file` after publication; `docs/agentctl.md` owns
-   its contract. Select focused checks for the changed contract; affected or
-   full-corpus runs require an explicit request.
+   the external candidate. One receipt may satisfy several beads when it tests
+   their shared contract; do not repeat an unchanged selection for each bead.
+   For task-bound native delivery, file the result after publication with
+   `agentctl evidence file`; `docs/agentctl.md` owns its contract. Select
+   focused checks for the changed contract; affected or full-corpus runs
+   require an explicit request.
 
 ## Model selection
 
@@ -86,9 +90,10 @@ that prior evidence.
   selector). Standing rules live in `references/worker-contract.md` and the
   `lane` agent definition. Communicate by pointer — bead ids, spec paths,
   commit SHAs.
-- External workers commit their logical chunks, run the verification selected
-  by the task, and exit with the result document: `candidate_sha`, each
-  acceptance criterion marked with evidence, `unresolved`, `verification`.
+- External workers commit their logical chunks, run the focused verification
+  once after the owned patch is coherent, and exit with the result document:
+  `candidate_sha`, each acceptance criterion marked with evidence, `unresolved`,
+  `verification`.
 
 ## Verification
 
