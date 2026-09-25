@@ -121,6 +121,15 @@ mkFeatureModule {
         programs.steam = {
           enable = true;
           gamescopeSession.enable = true;
+          # The desktop needs this for the NVIDIA Wayland compositor, but
+          # Steam's pressure-vessel runtime does not provide its requested
+          # nvidia-drm GBM backend. Let Steam select its container-visible GBM
+          # backend instead, or its Chromium UI can fail during initialization.
+          package = pkgs.steam.override {
+            extraProfile = ''
+              unset GBM_BACKEND
+            '';
+          };
         };
 
         # Steam keeps its XDG data path, while the install and library live on
