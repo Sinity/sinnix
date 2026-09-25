@@ -28,14 +28,14 @@
   # ─── Borg Snapshot Drainers ───
   #
   # btrbk is the producer. Borg is the durability gate. Local snapshots are
-  # never deleted by btrbk rotation; a snapshot leaves disk only after this
-  # drain has verified its canonical contents in a UUID-bound Borg archive.
+  # never deleted by btrbk rotation. The drain removes snapshots at or before
+  # a proven newest archive cutoff; older local-only versions are discarded.
   #
   # Backups are scheduled bulk I/O and must stay below interactive work;
   # unthrottled they saturate /realm enough to visibly stall the desktop.
   #
-  # Each wake archives at most one snapshot. Freshness gets priority when
-  # overdue; otherwise the oldest historical debt gets service.
+  # Each run archives the newest local snapshot. Older local restore points
+  # leave disk only after that archive has passed coverage verification.
   (mkBackupJob "borgbackup-job-persist" {
     description = "Drain /persist btrbk snapshots into Borg";
     unit = {
@@ -49,8 +49,8 @@
       ];
     };
     serviceConfig = {
-      # One wake processes at most one snapshot, then yields the shared lock.
-      # A timeout leaves the current snapshot and remaining queue intact.
+      # One wake archives at most one snapshot, then prunes only after proof.
+      # A timeout before proof retains the queue; a later wake resumes prune.
       TimeoutStartSec = "4h";
       TimeoutStopSec = "15s";
     };
@@ -89,8 +89,8 @@
       ];
     };
     serviceConfig = {
-      # One wake processes at most one snapshot, then yields the shared lock.
-      # A timeout leaves the current snapshot and remaining queue intact.
+      # One wake archives at most one snapshot, then prunes only after proof.
+      # A timeout before proof retains the queue; a later wake resumes prune.
       TimeoutStartSec = "4h";
       TimeoutStopSec = "15s";
     };
@@ -119,7 +119,7 @@
     };
   })
 
-  # One timer gives both lanes an attempt in each cycle. systemctl start waits
+  # One timer gives both fresh lanes an attempt in each cycle. systemctl start waits
   # for each oneshot's result; a persist failure must still start realm.
   # This unit never takes the Borg lock. The children own the archive gate.
   (mkBackupJob "borgbackup-drain-coordinator" {
@@ -134,6 +134,10 @@
     };
     path = [ pkgs.systemd ];
     script = ''
+      if ! ${snapshotCoverage} fresh-window; then
+        echo "Fresh snapshot admission window closed"
+        exit 0
+      fi
       failed=0
       if ! systemctl start borgbackup-job-persist.service; then
         echo "Persist snapshot drain failed; continuing to realm" >&2
@@ -146,7 +150,7 @@
       exit "$failed"
     '';
     timer = {
-      onCalendar = "*-*-* *:05,25,45:00";
+      onCalendar = "*-*-* 00,06,12,18:05,25:00";
       persistent = false;
     };
   })

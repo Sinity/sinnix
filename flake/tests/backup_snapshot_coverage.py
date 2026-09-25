@@ -1,7 +1,7 @@
 """Synthetic real-Borg coverage and rendered drain regression fixtures."""
 
 import argparse
-from datetime import datetime, timezone
+from datetime import datetime
 import errno
 import importlib.util
 import json
@@ -63,19 +63,80 @@ class CoverageFixture(unittest.TestCase):
             str(self.source) + "/./",
         )
 
-    def test_fresh_pending_snapshot_is_not_historical_debt(self):
+    def test_verified_newest_cutoff_prunes_only_snapshots_at_or_before_it(self):
         queue = self.root / "queue"
         queue.mkdir()
-        name = "realm." + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%z")
-        (queue / name).mkdir()
-        now = COVERAGE.snapshot_epoch(name) + 60
-        self.assertEqual(
-            COVERAGE.debt_progress(
-                queue, "realm.*", self.root / "missing-debt-marker",
-                self.root / "missing-latest-marker", now, 86400,
-            ),
-            "debt_count=1 historical_debt_count=0",
+        old = "realm.20260402T010000+0000"
+        new = "realm.20260402T070000+0000"
+        later = "realm.20260402T073000+0000"
+        (queue / old).mkdir()
+        (queue / new).mkdir()
+        archive = "realm-" + new
+        self.archive(archive)
+        proof = COVERAGE.verify(self.source, archive, []) | {
+            "snapshot_uuid": self.snapshot_uuid,
+            "archive_id": COVERAGE.archive_identity(archive, self.snapshot_uuid),
+            "archive": archive,
+        }
+        marker = self.root / "latest"
+        marker.write_text(
+            f"archive={archive}\nsnapshot={new}\ngeneration=20\nsubvolume_id=102\n"
+            f"coverage={json.dumps(proof)}\n"
         )
+        # A later acquisition can have an older wall-clock name after a clock
+        # rollback. Its Btrfs generation must keep it out of the prune plan.
+        rolled_back = "realm.20260401T233000+0000"
+        details = {
+            old: (str(uuid.uuid4()), 10, 101),
+            new: (self.snapshot_uuid, 20, 102),
+            rolled_back: (str(uuid.uuid4()), 30, 103),
+            later: (str(uuid.uuid4()), 40, 104),
+        }
+        with patch.object(COVERAGE, "snapshot_details", side_effect=lambda path: details[path.name]):
+            legacy_marker = self.root / "legacy-latest"
+            legacy_marker.write_text(
+                f"archive={archive}\nsnapshot={new}\ncoverage={json.dumps(proof)}\n"
+            )
+            self.assertEqual(COVERAGE.choose_snapshot(queue, "realm.*", legacy_marker), new)
+            self.assertEqual(
+                COVERAGE.verified_prune_plan(queue, "realm.*", legacy_marker, "realm", "-coverage-v3"),
+                [],
+            )
+            self.assertIsNone(COVERAGE.choose_snapshot(queue, "realm.*", marker))
+            self.assertEqual(
+                COVERAGE.verified_prune_plan(queue, "realm.*", marker, "realm", "-coverage-v3"),
+                [(old, *details[old]), (new, *details[new])],
+            )
+            details[new] = (str(uuid.uuid4()), 20, 102)
+            with self.assertRaisesRegex(ValueError, "snapshot identity changed"):
+                COVERAGE.verified_prune_plan(queue, "realm.*", marker, "realm", "-coverage-v3")
+            details[new] = (self.snapshot_uuid, 20, 102)
+            (queue / rolled_back).mkdir()
+            details[rolled_back] = (details[rolled_back][0], 20, 103)
+            self.assertEqual(COVERAGE.choose_snapshot(queue, "realm.*", marker), rolled_back)
+            self.assertEqual(
+                [name for name, *_ in COVERAGE.verified_prune_plan(
+                    queue, "realm.*", marker, "realm", "-coverage-v3"
+                )],
+                [old, new],
+            )
+            details[rolled_back] = (details[rolled_back][0], 30, 103)
+            self.assertEqual(COVERAGE.choose_snapshot(queue, "realm.*", marker), rolled_back)
+            self.assertEqual(
+                [name for name, *_ in COVERAGE.verified_prune_plan(
+                    queue, "realm.*", marker, "realm", "-coverage-v3"
+                )],
+                [old, new],
+            )
+            (queue / later).mkdir()
+            self.assertEqual(COVERAGE.choose_snapshot(queue, "realm.*", marker), later)
+            marker.write_text(marker.read_text().replace(proof["archive_id"], "a" * 64))
+            with self.assertRaisesRegex(ValueError, "archive identity changed"):
+                COVERAGE.verified_prune_plan(queue, "realm.*", marker, "realm", "-coverage-v3")
+        self.assertTrue(COVERAGE.within_fresh_window(datetime(2026, 4, 2, 6, 5)))
+        self.assertTrue(COVERAGE.within_fresh_window(datetime(2026, 4, 2, 6, 25)))
+        self.assertFalse(COVERAGE.within_fresh_window(datetime(2026, 4, 2, 6, 26)))
+        self.assertFalse(COVERAGE.within_fresh_window(datetime(2026, 4, 2, 7, 5)))
 
     def test_exact_versions_and_metadata(self):
         os.link(self.source / "same-name", self.source / "hardlink")
@@ -444,6 +505,7 @@ class DrainFixture(unittest.TestCase):
             ):
                 (root / path).mkdir(parents=True, exist_ok=True)
             (root / "identities.json").write_text("{}")
+            (root / "generations.json").write_text("{}")
             mock = """#!PYTHON
 import json, os, pathlib, shutil, subprocess, sys
 root=pathlib.Path(os.environ['TMPDIR']); command=pathlib.Path(sys.argv[0]).name; args=sys.argv[1:]
@@ -463,7 +525,11 @@ elif command=='umount':
     target=pathlib.Path(args[-1]); shutil.rmtree(target); target.mkdir(); (root/'logs/mounted').unlink(missing_ok=True)
 elif command=='btrfs':
     identities=json.loads((root/'identities.json').read_text())
-    if args[:2]==['subvolume','show']: print('UUID: '+identities[args[2]])
+    generations=json.loads((root/'generations.json').read_text())
+    if args[:2]==['subvolume','show']:
+        print('UUID: '+identities[args[2]])
+        print('Gen at creation: '+str(generations[args[2]]))
+        print('Subvolume ID: '+str(100+generations[args[2]]))
     elif args[:2]==['property','get']: print('ro=true')
     elif args[:2]==['subvolume','delete']:
         assert args[2] in identities
@@ -507,6 +573,9 @@ elif command=='btrfs':
                 identities = json.loads((root / "identities.json").read_text())
                 identities[str(path)] = str(uuid.uuid4())
                 (root / "identities.json").write_text(json.dumps(identities))
+                generations = json.loads((root / "generations.json").read_text())
+                generations[str(path)] = max(generations.values(), default=0) + 1
+                (root / "generations.json").write_text(json.dumps(generations))
                 return path
 
             def run(name="realm", ok=True):
@@ -566,23 +635,12 @@ elif command=='btrfs':
             )
             self.assertFalse((root / "state/borg-drain/realm.latest-archived").exists())
             run()
-            self.assertTrue(old.exists())
-            self.assertFalse(new.exists())
-            self.assertIn("debt_count=1", (root / "state/borg-drain/realm.snapshot-debt").read_text())
-            progress_marker = root / "state/borg-drain/realm.last-debt-success"
-            self.assertFalse(progress_marker.exists())
-            stalled = subprocess.run(
-                [sys.executable, ARGS.verifier, "progress", str(root / "realm-snapshots"),
-                 "realm.*", str(progress_marker), str(root / "state/borg-drain/realm.latest-archived"), "86400"],
-                env=env, capture_output=True, text=True,
-            )
-            self.assertEqual(stalled.returncode, 1)
-            run()
             self.assertFalse(old.exists())
-            self.assertIn("debt_count=0", (root / "state/borg-drain/realm.snapshot-debt").read_text())
-            self.assertIn("snapshot=" + old.name, progress_marker.read_text())
-            self.assertEqual(extract(old.name, "old-only"), "historical")
-            self.assertEqual(extract(old.name, "same-name"), "old")
+            self.assertFalse(new.exists())
+            self.assertIn("snapshot=" + new.name, (root / "state/borg-drain/realm.latest-archived").read_text())
+            self.assertNotIn("realm-" + old.name, subprocess.check_output(
+                ["borg", "list", "--short", str(root / "repos/borg-realm-v2")], env=env, text=True
+            ).splitlines())
             self.assertEqual(extract(new.name, "same-name"), "new")
             for relative, content in {
                 "project/build/precious": "source build material",
@@ -610,7 +668,18 @@ elif command=='btrfs':
                 for entry in commands
                 if entry[:3] == ["btrfs", "subvolume", "delete"]
             ]
-            self.assertEqual(deleted, [str(new), str(old)])
+            self.assertEqual(deleted, [str(old), str(new)])
+
+            rollback = snapshot(
+                "realm.20260401T233000+0000", {"unique": "new bytes after clock rollback"}
+            )
+            run()
+            self.assertFalse(rollback.exists())
+            self.assertIn(
+                "snapshot=" + rollback.name,
+                (root / "state/borg-drain/realm.latest-archived").read_text(),
+            )
+            self.assertEqual(extract(rollback.name, "unique"), "new bytes after clock rollback")
 
             # Direct-source jobs must keep the evaluated CAS path and exclude
             # mutable Polylogue databases. These use real Borg too.
@@ -663,84 +732,61 @@ elif command=='btrfs':
             receipt = next((root / "realm-data").rglob("borg_beads_drill.jsonl"))
             self.assertTrue(json.loads(receipt.read_text())["ok"])
 
-            debt = snapshot("realm.20260403T010000+0000", {"old-only": "debt bytes"})
+            older = snapshot("realm.20260403T010000+0000", {"old-only": "older bytes"})
             middle = snapshot("realm.20260403T020000+0000", {"same-name": "middle"})
             fresh = snapshot("realm.20260403T030000+0000", {"same-name": "fresh"})
             run()
+            self.assertFalse(older.exists())
+            self.assertFalse(middle.exists())
             self.assertFalse(fresh.exists())
-            self.assertTrue(debt.exists())
-            self.assertTrue(middle.exists())
             latest_marker = root / "state/borg-drain/realm.latest-archived"
             self.assertIn("snapshot=" + fresh.name, latest_marker.read_text())
-            run()
-            self.assertFalse(debt.exists())
-            self.assertTrue(middle.exists())
-            self.assertIn("snapshot=" + fresh.name, latest_marker.read_text())
-            self.assertEqual(extract(debt.name, "old-only"), "debt bytes")
-            run()
-            self.assertFalse(middle.exists())
+            archives = subprocess.check_output(
+                ["borg", "list", "--short", str(root / "repos/borg-realm-v2")], env=env, text=True
+            ).splitlines()
+            self.assertIn("realm-" + fresh.name, archives)
+            self.assertNotIn("realm-" + older.name, archives)
+            self.assertNotIn("realm-" + middle.name, archives)
 
-            stuck = snapshot("realm.20260401T010000+0000", {"old-only": "stuck debt"})
+            # A marker is a durable prune cutoff. A later wake removes old
+            # snapshots left by a failed delete, even without a new snapshot.
+            leftover = snapshot("realm.20260403T013000+0000", {"old-only": "leftover"})
+            (root / "fail-delete").touch()
+            run(ok=False)
+            self.assertTrue(leftover.exists())
+            (root / "fail-delete").unlink()
+            run()
+            self.assertFalse(leftover.exists())
+
+            pending = snapshot("realm.20260404T010000+0000", {"old-only": "pending"})
+            newer = snapshot("realm.20260404T013000+0000", {"same-name": "newer"})
             (root / "fail-create").touch()
             run(ok=False)
-            self.assertTrue(stuck.exists())
-            newer = snapshot("realm.20260404T010000+0000", {"same-name": "newer"})
+            self.assertTrue(pending.exists())
+            self.assertTrue(newer.exists())
             (root / "fail-create").unlink()
-            run()
-            self.assertFalse(newer.exists())
-            self.assertTrue(stuck.exists())
-            run()
-            self.assertFalse(stuck.exists())
-            self.assertEqual(extract(stuck.name, "old-only"), "stuck debt")
-
-            pending = snapshot("realm.20260405T010000+0000", {"old-only": "pending"})
-            saved_progress = progress_marker.read_text()
-            progress_marker.write_text("snapshot=" + stuck.name + "\nepoch=1\n")
-            stalled = subprocess.run(
-                [sys.executable, ARGS.verifier, "progress", str(root / "realm-snapshots"),
-                 "realm.*", str(progress_marker), str(latest_marker), "86400"],
-                env=env, capture_output=True, text=True,
-            )
-            self.assertEqual(stalled.returncode, 1)
-            self.assertIn("no progress", stalled.stderr)
-            progress_marker.write_text(saved_progress)
-            healthy = subprocess.run(
-                [sys.executable, ARGS.verifier, "progress", str(root / "realm-snapshots"),
-                 "realm.*", str(progress_marker), str(latest_marker), "86400"],
-                env=env, capture_output=True, text=True,
-            )
-            self.assertEqual(healthy.returncode, 0, healthy.stderr)
+            (root / "fail-read").touch()
+            run(ok=False)
+            self.assertTrue(pending.exists())
+            self.assertTrue(newer.exists())
+            (root / "fail-read").unlink()
             run()
             self.assertFalse(pending.exists())
+            self.assertFalse(newer.exists())
+            self.assertEqual(extract(newer.name, "same-name"), "newer")
 
-            # A recent success cannot suppress new backlog. A crash after
-            # archive completion leaves the UUID-bound archive reusable.
-            resumed = snapshot("realm.20260402T020000+0000", {"same-name": "resumable"})
+            resumed = snapshot("realm.20260405T010000+0000", {"same-name": "resumable"})
             (root / "fail-delete").touch()
             run(ok=False)
             self.assertTrue(resumed.exists())
+            self.assertIn("snapshot=" + resumed.name, latest_marker.read_text())
             (root / "fail-delete").unlink()
             run()
             self.assertFalse(resumed.exists())
             self.assertEqual(extract(resumed.name, "same-name"), "resumable")
 
-            failure = snapshot(
-                "realm.20260402T021500+0000", {"unique": "survives failures"}
-            )
-            (root / "fail-create").touch()
-            run(ok=False)
-            self.assertTrue(failure.exists())
-            (root / "fail-create").unlink()
-            (root / "fail-read").touch()
-            run(ok=False)
-            self.assertTrue(failure.exists())
-            (root / "fail-read").unlink()
-            run()
-            self.assertFalse(failure.exists())
-            self.assertEqual(extract(failure.name, "unique"), "survives failures")
-
             stale = snapshot(
-                "realm.20260402T022000+0000",
+                "realm.20260405T020000+0000",
                 {
                     "inbox/download/media": "canonical download",
                     ".pytest_cache/v/cache": "derived pytest data",
@@ -788,9 +834,9 @@ elif command=='btrfs':
             )
 
             gap = snapshot(
-                "realm.20260402T023000+0000", {"project/build/precious": "canonical"}
+                "realm.20260406T030000+0000", {"project/build/precious": "canonical"}
             )
-            later = snapshot("realm.20260402T030000+0000", {"same-name": "later"})
+            older_gap = snapshot("realm.20260406T023000+0000", {"same-name": "older"})
             gap_uuid = json.loads((root / "identities.json").read_text())[str(gap)]
             for suffix in ("", "-coverage-v2"):
                 subprocess.run(
@@ -806,7 +852,7 @@ elif command=='btrfs':
             result = run(ok=False)
             self.assertIn("borg create failed", result.stderr)
             self.assertTrue(gap.exists())
-            self.assertTrue(later.exists())
+            self.assertTrue(older_gap.exists())
             gap_archives = subprocess.check_output(
                 ["borg", "list", "--short", realm_repo], env=env, text=True
             ).splitlines()
@@ -814,10 +860,12 @@ elif command=='btrfs':
             self.assertIn("realm-" + gap.name + "-coverage-v2", gap_archives)
             self.assertNotIn("realm-" + gap.name + "-coverage-v3", gap_archives)
             (root / "fail-create").unlink()
-            gap.rename(root / "parked-gap")
+            run()
+            self.assertFalse(gap.exists())
+            self.assertFalse(older_gap.exists())
 
             collision = snapshot(
-                "realm.20260402T033000+0000", {"same-name": "collision"}
+                "realm.20260406T033000+0000", {"same-name": "collision"}
             )
             repo = str(root / "repos/borg-realm-v2")
             subprocess.run(
@@ -838,9 +886,6 @@ elif command=='btrfs':
                 env=env,
                 check=True,
             )
-            run()
-            self.assertFalse(later.exists())
-            self.assertTrue(collision.exists())
             run()
             self.assertFalse(collision.exists())
             collision_archives = subprocess.check_output(
@@ -943,7 +988,7 @@ elif command=='btrfs':
                 lane="persist",
             )
             queued_realm = snapshot(
-                "realm.20260406T010000+0000", {"unique": "realm after persist failure"},
+                "realm.20260407T010000+0000", {"unique": "realm after persist failure"},
             )
             (root / "fail-persist-unit").touch()
             run("coordinator", ok=False)
@@ -961,7 +1006,6 @@ elif command=='btrfs':
             (root / "fail-persist-unit").unlink()
             run("coordinator")
             self.assertFalse(queued_persist.exists())
-
 
 if __name__ == "__main__":
     unittest.main(argv=[sys.argv[0]])

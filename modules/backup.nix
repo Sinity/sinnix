@@ -119,16 +119,12 @@ let
   elicitStateArchivePath = "state/elicit";
   # Paths under /realm no exclude pattern may cover, ancestors included.
   protectedRealmArchivePaths = sinexBeadsArchivePaths ++ [ elicitStateArchivePath ];
-  borgArchiveMaxAgeSec = 6 * 60 * 60;
   # A six-hour snapshot can take about an hour to archive after acquisition.
   # Keep data age distinct from the last-success wall clock.
   borgDataFreshnessMaxAgeSec = 8 * 60 * 60;
-  # Debt is allowed to be old while catch-up advances. A day without an
-  # acknowledged oldest snapshot means the historical queue has stopped.
-  borgDebtProgressMaxAgeSec = 24 * 60 * 60;
   # sinex-blobs runs on its own daily timer (05:40), independently of
   # the persist/realm snapshot drain, so it needs its own budget rather than
-  # sharing borgArchiveMaxAgeSec: budget 3x cadence so one missed/delayed
+  # sharing the six-hour snapshot cadence: budget 3x cadence so one missed/delayed
   # run doesn't false-positive, same convention as the capture
   # staleAfterSeconds entries below.
   borgDailyArchiveMaxAgeSec = 3 * 24 * 60 * 60;
@@ -354,6 +350,7 @@ let
       export LC_ALL=C
       ${mkBorgCommonScript repo}
       install -d -m 0755 -o root -g root ${lib.escapeShellArg borgDrainStateRoot}
+      latest_marker=${lib.escapeShellArg "${borgDrainStateRoot}/${label}.latest-archived"}
       acquire_borg_global_lock_or_skip "${label} Borg drain"
 
       cleanup_snapshot_bind_mount() {
@@ -370,25 +367,14 @@ let
         with_borg_lock borg init --encryption repokey-blake2 "$BORG_REPO"
       fi
 
-      latest_marker=${lib.escapeShellArg "${borgDrainStateRoot}/${label}.latest-archived"}
       marker=${lib.escapeShellArg "${borgDrainStateRoot}/${label}.last-success"}
-      debt_progress_marker=${lib.escapeShellArg "${borgDrainStateRoot}/${label}.last-debt-success"}
-      debt_marker=${lib.escapeShellArg "${borgDrainStateRoot}/${label}.snapshot-debt"}
-      ${snapshotCoverage} debt ${lib.escapeShellArg snapshotDir} ${lib.escapeShellArg snapshotGlob} | publish_backup_marker "$debt_marker"
-      # Selection is deterministic over the current queue. A missing or stale
-      # freshness marker selects the newest snapshot; other wakes pay oldest debt.
-      oldest_before="$(${snapshotCoverage} oldest ${lib.escapeShellArg snapshotDir} ${lib.escapeShellArg snapshotGlob})"
-      snapshot="$(${snapshotCoverage} select ${lib.escapeShellArg snapshotDir} ${lib.escapeShellArg snapshotGlob} "$latest_marker" ${toString borgArchiveMaxAgeSec})"
-      failed=0
-      while IFS= read -r snapshot; do
-        [ -n "$snapshot" ] || break
+      snapshot="$(${snapshotCoverage} select ${lib.escapeShellArg snapshotDir} ${lib.escapeShellArg snapshotGlob} "$latest_marker")"
+      if [ -n "$snapshot" ]; then
         snapshot_path=${lib.escapeShellArg snapshotDir}/"$snapshot"
         archive_name=${lib.escapeShellArg archivePrefix}-"$snapshot"
         original_archive_name="$archive_name"
-        if ! snapshot_uuid="$(${snapshotCoverage} identity "$snapshot_path")"; then
-          failed=1
-          continue
-        fi
+        snapshot_details="$(${snapshotCoverage} details "$snapshot_path")"
+        IFS=$'\t' read -r snapshot_uuid snapshot_generation snapshot_id <<< "$snapshot_details"
         mount --bind "$snapshot_path" ${lib.escapeShellArg bindTarget}
         archives="$(with_borg_lock borg list --short "$BORG_REPO")"
         if [ -n ${lib.escapeShellArg replacementSuffix} ] && printf '%s\n' "$archives" | grep -Fxq "$original_archive_name"; then
@@ -411,8 +397,7 @@ let
         if ! printf '%s\n' "$archives" | grep -Fxq "$archive_name"; then
           if ! create_archive; then
             cleanup_snapshot_bind_mount
-            failed=1
-            break
+            exit 1
           fi
         fi
         # Neither a matching name nor a successful create acknowledges bytes.
@@ -420,42 +405,38 @@ let
         # compares metadata and binds the proof to UUID + immutable archive ID.
         if ! proof="$(${snapshotCoverage} verify ${lib.escapeShellArg bindTarget} "$archive_name" "$snapshot_uuid" ${coveragePolicy})"; then
           cleanup_snapshot_bind_mount
-          failed=1
-          # Retain the queue after a coverage refusal instead of rereading
-          # every archive in the same wake.
-          break
+          exit 1
         fi
         cleanup_snapshot_bind_mount
-        if [ "$(${snapshotCoverage} identity "$snapshot_path")" != "$snapshot_uuid" ]; then
+        if [ "$(${snapshotCoverage} details "$snapshot_path")" != "$snapshot_details" ]; then
           echo "Snapshot identity changed; retaining $snapshot_path" >&2
-          failed=1
-          continue
+          exit 1
         fi
-        btrfs subvolume delete "$snapshot_path"
         {
           printf 'archive=%s\n' "$archive_name"
           printf 'snapshot=%s\n' "$snapshot"
+          printf 'generation=%s\n' "$snapshot_generation"
+          printf 'subvolume_id=%s\n' "$snapshot_id"
           printf 'coverage=%s\n' "$proof"
           printf 'epoch=%s\n' "$(date +%s)"
-        } | publish_backup_marker "$marker"
-        if [ "$snapshot" = "$oldest_before" ] && ${snapshotCoverage} historical "$snapshot" "$latest_marker" ${toString borgDebtProgressMaxAgeSec}; then
-          {
-            printf 'snapshot=%s\n' "$snapshot"
-            printf 'epoch=%s\n' "$(date +%s)"
-          } | publish_backup_marker "$debt_progress_marker"
-        fi
-        # Debt service must never move the data-freshness signal backward.
-        if ${snapshotCoverage} newer "$latest_marker" "$snapshot"; then
-          {
-            printf 'archive=%s\n' "$archive_name"
-            printf 'snapshot=%s\n' "$snapshot"
-            printf 'coverage=%s\n' "$proof"
-            printf 'epoch=%s\n' "$(date +%s)"
-          } | publish_backup_marker "$latest_marker"
-        fi
-        ${snapshotCoverage} debt ${lib.escapeShellArg snapshotDir} ${lib.escapeShellArg snapshotGlob} | publish_backup_marker "$debt_marker"
-      done <<< "$snapshot"
-      exit "$failed"
+        } | publish_backup_marker "$latest_marker"
+        publish_backup_marker "$marker" < "$latest_marker"
+      fi
+      # A crash during deletion leaves the verified marker in place. Every
+      # later wake resumes the remaining local prune, even with no new archive.
+      if [ -f "$latest_marker" ]; then
+        prune_plan="$(${snapshotCoverage} prune-plan -- ${lib.escapeShellArg snapshotDir} ${lib.escapeShellArg snapshotGlob} "$latest_marker" ${lib.escapeShellArg archivePrefix} ${lib.escapeShellArg replacementSuffix})"
+        while IFS=$'\t' read -r old expected_uuid expected_generation expected_id; do
+          [ -n "$old" ] || continue
+          old_path=${lib.escapeShellArg snapshotDir}/"$old"
+          actual_details="$(${snapshotCoverage} details "$old_path")"
+          if [ "$actual_details" != "$(printf '%s\t%s\t%s' "$expected_uuid" "$expected_generation" "$expected_id")" ]; then
+            echo "Snapshot identity changed; retaining $old_path" >&2
+            exit 1
+          fi
+          btrfs subvolume delete "$old_path"
+        done <<< "$prune_plan"
+      fi
     '';
 
   chromeCacheRoot = "home/sinity/.config/chrome-ws";
@@ -753,9 +734,7 @@ let
   '';
 
   # Persist and realm freshness probes read snapshot timestamps from their
-  # latest-archived markers. Debt probes read the live snapshot directories;
-  # their small status files expose count and oldest age without walking
-  # snapshot contents. The integrity probe below has its own deadline.
+  # latest-archived markers. The integrity probe below has its own deadline.
   mkIntegrityStuckProbeScript = ''
     receipt=${lib.escapeShellArg borgIntegrityReceipt}
     # No receipt yet is the capture lane's own staleness check to make (or,
@@ -785,8 +764,8 @@ let
     # ─── Snapshot handoff queue ───
     # btrbk creates point-in-time local snapshots; Borg is responsible for
     # durable retention. The systemd btrbk service runs with
-    # --preserve-snapshots, so snapshots are deleted only by Borg drain jobs
-    # after the matching archive exists.
+    # --preserve-snapshots, so only Borg drain jobs delete snapshots, after
+    # the newest selected snapshot has a verified archive.
 
     volume ${realmRoot}
       snapshot_dir   .btrfs/snapshot
@@ -815,6 +794,16 @@ in
     lib.mkMerge (
       [
         {
+          # The realm archive's observed working set paged heavily under the
+          # 2G/4G background slice. Give this one low-I/O-priority Borg lane
+          # memory headroom without raising limits for every backup service.
+          systemd.slices.borgdrain.sliceConfig = {
+            CPUWeight = 3;
+            IOWeight = 20;
+            MemoryHigh = "6G";
+            MemoryMax = "8G";
+          };
+
           sinnix.runtime.dataStores = {
             # Backup coverage remains active for persisted Polylogue data even
             # when its daemon is disabled. The owning service supplies the
@@ -979,24 +968,16 @@ in
                     inputs = [ "borg-persist-archives" ];
                   };
                 }
-                {
-                  name = "borg-persist-snapshot-debt";
-                  path = "${borgDrainStateRoot}/persist.snapshot-debt";
-                  eventDriven = true;
-                  livenessProbe = {
-                    command = "${snapshotCoverage} progress ${persistSnapshots} 'persist.*' ${borgDrainStateRoot}/persist.last-debt-success ${borgDrainStateRoot}/persist.latest-archived ${toString borgDebtProgressMaxAgeSec}";
-                    timeoutSeconds = 15;
-                  };
-                  data = {
-                    class = "derived";
-                    inputs = [ "persist-snapshots" ];
-                  };
-                }
               ];
             };
             borgbackup-job-realm = {
               unit = "borgbackup-job-realm.service";
               resourceClass = "backup";
+              resources = {
+                Slice = "borgdrain.slice";
+                MemoryHigh = "4G";
+                MemoryMax = "6G";
+              };
               observe = {
                 enable = true;
                 restartable = false;
@@ -1013,19 +994,6 @@ in
                   data = {
                     class = "derived";
                     inputs = [ "borg-realm-archives" ];
-                  };
-                }
-                {
-                  name = "borg-realm-snapshot-debt";
-                  path = "${borgDrainStateRoot}/realm.snapshot-debt";
-                  eventDriven = true;
-                  livenessProbe = {
-                    command = "${snapshotCoverage} progress ${realmSnapshots} 'realm.*' ${borgDrainStateRoot}/realm.last-debt-success ${borgDrainStateRoot}/realm.latest-archived ${toString borgDebtProgressMaxAgeSec}";
-                    timeoutSeconds = 15;
-                  };
-                  data = {
-                    class = "derived";
-                    inputs = [ "realm-snapshots" ];
                   };
                 }
               ];
