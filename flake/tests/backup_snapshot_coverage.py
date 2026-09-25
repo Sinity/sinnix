@@ -527,6 +527,22 @@ elif command=='btrfs':
                     "tmp/scratch": "scratch",
                     "project/sinex/.beads/issues.jsonl": '{"id":"synthetic-bead"}\n',
                     "project/sinex/.beads/dolt/.dolt/HEAD": "synthetic",
+                    "project/build/precious": "source build material",
+                    "project/dist/precious": "source distribution material",
+                    "project/node_modules/precious": "source package material",
+                    "project/target/precious": "source target material",
+                    "project/.venv/precious": "source environment material",
+                    "project/.direnv/precious": "source environment state",
+                    "project/.ruff_cache/precious": "source cache material",
+                    "project/sample/.pytest_cache/precious": "source test material",
+                    "project/.cache/precious": "source hidden material",
+                    "project/compiled.pyc": "source bytecode material",
+                    "project/inbox/monero/precious": "source inbox material",
+                    "project/.Trash-1000/precious": "nested trash material",
+                    "project/tagged/CACHEDIR.TAG": "Signature: 8a477f597d28d172789f06886806bc55\n",
+                    "project/tagged/precious": "source content beside cache tag",
+                    "project/marked/.nobackup": "",
+                    "project/marked/precious": "source content beside backup marker",
                 },
             )
             run()
@@ -535,6 +551,23 @@ elif command=='btrfs':
             self.assertEqual(extract(old.name, "old-only"), "historical")
             self.assertEqual(extract(old.name, "same-name"), "old")
             self.assertEqual(extract(new.name, "same-name"), "new")
+            for relative, content in {
+                "project/build/precious": "source build material",
+                "project/dist/precious": "source distribution material",
+                "project/node_modules/precious": "source package material",
+                "project/target/precious": "source target material",
+                "project/.venv/precious": "source environment material",
+                "project/.direnv/precious": "source environment state",
+                "project/.ruff_cache/precious": "source cache material",
+                "project/sample/.pytest_cache/precious": "source test material",
+                "project/.cache/precious": "source hidden material",
+                "project/compiled.pyc": "source bytecode material",
+                "project/inbox/monero/precious": "source inbox material",
+                "project/.Trash-1000/precious": "nested trash material",
+                "project/tagged/precious": "source content beside cache tag",
+                "project/marked/precious": "source content beside backup marker",
+            }.items():
+                self.assertEqual(extract(new.name, relative), content)
             commands = [
                 json.loads(line)
                 for line in (root / "logs/commands").read_text().splitlines()
@@ -645,6 +678,14 @@ elif command=='btrfs':
                 env=env,
                 check=True,
             )
+            subprocess.run(
+                [
+                    "borg", "create", "--comment", "sinnix-snapshot-v1:" + stale_uuid,
+                    realm_repo + "::" + stale_name + "-coverage-v2", str(stale) + "/./",
+                ],
+                env=env,
+                check=True,
+            )
             transient.unlink()
             run()
             self.assertFalse(stale.exists())
@@ -653,9 +694,10 @@ elif command=='btrfs':
             ).splitlines()
             self.assertIn(stale_name, realm_archives)
             self.assertIn(stale_name + "-coverage-v2", realm_archives)
+            self.assertIn(stale_name + "-coverage-v3", realm_archives)
             self.assertEqual(
                 subprocess.check_output(
-                    ["borg", "extract", "--stdout", realm_repo + "::" + stale_name + "-coverage-v2", "inbox/download/media"],
+                    ["borg", "extract", "--stdout", realm_repo + "::" + stale_name + "-coverage-v3", "inbox/download/media"],
                     env=env,
                     text=True,
                 ),
@@ -666,10 +708,29 @@ elif command=='btrfs':
                 "realm.20260402T023000+0000", {"project/build/precious": "canonical"}
             )
             later = snapshot("realm.20260402T030000+0000", {"same-name": "later"})
+            gap_uuid = json.loads((root / "identities.json").read_text())[str(gap)]
+            for suffix in ("", "-coverage-v2"):
+                subprocess.run(
+                    [
+                        "borg", "create", "--comment", "sinnix-snapshot-v1:" + gap_uuid,
+                        "--exclude", str(gap / "project/build").lstrip("/"),
+                        realm_repo + "::realm-" + gap.name + suffix, str(gap) + "/./",
+                    ],
+                    env=env,
+                    check=True,
+                )
+            (root / "fail-create").touch()
             result = run(ok=False)
-            self.assertIn("canonical content missing", result.stderr)
+            self.assertIn("borg create failed", result.stderr)
             self.assertTrue(gap.exists())
             self.assertTrue(later.exists())
+            gap_archives = subprocess.check_output(
+                ["borg", "list", "--short", realm_repo], env=env, text=True
+            ).splitlines()
+            self.assertIn("realm-" + gap.name, gap_archives)
+            self.assertIn("realm-" + gap.name + "-coverage-v2", gap_archives)
+            self.assertNotIn("realm-" + gap.name + "-coverage-v3", gap_archives)
+            (root / "fail-create").unlink()
             gap.rename(root / "parked-gap")
 
             collision = snapshot(
@@ -686,6 +747,14 @@ elif command=='btrfs':
                 env=env,
                 check=True,
             )
+            subprocess.run(
+                [
+                    "borg", "create", repo + "::realm-" + collision.name + "-coverage-v2",
+                    str(collision) + "/./",
+                ],
+                env=env,
+                check=True,
+            )
             run()
             self.assertFalse(collision.exists())
             collision_archives = subprocess.check_output(
@@ -693,6 +762,7 @@ elif command=='btrfs':
             ).splitlines()
             self.assertIn("realm-" + collision.name, collision_archives)
             self.assertIn("realm-" + collision.name + "-coverage-v2", collision_archives)
+            self.assertIn("realm-" + collision.name + "-coverage-v3", collision_archives)
             run("persist")
             chrome = "home/sinity/.config/chrome-ws"
             persist = snapshot(
