@@ -26,6 +26,7 @@ that (see modules/backup.nix).
 """
 
 import argparse
+from collections import Counter
 import hashlib
 import json
 import os
@@ -53,13 +54,19 @@ def identity(source):
 
 
 def archive_identity(archive, snapshot_uuid):
-    archives = json.loads(run("borg", "info", "--json", "::" + archive))["archives"]
+    archives = json.loads(
+        run("borg", "list", "--json", "--format", "{comment}")
+    )["archives"]
+    matches = [
+        entry for entry in archives
+        if entry.get("archive", entry.get("name")) == archive
+    ]
     if (
-        len(archives) != 1
-        or archives[0]["comment"] != "sinnix-snapshot-v1:" + snapshot_uuid
+        len(matches) != 1
+        or matches[0].get("comment") != "sinnix-snapshot-v1:" + snapshot_uuid
     ):
         raise ValueError(f"archive does not bind this snapshot UUID: {archive}")
-    archive_id = archives[0]["id"]
+    archive_id = matches[0]["id"]
     if not re.fullmatch(r"[0-9a-f]{64}", archive_id):
         raise ValueError("invalid archive ID")
     return archive_id
@@ -246,7 +253,13 @@ def decode_borg_bytes(value):
     )
 
 
-def verify(source, archive, noncanonical):
+CHROME_EXTENSION_CACHE = re.compile(
+    r"home/sinity/\.config/chrome-ws/Default/Storage/ext/([a-p]{32})/def/"
+    r"(DawnGraphiteCache|DawnWebGPUCache|GPUCache|Shared Dictionary/cache)\Z"
+)
+
+
+def verify(source, archive, noncanonical, chrome_extension_caches=False):
     source = Path(source)
     expected = {}
     ignored = set(noncanonical)
@@ -261,8 +274,15 @@ def verify(source, archive, noncanonical):
     ):
         raise ValueError("noncanonical roots must be explicit relative paths")
 
+    def is_noncanonical_root(path, relative):
+        return relative in ignored or (
+            chrome_extension_caches
+            and CHROME_EXTENSION_CACHE.fullmatch(relative)
+            and stat.S_ISDIR(path.lstat().st_mode)
+        )
+
     def walk(path, relative):
-        if relative in ignored:
+        if is_noncanonical_root(path, relative):
             omitted_roots.append(relative)
             return
         st = path.lstat()
@@ -285,10 +305,18 @@ def verify(source, archive, noncanonical):
         ["borg", "debug", "dump-archive", "::" + archive, "/dev/stdout"],
         lambda stream: JsonStream(stream).items(),
     ):
+        # Borg's archive stream includes checkpoint parts, marked by the
+        # structural `part` key. Its ordinary item iterator filters them;
+        # debug dump-archive does not. A part is neither a source path nor
+        # proof of the complete file, which must appear separately below.
+        if "part" in item:
+            continue
         path = archive_path(item)
         if path not in expected:
             # Noncanonical material may be over-preserved by Borg.
-            if path in ignored or any(path.startswith(p + "/") for p in ignored):
+            if any(
+                path == p or path.startswith(p + "/") for p in omitted_roots
+            ):
                 continue
             raise ValueError(f"unexpected archive path: {path!r}")
         if path in seen:
@@ -347,8 +375,12 @@ def verify(source, archive, noncanonical):
             raise ValueError(f"unsupported canonical file type: {path!r}")
     missing = expected.keys() - seen
     if missing:
+        groups = Counter("/".join(path.split("/", 2)[:2]) for path in missing)
+        largest = sorted(groups.items(), key=lambda group: (-group[1], group[0]))[:8]
+        summary = ", ".join(f"{root}={count}" for root, count in largest)
         raise ValueError(
-            f"canonical content missing from archive: {min(missing)!r} ({len(missing)} entries)"
+            f"canonical content missing from archive: {min(missing)!r} "
+            f"({len(missing)} entries; largest roots: {summary})"
         )
 
     hashed = set()
@@ -411,6 +443,14 @@ def verify(source, archive, noncanonical):
     }
 
 
+def decode_policy(policy):
+    if isinstance(policy, list):
+        return policy, False
+    if isinstance(policy, dict):
+        return policy["noncanonical"], policy.get("chrome_extension_caches", False)
+    raise ValueError("invalid coverage policy")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -426,8 +466,14 @@ def main():
         print(identity(args.source))
     else:
         archive_id = archive_identity(args.archive, args.uuid)
+        noncanonical, chrome_extension_caches = decode_policy(
+            json.loads(Path(args.policy).read_text())
+        )
         result = verify(
-            args.source, args.archive, json.loads(Path(args.policy).read_text())
+            args.source,
+            args.archive,
+            noncanonical,
+            chrome_extension_caches,
         )
         if archive_identity(args.archive, args.uuid) != archive_id:
             raise ValueError("archive changed during verification")

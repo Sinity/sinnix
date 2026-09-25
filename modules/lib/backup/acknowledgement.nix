@@ -71,6 +71,7 @@
       snapshotGlob = "persist.*";
       bindTarget = borgPersistSnapshotBind;
       archivePrefix = "persist";
+      replacementSuffix = "-coverage-v2";
       exclude = persistExcludes;
       noncanonical = persistNoncanonical;
     };
@@ -114,6 +115,7 @@
       snapshotGlob = "realm.*";
       bindTarget = borgRealmSnapshotBind;
       archivePrefix = "realm";
+      replacementSuffix = "-coverage-v2";
       exclude = realmExcludes;
       noncanonical = realmNoncanonical;
     };
