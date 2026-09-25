@@ -1,40 +1,6 @@
---- a/polylogue/daemon/cursor_lag_baseline.py
-+++ b/polylogue/daemon/cursor_lag_baseline.py
-@@ -43,6 +43,7 @@
- from pathlib import Path
- 
- from polylogue.core.stats import percentile
-+from polylogue.core.write_lease import write_lease
- from polylogue.daemon.cursor_lag_status import CursorLagItem, CursorLagSummary
- from polylogue.logging import get_logger
- from polylogue.sources.live._lag_sample_ddl import _LAG_SAMPLE_DDL, _LAG_SAMPLE_INDEX_DDL
-@@ -232,7 +233,10 @@
-         return 0
-     ops_db.parent.mkdir(parents=True, exist_ok=True)
-     try:
--        with closing(open_initialized_tier_connection(ops_db, ArchiveTier.OPS, timeout=0.1)) as conn:
-+        with (
-+            write_lease("daemon.cursor_lag.sample", archive_root=ops_db.parent),
-+            closing(open_initialized_tier_connection(ops_db, ArchiveTier.OPS, timeout=0.1)) as conn,
-+        ):
-             for family, source_path, max_lag_s, stuck_file_count, p50_s, p95_s in rows:
-                 record_archive_cursor_lag_sample(
-                     conn,
-@@ -262,7 +266,10 @@
-         return 0
-     cutoff_ms = _epoch_ms((now or datetime.now(UTC)) - timedelta(days=retention_days))
-     try:
--        with closing(open_initialized_tier_connection(ops_db, ArchiveTier.OPS, timeout=0.1)) as conn:
-+        with (
-+            write_lease("daemon.cursor_lag.gc", archive_root=ops_db.parent),
-+            closing(open_initialized_tier_connection(ops_db, ArchiveTier.OPS, timeout=0.1)) as conn,
-+        ):
-             cur = conn.execute("DELETE FROM cursor_lag_samples WHERE sampled_at_ms < ?", (cutoff_ms,))
-             conn.commit()
-             return cur.rowcount or 0
 --- a/polylogue/daemon/cli.py
 +++ b/polylogue/daemon/cli.py
-@@ -3874,7 +3874,7 @@
+@@ -3590,7 +3590,7 @@
  main.add_command(api_command)
  
  
@@ -43,13 +9,10 @@
  
  
  def _live_daemon_status_payload(*, timeout: float = _LIVE_DAEMON_STATUS_TIMEOUT_S) -> JSONDocument | None:
-@@ -3928,17 +3928,21 @@
+@@ -3644,17 +3644,18 @@
      configure_logging()
      payload = _live_daemon_status_payload()
      if payload is None:
-+        # Match the daemon's periodic snapshot: the CLI fallback used to turn
-+        # every expensive diagnostic flag on, which is the >15s hang on a
-+        # reachable but still-warming daemon (polylogue-20d.17 / sinnix-iqo6).
 +        status_kwargs = {
 +            "browser_capture_spool_path": spool_path,
 +            "include_browser_capture_spool_path": spool_path is not None,
