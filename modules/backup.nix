@@ -176,8 +176,8 @@ let
   # Qualified patterns stay in the default fnmatch style rather than becoming
   # `pp:` path prefixes, and that is load-bearing rather than incidental: `pp:`
   # is a LITERAL prefix with no globbing, and the persist list contains
-  # wildcard entries (`.config/chrome-ws/*Cache*`). Measured both ways -- `pp:`
-  # left the GPUCache directory in the archive, plain fnmatch excluded it, and
+  # wildcard entries for Chrome extension cache producers. Measured both ways
+  # with GPUCache: `pp:` left the directory in the archive, fnmatch excluded it, and
   # both handled a literal directory correctly. fnmatch also matches "from the
   # start of the full path to just before a path separator", so a qualified
   # directory covers everything beneath it.
@@ -332,11 +332,15 @@ let
       snapshotGlob,
       bindTarget,
       archivePrefix,
+      replacementSuffix ? "",
       exclude,
       noncanonical,
     }:
     let
-      coveragePolicy = pkgs.writeText "${label}-snapshot-coverage.json" (builtins.toJSON noncanonical);
+      coveragePolicy = pkgs.writeText "${label}-snapshot-coverage.json" (builtins.toJSON {
+        inherit noncanonical;
+        chrome_extension_caches = label == "persist";
+      });
     in
     ''
       set -euo pipefail
@@ -367,13 +371,19 @@ let
         [ -n "$snapshot" ] || continue
         snapshot_path=${lib.escapeShellArg snapshotDir}/"$snapshot"
         archive_name=${lib.escapeShellArg archivePrefix}-"$snapshot"
+        original_archive_name="$archive_name"
         if ! snapshot_uuid="$(${snapshotCoverage} identity "$snapshot_path")"; then
           failed=1
           continue
         fi
         mount --bind "$snapshot_path" ${lib.escapeShellArg bindTarget}
         archives="$(with_borg_lock borg list --short "$BORG_REPO")"
-        if ! printf '%s\n' "$archives" | grep -Fxq "$archive_name"; then
+        if [ -n ${lib.escapeShellArg replacementSuffix} ] && printf '%s\n' "$archives" | grep -Fxq "$original_archive_name"; then
+          # This archive predates the policy repair. Keep it untouched and
+          # prove a separately named archive before deleting the snapshot.
+          archive_name="$original_archive_name"${lib.escapeShellArg replacementSuffix}
+        fi
+        create_archive() {
           if ! with_borg_lock borg create \
             --compression auto,zstd,1 \
             --lock-wait ${toString borgLockWaitSec} \
@@ -383,9 +393,14 @@ let
             ${mkBorgExcludeArgs bindTarget exclude} \
             "::$archive_name" ${lib.escapeShellArg "${bindTarget}/./"}; then
             echo "borg create failed for ${label} snapshot $snapshot; subvolume kept on disk" >&2
+            return 1
+          fi
+        }
+        if ! printf '%s\n' "$archives" | grep -Fxq "$archive_name"; then
+          if ! create_archive; then
             cleanup_snapshot_bind_mount
             failed=1
-            continue
+            break
           fi
         fi
         # Neither a matching name nor a successful create acknowledges bytes.
@@ -394,7 +409,9 @@ let
         if ! proof="$(${snapshotCoverage} verify ${lib.escapeShellArg bindTarget} "$archive_name" "$snapshot_uuid" ${coveragePolicy})"; then
           cleanup_snapshot_bind_mount
           failed=1
-          continue
+          # Retain the queue after a coverage refusal instead of rereading
+          # every archive in the same wake.
+          break
         fi
         cleanup_snapshot_bind_mount
         if [ "$(${snapshotCoverage} identity "$snapshot_path")" != "$snapshot_uuid" ]; then
@@ -414,16 +431,37 @@ let
       exit "$failed"
     '';
 
+  chromeCacheRoot = "home/sinity/.config/chrome-ws";
+  chromeCacheRoots = map (path: "${chromeCacheRoot}/${path}") [
+    "Default/Shared Dictionary/cache"
+    "System Profile/Shared Dictionary/cache"
+    "Default/AutofillAiModelCache"
+    "Default/DawnGraphiteCache"
+    "Default/DawnWebGPUCache"
+    "Default/GPUCache"
+    "Default/optimization_guide_hint_cache_store"
+    "GPUPersistentCache"
+    "GrShaderCache"
+    "GraphiteDawnCache"
+    "ShaderCache"
+    "component_crx_cache"
+    "extensions_crx_cache"
+  ];
+  # The verifier accepts these only when the wildcard is a Chrome extension ID
+  # (32 lowercase a-p characters) and the terminal path names this producer.
+  chromeExtensionCacheExcludes = map (path: "${chromeCacheRoot}/Default/Storage/ext/*/def/${path}") [
+    "DawnGraphiteCache"
+    "DawnWebGPUCache"
+    "GPUCache"
+    "Shared Dictionary/cache"
+  ];
+
   persistExcludes = [
     # Archive-relative patterns: paths start from the /persist snapshot root.
     "home/sinity/.local/share/Steam"
     "home/sinity/.cache/huggingface"
     "home/sinity/.cache/spotify"
     "root/.cache/borg"
-    "home/sinity/.config/chrome-ws/Default/Service Worker"
-    "home/sinity/.config/chrome-ws/Default/GPUCache"
-    "home/sinity/.config/chrome-ws/*Cache*"
-    "home/sinity/.config/chrome-ws/*cache*"
     # User caches are regenerable and currently large enough to dominate
     # backup churn if included.
     "home/sinity/.cache"
@@ -444,7 +482,7 @@ let
     "var/lib/systemd/coredump"
     # Sinex runtime state is backed up through structured service tooling.
     "var/lib/sinex"
-  ];
+  ] ++ chromeCacheRoots ++ chromeExtensionCacheExcludes;
 
   realmExcludes = [
     # Re-acquirable media: Steam, model weights, and private project caches
@@ -535,12 +573,10 @@ let
   # state are also not excused by a cache classification.
   # Intersect an explicit classification with the real creation exclusions:
   # adding another exclusion never silently authorizes snapshot deletion.
-  persistNoncanonical = lib.intersectLists persistExcludes [
+  persistNoncanonical = lib.intersectLists persistExcludes ([
     "home/sinity/.cache/huggingface"
     "home/sinity/.cache/spotify"
     "root/.cache/borg"
-    "home/sinity/.config/chrome-ws/Default/Service Worker"
-    "home/sinity/.config/chrome-ws/Default/GPUCache"
     "home/sinity/.cache"
     # Cargo tags both of these with CACHEDIR.TAG, so --exclude-caches already
     # kept them out of every archive while nothing classified them. The lane
@@ -562,7 +598,7 @@ let
     "home/sinity/.local/share/nvim/mason"
     "home/sinity/.local/share/hyprland/logs"
     "var/lib/systemd/coredump"
-  ];
+  ] ++ chromeCacheRoots);
   realmNoncanonical = lib.intersectLists realmExcludes [
     "library/games/steam/steamapps"
     "state/cache"

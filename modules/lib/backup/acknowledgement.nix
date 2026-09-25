@@ -71,6 +71,7 @@
       snapshotGlob = "persist.*";
       bindTarget = borgPersistSnapshotBind;
       archivePrefix = "persist";
+      replacementSuffix = "-coverage-v2";
       exclude = persistExcludes;
       noncanonical = persistNoncanonical;
     };

@@ -12,6 +12,7 @@ import tempfile
 import unittest
 import uuid
 from pathlib import Path
+from unittest.mock import patch
 
 PARSER = argparse.ArgumentParser()
 PARSER.add_argument("--verifier", required=True)
@@ -81,6 +82,22 @@ class CoverageFixture(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "content mismatch"):
             COVERAGE.verify(self.source, "snapshot", [])
+
+    def test_archive_identity_uses_exact_repository_listing_entry(self):
+        listing = json.dumps({"archives": [
+            {"archive": "snapshot-old", "id": "a" * 64, "comment": "sinnix-snapshot-v1:" + self.snapshot_uuid},
+            {"archive": "snapshot", "id": "b" * 64, "comment": "sinnix-snapshot-v1:" + self.snapshot_uuid},
+        ]})
+        with patch.object(COVERAGE, "run", return_value=listing) as command:
+            self.assertEqual(COVERAGE.archive_identity("snapshot", self.snapshot_uuid), "b" * 64)
+            command.assert_called_once_with("borg", "list", "--json", "--format", "{comment}")
+            with self.assertRaisesRegex(ValueError, "UUID"):
+                COVERAGE.archive_identity("absent", self.snapshot_uuid)
+        self.assertEqual(COVERAGE.decode_policy(["run"]), (["run"], False))
+        self.assertEqual(
+            COVERAGE.decode_policy({"noncanonical": ["run"], "chrome_extension_caches": True}),
+            (["run"], True),
+        )
 
     def test_extended_attributes(self):
         try:
@@ -229,6 +246,71 @@ class CoverageFixture(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "canonical content missing"):
             COVERAGE.verify(self.source, "marker", [])
 
+    def test_chrome_extension_cache_requires_a_valid_extension_id(self):
+        base = "home/sinity/.config/chrome-ws/Default/Storage/ext"
+        valid = "a" * 32
+        invalid = "a" * 31 + "q"
+        for extension in (valid, invalid):
+            path = self.source / base / extension / "def/GPUCache"
+            path.mkdir(parents=True)
+            (path / "data").write_text("derived")
+        self.archive(
+            "extension-caches",
+            "--exclude",
+            str(self.source / base / valid / "def/GPUCache").lstrip("/"),
+            "--exclude",
+            str(self.source / base / invalid / "def/GPUCache").lstrip("/"),
+        )
+        with self.assertRaisesRegex(ValueError, "canonical content missing"):
+            COVERAGE.verify(self.source, "extension-caches", [], True)
+        shutil.rmtree(self.source / base / invalid)
+        self.archive(
+            "valid-extension-cache",
+            "--exclude",
+            str(self.source / base / valid / "def/GPUCache").lstrip("/"),
+        )
+        result = COVERAGE.verify(self.source, "valid-extension-cache", [], True)
+        self.assertIn(
+            f"{base}/{valid}/def/GPUCache", result["noncanonical_roots"]
+        )
+        cache_path = self.source / base / valid / "def/GPUCache"
+        shutil.rmtree(cache_path)
+        target = self.source / "operator-data"
+        target.mkdir()
+        (target / "entry").write_text("durable")
+        cache_path.symlink_to(target, target_is_directory=True)
+        self.archive("symlink-cache", "--exclude", str(cache_path).lstrip("/"))
+        with self.assertRaisesRegex(ValueError, "canonical content missing"):
+            COVERAGE.verify(self.source, "symlink-cache", [], True)
+
+    def test_cache_api_storage_stays_canonical(self):
+        cache_api = self.source / "home/sinity/.config/chrome-ws/Default/WebStorage/7/CacheStorage"
+        cache_api.mkdir(parents=True)
+        (cache_api / "entry").write_text("site data")
+        self.archive(
+            "missing-cache-api",
+            "--exclude",
+            str(cache_api).lstrip("/"),
+        )
+        with self.assertRaisesRegex(ValueError, "canonical content missing"):
+            COVERAGE.verify(self.source, "missing-cache-api", [], True)
+
+    def test_service_worker_storage_stays_canonical(self):
+        storage = self.source / "home/sinity/.config/chrome-ws/Default/Service Worker/CacheStorage"
+        storage.mkdir(parents=True)
+        (storage / "entry").write_text("site data")
+        self.archive("missing-service-worker", "--exclude", str(storage).lstrip("/"))
+        with self.assertRaisesRegex(ValueError, "canonical content missing"):
+            COVERAGE.verify(self.source, "missing-service-worker", [], True)
+
+    def test_optguide_model_file_stays_canonical(self):
+        model = self.source / "home/sinity/.config/chrome-ws/OptGuideOnDeviceModel/1/cache.bin"
+        model.parent.mkdir(parents=True)
+        model.write_bytes(b"model cache")
+        self.archive("missing-optguide", "--exclude", str(model).lstrip("/"))
+        with self.assertRaisesRegex(ValueError, "canonical content missing"):
+            COVERAGE.verify(self.source, "missing-optguide", [], True)
+
     def test_declared_scratch_and_nested_stub(self):
         scratch = self.source / "tmp"
         scratch.mkdir()
@@ -327,8 +409,8 @@ elif command=='btrfs':
                     check=True,
                 )
 
-            def snapshot(name, files):
-                path = root / "realm-snapshots" / name
+            def snapshot(name, files, lane="realm"):
+                path = root / (lane + "-snapshots") / name
                 path.mkdir()
                 for relative, data in files.items():
                     file = path / relative
@@ -499,6 +581,62 @@ elif command=='btrfs':
             self.assertIn("UUID", result.stderr)
             self.assertTrue(collision.exists())
             run("persist")
+            chrome = "home/sinity/.config/chrome-ws"
+            persist = snapshot(
+                "persist.20260402T040000+0000",
+                {
+                    f"{chrome}/Default/Shared Dictionary/cache/derived": "rebuildable",
+                    f"{chrome}/Default/WebStorage/7/CacheStorage/site-entry": "site data",
+                },
+                lane="persist",
+            )
+            persist_repo = str(root / "repos/borg-persist-v1")
+            old_name = "persist-" + persist.name
+            snapshot_uuid = json.loads((root / "identities.json").read_text())[str(persist)]
+            subprocess.run(
+                [
+                    "borg", "create", "--comment", "sinnix-snapshot-v1:" + snapshot_uuid,
+                    "--exclude", str(persist / chrome / "Default/WebStorage/7/CacheStorage").lstrip("/"),
+                    persist_repo + "::" + old_name, str(persist) + "/./",
+                ],
+                env=env,
+                check=True,
+            )
+            (root / "fail-create").touch()
+            run("persist", ok=False)
+            self.assertTrue(persist.exists())
+            self.assertEqual(
+                subprocess.check_output(
+                    ["borg", "list", "--short", persist_repo], env=env, text=True
+                ).splitlines(),
+                [old_name],
+            )
+            (root / "fail-create").unlink()
+            run("persist")
+            self.assertFalse(persist.exists())
+            archived = subprocess.check_output(
+                ["borg", "list", "--short", persist_repo], env=env, text=True
+            ).splitlines()
+            self.assertIn(old_name, archived)
+            self.assertIn(old_name + "-coverage-v2", archived)
+            commands = [
+                json.loads(line)
+                for line in (root / "logs/commands").read_text().splitlines()
+            ]
+            self.assertFalse(any(
+                command[:3] == ["borg", "debug", "dump-archive"]
+                and command[3] == "::" + old_name
+                for command in commands
+            ))
+            canonical = f"{chrome}/Default/WebStorage/7/CacheStorage/site-entry"
+            self.assertEqual(
+                subprocess.check_output(
+                    ["borg", "extract", "--stdout", persist_repo + "::" + old_name + "-coverage-v2", canonical],
+                    env=env,
+                    text=True,
+                ),
+                "site data",
+            )
             run("missing")
             for directory in (
                 "live-holder/snapshots",
