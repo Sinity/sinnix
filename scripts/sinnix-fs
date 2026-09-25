@@ -1159,6 +1159,80 @@ def cmd_run(args: argparse.Namespace) -> int:
 JUDGMENT_FACETS = ("topic", "role", "maintenance_owner", "preservation")
 JUDGMENT_LIMIT_BYTES = 8 << 20
 
+# A small controlled role is distinct from the original descriptive wording.
+# The ledger retains detail and attributed source decisions; categories never
+# grant deletion permission or establish backup, lifecycle, or claim validity.
+ROLE_VOCABULARY_VERSION = "collection-role-v1"
+ROLE_VOCABULARY = {
+    "collection": "A mixed-purpose container; inspect more-specific classifications rather than assuming homogeneous contents.",
+    "provider-collection": "Material grouped by source provider or acquisition account, potentially including several representations.",
+    "source-record": "A retained observation, authored record or evidence item; no claim that its assertions are independently true.",
+    "source-export": "An acquired export or source snapshot whose package and acquisition provenance matter.",
+    "capture": "Recorded interaction, event, measurement or media from a capture producer.",
+    "personal-media": "Personal photographs, screenshots, recordings or keepsakes grouped for retrieval.",
+    "reference-material": "Retained external or personal reference material for reading, viewing or reuse.",
+    "learning-material": "Courses, exercises, learning editions or other instructional material.",
+    "dataset": "A reference corpus or structured data collection, not a guarantee of replaceability.",
+    "model-resource": "Model weights or model-related resources; preservation is specified separately.",
+    "source-snapshot": "A fixed source-code or document revision, with its own version/provenance identity.",
+    "creative-work": "Authored or generated creative material, independent of its medium.",
+    "working-notes": "Working concepts, observations, project context or maintained preferences.",
+    "planning": "Intentions, proposed designs, plans or handoffs; not execution/completion evidence.",
+    "analysis": "Interpretation, synthesis or analytical results; distinct from the underlying evidence.",
+    "transcript": "A transcription product, retaining its source and accuracy limitations.",
+    "derived-data": "Materialized or transformed data with source lineage and version constraints.",
+    "index": "A retrieval/serving index or lookup representation, distinct from its input corpus.",
+    "navigation": "An entrance, link arrangement or browsing projection; it need not contain the linked payloads.",
+    "metadata-ledger": "Authored or retained structured metadata/history; not disposable just because it supports an index.",
+    "configuration": "Configuration or protected inputs to a workflow; never a disclosure or deletion permission.",
+    "software-workspace": "A primary implementation workspace with a source/task owner.",
+    "research-workspace": "A research workspace with source, computation, drafts and owner-defined boundaries.",
+    "processing-workspace": "An executable transformation workflow whose stages and inputs form a contract.",
+    "worktree": "An isolated version-control checkout; status must come from its native owner.",
+    "native-store": "An application-owned database or library whose native layout must be respected.",
+    "runtime-state": "Operational state, queues, spools or application artifacts with an active owner.",
+    "history": "Retained historical material, without implying that it is a verified independent backup.",
+    "recovery": "Retained recovery or migration material; completeness and restorability require separate evidence.",
+    "backup-store": "A backup repository managed by its backup owner; no current-success claim.",
+    "intake": "Material awaiting assignment or transfer completion; not automatically temporary or disposable.",
+    "retained-unclassified": "Retained material whose purpose or disposition is not established sufficiently to classify more narrowly.",
+    "scratch": "Execution scratch; current references and retained work must be checked before cleanup.",
+    "git-origin": "A live Git remote repository, even if physically stored under an archive directory.",
+    "maintenance-evidence": "Operation receipts, preimages, audits or verification bundles retained as evidence, not replay instructions."
+}
+
+
+def validate_role_decisions(ledger: dict) -> list[dict]:
+    """Validate known role values on explicit import, not historical reads."""
+    issues = []
+    for entry in ledger["valid"]:
+        record = entry["record"]
+        if record["field"] != "role" or (record.get("observation") or "known") != "known":
+            continue
+        value = record["value"]
+        if not isinstance(value, str) or value not in ROLE_VOCABULARY:
+            issues.append({"line": entry["line"], "value": value,
+                           "reason": "noncanonical role; choose a vocabulary value and retain wording in detail"})
+        elif "detail" in record and not isinstance(record["detail"], str):
+            issues.append({"line": entry["line"], "reason": "role detail must be text"})
+    return issues
+
+
+def effective_role_audit(ledger: dict, targets: list[str]) -> dict:
+    counts, noncanonical = Counter(), []
+    for path in targets:
+        result = resolve_judgments(ledger, path).get("role", {})
+        status, value = result.get("status", "not-recorded"), result.get("value")
+        if status != "known":
+            counts["[" + status + "]"] += 1
+        elif isinstance(value, str) and value in ROLE_VOCABULARY:
+            counts[value] += 1
+        else:
+            noncanonical.append({"path": path, "via": result.get("via"), "value": value})
+    return {"vocabulary": ROLE_VOCABULARY_VERSION, "counts": dict(sorted(counts.items())),
+            "noncanonical": noncanonical}
+
+
 
 def judgment_target(target: str) -> tuple[str, str]:
     if target.startswith("sha256:"):
@@ -1246,19 +1320,34 @@ def resolve_judgments(ledger: dict, path: str) -> dict:
             record = selected[0]["record"]
             output[field] = {"status": record.get("observation") or "known",
                              "value": record["value"], "via": prefix, "evidence": evidence}
+            details = list(dict.fromkeys(e["record"].get("detail") for e in selected
+                                         if isinstance(e["record"].get("detail"), str)))
+            if details:
+                output[field]["details"] = details
     return output
 
 
 def cmd_judgments(args: argparse.Namespace) -> int:
+    if args.action == "vocabulary":
+        print(json.dumps({"schema": ROLE_VOCABULARY_VERSION, "field": "role",
+                          "roles": ROLE_VOCABULARY,
+                          "detail": "Retain source wording in each decision's detail and evidence; do not replace preservation constraints with role codes."}, indent=2))
+        return 0
     if args.action == "import":
         incoming = read_judgments(args.observations)
         if incoming["issues"]:
             raise ValueError(f"invalid incoming definitions: {incoming['issues']}")
+        role_issues = validate_role_decisions(incoming)
+        if role_issues and not getattr(args, "allow_legacy_roles", False):
+            raise ValueError(f"invalid incoming roles: {role_issues}; historical import requires explicit --allow-legacy-roles")
         path = args.index_dir / "judgments.jsonl"
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.with_name(path.name + ".lock").open("a+") as lock:
             fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
             existing = read_judgments(path) if path.exists() else {"valid": [], "records": 0}
+            expected = getattr(args, "expected_sha256", None)
+            if expected is not None and existing.get("sha256") != expected:
+                raise ValueError("judgment ledger changed since review; expected SHA-256 does not match")
             seen = {entry["record_sha256"] for entry in existing["valid"]}
             additions = []
             for entry in incoming["valid"]:
@@ -1301,29 +1390,54 @@ def cmd_judgments(args: argparse.Namespace) -> int:
                     state = "unavailable"
                 locations.append({"path": path, "status": state})
         modern = {e["address"] for e in ledger["valid"] if e["kind"] == "prefix" and e["record"]["field"] in JUDGMENT_FACETS}
+        role_audit = effective_role_audit(ledger, sorted(modern))
         result = {"schema": "sinnix-fs-judgment-audit-v1", "ledger": provenance,
+                  "role_vocabulary": role_audit,
                   "valid_records": len(ledger["valid"]), "prefix_targets":len(targets),
                   "facet_targets":len(modern), "location_counts":dict(Counter(r["status"] for r in locations)),
                   "locations":locations, "scope":"Definition audit only; missing historical targets are retained, not relocated or deleted. Path checks are opt-in and do not enumerate descendants."}
         print(json.dumps(result,ensure_ascii=False,indent=2))
-        return 1 if ledger["issues"] or any(r["status"] in ("missing","unavailable") for r in locations) else 0
+        return 1 if ledger["issues"] or role_audit["noncanonical"] or role_audit["counts"].get("[ambiguous]", 0) or any(r["status"] in ("missing","unavailable") for r in locations) else 0
     # A rebuildable Markdown projection of selected orthogonal collection facets.
     # Historical and non-facet fields remain in the canonical ledger, not erased.
     targets = sorted({e["address"] for e in ledger["valid"] if e["kind"] == "prefix" and e["record"]["field"] in JUDGMENT_FACETS})
+    grouped = getattr(args, "group_by", "path") == "role"
+    role_filter = getattr(args, "role", None)
+    fields_by_path = {path: resolve_judgments(ledger, path) for path in targets}
+    if role_filter is not None:
+        targets = [path for path in targets
+                   if fields_by_path[path].get("role", {}).get("status") == "known"
+                   and fields_by_path[path]["role"].get("value") == role_filter]
+    if grouped:
+        def group_key(path):
+            role = fields_by_path[path].get("role", {})
+            return str(role.get("value")) if role.get("status") == "known" else "unclassified"
+        targets.sort(key=lambda path: (group_key(path), path))
     def cell(value):
         return str(value).replace("\\", "\\\\").replace("|", "\\|").replace("\n", " ").replace("\r", " ").replace("<", "&lt;").replace(">", "&gt;")
     print("# Current collection facets\n")
     print("Generated from the existing authored judgment ledger, not a second registry. Each value is an inherited, dated classification of the collection's role—not inspection of every member or proof of backup coverage. Unknown values block broader assumptions.\n")
     print(f"Ledger: `{cell(ledger['path'])}`. Source SHA-256: `{ledger['sha256']}`. {len(targets)} explicitly described locations. {len(ledger['issues'])} invalid historical definitions excluded from resolution.\n")
-    print("| Location | Topic | Role | Maintenance owner | Preservation constraint |")
-    print("|---|---|---|---|---|")
+    print(f"Role vocabulary: `{ROLE_VOCABULARY_VERSION}`. Original role wording is retained as detail and in attributed history.\n")
+    def table_header():
+        print("| Location | Topic | Role | Maintenance owner | Preservation constraint | Role detail |")
+        print("|---|---|---|---|---|---|")
+    if not grouped:
+        table_header()
+    last_group = None
     for path in targets:
-        fields=resolve_judgments(ledger,path)
+        if grouped and group_key(path) != last_group:
+            last_group = group_key(path)
+            print("\n## " + cell(last_group) + "\n")
+            print(cell(ROLE_VOCABULARY.get(last_group, "Noncanonical or unknown historical classification.")) + "\n")
+            table_header()
+        fields=fields_by_path[path]
         values=[]
         for field in JUDGMENT_FACETS:
             result=fields.get(field,{"status":"not-recorded"})
             values.append(cell(result.get("value",result["status"])) if result["status"]=="known" else cell(result["status"]))
-        print("| "+cell(path)+" | "+" | ".join(values)+" |")
+        details = fields.get("role", {}).get("details", [])
+        print("| "+cell(path)+" | "+" | ".join(values)+" | "+cell("; ".join(details))+" |")
     print("\nUse `sinnix-fs judgments explain /absolute/path` for winning rule targets, dates, methods and evidence. A `preservation` classification never authorizes deletion. Native application state, workflow dependencies and independent backup evidence still control actual maintenance.")
     return 0
 
@@ -1387,9 +1501,15 @@ def main() -> int:
     explain.add_argument("path")
     audit = actions.add_parser("audit", help="Audit definitions; explicitly request path checks")
     audit.add_argument("--check-paths", action="store_true")
-    actions.add_parser("report", help="Print a rebuildable Markdown collection-facet view")
+    report = actions.add_parser("report", help="Print a rebuildable Markdown collection-facet view")
+    report.add_argument("--group-by", choices=["path", "role"], default="path")
+    report.add_argument("--role", choices=sorted(ROLE_VOCABULARY))
+    actions.add_parser("vocabulary", help="Describe the controlled role codes and separate detail contract")
     import_judgments = actions.add_parser("import", help="Validate and append attributed JSONL definitions, retaining history")
     import_judgments.add_argument("observations", type=Path)
+    import_judgments.add_argument("--allow-legacy-roles", action="store_true",
+                                  help="Explicit historical import only; noncanonical roles remain audit findings")
+    import_judgments.add_argument("--expected-sha256", help="Refuse if the existing ledger changed since review")
     judgments.set_defaults(func=cmd_judgments)
     from sinnix_lib.note_links import command as note_links_command
     note_links = sub.add_parser("note-links", help="Plan unambiguous legacy Markdown links without writing notes")
