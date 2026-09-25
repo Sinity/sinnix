@@ -67,7 +67,7 @@ REFUSALS: dict[str, str] = {
     "worker_not_done": "a worker's task has not finished",
     "worker_result_missing": "a worker filed no valid result",
     "workspace": "the descriptor declares no [workspace]",
-    "scope_violation": "the candidate changed paths outside write_scope without declaring scope_expansion",
+    "scope_violation": "the optional scope_expansion declaration is malformed",
 }
 
 

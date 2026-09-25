@@ -579,7 +579,7 @@ check failing). The codes:
 | `worker_not_done`              | a worker's task has not finished                                                    |
 | `worker_result_missing`        | a worker filed no valid result                                                      |
 | `workspace`                    | the descriptor declares no [workspace]                                              |
-| `scope_violation`              | the candidate changed paths outside write_scope without declaring scope_expansion   |
+| `scope_violation`              | an optional scope_expansion declaration is malformed                              |
 
 ### Result
 
@@ -600,15 +600,22 @@ It then reads `git diff --name-only <base>..<candidate>`: when the worker's
 beads declare `write_scope` (a list-valued metadata field, see below), the
 launch stores their sorted union and each glob's authorizing beads. A changed path is inside the scope when it is one of the globs, under
 a directory glob, or an `fnmatch` match of one; the rest are `outside_scope`.
-An out-of-scope path is accepted when the result declares `scope_expansion`
-(paths, the bead each serves, and one sentence why); `batch status` then
-shows `pending_expansion` for the landing reviewer. An undeclared
-out-of-scope edit is `scope_violation`. A worker with no `write_scope` still
+Paths outside the estimate are recorded for the landing reviewer and do not
+refuse a result. A worker may add `scope_expansion` (paths, the assigned Bead
+each serves, and one sentence why) to explain them; `batch status` then shows
+`pending_expansion`. A worker with no `write_scope` still
 records `scope: undeclared` and `changed_paths`. `batch scope-correct` is
 the explicit coordinator recovery route for an already-started run with
 malformed scope metadata. It requires the current candidate commit and
 records the old scope, corrected scope, per-bead authority, timestamp, and
 candidate before result validation retries.
+
+For a v2 result, an owner-authored acceptance field may have one dispatch AC ID
+even if its text contains several numbered parts. A worker should report one
+row for that ID. If it reports several rows with the same ID and exact text,
+result filing combines their evidence and keeps the field unsatisfied unless
+all rows agree on the same positive status. The original result file remains
+the audit source. Repeated IDs with different text still fail validation.
 
 ## Descriptors
 
