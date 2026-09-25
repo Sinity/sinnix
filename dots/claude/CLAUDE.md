@@ -77,8 +77,13 @@ before parallel agent work. Consult `agentctl --help` for current verbs.
   publication; Beads owns task state. Systemd owns fixed services, timer wake-ups
   and transient units, not queue state. Reconcile these sources instead of
   maintaining another ledger.
-- Check `agentctl job list --active` before heavy work. Do not duplicate jobs
-  or construct background reapers, `systemd-run`, or resource envelopes by hand.
+- Before DB-backed checks or a push, confirm this worktree's ready `dev_services`
+  job with `agentctl job list --active` and its logs; keep it running through
+  the pre-push hook. Service ports are checkout-scoped. If PostgreSQL is
+  unavailable, compare this worktree's `SINEX_DEV_*_PORT` values with the job
+  endpoints before retrying. For other heavy work, check active jobs; do not
+  duplicate jobs or construct background reapers, `systemd-run`, or resource
+  envelopes by hand.
 - Act on recorded task IDs and worktree paths, not inferred process names.
   For standalone process searches, bracket a character in `pgrep -f` patterns
   so the search cannot match its own shell command.
