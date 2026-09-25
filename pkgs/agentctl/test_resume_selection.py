@@ -78,7 +78,7 @@ def test_resume_updates_the_current_selection_and_retains_each_launch(
 
     assert (worker["backend"], worker["model"], worker["effort"]) == (
         "codex",
-        "gpt-5.6-terra",
+        "gpt-6-sol",
         "high",
     )
     for queued in (terra, final):
@@ -86,7 +86,7 @@ def test_resume_updates_the_current_selection_and_retains_each_launch(
             selection_harness.config,
             selection_harness.pueue.task(queued["job"]["job_id"]),
         )["argv"]
-        assert argv[argv.index("--model") + 1] == "gpt-5.6-terra"
+        assert argv[argv.index("--model") + 1] == "gpt-6-sol"
         assert argv[argv.index("--reasoning-effort") + 1] == "high"
     assert [
         (
@@ -97,9 +97,9 @@ def test_resume_updates_the_current_selection_and_retains_each_launch(
         )
         for attempt in worker["attempts"]
     ] == [
-        (run["workers"][0]["task_reference"], "codex", "gpt-5.6-luna", "low"),
-        (terra["job"]["reference"], "codex", "gpt-5.6-terra", "high"),
-        (final["job"]["reference"], "codex", "gpt-5.6-terra", "high"),
+        (run["workers"][0]["task_reference"], "codex", "gpt-6-luna", "low"),
+        (terra["job"]["reference"], "codex", "gpt-6-sol", "high"),
+        (final["job"]["reference"], "codex", "gpt-6-sol", "high"),
     ]
     assert worker["attempts"][-1]["prompt_path"] == worker["prompt_path"]
     assert worker["attempts"][-1]["result_path"] == worker["result_path"]
@@ -131,7 +131,7 @@ def test_resume_of_a_legacy_manifest_does_not_invent_historical_selection(
             "prompt_path": latest["prompt_path"],
             "result_path": latest["result_path"],
             "backend": "codex",
-            "model": "gpt-5.6-luna",
+            "model": "gpt-6-luna",
             "effort": "low",
         }
     ]

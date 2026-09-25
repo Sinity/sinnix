@@ -58,7 +58,7 @@ resolve_agent_bin() {
 
 if [[ -z ${model} ]]; then
   case "${agent}" in
-  codex) model="gpt-5.6-terra" ;;
+  codex) model="gpt-6-sol" ;;
   grok) model="grok-4.5" ;;
   antigravity) model="gemini-3.1-pro-high" ;;
   esac

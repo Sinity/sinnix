@@ -226,7 +226,18 @@ def test_explicit_backend_model_effort_override_the_policy(project_root: Path) -
     ) == ("claude", "claude-opus-5", "medium")
 
 
-def test_codex_model_alias_resolves_before_dispatch(project_root: Path) -> None:
+@pytest.mark.parametrize(
+    ("alias", "expected"),
+    [
+        ("luna", "gpt-6-luna"),
+        ("sol", "gpt-6-sol"),
+        ("terra", "gpt-6-sol"),
+        ("astra", "gpt-6-astra"),
+    ],
+)
+def test_codex_model_alias_resolves_before_dispatch(
+    project_root: Path, alias: str, expected: str
+) -> None:
     config = PromptConfig.from_project(load_project_adapter(project_root))
 
     snapshot = compile_worker_prompt(
@@ -234,11 +245,11 @@ def test_codex_model_alias_resolves_before_dispatch(project_root: Path) -> None:
         project_id="fixture",
         reader=reader(),
         config=config,
-        model="luna",
+        model=alias,
     )
 
     assert snapshot.dimensions.backend == "codex"
-    assert snapshot.dimensions.model == "gpt-5.6-luna"
+    assert snapshot.dimensions.model == expected
 
 
 def test_unknown_model_alias_is_rejected_with_valid_choices(project_root: Path) -> None:
