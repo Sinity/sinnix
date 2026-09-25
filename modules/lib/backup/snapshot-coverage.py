@@ -27,6 +27,7 @@ that (see modules/backup.nix).
 
 import argparse
 from collections import Counter
+from datetime import datetime
 import hashlib
 import json
 import os
@@ -35,6 +36,77 @@ import stat
 import subprocess
 import sys
 from pathlib import Path, PurePosixPath
+
+
+SNAPSHOT_NAME = re.compile(r"^[^.]+\.(\d{8}T\d{6}[+-]\d{4})$")
+
+
+def snapshot_epoch(name):
+    match = SNAPSHOT_NAME.fullmatch(name)
+    if not match:
+        raise ValueError(f"invalid snapshot timestamp: {name}")
+    return int(datetime.strptime(match[1], "%Y%m%dT%H%M%S%z").timestamp())
+
+
+def read_marker_fields(marker):
+    try:
+        return dict(line.split("=", 1) for line in Path(marker).read_text().splitlines())
+    except FileNotFoundError:
+        return None
+
+
+def read_latest_epoch(marker):
+    fields = read_marker_fields(marker)
+    return snapshot_epoch(fields["snapshot"]) if fields is not None else None
+
+
+def snapshot_names(directory, glob):
+    if not Path(directory).is_dir():
+        raise ValueError(f"snapshot directory unavailable: {directory}")
+    return sorted(
+        (path.name for path in Path(directory).glob(glob) if path.is_dir() and not path.is_symlink()),
+        key=snapshot_epoch,
+    )
+
+
+def choose_snapshot(directory, glob, latest_marker, now, freshness_budget):
+    names = snapshot_names(directory, glob)
+    if not names:
+        return None
+    newest = names[-1]
+    newest_epoch = snapshot_epoch(newest)
+    latest_epoch = read_latest_epoch(latest_marker)
+    if latest_epoch is None or (
+        newest_epoch > latest_epoch and now - latest_epoch >= freshness_budget
+    ):
+        return newest
+    return names[0]
+
+
+def debt_progress(directory, glob, marker, latest_marker, now, budget):
+    names = snapshot_names(directory, glob)
+    latest_epoch = read_latest_epoch(latest_marker)
+    historical = [
+        name for name in names
+        if is_historical(name, latest_epoch, now, budget)
+    ]
+    if not historical:
+        return f"debt_count={len(names)} historical_debt_count=0"
+    fields = read_marker_fields(marker)
+    if fields is None:
+        raise ValueError(f"historical debt has no successful acknowledgement: {glob}")
+    epoch = int(fields["epoch"])
+    if epoch < 0 or epoch > now:
+        raise ValueError(f"invalid historical debt acknowledgement epoch: {epoch}")
+    age = now - epoch
+    if age > budget:
+        raise ValueError(f"historical debt has made no progress for {age}s: {glob}")
+    return f"debt_count={len(names)} historical_debt_count={len(historical)} last_debt_ack_age_seconds={age}"
+
+
+def is_historical(name, latest_epoch, now, budget):
+    epoch = snapshot_epoch(name)
+    return now - epoch > budget or (latest_epoch is not None and epoch <= latest_epoch)
 
 
 def run(*args):
@@ -461,9 +533,78 @@ def main():
     check.add_argument("archive")
     check.add_argument("uuid")
     check.add_argument("policy")
+    select = sub.add_parser("select")
+    select.add_argument("directory")
+    select.add_argument("glob")
+    select.add_argument("latest_marker")
+    select.add_argument("freshness_budget", type=int)
+    oldest = sub.add_parser("oldest")
+    oldest.add_argument("directory")
+    oldest.add_argument("glob")
+    historical = sub.add_parser("historical")
+    historical.add_argument("snapshot")
+    historical.add_argument("latest_marker")
+    historical.add_argument("age_budget", type=int)
+    freshness = sub.add_parser("freshness")
+    freshness.add_argument("latest_marker")
+    freshness.add_argument("freshness_budget", type=int)
+    newer = sub.add_parser("newer")
+    newer.add_argument("latest_marker")
+    newer.add_argument("snapshot")
+    debt = sub.add_parser("debt")
+    debt.add_argument("directory")
+    debt.add_argument("glob")
+    progress = sub.add_parser("progress")
+    progress.add_argument("directory")
+    progress.add_argument("glob")
+    progress.add_argument("last_debt_marker")
+    progress.add_argument("latest_marker")
+    progress.add_argument("progress_budget", type=int)
     args = parser.parse_args()
     if args.command == "identity":
         print(identity(args.source))
+    elif args.command == "select":
+        selected = choose_snapshot(
+            args.directory, args.glob, args.latest_marker,
+            int(datetime.now().timestamp()), args.freshness_budget,
+        )
+        if selected:
+            print(selected)
+    elif args.command == "oldest":
+        names = snapshot_names(args.directory, args.glob)
+        if names:
+            print(names[0])
+    elif args.command == "historical":
+        if not is_historical(
+            args.snapshot, read_latest_epoch(args.latest_marker),
+            int(datetime.now().timestamp()), args.age_budget,
+        ):
+            return 1
+    elif args.command == "freshness":
+        epoch = read_latest_epoch(args.latest_marker)
+        if epoch is None:
+            raise ValueError("no archived snapshot freshness marker")
+        age = int(datetime.now().timestamp()) - epoch
+        print(f"latest_archived_epoch={epoch} age_seconds={age}")
+        if age > args.freshness_budget:
+            raise ValueError(f"latest archived snapshot is {age}s old")
+    elif args.command == "newer":
+        latest = read_latest_epoch(args.latest_marker)
+        if latest is not None and snapshot_epoch(args.snapshot) <= latest:
+            return 1
+    elif args.command == "debt":
+        names = snapshot_names(args.directory, args.glob)
+        if names:
+            oldest_epoch = snapshot_epoch(names[0])
+            age = int(datetime.now().timestamp()) - oldest_epoch
+            print(f"volume={args.glob} debt_count={len(names)} oldest_epoch={oldest_epoch} oldest_age_seconds={age}")
+        else:
+            print(f"volume={args.glob} debt_count=0")
+    elif args.command == "progress":
+        print(debt_progress(
+            args.directory, args.glob, args.last_debt_marker, args.latest_marker,
+            int(datetime.now().timestamp()), args.progress_budget,
+        ))
     else:
         archive_id = archive_identity(args.archive, args.uuid)
         noncanonical, chrome_extension_caches = decode_policy(
@@ -491,7 +632,7 @@ def main():
 
 if __name__ == "__main__":
     try:
-        main()
+        sys.exit(main() or 0)
     except (ValueError, OSError, subprocess.CalledProcessError) as error:
         print(f"Snapshot retained: {error}", file=sys.stderr)
         sys.exit(1)

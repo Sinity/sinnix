@@ -120,7 +120,12 @@ let
   # Paths under /realm no exclude pattern may cover, ancestors included.
   protectedRealmArchivePaths = sinexBeadsArchivePaths ++ [ elicitStateArchivePath ];
   borgArchiveMaxAgeSec = 6 * 60 * 60;
-  borgSnapshotQueueMaxAgeSec = 6 * 60 * 60;
+  # A six-hour snapshot can take about an hour to archive after acquisition.
+  # Keep data age distinct from the last-success wall clock.
+  borgDataFreshnessMaxAgeSec = 8 * 60 * 60;
+  # Debt is allowed to be old while catch-up advances. A day without an
+  # acknowledged oldest snapshot means the historical queue has stopped.
+  borgDebtProgressMaxAgeSec = 24 * 60 * 60;
   # sinex-blobs runs on its own daily timer (05:40), independently of
   # the persist/realm snapshot drain, so it needs its own budget rather than
   # sharing borgArchiveMaxAgeSec: budget 3x cadence so one missed/delayed
@@ -365,12 +370,18 @@ let
         with_borg_lock borg init --encryption repokey-blake2 "$BORG_REPO"
       fi
 
-      # Capture one ordered queue per wake. No timestamp gate can suppress
-      # backlog, and the existing unit timeout/resource envelope bounds work.
-      queue="$(find ${lib.escapeShellArg snapshotDir} -maxdepth 1 -mindepth 1 -type d -name ${lib.escapeShellArg snapshotGlob} -printf '%f\n' | sort)"
+      latest_marker=${lib.escapeShellArg "${borgDrainStateRoot}/${label}.latest-archived"}
+      marker=${lib.escapeShellArg "${borgDrainStateRoot}/${label}.last-success"}
+      debt_progress_marker=${lib.escapeShellArg "${borgDrainStateRoot}/${label}.last-debt-success"}
+      debt_marker=${lib.escapeShellArg "${borgDrainStateRoot}/${label}.snapshot-debt"}
+      ${snapshotCoverage} debt ${lib.escapeShellArg snapshotDir} ${lib.escapeShellArg snapshotGlob} | publish_backup_marker "$debt_marker"
+      # Selection is deterministic over the current queue. A missing or stale
+      # freshness marker selects the newest snapshot; other wakes pay oldest debt.
+      oldest_before="$(${snapshotCoverage} oldest ${lib.escapeShellArg snapshotDir} ${lib.escapeShellArg snapshotGlob})"
+      snapshot="$(${snapshotCoverage} select ${lib.escapeShellArg snapshotDir} ${lib.escapeShellArg snapshotGlob} "$latest_marker" ${toString borgArchiveMaxAgeSec})"
       failed=0
       while IFS= read -r snapshot; do
-        [ -n "$snapshot" ] || continue
+        [ -n "$snapshot" ] || break
         snapshot_path=${lib.escapeShellArg snapshotDir}/"$snapshot"
         archive_name=${lib.escapeShellArg archivePrefix}-"$snapshot"
         original_archive_name="$archive_name"
@@ -421,14 +432,29 @@ let
           continue
         fi
         btrfs subvolume delete "$snapshot_path"
-        marker=${lib.escapeShellArg "${borgDrainStateRoot}/${label}.last-success"}
         {
           printf 'archive=%s\n' "$archive_name"
           printf 'snapshot=%s\n' "$snapshot"
           printf 'coverage=%s\n' "$proof"
           printf 'epoch=%s\n' "$(date +%s)"
         } | publish_backup_marker "$marker"
-      done <<< "$queue"
+        if [ "$snapshot" = "$oldest_before" ] && ${snapshotCoverage} historical "$snapshot" "$latest_marker" ${toString borgDebtProgressMaxAgeSec}; then
+          {
+            printf 'snapshot=%s\n' "$snapshot"
+            printf 'epoch=%s\n' "$(date +%s)"
+          } | publish_backup_marker "$debt_progress_marker"
+        fi
+        # Debt service must never move the data-freshness signal backward.
+        if ${snapshotCoverage} newer "$latest_marker" "$snapshot"; then
+          {
+            printf 'archive=%s\n' "$archive_name"
+            printf 'snapshot=%s\n' "$snapshot"
+            printf 'coverage=%s\n' "$proof"
+            printf 'epoch=%s\n' "$(date +%s)"
+          } | publish_backup_marker "$latest_marker"
+        fi
+        ${snapshotCoverage} debt ${lib.escapeShellArg snapshotDir} ${lib.escapeShellArg snapshotGlob} | publish_backup_marker "$debt_marker"
+      done <<< "$snapshot"
       exit "$failed"
     '';
 
@@ -726,61 +752,10 @@ let
       | tee -a ${lib.escapeShellArg sinexBeadsDrillLog}
   '';
 
-  # Freshness for the three archive markers (persist/realm/sinex-blobs) and
-  # the integrity receipt is now expressed as capture lanes on their owning
-  # surfaces (staleAfterSeconds against the marker/receipt file). What a
-  # plain staleness check cannot see -- a stalled snapshot queue, an
-  # integrity run stuck past its own deadline -- goes through the reducer's
-  # livenessProbe exit-code contract instead (0 = fine, 1 = confirmed
-  # problem, anything else = the probe itself could not tell, never read as
-  # healthy). These two probe scripts implement that; the borgbackup-status
-  # oneshot + hourly timer that used to run this logic as a bespoke unit
-  # (writing borg_status.jsonl, zero consumers outside itself) is retired.
-  mkSnapshotQueueProbeScript = ''
-    now="$(${pkgs.coreutils}/bin/date +%s)"
-
-    oldest_epoch() {
-      dir="$1"
-      glob="$2"
-      ${pkgs.findutils}/bin/find "$dir" -maxdepth 1 -mindepth 1 -type d -name "$glob" -printf '%f\n' 2>/dev/null \
-        | ${pkgs.coreutils}/bin/sort \
-        | ${pkgs.coreutils}/bin/head -n 1 \
-        | ${pkgs.gnused}/bin/sed -E 's/^[^.]+\.([0-9]{8})T([0-9]{6})([+-][0-9]{4})$/\1 \2 \3/' \
-        | while IFS=' ' read -r day time tz; do
-            [ -n "$day" ] || continue
-            ${pkgs.coreutils}/bin/date -d "''${day:0:4}-''${day:4:2}-''${day:6:2} ''${time:0:2}:''${time:2:2}:''${time:4:2} $tz" +%s
-          done
-    }
-
-    # Returns 0 (empty or within budget), 1 (over budget -- drain stalled),
-    # or 2 (snapshots present but their age could not be determined: a
-    # broken probe, never read as healthy).
-    check_one() {
-      dir="$1"
-      glob="$2"
-      count="$(${pkgs.findutils}/bin/find "$dir" -maxdepth 1 -mindepth 1 -type d -name "$glob" 2>/dev/null | ${pkgs.coreutils}/bin/wc -l)"
-      [ "$count" -eq 0 ] && return 0
-      oldest="$(oldest_epoch "$dir" "$glob")"
-      [ -z "$oldest" ] && return 2
-      age=$((now - oldest))
-      [ "$age" -gt ${toString borgSnapshotQueueMaxAgeSec} ] && return 1
-      return 0
-    }
-
-    check_one ${lib.escapeShellArg persistSnapshots} 'persist.*'
-    persist_rc=$?
-    check_one ${lib.escapeShellArg realmSnapshots} 'realm.*'
-    realm_rc=$?
-
-    if [ "$persist_rc" -eq 2 ] || [ "$realm_rc" -eq 2 ]; then
-      exit 3
-    fi
-    if [ "$persist_rc" -eq 1 ] || [ "$realm_rc" -eq 1 ]; then
-      exit 1
-    fi
-    exit 0
-  '';
-
+  # Persist and realm freshness probes read snapshot timestamps from their
+  # latest-archived markers. Debt probes read the live snapshot directories;
+  # their small status files expose count and oldest age without walking
+  # snapshot contents. The integrity probe below has its own deadline.
   mkIntegrityStuckProbeScript = ''
     receipt=${lib.escapeShellArg borgIntegrityReceipt}
     # No receipt yet is the capture lane's own staleness check to make (or,
@@ -963,6 +938,14 @@ in
           };
 
           sinnix.runtime.surfaces = {
+            borgbackup-drain-coordinator = {
+              unit = "borgbackup-drain-coordinator.service";
+              resourceClass = "backup";
+              observe = {
+                enable = true;
+                restartable = false;
+              };
+            };
             btrbk = {
               unit = "btrbk.service";
               resourceClass = "backup";
@@ -985,13 +968,28 @@ in
               captures = [
                 {
                   name = "borg-persist-archive";
-                  path = "${borgDrainStateRoot}/persist.last-success";
+                  path = "${borgDrainStateRoot}/persist.latest-archived";
                   eventDriven = true;
-                  # Preserve the existing archive freshness budget.
-                  staleAfterSeconds = borgArchiveMaxAgeSec;
+                  livenessProbe = {
+                    command = "${snapshotCoverage} freshness ${borgDrainStateRoot}/persist.latest-archived ${toString borgDataFreshnessMaxAgeSec}";
+                    timeoutSeconds = 15;
+                  };
                   data = {
                     class = "derived";
                     inputs = [ "borg-persist-archives" ];
+                  };
+                }
+                {
+                  name = "borg-persist-snapshot-debt";
+                  path = "${borgDrainStateRoot}/persist.snapshot-debt";
+                  eventDriven = true;
+                  livenessProbe = {
+                    command = "${snapshotCoverage} progress ${persistSnapshots} 'persist.*' ${borgDrainStateRoot}/persist.last-debt-success ${borgDrainStateRoot}/persist.latest-archived ${toString borgDebtProgressMaxAgeSec}";
+                    timeoutSeconds = 15;
+                  };
+                  data = {
+                    class = "derived";
+                    inputs = [ "persist-snapshots" ];
                   };
                 }
               ];
@@ -1006,48 +1004,28 @@ in
               captures = [
                 {
                   name = "borg-realm-archive";
-                  path = "${borgDrainStateRoot}/realm.last-success";
+                  path = "${borgDrainStateRoot}/realm.latest-archived";
                   eventDriven = true;
-                  staleAfterSeconds = borgArchiveMaxAgeSec;
+                  livenessProbe = {
+                    command = "${snapshotCoverage} freshness ${borgDrainStateRoot}/realm.latest-archived ${toString borgDataFreshnessMaxAgeSec}";
+                    timeoutSeconds = 15;
+                  };
                   data = {
                     class = "derived";
                     inputs = [ "borg-realm-archives" ];
                   };
                 }
                 {
-                  # The btrbk snapshot queue (persist AND realm, both checked by
-                  # the probe below) has no owning unit of its own -- it is a
-                  # property of the drain state this job and borgbackup-job-persist
-                  # share. Landed here rather than split across both surfaces,
-                  # since realm is the heavier of the two volumes and the one that
-                  # has actually stalled before (drains contend for one global
-                  # Borg lock, so a stall on either queue means the same lock
-                  # contention regardless of which volume's job reports it).
-                  #
-                  # `path` is deliberately the small drain-state directory (a
-                  # handful of marker/stamp files), NOT the snapshot directories
-                  # themselves: those are full btrfs subvolume trees (potentially
-                  # many GB / millions of files each), and the sweep's
-                  # newest_mtime does a plain os.walk over every capture path on a
-                  # 60s clock -- pointing it at a live snapshot tree would re-stat
-                  # the entire /realm or /persist dataset every minute. No
-                  # staleAfterSeconds: the drain-state directory always holds a
-                  # file once the first drain has ever succeeded, so plain
-                  # presence is enough; the real freshness question here is
-                  # answered by the probe below, not by this path's mtime.
-                  name = "borg-snapshot-queue";
-                  path = borgDrainStateRoot;
+                  name = "borg-realm-snapshot-debt";
+                  path = "${borgDrainStateRoot}/realm.snapshot-debt";
                   eventDriven = true;
                   livenessProbe = {
-                    command = mkSnapshotQueueProbeScript;
+                    command = "${snapshotCoverage} progress ${realmSnapshots} 'realm.*' ${borgDrainStateRoot}/realm.last-debt-success ${borgDrainStateRoot}/realm.latest-archived ${toString borgDebtProgressMaxAgeSec}";
                     timeoutSeconds = 15;
                   };
                   data = {
                     class = "derived";
-                    inputs = [
-                      "realm-snapshots"
-                      "persist-snapshots"
-                    ];
+                    inputs = [ "realm-snapshots" ];
                   };
                 }
               ];

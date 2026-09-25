@@ -158,6 +158,14 @@ in
         builtins.replaceStrings (map (replacement: replacement.from) replacements) (map (
           replacement: replacement.to
         ) replacements) hook;
+      coordinatorScript = rewriteBackupHook
+        backupRuntimeEval.config.systemd.services.borgbackup-drain-coordinator.script
+        [
+          {
+            from = "systemctl start";
+            to = "$TMPDIR/mock-bin/systemctl start";
+          }
+        ];
       realmBorgDrainScript =
         rewriteBackupHook backupRuntimeEval.config.systemd.services.borgbackup-job-realm.script
           [
@@ -493,6 +501,16 @@ in
             "borgbackup-root-snapshots"
           ]
         ) "Snapshot backlog drains must have a finite per-wake deadline";
+        assert lib.assertMsg (
+          backupRuntimeEval.config.systemd.services.borgbackup-drain-coordinator.serviceConfig.TimeoutStartSec == "8h15m"
+          && backupRuntimeEval.config.systemd.services.borgbackup-drain-coordinator.unitConfig.PropagatesStopTo == [
+            "borgbackup-job-persist.service"
+            "borgbackup-job-realm.service"
+          ]
+          && !(builtins.hasAttr "borgbackup-job-persist" backupRuntimeEval.config.systemd.timers)
+          && !(builtins.hasAttr "borgbackup-job-realm" backupRuntimeEval.config.systemd.timers)
+          && builtins.hasAttr "borgbackup-drain-coordinator" backupRuntimeEval.config.systemd.timers
+        ) "Only the bounded coordinator may schedule snapshot drain cycles";
         mkRuntimeCheck system {
           name = "backup-borg-hook-runtime-check";
           nativeBuildInputs = [
@@ -514,6 +532,7 @@ in
                   builtins.toJSON {
                     realm = realmBorgDrainScript;
                     persist = persistBorgDrainScript;
+                    coordinator = coordinatorScript;
                     missing = missingRealmBorgDrainScript;
                     sinex = sinexBlobBorgScript;
                     polylogue = polylogueStateBorgScript;
