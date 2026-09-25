@@ -23,8 +23,18 @@ mkFeatureModule {
       user,
       ...
     }:
+    let
+      # One declaration serves both XDG defaults and conventional home paths.
+      # Compatibility links never become a second copy of the personal corpus.
+      corpusEntrances = {
+        Documents = "${config.sinnix.paths.realmRoot}/documents";
+        Pictures = "${config.sinnix.paths.realmRoot}/photos";
+        Projects = "${config.sinnix.paths.realmRoot}/project";
+        Videos = "${config.sinnix.paths.realmRoot}/library/videos";
+      };
+    in
     {
-      home-manager.users.${user} = {
+      home-manager.users.${user} = hmArgs: {
         home.packages = with pkgs; [
           wl-clipboard
           wtype
@@ -37,7 +47,17 @@ mkFeatureModule {
           createDirectories = true;
           setSessionVariables = true;
           download = "${config.sinnix.paths.realmRoot}/inbox/download";
+          documents = corpusEntrances.Documents;
+          pictures = corpusEntrances.Pictures;
+          projects = corpusEntrances.Projects;
+          videos = corpusEntrances.Videos;
         };
+
+        # Home Manager refuses conflicting populated paths: no force flag,
+        # recursive move, or implicit migration belongs to this declaration.
+        home.file = lib.mapAttrs (_: target: {
+          source = hmArgs.config.lib.file.mkOutOfStoreSymlink target;
+        }) corpusEntrances;
 
         # Background Services
         systemd.user.services = {
