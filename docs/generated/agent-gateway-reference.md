@@ -1,11 +1,11 @@
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: a0918f339e50b14129afecb12dca3a7df6832cfe81a8481803b1b1a9c393c094 -->
+<!-- gateway-catalog-sha256: 3f2c83bdd04a1cc23928d41c8a02be34b51bffab1f950be25a6a85f12c1f77e9 -->
 # Sinnix Agent Gateway reference
 
 Generated from `sinnix_agent_gateway.actions`. Every action is one MCP tool whose `tools/list` input schema is the one below; the catalog hash changes when any principal-visible action catalog row changes, including its schema, principal set, example or affordance.
 
-Revision: `v3-typed-actions`. Catalog SHA-256: `a0918f339e50b14129afecb12dca3a7df6832cfe81a8481803b1b1a9c393c094`.
+Revision: `v3-typed-actions`. Catalog SHA-256: `3f2c83bdd04a1cc23928d41c8a02be34b51bffab1f950be25a6a85f12c1f77e9`.
 
 ## Invocation
 
@@ -23499,6 +23499,21 @@ Input schema:
 ```json
 {
   "$defs": {
+    "MaterialOrigin": {
+      "description": "Archive-visible authoredness/material-origin axis for messages.\n\n``Role`` preserves provider/API envelope truth. Material origin answers\nwhat kind of material the row represents for accounting, projections, and\nuser-facing prose filters.",
+      "enum": [
+        "human_authored",
+        "assistant_authored",
+        "operator_command",
+        "runtime_protocol",
+        "runtime_context",
+        "tool_result",
+        "generated_context_pack",
+        "generated_analysis_pack",
+        "unknown"
+      ],
+      "type": "string"
+    },
     "Origin": {
       "description": "Archive source-origin tokens.",
       "enum": [
@@ -23513,6 +23528,7 @@ Input schema:
         "claude-ai-export",
         "claude-design-session",
         "aistudio-drive",
+        "otel-genai",
         "unknown-export"
       ],
       "type": "string"
@@ -23654,6 +23670,17 @@ Input schema:
         "query"
       ],
       "type": "object"
+    },
+    "Role": {
+      "description": "Canonical session roles.",
+      "enum": [
+        "user",
+        "assistant",
+        "system",
+        "tool",
+        "unknown"
+      ],
+      "type": "string"
     },
     "SessionList": {
       "additionalProperties": false,
@@ -23814,6 +23841,7 @@ Input schema:
     },
     "SessionRead": {
       "additionalProperties": false,
+      "description": "One bounded transcript window for an exact session reference.\n\nThe three message filters are part of the request identity, not of the\nwindow: a continuation minted for ``message_role=(\"user\",)`` cannot resume\nan unfiltered read, because the two do not name the same row sequence.\nThey live here rather than only on ``Polylogue.get_messages_paginated`` so\nthat routing every surface through the one bound execution route\n(``polylogue/operations/transcript_window.py``) preserves the selection\nvocabulary instead of dropping it (polylogue-ijbwq).",
       "properties": {
         "continuation": {
           "anyOf": [
@@ -23833,6 +23861,40 @@ Input schema:
           "maximum": 1000,
           "minimum": 1,
           "type": "integer"
+        },
+        "material_origin": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/MaterialOrigin"
+          },
+          "type": "array"
+        },
+        "message_role": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Role"
+          },
+          "type": "array"
+        },
+        "message_type": {
+          "anyOf": [
+            {
+              "enum": [
+                "message",
+                "summary",
+                "tool_use",
+                "tool_result",
+                "thinking",
+                "context",
+                "protocol"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "offset": {
           "default": 0,
@@ -24361,6 +24423,7 @@ Input schema:
         "claude-ai-export",
         "claude-design-session",
         "aistudio-drive",
+        "otel-genai",
         "unknown-export"
       ],
       "type": "string"
@@ -24541,6 +24604,7 @@ Input schema:
         "claude-ai-export",
         "claude-design-session",
         "aistudio-drive",
+        "otel-genai",
         "unknown-export"
       ],
       "type": "string"
@@ -24796,6 +24860,7 @@ Input schema:
         "claude-ai-export",
         "claude-design-session",
         "aistudio-drive",
+        "otel-genai",
         "unknown-export"
       ],
       "type": "string"
@@ -25036,6 +25101,34 @@ Input schema:
 
 ```json
 {
+  "$defs": {
+    "MaterialOrigin": {
+      "description": "Archive-visible authoredness/material-origin axis for messages.\n\n``Role`` preserves provider/API envelope truth. Material origin answers\nwhat kind of material the row represents for accounting, projections, and\nuser-facing prose filters.",
+      "enum": [
+        "human_authored",
+        "assistant_authored",
+        "operator_command",
+        "runtime_protocol",
+        "runtime_context",
+        "tool_result",
+        "generated_context_pack",
+        "generated_analysis_pack",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "Role": {
+      "description": "Canonical session roles.",
+      "enum": [
+        "user",
+        "assistant",
+        "system",
+        "tool",
+        "unknown"
+      ],
+      "type": "string"
+    }
+  },
   "additionalProperties": false,
   "properties": {
     "actor": {
@@ -25081,6 +25174,40 @@ Input schema:
       "maximum": 1000,
       "minimum": 1,
       "type": "integer"
+    },
+    "material_origin": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/MaterialOrigin"
+      },
+      "type": "array"
+    },
+    "message_role": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Role"
+      },
+      "type": "array"
+    },
+    "message_type": {
+      "anyOf": [
+        {
+          "enum": [
+            "message",
+            "summary",
+            "tool_use",
+            "tool_result",
+            "thinking",
+            "context",
+            "protocol"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "offset": {
       "default": 0,
