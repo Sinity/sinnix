@@ -23,11 +23,13 @@ names, and exits with one result document.
    `scope_expansion` (paths, assigned Bead, reason) to explain the extra paths.
 3. **Verify the change.** Run the snapshot's `verification_commands` when the
    task names them, using the declared operation or job for any shared/heavy
-   work. Exact test selectors belong in `verification_commands`;
-   `affected_paths` describes code scope. A quick/static green is not test
-   evidence. Record the actual selection and receipt; a selected green proves
-   that scope only. Capture the exit status. Broader verification is an
-   explicit task or coordinator decision, not an automatic worker step.
+   work after the owned source patch is coherent. Run a shared selector once
+   for all assigned Beads that name it. Exact test selectors belong in
+   `verification_commands`; `affected_paths` describes code scope. A quick/static
+   green is not test evidence. Record the actual selection and receipt; a
+   selected green proves that scope only. Capture the exit status. Broader
+   verification is an explicit task or coordinator decision, not an automatic
+   worker step.
 4. **Do not publish, do not claim beads.** No push, no PR, no merge, no
    rebase onto a newer base, no rebuild of the host. No `bd update`,
    `claim`, `close` or `comment`: `batch start` claimed the beads and
