@@ -82,7 +82,9 @@ mkServiceModule {
       # focused tests here while its own task occupies the agent pool.
       pytest-quick.parallel = 2;
       bulk.parallel = 2;
-      normal.parallel = 2;
+      normal.parallel = 3;
+      # Long-lived development dependencies must not occupy short-job capacity.
+      service.parallel = 2;
       interactive.parallel = 4;
     }
     // landPools
