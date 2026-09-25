@@ -437,14 +437,16 @@ rec {
       };
       # Short, bounded pytest selections (one file, one worker's focused
       # check): a separate pool so they never queue behind the corpus.
+      # The ceiling is shared by all three quick jobs. Keep it above their
+      # measured combined peak so memory.high does not create sustained reclaim
+      # that triggers oomd for healthy focused runs. The 12G parent arbitrates
+      # this pool against concurrent heavy tests.
       agentctl-pytest-quick = {
         IOAccounting = true;
         CPUWeight = 200;
         IOWeight = 200;
-        # A focused run still collects the whole corpus per xdist worker; 4G
-        # OOM-killed three runs in a wave. Two slots at 6G cost what three at 4G did.
-        MemoryHigh = "5G";
-        MemoryMax = "6G";
+        MemoryHigh = "9G";
+        MemoryMax = "10G";
         MemorySwapMax = "0";
         ManagedOOMMemoryPressure = "kill";
         ManagedOOMMemoryPressureLimit = "50%";
