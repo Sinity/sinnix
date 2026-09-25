@@ -16,10 +16,8 @@ from typing import Any, TypedDict
 
 from devtools import pytest_slot as slot
 from devtools.worker_memory import (
-    CONTROLLER_PEAK_MIB,
     CORPUS_MAX_WORKERS,
-    MEMORY_HEADROOM_FRACTION,
-    WORKER_PEAK_MIB,
+    MEASURED_CHARGE,
     memory_bounded_worker_cap,
     resize_worker_argument,
     width_within,
@@ -32,12 +30,12 @@ class CgroupPaths(TypedDict):
 
 
 MIB = 1024 * 1024
-SLOT_531_CGROUP_MIB = 46
+SLOT_46_CGROUP_MIB = 46
 AMPLE_HOST_MIB = 14302
 
 
 def _one_worker_floor_mib() -> float:
-    return (CONTROLLER_PEAK_MIB + WORKER_PEAK_MIB) / (1.0 - MEMORY_HEADROOM_FRACTION)
+    return MEASURED_CHARGE.charge_mib(1)
 
 
 def _meminfo(root: Path, available_mib: int) -> Path:
@@ -104,11 +102,11 @@ class PytestAdmissionTests(unittest.TestCase):
         workers, basis = memory_bounded_worker_cap(
             requested=8,
             meminfo=_meminfo(root, AMPLE_HOST_MIB),
-            **_job_cgroup(root, available_mib=SLOT_531_CGROUP_MIB),
+            **_job_cgroup(root, available_mib=SLOT_46_CGROUP_MIB),
         )
         self.assertEqual(workers, 0)
         self.assertEqual(basis["admission"], "resource_not_ready")
-        self.assertEqual(basis["cgroup_available_mib"], SLOT_531_CGROUP_MIB)
+        self.assertEqual(basis["cgroup_available_mib"], SLOT_46_CGROUP_MIB)
         self.assertEqual(basis["host_available_mib"], AMPLE_HOST_MIB)
 
     def test_controller_plus_one_worker_headroom_admits_exactly_one(self) -> None:
@@ -131,17 +129,17 @@ class PytestAdmissionTests(unittest.TestCase):
         workers, basis = memory_bounded_worker_cap(
             requested=CORPUS_MAX_WORKERS,
             meminfo=_meminfo(root, 28000),
-            **_job_cgroup(root, available_mib=6 * 1024),
+            **_job_cgroup(root, available_mib=12 * 1024),
         )
         self.assertGreaterEqual(workers, 1)
         self.assertEqual(basis["admission"], "admitted")
-        self.assertEqual(workers, min(CORPUS_MAX_WORKERS, width_within(6 * 1024)))
+        self.assertEqual(workers, min(CORPUS_MAX_WORKERS, width_within(12 * 1024)))
 
     def test_held_launch_defers_before_popen_on_a_46_mib_cgroup(self) -> None:
         root = Path(os.environ["TMPDIR"]) / "held"
         root.mkdir()
         meminfo = _meminfo(root, AMPLE_HOST_MIB)
-        paths = _job_cgroup(root, available_mib=SLOT_531_CGROUP_MIB)
+        paths = _job_cgroup(root, available_mib=SLOT_46_CGROUP_MIB)
         original_resize = slot.resize_worker_argument
         original_popen = slot.subprocess.Popen
 
@@ -170,7 +168,7 @@ class PytestAdmissionTests(unittest.TestCase):
         root = Path(os.environ["TMPDIR"]) / "queued"
         root.mkdir()
         meminfo = _meminfo(root, AMPLE_HOST_MIB)
-        paths = _job_cgroup(root, available_mib=SLOT_531_CGROUP_MIB)
+        paths = _job_cgroup(root, available_mib=SLOT_46_CGROUP_MIB)
         launch = root / "launch.json"
         log = root / "run.log"
         launch.write_text(

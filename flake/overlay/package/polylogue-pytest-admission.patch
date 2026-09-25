@@ -1,71 +1,43 @@
 --- a/devtools/worker_memory.py
 +++ b/devtools/worker_memory.py
-@@ -52,10 +52,13 @@
- def width_within(budget_mib: float) -> int:
-     """The widest run whose peak fits ``budget_mib`` with the headroom kept back.
- 
+@@ -355 +355,2 @@
 -    Never zero: a slow run beats a run that does not start.
-+    Zero when the budget cannot hold the controller plus one worker after
-+    headroom: a typed deferral beats a one-worker launch that will be killed.
-     """
-     budget = budget_mib * (1.0 - MEMORY_HEADROOM_FRACTION) - CONTROLLER_PEAK_MIB
--    return max(1, int(budget // WORKER_PEAK_MIB))
-+    if budget < WORKER_PEAK_MIB:
-+        return 0
-+    return int(budget // WORKER_PEAK_MIB)
- 
- 
- #: The corpus width, and the ceiling any configured width is reduced to. It is
-@@ -217,7 +220,8 @@
-             "narrowed": False,
-         }
-     available = min(measured)
--    workers = max(1, min(requested, width_within(available)))
-+    workers = min(requested, width_within(available))
++    Zero when the cgroup cannot hold the controller plus one worker: a typed
++    deferral beats a one-worker launch that will be killed.
+@@ -358,4 +359,3 @@
+-    # share.  A negative margin at width 1 still returns one: slow work is
+-    # preferable to refusing to start, and the negative admission margin is
+-    # retained in the receipt for the owner to act on.
+-    workers = 1
++    # share.  A run that cannot hold its controller plus one worker is
++    # deferred by the slot before it starts.
++    workers = 0
+@@ -643 +643,2 @@
+-    workers = max(1, min(requested, width_within(cgroup)))
++    workers = min(requested, width_within(cgroup))
 +    admission = "admitted" if workers >= 1 else "resource_not_ready"
-     basis = "cgroup_budget" if cgroup is not None and (host is None or cgroup <= host) else "mem_available"
-     return workers, {
-         "basis": basis,
-@@ -230,6 +234,7 @@
-         "workers": workers,
-         "requested_workers": requested,
-         "narrowed": workers < requested,
+@@ -658,0 +660 @@
 +        "admission": admission,
-     }
- 
- 
-@@ -265,12 +270,12 @@
-         return argv, None
-     if requested is None or index is None:
-         return argv, None
--    if requested <= 1:
-+    if requested < 1:
-         return argv, None
-     workers, basis = memory_bounded_worker_cap(
-         requested=requested, meminfo=meminfo, process_cgroup=process_cgroup, cgroup_root=cgroup_root
-     )
--    if not basis.get("narrowed"):
-+    if workers < 1 or not basis.get("narrowed"):
-         return argv, basis
-     resized = list(argv)
-     resized[index] = (
 --- a/devtools/pytest_slot.py
 +++ b/devtools/pytest_slot.py
-@@ -71,6 +71,10 @@
- SLOT_HELD: Final = "held"
- #: How often the waiter asks the runtime whether its job has ended.
- POLL_INTERVAL_S: Final = 2.0
+@@ -79,0 +80,4 @@
 +#: Typed deferral when the cgroup cannot hold controller plus one worker.
 +RESOURCE_NOT_READY: Final = "resource_not_ready"
 +#: sysexits.h EX_TEMPFAIL: bounded, retryable, not a pytest failure.
 +EX_TEMPFAIL: Final = 75
- 
- #: Signals that end this process while it waits on a job it owns. The job
- #: outlives the waiter, and the pool's parallelism is one, so an unreaped job
-@@ -536,11 +540,29 @@
-     return counts
- 
- 
+@@ -799 +803 @@
+-    if sizing is None or not sizing.get("narrowed"):
++    if sizing is None:
+@@ -801,0 +806,8 @@
++    if _admission_not_ready(sizing):
++        return (
++            f"pytest slot: {sizing['available_mib']} MiB from {bound} "
++            f"(host {sizing['host_available_mib']} MiB, cgroup {sizing['cgroup_available_mib']} MiB) "
++            "cannot hold controller plus one worker; deferring."
++        )
++    if not sizing.get("narrowed"):
++        return None
+@@ -809,0 +822,10 @@
 +def _admission_not_ready(sizing: Mapping[str, Any] | None) -> bool:
 +    """True when sizing forbids launching even one worker."""
 +    if sizing is None:
@@ -76,28 +48,7 @@
 +    return isinstance(workers, int) and workers < 1
 +
 +
- def _sizing_note(sizing: Mapping[str, Any] | None) -> str | None:
-     """Why this run is narrower than it asked to be, or None when it is not."""
--    if sizing is None or not sizing.get("narrowed"):
-+    if sizing is None:
-+        return None
-+    bound = "the job cgroup" if sizing.get("basis") == "cgroup_budget" else "host memory"
-+    if _admission_not_ready(sizing):
-+        return (
-+            f"pytest slot: {sizing['available_mib']} MiB from {bound} "
-+            f"(host {sizing['host_available_mib']} MiB, cgroup {sizing['cgroup_available_mib']} MiB) "
-+            "cannot hold controller plus one worker; deferring."
-+        )
-+    if not sizing.get("narrowed"):
-         return None
--    bound = "the job cgroup" if sizing["basis"] == "cgroup_budget" else "host memory"
-     return (
-         f"pytest slot: {sizing['available_mib']} MiB from {bound} "
-         f"(host {sizing['host_available_mib']} MiB, cgroup {sizing['cgroup_available_mib']} MiB) "
-@@ -633,6 +655,15 @@
-     if note is not None:
-         sys.stderr.write(note + "\n")
-         sys.stderr.flush()
+@@ -939,0 +962,9 @@
 +    if _admission_not_ready(sizing):
 +        return EX_TEMPFAIL, _slot_receipt(
 +            status=RESOURCE_NOT_READY,
@@ -107,13 +58,7 @@
 +            memory=None,
 +            extra={"diagnosis": "pytest_resource_not_ready"},
 +        )
-     process = subprocess.Popen(command, cwd=cwd, env=dict(env), stdout=stdout, stderr=stdout, process_group=0)
-     sampler = ProcessGroupMemorySampler(process.pid)
-     sampler.start()
-@@ -797,6 +828,27 @@
-     # may take when its workers start.
-     command, sizing = resize_worker_argument(list(launch["argv"]))
-     note = _sizing_note(sizing)
+@@ -1180,0 +1212,21 @@
 +    if _admission_not_ready(sizing):
 +        receipt = _slot_receipt(
 +            status=RESOURCE_NOT_READY,
@@ -135,6 +80,3 @@
 +            with contextlib.suppress(ValueError, OSError):
 +                signal.signal(number, handler)
 +        return EX_TEMPFAIL
-     with open(log_path, "wb") as log:
-         if note is not None:
-             log.write((note + "\n").encode())
