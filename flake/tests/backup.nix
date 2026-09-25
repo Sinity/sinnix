@@ -162,12 +162,16 @@ in
         backupRuntimeEval.config.systemd.services.borgbackup-drain-coordinator.script
         [
           {
+            from = "${pkgs.python3}/bin/python3 ${../../modules/lib/backup/snapshot-coverage.py} fresh-window";
+            to = "true";
+          }
+          {
             from = "systemctl start";
             to = "$TMPDIR/mock-bin/systemctl start";
           }
         ];
-      realmBorgDrainScript =
-        rewriteBackupHook backupRuntimeEval.config.systemd.services.borgbackup-job-realm.script
+      realmBorgDrainScriptFor = name:
+        rewriteBackupHook backupRuntimeEval.config.systemd.services.${name}.script
           [
             {
               from = "/outer-realm/backup/borg-realm-v2";
@@ -223,8 +227,9 @@ in
               to = "$TMPDIR/bind/realm";
             }
           ];
-      persistBorgDrainScript =
-        rewriteBackupHook backupRuntimeEval.config.systemd.services.borgbackup-job-persist.script
+      realmBorgDrainScript = realmBorgDrainScriptFor "borgbackup-job-realm";
+      persistBorgDrainScriptFor = name:
+        rewriteBackupHook backupRuntimeEval.config.systemd.services.${name}.script
           [
             {
               from = "/outer-realm/backup/borg-persist-v1";
@@ -275,6 +280,7 @@ in
               to = "$TMPDIR/bind/persist";
             }
           ];
+      persistBorgDrainScript = persistBorgDrainScriptFor "borgbackup-job-persist";
       missingRealmBorgDrainScript =
         rewriteBackupHook backupRuntimeEval.config.systemd.services.borgbackup-job-realm.script
           [
@@ -510,7 +516,14 @@ in
           && !(builtins.hasAttr "borgbackup-job-persist" backupRuntimeEval.config.systemd.timers)
           && !(builtins.hasAttr "borgbackup-job-realm" backupRuntimeEval.config.systemd.timers)
           && builtins.hasAttr "borgbackup-drain-coordinator" backupRuntimeEval.config.systemd.timers
-        ) "Only the bounded coordinator may schedule snapshot drain cycles";
+          && backupRuntimeEval.config.systemd.timers.borgbackup-drain-coordinator.timerConfig.OnCalendar == "*-*-* 00,06,12,18:05,25:00"
+          && backupRuntimeEval.config.systemd.timers.btrbk.timerConfig.OnCalendar == "*-*-* *:00,30:00"
+          && backupRuntimeEval.config.systemd.services.borgbackup-job-realm.serviceConfig.Slice == "borgdrain.slice"
+          && backupRuntimeEval.config.systemd.services.borgbackup-job-realm.serviceConfig.MemoryHigh == "4G"
+          && backupRuntimeEval.config.systemd.services.borgbackup-job-realm.serviceConfig.MemoryMax == "6G"
+          && backupRuntimeEval.config.systemd.slices.borgdrain.sliceConfig.MemoryHigh == "6G"
+          && backupRuntimeEval.config.systemd.slices.borgdrain.sliceConfig.MemoryMax == "8G"
+        ) "Half-hour acquisition and bounded newest-only archival must have separate schedules";
         mkRuntimeCheck system {
           name = "backup-borg-hook-runtime-check";
           nativeBuildInputs = [
