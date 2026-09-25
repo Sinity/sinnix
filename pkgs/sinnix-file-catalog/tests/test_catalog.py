@@ -70,6 +70,71 @@ def test_import_is_idempotent_and_merges_evidence(tmp_path: Path) -> None:
     assert len(second["inspections"]) == 2
 
 
+def test_batch_import_records_disagreement_and_is_atomic(tmp_path: Path) -> None:
+    first, second = tmp_path / "first", tmp_path / "second"
+    first.write_text("one")
+    second.write_text("two")
+    catalog = tmp_path / "catalog.json"
+    assert import_rows(catalog, [observation(first)]).returncode == 0
+    sources = [tmp_path / "lane-a.json", tmp_path / "lane-b.json"]
+    sources[0].write_text(json.dumps([observation(first, description="Alternative interpretation")]))
+    sources[1].write_text(json.dumps([observation(second, facets={"topic": "geology"})]))
+    result = invoke(catalog, "import", *map(str, sources), "--on-conflict", "record")
+    assert result.returncode == 0, result.stderr
+    rows = assets(catalog)
+    assert len(rows) == 2
+    assert rows[0]["description"] == "A useful sample"
+    assert rows[0]["annotation_conflicts"][0]["proposed"] == "Alternative interpretation"
+    assert rows[0]["inspections"][-1]["description"] == "Alternative interpretation"
+    assert invoke(catalog, "import", *map(str, sources), "--on-conflict", "record").returncode == 0
+    assert len(assets(catalog)[0]["annotation_conflicts"]) == 1
+    before = catalog.read_bytes()
+    sources[1].write_text(json.dumps([observation(tmp_path / "missing")]))
+    assert invoke(catalog, "import", *map(str, sources), "--on-conflict", "record").returncode != 0
+    assert catalog.read_bytes() == before
+
+
+def test_explicit_coverage_and_rich_search_do_not_inherit_completion(tmp_path: Path) -> None:
+    collection = tmp_path / "collection"
+    collection.mkdir()
+    payload = collection / "member.txt"
+    payload.write_text("sample")
+    catalog = tmp_path / "catalog.json"
+    coverage = {"status": "sampled", "scope": "One of two known members", "unit": "files",
+                "discovered_count": 2, "inspected_count": 1, "exclusions": []}
+    rows = [observation(collection, kind="collection", coverage=coverage,
+                        facets={"topic": "geology"}), observation(payload)]
+    assert import_rows(catalog, rows).returncode == 0
+    result = invoke(catalog, "coverage")
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["inspection_status"] == {"sampled": 1, "unrecorded": 1}
+    result = invoke(catalog, "search", "geology", "--kind", "collection", "--limit", "1")
+    assert len(result.stdout.splitlines()) == 1
+    assert invoke(catalog, "search", "geology", "--kind", "file").stdout == ""
+    assert invoke(catalog, "search", "geology", "--offset", "1").stdout == ""
+    before = catalog.read_bytes()
+    rows[0]["coverage"] = {**coverage, "status": "complete"}
+    assert import_rows(catalog, rows).returncode != 0
+    assert catalog.read_bytes() == before
+
+
+def test_disjoint_facets_merge_and_same_facet_disagreement_is_retained(tmp_path: Path) -> None:
+    payload = tmp_path / "sample"
+    payload.write_text("sample")
+    catalog = tmp_path / "catalog.json"
+    assert import_rows(catalog, [observation(payload, facets={"topic": "geology"})]).returncode == 0
+    source = tmp_path / "worker.json"
+    source.write_text(json.dumps([observation(payload, facets={"topic": "geography", "role": "field-notes"})]))
+    result = invoke(catalog, "import", str(source), "--on-conflict", "record")
+    assert result.returncode == 0, result.stderr
+    asset = assets(catalog)[0]
+    assert asset["facets"] == {"topic": "geology", "role": "field-notes"}
+    assert asset["annotation_conflicts"][0]["field"] == "facets.topic"
+    before = catalog.read_bytes()
+    assert invoke(catalog, "import", str(source), "--on-conflict", "error").returncode != 0
+    assert catalog.read_bytes() == before
+
+
 def test_catalog_publication_is_private(tmp_path: Path) -> None:
     payload = tmp_path / "recording.txt"
     payload.write_text("sample", encoding="utf-8")

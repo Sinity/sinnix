@@ -112,3 +112,26 @@ def test_cli_failure_is_bounded_and_has_no_partial_output(tmp_path):
     (tmp_path/'judgments.jsonl').write_text('{broken')
     run=subprocess.run([sys.executable,str(SCRIPT),'judgments','--index-dir',str(tmp_path),'explain','/a'],capture_output=True,text=True,timeout=10)
     assert run.returncode==2 and not run.stdout and 'Malformed JSON' in run.stderr
+
+
+def test_import_preserves_history_is_idempotent_and_refuses_invalid_batch(tmp_path, capsys):
+    fs = load()
+    invalid_history = decision()
+    invalid_history['target'] = 'sha256:old-filename'
+    ledger(fs, tmp_path, [invalid_history, decision(method='operator')])
+    original = (tmp_path / 'judgments.jsonl').read_bytes()
+    incoming = tmp_path / 'incoming.jsonl'
+    incoming.write_text(json.dumps(decision(value='proposal', method='model', ts='2026-02-01T00:00:00Z')) + '\n')
+    args = SimpleNamespace(index_dir=tmp_path, action='import', observations=incoming)
+    assert fs.cmd_judgments(args) == 0
+    assert json.loads(capsys.readouterr().out)['added'] == 1
+    updated = (tmp_path / 'judgments.jsonl').read_bytes()
+    assert updated.startswith(original)
+    assert fs.resolve_judgments(fs.read_judgments(tmp_path / 'judgments.jsonl'), '/a')['topic']['value'] == 'alpha'
+    assert fs.cmd_judgments(args) == 0
+    assert json.loads(capsys.readouterr().out)['added'] == 0
+    assert (tmp_path / 'judgments.jsonl').read_bytes() == updated
+    incoming.write_text(json.dumps(decision('/b')) + '\n' + json.dumps(invalid_history) + '\n')
+    with pytest.raises(ValueError, match='invalid incoming'):
+        fs.cmd_judgments(args)
+    assert (tmp_path / 'judgments.jsonl').read_bytes() == updated

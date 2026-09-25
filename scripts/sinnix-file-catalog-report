@@ -41,6 +41,8 @@ SCRIPT = r"""
  const rows=[...document.querySelectorAll('.asset')];
  const q=document.getElementById('catalog-query');
  const method=document.getElementById('catalog-method');
+ const kind=document.getElementById('catalog-kind');
+ const coverage=document.getElementById('catalog-coverage');
  const count=document.getElementById('catalog-count');
  let related=null;
  function filter(){
@@ -50,22 +52,25 @@ SCRIPT = r"""
    const text=row.textContent.toLocaleLowerCase();
    const methods=JSON.parse(row.dataset.methods);
    const show=terms.every(term=>text.includes(term))&&(!method.value||methods.includes(method.value))
+      &&(!kind.value||kind.value===row.dataset.kind)
+      &&(!coverage.value||coverage.value===row.dataset.coverage)
       &&(!related||related.has(row.id));
    row.hidden=!show;if(show)visible++;
   });
   count.textContent=visible+' of '+rows.length+' records shown';
  }
  q.addEventListener('input',filter);method.addEventListener('change',filter);
+ kind.addEventListener('change',filter);coverage.addEventListener('change',filter);
  document.getElementById('catalog-reset').addEventListener('click',()=>{
-  q.value='';method.value='';related=null;filter();
+  q.value='';method.value='';kind.value='';coverage.value='';related=null;filter();
  });
  document.querySelectorAll('[data-related]').forEach(button=>button.addEventListener('click',()=>{
-  related=new Set(JSON.parse(button.dataset.related));q.value='';method.value='';filter();
+  related=new Set(JSON.parse(button.dataset.related));q.value='';method.value='';kind.value='';coverage.value='';filter();
   document.getElementById('catalog').scrollIntoView();
  }));
  function revealTarget(){
   if(location.hash.startsWith('#asset-')){
-   q.value='';method.value='';related=null;filter();
+   q.value='';method.value='';kind.value='';coverage.value='';related=null;filter();
    const target=document.getElementById(location.hash.slice(1));
    if(target)target.scrollIntoView();
   }
@@ -91,11 +96,31 @@ def render_asset(asset: dict, by_id: dict) -> str:
     methods = sorted({item["method"] for item in inspections})
     tags = "".join(f'<span class="chip">{esc(tag)}</span>' for tag in asset.get("tags", []))
     parts = [
-        f'<article class="asset" id="asset-{esc(asset_id)}" data-methods="{esc(json.dumps(methods))}">',
+        f'<article class="asset" id="asset-{esc(asset_id)}" data-kind="{esc(asset["kind"])}" '
+        f'data-coverage="{esc(asset.get("coverage", {}).get("status", "unrecorded"))}" '
+        f'data-methods="{esc(json.dumps(methods))}">',
         f'<h3>{esc(asset["title"])}</h3>',
         f'<p>{esc(asset["description"])}</p>',
         f'<p>{path_link(asset["current_path"])}</p><div class="tags">{tags}</div>',
     ]
+    if asset.get("facets"):
+        parts.append('<dl class="meta">' + ''.join(
+            f'<dt>{esc(key.replace("_", " "))}</dt><dd>{esc(value)}</dd>'
+            for key, value in asset["facets"].items()) + '</dl>')
+    if asset.get("coverage"):
+        coverage = asset["coverage"]
+        denominator = coverage.get("discovered_count")
+        count = f'{coverage["inspected_count"]} / {denominator if denominator is not None else "unknown"} {coverage["unit"]}'
+        parts.append(f'<p><strong>Inspection: {esc(coverage["status"])}</strong> · {esc(count)}. {esc(coverage["scope"])}</p>')
+    if asset.get("organization"):
+        organization = asset["organization"]
+        parts.append(f'<p><strong>Organization proposal: {esc(organization["action"])}</strong>. {esc(organization["rationale"])}</p>')
+        if organization.get("proposed_path"):
+            parts.append(f'<p>Proposed location: <code>{esc(organization["proposed_path"])}</code></p>')
+    if asset.get("annotation_conflicts"):
+        parts.append('<p><strong>Competing annotations retained.</strong> See the evidence details for proposed values.</p>')
+    for relation in asset.get("related_paths", []):
+        parts.append(f'<p><strong>{esc(relation["type"])}</strong>: {path_link(relation["path"])}. {esc(relation["basis"])}</p>')
     for inspection in inspections:
         parts.append(
             f'<p class="scope"><strong>{esc(inspection["method"])}</strong>: '
@@ -130,9 +155,9 @@ def render_asset(asset: dict, by_id: dict) -> str:
         "identity": asset.get("identity", {}),
         "inspections": inspections,
     }
-    for key in ("media", "dates", "sensitivity", "source_artifact_paths"):
-        if key in asset:
-            details[key] = asset[key]
+    for key, value in asset.items():
+        if key not in {"title", "description", "tags", "relations", *details}:
+            details[key] = value
     parts.append('<details><summary>Identity, path history and inspection evidence</summary>')
     parts.append(f'<pre class="catalog-data">{esc(json.dumps(details, ensure_ascii=False, indent=2))}</pre>')
     parts.append('</details></article>')
@@ -143,6 +168,9 @@ def render(catalog: dict, source: Path, template: str, command: str) -> str:
     if catalog.get("schema_version") != 1 or not isinstance(catalog.get("assets"), list):
         raise ValueError("expected schema_version 1 catalog with assets")
     assets = catalog["assets"]
+    collections = sum(asset.get("kind") == "collection" for asset in assets)
+    coverage_states = sorted({asset.get("coverage", {}).get("status", "unrecorded") for asset in assets})
+    coverage_options = ''.join(f'<option value="{esc(value)}">{esc(value)}</option>' for value in coverage_states)
     by_id = {asset["id"]: asset for asset in assets}
     if len(by_id) != len(assets):
         raise ValueError("duplicate asset IDs")
@@ -186,12 +214,16 @@ each record states the inspected surface and its limits. A title-page or filenam
 <dt>catalog updated</dt><dd>{esc(catalog['updated_at'])}</dd><dt>inspection dates</dt><dd>Recorded individually below</dd>
 <dt>canonical source</dt><dd>{path_link(str(source))}</dd><dt>basis</dt><dd>Authored observations and attributed source metadata; counts derived from catalog records</dd></dl>
 <div class="tiles"><div class="tile"><span class="n">{len(assets)}</span><span class="l">catalog records</span></div>
+<div class="tile"><span class="n">{collections}</span><span class="l">collections described</span></div>
 <div class="tile"><span class="n">{len(relationship_rows)}</span><span class="l">explicit relationships</span></div></div>
+<p>Inspection counts describe each record's stated scope. Collections can overlap; their counts are not a filesystem-wide completion percentage. Organization proposals are not executed moves.</p>
 </section>
 <section id="catalog"><h2>Browse files and collections</h2>
 <div class="catalog-controls" hidden><label>Search descriptions, tags and old names
 <input id="catalog-query" type="search" placeholder="certificate, GPU, postcard…"></label>
 <label>Inspection method<select id="catalog-method"><option value="">All methods</option>{options}</select></label>
+<label>Record kind<select id="catalog-kind"><option value="">Files and collections</option><option value="collection">Collections</option><option value="file">Files</option></select></label>
+<label>Inspection coverage<select id="catalog-coverage"><option value="">All coverage</option>{coverage_options}</select></label>
 <button class="fs" id="catalog-reset">Reset filters</button></div>
 <p id="catalog-count" class="catalog-count" aria-live="polite">{len(assets)} records shown</p>
 {cards}</section>

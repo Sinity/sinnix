@@ -28,6 +28,7 @@ from sinnix_lib.atomic import atomic_text_writer
 
 import argparse
 import datetime as dt
+import fcntl
 import hashlib
 import json
 import os
@@ -1249,6 +1250,32 @@ def resolve_judgments(ledger: dict, path: str) -> dict:
 
 
 def cmd_judgments(args: argparse.Namespace) -> int:
+    if args.action == "import":
+        incoming = read_judgments(args.observations)
+        if incoming["issues"]:
+            raise ValueError(f"invalid incoming definitions: {incoming['issues']}")
+        path = args.index_dir / "judgments.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.with_name(path.name + ".lock").open("a+") as lock:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+            existing = read_judgments(path) if path.exists() else {"valid": [], "records": 0}
+            seen = {entry["record_sha256"] for entry in existing["valid"]}
+            additions = []
+            for entry in incoming["valid"]:
+                if entry["record_sha256"] not in seen:
+                    additions.append(entry["record"])
+                    seen.add(entry["record_sha256"])
+            original = path.read_bytes().decode("utf-8") if path.exists() else ""
+            appended = ''.join(json.dumps(row, ensure_ascii=False) + '\n' for row in additions)
+            text = original + ('\n' if original and not original.endswith('\n') else '') + appended
+            if len(text.encode()) > JUDGMENT_LIMIT_BYTES or existing["records"] + len(additions) > 25000:
+                raise ValueError("combined judgment ledger exceeds read bounds")
+            if additions:
+                with atomic_text_writer(path, fsync=True, mode=0o600) as handle:
+                    handle.write(text)
+        print(json.dumps({"added": len(additions), "records": existing["records"] + len(additions),
+                          "path": str(path), "materializations_refreshed": False}))
+        return 0
     ledger = read_judgments(args.index_dir / "judgments.jsonl")
     provenance = {k: ledger[k] for k in ("path", "sha256", "records", "issues")}
     if args.action == "explain":
@@ -1353,7 +1380,7 @@ def main() -> int:
     views = sub.add_parser("content-views", help="Correct derived full-hash/sample comparison views without rescanning")
     views.add_argument("--index-dir", type=Path, default=Path("/realm/state/fs-index"))
     views.set_defaults(func=lambda a: content_views_refresh(a.index_dir / "content.duckdb"))
-    judgments = sub.add_parser("judgments", help="Read authored collection classifications without scanning or materializing")
+    judgments = sub.add_parser("judgments", help="Read or import authored classifications without scanning or materializing")
     judgments.add_argument("--index-dir", type=Path, default=Path("/realm/state/fs-index"))
     actions = judgments.add_subparsers(dest="action", required=True)
     explain = actions.add_parser("explain", help="Explain lexical path classification with evidence; no payload access")
@@ -1361,6 +1388,8 @@ def main() -> int:
     audit = actions.add_parser("audit", help="Audit definitions; explicitly request path checks")
     audit.add_argument("--check-paths", action="store_true")
     actions.add_parser("report", help="Print a rebuildable Markdown collection-facet view")
+    import_judgments = actions.add_parser("import", help="Validate and append attributed JSONL definitions, retaining history")
+    import_judgments.add_argument("observations", type=Path)
     judgments.set_defaults(func=cmd_judgments)
     from sinnix_lib.note_links import command as note_links_command
     note_links = sub.add_parser("note-links", help="Plan unambiguous legacy Markdown links without writing notes")

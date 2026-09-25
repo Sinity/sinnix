@@ -56,6 +56,10 @@ Reads are bounded to 8 MiB and 25,000 records. Malformed JSON fails the command 
 
 `report` emits a rebuildable Markdown collection-facet projection; the JSONL remains its only source of truth. Preserve original rows and actor attribution when adding fresh observations. A maintenance owner is not the topic of all data it stores, and a preservation constraint is not a backup certificate or deletion permission.
 
+`judgments import observations.jsonl` validates an entire incoming batch, locks the ledger, and atomically appends previously unseen definitions. Existing historical rows, including invalid historical definitions, remain intact; invalid incoming definitions refuse the whole batch. Retries of identical records are idempotent. Methods, actors, timestamps and evidence are supplied explicitly by the caller; importing an agent observation does not turn it into an operator decision. The combined ledger must stay within the reader's size and record bounds. Import does not refresh DuckDB or reports.
+
+The SQL `coverage` table summarizes inherited legacy `subject` decisions over indexed path rows. It does not measure content inspection or the current four collection facets. Use the file catalog's explicit inspection coverage for survey progress, and retain the scan's own completeness and exclusion information separately.
+
 ## Portable note references
 
 `note-links` is a read-only repair planner for legacy wiki-style Markdown references. It reads only explicitly selected current roots and reference-only roots:

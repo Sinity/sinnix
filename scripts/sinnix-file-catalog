@@ -14,6 +14,7 @@ catalog cannot silently point at a different object after replacement.
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import copy
 import datetime as _dt
 import fcntl
@@ -28,6 +29,7 @@ from sinnix_lib.atomic import atomic_publish
 
 SCHEMA_VERSION = 1
 REQUIRED_INSPECTION = ("method", "scope", "basis")
+COVERAGE_STATES = ("sampled", "metadata_only", "complete", "native_boundary", "unavailable")
 
 
 class CatalogError(ValueError):
@@ -92,6 +94,31 @@ def check_inspection(item: Any) -> None:
             raise CatalogError(f"inspection requires nonempty {key}")
 
 
+def check_coverage(value: Any) -> None:
+    if not isinstance(value, dict) or value.get("status") not in COVERAGE_STATES:
+        raise CatalogError("coverage requires an explicit inspection status")
+    if "discovered_count" not in value:
+        raise CatalogError("coverage requires discovered_count; use null for unknown")
+    for key in ("scope", "unit"):
+        if not isinstance(value.get(key), str) or not value[key].strip():
+            raise CatalogError(f"coverage requires nonempty {key}")
+    for key in ("discovered_count", "inspected_count"):
+        count = value.get(key)
+        if key == "discovered_count" and count is None:
+            continue
+        if type(count) is not int or count < 0:
+            raise CatalogError(f"coverage requires nonnegative {key}")
+    discovered, inspected = value.get("discovered_count"), value["inspected_count"]
+    if discovered is not None and inspected > discovered:
+        raise CatalogError("coverage inspected_count exceeds discovered_count")
+    if value["status"] == "complete" and (discovered is None or inspected != discovered):
+        raise CatalogError("complete coverage requires an explicit, fully inspected denominator")
+    if not isinstance(value.get("exclusions", []), list) or not all(
+        isinstance(item, str) for item in value.get("exclusions", [])
+    ):
+        raise CatalogError("coverage exclusions must be strings")
+
+
 def check_asset(asset: Any, *, require_path: bool = True, require_identity: bool = True) -> None:
     if not isinstance(asset, dict):
         raise CatalogError("asset must be an object")
@@ -130,6 +157,31 @@ def check_asset(asset: Any, *, require_path: bool = True, require_identity: bool
         raise CatalogError("uncertainties must contain strings")
     for inspection in asset.get("inspections", []):
         check_inspection(inspection)
+    if "coverage" in asset:
+        check_coverage(asset["coverage"])
+    if "facets" in asset and (not isinstance(asset["facets"], dict) or not all(
+        isinstance(k, str) and isinstance(v, str) for k, v in asset["facets"].items()
+    )):
+        raise CatalogError("facets must map names to strings")
+    if "organization" in asset:
+        organization = asset["organization"]
+        if not isinstance(organization, dict) or organization.get("action") not in (
+            "keep", "navigate", "consolidate", "split", "relocate", "investigate"
+        ) or not isinstance(organization.get("rationale"), str) or not organization["rationale"].strip():
+            raise CatalogError("organization requires action and rationale")
+        destination = organization.get("proposed_path")
+        if destination is not None and (not isinstance(destination, str) or not Path(destination).is_absolute()):
+            raise CatalogError("organization proposed_path must be absolute or null")
+        dependencies = organization.get("dependencies", [])
+        if not isinstance(dependencies, list) or not all(isinstance(item, str) for item in dependencies):
+            raise CatalogError("organization dependencies must be strings")
+    if "related_paths" in asset:
+        if not isinstance(asset["related_paths"], list) or not all(
+            isinstance(r, dict) and all(isinstance(r.get(k), str) and r[k].strip()
+                                       for k in ("path", "type", "basis"))
+            and Path(r["path"]).is_absolute() for r in asset["related_paths"]
+        ):
+            raise CatalogError("related_paths require absolute path, type and basis")
     for relation in asset.get("relations", []):
         if (not isinstance(relation, dict)
                 or not all(isinstance(relation.get(k), str) and relation[k].strip() for k in ("type", "target_id", "basis"))):
@@ -212,22 +264,55 @@ def observation_asset(row: dict[str, Any]) -> dict[str, Any]:
     return item
 
 
-def merge_asset(old: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
+def merge_asset(old: dict[str, Any], incoming: dict[str, Any], *, on_conflict: str = "replace") -> dict[str, Any]:
     # Preserve annotation keys unknown to this version and merge known fields.
     merged = copy.deepcopy(old)
     old_identity = old.get("identity")
     if old_identity is not None and not same_identity(old_identity, incoming["identity"], old["kind"]):
         raise CatalogError(f"refusing replacement at {incoming['current_path']}; identity differs from catalog")
     identity_fields = {**old_identity, **incoming["identity"]} if isinstance(old_identity, dict) else incoming["identity"]
-    merged.update(copy.deepcopy(incoming))
+    conflicts = copy.deepcopy(old.get("annotation_conflicts", []))
+    list_fields = ("previous_paths", "tags", "inspections", "uncertainties", "relations", "related_paths")
+    for key, value in incoming.items():
+        if key == "facets" and key in old:
+            facets = copy.deepcopy(old[key])
+            for facet, proposed in value.items():
+                if facet in facets and facets[facet] != proposed:
+                    if on_conflict == "error":
+                        raise CatalogError(f"conflicting facets.{facet} for {incoming['current_path']}")
+                    if on_conflict == "record":
+                        conflict = {"field": f"facets.{facet}", "retained": facets[facet],
+                                    "proposed": proposed, "inspections": incoming["inspections"]}
+                        if conflict not in conflicts:
+                            conflicts.append(copy.deepcopy(conflict))
+                        continue
+                facets[facet] = copy.deepcopy(proposed)
+            merged[key] = facets
+            continue
+        if key in old and old[key] != value and key not in (*list_fields, "identity", "annotation_conflicts"):
+            if on_conflict == "error":
+                raise CatalogError(f"conflicting {key} for {incoming['current_path']}")
+            if on_conflict == "record":
+                conflict = {"field": key, "retained": old[key], "proposed": value,
+                            "inspections": incoming["inspections"]}
+                if conflict not in conflicts:
+                    conflicts.append(copy.deepcopy(conflict))
+                continue
+        if key != "annotation_conflicts":
+            merged[key] = copy.deepcopy(value)
+    if conflicts:
+        merged["annotation_conflicts"] = conflicts
     merged["identity"] = identity_fields
-    for key in ("previous_paths", "tags", "inspections", "uncertainties", "relations"):
+    for key in list_fields:
         values = []
+        seen = set()
         for value in [*old.get(key, []), *incoming.get(key, [])]:
             marker = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-            if marker not in {json.dumps(v, ensure_ascii=False, sort_keys=True, separators=(",", ":")) for v in values}:
+            if marker not in seen:
                 values.append(copy.deepcopy(value))
-        merged[key] = values
+                seen.add(marker)
+        if values or key in old or key in incoming:
+            merged[key] = values
     return merged
 
 
@@ -248,7 +333,7 @@ def locked(path: Path):
 
 def cmd_import(args: argparse.Namespace) -> int:
     path = Path(args.catalog)
-    rows = observation_list(read_json(Path(args.observations)))
+    rows = [row for source in args.observations for row in observation_list(read_json(Path(source)))]
     with locked(path):
         if path.exists():
             # Existing unrelated paths may be temporarily absent while a
@@ -258,8 +343,8 @@ def cmd_import(args: argparse.Namespace) -> int:
             catalog = {"schema_version": SCHEMA_VERSION, "updated_at": now(), "assets": []}
         additions = [observation_asset(row) for row in rows]
         assets = catalog["assets"]
-        by_id = {x["id"]: x for x in assets}
-        by_path = {x["current_path"]: x for x in assets}
+        by_id = {x["id"]: i for i, x in enumerate(assets)}
+        by_path = {x["current_path"]: i for i, x in enumerate(assets)}
         seen_ids: set[str] = set()
         seen_paths: set[str] = set()
         for row, item in zip(rows, additions):
@@ -269,7 +354,8 @@ def cmd_import(args: argparse.Namespace) -> int:
                 raise CatalogError(f"duplicate current_path in observations: {item['current_path']}")
             seen_ids.add(item["id"])
             seen_paths.add(item["current_path"])
-            old = by_id.get(item["id"]) or by_path.get(item["current_path"])
+            index = by_id.get(item["id"], by_path.get(item["current_path"]))
+            old = assets[index] if index is not None else None
             if old is not None and old["current_path"] == item["current_path"] and "id" not in row:
                 item["id"] = old["id"]
             if old is not None and old["id"] == item["id"] and old["current_path"] != item["current_path"]:
@@ -277,24 +363,54 @@ def cmd_import(args: argparse.Namespace) -> int:
             if old is not None and old["current_path"] == item["current_path"] and "id" in row and row["id"] != old["id"]:
                 raise CatalogError(f"current_path already belongs to asset {old['id']}")
             if old is None:
+                index = len(assets)
                 assets.append(item)
             else:
-                merged = merge_asset(old, item)
-                assets[assets.index(old)] = merged
-            by_id = {x["id"]: x for x in assets}
-            by_path = {x["current_path"]: x for x in assets}
+                assets[index] = merge_asset(old, item, on_conflict=args.on_conflict)
+            by_id[item["id"]] = index
+            by_path[item["current_path"]] = index
         validate_catalog(catalog, check_paths=False)
         write_catalog(path, catalog)
     return 0
 
 
 def cmd_search(args: argparse.Namespace) -> int:
+    if args.offset < 0 or (args.limit is not None and args.limit < 0):
+        raise CatalogError("search offset and limit must be nonnegative")
     catalog = load_catalog(Path(args.catalog), paths=False)
     needle = args.text.casefold()
+    matched = 0
+    emitted = 0
     for asset in catalog["assets"]:
-        hay = " ".join([asset["title"], asset["description"], asset["current_path"], *asset.get("previous_paths", []), *asset.get("tags", [])]).casefold()
+        if args.kind and asset["kind"] != args.kind:
+            continue
+        hay = json.dumps(asset, ensure_ascii=False).casefold()
         if needle in hay:
+            matched += 1
+            if matched <= args.offset:
+                continue
+            if args.limit is not None and emitted >= args.limit:
+                break
             print(json.dumps(asset, ensure_ascii=False, sort_keys=True))
+            emitted += 1
+    return 0
+
+
+def cmd_coverage(args: argparse.Namespace) -> int:
+    catalog = load_catalog(Path(args.catalog), paths=False)
+    assets = catalog["assets"]
+    selected = [a for a in assets if not args.kind or a["kind"] == args.kind]
+    result = {
+        "schema": "sinnix.file-catalog-coverage.v1",
+        "catalog_updated_at": catalog["updated_at"],
+        "asset_count": len(selected),
+        "kinds": dict(Counter(a["kind"] for a in selected)),
+        "inspection_status": dict(Counter(a.get("coverage", {}).get("status", "unrecorded") for a in selected)),
+        "organization_actions": dict(Counter(a.get("organization", {}).get("action", "unrecorded") for a in selected)),
+        "assets_with_conflicts": sum(bool(a.get("annotation_conflicts")) for a in selected),
+        "scope": "Catalog records only. Inherited taxonomy is not inspection; overlapping collection counts are not summed. No filesystem census denominator is implied.",
+    }
+    print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
     return 0
 
 
@@ -388,8 +504,16 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--catalog", required=True, help="catalog JSON path")
     sub = parser.add_subparsers(dest="command", required=True)
-    p = sub.add_parser("import"); p.add_argument("observations"); p.set_defaults(func=cmd_import)
-    p = sub.add_parser("search"); p.add_argument("text"); p.set_defaults(func=cmd_search)
+    p = sub.add_parser("import"); p.add_argument("observations", nargs="+")
+    p.add_argument("--on-conflict", choices=("replace", "record", "error"), default="replace",
+                   help="How to handle competing annotations; record retains existing values and attributed proposals")
+    p.set_defaults(func=cmd_import)
+    p = sub.add_parser("search"); p.add_argument("text")
+    p.add_argument("--kind", choices=("file", "collection"))
+    p.add_argument("--offset", type=int, default=0); p.add_argument("--limit", type=int)
+    p.set_defaults(func=cmd_search)
+    p = sub.add_parser("coverage", help="Summarize explicit inspection coverage, without inherited completion claims")
+    p.add_argument("--kind", choices=("file", "collection")); p.set_defaults(func=cmd_coverage)
     p = sub.add_parser("show"); p.add_argument("id"); p.set_defaults(func=cmd_show)
     p = sub.add_parser("relocate"); p.add_argument("id"); p.add_argument("new_path"); p.set_defaults(func=cmd_relocate)
     p = sub.add_parser("validate"); p.set_defaults(func=lambda a: (load_catalog(Path(a.catalog)) or 0) and 0)
