@@ -773,7 +773,7 @@ def _scope_check(
 def _declared_expansion(
     worker: Mapping[str, Any], value: Mapping[str, Any], scope: Mapping[str, Any]
 ) -> list[dict[str, Any]]:
-    """Pending write-scope expansion, or a refusal when outside paths are bare."""
+    """Retain an optional explanation for paths outside the planning estimate."""
     outside = [path for path in scope.get("outside_scope") or [] if path]
     if not outside or scope.get("scope") != "declared":
         return []
@@ -781,7 +781,6 @@ def _declared_expansion(
     if not isinstance(raw, list):
         raise BatchRefusal("scope_violation", "scope_expansion must be a list")
     assigned = set(worker["beads"])
-    covered: set[str] = set()
     rows: list[dict[str, Any]] = []
     for item in raw:
         if not isinstance(item, Mapping):
@@ -807,15 +806,7 @@ def _declared_expansion(
                 "scope_violation",
                 "scope_expansion paths must be a nonempty list of strings",
             )
-        covered.update(paths)
         rows.append({"paths": list(paths), "bead": bead, "reason": reason.strip()})
-    uncovered = [path for path in outside if path not in covered]
-    if uncovered:
-        raise BatchRefusal(
-            "scope_violation",
-            "candidate changed paths outside write_scope without declaring them: "
-            + ", ".join(uncovered),
-        )
     return rows
 
 

@@ -395,8 +395,49 @@ def load_result(path: Path, *, kind: str) -> tuple[Any, list[str]]:
         value = value["structured_output"]
     value = _drop_transport_nulls(SCHEMAS[kind], value)
     if kind == "worker":
+        value = _combine_repeated_criteria(value)
         return value, validate_worker_result(value)
     return value, validate(SCHEMAS[kind], value)
+
+
+def _combine_repeated_criteria(value: Any) -> Any:
+    """Conservatively fold worker notes about one bound acceptance field.
+
+    Some Beads provide one opaque acceptance string containing numbered parts.
+    Its dispatch has one AC ID, even when a worker reports each part as a row.
+    Retain every evidence fragment and keep the whole field unsatisfied unless
+    all of those rows make the same positive claim. The original file remains
+    available for audit; distinct texts still fail binding validation.
+    """
+    if not isinstance(value, dict) or value.get("schema_version") != RESULT_SCHEMA_VERSION:
+        return value
+    for bead in value.get("beads") or ():
+        if not isinstance(bead, dict) or not isinstance(bead.get("criteria"), list):
+            continue
+        combined: list[Any] = []
+        by_identity: dict[tuple[str, str], dict[str, Any]] = {}
+        for criterion in bead["criteria"]:
+            if not isinstance(criterion, dict):
+                combined.append(criterion)
+                continue
+            ac_id, criterion_text = criterion.get("ac_id"), criterion.get("text")
+            if not isinstance(ac_id, str) or not isinstance(criterion_text, str):
+                combined.append(criterion)
+                continue
+            key = (ac_id, criterion_text)
+            previous = by_identity.get(key)
+            if previous is None:
+                by_identity[key] = criterion
+                combined.append(criterion)
+                continue
+            if previous.get("status") != criterion.get("status"):
+                previous["status"] = "unsatisfied"
+            evidence = criterion.get("evidence")
+            if isinstance(evidence, str) and evidence:
+                earlier = previous.get("evidence")
+                previous["evidence"] = f"{earlier}\n{evidence}" if earlier else evidence
+        bead["criteria"] = combined
+    return value
 
 
 def write_schema(path: Path, kind: str, *, codex_strict: bool = False) -> Path:
