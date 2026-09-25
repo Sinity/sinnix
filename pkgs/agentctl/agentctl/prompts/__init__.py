@@ -32,7 +32,7 @@ _INACTIVE_STATUSES = frozenset({"closed", "deferred"})
 # repository's commit convention stops here.
 MAX_SUBJECT_LENGTH = 72
 DEFAULT_BACKEND = "codex"
-DEFAULT_MODEL = "gpt-5.6-luna"
+DEFAULT_MODEL = "gpt-6-luna"
 DEFAULT_EFFORT = "medium"
 # The reasoning efforts every backend adapter accepts; the runner script
 # checks the same set.
@@ -42,14 +42,16 @@ DEFAULT_TEMPLATE_RELATIVE_PATH = (
 )
 DEFAULT_ATLAS_RELATIVE_PATH = "docs/atlas"
 DEFAULT_POLICY_MAP: dict[str, tuple[str, str]] = {
-    "provider-neutral-calibrated-v2": ("codex", "gpt-5.6-luna"),
-    "provider-neutral-capability-v1": ("codex", "gpt-5.6-luna"),
-    "provider-pinned-v1": ("codex", "gpt-5.6-luna"),
+    "provider-neutral-calibrated-v2": ("codex", "gpt-6-luna"),
+    "provider-neutral-capability-v1": ("codex", "gpt-6-luna"),
+    "provider-pinned-v1": ("codex", "gpt-6-luna"),
 }
 MODEL_ALIASES: dict[str, tuple[str, str]] = {
-    "sol": ("codex", "gpt-5.6-sol"),
-    "terra": ("codex", "gpt-5.6-terra"),
-    "luna": ("codex", "gpt-5.6-luna"),
+    "sol": ("codex", "gpt-6-sol"),
+    # Existing packets may still use this shorthand; new launches use Sol.
+    "terra": ("codex", "gpt-6-sol"),
+    "luna": ("codex", "gpt-6-luna"),
+    "astra": ("codex", "gpt-6-astra"),
 }
 BACKEND_MODEL_PREFIXES = {
     "codex": "gpt-",
@@ -272,7 +274,7 @@ class PromptConfig:
         aliases = dict(MODEL_ALIASES)
         for configured_backend, configured_model in self.policy_map.values():
             if configured_backend == "codex" and configured_model.startswith("gpt-"):
-                alias = configured_model.removeprefix("gpt-5.6-")
+                alias = configured_model.removeprefix("gpt-6-")
                 aliases.setdefault(alias, (configured_backend, configured_model))
         valid = ", ".join(sorted(aliases))
         if model in aliases:

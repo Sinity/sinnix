@@ -27,7 +27,7 @@ let
   codexProfileFiles = lib.genAttrs mcpRegistry.codexProfileNames mkCodexProfileFile;
   # Alternate-backend profiles: the full MCP table plus a model + provider.
   # `codex --profile <name>` layers these over ~/.codex/config.toml, so the
-  # provider's base_url/env_key and the chosen model override the gpt-5.6-luna
+  # provider's base_url/env_key and the chosen model override the gpt-6-luna
   # defaults while keeping the full MCP surface.
   mkCodexBackendProfileFile =
     name: extra:

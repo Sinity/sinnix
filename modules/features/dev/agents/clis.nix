@@ -81,7 +81,7 @@ mkFeatureModule {
           delegation ? { },
           voiceEnabled ? true,
           model ? {
-            default = "gpt-5.6-terra";
+            default = "gpt-6-sol";
             provider = "openai-codex";
           },
         }:

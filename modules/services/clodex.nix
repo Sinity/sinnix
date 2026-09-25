@@ -113,9 +113,11 @@ mkServiceModule {
   extraOptions.aliases = lib.mkOption {
     type = lib.types.attrsOf lib.types.str;
     default = {
-      sol = "clodex:openai-oauth:gpt-5.6-sol";
-      terra = "clodex:openai-oauth:gpt-5.6-terra";
-      luna = "clodex:openai-oauth:gpt-5.6-luna";
+      sol = "clodex:openai-oauth:gpt-6-sol";
+      # Existing clients may still request terra; route new calls to Sol.
+      terra = "clodex:openai-oauth:gpt-6-sol";
+      astra = "clodex:openai-oauth:gpt-6-astra";
+      luna = "clodex:openai-oauth:gpt-6-luna";
     };
     description = "Exact Clodex model aliases reconciled before the bridge starts.";
   };

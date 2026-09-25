@@ -651,7 +651,7 @@ branch_prefix = "feature/packet"
 
 [packets.defaults]
 backend = "codex"
-model = "gpt-5.6-luna"
+model = "gpt-6-luna"
 effort = "medium"
 
 [operations.verify_quick]
