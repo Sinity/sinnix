@@ -476,7 +476,7 @@ rec {
         IOAccounting = true;
         CPUWeight = 50;
         IOWeight = 50;
-        MemoryHigh = "4G";
+        MemoryHigh = "5G";
         MemoryMax = "6G";
         MemorySwapMax = "0";
       };
