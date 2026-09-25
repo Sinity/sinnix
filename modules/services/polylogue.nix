@@ -205,22 +205,10 @@ mkServiceModule {
         imports = [ inputs.polylogue.homeManagerModules.default ];
         systemd.user.startServices = lib.mkForce "sd-switch";
 
-        # ── Deliberate hold: the daemon must not run before the reindex ──
-        # Operator decision 2026-08-24: the archive stays down until the
-        # rebuild, so nothing is acquired into an archive mid-surgery while
-        # the blob store is being reconciled against its sources and pruned.
-        # `daemon.autoStart = false` already removes the [Install] section, so
-        # nothing pulls the unit in — but a manual `systemctl --user start`
-        # still worked, and did (accidentally) on 2026-08-24. This closes that.
-        #
-        # To release: delete this block and switch. Do NOT release before the
-        # blob-collector liveness fixes have landed (#4133) — that path can
-        # unlink live payload it cannot prove is referenced.
+        # Keep the unit outside default.target's startup cycle. Auto-start
+        # remains disabled; the archive handoff starts it deliberately.
         systemd.user.services.polylogued.Unit = {
-          # The upstream unit is wanted by default.target, so ordering it
-          # after that target leaves the user manager with a startup cycle.
           After = lib.mkForce [ ];
-          RefuseManualStart = true;
         };
 
         programs.polylogued = {
