@@ -69,10 +69,9 @@
     execStart = "${pkgs.btrbk}/bin/btrbk --quiet --preserve-snapshots run";
     serviceConfig.TimeoutStopSec = "15s";
     timer = {
-      # Provisional: one snapshot of each volume every six hours. Persist
-      # takes about 58 minutes (measured 2026-09-25); realm drain time still
-      # needs measurement. Revisit after measuring their combined service time.
-      onCalendar = "*-*-* 00,06,12,18:00:00";
+      # Local restore points continue every half hour. Borg selects one newest
+      # point on its own slower schedule and prunes older points after proof.
+      onCalendar = "*-*-* *:00,30:00";
       persistent = false;
     };
   })

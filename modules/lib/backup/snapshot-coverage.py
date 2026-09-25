@@ -28,6 +28,7 @@ that (see modules/backup.nix).
 import argparse
 from collections import Counter
 from datetime import datetime
+from fnmatch import fnmatchcase
 import hashlib
 import json
 import os
@@ -60,6 +61,18 @@ def read_latest_epoch(marker):
     return snapshot_epoch(fields["snapshot"]) if fields is not None else None
 
 
+def marker_order(fields):
+    if fields is None or ("generation" not in fields and "subvolume_id" not in fields):
+        return None
+    try:
+        order = int(fields["generation"]), int(fields["subvolume_id"])
+    except (KeyError, ValueError) as error:
+        raise ValueError("invalid verified cutoff creation generation") from error
+    if min(order) <= 0:
+        raise ValueError("invalid verified cutoff creation generation")
+    return order
+
+
 def snapshot_names(directory, glob):
     if not Path(directory).is_dir():
         raise ValueError(f"snapshot directory unavailable: {directory}")
@@ -69,82 +82,79 @@ def snapshot_names(directory, glob):
     )
 
 
-def choose_snapshot(directory, glob, latest_marker, mode):
+def choose_snapshot(directory, glob, latest_marker):
     names = snapshot_names(directory, glob)
     if not names:
         return None
-    newest = names[-1]
-    latest_epoch = read_latest_epoch(latest_marker)
-    if mode == "fresh":
-        return newest if latest_epoch is None or snapshot_epoch(newest) > latest_epoch else None
-    if latest_epoch is None or snapshot_epoch(newest) > latest_epoch:
-        return None
-    return names[0]
+    records = [(name, snapshot_details(Path(directory) / name)) for name in names]
+    newest, details = max(records, key=lambda row: row[1][1:])
+    fields = read_marker_fields(latest_marker)
+    cutoff = marker_order(fields)
+    if cutoff is None or details[1:] > cutoff:
+        return newest
+    if details[1] == cutoff[0] and details[0] != json.loads(fields["coverage"])["snapshot_uuid"]:
+        raise ValueError("another snapshot shares the verified creation generation")
+    return None
 
 
-def claim_daily_debt_attempt(marker, now):
-    """Record the daily attempt before Borg starts, including failed attempts."""
-    day = datetime.fromtimestamp(now).strftime("%Y-%m-%d")
-    fields = read_marker_fields(marker)
-    if fields is not None and fields.get("day") == day:
-        return False
-    path = Path(marker)
-    temporary = path.with_name(path.name + f".{os.getpid()}.tmp")
-    try:
-        temporary.write_text(f"day={day}\nepoch={now}\n")
-        with temporary.open("rb") as stream:
-            os.fsync(stream.fileno())
-        os.replace(temporary, path)
-        directory_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
-    finally:
-        temporary.unlink(missing_ok=True)
-    return True
+def within_fresh_window(now):
+    return now.hour in (0, 6, 12, 18) and 5 <= now.minute <= 25
 
 
-def debt_progress(directory, glob, marker, latest_marker, now, budget):
-    names = snapshot_names(directory, glob)
-    latest_epoch = read_latest_epoch(latest_marker)
-    historical = [
-        name for name in names
-        if is_historical(name, latest_epoch, now, budget)
-    ]
-    if not historical:
-        return f"debt_count={len(names)} historical_debt_count=0"
+def verified_prune_plan(directory, glob, marker, prefix, replacement_suffix):
     fields = read_marker_fields(marker)
     if fields is None:
-        raise ValueError(f"historical debt has no successful acknowledgement: {glob}")
-    epoch = int(fields["epoch"])
-    if epoch < 0 or epoch > now:
-        raise ValueError(f"invalid historical debt acknowledgement epoch: {epoch}")
-    age = now - epoch
-    if age > budget:
-        raise ValueError(f"historical debt has made no progress for {age}s: {glob}")
-    return f"debt_count={len(names)} historical_debt_count={len(historical)} last_debt_ack_age_seconds={age}"
-
-
-def is_historical(name, latest_epoch, now, budget):
-    epoch = snapshot_epoch(name)
-    return now - epoch > budget or (latest_epoch is not None and epoch <= latest_epoch)
+        raise ValueError("no verified archive cutoff")
+    snapshot = fields["snapshot"]
+    archive = fields["archive"]
+    proof = json.loads(fields["coverage"])
+    if not fnmatchcase(snapshot, glob):
+        raise ValueError("verified cutoff names another snapshot volume")
+    snapshot_epoch(snapshot)
+    cutoff = marker_order(fields)
+    # Old markers were written before creation generations were recorded.
+    # Archive a fresh generation-bound cutoff before deleting any backlog.
+    if cutoff is None:
+        return []
+    expected_archive = f"{prefix}-{snapshot}"
+    if archive not in (expected_archive, expected_archive + replacement_suffix):
+        raise ValueError("verified cutoff names another archive")
+    uuid = proof["snapshot_uuid"]
+    if proof["archive"] != archive or archive_identity(archive, uuid) != proof["archive_id"]:
+        raise ValueError("verified cutoff archive identity changed")
+    records = [(name, snapshot_details(Path(directory) / name)) for name in snapshot_names(directory, glob)]
+    selected = next((details for name, details in records if name == snapshot), None)
+    if selected is not None and selected != (uuid, *cutoff):
+        raise ValueError("verified cutoff snapshot identity changed")
+    return [
+        (name, *details)
+        for name, details in sorted(records, key=lambda row: row[1][1:])
+        if details[1] < cutoff[0] or (name == snapshot and details == (uuid, *cutoff))
+    ]
 
 
 def run(*args):
     return subprocess.check_output(args, text=True)
 
 
-def identity(source):
+def snapshot_details(source):
     output = run("btrfs", "subvolume", "show", str(source))
     uuid = re.search(r"^\s*UUID:\s*([0-9a-f-]{36})\s*$", output, re.M)
+    generation = re.search(r"^\s*Gen at creation:\s*(\d+)\s*$", output, re.M)
+    subvolume_id = re.search(r"^\s*Subvolume ID:\s*(\d+)\s*$", output, re.M)
     if (
         not uuid
+        or not generation
+        or not subvolume_id
         or run("btrfs", "property", "get", "-ts", str(source), "ro").strip()
         != "ro=true"
     ):
         raise ValueError(f"snapshot is not an identified read-only subvolume: {source}")
-    return uuid[1]
+    return uuid[1], int(generation[1]), int(subvolume_id[1])
+
+
+def identity(source):
+    return snapshot_details(source)[0]
 
 
 def archive_identity(archive, snapshot_uuid):
@@ -550,6 +560,8 @@ def main():
     sub = parser.add_subparsers(dest="command", required=True)
     ident = sub.add_parser("identity")
     ident.add_argument("source")
+    details = sub.add_parser("details")
+    details.add_argument("source")
     check = sub.add_parser("verify")
     check.add_argument("source")
     check.add_argument("archive")
@@ -559,52 +571,37 @@ def main():
     select.add_argument("directory")
     select.add_argument("glob")
     select.add_argument("latest_marker")
-    select.add_argument("mode", choices=("fresh", "debt"))
-    claim = sub.add_parser("claim-debt-attempt")
-    claim.add_argument("marker")
-    oldest = sub.add_parser("oldest")
-    oldest.add_argument("directory")
-    oldest.add_argument("glob")
-    historical = sub.add_parser("historical")
-    historical.add_argument("snapshot")
-    historical.add_argument("latest_marker")
-    historical.add_argument("age_budget", type=int)
+    prune = sub.add_parser("prune-plan")
+    prune.add_argument("directory")
+    prune.add_argument("glob")
+    prune.add_argument("marker")
+    prune.add_argument("prefix")
+    prune.add_argument("replacement_suffix")
+    sub.add_parser("fresh-window")
     freshness = sub.add_parser("freshness")
     freshness.add_argument("latest_marker")
     freshness.add_argument("freshness_budget", type=int)
     newer = sub.add_parser("newer")
     newer.add_argument("latest_marker")
     newer.add_argument("snapshot")
-    debt = sub.add_parser("debt")
-    debt.add_argument("directory")
-    debt.add_argument("glob")
-    progress = sub.add_parser("progress")
-    progress.add_argument("directory")
-    progress.add_argument("glob")
-    progress.add_argument("last_debt_marker")
-    progress.add_argument("latest_marker")
-    progress.add_argument("progress_budget", type=int)
     args = parser.parse_args()
     if args.command == "identity":
         print(identity(args.source))
+    elif args.command == "details":
+        print("\t".join(map(str, snapshot_details(args.source))))
     elif args.command == "select":
         selected = choose_snapshot(
-            args.directory, args.glob, args.latest_marker, args.mode,
+            args.directory, args.glob, args.latest_marker,
         )
         if selected:
             print(selected)
-    elif args.command == "claim-debt-attempt":
-        if not claim_daily_debt_attempt(args.marker, int(datetime.now().timestamp())):
-            return 1
-    elif args.command == "oldest":
-        names = snapshot_names(args.directory, args.glob)
-        if names:
-            print(names[0])
-    elif args.command == "historical":
-        if not is_historical(
-            args.snapshot, read_latest_epoch(args.latest_marker),
-            int(datetime.now().timestamp()), args.age_budget,
+    elif args.command == "prune-plan":
+        for name, uuid, generation, subvolume_id in verified_prune_plan(
+            args.directory, args.glob, args.marker, args.prefix, args.replacement_suffix,
         ):
+            print(f"{name}\t{uuid}\t{generation}\t{subvolume_id}")
+    elif args.command == "fresh-window":
+        if not within_fresh_window(datetime.now()):
             return 1
     elif args.command == "freshness":
         epoch = read_latest_epoch(args.latest_marker)
@@ -618,19 +615,6 @@ def main():
         latest = read_latest_epoch(args.latest_marker)
         if latest is not None and snapshot_epoch(args.snapshot) <= latest:
             return 1
-    elif args.command == "debt":
-        names = snapshot_names(args.directory, args.glob)
-        if names:
-            oldest_epoch = snapshot_epoch(names[0])
-            age = int(datetime.now().timestamp()) - oldest_epoch
-            print(f"volume={args.glob} debt_count={len(names)} oldest_epoch={oldest_epoch} oldest_age_seconds={age}")
-        else:
-            print(f"volume={args.glob} debt_count=0")
-    elif args.command == "progress":
-        print(debt_progress(
-            args.directory, args.glob, args.last_debt_marker, args.latest_marker,
-            int(datetime.now().timestamp()), args.progress_budget,
-        ))
     else:
         archive_id = archive_identity(args.archive, args.uuid)
         noncanonical, chrome_extension_caches = decode_policy(

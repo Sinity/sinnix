@@ -28,14 +28,14 @@
   # ─── Borg Snapshot Drainers ───
   #
   # btrbk is the producer. Borg is the durability gate. Local snapshots are
-  # never deleted by btrbk rotation; a snapshot leaves disk only after this
-  # drain has verified its canonical contents in a UUID-bound Borg archive.
+  # never deleted by btrbk rotation. The drain removes snapshots at or before
+  # a proven newest archive cutoff; older local-only versions are discarded.
   #
   # Backups are scheduled bulk I/O and must stay below interactive work;
   # unthrottled they saturate /realm enough to visibly stall the desktop.
   #
-  # Fresh drains run when a newer acquisition exists. Historical debt has a
-  # separate daily window and one attempted transaction per volume per day.
+  # Each run archives the newest local snapshot. Older local restore points
+  # leave disk only after that archive has passed coverage verification.
   (mkBackupJob "borgbackup-job-persist" {
     description = "Drain /persist btrbk snapshots into Borg";
     unit = {
@@ -49,8 +49,8 @@
       ];
     };
     serviceConfig = {
-      # One wake processes at most one snapshot, then yields the shared lock.
-      # A timeout leaves the current snapshot and remaining queue intact.
+      # One wake archives at most one snapshot, then prunes only after proof.
+      # A timeout before proof retains the queue; a later wake resumes prune.
       TimeoutStartSec = "4h";
       TimeoutStopSec = "15s";
     };
@@ -64,7 +64,6 @@
     ];
     script = mkSnapshotDrainScript {
       label = "persist";
-      mode = "fresh";
       repo = borgRepoPersist;
       repoPath = borgRepoPersistPath;
       snapshotDir = persistSnapshots;
@@ -90,8 +89,8 @@
       ];
     };
     serviceConfig = {
-      # One wake processes at most one snapshot, then yields the shared lock.
-      # A timeout leaves the current snapshot and remaining queue intact.
+      # One wake archives at most one snapshot, then prunes only after proof.
+      # A timeout before proof retains the queue; a later wake resumes prune.
       TimeoutStartSec = "4h";
       TimeoutStopSec = "15s";
     };
@@ -105,7 +104,6 @@
     ];
     script = mkSnapshotDrainScript {
       label = "realm";
-      mode = "fresh";
       repo = borgRepoRealm;
       repoPath = borgRepoRealmPath;
       snapshotDir = realmSnapshots;
@@ -115,59 +113,6 @@
       replacementSuffix = "-coverage-v3";
       # A tag in an unknown realm subtree cannot waive canonical content.
       # The verifier only permits the exact noncanonical roots below.
-      excludeByMarker = false;
-      exclude = realmExcludes;
-      noncanonical = realmNoncanonical;
-    };
-  })
-
-  (mkBackupJob "borgbackup-debt-persist" {
-    description = "Archive one historical /persist snapshot";
-    unit = {
-      after = [ "persist.mount" outerRealmMountUnit ];
-      requires = [ "persist.mount" outerRealmMountUnit ];
-    };
-    serviceConfig = {
-      TimeoutStartSec = "2h";
-      TimeoutStopSec = "15s";
-    };
-    path = with pkgs; [ borgbackup btrfs-progs coreutils findutils gnugrep util-linux ];
-    script = mkSnapshotDrainScript {
-      label = "persist";
-      mode = "debt";
-      repo = borgRepoPersist;
-      repoPath = borgRepoPersistPath;
-      snapshotDir = persistSnapshots;
-      snapshotGlob = "persist.*";
-      bindTarget = borgPersistSnapshotBind;
-      archivePrefix = "persist";
-      replacementSuffix = "-coverage-v2";
-      exclude = persistExcludes;
-      noncanonical = persistNoncanonical;
-    };
-  })
-
-  (mkBackupJob "borgbackup-debt-realm" {
-    description = "Archive one historical /realm snapshot";
-    unit = {
-      after = [ "realm.mount" outerRealmMountUnit ];
-      requires = [ "realm.mount" outerRealmMountUnit ];
-    };
-    serviceConfig = {
-      TimeoutStartSec = "2h";
-      TimeoutStopSec = "15s";
-    };
-    path = with pkgs; [ borgbackup btrfs-progs coreutils findutils gnugrep util-linux ];
-    script = mkSnapshotDrainScript {
-      label = "realm";
-      mode = "debt";
-      repo = borgRepoRealm;
-      repoPath = borgRepoRealmPath;
-      snapshotDir = realmSnapshots;
-      snapshotGlob = "realm.*";
-      bindTarget = borgRealmSnapshotBind;
-      archivePrefix = "realm";
-      replacementSuffix = "-coverage-v3";
       excludeByMarker = false;
       exclude = realmExcludes;
       noncanonical = realmNoncanonical;
@@ -189,6 +134,10 @@
     };
     path = [ pkgs.systemd ];
     script = ''
+      if ! ${snapshotCoverage} fresh-window; then
+        echo "Fresh snapshot admission window closed"
+        exit 0
+      fi
       failed=0
       if ! systemctl start borgbackup-job-persist.service; then
         echo "Persist snapshot drain failed; continuing to realm" >&2
@@ -201,39 +150,7 @@
       exit "$failed"
     '';
     timer = {
-      onCalendar = "*-*-* *:05,25,45:00";
-      persistent = false;
-    };
-  })
-
-  # The separate timer can be stopped during a final rebuild without stopping
-  # fresh archival. A run ends before the next 06:00 acquisition even if both
-  # child units hit their two-hour deadlines.
-  (mkBackupJob "borgbackup-debt-coordinator" {
-    description = "Run one daily historical snapshot transaction per volume";
-    unit.unitConfig.PropagatesStopTo = [
-      "borgbackup-debt-persist.service"
-      "borgbackup-debt-realm.service"
-    ];
-    serviceConfig = {
-      TimeoutStartSec = "4h15m";
-      TimeoutStopSec = "15s";
-    };
-    path = [ pkgs.systemd ];
-    script = ''
-      failed=0
-      if ! systemctl start borgbackup-debt-persist.service; then
-        echo "Persist historical snapshot drain failed; continuing to realm" >&2
-        failed=1
-      fi
-      if ! systemctl start borgbackup-debt-realm.service; then
-        echo "Realm historical snapshot drain failed" >&2
-        failed=1
-      fi
-      exit "$failed"
-    '';
-    timer = {
-      onCalendar = "*-*-* 01:05:00";
+      onCalendar = "*-*-* 00,06,12,18:05,25:00";
       persistent = false;
     };
   })
