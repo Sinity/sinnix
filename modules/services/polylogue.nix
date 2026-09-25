@@ -249,6 +249,13 @@ mkServiceModule {
 
             daemon = {
               debounce-s = 30;
+              # The archive inbox links point at these external export roots.
+              # Watch the real roots so a fresh archive can acquire them after
+              # the old archive and its inbox are retained as a rollback copy.
+              watch = [
+                "/realm/accounts/chatgpt"
+                "/realm/accounts/claude"
+              ];
             };
 
             daemon-api = {
