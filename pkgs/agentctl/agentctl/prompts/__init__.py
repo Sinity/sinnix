@@ -348,8 +348,7 @@ class PromptSnapshot:
     # worktree, result path and schema, harness, the focused verification
     # command. Empty outside a batch.
     batch: Mapping[str, Any] = field(default_factory=dict)
-    # The globs the worker may write, from every member's `write_scope`;
-    # empty means undeclared.
+    # Estimated paths from every member's `write_scope`; empty means undeclared.
     write_scope: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
@@ -1001,7 +1000,7 @@ def member_view(bead: Mapping[str, Any]) -> dict[str, Any]:
 def landing_members(
     run_workers: Sequence[Mapping[str, Any]], reader: BdReader
 ) -> list[dict[str, Any]]:
-    """Per worker: branch, write scope, changed paths where scope is undeclared, beads."""
+    """Per worker: branch, estimated scope, actual paths, and assigned beads."""
     rows = []
     for worker in run_workers:
         beads = []

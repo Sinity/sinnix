@@ -18,9 +18,9 @@ superseded; passing review does not close the remaining operational work.
 
 ## Members
 
-Each worker's branch, the globs it was allowed to write (`write_scope`; a
-worker with `scope: undeclared` lists the paths it changed instead), any
-`pending_expansion` the worker declared for paths outside that estimate, and
+Each worker's branch, its estimated file globs (`write_scope`; a worker with
+`scope: undeclared` lists the paths it changed instead), recorded
+`outside_scope` paths, any optional `pending_expansion` explanation, and
 its beads' intent, design and acceptance criteria. Each record names a local
 `source` file and `index` containing its exact contents; read omitted records.
 

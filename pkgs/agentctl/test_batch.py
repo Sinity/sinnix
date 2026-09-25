@@ -2599,16 +2599,14 @@ def test_abandon_refuses_while_the_landing_task_runs_and_drops_a_queued_one(
 # ---------------------------------------------------------------- scope / landing packets
 
 
-def test_a_result_outside_the_declared_write_scope_is_refused_without_expansion(
+def test_a_result_outside_the_declared_write_scope_is_recorded_without_expansion(
     harness: Harness,
 ) -> None:
-    """Anti-vacuity: removing the declaration from a result that needs it
-    makes filing fail (sinnix-c0im)."""
     harness.beads.beads["fx-solo"]["metadata"]["write_scope"] = ["src/", "docs/*.md"]
     run = harness.start("fx-solo")
-    with pytest.raises(BatchRefusal, match="scope_violation"):
-        harness.file_result(run, "fx-solo")
-    assert manifest.load(harness.config, run["run_id"]).workers[0]["result"] is None
+    filed = harness.file_result(run, "fx-solo")
+    assert filed["outside_scope"] == ["a.py", "b.py"]
+    assert filed.get("pending_expansion") is None
 
     other = harness.start("fx-other")
     filed = harness.file_result(other, "fx-other")
