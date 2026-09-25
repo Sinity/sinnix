@@ -69,7 +69,10 @@
     execStart = "${pkgs.btrbk}/bin/btrbk --quiet --preserve-snapshots run";
     serviceConfig.TimeoutStopSec = "15s";
     timer = {
-      onCalendar = "*-*-* *:00/30:00";
+      # Provisional: one snapshot of each volume every six hours. Persist
+      # takes about 58 minutes (measured 2026-09-25); realm drain time still
+      # needs measurement. Revisit after measuring their combined service time.
+      onCalendar = "*-*-* 00,06,12,18:00:00";
       persistent = false;
     };
   })
