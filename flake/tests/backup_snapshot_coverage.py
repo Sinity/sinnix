@@ -261,6 +261,7 @@ class CoverageFixture(unittest.TestCase):
             (["run"], True),
         )
 
+
     def test_borg_checkpoint_parts_are_not_source_items_or_complete_file_proof(self):
         self.archive("checkpointed")
         original = COVERAGE.command_items
@@ -562,6 +563,129 @@ class CoverageFixture(unittest.TestCase):
         with self.assertRaises((ValueError, subprocess.CalledProcessError)):
             COVERAGE.verify(older, "absent", [])
 
+    def test_independent_audit_refuses_changed_bytes_without_success_receipt(self):
+        archive = "realm-audit-fixture"
+        self.archive(archive)
+        policy = self.root / "policy.json"
+        policy.write_text(json.dumps({"noncanonical": [], "borg_excludes": []}))
+        marker = self.root / "latest"
+        proof = {
+            "archive": archive,
+            "archive_id": COVERAGE.archive_identity(archive, self.snapshot_uuid),
+            "snapshot_uuid": self.snapshot_uuid,
+            "policy_sha256": COVERAGE.policy_identity(policy),
+        }
+        marker.write_text(
+            f"snapshot={self.source.name}\narchive={archive}\n"
+            "generation=17\nsubvolume_id=117\n"
+            f"coverage={json.dumps(proof)}\n"
+        )
+        receipt = self.root / "audit-success.json"
+        old_stat = (self.source / "same-name").stat()
+        (self.source / "same-name").write_text("new version")
+        os.utime(
+            self.source / "same-name",
+            ns=(old_stat.st_atime_ns, old_stat.st_mtime_ns),
+        )
+        with patch.object(
+            COVERAGE, "snapshot_details", return_value=(self.snapshot_uuid, 17, 117)
+        ), self.assertRaisesRegex(ValueError, "content mismatch"):
+            COVERAGE.audit_latest(marker, self.root, policy)
+        self.assertFalse(receipt.exists())
+
+
+class ProducerReceiptFixture(unittest.TestCase):
+    def test_create_receipt_binds_exact_command_snapshot_archive_and_policy(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as scratch:
+            root = Path(scratch)
+            source = root / "mounted"
+            source.mkdir()
+            policy = root / "policy.json"
+            policy.write_text(json.dumps({
+                "noncanonical": [], "chrome_extension_caches": False,
+                "borg_excludes": ["run/borgbackup-snapshot-inputs/realm/cache"],
+                "producer_contract": COVERAGE.REALM_PRODUCER_CONTRACT,
+            }))
+            uuid_value = str(uuid.uuid4())
+            archive = "realm-fixture"
+            archive_id = "a" * 64
+            decoded = json.loads(policy.read_text())
+            command = COVERAGE.expected_create_command(
+                "/store/borg", source, archive, uuid_value, decoded
+            )
+            stats = {"archive": {
+                "command_line": command, "name": archive, "id": archive_id,
+                "stats": {"original_size": 123},
+            }}
+            details = (uuid_value, 17, 117)
+            with patch.object(COVERAGE, "snapshot_details", return_value=details), patch.object(
+                COVERAGE, "archive_identity", return_value=archive_id
+            ):
+                receipt = COVERAGE.record_create(source, archive, policy, stats)
+                receipt_path = root / "receipt.json"
+                receipt_path.write_text(json.dumps(receipt))
+                proof = COVERAGE.verify_created(
+                    source, archive, uuid_value, policy, receipt_path
+                )
+                self.assertEqual(proof["proof_mode"], "created")
+                self.assertEqual(proof["source_hashed_bytes"], 0)
+                self.assertEqual(proof["archive_id"], archive_id)
+                bad_stats = json.loads(json.dumps(stats))
+                bad_stats["archive"]["command_line"].extend([
+                    "--exclude-if-present", ".nobackup",
+                ])
+                with self.assertRaisesRegex(ValueError, "command differs"):
+                    COVERAGE.record_create(source, archive, policy, bad_stats)
+                policy.write_text(json.dumps(decoded | {
+                    "borg_excludes": ["run/borgbackup-snapshot-inputs/realm/project/build"],
+                }))
+                with self.assertRaisesRegex(ValueError, "receipt does not bind"):
+                    COVERAGE.verify_created(
+                        source, archive, uuid_value, policy, receipt_path
+                    )
+                policy.write_text(json.dumps(decoded))
+                with self.assertRaises(FileNotFoundError):
+                    COVERAGE.verify_created(
+                        source, archive, uuid_value, policy, root / "missing.json"
+                    )
+
+    def test_full_audit_receipt_overdue_until_independent_comparison_succeeds(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as scratch:
+            root = Path(scratch)
+            policy = root / "policy.json"
+            policy.write_text(json.dumps({"noncanonical": [], "borg_excludes": []}))
+            receipt = root / "audit.json"
+            with self.assertRaisesRegex(ValueError, "has not completed"):
+                COVERAGE.audit_status(receipt, policy, 691200)
+            marker = root / "latest"
+            uuid_value = str(uuid.uuid4())
+            archive_id = "a" * 64
+            proof = {
+                "policy_sha256": COVERAGE.policy_identity(policy),
+                "snapshot_uuid": uuid_value, "archive": "realm-fixture",
+                "archive_id": archive_id,
+            }
+            marker.write_text(
+                "snapshot=realm.20260402T010000+0000\narchive=realm-fixture\n"
+                "generation=17\nsubvolume_id=117\n"
+                f"coverage={json.dumps(proof)}\n"
+            )
+            with patch.object(COVERAGE, "snapshot_details", return_value=(uuid_value, 17, 117)), patch.object(
+                COVERAGE, "archive_identity", return_value=archive_id
+            ), patch.object(COVERAGE, "verify", return_value={
+                "content_sha256": "b" * 64, "source_hashed_bytes": 123,
+                "archive_content_verified_bytes": 123,
+            }):
+                audit = COVERAGE.audit_latest(marker, root, policy)
+            receipt.write_text(json.dumps(audit))
+            self.assertEqual(audit["audit_mode"], "independent_full")
+            self.assertEqual(audit["source_hashed_bytes"], 123)
+            self.assertLessEqual(COVERAGE.audit_status(receipt, policy, 691200), 1)
+            audit["audited_epoch"] -= 691201
+            receipt.write_text(json.dumps(audit))
+            with self.assertRaisesRegex(ValueError, "overdue"):
+                COVERAGE.audit_status(receipt, policy, 691200)
+
 
 class DrainFixture(unittest.TestCase):
     @unittest.skipUnless(
@@ -599,6 +723,7 @@ with (root/'logs/commands').open('a') as log: log.write(json.dumps([command,*arg
 if command=='borg':
     if args[0]=='create' and (root/'fail-create').exists(): sys.exit(2)
     if args[0]=='debug' and (root/'fail-read').exists(): sys.exit(2)
+    if args[:2]==['list','--json'] and (root/'fail-read').exists(): sys.exit(2)
     if args[:2]==['list','--json'] and (root/'fail-proof-list').exists(): sys.exit(2)
     os.execv(REAL_BORG, [REAL_BORG,*args])
 if command=='systemctl':
@@ -737,8 +862,9 @@ elif command=='btrfs':
             latest_marker = root / "state/borg-drain/realm.latest-archived"
             self.assertIn("snapshot=" + new.name, latest_marker.read_text())
             first_proof = json.loads(COVERAGE.read_marker_fields(latest_marker)["coverage"])
-            self.assertEqual(first_proof["proof_mode"], "full")
-            self.assertGreater(first_proof["source_hashed_bytes"], 0)
+            self.assertEqual(first_proof["proof_mode"], "created")
+            self.assertEqual(first_proof["source_hashed_bytes"], 0)
+            self.assertTrue(first_proof["create_receipt_sha256"])
             self.assertNotIn("realm-" + old.name, subprocess.check_output(
                 ["borg", "list", "--short", str(root / "repos/borg-realm-v2")], env=env, text=True
             ).splitlines())
@@ -794,8 +920,7 @@ elif command=='btrfs':
             created_proof = json.loads(COVERAGE.read_marker_fields(latest_marker)["coverage"])
             self.assertEqual(created_proof["proof_mode"], "created")
             self.assertEqual(created_proof["source_hashed_bytes"], 0)
-            self.assertEqual(created_proof["full_proof_epoch"], first_proof["full_proof_epoch"])
-            self.assertEqual(created_proof["previous_archive_id"], first_proof["archive_id"])
+            self.assertTrue(created_proof["create_receipt_sha256"])
             self.assertEqual(extract(rollback.name, "unique"), "new bytes after clock rollback")
 
             interrupted = snapshot(
@@ -808,10 +933,28 @@ elif command=='btrfs':
             self.assertTrue(interrupted.exists())
             (root / "fail-proof-list").unlink()
             run()
-            self.assertEqual(
-                json.loads(COVERAGE.read_marker_fields(latest_marker)["coverage"])["proof_mode"],
-                "full",
+            resumed_fields = COVERAGE.read_marker_fields(latest_marker)
+            self.assertEqual(json.loads(resumed_fields["coverage"])["proof_mode"], "created")
+            self.assertEqual(resumed_fields["archive"], "realm-" + interrupted.name + "-producer-v1")
+            # A receipt can survive a crash before the acknowledgement. Reuse
+            # that exact archive on restart instead of creating another one.
+            acknowledged = COVERAGE.read_marker_fields(latest_marker)
+            latest_marker.write_bytes(before)
+            creates_before = sum(
+                1 for line in (root / "logs/commands").read_text().splitlines()
+                if json.loads(line)[:2] == ["borg", "create"]
             )
+            run()
+            repeated = COVERAGE.read_marker_fields(latest_marker)
+            self.assertEqual(repeated["archive"], acknowledged["archive"])
+            self.assertEqual(
+                json.loads(repeated["coverage"])["create_receipt_sha256"],
+                json.loads(acknowledged["coverage"])["create_receipt_sha256"],
+            )
+            self.assertEqual(sum(
+                1 for line in (root / "logs/commands").read_text().splitlines()
+                if json.loads(line)[:2] == ["borg", "create"]
+            ), creates_before)
 
             # Direct-source jobs must keep the evaluated CAS path and exclude
             # mutable Polylogue databases. These use real Borg too.
@@ -1039,6 +1182,8 @@ elif command=='btrfs':
             persist_repo = str(root / "repos/borg-persist-v1")
             old_name = "persist-" + persist.name
             snapshot_uuid = json.loads((root / "identities.json").read_text())[str(persist)]
+            tagged = persist / chrome / "Default/WebStorage/7/CacheStorage/.nobackup"
+            tagged.write_text("")
             subprocess.run(
                 [
                     "borg", "create", "--comment", "sinnix-snapshot-v1:" + snapshot_uuid,
@@ -1048,14 +1193,24 @@ elif command=='btrfs':
                 env=env,
                 check=True,
             )
+            subprocess.run(
+                [
+                    "borg", "create", "--comment", "sinnix-snapshot-v1:" + snapshot_uuid,
+                    "--exclude-if-present", ".nobackup",
+                    persist_repo + "::" + old_name + "-coverage-v2", str(persist) + "/./",
+                ],
+                env=env,
+                check=True,
+            )
             (root / "fail-create").touch()
             run("persist", ok=False)
             self.assertTrue(persist.exists())
+            self.assertFalse((root / "state/borg-drain/persist.latest-archived").exists())
             self.assertEqual(
                 subprocess.check_output(
                     ["borg", "list", "--short", persist_repo], env=env, text=True
                 ).splitlines(),
-                [old_name],
+                [old_name, old_name + "-coverage-v2"],
             )
             (root / "fail-create").unlink()
             run("persist")
@@ -1065,6 +1220,21 @@ elif command=='btrfs':
             ).splitlines()
             self.assertIn(old_name, archived)
             self.assertIn(old_name + "-coverage-v2", archived)
+            self.assertIn(old_name + "-coverage-v3", archived)
+            self.assertEqual(
+                COVERAGE.read_marker_fields(root / "state/borg-drain/persist.latest-archived")["archive"],
+                old_name + "-coverage-v3",
+            )
+            # If verification had completed but the marker write was lost,
+            # the next run must recheck v3 instead of creating v4.
+            (root / "state/borg-drain/persist.latest-archived").unlink()
+            run("persist")
+            self.assertEqual(
+                subprocess.check_output(
+                    ["borg", "list", "--short", persist_repo], env=env, text=True
+                ).splitlines(),
+                archived,
+            )
             commands = [
                 json.loads(line)
                 for line in (root / "logs/commands").read_text().splitlines()
@@ -1077,7 +1247,7 @@ elif command=='btrfs':
             canonical = f"{chrome}/Default/WebStorage/7/CacheStorage/site-entry"
             self.assertEqual(
                 subprocess.check_output(
-                    ["borg", "extract", "--stdout", persist_repo + "::" + old_name + "-coverage-v2", canonical],
+                ["borg", "extract", "--stdout", persist_repo + "::" + old_name + "-coverage-v3", canonical],
                     env=env,
                     text=True,
                 ),

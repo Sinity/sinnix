@@ -42,6 +42,7 @@ from pathlib import Path, PurePosixPath
 
 SNAPSHOT_NAME = re.compile(r"^[^.]+\.(\d{8}T\d{6}[+-]\d{4})$")
 FULL_PROOF_INTERVAL = 7 * 24 * 3600
+REALM_PRODUCER_CONTRACT = "realm-borg-create-v2"
 
 
 def snapshot_epoch(name):
@@ -119,7 +120,11 @@ def verified_prune_plan(directory, glob, marker, prefix, replacement_suffix):
     if cutoff is None:
         return []
     expected_archive = f"{prefix}-{snapshot}"
-    if archive not in (expected_archive, expected_archive + replacement_suffix):
+    replacement = re.escape(expected_archive) + r"-coverage-v(?:[2-9]|[1-9][0-9]+)"
+    producer = re.escape(expected_archive) + r"-producer-v[1-9][0-9]*"
+    if archive not in (expected_archive, expected_archive + replacement_suffix) and not (
+        re.fullmatch(replacement, archive) or re.fullmatch(producer, archive)
+    ):
         raise ValueError("verified cutoff names another archive")
     uuid = proof["snapshot_uuid"]
     if proof["archive"] != archive or archive_identity(archive, uuid) != proof["archive_id"]:
@@ -225,6 +230,151 @@ def previous_proof(marker, policy_hash, now, snapshot_directory):
     except (KeyError, TypeError, ValueError, OSError, subprocess.CalledProcessError):
         return None
     return proof
+
+
+def expected_create_command(binary, source, archive, uuid, policy):
+    """The exact Borg invocation allowed to justify a realm producer proof."""
+    return [
+        binary, "create", "--json", "--quick-stats",
+        "--files-cache", "ctime,size,inode", "--files-changed", "ctime",
+        "--compression", "auto,zstd,1", "--lock-wait", "60",
+        "--comment", "sinnix-snapshot-v1:" + uuid,
+        *(part for pattern in policy["borg_excludes"] for part in ("--exclude", pattern)),
+        "::" + archive, str(source).rstrip("/") + "/./",
+    ]
+
+
+def record_create(source, archive, policy_path, create_stats):
+    policy = json.loads(Path(policy_path).read_text())
+    policy_hash = policy_identity(policy_path, require_borg_excludes=True)
+    if policy.get("producer_contract") != REALM_PRODUCER_CONTRACT:
+        raise ValueError("unrecognized producer contract")
+    uuid, generation, subvolume_id = snapshot_details(source)
+    created = create_stats["archive"]
+    command = created["command_line"]
+    if (
+        not isinstance(command, list)
+        or not command
+        or command != expected_create_command(command[0], source, archive, uuid, policy)
+        or created["name"] != archive
+    ):
+        raise ValueError("Borg create command differs from declared producer contract")
+    archive_id = archive_identity(archive, uuid)
+    if created["id"] != archive_id:
+        raise ValueError("created archive identity changed")
+    return {
+        "producer_contract": REALM_PRODUCER_CONTRACT,
+        "snapshot_uuid": uuid,
+        "generation": generation,
+        "subvolume_id": subvolume_id,
+        "archive": archive,
+        "archive_id": archive_id,
+        "policy_sha256": policy_hash,
+        "command_line": command,
+        "command_sha256": hashlib.sha256(json.dumps(command).encode()).hexdigest(),
+        "create_original_bytes": created["stats"]["original_size"],
+        "created_epoch": int(time.time()),
+    }
+
+
+def verify_created(source, archive, uuid, policy_path, receipt_path):
+    started = time.monotonic()
+    policy = json.loads(Path(policy_path).read_text())
+    policy_hash = policy_identity(policy_path, require_borg_excludes=True)
+    receipt = json.loads(Path(receipt_path).read_text())
+    details = snapshot_details(source)
+    if (
+        policy.get("producer_contract") != REALM_PRODUCER_CONTRACT
+        or receipt["producer_contract"] != REALM_PRODUCER_CONTRACT
+        or details != (
+            receipt["snapshot_uuid"], receipt["generation"], receipt["subvolume_id"]
+        )
+        or uuid != details[0]
+        or receipt["archive"] != archive
+        or receipt["policy_sha256"] != policy_hash
+        or not isinstance(receipt["command_line"], list)
+        or not receipt["command_line"]
+        or receipt["command_line"] != expected_create_command(
+            receipt["command_line"][0], source, archive, uuid, policy
+        )
+        or receipt["command_sha256"] != hashlib.sha256(
+            json.dumps(receipt["command_line"]).encode()
+        ).hexdigest()
+    ):
+        raise ValueError("creation receipt does not bind this snapshot and policy")
+    archive_id = archive_identity(archive, uuid)
+    if archive_id != receipt["archive_id"]:
+        raise ValueError("creation receipt archive identity changed")
+    return {
+        "archive": archive,
+        "archive_id": archive_id,
+        "snapshot_uuid": uuid,
+        "generation": details[1],
+        "subvolume_id": details[2],
+        "policy_sha256": policy_hash,
+        "proof_mode": "created",
+        "producer": REALM_PRODUCER_CONTRACT,
+        "create_receipt_sha256": hashlib.sha256(Path(receipt_path).read_bytes()).hexdigest(),
+        "create_original_bytes": receipt["create_original_bytes"],
+        "create_seconds": receipt.get("create_seconds", 0),
+        "source_hashed_bytes": 0,
+        "archive_content_verified_bytes": 0,
+        "verification_seconds": round(time.monotonic() - started, 3),
+    }
+
+
+def audit_latest(marker, snapshot_directory, policy_path):
+    started = time.monotonic()
+    marker_bytes = Path(marker).read_bytes()
+    fields = read_marker_fields(marker)
+    proof = json.loads(fields["coverage"])
+    if proof["policy_sha256"] != policy_identity(policy_path, require_borg_excludes=True):
+        raise ValueError("acknowledged archive uses another coverage policy")
+    source = Path(snapshot_directory) / fields["snapshot"]
+    details = snapshot_details(source)
+    if details != (
+        proof["snapshot_uuid"], int(fields["generation"]), int(fields["subvolume_id"])
+    ):
+        raise ValueError("acknowledged snapshot identity changed")
+    archive = fields["archive"]
+    if archive != proof["archive"] or archive_identity(archive, details[0]) != proof["archive_id"]:
+        raise ValueError("acknowledged archive identity changed")
+    noncanonical, chrome_extension_caches = decode_policy(
+        json.loads(Path(policy_path).read_text())
+    )
+    result = verify(source, archive, noncanonical, chrome_extension_caches)
+    if (
+        Path(marker).read_bytes() != marker_bytes
+        or snapshot_details(source) != details
+        or archive_identity(archive, details[0]) != proof["archive_id"]
+    ):
+        raise ValueError("acknowledged archive changed during full audit")
+    return result | {
+        "audit_mode": "independent_full",
+        "archive": archive,
+        "archive_id": proof["archive_id"],
+        "snapshot_uuid": details[0],
+        "policy_sha256": proof["policy_sha256"],
+        "audited_epoch": int(time.time()),
+        "verification_seconds": round(time.monotonic() - started, 3),
+    }
+
+
+def audit_status(receipt, policy_path, max_age):
+    try:
+        audit = json.loads(Path(receipt).read_text())
+        age = int(time.time()) - audit["audited_epoch"]
+        if (
+            audit["audit_mode"] != "independent_full"
+            or audit["policy_sha256"] != policy_identity(
+                policy_path, require_borg_excludes=True
+            )
+            or age < 0 or age > max_age
+        ):
+            raise ValueError("independent full audit overdue")
+    except FileNotFoundError as error:
+        raise ValueError("independent full audit has not completed") from error
+    return age
 
 
 class JsonStream:
@@ -634,6 +784,24 @@ def main():
     plan.add_argument("latest_marker")
     plan.add_argument("snapshot_directory")
     plan.add_argument("policy")
+    created = sub.add_parser("record-create")
+    created.add_argument("source")
+    created.add_argument("archive")
+    created.add_argument("policy")
+    resumed = sub.add_parser("verify-created")
+    resumed.add_argument("source")
+    resumed.add_argument("archive")
+    resumed.add_argument("uuid")
+    resumed.add_argument("policy")
+    resumed.add_argument("receipt")
+    audit = sub.add_parser("audit")
+    audit.add_argument("latest_marker")
+    audit.add_argument("snapshot_directory")
+    audit.add_argument("policy")
+    status = sub.add_parser("audit-status")
+    status.add_argument("receipt")
+    status.add_argument("policy")
+    status.add_argument("max_age", type=int)
     select = sub.add_parser("select")
     select.add_argument("directory")
     select.add_argument("glob")
@@ -691,6 +859,20 @@ def main():
                 args.snapshot_directory,
             ) is not None else "full"
         )
+    elif args.command == "record-create":
+        print(json.dumps(record_create(
+            args.source, args.archive, args.policy, json.load(sys.stdin)
+        )))
+    elif args.command == "verify-created":
+        print(json.dumps(verify_created(
+            args.source, args.archive, args.uuid, args.policy, args.receipt
+        )))
+    elif args.command == "audit":
+        print(json.dumps(audit_latest(
+            args.latest_marker, args.snapshot_directory, args.policy
+        )))
+    elif args.command == "audit-status":
+        print(f"independent_full_audit_age_seconds={audit_status(args.receipt, args.policy, args.max_age)}")
     else:
         started = time.monotonic()
         now = int(time.time())
