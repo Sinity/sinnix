@@ -8,6 +8,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -702,6 +703,28 @@ class DrainFixture(unittest.TestCase):
                 "BORG_SECURITY_DIR": scratch + "/security",
                 "BORG_UNKNOWN_UNENCRYPTED_REPO_ACCESS_IS_OK": "yes",
             }
+            fixture_policies = {}
+            for lane in ("realm", "persist"):
+                # The rendered shell script is relocated to this synthetic
+                # tree. Its Nix-store policy is a separate file, so relocate
+                # the effective Borg exclusions in that policy as well.
+                match = re.search(
+                    rf"/nix/store/[a-z0-9]+-{lane}-snapshot-coverage\.json",
+                    scripts[lane],
+                )
+                self.assertIsNotNone(match)
+                policy = json.loads(Path(match.group()).read_text())
+                original_root = f"run/borgbackup-snapshot-inputs/{lane}"
+                fixture_root = str(root / "bind" / lane)
+                policy["borg_excludes"] = [
+                    pattern.replace(original_root, fixture_root, 1)
+                    if pattern.startswith(original_root + "/") else pattern
+                    for pattern in policy["borg_excludes"]
+                ]
+                fixture_policy = root / f"{lane}-snapshot-coverage.json"
+                fixture_policy.write_text(json.dumps(policy))
+                fixture_policies[lane] = policy
+                scripts[lane] = scripts[lane].replace(match.group(), str(fixture_policy))
             for path in (
                 "mock-bin",
                 "logs",
@@ -901,6 +924,10 @@ elif command=='btrfs':
                 self.assertEqual(entry[entry.index("--files-changed") + 1], "ctime")
                 self.assertNotIn("--exclude-caches", entry)
                 self.assertNotIn("--exclude-if-present", entry)
+                self.assertEqual(
+                    [entry[index + 1] for index, arg in enumerate(entry) if arg == "--exclude"],
+                    fixture_policies["realm"]["borg_excludes"],
+                )
             deleted = [
                 entry[-1]
                 for entry in commands
@@ -924,7 +951,11 @@ elif command=='btrfs':
             self.assertEqual(extract(rollback.name, "unique"), "new bytes after clock rollback")
 
             interrupted = snapshot(
-                "realm.20260402T080000+0000", {"same-name": "interrupted proof"}
+                "realm.20260402T080000+0000", {
+                    "same-name": "interrupted proof",
+                    "project/sinex/.beads/issues.jsonl": '{"id":"synthetic-bead"}\n',
+                    "project/sinex/.beads/dolt/.dolt/HEAD": "synthetic",
+                }
             )
             before = latest_marker.read_bytes()
             (root / "fail-proof-list").touch()
@@ -935,7 +966,9 @@ elif command=='btrfs':
             run()
             resumed_fields = COVERAGE.read_marker_fields(latest_marker)
             self.assertEqual(json.loads(resumed_fields["coverage"])["proof_mode"], "created")
-            self.assertEqual(resumed_fields["archive"], "realm-" + interrupted.name + "-producer-v1")
+            # The failed identity read happened before a receipt was written.
+            # Realm's policy-repair suffix takes precedence on that collision.
+            self.assertEqual(resumed_fields["archive"], "realm-" + interrupted.name + "-coverage-v3")
             # A receipt can survive a crash before the acknowledgement. Reuse
             # that exact archive on restart instead of creating another one.
             acknowledged = COVERAGE.read_marker_fields(latest_marker)
@@ -1023,15 +1056,18 @@ elif command=='btrfs':
             self.assertNotIn("realm-" + older.name, archives)
             self.assertNotIn("realm-" + middle.name, archives)
 
-            # A marker is a durable prune cutoff. A later wake removes old
-            # snapshots left by a failed delete, even without a new snapshot.
+            # A marker is a durable prune cutoff. This new snapshot has an
+            # older timestamp but a newer creation generation, so it becomes
+            # the cutoff; a later wake resumes deletion of its predecessor.
             leftover = snapshot("realm.20260403T013000+0000", {"old-only": "leftover"})
             (root / "fail-delete").touch()
             run(ok=False)
             self.assertTrue(leftover.exists())
             (root / "fail-delete").unlink()
             run()
-            self.assertFalse(leftover.exists())
+            self.assertTrue(leftover.exists())
+            self.assertFalse(fresh.exists())
+            self.assertIn("snapshot=" + leftover.name, latest_marker.read_text())
 
             pending = snapshot("realm.20260404T010000+0000", {"old-only": "pending"})
             newer = snapshot("realm.20260404T013000+0000", {"same-name": "newer"})
@@ -1108,10 +1144,10 @@ elif command=='btrfs':
                 "canonical download",
             )
 
+            older_gap = snapshot("realm.20260406T023000+0000", {"same-name": "older"})
             gap = snapshot(
                 "realm.20260406T030000+0000", {"project/build/precious": "canonical"}
             )
-            older_gap = snapshot("realm.20260406T023000+0000", {"same-name": "older"})
             gap_uuid = json.loads((root / "identities.json").read_text())[str(gap)]
             for suffix in ("", "-coverage-v2"):
                 subprocess.run(
