@@ -230,6 +230,7 @@ def _receipt_observation(
         # runner's endpoint receipt below, never this enqueue-time snapshot.
         "tree_receipt": tree_receipt,
         "execution_receipt": execution_receipt,
+        "execution_evidence": outcome.get("execution_evidence") if isinstance(outcome, Mapping) else None,
         "result_kind": launch_input.get("result_kind"),
         "checked": True,
         "eligible": clean_candidate,

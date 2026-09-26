@@ -683,6 +683,14 @@ selector; a focused profile must not name a `required` operation), `schedule`
 queued before their operation and cannot contain cycles. Any other operation
 field is ignored with a warning on stderr.
 
+Dirty execution endpoints include a versioned content manifest of Git-tracked
+and nonignored untracked paths, file modes, sizes and SHA-256 hashes. Symlinks
+record their link text. The manifest reports omitted paths and its file/byte
+limits; matching endpoint hashes do not attest that inputs were immutable
+during execution. Outcomes also export the exact command selector,
+unit lifecycle phase, result and a hash of the declared environment. Unobserved inner phases
+and published artifact references remain gaps, rather than inferred successes.
+
 ### `checkout`: which tree the receipt is evidence about
 
 | kind | meaning |
