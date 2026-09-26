@@ -206,6 +206,19 @@ def test_job_start_with_wait_reports_a_failure_in_the_exit_status(
     assert "failed exit 3" in captured.err
 
 
+def test_job_fire_with_wait_reports_failure(
+    fake_pueue: FakePueue, cli_config: Config, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fake_pueue.finish_when_waited(1, lambda fake: fake.fail(1, exit_code=3))
+    assert (
+        cli.main(["job", "fire", "fixture", "check", "--wait"])
+        == cli.EXIT_JOB_NOT_SUCCEEDED
+    )
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["phase"] == "failed"
+    assert "failed exit 3" in captured.err
+
+
 def test_retained_run_diagnostics_reach_json_and_human_errors(
     cli_config: Config,
     capsys: pytest.CaptureFixture[str],
