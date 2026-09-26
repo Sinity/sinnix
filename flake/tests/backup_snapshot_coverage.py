@@ -1,15 +1,18 @@
 """Synthetic real-Borg coverage and rendered drain regression fixtures."""
 
 import argparse
+from contextlib import redirect_stdout
 from datetime import datetime
 import errno
 import importlib.util
+import io
 import json
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 import uuid
 from pathlib import Path
@@ -158,6 +161,89 @@ class CoverageFixture(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "content mismatch"):
             COVERAGE.verify(self.source, "snapshot", [])
+
+    def test_created_proof_requires_current_full_anchor_and_borg_reads_changed_bytes(self):
+        policy = self.root / "policy.json"
+        policy.write_text(json.dumps({"noncanonical": [], "borg_excludes": []}))
+        archive = "first"
+        self.archive(archive)
+        full_content_hash = COVERAGE.verify(self.source, archive, [])["content_sha256"]
+        previous = {
+            "archive": archive,
+            "archive_id": COVERAGE.archive_identity(archive, self.snapshot_uuid),
+            "snapshot_uuid": self.snapshot_uuid,
+            "proof_mode": "full",
+            "full_proof_epoch": int(time.time()),
+            "content_sha256": full_content_hash,
+            "full_proof_content_sha256": full_content_hash,
+            "policy_sha256": COVERAGE.policy_identity(policy),
+        }
+        snapshot_directory = self.root / "snapshots"
+        snapshot_directory.mkdir()
+        (snapshot_directory / "realm.20260402T010000+0000").mkdir()
+        marker = self.root / "latest"
+        marker.write_text(
+            "archive=first\nsnapshot=realm.20260402T010000+0000\n"
+            "generation=20\nsubvolume_id=102\n"
+            f"coverage={json.dumps(previous)}\n"
+        )
+        details = (self.snapshot_uuid, 20, 102)
+        with patch.object(COVERAGE, "snapshot_details", return_value=details):
+            self.assertEqual(
+                COVERAGE.previous_proof(marker, previous["policy_sha256"], int(time.time()), snapshot_directory),
+                previous,
+            )
+            old_stat = (self.source / "same-name").stat()
+            (self.source / "same-name").write_text("new version")
+            os.utime(
+                self.source / "same-name",
+                ns=(old_stat.st_atime_ns, old_stat.st_mtime_ns),
+            )
+            self.archive("second")
+            self.assertEqual(
+                self.borg("extract", "--stdout", "::second", "same-name"),
+                "new version",
+            )
+            stdout = io.StringIO()
+            with patch.object(sys, "argv", [
+                "snapshot-coverage", "verify", str(self.source), "second",
+                self.snapshot_uuid, str(policy), "--mode", "created",
+                "--latest-marker", str(marker),
+                "--snapshot-directory", str(snapshot_directory),
+            ]), redirect_stdout(stdout):
+                COVERAGE.main()
+            created = json.loads(stdout.getvalue())
+            self.assertEqual(created["proof_mode"], "created")
+            self.assertEqual(created["previous_archive_id"], previous["archive_id"])
+            self.assertEqual(created["source_hashed_bytes"], 0)
+            changed_policy = self.root / "changed-policy.json"
+            changed_policy.write_text(json.dumps({"noncanonical": ["old-only"]}))
+            self.assertIsNone(COVERAGE.previous_proof(
+                marker, COVERAGE.policy_identity(changed_policy), int(time.time()), snapshot_directory
+            ))
+            changed_excludes = self.root / "changed-excludes.json"
+            changed_excludes.write_text(json.dumps({
+                "noncanonical": [], "borg_excludes": ["bind/project/build"],
+            }))
+            self.assertIsNone(COVERAGE.previous_proof(
+                marker, COVERAGE.policy_identity(changed_excludes),
+                int(time.time()), snapshot_directory,
+            ))
+            self.assertIsNone(COVERAGE.previous_proof(
+                marker, previous["policy_sha256"], previous["full_proof_epoch"] + COVERAGE.FULL_PROOF_INTERVAL,
+                snapshot_directory,
+            ))
+            marker.write_text(marker.read_text().replace(previous["archive_id"], "a" * 64))
+            self.assertIsNone(COVERAGE.previous_proof(
+                marker, previous["policy_sha256"], int(time.time()), snapshot_directory
+            ))
+            with patch.object(sys, "argv", [
+                "snapshot-coverage", "verify", str(self.source), "second",
+                self.snapshot_uuid, str(policy), "--mode", "created",
+                "--latest-marker", str(marker),
+                "--snapshot-directory", str(snapshot_directory),
+            ]), self.assertRaisesRegex(ValueError, "no current verified predecessor"):
+                COVERAGE.main()
 
     def test_archive_identity_uses_exact_repository_listing_entry(self):
         listing = json.dumps({"archives": [
@@ -513,6 +599,7 @@ with (root/'logs/commands').open('a') as log: log.write(json.dumps([command,*arg
 if command=='borg':
     if args[0]=='create' and (root/'fail-create').exists(): sys.exit(2)
     if args[0]=='debug' and (root/'fail-read').exists(): sys.exit(2)
+    if args[:2]==['list','--json'] and (root/'fail-proof-list').exists(): sys.exit(2)
     os.execv(REAL_BORG, [REAL_BORG,*args])
 if command=='systemctl':
     lane={'borgbackup-job-persist.service':'persist', 'borgbackup-job-realm.service':'realm'}[args[-1]]
@@ -521,8 +608,18 @@ if command=='systemctl':
 if command=='mountpoint': sys.exit(0 if (root/'logs/mounted').exists() else 1)
 if command=='mount':
     source,target=args[-2:]; subprocess.run(['cp','-a',source+'/.',target],check=True); (root/'logs/mounted').touch()
+    identities=json.loads((root/'identities.json').read_text())
+    generations=json.loads((root/'generations.json').read_text())
+    identities[target]=identities[source]; generations[target]=generations[source]
+    (root/'identities.json').write_text(json.dumps(identities))
+    (root/'generations.json').write_text(json.dumps(generations))
 elif command=='umount':
     target=pathlib.Path(args[-1]); shutil.rmtree(target); target.mkdir(); (root/'logs/mounted').unlink(missing_ok=True)
+    identities=json.loads((root/'identities.json').read_text())
+    generations=json.loads((root/'generations.json').read_text())
+    identities.pop(str(target),None); generations.pop(str(target),None)
+    (root/'identities.json').write_text(json.dumps(identities))
+    (root/'generations.json').write_text(json.dumps(generations))
 elif command=='btrfs':
     identities=json.loads((root/'identities.json').read_text())
     generations=json.loads((root/'generations.json').read_text())
@@ -637,7 +734,11 @@ elif command=='btrfs':
             run()
             self.assertFalse(old.exists())
             self.assertTrue(new.exists())
-            self.assertIn("snapshot=" + new.name, (root / "state/borg-drain/realm.latest-archived").read_text())
+            latest_marker = root / "state/borg-drain/realm.latest-archived"
+            self.assertIn("snapshot=" + new.name, latest_marker.read_text())
+            first_proof = json.loads(COVERAGE.read_marker_fields(latest_marker)["coverage"])
+            self.assertEqual(first_proof["proof_mode"], "full")
+            self.assertGreater(first_proof["source_hashed_bytes"], 0)
             self.assertNotIn("realm-" + old.name, subprocess.check_output(
                 ["borg", "list", "--short", str(root / "repos/borg-realm-v2")], env=env, text=True
             ).splitlines())
@@ -663,6 +764,17 @@ elif command=='btrfs':
                 json.loads(line)
                 for line in (root / "logs/commands").read_text().splitlines()
             ]
+            realm_creates = [
+                entry for entry in commands
+                if entry[:2] == ["borg", "create"]
+                and any(arg.startswith("::realm-") for arg in entry)
+            ]
+            self.assertTrue(realm_creates)
+            for entry in realm_creates:
+                self.assertEqual(entry[entry.index("--files-cache") + 1], "ctime,size,inode")
+                self.assertEqual(entry[entry.index("--files-changed") + 1], "ctime")
+                self.assertNotIn("--exclude-caches", entry)
+                self.assertNotIn("--exclude-if-present", entry)
             deleted = [
                 entry[-1]
                 for entry in commands
@@ -677,9 +789,29 @@ elif command=='btrfs':
             self.assertTrue(rollback.exists())
             self.assertIn(
                 "snapshot=" + rollback.name,
-                (root / "state/borg-drain/realm.latest-archived").read_text(),
+                latest_marker.read_text(),
             )
+            created_proof = json.loads(COVERAGE.read_marker_fields(latest_marker)["coverage"])
+            self.assertEqual(created_proof["proof_mode"], "created")
+            self.assertEqual(created_proof["source_hashed_bytes"], 0)
+            self.assertEqual(created_proof["full_proof_epoch"], first_proof["full_proof_epoch"])
+            self.assertEqual(created_proof["previous_archive_id"], first_proof["archive_id"])
             self.assertEqual(extract(rollback.name, "unique"), "new bytes after clock rollback")
+
+            interrupted = snapshot(
+                "realm.20260402T080000+0000", {"same-name": "interrupted proof"}
+            )
+            before = latest_marker.read_bytes()
+            (root / "fail-proof-list").touch()
+            run(ok=False)
+            self.assertEqual(latest_marker.read_bytes(), before)
+            self.assertTrue(interrupted.exists())
+            (root / "fail-proof-list").unlink()
+            run()
+            self.assertEqual(
+                json.loads(COVERAGE.read_marker_fields(latest_marker)["coverage"])["proof_mode"],
+                "full",
+            )
 
             # Direct-source jobs must keep the evaluated CAS path and exclude
             # mutable Polylogue databases. These use real Borg too.

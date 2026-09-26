@@ -36,10 +36,12 @@ import re
 import stat
 import subprocess
 import sys
+import time
 from pathlib import Path, PurePosixPath
 
 
 SNAPSHOT_NAME = re.compile(r"^[^.]+\.(\d{8}T\d{6}[+-]\d{4})$")
+FULL_PROOF_INTERVAL = 7 * 24 * 3600
 
 
 def snapshot_epoch(name):
@@ -174,6 +176,55 @@ def archive_identity(archive, snapshot_uuid):
     if not re.fullmatch(r"[0-9a-f]{64}", archive_id):
         raise ValueError("invalid archive ID")
     return archive_id
+
+
+def policy_identity(policy, require_borg_excludes=False):
+    """Bind a producer-backed proof to the exact coverage declaration."""
+    decoded = json.loads(Path(policy).read_text())
+    decode_policy(decoded)
+    if require_borg_excludes and (
+        not isinstance(decoded, dict) or "borg_excludes" not in decoded
+    ):
+        raise ValueError("created proof requires declared Borg exclusions")
+    return hashlib.sha256(
+        json.dumps(decoded, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def previous_proof(marker, policy_hash, now, snapshot_directory):
+    fields = read_marker_fields(marker)
+    if fields is None:
+        return None
+    try:
+        proof = json.loads(fields["coverage"])
+        full_epoch = proof["full_proof_epoch"]
+        details = snapshot_details(Path(snapshot_directory) / fields["snapshot"])
+        if (
+            proof["policy_sha256"] != policy_hash
+            or proof["proof_mode"] not in ("full", "created")
+            or not re.fullmatch(r"[0-9a-f]{64}", proof["full_proof_content_sha256"])
+            or not isinstance(full_epoch, int)
+            or isinstance(full_epoch, bool)
+            or full_epoch > now
+            or now - full_epoch >= FULL_PROOF_INTERVAL
+            or proof["archive"] != fields["archive"]
+            or details != (
+                proof["snapshot_uuid"], int(fields["generation"]),
+                int(fields["subvolume_id"]),
+            )
+        ):
+            return None
+        if proof["proof_mode"] == "full" and proof["content_sha256"] != proof["full_proof_content_sha256"]:
+            return None
+        if proof["proof_mode"] == "created" and not re.fullmatch(
+            r"[0-9a-f]{64}", proof["previous_proof_sha256"]
+        ):
+            return None
+        if archive_identity(proof["archive"], proof["snapshot_uuid"]) != proof["archive_id"]:
+            return None
+    except (KeyError, TypeError, ValueError, OSError, subprocess.CalledProcessError):
+        return None
+    return proof
 
 
 class JsonStream:
@@ -490,6 +541,7 @@ def verify(source, archive, noncanonical, chrome_extension_caches=False):
     hashed = set()
     hardlinks = {}
     digest = hashlib.sha256()
+    hashed_bytes = 0
     # Only names that Borg cannot spell need the fallback, so the index stays
     # empty on an ordinary tree and an exact match always wins.
     lossy_index = {}
@@ -531,6 +583,7 @@ def verify(source, archive, noncanonical, chrome_extension_caches=False):
         if checksum != item["sha256"] or item["size"] != expected[path].st_size:
             raise ValueError(f"archive content mismatch: {path!r}")
         hashed.add(path)
+        hashed_bytes += expected[path].st_size
         digest.update(json.dumps([path, checksum], ensure_ascii=True).encode())
     for path, target in hardlinks.items():
         if target not in hashed:
@@ -541,6 +594,8 @@ def verify(source, archive, noncanonical, chrome_extension_caches=False):
     return {
         "canonical_entries": len(expected),
         "content_sha256": digest.hexdigest(),
+        "source_hashed_bytes": hashed_bytes,
+        "archive_content_verified_bytes": hashed_bytes,
         "noncanonical_roots": omitted_roots,
         "unarchivable_entries": unarchivable,
         "nested_subvolume_stubs": nested_stubs,
@@ -551,6 +606,11 @@ def decode_policy(policy):
     if isinstance(policy, list):
         return policy, False
     if isinstance(policy, dict):
+        excludes = policy.get("borg_excludes", [])
+        if not isinstance(excludes, list) or any(
+            not isinstance(pattern, str) for pattern in excludes
+        ):
+            raise ValueError("invalid Borg exclusion policy")
         return policy["noncanonical"], policy.get("chrome_extension_caches", False)
     raise ValueError("invalid coverage policy")
 
@@ -567,6 +627,13 @@ def main():
     check.add_argument("archive")
     check.add_argument("uuid")
     check.add_argument("policy")
+    check.add_argument("--mode", choices=("full", "created"), default="full")
+    check.add_argument("--latest-marker")
+    check.add_argument("--snapshot-directory")
+    plan = sub.add_parser("proof-mode")
+    plan.add_argument("latest_marker")
+    plan.add_argument("snapshot_directory")
+    plan.add_argument("policy")
     select = sub.add_parser("select")
     select.add_argument("directory")
     select.add_argument("glob")
@@ -615,17 +682,60 @@ def main():
         latest = read_latest_epoch(args.latest_marker)
         if latest is not None and snapshot_epoch(args.snapshot) <= latest:
             return 1
+    elif args.command == "proof-mode":
+        print(
+            "created" if previous_proof(
+                args.latest_marker,
+                policy_identity(args.policy, require_borg_excludes=True),
+                int(time.time()),
+                args.snapshot_directory,
+            ) is not None else "full"
+        )
     else:
+        started = time.monotonic()
+        now = int(time.time())
+        policy_hash = policy_identity(
+            args.policy, require_borg_excludes=args.mode == "created"
+        )
+        if args.mode == "created":
+            if not args.latest_marker or not args.snapshot_directory:
+                raise ValueError("created proof requires a verified predecessor")
+            previous = previous_proof(
+                args.latest_marker, policy_hash, now, args.snapshot_directory
+            )
+            if previous is None:
+                raise ValueError("created proof has no current verified predecessor")
+            if snapshot_details(args.source)[0] != args.uuid:
+                raise ValueError("snapshot UUID changed during created proof")
         archive_id = archive_identity(args.archive, args.uuid)
-        noncanonical, chrome_extension_caches = decode_policy(
-            json.loads(Path(args.policy).read_text())
-        )
-        result = verify(
-            args.source,
-            args.archive,
-            noncanonical,
-            chrome_extension_caches,
-        )
+        if args.mode == "full":
+            noncanonical, chrome_extension_caches = decode_policy(
+                json.loads(Path(args.policy).read_text())
+            )
+            result = verify(
+                args.source,
+                args.archive,
+                noncanonical,
+                chrome_extension_caches,
+            )
+            full_epoch = now
+            full_content_hash = result["content_sha256"]
+        else:
+            result = {
+                "source_hashed_bytes": 0,
+                "archive_content_verified_bytes": 0,
+                "producer": "successful_borg_create_v1",
+                "previous_archive_id": previous["archive_id"],
+                "previous_proof_sha256": hashlib.sha256(
+                    json.dumps(previous, sort_keys=True, separators=(",", ":")).encode()
+                ).hexdigest(),
+            }
+            full_epoch = previous["full_proof_epoch"]
+            full_content_hash = previous["full_proof_content_sha256"]
+            if previous_proof(
+                args.latest_marker, policy_hash, int(time.time()), args.snapshot_directory
+            ) != previous:
+                raise ValueError("verified predecessor changed during created proof")
         if archive_identity(args.archive, args.uuid) != archive_id:
             raise ValueError("archive changed during verification")
         print(
@@ -635,6 +745,11 @@ def main():
                     "snapshot_uuid": args.uuid,
                     "archive_id": archive_id,
                     "archive": args.archive,
+                    "proof_mode": args.mode,
+                    "policy_sha256": policy_hash,
+                    "full_proof_epoch": full_epoch,
+                    "full_proof_content_sha256": full_content_hash,
+                    "verification_seconds": round(time.monotonic() - started, 3),
                 }
             )
         )

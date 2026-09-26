@@ -185,13 +185,18 @@ let
   #
   # `**/...` patterns pass through unchanged: they are deliberately
   # match-anywhere and qualifying them would defeat that.
-  mkBorgExcludeArgs =
+  borgExcludePatterns =
     root: exclude:
     let
       rootRelative = lib.removePrefix "/" root;
       qualify = pattern: if lib.hasPrefix "**" pattern then pattern else "${rootRelative}/${pattern}";
     in
-    lib.concatMapStringsSep " " (pattern: "--exclude ${lib.escapeShellArg (qualify pattern)}") exclude;
+    map qualify exclude;
+
+  mkBorgExcludeArgs =
+    root: exclude:
+    lib.concatMapStringsSep " " (pattern: "--exclude ${lib.escapeShellArg pattern}")
+      (borgExcludePatterns root exclude);
 
   # Borg records every holder of an exclusive lock as an empty file inside the
   # lock directory, named "<hostid>.<pid>-<threadid>" (borg/locking.py,
@@ -334,15 +339,14 @@ let
       bindTarget,
       archivePrefix,
       replacementSuffix ? "",
-      excludeByMarker ? true,
       exclude,
       noncanonical,
     }:
     let
-      markerExcludeArgs = lib.optionalString excludeByMarker "--exclude-caches --exclude-if-present .nobackup";
       coveragePolicy = pkgs.writeText "${label}-snapshot-coverage.json" (builtins.toJSON {
         inherit noncanonical;
         chrome_extension_caches = label == "persist";
+        borg_excludes = borgExcludePatterns bindTarget exclude;
       });
     in
     ''
@@ -377,22 +381,41 @@ let
         IFS=$'\t' read -r snapshot_uuid snapshot_generation snapshot_id <<< "$snapshot_details"
         mount --bind "$snapshot_path" ${lib.escapeShellArg bindTarget}
         archives="$(with_borg_lock borg list --short "$BORG_REPO")"
+        archive_created=0
+        create_archive_id=""
+        create_seconds=0
+        create_original_bytes=0
         if [ -n ${lib.escapeShellArg replacementSuffix} ] && printf '%s\n' "$archives" | grep -Fxq "$original_archive_name"; then
           # This archive predates the policy repair. Keep it untouched and
           # prove a separately named archive before deleting the snapshot.
           archive_name="$original_archive_name"${lib.escapeShellArg replacementSuffix}
         fi
         create_archive() {
-          if ! with_borg_lock borg create \
+          create_started="$(date +%s)"
+          if ! create_stats="$(with_borg_lock borg create \
+            --json --quick-stats \
+            --files-cache ctime,size,inode --files-changed ctime \
             --compression auto,zstd,1 \
             --lock-wait ${toString borgLockWaitSec} \
             --comment "sinnix-snapshot-v1:$snapshot_uuid" \
-            ${markerExcludeArgs} \
             ${mkBorgExcludeArgs bindTarget exclude} \
-            "::$archive_name" ${lib.escapeShellArg "${bindTarget}/./"}; then
+            "::$archive_name" ${lib.escapeShellArg "${bindTarget}/./"})"; then
             echo "borg create failed for ${label} snapshot $snapshot; subvolume kept on disk" >&2
             return 1
           fi
+          create_seconds=$(( $(date +%s) - create_started ))
+          if ! create_receipt="$(printf '%s' "$create_stats" | ${pkgs.jq}/bin/jq -er \
+            --arg name "$archive_name" 'select(.archive.name == $name) | [.archive.id,.archive.stats.original_size] | @tsv')"; then
+            echo "borg create returned no usable stats; retaining ${label} snapshot $snapshot" >&2
+            return 1
+          fi
+          IFS=$'\t' read -r create_archive_id create_original_bytes <<< "$create_receipt"
+          if [[ ! "$create_archive_id" =~ ^[0-9a-f]{64}$ || ! "$create_original_bytes" =~ ^[0-9]+$ ]]; then
+            echo "borg create returned invalid stats; retaining ${label} snapshot $snapshot" >&2
+            return 1
+          fi
+          archive_created=1
+          echo "backup_phase=create label=${label} archive=$archive_name elapsed_seconds=$create_seconds original_bytes=$create_original_bytes"
         }
         if ! printf '%s\n' "$archives" | grep -Fxq "$archive_name"; then
           if ! create_archive; then
@@ -400,13 +423,31 @@ let
             exit 1
           fi
         fi
-        # Neither a matching name nor a successful create acknowledges bytes.
-        # Verification reads every canonical file from both immutable sources,
-        # compares metadata and binds the proof to UUID + immutable archive ID.
-        if ! proof="$(${snapshotCoverage} verify ${lib.escapeShellArg bindTarget} "$archive_name" "$snapshot_uuid" ${coveragePolicy})"; then
+        # The first/new-policy/weekly archive and every preexisting archive
+        # receive independent full coverage. Between full proofs, only a
+        # newly successful warning-free Borg create may use the producer proof.
+        # Static exclusions are matched by the coverage policy; cache tags
+        # cannot silently waive a canonical directory.
+        proof_mode=full
+        if [ "$archive_created" = 1 ]; then
+          proof_mode="$(${snapshotCoverage} proof-mode "$latest_marker" ${lib.escapeShellArg snapshotDir} ${coveragePolicy})"
+        fi
+        if ! proof="$(${snapshotCoverage} verify ${lib.escapeShellArg bindTarget} "$archive_name" "$snapshot_uuid" ${coveragePolicy} \
+          --mode "$proof_mode" --latest-marker "$latest_marker" --snapshot-directory ${lib.escapeShellArg snapshotDir})"; then
           cleanup_snapshot_bind_mount
           exit 1
         fi
+        if [ "$archive_created" = 1 ] && ! printf '%s' "$proof" | ${pkgs.jq}/bin/jq -e \
+          --arg id "$create_archive_id" '.archive_id == $id' >/dev/null; then
+          echo "Created archive identity changed; retaining $snapshot_path" >&2
+          cleanup_snapshot_bind_mount
+          exit 1
+        fi
+        proof="$(printf '%s' "$proof" | ${pkgs.jq}/bin/jq -c \
+          --argjson create_seconds "$create_seconds" \
+          --argjson create_original_bytes "$create_original_bytes" \
+          '. + {create_seconds:$create_seconds,create_original_bytes:$create_original_bytes}')"
+        echo "backup_phase=verify label=${label} archive=$archive_name mode=$proof_mode $(printf '%s' "$proof" | ${pkgs.jq}/bin/jq -r '"elapsed_seconds=\(.verification_seconds) source_hashed_bytes=\(.source_hashed_bytes) archive_content_verified_bytes=\(.archive_content_verified_bytes)"')"
         cleanup_snapshot_bind_mount
         if [ "$(${snapshotCoverage} details "$snapshot_path")" != "$snapshot_details" ]; then
           echo "Snapshot identity changed; retaining $snapshot_path" >&2
