@@ -84,6 +84,7 @@ let
   borgRealmSnapshotBind = "${borgSnapshotBindRoot}/realm";
   borgDrainStateRoot = "/persist/root/.cache/borg-drain";
   borgIntegrityReceipt = "${borgDrainStateRoot}/integrity-check.json";
+  realmCoverageAuditReceipt = "${borgDrainStateRoot}/realm.independent-full-audit.json";
 
   # Borg Configuration
   borgRepoPersistPath = "${borgRepoRoot}/borg-persist-v1";
@@ -185,13 +186,18 @@ let
   #
   # `**/...` patterns pass through unchanged: they are deliberately
   # match-anywhere and qualifying them would defeat that.
-  mkBorgExcludeArgs =
+  borgExcludePatterns =
     root: exclude:
     let
       rootRelative = lib.removePrefix "/" root;
       qualify = pattern: if lib.hasPrefix "**" pattern then pattern else "${rootRelative}/${pattern}";
     in
-    lib.concatMapStringsSep " " (pattern: "--exclude ${lib.escapeShellArg (qualify pattern)}") exclude;
+    map qualify exclude;
+
+  mkBorgExcludeArgs =
+    root: exclude:
+    lib.concatMapStringsSep " " (pattern: "--exclude ${lib.escapeShellArg pattern}")
+      (borgExcludePatterns root exclude);
 
   # Borg records every holder of an exclusive lock as an empty file inside the
   # lock directory, named "<hostid>.<pid>-<threadid>" (borg/locking.py,
@@ -305,17 +311,30 @@ let
       export SINNIX_BORG_GLOBAL_LOCK_HELD=1
     }
 
+    acquire_borg_global_lock_or_fail() {
+      if [ "''${SINNIX_BORG_GLOBAL_LOCK_HELD:-0}" = 1 ]; then
+        return
+      fi
+      reason="$1"
+      exec 9>${lib.escapeShellArg borgGlobalLock}
+      if ! flock -n 9; then
+        echo "Another Borg operation is active; $reason remains due" >&2
+        return 1
+      fi
+      export SINNIX_BORG_GLOBAL_LOCK_HELD=1
+    }
+
     publish_backup_marker() {
       marker="$1"
       marker_dir="$(dirname "$marker")"
       marker_base="$(basename "$marker")"
       temporary="$(mktemp "$marker_dir/.''${marker_base}.tmp.XXXXXX")"
       trap 'rm -f "$temporary"' RETURN
-      cat > "$temporary"
-      chmod 0644 "$temporary"
-      sync -f "$temporary"
-      mv -f "$temporary" "$marker"
-      sync -f "$marker_dir"
+      cat > "$temporary" || return 1
+      chmod 0644 "$temporary" || return 1
+      sync -f "$temporary" || return 1
+      mv -f "$temporary" "$marker" || return 1
+      sync -f "$marker_dir" || return 1
       trap - RETURN
     }
 
@@ -323,6 +342,26 @@ let
   '';
 
   snapshotCoverage = "${pkgs.python3}/bin/python3 ${./lib/backup/snapshot-coverage.py}";
+
+  mkCoveragePolicy =
+    { label, bindTarget, exclude, noncanonical }:
+    pkgs.writeText "${label}-snapshot-coverage.json" (builtins.toJSON (
+      {
+        inherit noncanonical;
+        chrome_extension_caches = label == "persist";
+        borg_excludes = borgExcludePatterns bindTarget exclude;
+      }
+      // lib.optionalAttrs (label == "realm") {
+        producer_contract = "realm-borg-create-v2";
+      }
+    ));
+
+  realmCoveragePolicy = mkCoveragePolicy {
+    label = "realm";
+    bindTarget = borgRealmSnapshotBind;
+    exclude = realmExcludes;
+    noncanonical = realmNoncanonical;
+  };
 
   mkSnapshotDrainScript =
     {
@@ -334,16 +373,11 @@ let
       bindTarget,
       archivePrefix,
       replacementSuffix ? "",
-      excludeByMarker ? true,
       exclude,
       noncanonical,
     }:
     let
-      markerExcludeArgs = lib.optionalString excludeByMarker "--exclude-caches --exclude-if-present .nobackup";
-      coveragePolicy = pkgs.writeText "${label}-snapshot-coverage.json" (builtins.toJSON {
-        inherit noncanonical;
-        chrome_extension_caches = label == "persist";
-      });
+      coveragePolicy = mkCoveragePolicy { inherit label bindTarget exclude noncanonical; };
     in
     ''
       set -euo pipefail
@@ -351,6 +385,7 @@ let
       ${mkBorgCommonScript repo}
       install -d -m 0755 -o root -g root ${lib.escapeShellArg borgDrainStateRoot}
       latest_marker=${lib.escapeShellArg "${borgDrainStateRoot}/${label}.latest-archived"}
+      pending_receipt=${lib.escapeShellArg "${borgDrainStateRoot}/${label}.pending-create.json"}
       acquire_borg_global_lock_or_skip "${label} Borg drain"
 
       cleanup_snapshot_bind_mount() {
@@ -377,36 +412,149 @@ let
         IFS=$'\t' read -r snapshot_uuid snapshot_generation snapshot_id <<< "$snapshot_details"
         mount --bind "$snapshot_path" ${lib.escapeShellArg bindTarget}
         archives="$(with_borg_lock borg list --short "$BORG_REPO")"
+        archive_created=0
+        producer_proof=""
+        create_archive_id=""
+        create_seconds=0
+        create_original_bytes=0
         if [ -n ${lib.escapeShellArg replacementSuffix} ] && printf '%s\n' "$archives" | grep -Fxq "$original_archive_name"; then
           # This archive predates the policy repair. Keep it untouched and
           # prove a separately named archive before deleting the snapshot.
           archive_name="$original_archive_name"${lib.escapeShellArg replacementSuffix}
         fi
+        if [ ${lib.escapeShellArg label} = persist ]; then
+          # Recheck the newest previously created coverage replacement after
+          # an interrupted full proof, rather than creating another archive.
+          suffix=3
+          while printf '%s\n' "$archives" | grep -Fxq "$original_archive_name-coverage-v$suffix"; do
+            archive_name="$original_archive_name-coverage-v$suffix"
+            suffix=$((suffix + 1))
+          done
+        fi
         create_archive() {
-          if ! with_borg_lock borg create \
+          create_started="$(date +%s)"
+          if ! create_stats="$(with_borg_lock borg create \
+            --json --quick-stats \
+            --files-cache ctime,size,inode --files-changed ctime \
             --compression auto,zstd,1 \
             --lock-wait ${toString borgLockWaitSec} \
             --comment "sinnix-snapshot-v1:$snapshot_uuid" \
-            ${markerExcludeArgs} \
             ${mkBorgExcludeArgs bindTarget exclude} \
-            "::$archive_name" ${lib.escapeShellArg "${bindTarget}/./"}; then
+            "::$archive_name" ${lib.escapeShellArg "${bindTarget}/./"})"; then
             echo "borg create failed for ${label} snapshot $snapshot; subvolume kept on disk" >&2
             return 1
           fi
+          create_seconds=$(( $(date +%s) - create_started ))
+          if ! create_receipt="$(printf '%s' "$create_stats" | ${pkgs.jq}/bin/jq -er \
+            --arg name "$archive_name" 'select(.archive.name == $name) | [.archive.id,.archive.stats.original_size] | @tsv')"; then
+            echo "borg create returned no usable stats; retaining ${label} snapshot $snapshot" >&2
+            return 1
+          fi
+          IFS=$'\t' read -r create_archive_id create_original_bytes <<< "$create_receipt"
+          if [[ ! "$create_archive_id" =~ ^[0-9a-f]{64}$ || ! "$create_original_bytes" =~ ^[0-9]+$ ]]; then
+            echo "borg create returned invalid stats; retaining ${label} snapshot $snapshot" >&2
+            return 1
+          fi
+          if [ ${lib.escapeShellArg label} = realm ]; then
+            if ! created_receipt="$(printf '%s' "$create_stats" | ${snapshotCoverage} record-create \
+              ${lib.escapeShellArg bindTarget} "$archive_name" ${coveragePolicy} | ${pkgs.jq}/bin/jq -c \
+              --argjson seconds "$create_seconds" '. + {create_seconds:$seconds}')"; then
+              echo "Could not bind Borg create to snapshot; retaining ${label} snapshot $snapshot" >&2
+              return 1
+            fi
+            if ! printf '%s\n' "$created_receipt" | publish_backup_marker "$pending_receipt"; then
+              echo "Could not publish creation receipt; retaining ${label} snapshot $snapshot" >&2
+              return 1
+            fi
+          fi
+          archive_created=1
+          echo "backup_phase=create label=${label} archive=$archive_name elapsed_seconds=$create_seconds original_bytes=$create_original_bytes"
         }
-        if ! printf '%s\n' "$archives" | grep -Fxq "$archive_name"; then
+        if [ ${lib.escapeShellArg label} = realm ] && [ -f "$pending_receipt" ]; then
+          if receipt_archive="$(${pkgs.jq}/bin/jq -er '.archive' "$pending_receipt" 2>/dev/null)" \
+            && [[ "$receipt_archive" == "$original_archive_name" || "$receipt_archive" == "$original_archive_name"-* ]] \
+            && printf '%s\n' "$archives" | grep -Fxq "$receipt_archive" \
+            && producer_proof="$(${snapshotCoverage} verify-created ${lib.escapeShellArg bindTarget} \
+              "$receipt_archive" "$snapshot_uuid" ${coveragePolicy} "$pending_receipt" 2>/dev/null)"; then
+            archive_name="$receipt_archive"
+          fi
+        fi
+        if [ ${lib.escapeShellArg label} = realm ] && [ -z "$producer_proof" ] \
+          && printf '%s\n' "$archives" | grep -Fxq "$archive_name"; then
+          if ! producer_proof="$(${snapshotCoverage} verify-created ${lib.escapeShellArg bindTarget} \
+            "$archive_name" "$snapshot_uuid" ${coveragePolicy} "$pending_receipt" 2>/dev/null)"; then
+            # An unreceipted archive has no observed successful create. Do
+            # not promote it; create a separately named archive instead.
+            suffix=1
+            archive_name="$original_archive_name-producer-v$suffix"
+            while printf '%s\n' "$archives" | grep -Fxq "$archive_name"; do
+              suffix=$((suffix + 1))
+              archive_name="$original_archive_name-producer-v$suffix"
+            done
+          fi
+        fi
+        if [ -z "$producer_proof" ] && ! printf '%s\n' "$archives" | grep -Fxq "$archive_name"; then
           if ! create_archive; then
             cleanup_snapshot_bind_mount
             exit 1
           fi
         fi
-        # Neither a matching name nor a successful create acknowledges bytes.
-        # Verification reads every canonical file from both immutable sources,
-        # compares metadata and binds the proof to UUID + immutable archive ID.
-        if ! proof="$(${snapshotCoverage} verify ${lib.escapeShellArg bindTarget} "$archive_name" "$snapshot_uuid" ${coveragePolicy})"; then
+        # Realm accepts only the observed zero-warning create or its matching
+        # durable receipt; its independent full comparison has its own job.
+        # Persist keeps its first/policy-change/weekly full comparison and
+        # uses a producer proof on fresh creates between those checks.
+        if [ ${lib.escapeShellArg label} = realm ]; then
+          proof_mode=created
+          if [ -n "$producer_proof" ]; then
+            proof="$producer_proof"
+          elif ! proof="$(${snapshotCoverage} verify-created ${lib.escapeShellArg bindTarget} \
+            "$archive_name" "$snapshot_uuid" ${coveragePolicy} "$pending_receipt")"; then
+            cleanup_snapshot_bind_mount
+            exit 1
+          fi
+        else
+          proof_mode=full
+          if [ "$archive_created" = 1 ]; then
+            proof_mode="$(${snapshotCoverage} proof-mode "$latest_marker" ${lib.escapeShellArg snapshotDir} ${coveragePolicy})"
+          fi
+          if ! proof="$(${snapshotCoverage} verify ${lib.escapeShellArg bindTarget} "$archive_name" "$snapshot_uuid" ${coveragePolicy} \
+            --mode "$proof_mode" --latest-marker "$latest_marker" --snapshot-directory ${lib.escapeShellArg snapshotDir})"; then
+            if [ "$archive_created" = 1 ]; then
+              cleanup_snapshot_bind_mount
+              exit 1
+            fi
+            # A legacy archive can have omitted a canonical directory under
+            # marker-driven Borg exclusions. A failed full comparison never
+            # acknowledges it; retry one fresh name under the current policy.
+            suffix=3
+            archive_name="$original_archive_name-coverage-v$suffix"
+            while printf '%s\n' "$archives" | grep -Fxq "$archive_name"; do
+              suffix=$((suffix + 1))
+              archive_name="$original_archive_name-coverage-v$suffix"
+            done
+            if ! create_archive; then
+              cleanup_snapshot_bind_mount
+              exit 1
+            fi
+            proof_mode=full
+            if ! proof="$(${snapshotCoverage} verify ${lib.escapeShellArg bindTarget} "$archive_name" "$snapshot_uuid" ${coveragePolicy} \
+              --mode full --latest-marker "$latest_marker" --snapshot-directory ${lib.escapeShellArg snapshotDir})"; then
+              cleanup_snapshot_bind_mount
+              exit 1
+            fi
+          fi
+        fi
+        if [ "$archive_created" = 1 ] && ! printf '%s' "$proof" | ${pkgs.jq}/bin/jq -e \
+          --arg id "$create_archive_id" '.archive_id == $id' >/dev/null; then
+          echo "Created archive identity changed; retaining $snapshot_path" >&2
           cleanup_snapshot_bind_mount
           exit 1
         fi
+        proof="$(printf '%s' "$proof" | ${pkgs.jq}/bin/jq -c \
+          --argjson create_seconds "$create_seconds" \
+          --argjson create_original_bytes "$create_original_bytes" \
+          '. + {create_seconds:(.create_seconds // $create_seconds),create_original_bytes:(.create_original_bytes // $create_original_bytes)}')"
+        echo "backup_phase=verify label=${label} archive=$archive_name mode=$proof_mode $(printf '%s' "$proof" | ${pkgs.jq}/bin/jq -r '"elapsed_seconds=\(.verification_seconds) source_hashed_bytes=\(.source_hashed_bytes) archive_content_verified_bytes=\(.archive_content_verified_bytes)"')"
         cleanup_snapshot_bind_mount
         if [ "$(${snapshotCoverage} details "$snapshot_path")" != "$snapshot_details" ]; then
           echo "Snapshot identity changed; retaining $snapshot_path" >&2
@@ -1076,6 +1224,30 @@ in
                 }
               ];
             };
+            borgbackup-coverage-audit-realm = {
+              unit = "borgbackup-coverage-audit-realm.service";
+              resourceClass = "backup";
+              observe = {
+                enable = true;
+                restartable = false;
+              };
+              captures = [
+                {
+                  name = "borg-realm-independent-full-audit";
+                  path = realmCoverageAuditReceipt;
+                  eventDriven = true;
+                  staleAfterSeconds = 691200;
+                  livenessProbe = {
+                    command = "${snapshotCoverage} audit-status ${realmCoverageAuditReceipt} ${realmCoveragePolicy} 691200";
+                    timeoutSeconds = 10;
+                  };
+                  data = {
+                    class = "derived";
+                    inputs = [ "borg-realm-archives" ];
+                  };
+                }
+              ];
+            };
             borgbackup-verify = {
               unit = "borgbackup-verify.service";
               resourceClass = "backup";
@@ -1262,10 +1434,14 @@ in
           scriptPkgs
           borgDrainStateRoot
           borgIntegrityReceipt
+          realmCoverageAuditReceipt
           btrfsImageRoot
           btrfsImageMinBytes
           borgRepoPersist
           borgRepoRealm
+          realmSnapshots
+          realmCoveragePolicy
+          snapshotCoverage
           borgRepoSinexBlobs
           borgPassphrasePath
           outerRealmMountUnit

@@ -36,10 +36,13 @@ import re
 import stat
 import subprocess
 import sys
+import time
 from pathlib import Path, PurePosixPath
 
 
 SNAPSHOT_NAME = re.compile(r"^[^.]+\.(\d{8}T\d{6}[+-]\d{4})$")
+FULL_PROOF_INTERVAL = 7 * 24 * 3600
+REALM_PRODUCER_CONTRACT = "realm-borg-create-v2"
 
 
 def snapshot_epoch(name):
@@ -117,7 +120,11 @@ def verified_prune_plan(directory, glob, marker, prefix, replacement_suffix):
     if cutoff is None:
         return []
     expected_archive = f"{prefix}-{snapshot}"
-    if archive not in (expected_archive, expected_archive + replacement_suffix):
+    replacement = re.escape(expected_archive) + r"-coverage-v(?:[2-9]|[1-9][0-9]+)"
+    producer = re.escape(expected_archive) + r"-producer-v[1-9][0-9]*"
+    if archive not in (expected_archive, expected_archive + replacement_suffix) and not (
+        re.fullmatch(replacement, archive) or re.fullmatch(producer, archive)
+    ):
         raise ValueError("verified cutoff names another archive")
     uuid = proof["snapshot_uuid"]
     if proof["archive"] != archive or archive_identity(archive, uuid) != proof["archive_id"]:
@@ -174,6 +181,200 @@ def archive_identity(archive, snapshot_uuid):
     if not re.fullmatch(r"[0-9a-f]{64}", archive_id):
         raise ValueError("invalid archive ID")
     return archive_id
+
+
+def policy_identity(policy, require_borg_excludes=False):
+    """Bind a producer-backed proof to the exact coverage declaration."""
+    decoded = json.loads(Path(policy).read_text())
+    decode_policy(decoded)
+    if require_borg_excludes and (
+        not isinstance(decoded, dict) or "borg_excludes" not in decoded
+    ):
+        raise ValueError("created proof requires declared Borg exclusions")
+    return hashlib.sha256(
+        json.dumps(decoded, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def previous_proof(marker, policy_hash, now, snapshot_directory):
+    fields = read_marker_fields(marker)
+    if fields is None:
+        return None
+    try:
+        proof = json.loads(fields["coverage"])
+        full_epoch = proof["full_proof_epoch"]
+        details = snapshot_details(Path(snapshot_directory) / fields["snapshot"])
+        if (
+            proof["policy_sha256"] != policy_hash
+            or proof["proof_mode"] not in ("full", "created")
+            or not re.fullmatch(r"[0-9a-f]{64}", proof["full_proof_content_sha256"])
+            or not isinstance(full_epoch, int)
+            or isinstance(full_epoch, bool)
+            or full_epoch > now
+            or now - full_epoch >= FULL_PROOF_INTERVAL
+            or proof["archive"] != fields["archive"]
+            or details != (
+                proof["snapshot_uuid"], int(fields["generation"]),
+                int(fields["subvolume_id"]),
+            )
+        ):
+            return None
+        if proof["proof_mode"] == "full" and proof["content_sha256"] != proof["full_proof_content_sha256"]:
+            return None
+        if proof["proof_mode"] == "created" and not re.fullmatch(
+            r"[0-9a-f]{64}", proof["previous_proof_sha256"]
+        ):
+            return None
+        if archive_identity(proof["archive"], proof["snapshot_uuid"]) != proof["archive_id"]:
+            return None
+    except (KeyError, TypeError, ValueError, OSError, subprocess.CalledProcessError):
+        return None
+    return proof
+
+
+def expected_create_command(binary, source, archive, uuid, policy):
+    """The exact Borg invocation allowed to justify a realm producer proof."""
+    return [
+        binary, "create", "--json", "--quick-stats",
+        "--files-cache", "ctime,size,inode", "--files-changed", "ctime",
+        "--compression", "auto,zstd,1", "--lock-wait", "60",
+        "--comment", "sinnix-snapshot-v1:" + uuid,
+        *(part for pattern in policy["borg_excludes"] for part in ("--exclude", pattern)),
+        "::" + archive, str(source).rstrip("/") + "/./",
+    ]
+
+
+def record_create(source, archive, policy_path, create_stats):
+    policy = json.loads(Path(policy_path).read_text())
+    policy_hash = policy_identity(policy_path, require_borg_excludes=True)
+    if policy.get("producer_contract") != REALM_PRODUCER_CONTRACT:
+        raise ValueError("unrecognized producer contract")
+    uuid, generation, subvolume_id = snapshot_details(source)
+    created = create_stats["archive"]
+    command = created["command_line"]
+    if (
+        not isinstance(command, list)
+        or not command
+        or command != expected_create_command(command[0], source, archive, uuid, policy)
+        or created["name"] != archive
+    ):
+        raise ValueError("Borg create command differs from declared producer contract")
+    archive_id = archive_identity(archive, uuid)
+    if created["id"] != archive_id:
+        raise ValueError("created archive identity changed")
+    return {
+        "producer_contract": REALM_PRODUCER_CONTRACT,
+        "snapshot_uuid": uuid,
+        "generation": generation,
+        "subvolume_id": subvolume_id,
+        "archive": archive,
+        "archive_id": archive_id,
+        "policy_sha256": policy_hash,
+        "command_line": command,
+        "command_sha256": hashlib.sha256(json.dumps(command).encode()).hexdigest(),
+        "create_original_bytes": created["stats"]["original_size"],
+        "created_epoch": int(time.time()),
+    }
+
+
+def verify_created(source, archive, uuid, policy_path, receipt_path):
+    started = time.monotonic()
+    policy = json.loads(Path(policy_path).read_text())
+    policy_hash = policy_identity(policy_path, require_borg_excludes=True)
+    receipt = json.loads(Path(receipt_path).read_text())
+    details = snapshot_details(source)
+    if (
+        policy.get("producer_contract") != REALM_PRODUCER_CONTRACT
+        or receipt["producer_contract"] != REALM_PRODUCER_CONTRACT
+        or details != (
+            receipt["snapshot_uuid"], receipt["generation"], receipt["subvolume_id"]
+        )
+        or uuid != details[0]
+        or receipt["archive"] != archive
+        or receipt["policy_sha256"] != policy_hash
+        or not isinstance(receipt["command_line"], list)
+        or not receipt["command_line"]
+        or receipt["command_line"] != expected_create_command(
+            receipt["command_line"][0], source, archive, uuid, policy
+        )
+        or receipt["command_sha256"] != hashlib.sha256(
+            json.dumps(receipt["command_line"]).encode()
+        ).hexdigest()
+    ):
+        raise ValueError("creation receipt does not bind this snapshot and policy")
+    archive_id = archive_identity(archive, uuid)
+    if archive_id != receipt["archive_id"]:
+        raise ValueError("creation receipt archive identity changed")
+    return {
+        "archive": archive,
+        "archive_id": archive_id,
+        "snapshot_uuid": uuid,
+        "generation": details[1],
+        "subvolume_id": details[2],
+        "policy_sha256": policy_hash,
+        "proof_mode": "created",
+        "producer": REALM_PRODUCER_CONTRACT,
+        "create_receipt_sha256": hashlib.sha256(Path(receipt_path).read_bytes()).hexdigest(),
+        "create_original_bytes": receipt["create_original_bytes"],
+        "create_seconds": receipt.get("create_seconds", 0),
+        "source_hashed_bytes": 0,
+        "archive_content_verified_bytes": 0,
+        "verification_seconds": round(time.monotonic() - started, 3),
+    }
+
+
+def audit_latest(marker, snapshot_directory, policy_path):
+    started = time.monotonic()
+    marker_bytes = Path(marker).read_bytes()
+    fields = read_marker_fields(marker)
+    proof = json.loads(fields["coverage"])
+    if proof["policy_sha256"] != policy_identity(policy_path, require_borg_excludes=True):
+        raise ValueError("acknowledged archive uses another coverage policy")
+    source = Path(snapshot_directory) / fields["snapshot"]
+    details = snapshot_details(source)
+    if details != (
+        proof["snapshot_uuid"], int(fields["generation"]), int(fields["subvolume_id"])
+    ):
+        raise ValueError("acknowledged snapshot identity changed")
+    archive = fields["archive"]
+    if archive != proof["archive"] or archive_identity(archive, details[0]) != proof["archive_id"]:
+        raise ValueError("acknowledged archive identity changed")
+    noncanonical, chrome_extension_caches = decode_policy(
+        json.loads(Path(policy_path).read_text())
+    )
+    result = verify(source, archive, noncanonical, chrome_extension_caches)
+    if (
+        Path(marker).read_bytes() != marker_bytes
+        or snapshot_details(source) != details
+        or archive_identity(archive, details[0]) != proof["archive_id"]
+    ):
+        raise ValueError("acknowledged archive changed during full audit")
+    return result | {
+        "audit_mode": "independent_full",
+        "archive": archive,
+        "archive_id": proof["archive_id"],
+        "snapshot_uuid": details[0],
+        "policy_sha256": proof["policy_sha256"],
+        "audited_epoch": int(time.time()),
+        "verification_seconds": round(time.monotonic() - started, 3),
+    }
+
+
+def audit_status(receipt, policy_path, max_age):
+    try:
+        audit = json.loads(Path(receipt).read_text())
+        age = int(time.time()) - audit["audited_epoch"]
+        if (
+            audit["audit_mode"] != "independent_full"
+            or audit["policy_sha256"] != policy_identity(
+                policy_path, require_borg_excludes=True
+            )
+            or age < 0 or age > max_age
+        ):
+            raise ValueError("independent full audit overdue")
+    except FileNotFoundError as error:
+        raise ValueError("independent full audit has not completed") from error
+    return age
 
 
 class JsonStream:
@@ -490,6 +691,7 @@ def verify(source, archive, noncanonical, chrome_extension_caches=False):
     hashed = set()
     hardlinks = {}
     digest = hashlib.sha256()
+    hashed_bytes = 0
     # Only names that Borg cannot spell need the fallback, so the index stays
     # empty on an ordinary tree and an exact match always wins.
     lossy_index = {}
@@ -531,6 +733,7 @@ def verify(source, archive, noncanonical, chrome_extension_caches=False):
         if checksum != item["sha256"] or item["size"] != expected[path].st_size:
             raise ValueError(f"archive content mismatch: {path!r}")
         hashed.add(path)
+        hashed_bytes += expected[path].st_size
         digest.update(json.dumps([path, checksum], ensure_ascii=True).encode())
     for path, target in hardlinks.items():
         if target not in hashed:
@@ -541,6 +744,8 @@ def verify(source, archive, noncanonical, chrome_extension_caches=False):
     return {
         "canonical_entries": len(expected),
         "content_sha256": digest.hexdigest(),
+        "source_hashed_bytes": hashed_bytes,
+        "archive_content_verified_bytes": hashed_bytes,
         "noncanonical_roots": omitted_roots,
         "unarchivable_entries": unarchivable,
         "nested_subvolume_stubs": nested_stubs,
@@ -551,6 +756,11 @@ def decode_policy(policy):
     if isinstance(policy, list):
         return policy, False
     if isinstance(policy, dict):
+        excludes = policy.get("borg_excludes", [])
+        if not isinstance(excludes, list) or any(
+            not isinstance(pattern, str) for pattern in excludes
+        ):
+            raise ValueError("invalid Borg exclusion policy")
         return policy["noncanonical"], policy.get("chrome_extension_caches", False)
     raise ValueError("invalid coverage policy")
 
@@ -567,6 +777,31 @@ def main():
     check.add_argument("archive")
     check.add_argument("uuid")
     check.add_argument("policy")
+    check.add_argument("--mode", choices=("full", "created"), default="full")
+    check.add_argument("--latest-marker")
+    check.add_argument("--snapshot-directory")
+    plan = sub.add_parser("proof-mode")
+    plan.add_argument("latest_marker")
+    plan.add_argument("snapshot_directory")
+    plan.add_argument("policy")
+    created = sub.add_parser("record-create")
+    created.add_argument("source")
+    created.add_argument("archive")
+    created.add_argument("policy")
+    resumed = sub.add_parser("verify-created")
+    resumed.add_argument("source")
+    resumed.add_argument("archive")
+    resumed.add_argument("uuid")
+    resumed.add_argument("policy")
+    resumed.add_argument("receipt")
+    audit = sub.add_parser("audit")
+    audit.add_argument("latest_marker")
+    audit.add_argument("snapshot_directory")
+    audit.add_argument("policy")
+    status = sub.add_parser("audit-status")
+    status.add_argument("receipt")
+    status.add_argument("policy")
+    status.add_argument("max_age", type=int)
     select = sub.add_parser("select")
     select.add_argument("directory")
     select.add_argument("glob")
@@ -615,17 +850,74 @@ def main():
         latest = read_latest_epoch(args.latest_marker)
         if latest is not None and snapshot_epoch(args.snapshot) <= latest:
             return 1
+    elif args.command == "proof-mode":
+        print(
+            "created" if previous_proof(
+                args.latest_marker,
+                policy_identity(args.policy, require_borg_excludes=True),
+                int(time.time()),
+                args.snapshot_directory,
+            ) is not None else "full"
+        )
+    elif args.command == "record-create":
+        print(json.dumps(record_create(
+            args.source, args.archive, args.policy, json.load(sys.stdin)
+        )))
+    elif args.command == "verify-created":
+        print(json.dumps(verify_created(
+            args.source, args.archive, args.uuid, args.policy, args.receipt
+        )))
+    elif args.command == "audit":
+        print(json.dumps(audit_latest(
+            args.latest_marker, args.snapshot_directory, args.policy
+        )))
+    elif args.command == "audit-status":
+        print(f"independent_full_audit_age_seconds={audit_status(args.receipt, args.policy, args.max_age)}")
     else:
+        started = time.monotonic()
+        now = int(time.time())
+        policy_hash = policy_identity(
+            args.policy, require_borg_excludes=args.mode == "created"
+        )
+        if args.mode == "created":
+            if not args.latest_marker or not args.snapshot_directory:
+                raise ValueError("created proof requires a verified predecessor")
+            previous = previous_proof(
+                args.latest_marker, policy_hash, now, args.snapshot_directory
+            )
+            if previous is None:
+                raise ValueError("created proof has no current verified predecessor")
+            if snapshot_details(args.source)[0] != args.uuid:
+                raise ValueError("snapshot UUID changed during created proof")
         archive_id = archive_identity(args.archive, args.uuid)
-        noncanonical, chrome_extension_caches = decode_policy(
-            json.loads(Path(args.policy).read_text())
-        )
-        result = verify(
-            args.source,
-            args.archive,
-            noncanonical,
-            chrome_extension_caches,
-        )
+        if args.mode == "full":
+            noncanonical, chrome_extension_caches = decode_policy(
+                json.loads(Path(args.policy).read_text())
+            )
+            result = verify(
+                args.source,
+                args.archive,
+                noncanonical,
+                chrome_extension_caches,
+            )
+            full_epoch = now
+            full_content_hash = result["content_sha256"]
+        else:
+            result = {
+                "source_hashed_bytes": 0,
+                "archive_content_verified_bytes": 0,
+                "producer": "successful_borg_create_v1",
+                "previous_archive_id": previous["archive_id"],
+                "previous_proof_sha256": hashlib.sha256(
+                    json.dumps(previous, sort_keys=True, separators=(",", ":")).encode()
+                ).hexdigest(),
+            }
+            full_epoch = previous["full_proof_epoch"]
+            full_content_hash = previous["full_proof_content_sha256"]
+            if previous_proof(
+                args.latest_marker, policy_hash, int(time.time()), args.snapshot_directory
+            ) != previous:
+                raise ValueError("verified predecessor changed during created proof")
         if archive_identity(args.archive, args.uuid) != archive_id:
             raise ValueError("archive changed during verification")
         print(
@@ -635,6 +927,11 @@ def main():
                     "snapshot_uuid": args.uuid,
                     "archive_id": archive_id,
                     "archive": args.archive,
+                    "proof_mode": args.mode,
+                    "policy_sha256": policy_hash,
+                    "full_proof_epoch": full_epoch,
+                    "full_proof_content_sha256": full_content_hash,
+                    "verification_seconds": round(time.monotonic() - started, 3),
                 }
             )
         )
