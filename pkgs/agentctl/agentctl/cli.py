@@ -22,7 +22,7 @@ Exit status, the one table for the package:
   1  refused (validation, policy, a missing object) or the action failed
   2  usage
   3  a tool agentctl drives failed (pueue, wt, gh, git, bd, systemd)
-  4  the waited job (``job wait``, ``job start --wait``) did not succeed
+  4  the waited job (``job wait``, ``job start --wait``, ``job fire --wait``) did not succeed
 """
 
 from __future__ import annotations
@@ -177,6 +177,8 @@ def parser() -> argparse.ArgumentParser:
     )
     fire.add_argument("target", nargs="+", metavar="[project] operation")
     _project_option(fire)
+    fire.add_argument("--wait", action="store_true")
+    fire.add_argument("--timeout-seconds", type=int, default=DEFAULT_WAIT_SECONDS)
     _output_arguments(fire)
     listing = job_verbs.add_parser(
         "list", help=f"the newest {DEFAULT_JOB_ROWS} tasks, newest first"
@@ -473,12 +475,25 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         if len(rest) != 1:
             raise JobError("job fire needs exactly one operation")
         fired = launch.fire(config, project, _operation(project, rest[0]))
+        if fired.get("fired") and arguments.wait:
+            waited = launch.wait(
+                fired["job_id"],
+                timeout_seconds=arguments.timeout_seconds,
+                reference=fired.get("reference"),
+            )
+            fired = {**fired, **waited}
         text = (
             out.job_line(fired)
             if fired.get("fired")
             else f"{fired['label']} not fired: task(s) {fired['active']} still active"
         )
         out.write(fired, text)
+        if fired.get("terminal"):
+            return (
+                EXIT_OK
+                if fired.get("phase") == "succeeded"
+                else EXIT_JOB_NOT_SUCCEEDED
+            )
         return EXIT_OK
     if verb == "list":
         rows = launch.list_jobs(arguments.project)

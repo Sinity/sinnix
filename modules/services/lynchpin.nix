@@ -178,7 +178,7 @@ mkServiceModule {
                 surface = config.sinnix.runtime.surfaces.${unitName};
               }
               {
-                execStart = "${scriptPkgs.agentctl}/bin/agentctl job start lynchpin ${job.operation} --wait";
+                execStart = "${scriptPkgs.agentctl}/bin/agentctl job fire lynchpin ${job.operation} --wait";
                 user = "sinity";
                 serviceConfig = {
                   Group = "users";
