@@ -7,6 +7,10 @@
   scriptPkgs,
   borgDrainStateRoot,
   borgIntegrityReceipt,
+  realmCoverageAuditReceipt,
+  realmSnapshots,
+  realmCoveragePolicy,
+  snapshotCoverage,
   btrfsImageRoot,
   btrfsImageMinBytes,
   borgRepoPersist,
@@ -135,6 +139,42 @@
       # per-process-tree.
       exec 9>&-
       ${scriptPkgs.sinnix-borg-drill}/bin/sinnix-borg-drill
+    '';
+  })
+
+  # The shared Borg lock keeps the selected acknowledged snapshot from being
+  # pruned by a drain while this independent full comparison runs.
+  (mkBackupJob "borgbackup-coverage-audit-realm" {
+    description = "Independently compare one acknowledged realm snapshot with Borg";
+    unit = {
+      after = [ "realm.mount" outerRealmMountUnit ];
+      requires = [ "realm.mount" outerRealmMountUnit ];
+    };
+    serviceConfig = {
+      TimeoutStartSec = "24h";
+      TimeoutStopSec = "15s";
+    };
+    timer = {
+      # A missed lock window retries the next day; a successful comparison
+      # makes the other daily wakes no-ops until its seven-day age expires.
+      onCalendar = "*-*-* 04:50:00";
+      persistent = false;
+    };
+    path = with pkgs; [ borgbackup btrfs-progs coreutils util-linux ];
+    script = ''
+      set -euo pipefail
+      ${mkBorgCommonScript borgRepoRealm}
+      if ${snapshotCoverage} audit-status ${lib.escapeShellArg realmCoverageAuditReceipt} \
+        ${realmCoveragePolicy} 604800 >/dev/null 2>&1; then
+        exit 0
+      fi
+      acquire_borg_global_lock_or_fail "realm independent full audit"
+      install -d -m 0755 ${lib.escapeShellArg borgDrainStateRoot}
+      audit="$(${snapshotCoverage} audit \
+        ${lib.escapeShellArg "${borgDrainStateRoot}/realm.latest-archived"} \
+        ${lib.escapeShellArg realmSnapshots} ${realmCoveragePolicy})"
+      printf '%s\n' "$audit" | publish_backup_marker ${lib.escapeShellArg realmCoverageAuditReceipt}
+      echo "backup_phase=independent_full_audit label=realm $(printf '%s' "$audit" | ${pkgs.jq}/bin/jq -r '"elapsed_seconds=\(.verification_seconds) source_hashed_bytes=\(.source_hashed_bytes) archive_content_verified_bytes=\(.archive_content_verified_bytes)"')"
     '';
   })
 
