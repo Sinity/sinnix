@@ -85,10 +85,12 @@ def test_git_observation_is_read_only_and_fails_closed(
 
     monkeypatch.setattr(run_module.subprocess, "run", probe)
 
+    monkeypatch.setattr("agentctl.content_identity.content_manifest", lambda _path: {"schema_version": 1, "sha256": "fixture"})
     observed = run_module.git_observation(tmp_path, observed_at="2026-09-11T00:00:00Z")
 
     assert observed == {
         "observed_at": "2026-09-11T00:00:00Z",
+        "content_manifest": {"schema_version": 1, "sha256": "fixture"},
         "head": "head",
         "tree": "tree",
         "dirty": True,

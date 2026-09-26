@@ -197,12 +197,16 @@ def git_observation(cwd: Path, *, observed_at: str | None = None) -> dict[str, A
         )
         if error is not None
     ]
+    from .content_identity import content_manifest
+
+    content = content_manifest(cwd) if dirty is True else None
     return {
         "observed_at": observed_at
         or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "head": head,
         "tree": tree,
         "dirty": dirty,
+        "content_manifest": content,
         "status": "observed" if not errors else "unavailable",
         "reason": None if not errors else "git_" + "_".join(errors) + "_unavailable",
     }
@@ -218,6 +222,12 @@ def execution_receipt(
     same = all(
         start.get(field) == end.get(field) for field in ("head", "tree", "dirty")
     )
+    content_start = start.get("content_manifest")
+    content_end = end.get("content_manifest")
+    if isinstance(content_start, Mapping) or isinstance(content_end, Mapping):
+        same = same and isinstance(content_start, Mapping) and isinstance(content_end, Mapping)
+        if isinstance(content_start, Mapping) and isinstance(content_end, Mapping):
+            same = same and content_start.get("sha256") == content_end.get("sha256")
     if not available:
         binding = "unavailable"
         reason = "git_observation_unavailable"
@@ -232,6 +242,7 @@ def execution_receipt(
         "start": dict(start),
         "end": dict(end),
         "binding": binding,
+        "immutable_execution_attestation": None,
         "reason": reason,
     }
 
@@ -645,6 +656,19 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
         "pool": pool,
         "systemd_result": properties.get("Result"),
         "execution_receipt": execution_receipt(start_git, end_git),
+        "execution_evidence": {
+            "schema_version": 1,
+            "selector": list(launch.get("argv") or ()),
+            "phase": "unit_lifecycle",
+            "command_execution_observed": None,
+            "result": {"outcome": outcome.value, "exit_code": status},
+            "environment_identity": hashlib.sha256(
+                json.dumps(launch.get("environment") or {}, sort_keys=True).encode()
+            ).hexdigest(),
+            "environment_identity_method": "sha256 of declared launch environment JSON",
+            "published_artifact_refs": [],
+            "coverage_gaps": ["Inner provisioning, collection, test and product phases require owner stage records."],
+        },
     }
     if scratch_dir is not None:
         # Measured now, while the unit has exited and nothing else writes
