@@ -63,15 +63,15 @@ generated private analyses in them. Synthetic fixtures stay neutral.
 
 Load `agent-runtime` before any nontrivial AgentCTL job or batch work—query,
 start, monitor, retry, resume, land, cancel, or clean. Load `orchestrate` before
-parallel agent work. The skill, `/realm/project/sinnix/docs/agentctl.md`, the
-project descriptor, and `agentctl <verb> --help` define the installed command
-flow. On a CLI error, read the exact error and consult those sources before
-correcting the command; never retry guessed syntax or repeat a mutating command
-whose first result is unclear.
+parallel agent work. `agent-runtime`, `/realm/project/sinnix/docs/agentctl.md`,
+the project descriptor, and `agentctl <verb> --help` define installed syntax.
+On error, read the exact message and consult those sources before correcting a
+command; never guess syntax or repeat a mutation whose result is unclear.
 
 - Short foreground checks run directly. Detached, queued, resource-heavy,
   and shared work runs through declared project operations:
-  `agentctl job start <project> <operation> [--workspace <path>] [--wait]`.
+  `agentctl job start <project> <operation> [AgentCTL options] [-- <declared operation args>]`.
+  Put AgentCTL options before `--`; pass only declared parameters after it.
 - Native agents handle investigation, bounded help, and cohesive implementation
   in the shared checkout with disjoint write scopes; the coordinator commits
   the result. AgentCTL batches integrate independent isolated groups; external
