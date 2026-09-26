@@ -134,6 +134,17 @@ mkServiceModule {
     }:
     let
       polyloguePkg = pkgs.polylogue;
+      defaultSourceNames = [
+        "claude-code"
+        "claude-code-todos"
+        "claude-code-history"
+        "codex"
+        "codex-state"
+        "codex-memories"
+        "gemini-cli"
+        "hermes"
+        "antigravity"
+      ];
       # One source of truth for the daemon's memory ceiling, derived from a
       # single budget knob and used both for upstream's own service.memory*
       # options and for the runtime surface declaration, so the inventory
@@ -238,8 +249,7 @@ mkServiceModule {
             daemon = {
               debounce-s = 30;
               # The archive inbox links point at these external export roots.
-              # Watch the real roots so a fresh archive can acquire them after
-              # the old archive and its inbox are retained as a rollback copy.
+              # Watch the real roots so a fresh archive can acquire exports.
               watch = [
                 "/realm/accounts/chatgpt"
                 "/realm/accounts/claude"
@@ -272,6 +282,7 @@ mkServiceModule {
             manager = "user";
           })
           // {
+            ExecStart = lib.mkForce "${polyloguePkg}/bin/polylogued run ${lib.concatMapStringsSep " " (name: "--default-source ${name}") defaultSourceNames}";
             # The upstream unit does not pass its rendered TOML path to the
             # daemon process. Keep the service's startup-bound archive root
             # aligned with the generated user configuration.
