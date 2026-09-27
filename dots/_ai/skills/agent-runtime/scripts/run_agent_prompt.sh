@@ -96,13 +96,24 @@ done
   echo "output schema is unreadable: $output_schema" >&2
   exit 2
 }
-# Only codex and claude carry a native session reference this adapter can hand
-# back. Every other backend would start a fresh session with the caller still
-# believing the earlier context was restored, so a resume request it cannot
-# honour is a refusal, never a silent downgrade.
-if [[ -n $resume_session_id && $agent != codex && $agent != claude ]]; then
-  echo "$agent cannot resume a native session; drop --resume-session-id" >&2
-  exit 2
+# Keep native-resume admission in agentctl's backend capability contract. A
+# backend without this capability must refuse instead of starting fresh while
+# the caller believes its prior context was restored.
+if [[ -n $resume_session_id ]]; then
+  python3 - "$agent" <<'PY'
+import sys
+
+from agentctl.backend_capabilities import BACKEND_CAPABILITIES
+
+backend = sys.argv[1]
+capabilities = BACKEND_CAPABILITIES.get(backend)
+if capabilities is None or not capabilities.native_session_resume:
+    print(
+        f"{backend} cannot resume a native session; drop --resume-session-id",
+        file=sys.stderr,
+    )
+    raise SystemExit(2)
+PY
 fi
 mkdir -p "$(dirname "$last_file")"
 # The contract runner keeps the private prompt input alive for the duration of

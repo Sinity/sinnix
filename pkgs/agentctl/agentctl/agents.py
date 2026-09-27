@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 from . import launch, pueue, results
+from .backend_capabilities import BACKEND_CAPABILITIES
 from .checkout import workspace_of, worktree_path
 from .config import Config
 from .limits import MAX_AGENT_TIMEOUT_SECONDS
@@ -33,7 +34,11 @@ RESTRICTED_KINDS = frozenset({"worker", "resume", "review"})
 # These backends implement the schema-to-result-file contract used by batch
 # workers and landing reviewers. The remaining interactive backends can still
 # run unstructured prompts, but must not be admitted for a typed result.
-STRUCTURED_RESULT_BACKENDS = frozenset({"claude", "codex", "pi"})
+STRUCTURED_RESULT_BACKENDS = frozenset(
+    backend
+    for backend, capabilities in BACKEND_CAPABILITIES.items()
+    if capabilities.structured_results
+)
 BD_SHIM = """#!/bin/sh
 # agentctl: agents read Beads and never write them.
 self=$(dirname "$0")

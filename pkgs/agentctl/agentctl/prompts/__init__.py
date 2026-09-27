@@ -17,6 +17,7 @@ from importlib import resources
 from pathlib import Path
 from typing import Any, Mapping, Protocol, Sequence
 
+from ..backend_capabilities import BACKEND_CAPABILITIES, supported_backends
 from ..limits import CALL_TIMEOUT_SECONDS
 from ..projects import ProjectAdapter
 
@@ -52,13 +53,6 @@ MODEL_ALIASES: dict[str, tuple[str, str]] = {
     "terra": ("codex", "gpt-6-sol"),
     "luna": ("codex", "gpt-6-luna"),
     "astra": ("codex", "gpt-6-astra"),
-}
-BACKEND_MODEL_PREFIXES = {
-    "codex": "gpt-",
-    "claude": "claude-",
-    "gemini": "gemini-",
-    "antigravity": "gemini-",
-    "grok": "grok-",
 }
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9._/-]+")
 _SUBJECT_PREFIXES = {"bug": "fix", "feature": "feat"}
@@ -292,21 +286,23 @@ class PromptConfig:
         ):
             resolved = model
         elif not any(
-            model.startswith(prefix) for prefix in BACKEND_MODEL_PREFIXES.values()
+            model.startswith(item.model_prefix)
+            for item in BACKEND_CAPABILITIES.values()
         ):
             raise PromptError(f"unknown model alias {model!r}; valid aliases: {valid}")
         else:
             resolved = model
-        expected_prefix = BACKEND_MODEL_PREFIXES.get(backend)
-        if expected_prefix is None:
-            valid_backends = ", ".join(sorted(BACKEND_MODEL_PREFIXES))
+        capabilities = BACKEND_CAPABILITIES.get(backend)
+        if capabilities is None:
+            valid_backends = ", ".join(supported_backends())
             raise PromptError(
                 f"unsupported backend {backend!r}; valid backends: {valid_backends}"
             )
         known_model = any(
-            resolved.startswith(prefix) for prefix in BACKEND_MODEL_PREFIXES.values()
+            resolved.startswith(item.model_prefix)
+            for item in BACKEND_CAPABILITIES.values()
         )
-        if known_model and not resolved.startswith(expected_prefix):
+        if known_model and not resolved.startswith(capabilities.model_prefix):
             raise PromptError(
                 f"model {resolved!r} is incompatible with backend {backend!r}"
             )

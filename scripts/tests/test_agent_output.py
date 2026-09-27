@@ -27,7 +27,17 @@ class NativeOutputTest(unittest.TestCase):
         self.root = Path(self.scratch.name)
         self.bin = self.root / "bin"
         self.bin.mkdir()
-        self.env = {**os.environ, "PATH": f"{self.bin}:{os.environ['PATH']}"}
+        self.env = {
+            **os.environ,
+            "PATH": f"{self.bin}:{os.environ['PATH']}",
+            "PYTHONPATH": os.pathsep.join(
+                (
+                    str(REPO / "pkgs/agentctl"),
+                    str(REPO / "pkgs/sinnix-lib"),
+                    os.environ.get("PYTHONPATH", ""),
+                )
+            ),
+        }
         self.result = self.root / "result.json"
 
     def executable(self, name, body):
@@ -81,6 +91,8 @@ class NativeOutputTest(unittest.TestCase):
             body
             or (
                 'printf "%s\\n" "$@" > "$PI_ARGS"\n'
+                'for last_arg do :; done\n'
+                'cat "${last_arg#@}" > "$PI_INPUT"\n'
                 'cat "$FIXTURE_STREAM"\n'
                 'exit "$FIXTURE_EXIT"\n'
             ),
@@ -99,7 +111,7 @@ class NativeOutputTest(unittest.TestCase):
             "--last-file",
             str(self.result),
             "--model",
-            "fixture-model",
+            "gpt-6-sol",
             "--reasoning-effort",
             "high",
         ]
@@ -113,6 +125,7 @@ class NativeOutputTest(unittest.TestCase):
             "FIXTURE_STREAM": str(stream),
             "FIXTURE_EXIT": str(exit_code),
             "PI_ARGS": str(self.root / "pi-args"),
+            "PI_INPUT": str(self.root / "pi-input"),
             "RELAY_FILE": str(stdout) if stdout else "",
         }
         if stdout is None:
@@ -221,8 +234,9 @@ class NativeOutputTest(unittest.TestCase):
         self.assertEqual(json.loads(self.result.read_text()), {"answer": "fixture"})
         argv = (self.root / "pi-args").read_text().splitlines()
         self.assertEqual(
-            argv[:6], ["--mode", "json", "--model", "fixture-model", "--thinking", "high"]
+            argv[:6], ["--mode", "json", "--model", "gpt-6-sol", "--thinking", "high"]
         )
+        self.assertIn('{"type":"object"}', (self.root / "pi-input").read_text())
         self.assertTrue(argv[-1].startswith("@"))
 
     def test_pi_rejects_non_json_terminal_assistant_message(self):

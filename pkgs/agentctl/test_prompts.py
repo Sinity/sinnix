@@ -226,6 +226,37 @@ def test_explicit_backend_model_effort_override_the_policy(project_root: Path) -
     ) == ("claude", "claude-opus-5", "medium")
 
 
+def test_pi_accepts_its_codex_provider_model_and_rejects_other_provider(
+    project_root: Path,
+) -> None:
+    config = PromptConfig.from_project(load_project_adapter(project_root))
+
+    snapshot = compile_worker_prompt(
+        "fx-solo",
+        project_id="fixture",
+        reader=reader(),
+        config=config,
+        backend="pi",
+        model="gpt-6-sol",
+        effort="high",
+    )
+
+    assert (
+        snapshot.dimensions.backend,
+        snapshot.dimensions.model,
+        snapshot.dimensions.effort,
+    ) == ("pi", "gpt-6-sol", "high")
+    with pytest.raises(PromptError, match="incompatible"):
+        compile_worker_prompt(
+            "fx-solo",
+            project_id="fixture",
+            reader=reader(),
+            config=config,
+            backend="pi",
+            model="claude-opus-5",
+        )
+
+
 @pytest.mark.parametrize(
     ("alias", "expected"),
     [

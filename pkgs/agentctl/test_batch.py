@@ -1283,6 +1283,25 @@ def test_resume_requeues_the_worker_and_a_landing_behind_it(
     )
 
 
+def test_pi_worker_admits_codex_model_effort_and_schema(harness: Harness) -> None:
+    run = harness.start("fx-solo", backend="pi", model="gpt-6-sol", effort="high")
+    worker = run["workers"][0]
+    task = harness.pueue.task(worker["task_id"])
+    argv = read_launch(harness.config, task)["argv"]
+
+    assert argv[argv.index("--agent") + 1] == "pi"
+    assert argv[argv.index("--model") + 1] == "gpt-6-sol"
+    assert argv[argv.index("--reasoning-effort") + 1] == "high"
+    schema_path = Path(argv[argv.index("--output-schema") + 1])
+    assert schema_path.is_file()
+    assert schema_path.name == "worker.schema.json"
+
+
+def test_unstructured_backend_is_refused_for_queued_worker(harness: Harness) -> None:
+    with pytest.raises(BatchRefusal, match="require structured results"):
+        harness.start("fx-solo", backend="gemini", model="gemini-3-pro")
+
+
 # ---------------------------------------------------------------- land
 
 
