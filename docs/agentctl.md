@@ -708,16 +708,22 @@ caller to supply one -- therefore runs in the project checkout in whatever
 state it is in, and its receipt names the operator's branch and uncommitted
 work rather than a candidate.
 
-`candidate` selects the tree: a worktree agentctl owns on
-`agentctl/candidate` under `[workspace] root`, created on first use and
-`reset --hard` to the project's `default_base` (fetched first when remote) at
-every launch. The job record and launch input carry
-`checkout = {kind, commit}`, so a receipt names the commit it ran against. A
+`candidate` selects a worktree owned by one launch on
+`agentctl/candidate-<launch-reference>` under `[workspace]` root. It is pinned
+to the project's `default_base` (fetched first when remote), so later launches
+cannot change its files while it is queued or running. The wrapper observes
+the checkout at execution and removes its worktree after publishing the
+terminal receipt. Its `.cache` moves to AgentCTL's private state and remains
+reachable at the original checkout path for verification receipts and testmon.
+A retry recreates that launch's tree at the same commit and reattaches its cache.
+The job record and launch input carry the requested commit; the execution
+receipt records the commit observed before and after the command. A
 `candidate` operation refuses a caller-supplied workspace, and
 `workspace.verify.focused` must not name one: a worker verifies its own
-worktree, not the base. It requires `[workspace]`. Because the tree keeps its
-untracked build and verification caches, `cache = "tree+environment"` reuse
-does not apply to it: `_tree_receipt` counts untracked files as dirty.
+worktree, not the base. It requires `[workspace]`. With
+`cache = "tree+environment"`, an active or completed matching job can be reused
+without creating another worktree. Completed reuse requires a matching
+execution receipt.
 
 ### `admission`: the envelope an operation expects
 

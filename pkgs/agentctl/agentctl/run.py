@@ -42,7 +42,8 @@ from typing import Any, Mapping, Sequence
 
 from sinnix_lib.atomic import atomic_publish
 
-from . import artifacts, pueue
+from . import artifacts, pueue, worktrunk
+from .checkout import CANDIDATE_BRANCH_PREFIX, CheckoutError, release_candidate_checkout
 from .launch_input import QueueInputError, read_input
 from .limits import SYSTEMCTL_TIMEOUT_SECONDS
 from .pueue import PueueError
@@ -225,7 +226,11 @@ def execution_receipt(
     content_start = start.get("content_manifest")
     content_end = end.get("content_manifest")
     if isinstance(content_start, Mapping) or isinstance(content_end, Mapping):
-        same = same and isinstance(content_start, Mapping) and isinstance(content_end, Mapping)
+        same = (
+            same
+            and isinstance(content_start, Mapping)
+            and isinstance(content_end, Mapping)
+        )
         if isinstance(content_start, Mapping) and isinstance(content_end, Mapping):
             same = same and content_start.get("sha256") == content_end.get("sha256")
     if not available:
@@ -512,6 +517,30 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
     )
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
+    checkout = launch.get("checkout")
+
+    def candidate_parts() -> tuple[Path, str, Path, str] | None:
+        if not isinstance(checkout, Mapping) or checkout.get("kind") != "candidate":
+            return None
+        root, branch, commit = (
+            checkout.get(key) for key in ("root", "branch", "commit")
+        )
+        path = Path(launch["working_directory"])
+        if (
+            not all(isinstance(value, str) for value in (root, branch, commit))
+            or not branch.startswith(CANDIDATE_BRANCH_PREFIX)
+            or path == Path(root)
+        ):
+            raise ValueError("invalid candidate checkout ownership")
+        return Path(root), branch, path, commit
+
+    def release_candidate() -> None:
+        try:
+            release_candidate_checkout(checkout, launch["working_directory"])
+        except (CheckoutError, worktrunk.WorktrunkError) as error:
+            with log_path.open("ab") as log:
+                log.write(f"candidate cleanup deferred: {error}\n".encode())
+
     def refused() -> int:
         record = {
             "outcome": "refused",
@@ -534,7 +563,58 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
                 **record,
             },
         )
+        release_candidate()
         return REFUSED_EXIT_CODE
+
+    parts = candidate_parts()
+    if parts is not None:
+        root, branch, path, commit = parts
+        try:
+            registered = worktrunk.worktrunk_find(root, branch)
+            if registered is None or registered.path is None:
+                retained = (
+                    checkout.get("cache_path")
+                    if isinstance(checkout, Mapping)
+                    else None
+                )
+                cache_path = Path(retained) if isinstance(retained, str) else None
+                stub = path / ".cache"
+                if path.exists():
+                    if (
+                        cache_path is None
+                        or not stub.is_symlink()
+                        or stub.resolve() != cache_path
+                    ):
+                        raise worktrunk.WorktrunkError("candidate path is occupied")
+                    stub.unlink()
+                    path.rmdir()
+                try:
+                    worktrunk.worktrunk_create(root, branch, path=path, base=commit)
+                except worktrunk.WorktrunkError:
+                    if (
+                        cache_path is not None
+                        and cache_path.is_dir()
+                        and not path.exists()
+                    ):
+                        path.mkdir()
+                        stub.symlink_to(cache_path, target_is_directory=True)
+                    raise
+                if cache_path is not None and cache_path.is_dir():
+                    if (path / ".cache").is_dir():
+                        shutil.rmtree(path / ".cache")
+                    (path / ".cache").symlink_to(cache_path, target_is_directory=True)
+            elif registered.path != path:
+                raise worktrunk.WorktrunkError(
+                    "candidate branch belongs to another path"
+                )
+            observed, error = _git_probe(path, "rev-parse", "HEAD")
+            if error or observed != commit:
+                raise worktrunk.WorktrunkError(
+                    "candidate checkout moved from its pinned commit"
+                )
+        except worktrunk.WorktrunkError as error:
+            log_path.write_text(f"candidate preparation failed: {error}\n")
+            return refused()
 
     if not Path(launch["working_directory"]).is_dir():
         log_path.write_text(
@@ -668,7 +748,9 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
             ).hexdigest(),
             "environment_identity_method": "sha256 of declared launch environment JSON",
             "published_artifact_refs": [],
-            "coverage_gaps": ["Inner provisioning, collection, test and product phases require owner stage records."],
+            "coverage_gaps": [
+                "Inner provisioning, collection, test and product phases require owner stage records."
+            ],
         },
     }
     if scratch_dir is not None:
@@ -687,6 +769,7 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
         mode=0o600,
     )
     append_event(spool_path, {**event, "phase": "finished", **record})
+    release_candidate()
     return status
 
 

@@ -15,7 +15,7 @@ from agentctl.config import Config, load_config
 from agentctl.launch import JobError
 from agentctl.launch_input import write_input
 from agentctl.projects import load_project_adapter
-from agentctl.pueue import PueueGroupError, Task
+from agentctl.pueue import PueueError, PueueGroupError, Task
 from agentctl.run import (
     CANCELLED_EXIT_CODE,
     REFUSED_EXIT_CODE,
@@ -25,6 +25,9 @@ from agentctl.run import (
     cancel_marker_for,
     outcome_path_for,
     unit_for,
+)
+from agentctl.run import (
+    main as run_main,
 )
 from conftest import FakePueue, read_launch, write_project
 
@@ -115,7 +118,7 @@ def test_an_argument_requiring_operation_is_refused_without_supplied_argv(
         )
     )
     project = load_project_adapter(project_root)
-    with pytest.raises(JobError, match="arguments = \"required\""):
+    with pytest.raises(JobError, match='arguments = "required"'):
         launch.start_operation(config, project, project.operation("check"))
     started = launch.start_operation(
         config, project, project.operation("check"), extra_argv=("--sel",)
@@ -907,9 +910,7 @@ def test_cancelling_a_queued_retry_keeps_the_previous_attempt_and_its_output(
 
     retried = launch.retry(started["job_id"], started["reference"])
     assert retried["phase"] == "queued"
-    cancelled = launch.cancel(
-        config, started["job_id"], reference=started["reference"]
-    )
+    cancelled = launch.cancel(config, started["job_id"], reference=started["reference"])
 
     assert cancelled["phase"] == "cancelled" and cancelled["started"] is False
     latest = launch.get_job(started["job_id"], config, started["reference"])
@@ -1026,9 +1027,7 @@ def test_cancel_racing_runner_start_does_not_fabricate_not_started(
     assert input_path is not None
     artifacts.begin(document, str(input_path))
 
-    cancelled = launch.cancel(
-        config, started["job_id"], reference=started["reference"]
-    )
+    cancelled = launch.cancel(config, started["job_id"], reference=started["reference"])
 
     assert cancelled.get("started") is not False
     assert cancelled["phase"] == "unresolved"
@@ -1440,6 +1439,9 @@ def test_a_candidate_operation_resolves_its_own_tree_without_a_workspace(
     checkout -- the operator's branch, ahead of the base and dirty -- and its
     receipt is not candidate evidence, which is the observed defect."""
     root, base = _candidate_project(tmp_path)
+    subprocess.run(
+        ["git", "-C", str(root), "branch", "agentctl/candidate", base], check=True
+    )
     config = Config(
         project_roots=(root,),
         agent_runner=root / "contract.md",
@@ -1454,24 +1456,32 @@ def test_a_candidate_operation_resolves_its_own_tree_without_a_workspace(
 
     assert fired["fired"] is True
     added = fake_pueue.added[0]
-    working = Path(added["working_directory"])
+    written = read_launch(config, fake_pueue.task(fired["job_id"]))
+    working = Path(written["working_directory"])
     assert working != root
     assert working.parent == tmp_path / "worktrees"
+    assert added["working_directory"] == root
     head = subprocess.check_output(
         ["git", "-C", str(working), "rev-parse", "HEAD"], text=True
     ).strip()
     assert head == base
-    written = read_launch(config, fake_pueue.task(fired["job_id"]))
-    assert written["checkout"] == {"kind": "candidate", "commit": base}
+    assert written["checkout"]["kind"] == "candidate"
+    assert written["checkout"]["commit"] == base
     assert written["working_directory"] == str(working)
 
 
-def test_a_candidate_operation_is_reset_to_the_base_on_every_launch(
-    fake_pueue: FakePueue, tmp_path: Path
+@pytest.mark.parametrize("phase", ["queued", "running"])
+@pytest.mark.parametrize("second_operation", ["corpus", "other"])
+def test_a_candidate_operation_keeps_each_launch_at_its_requested_commit(
+    fake_pueue: FakePueue, tmp_path: Path, phase: str, second_operation: str
 ) -> None:
-    """Breaks if the tree is created once and then reused as-is: whatever a
-    previous run committed or left modified becomes the next run's subject."""
+    """A second request cannot reset a queued or running launch's tree."""
     root, base = _candidate_project(tmp_path)
+    descriptor = root / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text()
+        + '\n[operations.other]\ndescription = "Other candidate"\nexec = ["true"]\npool = "normal"\ncheckout = "candidate"\n'
+    )
     config = Config(
         project_roots=(root,),
         agent_runner=root / "contract.md",
@@ -1482,18 +1492,227 @@ def test_a_candidate_operation_is_reset_to_the_base_on_every_launch(
     )
     project = load_project_adapter(root)
     first = launch.start_operation(config, project, project.operation("corpus"))
-    working = Path(fake_pueue.task(first["job_id"]).path)
-    (working / "marker").write_text("a previous run left this behind\n")
+    if phase == "queued":
+        fake_pueue.queue(first["job_id"])
+    first_input = read_launch(config, fake_pueue.task(first["job_id"]))
+    working = Path(first_input["working_directory"])
+    (working / "marker").write_text("A's private data\n")
+    (root / "operator-work.txt").write_text("B\n")
+    subprocess.run(["git", "-C", str(root), "add", "operator-work.txt"], check=True)
+    subprocess.run(["git", "-C", str(root), "commit", "-q", "-m", "B"], check=True)
+    b = subprocess.check_output(
+        ["git", "-C", str(root), "rev-parse", "HEAD"], text=True
+    ).strip()
+    subprocess.run(
+        ["git", "-C", str(root), "update-ref", "refs/remotes/origin/master", b],
+        check=True,
+    )
+    second = launch.start_operation(
+        config, project, project.operation(second_operation)
+    )
+    second_input = read_launch(config, fake_pueue.task(second["job_id"]))
 
-    launch.start_operation(config, project, project.operation("corpus"))
-
-    assert (working / "marker").read_text() == ""
+    assert second_input["working_directory"] != first_input["working_directory"]
+    assert second_input["checkout"]["commit"] == b
+    assert Path(second_input["working_directory"]).is_dir()
+    assert (working / "marker").read_text() == "A's private data\n"
     assert (
         subprocess.check_output(
             ["git", "-C", str(working), "rev-parse", "HEAD"], text=True
         ).strip()
         == base
     )
+
+
+def test_candidate_execution_receipt_names_actual_sha_and_releases_tree(
+    fake_pueue: FakePueue, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, base = _candidate_project(tmp_path)
+    config = Config(
+        project_roots=(root,),
+        agent_runner=root / "contract.md",
+        worker_contract=root / "contract.md",
+        event_spool=tmp_path / "events.jsonl",
+        state_dir=tmp_path / "state",
+        agentctl_executable="/fixture/agentctl",
+    )
+    project = load_project_adapter(root)
+    started = launch.start_operation(config, project, project.operation("corpus"))
+    task = fake_pueue.task(started["job_id"])
+    payload = read_launch(config, task)
+    path = Path(payload["working_directory"])
+    receipt = path / ".cache" / "verify" / "runs" / "fixture" / "run.json"
+    receipt.parent.mkdir(parents=True)
+    receipt.write_text('{"status":"passed"}\n')
+    graph = path / ".cache" / "testmon" / "testmondata"
+    graph.parent.mkdir(parents=True)
+    graph.write_bytes(b"fixture graph")
+    payload["argv"] = ["true"]
+    payload["pool"] = "bulk"
+    payload["environment"]["PATH"] = os.environ["PATH"]
+    input_path = Path(task.command.split()[-1])
+    write_input(input_path, payload)
+    monkeypatch.delenv("PUEUE_GROUP", raising=False)
+    monkeypatch.setattr("agentctl.run.unit_pool", lambda _pool: None)
+
+    assert run_main([str(input_path)]) == 0
+    outcome = json.loads(outcome_path_for(payload["log_path"]).read_text())
+    execution = outcome["execution_receipt"]
+    assert execution["binding"] == "unchanged_endpoints"
+    assert execution["start"]["head"] == execution["end"]["head"] == base
+    assert receipt.read_text() == '{"status":"passed"}\n'
+    assert graph.read_bytes() == b"fixture graph"
+    assert not (path / ".git").exists()
+    assert run_main([str(input_path)]) == 0
+    assert receipt.read_text() == '{"status":"passed"}\n'
+    assert graph.read_bytes() == b"fixture graph"
+    next_job = launch.start_operation(config, project, project.operation("corpus"))
+    next_path = Path(
+        read_launch(config, fake_pueue.task(next_job["job_id"]))["working_directory"]
+    )
+    assert next_path != path and next_path.is_dir()
+    assert not (next_path / ".cache" / "testmon" / "testmondata").exists()
+    assert receipt.read_text() == '{"status":"passed"}\n'
+
+
+def test_candidate_known_enqueue_failure_releases_tree_but_uncertain_add_retains_it(
+    fake_pueue: FakePueue, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, _ = _candidate_project(tmp_path)
+    config = Config(
+        project_roots=(root,),
+        agent_runner=root / "contract.md",
+        worker_contract=root / "contract.md",
+        event_spool=tmp_path / "events.jsonl",
+        state_dir=tmp_path / "state",
+        agentctl_executable="/fixture/agentctl",
+    )
+    project = load_project_adapter(root)
+    monkeypatch.setattr(
+        pueue, "add", lambda **_kwargs: (_ for _ in ()).throw(PueueGroupError("bulk"))
+    )
+    with pytest.raises(PueueGroupError):
+        launch.start_operation(config, project, project.operation("corpus"))
+    assert not list((tmp_path / "worktrees").glob("fixture-agentctl-candidate-*"))
+
+    monkeypatch.setattr(
+        pueue, "add", lambda **_kwargs: (_ for _ in ()).throw(PueueError("ack lost"))
+    )
+    with pytest.raises(launch.EnqueueUncertain):
+        launch.start_operation(config, project, project.operation("corpus"))
+    assert len(list((tmp_path / "worktrees").glob("fixture-agentctl-candidate-*"))) == 1
+
+
+def test_candidate_wrapper_refuses_a_tree_moved_to_another_sha(
+    fake_pueue: FakePueue, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, _ = _candidate_project(tmp_path)
+    config = Config(
+        project_roots=(root,),
+        agent_runner=root / "contract.md",
+        worker_contract=root / "contract.md",
+        event_spool=tmp_path / "events.jsonl",
+        state_dir=tmp_path / "state",
+        agentctl_executable="/fixture/agentctl",
+    )
+    project = load_project_adapter(root)
+    started = launch.start_operation(config, project, project.operation("corpus"))
+    task = fake_pueue.task(started["job_id"])
+    payload = read_launch(config, task)
+    input_path = Path(task.command.split()[-1])
+    subprocess.run(
+        ["git", "-C", payload["working_directory"], "reset", "--hard", "master"],
+        check=True,
+        capture_output=True,
+    )
+    monkeypatch.delenv("PUEUE_GROUP", raising=False)
+
+    assert run_main([str(input_path)]) == REFUSED_EXIT_CODE
+    outcome = json.loads(outcome_path_for(payload["log_path"]).read_text())
+    assert outcome["outcome"] == "refused"
+    assert "execution_receipt" not in outcome
+
+
+def test_candidate_cancelled_before_wrapper_start_releases_tree(
+    fake_pueue: FakePueue, tmp_path: Path
+) -> None:
+    root, _ = _candidate_project(tmp_path)
+    config = Config(
+        project_roots=(root,),
+        agent_runner=root / "contract.md",
+        worker_contract=root / "contract.md",
+        event_spool=tmp_path / "events.jsonl",
+        state_dir=tmp_path / "state",
+        agentctl_executable="/fixture/agentctl",
+    )
+    project = load_project_adapter(root)
+    started = launch.start_operation(config, project, project.operation("corpus"))
+    path = Path(
+        read_launch(config, fake_pueue.task(started["job_id"]))["working_directory"]
+    )
+    fake_pueue.queue(started["job_id"])
+    assert launch.cancel(config, started["job_id"])["phase"] == "cancelled"
+    assert not path.exists()
+
+
+def test_candidate_preparation_failure_does_not_enqueue_or_touch_an_active_tree(
+    fake_pueue: FakePueue, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, _ = _candidate_project(tmp_path)
+    config = Config(
+        project_roots=(root,),
+        agent_runner=root / "contract.md",
+        worker_contract=root / "contract.md",
+        event_spool=tmp_path / "events.jsonl",
+        state_dir=tmp_path / "state",
+        agentctl_executable="/fixture/agentctl",
+    )
+    project = load_project_adapter(root)
+    first = launch.start_operation(config, project, project.operation("corpus"))
+    path = Path(
+        read_launch(config, fake_pueue.task(first["job_id"]))["working_directory"]
+    )
+    marker = path / "marker"
+    marker.write_text("A\n")
+    monkeypatch.setattr(
+        launch,
+        "candidate_tree",
+        lambda *_args: (_ for _ in ()).throw(
+            launch.CheckoutError("fixture preparation failed")
+        ),
+    )
+
+    with pytest.raises(JobError, match="fixture preparation failed"):
+        launch.start_operation(config, project, project.operation("corpus"))
+    assert len(fake_pueue.added) == 1
+    assert marker.read_text() == "A\n"
+
+
+def test_candidate_cache_reuses_active_content_without_allocating_a_second_tree(
+    fake_pueue: FakePueue, tmp_path: Path
+) -> None:
+    root, _ = _candidate_project(tmp_path)
+    descriptor = root / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text().replace(
+            'checkout = "candidate"',
+            'checkout = "candidate"\ncache = "tree+environment"',
+        )
+    )
+    config = Config(
+        project_roots=(root,),
+        agent_runner=root / "contract.md",
+        worker_contract=root / "contract.md",
+        event_spool=tmp_path / "events.jsonl",
+        state_dir=tmp_path / "state",
+        agentctl_executable="/fixture/agentctl",
+    )
+    project = load_project_adapter(root)
+    first = launch.start_operation(config, project, project.operation("corpus"))
+    again = launch.start_operation(config, project, project.operation("corpus"))
+    assert again["job_id"] == first["job_id"]
+    assert again["reused"] is True
+    assert len(fake_pueue.added) == 1
 
 
 def test_a_candidate_operation_refuses_a_caller_supplied_workspace(

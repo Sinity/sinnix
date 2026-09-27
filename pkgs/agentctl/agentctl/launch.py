@@ -24,7 +24,14 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Iterator, Mapping, Sequence
 
 from . import artifacts, gitcmd, manifest, pools, pueue
-from .checkout import CheckoutError, candidate_tree
+from .checkout import (
+    CheckoutError,
+    base_commit,
+    candidate_branch,
+    candidate_tree,
+    release_candidate_checkout,
+    remove_candidate_tree,
+)
 from .config import Config
 from .launch_input import scratch_path, write_input
 from .limits import CALL_TIMEOUT_SECONDS, SHORT_ID, SYSTEMCTL_TIMEOUT_SECONDS
@@ -160,7 +167,19 @@ def _matching_task(
         if launch_input is None:
             continue
         if (
-            launch_input.get("working_directory") != str(working_directory)
+            (
+                operation.checkout != "candidate"
+                and launch_input.get("working_directory") != str(working_directory)
+            )
+            or (
+                operation.checkout == "candidate"
+                and (
+                    not isinstance(launch_input.get("checkout"), dict)
+                    or launch_input["checkout"].get("commit")
+                    != tree_receipt.get("head")
+                    or launch_input["checkout"].get("kind") != "candidate"
+                )
+            )
             or launch_input.get("tree_receipt") != dict(tree_receipt)
             or launch_input.get("environment_receipt") != dict(environment_receipt)
         ):
@@ -286,6 +305,7 @@ def enqueue(
     group: str,
     argv: Sequence[str],
     working_directory: Path,
+    queue_directory: Path | None = None,
     timeout_seconds: int,
     result_kind: str,
     environment: Mapping[str, str],
@@ -348,8 +368,8 @@ def enqueue(
         environment["AGENTCTL_ADMISSION_MEMORY_MIB"] = str(admission.memory_mib)
         launch["environment"] = environment
     if checkout is not None:
-        # Which tree agentctl chose and the commit it reset it to, so a
-        # receipt names the code it is evidence about.
+        # Requested tree and commit; execution observations decide the actual
+        # content named by a terminal receipt.
         launch["checkout"] = dict(checkout)
     if tree_receipt is not None:
         launch["tree_receipt"] = dict(tree_receipt)
@@ -375,7 +395,7 @@ def enqueue(
                 group=group,
                 label=label,
                 command=(QUEUE_RUN_EXECUTABLE, str(input_path)),
-                working_directory=working_directory,
+                working_directory=queue_directory or working_directory,
                 after=after,
                 stashed=stashed or hold is not None,
             )
@@ -691,11 +711,10 @@ def _working_directory(
                 "checkout; it does not take a workspace"
             )
         try:
-            return candidate_tree(project)
-        except (CheckoutError, WorktrunkError, BatchRefusal) as error:
+            return project.root, base_commit(project)
+        except (CheckoutError, BatchRefusal) as error:
             raise JobError(
-                f"{project.project_id}.{operation.name} could not resolve its "
-                f"candidate checkout: {error}"
+                f"{project.project_id}.{operation.name} could not resolve its candidate checkout: {error}"
             ) from error
     working_directory = (workspace or project.root).resolve()
     if operation.checkout == "default" and working_directory != project.root:
@@ -727,7 +746,7 @@ def _start_operation(
     )
     if operation.arguments == "required" and not extra_argv:
         raise JobError(
-            f"{project.project_id}.{operation.name} declares arguments = \"required\" "
+            f'{project.project_id}.{operation.name} declares arguments = "required" '
             "but no arguments were supplied"
         )
     if not working_directory.is_dir():
@@ -739,7 +758,15 @@ def _start_operation(
     tree_receipt = None
     environment_receipt = None
     if operation.cache == "tree+environment" and owner_request_key is None:
-        tree_receipt = _tree_receipt(working_directory)
+        tree_receipt = (
+            {
+                "head": candidate_commit,
+                "tree": _git(project.root, "rev-parse", f"{candidate_commit}^{{tree}}"),
+                "dirty": False,
+            }
+            if candidate_commit is not None
+            else _tree_receipt(working_directory)
+        )
         if tree_receipt["dirty"]:
             tree_receipt = None
         else:
@@ -765,6 +792,11 @@ def _start_operation(
                         if key in existing_input
                     },
                 }
+    reference = (
+        _owner_reference(owner_request_key)
+        if owner_request_key is not None
+        else _reference(label_for(project.project_id, operation.name))
+    )
     if owner_request_key is not None and operation.dependencies:
         # Persist the parent intent before any dependency can be submitted.
         # A crash here is uncertain, not permission to duplicate dependencies.
@@ -807,33 +839,50 @@ def _start_operation(
                 f"{project.project_id}.{dependency_name} did not return a task id"
             )
         dependency_ids.append(dependency_id)
-    started = enqueue(
-        config,
-        project=project,
-        operation=operation.name,
-        label=label_for(project.project_id, operation.name),
-        group=operation.pool,
-        argv=project.environment.command_for((*operation.command, *extra_argv)),
-        working_directory=working_directory,
-        timeout_seconds=operation.timeout_seconds,
-        result_kind=operation.result,
-        environment=environment,
-        scratch=operation.scratch,
-        admission=operation.admission,
-        checkout={"kind": operation.checkout, "commit": candidate_commit}
-        if candidate_commit is not None
-        else None,
-        after=dependency_ids,
-        reference=(
-            _owner_reference(owner_request_key)
-            if owner_request_key is not None
-            else None
-        ),
-        owner_request_key=owner_request_key,
-        request_digest=request_digest,
-        tree_receipt=tree_receipt,
-        environment_receipt=environment_receipt,
-    )
+    if candidate_commit is not None:
+        try:
+            working_directory = candidate_tree(project, reference, candidate_commit)
+        except (CheckoutError, WorktrunkError, BatchRefusal) as error:
+            raise JobError(
+                f"{project.project_id}.{operation.name} could not resolve its candidate checkout: {error}"
+            ) from error
+    try:
+        started = enqueue(
+            config,
+            project=project,
+            operation=operation.name,
+            label=label_for(project.project_id, operation.name),
+            group=operation.pool,
+            argv=project.environment.command_for((*operation.command, *extra_argv)),
+            working_directory=working_directory,
+            queue_directory=project.root if candidate_commit is not None else None,
+            timeout_seconds=operation.timeout_seconds,
+            result_kind=operation.result,
+            environment=environment,
+            scratch=operation.scratch,
+            admission=operation.admission,
+            checkout={
+                "kind": operation.checkout,
+                "commit": candidate_commit,
+                "root": str(project.root),
+                "branch": candidate_branch(reference),
+                "cache_path": str(config.state_dir / "candidate-cache" / reference),
+            }
+            if candidate_commit is not None
+            else None,
+            after=dependency_ids,
+            reference=reference,
+            owner_request_key=owner_request_key,
+            request_digest=request_digest,
+            tree_receipt=tree_receipt,
+            environment_receipt=environment_receipt,
+        )
+    except EnqueueUncertain:
+        raise
+    except Exception:
+        if candidate_commit is not None:
+            remove_candidate_tree(project, reference)
+        raise
     if tree_receipt is not None:
         started["tree_receipt"] = tree_receipt
     if environment_receipt is not None:
@@ -1217,6 +1266,13 @@ def _job_detail(
 ) -> dict[str, Any]:
     view = job_view(task)
     launch_input = _launch_input(config, task) or {}
+    if task.terminal and launch_input.get("checkout"):
+        try:
+            release_candidate_checkout(
+                launch_input.get("checkout"), launch_input.get("working_directory", "")
+            )
+        except (CheckoutError, WorktrunkError):
+            pass
     binding = launch_input.get("binding")
     if binding:
         view["binding"] = binding
@@ -1720,6 +1776,12 @@ def _cancel_not_started(
             )
         confirmed = dict(NOT_STARTED_CANCEL)
         _retain_disposition(config, task, confirmed, owned=owned)
+        try:
+            release_candidate_checkout(
+                document.get("checkout"), document.get("working_directory", "")
+            )
+        except (CheckoutError, WorktrunkError):
+            pass
         return _cancelled_not_started(view, confirmed)
     finally:
         if lock_handle is not None:
