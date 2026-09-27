@@ -140,12 +140,12 @@ class FakePueue:
                 task, status="Done", result="Killed", exit_code=None
             )
 
-    def restart(self, task_id: int) -> None:
+    def restart(self, task_id: int, *, stashed: bool = False) -> None:
         self.restarted.append(task_id)
         task = self._tasks[task_id]
         self._tasks[task_id] = replace(
             task,
-            status="Queued",
+            status="Stashed" if stashed else "Queued",
             result=None,
             exit_code=None,
             started_at=None,

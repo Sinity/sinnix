@@ -281,8 +281,12 @@ def test_pause_drains_running_tasks_and_resume_names_the_group(
 
 def test_restart_is_the_only_retry(stub_pueue: Path) -> None:
     pueue.restart(4)
+    pueue.restart(5, stashed=True)
 
-    assert _calls(stub_pueue) == [["restart", "--in-place", "4"]]
+    assert _calls(stub_pueue) == [
+        ["restart", "--in-place", "4"],
+        ["restart", "--in-place", "--stashed", "5"],
+    ]
 
 
 def test_remove_of_nothing_does_not_call_pueue(stub_pueue: Path) -> None:

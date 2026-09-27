@@ -908,7 +908,7 @@ def test_cancelling_a_queued_retry_keeps_the_previous_attempt_and_its_output(
     original_log = Path(written["log_path"]).read_bytes()
     original_result = Path(written["result_path"]).read_bytes()
 
-    retried = launch.retry(started["job_id"], started["reference"])
+    retried = launch.retry(config, started["job_id"], started["reference"])
     assert retried["phase"] == "queued"
     cancelled = launch.cancel(config, started["job_id"], reference=started["reference"])
 
@@ -1186,9 +1186,9 @@ def test_retry_is_pueue_restart_and_only_for_terminal_tasks(
     started = launch.start_operation(config, project, project.operation("check"))
 
     with pytest.raises(JobError, match="still running"):
-        launch.retry(started["job_id"])
+        launch.retry(config, started["job_id"])
     fake_pueue.fail(started["job_id"], exit_code=1)
-    retried = launch.retry(started["job_id"])
+    retried = launch.retry(config, started["job_id"])
 
     assert fake_pueue.restarted == [started["job_id"]]
     assert retried["phase"] == "queued"

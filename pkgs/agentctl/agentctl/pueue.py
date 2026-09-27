@@ -335,9 +335,9 @@ def kill(task_id: int) -> None:
     _run(["kill", str(task_id)])
 
 
-def restart(task_id: int) -> None:
+def restart(task_id: int, *, stashed: bool = False) -> None:
     """Re-run a terminal task in place: pueue's retry, so agentctl keeps none."""
-    _run(["restart", "--in-place", str(task_id)])
+    _run(["restart", "--in-place", *(["--stashed"] if stashed else []), str(task_id)])
 
 
 def remove(task_ids: Sequence[int]) -> None:

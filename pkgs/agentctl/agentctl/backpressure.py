@@ -227,7 +227,7 @@ def _pressure_complete(pressure: Mapping[str, float | None]) -> bool:
 
 
 def _can_reopen(
-    record: Mapping[str, Any], pressure: Mapping[str, float | None]
+    group: str, record: Mapping[str, Any], pressure: Mapping[str, float | None]
 ) -> bool:
     signals = record.get("signals")
     sources = (
@@ -238,6 +238,14 @@ def _can_reopen(
     # Old events had no signal. Require all readings known and quiet rather
     # than accidentally releasing after an invalid PSI read.
     sources = sources or tuple(CLOSE_ORDER)
+    sources = tuple(
+        dict.fromkeys(
+            (
+                *sources,
+                *(signal for signal in CLOSE_ORDER if group in CLOSE_ORDER[signal]),
+            )
+        )
+    )
     return _pressure_complete(pressure) and all(
         (value := _recovery_pressure(pressure, signal)) is not None
         and value < RESUME_BELOW
@@ -318,7 +326,7 @@ def tick(
     obsolete = [
         name
         for name in paused
-        if name in state.ours() and _can_reopen(state.pauses[name], pressure)
+        if name in state.ours() and _can_reopen(name, state.pauses[name], pressure)
     ]
     if obsolete:
         target = obsolete[0]

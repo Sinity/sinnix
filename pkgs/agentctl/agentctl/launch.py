@@ -405,15 +405,16 @@ def enqueue(
             raise
         except PueueError as error:
             raise EnqueueUncertain(reference, error) from error
-    # The task id goes back into the input so its artifacts can be found
-    # after pueue has forgotten the task.
-    launch["queue_task_id"] = task_id
-    write_input(input_path, launch)
-    if hold is not None:
-        append_event(
-            config.event_spool,
-            {"kind": "pool-hold", "action": "held", "task_id": task_id, **hold},
-        )
+        # Keep queue acknowledgement and the hold marker in the same admission
+        # transaction. A release between add and this write could enqueue a
+        # task while the stale local launch value restores its consumed hold.
+        launch["queue_task_id"] = task_id
+        write_input(input_path, launch)
+        if hold is not None:
+            append_event(
+                config.event_spool,
+                {"kind": "pool-hold", "action": "held", "task_id": task_id, **hold},
+            )
     task = pueue.task(task_id)
     return (
         job_view(task)
@@ -471,7 +472,12 @@ def _hold_of(config: Config, task: Task) -> dict[str, Any] | None:
         return None
     value = _launch_input(config, task)
     hold = value.get("hold") if value else None
-    if not isinstance(hold, Mapping) or hold.get("reason") != HOLD_REASON:
+    if (
+        not isinstance(hold, Mapping)
+        or hold.get("reason") != HOLD_REASON
+        or value.get("job_id") != launch_reference(task)
+        or value.get("pool") != task.group
+    ):
         return None
     return dict(hold)
 
@@ -487,12 +493,14 @@ def _consume_hold(config: Config, task: Task, expected: Mapping[str, Any]) -> bo
     if (
         path is None
         or value is None
-        or value.get("queue_task_id") != task.task_id
+        or value.get("job_id") != launch_reference(task)
+        or value.get("pool") != task.group
         or value.get("hold") != dict(expected)
     ):
         return False
     updated = dict(value)
     updated.pop("hold", None)
+    updated["queue_task_id"] = task.task_id
     write_input(path, updated)
     return True
 
@@ -1976,13 +1984,38 @@ def clean_terminal(config: Config) -> list[dict[str, Any]]:
     ]
 
 
-def retry(task_id: int, reference: str | None = None) -> dict[str, Any]:
-    """pueue's in-place restart: the same launch input runs again under the same id."""
-    task = addressed(task_id, reference)
-    if not task.terminal:
-        raise JobError(f"task {task.task_id} is still {task.status.lower()}")
-    pueue.restart(task.task_id)
-    return get_job(task.task_id)
+def retry(config: Config, task_id: int, reference: str | None = None) -> dict[str, Any]:
+    """Restart in place, applying the same cross-pool admission as a new launch."""
+    with admission_lock(config):
+        task = addressed(task_id, reference)
+        if not task.terminal:
+            raise JobError(f"task {task.task_id} is still {task.status.lower()}")
+        hold = _admission_hold(config, task.group, label=task.label)
+        if hold is not None:
+            value = _launch_input(config, task)
+            path = launch_input_path(task)
+            if (
+                value is None
+                or path is None
+                or value.get("job_id") != launch_reference(task)
+            ):
+                raise JobError(
+                    f"task {task.task_id} has no owned launch input for a held retry"
+                )
+            pueue.restart(task.task_id, stashed=True)
+            write_input(path, {**value, "queue_task_id": task.task_id, "hold": hold})
+            append_event(
+                config.event_spool,
+                {
+                    "kind": "pool-hold",
+                    "action": "held",
+                    "task_id": task.task_id,
+                    **hold,
+                },
+            )
+        else:
+            pueue.restart(task.task_id)
+    return get_job(task.task_id, config, reference)
 
 
 def find_task(

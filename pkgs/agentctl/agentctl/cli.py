@@ -587,7 +587,7 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         out.write(job, f"{out.job_line(job)}; cleaned")
         return EXIT_OK
     if verb == "retry":
-        job = launch.retry(arguments.job_id, arguments.reference)
+        job = launch.retry(config, arguments.job_id, arguments.reference)
         out.write(job, out.job_line(job))
         return EXIT_OK
     if verb == "wait":

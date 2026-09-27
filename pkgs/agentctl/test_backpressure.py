@@ -189,6 +189,33 @@ def test_signal_transition_reopens_excluded_group_before_closing_another(
     assert result["group"] == "pytest"
 
 
+def test_signal_transition_keeps_group_closed_while_new_signal_still_requires_it(
+    monkeypatch, tmp_path
+) -> None:
+    """An I/O pause cannot reopen pytest-heavy after memory becomes active."""
+    result, calls = _tick(
+        monkeypatch,
+        {
+            "io_full_avg10": 1.0,
+            "io_full_avg60": 1.0,
+            "memory_full_avg10": 30.0,
+            "memory_full_avg60": 30.0,
+        },
+        {
+            "agent": "Running",
+            "pytest-heavy": "Paused",
+            "pytest": "Running",
+            "normal": "Running",
+            "bulk": "Running",
+        },
+        spool=_spool(tmp_path, {**_ours("pytest-heavy"), "signal": "io"}),
+    )
+
+    assert calls == [("pause", "pytest")]
+    assert result["action"] == "closed"
+    assert result["group"] == "pytest"
+
+
 def test_pressure_closes_admission_without_stopping_tasks(monkeypatch) -> None:
     result, calls = _tick(
         monkeypatch,
