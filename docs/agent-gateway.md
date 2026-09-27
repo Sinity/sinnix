@@ -17,10 +17,11 @@ Local coordinators
     -> agentctl's launch routes, in process
     -> a pueue task, its log and typed result
 
-ChatGPT observer connector
-    -> separate OpenAI Secure MCP Tunnel
-    -> stdio: sinnix-agent-gateway-observer-mcp
 ```
+
+Prime runs only the ChatGPT `operator` tunnel. `observer` is an available
+read-only endpoint profile, not a second deployed ChatGPT connector. Local
+coordinators use the separate `agent-control` profile.
 
 The gateway owns no HTTP server and no listening port. The official OpenAI tunnel owns the remote connection and launches the MCP server over stdio. The gateway retains principal and capability authorization, project authorization, envelopes, audit and redaction. Jobs are pueue tasks: agentctl (`docs/agentctl.md`) owns the launch input, the pool, the log, the typed result and cancellation; the gateway calls its routes in process and implements no second job controller.
 
@@ -136,14 +137,24 @@ project tools complement those snapshots rather than replacing them. The Lynchpi
 `operations` route accepts a project name when running Chisel and preserves its
 existing receipts and output contracts.
 
+The installed package and live operator manifest can agree while ChatGPT still
+holds an older tool snapshot. In that case, refresh the connector's tool
+metadata in ChatGPT, review its discovered actions, and start a new conversation.
+`gateway.status` compares against the last *recorded* ChatGPT observation;
+that file does not query ChatGPT's current conversation or settings. A missing
+action should first be checked against the live operator manifest and the
+connector's current discovered-tool list. Tool-call errors in the tunnel log
+are separate evidence from a discovery failure.
+
 For a personal ChatGPT connector, select the Sinnix app's app-specific **Allow all
 actions** permission in ChatGPT settings. That setting is what removes eligible
 per-call approval prompts for the operator; it does not bypass connector policy,
 the gateway principal/capability checks, or ChatGPT safety interventions. Keep the
 gateway's operator endpoint loopback/tunnel-scoped and retain the explicit
-idempotency and precondition guards for changes. If ChatGPT still asks for approval,
-inspect the app-specific permission and connector tool snapshot first; changing
-the gateway action family cannot suppress a client-side approval policy.
+idempotency and precondition guards for changes. The permission controls call
+approval, not tool discovery or the gateway principal. If ChatGPT still asks for
+approval, inspect the app-specific permission and connector tool snapshot first;
+changing the gateway action family cannot suppress a client-side approval policy.
 
 <!-- BEGIN GENERATED GATEWAY V2 REFERENCE -->
 
