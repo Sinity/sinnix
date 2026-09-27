@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
 import subprocess
+import threading
 from dataclasses import replace
 from pathlib import Path
 from typing import Callable
 
 import pytest
 from agentctl import artifacts, launch, pueue
+from agentctl import run as run_module
 from agentctl.config import Config, load_config
 from agentctl.launch import JobError
 from agentctl.launch_input import write_input
@@ -452,6 +455,101 @@ def test_cancel_marks_then_stops_the_unit_then_kills_the_task(
     assert cancelled["unresolved"] is True
     assert cancelled["unit"] == unit
     assert cancelled["phase"] == "cancelled"
+
+
+def test_cancel_waits_for_inflight_service_creation_then_stops_unit(
+    fake_pueue: FakePueue,
+    config: Config,
+    project_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cancellation serializes with systemd admission and reports unknown state."""
+    project = load_project_adapter(project_root)
+    started = launch.start_operation(config, project, project.operation("check"))
+    task = fake_pueue.task(started["job_id"])
+    written = read_launch(config, task)
+    marker = cancel_marker_for(written["log_path"])
+    artifacts.root_for(Path(written["log_path"])).mkdir(parents=True)
+    unit = launch.unit_of(task)
+    admission_entered = threading.Event()
+    allow_admission = threading.Event()
+    cancel_lock_attempted = threading.Event()
+    cancel_finished = threading.Event()
+    sequence: list[str] = []
+    stopped_units: list[str] = []
+    cancellation: list[dict[str, object]] = []
+    errors: list[BaseException] = []
+    real_flock = fcntl.flock
+
+    def observed_flock(fd: int, operation: int) -> None:
+        if (
+            operation == fcntl.LOCK_EX
+            and threading.current_thread().name == "cancel-inflight-service"
+        ):
+            cancel_lock_attempted.set()
+        real_flock(fd, operation)
+
+    def fake_run(
+        argv: list[str], **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        if argv[0] == "systemd-run":
+            admission_entered.set()
+            if not allow_admission.wait(5):
+                raise AssertionError("test did not release the admission barrier")
+            sequence.append("admitted")
+            return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+        if argv[:3] == ["systemctl", "--user", "stop"]:
+            sequence.append("stop")
+            stopped_units.append(argv[3])
+            return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+        if argv[:3] == ["systemctl", "--user", "show"]:
+            return subprocess.CompletedProcess(argv, 1, stdout="", stderr="unavailable")
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(fcntl, "flock", observed_flock)
+    monkeypatch.setattr(run_module.subprocess, "run", fake_run)
+
+    def start_service() -> None:
+        try:
+            client = run_module._start_service(
+                ["systemd-run", "--quiet"], marker, 1, None
+            )
+            assert client is not None and client.returncode == 0
+        except BaseException as error:
+            errors.append(error)
+
+    def cancel() -> None:
+        try:
+            cancellation.append(
+                launch.cancel(config, started["job_id"], settle_seconds=0)
+            )
+        except BaseException as error:
+            errors.append(error)
+        finally:
+            cancel_finished.set()
+
+    runner = threading.Thread(target=start_service, name="service-admission")
+    canceller = threading.Thread(target=cancel, name="cancel-inflight-service")
+    runner.start()
+    assert admission_entered.wait(5), errors
+    canceller.start()
+    assert cancel_lock_attempted.wait(5)
+    assert not marker.exists()
+    assert sequence == []
+    assert not cancel_finished.is_set()
+
+    allow_admission.set()
+    runner.join(5)
+    canceller.join(5)
+
+    assert not runner.is_alive() and not canceller.is_alive()
+    assert errors == []
+    assert sequence == ["admitted", "stop"]
+    assert stopped_units == [unit]
+    assert json.loads(marker.read_text()) == {"attempt": 1}
+    assert fake_pueue.killed == [started["job_id"]]
+    assert cancellation[0]["state"] == "unresolved"
+    assert cancellation[0]["unresolved"] is True
 
 
 def test_cancel_fails_when_the_unit_is_still_active_afterwards(
