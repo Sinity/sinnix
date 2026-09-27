@@ -16,12 +16,14 @@ next, not on supervising progress.
 - **Native agents** for investigation, bounded help, and cohesive
   implementation. Give each one its own worktree (under `/realm/worktrees/`)
   or a disjoint area of a shared checkout; the coordinator integrates.
-  - In Claude Code, a fork (`subagent_type: "fork"`) inherits the whole
-    conversation and the parent model, and is capped at 200 turns. Use one
-    when inherited context matters and the work fits that cap. Otherwise
-    dispatch the `implementer` agent (1000 turns) with a self-contained
-    packet. Every non-fork dispatch passes an explicit `model`; the dispatch
-    hook refuses one without it.
+  - In Claude Code, prefer forks (`subagent_type: "fork"`) for
+    implementation: they inherit the conversation and the parent model. A
+    fork that hits its 200-turn cap is resumed with a short continue message.
+  - Use a fresh `general-purpose` agent only when a clean context is the
+    point (an independent review, a self-contained packet that must not
+    inherit bias) or a different model is needed; Fable costs most and needs
+    a stated reason. Every non-fork dispatch passes an explicit `model`; the
+    dispatch hook refuses one without it.
   - In Codex, native spawn takes `model`, `reasoning_effort`, and `fork_turns`
     (`'none'` by default; `'all'` for deliberate full-history inheritance,
     with no model or effort override).
