@@ -62,10 +62,16 @@ class OpaqueEventCursor:
             "runtime_generation": None,
             "owner_revisions": {},
             "job_revision": None,
+            "source_turn": 0,
+            "project_offset": 0,
         }
 
     def encode(self, state: Mapping[str, Any], projects: list[str]) -> str:
-        body = {"v": 2, "scope": self._scope(projects), "state": dict(state)}
+        body = {
+            "v": 3,
+            "scope": self._scope(projects),
+            "state": {**self._initial_state(), **state},
+        }
         payload = base64.urlsafe_b64encode(_canonical(body)).decode().rstrip("=")
         mac = hmac.new(self._key, payload.encode(), hashlib.sha256).hexdigest()
         value = f"{payload}.{mac}"
@@ -98,7 +104,7 @@ class OpaqueEventCursor:
             raise EventCursorError("event cursor is not valid JSON") from exc
         if (
             not isinstance(body, Mapping)
-            or body.get("v") not in {1, 2}
+            or body.get("v") not in {1, 2, 3}
             or body.get("scope") != self._scope(projects)
         ):
             raise EventCursorError(
@@ -109,14 +115,19 @@ class OpaqueEventCursor:
             raise EventCursorError("event cursor state is malformed")
         if body.get("v") == 1:
             raise EventCursorError("legacy event cursor is stale; restart continuation")
-        if set(state) != {
+        expected_fields = {
             "audit_sequence",
             "runtime_offset",
             "runtime_generation",
             "owner_revisions",
             "job_revision",
-        }:
+        }
+        if body["v"] == 3:
+            expected_fields |= {"source_turn", "project_offset"}
+        if set(state) != expected_fields:
             raise EventCursorError("event cursor state is malformed")
+        if body["v"] == 2:
+            state = {**state, "source_turn": 0, "project_offset": 0}
         if any(
             not isinstance(state[key], int)
             or isinstance(state[key], bool)
@@ -147,6 +158,15 @@ class OpaqueEventCursor:
             not isinstance(job_revision, str) or len(job_revision) > 256
         ):
             raise EventCursorError("event cursor job state is malformed")
+        if (
+            not isinstance(state["source_turn"], int)
+            or isinstance(state["source_turn"], bool)
+            or not 0 <= state["source_turn"] < 5
+            or not isinstance(state["project_offset"], int)
+            or isinstance(state["project_offset"], bool)
+            or not 0 <= state["project_offset"] < len(projects)
+        ):
+            raise EventCursorError("event cursor source position is malformed")
         return dict(state)
 
 
@@ -383,183 +403,209 @@ class NormalizedEventService:
         job_revision = state["job_revision"]
         truncated = False
 
-        audit_rows = self.audit.events_since(audit_sequence, limit)
-        sources["gateway.audit"] = {
-            "availability": "available",
-            "last_sequence": audit_sequence,
-        }
-        for row in audit_rows:
-            payload = row.get("payload", {})
-            owner = payload.get("owner") if isinstance(payload, Mapping) else None
-            kind = (
-                "ops_receipt"
-                if owner == "ops-reducer" or row.get("operation") == "machine.operate"
-                else "gateway_receipt"
-            )
-            event = self._event(
-                event_id=str(row["event_id"]),
-                kind=kind,
-                source="gateway.audit",
-                source_revision=str(row["entry_hash"]),
-                data=row,
-                exact=True,
-                subject_ref=(
-                    payload.get("target_refs", [None])[0]
-                    if isinstance(payload, Mapping) and payload.get("target_refs")
-                    else None
-                ),
-            )
-            event.update(
-                {key: row[key] for key in ("operation", "outcome", "sequence")}
-            )
-            if not self._accept(events, sources, event, limit):
-                truncated = True
-                break
-            audit_sequence = max(audit_sequence, int(row["sequence"]))
-            sources["gateway.audit"]["last_sequence"] = audit_sequence
-        if len(audit_rows) >= limit:
-            truncated = True
-
-        for project_id in selected:
-            project_ref = f"sinnix://projects/{project_id}"
-            try:
-                summary = self.projects.summary(project_id)
-                git_revision = _digest(summary)
-                sources[f"git:{project_id}"] = {
-                    "availability": "available",
-                    "revision": git_revision,
-                }
-                key = f"git:{project_id}"
-                if owner_revisions.get(key) != git_revision:
-                    event = self._event(
-                        event_id=f"git:{project_id}:{git_revision}",
-                        kind="git_revision",
-                        source="git.project",
-                        source_revision=git_revision,
-                        data={
-                            "project_id": project_id,
-                            "latest_commit": summary.get("latest_commit"),
-                            "changes": summary.get("changes"),
-                        },
-                        exact=False,
-                        subject_ref=project_ref,
-                    )
-                    if self._accept(events, sources, event, limit):
-                        owner_revisions[key] = git_revision
-                    else:
-                        truncated = True
-            except Exception as exc:
-                sources[f"git:{project_id}"] = {
-                    "availability": "unavailable",
-                    "reason": str(exc),
-                }
-            try:
-                authority = self.beads.task_authority_status(project_id)
-                bead_revision = str(authority["revision"])
-                sources[f"beads:{project_id}"] = {
-                    "availability": "available",
-                    "revision": bead_revision,
-                }
-                key = f"beads:{project_id}"
-                if owner_revisions.get(key) != bead_revision:
-                    event = self._event(
-                        event_id=f"beads:{project_id}:{bead_revision}",
-                        kind="owner_revision",
-                        source="beads.owner",
-                        source_revision=bead_revision,
-                        data={
-                            "project_id": project_id,
-                            "revision": bead_revision,
-                            "diff": authority.get("diff"),
-                            "change": "owner revision changed",
-                        },
-                        exact=False,
-                        subject_ref=f"{project_ref}/task-authority",
-                    )
-                    if self._accept(events, sources, event, limit):
-                        owner_revisions[key] = bead_revision
-                    else:
-                        truncated = True
-            except Exception as exc:
-                sources[f"beads:{project_id}"] = {
-                    "availability": "unavailable",
-                    "reason": str(exc),
-                }
-
-        if self.jobs is not None:
-            try:
-                page = self.jobs(JOB_OBSERVATION_LIMIT, None)
-                jobs = page.get("jobs", []) if isinstance(page, Mapping) else []
-                observation = {
-                    "jobs": [
-                        {"job_id": job.get("job_id"), "state": job.get("state")}
-                        for job in jobs
-                        if isinstance(job, Mapping)
-                        and isinstance(job.get("job_id"), str)
-                    ]
-                }
-                observed_revision = _digest(observation)
-                coverage = page.get("coverage") if isinstance(page, Mapping) else None
-                omitted = page.get("omitted") if isinstance(page, Mapping) else None
-                incomplete = bool(
-                    (isinstance(page, Mapping) and page.get("next_cursor"))
-                    or (
-                        isinstance(omitted, Mapping)
-                        and int(omitted.get("active") or 0) > 0
-                    )
-                )
-                sources["jobs"] = {
-                    "availability": "available",
-                    "count": len(observation["jobs"]),
-                    "revision": observed_revision,
-                    "incomplete": incomplete,
-                }
-                if isinstance(coverage, Mapping):
-                    sources["jobs"]["coverage"] = dict(coverage)
-                if isinstance(omitted, Mapping):
-                    sources["jobs"]["omitted"] = dict(omitted)
-                if isinstance(page, Mapping) and page.get("next_cursor"):
-                    sources["jobs"]["next_cursor"] = page.get("next_cursor")
-                if job_revision != observed_revision and len(events) < limit:
-                    event = self._event(
-                        event_id=f"jobs:{observed_revision}",
-                        kind="job_state",
-                        source="jobs",
-                        source_revision=observed_revision,
-                        data={
-                            "snapshot": page.get("snapshot")
-                            if isinstance(page, Mapping)
-                            else None,
-                            "jobs": observation["jobs"],
-                        },
-                        exact=False,
-                        subject_ref="sinnix://jobs",
-                    )
-                    if self._accept(events, sources, event, limit):
-                        job_revision = observed_revision
-                    else:
-                        truncated = True
-            except Exception as exc:
-                sources["jobs"] = {
-                    "availability": "unavailable",
-                    "reason": str(exc),
-                }
-
         runtime_offset = int(state["runtime_offset"])
         runtime_generation = state["runtime_generation"]
-        (
-            runtime_offset,
-            runtime_generation,
-            runtime_source,
-            runtime_more,
-        ) = self._runtime_events(
-            runtime_offset,
-            runtime_generation,
-            limit - len(events),
-            lambda event: self._accept(events, sources, event, limit),
-        )
-        sources["ops-reducer.transitions"] = runtime_source
-        truncated = truncated or runtime_more
+        source_turn = int(state["source_turn"])
+        project_offset = int(state["project_offset"])
+        ordered_projects = selected[project_offset:] + selected[:project_offset]
+
+        def read_audit() -> None:
+            nonlocal audit_sequence, truncated
+            audit_rows = self.audit.events_since(audit_sequence, limit)
+            sources["gateway.audit"] = {
+                "availability": "available",
+                "last_sequence": audit_sequence,
+            }
+            for row in audit_rows:
+                payload = row.get("payload", {})
+                owner = payload.get("owner") if isinstance(payload, Mapping) else None
+                kind = (
+                    "ops_receipt"
+                    if owner == "ops-reducer" or row.get("operation") == "machine.operate"
+                    else "gateway_receipt"
+                )
+                event = self._event(
+                    event_id=str(row["event_id"]),
+                    kind=kind,
+                    source="gateway.audit",
+                    source_revision=str(row["entry_hash"]),
+                    data=row,
+                    exact=True,
+                    subject_ref=(
+                        payload.get("target_refs", [None])[0]
+                        if isinstance(payload, Mapping) and payload.get("target_refs")
+                        else None
+                    ),
+                )
+                event.update(
+                    {key: row[key] for key in ("operation", "outcome", "sequence")}
+                )
+                if not self._accept(events, sources, event, limit):
+                    truncated = True
+                    break
+                audit_sequence = max(audit_sequence, int(row["sequence"]))
+                sources["gateway.audit"]["last_sequence"] = audit_sequence
+            if len(audit_rows) >= limit:
+                truncated = True
+
+        def read_git() -> None:
+            nonlocal truncated
+            for project_id in ordered_projects:
+                project_ref = f"sinnix://projects/{project_id}"
+                try:
+                    summary = self.projects.summary(project_id)
+                    git_revision = _digest(summary)
+                    sources[f"git:{project_id}"] = {
+                        "availability": "available",
+                        "revision": git_revision,
+                    }
+                    key = f"git:{project_id}"
+                    if owner_revisions.get(key) != git_revision:
+                        event = self._event(
+                            event_id=f"git:{project_id}:{git_revision}",
+                            kind="git_revision",
+                            source="git.project",
+                            source_revision=git_revision,
+                            data={
+                                "project_id": project_id,
+                                "latest_commit": summary.get("latest_commit"),
+                                "changes": summary.get("changes"),
+                            },
+                            exact=False,
+                            subject_ref=project_ref,
+                        )
+                        if self._accept(events, sources, event, limit):
+                            owner_revisions[key] = git_revision
+                        else:
+                            truncated = True
+                except Exception as exc:
+                    sources[f"git:{project_id}"] = {
+                        "availability": "unavailable",
+                        "reason": str(exc),
+                    }
+
+        def read_beads() -> None:
+            nonlocal truncated
+            for project_id in ordered_projects:
+                project_ref = f"sinnix://projects/{project_id}"
+                try:
+                    authority = self.beads.task_authority_status(project_id)
+                    bead_revision = str(authority["revision"])
+                    sources[f"beads:{project_id}"] = {
+                        "availability": "available",
+                        "revision": bead_revision,
+                    }
+                    key = f"beads:{project_id}"
+                    if owner_revisions.get(key) != bead_revision:
+                        event = self._event(
+                            event_id=f"beads:{project_id}:{bead_revision}",
+                            kind="owner_revision",
+                            source="beads.owner",
+                            source_revision=bead_revision,
+                            data={
+                                "project_id": project_id,
+                                "revision": bead_revision,
+                                "diff": authority.get("diff"),
+                                "change": "owner revision changed",
+                            },
+                            exact=False,
+                            subject_ref=f"{project_ref}/task-authority",
+                        )
+                        if self._accept(events, sources, event, limit):
+                            owner_revisions[key] = bead_revision
+                        else:
+                            truncated = True
+                except Exception as exc:
+                    sources[f"beads:{project_id}"] = {
+                        "availability": "unavailable",
+                        "reason": str(exc),
+                    }
+
+        def read_jobs() -> None:
+            nonlocal job_revision, truncated
+            if self.jobs is not None:
+                try:
+                    page = self.jobs(JOB_OBSERVATION_LIMIT, None)
+                    jobs = page.get("jobs", []) if isinstance(page, Mapping) else []
+                    observation = {
+                        "jobs": [
+                            {"job_id": job.get("job_id"), "state": job.get("state")}
+                            for job in jobs
+                            if isinstance(job, Mapping)
+                            and isinstance(job.get("job_id"), str)
+                        ]
+                    }
+                    observed_revision = _digest(observation)
+                    coverage = page.get("coverage") if isinstance(page, Mapping) else None
+                    omitted = page.get("omitted") if isinstance(page, Mapping) else None
+                    incomplete = bool(
+                        (isinstance(page, Mapping) and page.get("next_cursor"))
+                        or (
+                            isinstance(omitted, Mapping)
+                            and int(omitted.get("active") or 0) > 0
+                        )
+                    )
+                    sources["jobs"] = {
+                        "availability": "available",
+                        "count": len(observation["jobs"]),
+                        "revision": observed_revision,
+                        "incomplete": incomplete,
+                    }
+                    if isinstance(coverage, Mapping):
+                        sources["jobs"]["coverage"] = dict(coverage)
+                    if isinstance(omitted, Mapping):
+                        sources["jobs"]["omitted"] = dict(omitted)
+                    if isinstance(page, Mapping) and page.get("next_cursor"):
+                        sources["jobs"]["next_cursor"] = page.get("next_cursor")
+                    if job_revision != observed_revision and len(events) < limit:
+                        event = self._event(
+                            event_id=f"jobs:{observed_revision}",
+                            kind="job_state",
+                            source="jobs",
+                            source_revision=observed_revision,
+                            data={
+                                "snapshot": page.get("snapshot")
+                                if isinstance(page, Mapping)
+                                else None,
+                                "jobs": observation["jobs"],
+                            },
+                            exact=False,
+                            subject_ref="sinnix://jobs",
+                        )
+                        if self._accept(events, sources, event, limit):
+                            job_revision = observed_revision
+                        else:
+                            truncated = True
+                except Exception as exc:
+                    sources["jobs"] = {
+                        "availability": "unavailable",
+                        "reason": str(exc),
+                    }
+
+        def read_runtime() -> None:
+            nonlocal runtime_offset, runtime_generation, truncated
+            (
+                runtime_offset,
+                runtime_generation,
+                runtime_source,
+                runtime_more,
+            ) = self._runtime_events(
+                runtime_offset,
+                runtime_generation,
+                limit - len(events),
+                lambda event: self._accept(events, sources, event, limit),
+            )
+            sources["ops-reducer.transitions"] = runtime_source
+            truncated = truncated or runtime_more
+
+        # A busy source can fill any page. Start the next page at the next
+        # source, while keeping each owner's position until its event emits.
+        stages = (read_audit, read_git, read_beads, read_jobs, read_runtime)
+        for step in range(len(stages)):
+            stages[(source_turn + step) % len(stages)]()
+        if source_turn == 1:
+            project_offset = (project_offset + 1) % len(selected)
+        source_turn = (source_turn + 1) % len(stages)
 
         next_state = {
             "audit_sequence": audit_sequence,
@@ -567,6 +613,8 @@ class NormalizedEventService:
             "runtime_generation": runtime_generation,
             "owner_revisions": owner_revisions,
             "job_revision": job_revision,
+            "source_turn": source_turn,
+            "project_offset": project_offset,
         }
         next_cursor = self.cursor.encode(next_state, selected)
         response = {

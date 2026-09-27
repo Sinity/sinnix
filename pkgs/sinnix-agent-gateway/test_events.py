@@ -210,6 +210,80 @@ def test_event_cursor_state_and_runtime_continuation_preserve_rows(
     assert len(seen) == len(set(seen))
 
 
+@pytest.mark.parametrize("limit", [1, 2])
+def test_receipt_on_every_read_cannot_starve_other_event_sources(
+    tmp_path: Path, limit: int
+) -> None:
+    events, _projects, _beads, audit = service(tmp_path)
+    events.jobs = lambda _limit, _cursor: {
+        "jobs": [{"job_id": "job-1", "state": {"phase": "running"}}],
+    }
+    cursor = None
+    seen: set[str] = set()
+    for _ in range(16):
+        page = events.read(limit=limit, cursor=cursor)
+        assert len(page["events"]) <= limit
+        seen.update(row["kind"] for row in page["events"])
+        cursor = page["next_cursor"]
+        audit.append("events.tail", "ok", {"target_refs": ["sinnix://projects/fixture"]})
+    assert {"gateway_receipt", "git_revision", "owner_revision", "job_state", "runtime_transition"} <= seen
+
+
+def test_continuation_rotates_across_selected_project_owners(tmp_path: Path) -> None:
+    events, projects, _beads, audit = service(tmp_path)
+    projects.config.projects = {
+        name: ProjectConfig(name, tmp_path / name)
+        for name in ("alpha", "beta", "gamma", "delta")
+    }
+    cursor = None
+    seen: set[str] = set()
+    for _ in range(40):
+        page = events.read(limit=1, cursor=cursor)
+        seen.update(
+            row["data"]["project_id"]
+            for row in page["events"]
+            if row["kind"] == "git_revision"
+        )
+        cursor = page["next_cursor"]
+        audit.append("events.tail", "ok", {})
+    assert seen == {"alpha", "beta", "gamma", "delta"}
+
+
+def test_changing_git_does_not_hide_beads_revision(tmp_path: Path) -> None:
+    events, projects, beads, audit = service(tmp_path)
+    projects.config.projects = {
+        name: ProjectConfig(name, tmp_path / name)
+        for name in ("alpha", "beta", "gamma", "delta")
+    }
+    cursor = None
+    seen: dict[str, set[str]] = {"git_revision": set(), "owner_revision": set()}
+    for index in range(45):
+        projects.revision = f"git-{index}"
+        beads.revision = f"beads-{index}"
+        page = events.read(limit=1, cursor=cursor)
+        for row in page["events"]:
+            if row["kind"] in seen:
+                seen[row["kind"]].add(row["data"]["project_id"])
+        cursor = page["next_cursor"]
+        audit.append("events.tail", "ok", {})
+    assert all(projects_seen == set(projects.config.projects) for projects_seen in seen.values())
+
+
+def test_v2_cursor_continues_with_v3_source_rotation(tmp_path: Path) -> None:
+    events, _projects, _beads, _audit = service(tmp_path)
+    state = events.cursor._initial_state()
+    state.pop("source_turn")
+    state.pop("project_offset")
+    body = {"v": 2, "scope": events.cursor._scope(["fixture"]), "state": state}
+    payload = base64.urlsafe_b64encode(
+        json.dumps(body, sort_keys=True, separators=(",", ":")).encode()
+    ).decode().rstrip("=")
+    mac = hmac.new(events.cursor._key, payload.encode(), hashlib.sha256).hexdigest()
+    page = events.read(limit=1, cursor=f"{payload}.{mac}")
+    assert page["events"]
+    assert events.cursor.decode(page["next_cursor"], ["fixture"])["source_turn"] == 1
+
+
 @pytest.mark.parametrize("change", ["replace", "truncate"])
 def test_runtime_cursor_rejects_replaced_or_truncated_ledger(
     tmp_path: Path, change: str
