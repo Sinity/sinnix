@@ -55,6 +55,17 @@ mkFeatureModule {
 
       # Python with common packages
       (lib.mkIf cfg.python.enable {
+        # The uv cache lives on /realm beside the worktrees so venvs clone
+        # (reflink) from it instead of copying ~450 MB across devices per
+        # worktree. The directory exists before any variable points at it;
+        # it is seeded from the warm cache before uv is switched over, since
+        # an empty cache source-builds wheels with no published build (the
+        # free-threaded duckdb) and that build nearly took the host down.
+        systemd.tmpfiles.rules = [ "d /realm/state/cache/uv 0755 ${user} users -" ];
+        sinnix.runtime.dataStores.uv-cache = {
+          path = "/realm/state/cache/uv";
+          class = "cache";
+        };
         home-manager.users.${user}.home.packages = [
           (pkgs.python3.withPackages (
             ps: with ps; [
