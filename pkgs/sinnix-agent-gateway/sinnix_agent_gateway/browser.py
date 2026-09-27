@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from sinnix_lib.atomic import atomic_publish
+from sinnix_lib.lock import flock
 
 from .artifacts import ArtifactService
 from .capabilities import Capability, Principal
@@ -87,19 +88,26 @@ class BrowserService:
             fsync=False,
         )
 
+    def _update_target(self, page_id: str, target: dict[str, Any] | None) -> None:
+        """Serialize one registry read-modify-write across gateway processes."""
+        self.config.state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        with flock(self.config.state_dir / "browser-targets.lock"):
+            targets = self._load_targets()
+            if target is None:
+                targets.pop(page_id, None)
+            else:
+                targets[page_id] = target
+            self._save_targets(targets)
+
     def owned_page_ids(self) -> set[str]:
         """Page ids the gateway created; the only mutable or capturable targets."""
         return set(self._load_targets())
 
     def register_target(self, target: dict[str, Any]) -> None:
-        targets = self._load_targets()
-        targets[str(target["id"])] = target
-        self._save_targets(targets)
+        self._update_target(str(target["id"]), target)
 
     def forget_target(self, page_id: str) -> None:
-        targets = self._load_targets()
-        targets.pop(page_id, None)
-        self._save_targets(targets)
+        self._update_target(page_id, None)
 
     def invoke(self, arguments: list[str], *, mutating: bool, timeout: int = 30) -> Any:
         """Run one declared wrapper verb for a typed action; returns decoded output."""
@@ -259,9 +267,7 @@ class BrowserService:
                 raise BrowserError(
                     "agent-window was not parked on the hidden workspace"
                 )
-            targets = self._load_targets()
-            targets[target["id"]] = target
-            self._save_targets(targets)
+            self.register_target(target)
             return {"operation": operation, "target": target}
         page_id = self._require_owned_target(arguments.get("page_id"))
         execution_timeout = 30
@@ -384,7 +390,5 @@ class BrowserService:
             **self._run(command, execution_timeout),
         }
         if operation == "close":
-            targets = self._load_targets()
-            targets.pop(page_id, None)
-            self._save_targets(targets)
+            self.forget_target(page_id)
         return result

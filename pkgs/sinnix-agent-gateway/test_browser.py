@@ -2,9 +2,14 @@ from __future__ import annotations
 
 import json
 import sys
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from pathlib import Path
+from threading import Barrier
 
 import pytest
+from sinnix_agent_gateway import browser as browser_module
 from sinnix_agent_gateway.artifacts import ArtifactService
 from sinnix_agent_gateway.browser import (
     BrowserDiagnosticError,
@@ -48,6 +53,63 @@ def commands(path: Path) -> list[list[str]]:
     return [json.loads(line) for line in path.read_text().splitlines()]
 
 
+def run_concurrent_registry_updates(
+    monkeypatch: pytest.MonkeyPatch,
+    state_dir: Path,
+    first_update: Callable[[BrowserService], None],
+    second_update: Callable[[BrowserService], None],
+) -> BrowserService:
+    barrier = Barrier(2)
+    lock_paths: list[Path] = []
+    original_flock = browser_module.flock
+    browser, _ = browser_service(state_dir.parent, "operator")
+
+    @contextmanager
+    def synchronized_flock(path):
+        lock_paths.append(Path(path))
+        barrier.wait(timeout=5)
+        with original_flock(path):
+            yield
+
+    monkeypatch.setattr(browser_module, "flock", synchronized_flock)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(first_update, browser)
+        second = pool.submit(second_update, browser)
+        first.result(timeout=5)
+        second.result(timeout=5)
+
+    assert lock_paths == [state_dir / "browser-targets.lock"] * 2
+    return browser
+
+
+def test_concurrent_target_registration_preserves_both_targets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state_dir = tmp_path / "state"
+    browser = run_concurrent_registry_updates(
+        monkeypatch,
+        state_dir,
+        lambda service: service.register_target({"id": "first"}),
+        lambda service: service.register_target({"id": "second"}),
+    )
+
+    assert browser.owned_page_ids() == {"first", "second"}
+
+
+def test_concurrent_register_and_forget_preserve_unrelated_update(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state_dir = tmp_path / "state"
+    browser, _ = browser_service(tmp_path, "operator")
+    browser.register_target({"id": "existing"})
+    browser = run_concurrent_registry_updates(
+        monkeypatch,
+        state_dir,
+        lambda service: service.register_target({"id": "new"}),
+        lambda service: service.forget_target("existing"),
+    )
+
+    assert browser.owned_page_ids() == {"new"}
 
 
 def test_operator_actions_require_gateway_created_agent_target(tmp_path: Path) -> None:
@@ -148,8 +210,6 @@ def test_operator_cannot_act_on_existing_browser_page(tmp_path: Path) -> None:
             "navigate",
             {"page_id": "operator-page", "url": "https://example.test"},
         )
-
-
 
 
 def test_browser_capture_registers_only_owned_target_as_artifact(
