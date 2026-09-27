@@ -1,6 +1,6 @@
 ---
 name: chatgpt-conversations
-description: Read, compare, summarize, or continue complete ChatGPT conversations already open in the operator's Chrome without navigating, activating, editing, submitting, or closing tabs.
+description: Read complete ChatGPT conversations and inspect or explicitly download generated files from already open Chrome tabs, without navigating or submitting messages.
 ---
 
 # ChatGPT conversations
@@ -10,8 +10,8 @@ reads use the provider-native conversation endpoint in an explicitly selected
 tab. Use Polylogue for durable historical session search.
 
 Run the bundled `scripts/sinnix-chatgpt-conversations` helper. It uses the
-shared Chrome CDP control plane, requires an explicit page ID for individual
-reads, and does not alter the browser.
+shared Chrome CDP control plane and requires an explicit page ID for reads
+and downloads. Read commands do not alter the browser.
 
 ## Read conversations
 
@@ -70,14 +70,30 @@ complete-conversation proof.
 
 An attachment reference proves that the tab visibly rendered it and gives the
 agent stable page, message, and attachment context for a requested action. It
-does not itself provide a local file path. Downloading, opening, uploading,
-navigating, submitting, and other browser mutations require an explicit
-operator request and a verified result. Sandbox-file links in old assistant
-turns are frequently expired on ChatGPT's side; a null `href` plus a button
-control is the normal rendering, and absence of a working link is not a
-capture defect.
+does not itself provide a local file path. Generated assistant files can be
+preview controls absent from native `metadata.attachments`. Inspect their
+rendered inventory without opening them:
 
-Before considering any browser download, run
+```bash
+scripts/sinnix-chatgpt-conversations artifacts <page-id>
+```
+
+When the operator explicitly requests a generated file, download it from the
+selected tab and verify the returned path, byte count, and SHA-256:
+
+```bash
+scripts/sinnix-chatgpt-conversations download <page-id> <generated-filename>
+```
+
+This opens and closes the file viewer in that tab but does not navigate or
+submit. It uses the configured Downloads directory and refuses an ambiguous
+or missing filename. For repeated names, select one with `--occurrence N`,
+using its zero-based position among matching controls from `artifacts`.
+Generated-file inventory describes rendered controls, not unseen branches.
+Sandbox-file links in old assistant turns are frequently
+expired on ChatGPT's side; a null `href` plus a button control is normal.
+
+Before considering a download of an uploaded file, run
 `scripts/sinnix-chatgpt-conversations locate "<attachment label>"`. Uploaded
 files always originated on this machine and generated bundles are often
 already downloaded, so the file is usually findable locally — the command
@@ -101,18 +117,15 @@ characters to recover the canvas document alone.
 - Do not treat a ChatGPT answer as verified system state. Check the owning
   codebase, Beads, runtime, or source before acting on a factual claim.
 - Do not commit transcript content or create an automatic archive. Retrieve the
-  complete rendered conversation when requested, and persist or download only
+  complete native conversation when requested, and persist or download only
   when the operator asks for that result.
 - This skill is for `chatgpt.com/c/...` tabs already open in the browser. It
   does not authenticate, open new chats, or search the user’s account.
 
 ## Routing validation
 
-Before this skill, generic browser control could evaluate a page but did not
-provide an ordered conversation schema, turn paging, or attachment extraction.
-The forward probe used the request “read the currently open ChatGPT chats and
-act on the relevant messages”: the helper enumerated five open conversation
-tabs, extracted their role/count summaries, and paged a selected assistant
-turn with its visible attachment labels. The non-trigger “open a new ChatGPT
-chat and submit this prompt” remains browser-action work and does not select
-this read-only transcript skill.
+The original routing description only promised reading. The request “inspect
+the ChatGPT-generated audit attachments in this open conversation” now selects
+this skill: `artifacts` lists the rendered generated controls, and `download`
+verified a generated JSON file in Downloads. The non-trigger “open a new
+ChatGPT chat and submit this prompt” remains browser-action work.

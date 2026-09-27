@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Read structured ChatGPT conversation content from explicitly opened Chrome tabs.
-# This script never navigates, activates, submits, edits, or closes a tab.
+# Read structured ChatGPT conversation content and explicitly requested generated
+# files from an already open tab. It never navigates, activates, or submits.
 
 CHROME_CONTROL="${SINNIX_CHROME_CONTROL:-sinnix-chrome-control}"
 CDP_BASE="${CDP_BASE:-http://127.0.0.1:9222}"
@@ -12,8 +12,8 @@ usage() {
 Usage: sinnix-chatgpt-conversations <command> [options]
 
 Read structured transcripts from ChatGPT conversation tabs already open in the
-operator's Chrome. Every read addresses an explicit CDP page ID. The script
-never navigates, activates, submits, edits, or closes a tab.
+operator's Chrome. Every read addresses an explicit CDP page ID. The download
+command only operates on a generated-file control in that tab.
 
 Commands:
   list
@@ -48,6 +48,16 @@ Commands:
       suffixes like " (1)" added or removed, and finally a de-parenthesized
       core substring. Default roots: /realm/inbox, /realm/tmp,
       /realm/accounts, the user and /realm trash directories, and $HOME.
+
+  artifacts <page-id>
+      List rendered generated-file preview controls with their control index.
+      This is a bounded DOM inventory, not a claim about unseen branches.
+
+  download <page-id> <generated-filename> [--occurrence N]
+      Open that generated-file preview, invoke its Download control, and
+      verify the newly downloaded file in the user's Downloads directory.
+      A repeated filename requires its zero-based occurrence from artifacts.
+      Requires an explicit operator request to obtain the file.
 
 Examples:
   sinnix-chatgpt-conversations list
@@ -306,6 +316,84 @@ JS
 
 evaluate() {
   "$CHROME_CONTROL" evaluate "$1" --js "$2"
+}
+
+generated_artifacts() {
+  local page_id="$1" base
+  base=$(evaluate "$page_id" '(() => {
+    const turns = [...document.querySelectorAll("[data-message-author-role]")];
+    const files = [...document.querySelectorAll("button[aria-label^=\"Open preview of \"]")]
+      .map((button, control_index) => {
+        const name = button.getAttribute("aria-label").slice("Open preview of ".length);
+        const turn = button.closest("[data-message-author-role]");
+        return { name, control_index, message_index: turn ? turns.indexOf(turn) : null,
+          message_id: turn?.dataset.messageId || null };
+      });
+    return { schema: "sinnix-chatgpt-generated-artifacts-v1", url: location.href,
+      fidelity: "rendered_dom", files };
+  })()')
+  jq --arg page_id "$page_id" '. + {page_id: $page_id}' <<<"$base"
+}
+
+download_generated() {
+  local page_id="$1" name="$2" occurrence="$3" directory before after opened clicked candidate deadline
+  [[ $name == "$(basename -- "$name")" && $name != . && $name != .. ]] || {
+    printf 'generated filename must be a plain basename\n' >&2; exit 2;
+  }
+  local count
+  count=$(generated_artifacts "$page_id" | jq --arg name "$name" '[.files[] | select(.name == $name)] | length')
+  [[ $count -gt 0 ]] || { printf 'no rendered generated file named %s\n' "$name" >&2; exit 2; }
+  if [[ -z $occurrence ]]; then
+    [[ $count -eq 1 ]] || { printf 'filename has %s controls; select --occurrence from artifacts\n' "$count" >&2; exit 2; }
+    occurrence=0
+  fi
+  require_nonnegative_integer "$occurrence" "--occurrence"
+  [[ $occurrence -lt $count ]] || { printf 'occurrence %s exceeds %s controls\n' "$occurrence" "$count" >&2; exit 2; }
+  directory=$(xdg-user-dir DOWNLOAD)
+  [[ -d $directory ]] || { printf 'Downloads directory unavailable: %s\n' "$directory" >&2; exit 1; }
+  before=$(mktemp /realm/tmp/work/sinnix-chatgpt-download-before.XXXXXX)
+  after=$(mktemp /realm/tmp/work/sinnix-chatgpt-download-after.XXXXXX)
+  trap 'rm -f -- "$before" "$after"' RETURN
+  find "$directory" -maxdepth 1 -type f -printf '%i %f\n' >"$before"
+  local quoted
+  quoted=$(jq -Rn --arg value "$name" '$value')
+  opened=$(evaluate "$page_id" "(() => {
+    document.querySelector('button[aria-label=\"Close viewer\"]')?.click();
+    const buttons = [...document.querySelectorAll('button[aria-label^=\"Open preview of \"]')];
+    const button = buttons.filter(item => item.getAttribute('aria-label') === 'Open preview of ' + $quoted)[${occurrence}];
+    if (!button) return false;
+    button.click(); return true;
+  })()")
+  [[ $opened == true ]] || { printf 'generated preview did not open\n' >&2; exit 1; }
+  clicked=false
+  for _ in 1 2 3 4 5; do
+    clicked=$(evaluate "$page_id" '(() => {
+      const button = document.querySelector("button[aria-label=\"Download\"]");
+      if (!button) return false;
+      button.click(); return true;
+    })()')
+    [[ $clicked == true ]] && break
+    sleep 1
+  done
+  [[ $clicked == true ]] || { printf 'generated preview had no Download control\n' >&2; exit 1; }
+  deadline=$((SECONDS + 30))
+  while (( SECONDS <= deadline )); do
+    find "$directory" -maxdepth 1 -type f -printf '%i %f\n' >"$after"
+    candidate=$(comm -13 <(sort "$before") <(sort "$after") | cut -d' ' -f2- | while IFS= read -r file; do
+      [[ $file == "$name" || $file == "${name%.*}"*".${name##*.}" ]] && printf '%s\n' "$file"
+    done | head -n 1 || true)
+    if [[ -n $candidate && -s $directory/$candidate ]]; then
+      # Chrome first creates a .crdownload file; only a completed filename passes.
+      evaluate "$page_id" '(() => { document.querySelector("button[aria-label=\"Close viewer\"]")?.click(); return true; })()' >/dev/null
+      jq -cn --arg path "$directory/$candidate" --arg sha256 "$(sha256sum "$directory/$candidate" | cut -d' ' -f1)" \
+        --argjson bytes "$(stat -c %s "$directory/$candidate")" \
+        '{schema:"sinnix-chatgpt-generated-download-v1",path:$path,bytes:$bytes,sha256:$sha256}'
+      return 0
+    fi
+    sleep 1
+  done
+  printf 'generated download did not finish within 30 seconds\n' >&2
+  exit 1
 }
 
 summary() {
@@ -569,6 +657,24 @@ case "$command_name" in
     done
     need_cmd fd
     locate_attachment "$label" "${roots[@]}"
+    ;;
+  artifacts)
+    page_id="${1:-}"
+    [[ -n $page_id && $# -eq 1 ]] || { printf 'artifacts requires one page ID\n' >&2; exit 2; }
+    generated_artifacts "$page_id"
+    ;;
+  download)
+    page_id="${1:-}"
+    name="${2:-}"
+    [[ -n $page_id && -n $name ]] || { printf 'download requires a page ID and generated filename\n' >&2; exit 2; }
+    shift 2
+    occurrence=""
+    if [[ $# -gt 0 ]]; then
+      [[ $# -eq 2 && $1 == --occurrence ]] || { printf 'expected --occurrence N\n' >&2; exit 2; }
+      occurrence="$2"
+    fi
+    need_cmd xdg-user-dir
+    download_generated "$page_id" "$name" "$occurrence"
     ;;
   read-open)
     parse_read_options "$@"
