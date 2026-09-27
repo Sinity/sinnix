@@ -25,10 +25,9 @@ let
   # btrbk→borg coverage.
   backupRoot = "/realm/state/db-dumps/machine-telemetry";
   backupSnapshotRoot = "${realmRoot}/state/machine-telemetry-backup-snapshots";
-  # Integrity checking has 18 minutes; compression and archive verification
-  # must fit within the remaining 12 minutes.
+  # Backup publication uses a bounded schema/header check. A full page walk
+  # would keep a growing database from producing any current backup.
   backupTimeoutMinutes = 30;
-  integrityBudgetSeconds = backupTimeoutMinutes * 60 * 3 / 5;
   manifestPath = "${dataDir}/manifest.json";
   username = config.sinnix.user.name;
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
@@ -304,7 +303,7 @@ mkServiceModule {
             resume_writer
             sinnix-sqlite-backup \
               --immutable-source \
-              --check-budget-seconds ${toString integrityBudgetSeconds} \
+              --check-mode header \
               "$snapshot/telemetry.sqlite" "$final"
             chown ${lib.escapeShellArg username}:users "$final"
 

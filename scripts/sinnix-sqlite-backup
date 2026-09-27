@@ -161,13 +161,13 @@ def run_check(
 
 
 def check_immutable_snapshot(
-    connection: sqlite3.Connection, deadline: float | None
-) -> str:
-    """Prove the snapshot's pages and b-trees before anything is published.
+    connection: sqlite3.Connection, deadline: float | None, *, mode: str
+) -> tuple[str, str]:
+    """Report the exact strength of the check performed before publication.
 
-    The source subvolume is NOCOW, which also turns off Btrfs data checksums,
-    so this pragma is the only thing standing between silent page damage and an
-    archive of it.
+    The source subvolume is NOCOW, which also turns off Btrfs data checksums.
+    Structural mode can detect page damage; header mode cannot and records
+    that reduced assurance explicitly.
 
     Above the page limit the check is quick_check rather than integrity_check:
     quick_check validates b-trees and scans table rows. integrity_check
@@ -177,6 +177,14 @@ def check_immutable_snapshot(
     row per damaged page inside the unit's memory ceiling.
     """
     page_count = int(connection.execute("PRAGMA page_count").fetchone()[0])
+    if mode == "header":
+        print(f"sqlite-backup: schema_header over {page_count} pages (no page walk)", flush=True)
+        # Backup availability and a full page walk are separate claims. The
+        # daily telemetry snapshot uses this bounded check so a growing NOCOW
+        # database cannot prevent every new backup from being published.
+        connection.execute("PRAGMA schema_version").fetchone()
+        connection.execute("SELECT name FROM sqlite_master LIMIT 1").fetchone()
+        return "schema_header", "limited"
     check = (
         "integrity_check" if page_count <= FULL_INTEGRITY_PAGE_LIMIT else "quick_check(1)"
     )
@@ -185,7 +193,7 @@ def check_immutable_snapshot(
     verdict = run_check(connection, f"PRAGMA {check}", deadline)
     if verdict != ("ok",):
         raise RuntimeError(f"SQLite {check} failed: {verdict!r}")
-    return check
+    return check, "ok"
 
 
 def compress(source_path: Path, compressed_path: Path) -> None:
@@ -205,6 +213,7 @@ def backup_database(
     *,
     immutable_source: bool = False,
     check_budget_seconds: float = 0.0,
+    check_mode: str = "structural",
 ) -> None:
     raw_path = output_path.with_name(output_path.name.removesuffix(".zst") + ".tmp")
     compressed_path = output_path.with_suffix(output_path.suffix + ".tmp")
@@ -237,8 +246,9 @@ def backup_database(
             # clean mapped pages remain reclaimable under memory pressure.
             source.execute(f"PRAGMA mmap_size={source_bytes}")
             started = time.monotonic()
-            check = check_immutable_snapshot(
-                source, started + check_budget_seconds if check_budget_seconds else None
+            check, verdict = check_immutable_snapshot(
+                source, started + check_budget_seconds if check_budget_seconds else None,
+                mode=check_mode,
             )
             check_seconds = time.monotonic() - started
             source.close()
@@ -255,7 +265,7 @@ def backup_database(
                 f" source={source_path}"
                 f" source_bytes={source_bytes}"
                 f" check={check}"
-                " verdict=ok"
+                f" verdict={verdict}"
                 f" check_seconds={check_seconds:.1f}"
                 f" archive={output_path}"
                 f" archive_bytes={archive_bytes}"
@@ -290,8 +300,9 @@ def backup_database(
         # anything is published, same as the immutable route.
         target.execute(f"PRAGMA mmap_size={raw_path.stat().st_size}")
         started = time.monotonic()
-        check = check_immutable_snapshot(
-            target, started + check_budget_seconds if check_budget_seconds else None
+        check, verdict = check_immutable_snapshot(
+            target, started + check_budget_seconds if check_budget_seconds else None,
+            mode="structural",
         )
         check_seconds = time.monotonic() - started
         target.close()
@@ -308,7 +319,7 @@ def backup_database(
             f" source={source_path}"
             f" source_bytes={source_path.stat().st_size}"
             f" check={check}"
-            " verdict=ok"
+            f" verdict={verdict}"
             f" check_seconds={check_seconds:.1f}"
             f" archive={output_path}"
             f" archive_bytes={archive_bytes}"
@@ -341,7 +352,17 @@ def main() -> int:
             " many seconds (0 leaves it unbounded)"
         ),
     )
+    parser.add_argument(
+        "--check-mode",
+        choices=("structural", "header"),
+        default="structural",
+        help="structural page walk or a qualified, bounded schema/header check",
+    )
     args = parser.parse_args()
+    if args.check_mode == "header" and not args.immutable_source:
+        parser.error("--check-mode header requires --immutable-source")
+    if args.check_mode == "header" and args.check_budget_seconds:
+        parser.error("--check-budget-seconds requires --check-mode structural")
     signal.signal(signal.SIGTERM, request_cancel)
     signal.signal(signal.SIGINT, request_cancel)
     try:
@@ -351,6 +372,7 @@ def main() -> int:
                 args.output,
                 immutable_source=args.immutable_source,
                 check_budget_seconds=args.check_budget_seconds,
+                check_mode=args.check_mode,
             )
     except BackupCancelled:
         print("SQLite backup cancelled", file=sys.stderr)

@@ -267,6 +267,40 @@ def test_immutable_large_snapshot_rejects_corruption(tmp_path: Path) -> None:
     assert not list(tmp_path.glob("*.tmp*"))
 
 
+def test_header_mode_publishes_a_qualified_backup_without_a_page_walk(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "telemetry.sqlite"
+    seed_large_database(source)
+    output = tmp_path / "out.zst"
+    # The header and schema remain readable while an overflow page is corrupt.
+    # Header mode may preserve those bytes, but must not claim page integrity.
+    with source.open("r+b") as database:
+        database.seek(2 * 512)
+        database.write((3).to_bytes(4, byteorder="big"))
+
+    result = subprocess.run(
+        [
+            str(SCRIPT),
+            "--immutable-source",
+            "--check-mode",
+            "header",
+            str(source),
+            str(output),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+    assert result.returncode == 0, result.stderr
+    receipt = read_receipt(result.stdout)
+    assert receipt["check"] == "schema_header"
+    assert receipt["verdict"] == "limited"
+    assert receipt["archive_check"] == "zstd-t:ok"
+    assert output.is_file()
+
+
 def test_copied_large_database_rejects_corruption(tmp_path: Path) -> None:
     """The copying route walks the copy before publishing, like the immutable route.
 
