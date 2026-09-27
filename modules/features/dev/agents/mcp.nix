@@ -507,12 +507,14 @@ mkFeatureModule {
                       run rm "$codex_entry"
                       continue
                     fi
-                    if [ "$codex_target" = "${dotsRoot}/_ai/skills/$codex_name" ] && [ ! -e "$declared_skills/$codex_name" ]; then
+                    # A declared entry without SKILL.md (a retired skill, the
+                    # harness-owned synced/ and .trash/ trees) is not a skill.
+                    if [ "$codex_target" = "${dotsRoot}/_ai/skills/$codex_name" ] && [ ! -e "$declared_skills/$codex_name/SKILL.md" ]; then
                       run rm "$codex_entry"
                     fi
                   done
-                  for codex_source in "$declared_skills"/* "$declared_skills"/.[!.]*; do
-                    [ -e "$codex_source" ] || [ -L "$codex_source" ] || continue
+                  for codex_source in "$declared_skills"/*; do
+                    [ -e "$codex_source/SKILL.md" ] || continue
                     codex_name="$(basename "$codex_source")"
                     codex_destination="$codex_skills/$codex_name"
                     if [ -e "$codex_destination" ] || [ -L "$codex_destination" ]; then
@@ -543,14 +545,14 @@ mkFeatureModule {
                     run mkdir -p "$(dirname "$target")"
                     run ln -s "$source" "$target"
                   }
-                  direct_link "$HOME/.config/claude/CLAUDE.md" "${dotsRoot}/claude/CLAUDE.md"
+                  direct_link "$HOME/.config/claude/CLAUDE.md" "${dotsRoot}/_ai/AGENTS.md"
                   direct_link "$HOME/.config/claude/agents" "${dotsRoot}/claude/agents"
                   direct_link "$HOME/.config/claude/skills" "${dotsRoot}/_ai/skills"
                   direct_link "$HOME/.agents/skills" "${dotsRoot}/_ai/skills"
                   direct_link "$HOME/.codex/agents/explorer.toml" "${dotsRoot}/codex/agents/explorer.toml"
                   direct_link "$HOME/.gemini/skills" "${dotsRoot}/_ai/skills"
                   direct_link "$HOME/.gemini/config/skills" "${dotsRoot}/_ai/skills"
-                  direct_link "$HOME/.gemini/config/AGENTS.md" "${dotsRoot}/claude/CLAUDE.md"
+                  direct_link "$HOME/.gemini/config/AGENTS.md" "${dotsRoot}/_ai/AGENTS.md"
                 '';
               };
             };
@@ -588,7 +590,7 @@ mkFeatureModule {
                 source = mkDotsFile "/_ai/skills";
                 force = true;
               };
-              ".gemini/config/AGENTS.md".source = mkDotsFile "/claude/CLAUDE.md";
+              ".gemini/config/AGENTS.md".source = mkDotsFile "/_ai/AGENTS.md";
               ".local/bin/mcp-firecrawl" = {
                 source = "${mcpFirecrawlBin}/bin/mcp-firecrawl";
                 force = true;

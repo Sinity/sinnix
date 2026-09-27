@@ -18,7 +18,7 @@ let
 
   # Stamp the running generation with the sinnix repo commit so
   # `nixos-version --configuration-revision` supports the live-drift
-  # tripwire (CLAUDE.md). Without this it falls back to the NIXPKGS
+  # tripwire (AGENTS.md). Without this it falls back to the NIXPKGS
   # revision, which reads like a plausible sinnix commit and invites a wrong
   # drift diagnosis. Builds from a dirty tree get the `<rev>-dirty` marker;
   # treat that as "commits since <rev> may or may not be live".

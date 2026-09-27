@@ -1,69 +1,64 @@
 ---
 name: claude-self-knowledge
-description: Verify Claude model and harness capabilities, choose dispatch mechanics, locate local state, explain Claude Code behavior, or diagnose compaction, notification, permission, and model-resolution surprises.
+description: Verify what the installed Claude Code harness does — versions, models, dispatch and forks, hooks, permissions, compaction, notifications, local state — or diagnose a surprising harness behavior.
 ---
 
-# Claude harness verification
+# Claude harness facts
 
-Verify version-dependent capabilities against the installed harness or current
-official documentation. Model names, prices, limits, flags, notification
-behavior, and context inheritance are not durable facts of this skill.
-Use `orchestrate` for model allocation and `agent-runtime` for managed jobs.
+Model names, limits, flags, hook behavior, and context inheritance change
+between releases. Establish them from the installed harness, not memory. Use
+`orchestrate` for choosing models and `agent-runtime` for managed jobs.
 
 ## Establish the actual surface
 
-1. Read `claude --version` and the relevant `--help` output. Resolve the
-   executable and wrapper before attributing behavior to the upstream CLI.
-2. Inspect the applicable settings, agent definition, and launch input.
-   Avoid printing credentials or full inherited environments.
-3. Compare the requested model/effort and permissions with the effective
-   launch. A hook echoing a requested model does not prove server resolution.
-4. For undocumented behavior, use an exposed documentation tool or current
-   official documentation. A Claude-specific guide agent or API skill is
-   usable only if this session actually exposes it. State unavailable evidence.
+1. `claude --version` and the relevant `--help`. The `claude` on PATH is a
+   Sinnix wrapper; the real binary is under
+   `~/.local/state/claude-code/npm/`. Attribute behavior to the wrapper or
+   upstream only after checking which one acts.
+2. Read the settings, hooks, and agent definition that apply, without
+   printing credentials or whole environments.
+3. For undocumented behavior, use the Claude Code guide agent or current
+   official documentation when this session exposes one; the installed
+   binary's strings settle what a specific version supports. Say which
+   evidence was unavailable.
+4. Compare the requested model, effort, and permissions with the effective
+   launch. A hook echoing the requested model does not prove what the server
+   ran.
+
+## Local layout
+
+Sinnix owns the sources: global instructions at `dots/_ai/AGENTS.md` (linked as
+`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, and `~/.gemini/GEMINI.md`),
+agent definitions and hooks under `dots/claude/`, shared skills under
+`dots/_ai/skills/`, rendering under `modules/features/dev/agents/`, and
+launcher profiles in `flake/data/agent-lanes.nix`. Instructions and skills are
+live links, effective on the next read; generated settings and profiles
+change at activation. Resolve `~/.claude/` links before editing anything.
 
 ## Dispatch and context
 
-- Determine whether the active tool creates a fresh context or a fork, what
-  model controls it accepts, and how completion is delivered. Do not assume
-  another harness's subagent semantics apply.
-- This environment's Claude Agent hook requires an explicit model for fresh
-  dispatches and exempts forks. Inspect the installed hook and its settings
-  binding when enforcement differs from the request.
-- Agent definitions carry standing role/tool constraints. Dispatch packets
-  carry task scope, ownership, and evidence. Read both before explaining an
-  unexpected permission or model choice.
-- Use the harness's completion notifications or the managed runtime's event
-  stream. Do not invent Monitor or ScheduleWakeup calls when no such tool is
-  exposed. Give long work a bound and an accountable owner.
-- Preserve task decisions and results outside conversation context. After
-  compaction, reconcile Beads, Git, and runtime evidence; a summary is a guide
-  to evidence, not proof that an operation completed.
+- Know whether a tool creates a fresh context or a fork, which model controls
+  it takes, and how completion arrives. Another harness's subagent semantics
+  do not carry over.
+- Agent definitions carry standing role and tool limits; dispatch packets
+  carry task scope. Read both before explaining an unexpected permission or
+  model.
+- Wait on the harness's completion notifications or the runtime's event
+  stream, and use only the scheduling tools this session actually exposes.
+- Keep decisions and results outside the conversation. After compaction,
+  reconcile Beads, Git, and runtime records; a summary points to evidence, it
+  does not prove an operation finished.
 
-## Local configuration and history
+## History
 
-Sinnix owns agent sources under `dots/claude/`, shared skills under
-`dots/_ai/skills/`, and client rendering under
-`modules/features/dev/agents/`. Resolve `~/.claude/` links before editing:
-dots sources can be live-linked, while generated profiles reflect activation.
-Wrapper profiles come from `flake/data/agent-lanes.nix`.
+Session history comes from Polylogue; `claude-sessions` reads raw transcripts
+when the archive is unavailable. Subagent transcripts can outlive their
+worktrees; locate them from the session's own records.
 
-Use Polylogue for session history and `claude-sessions` for bounded raw-JSONL
-recovery when the archive is unavailable. Subagent transcripts may retain
-evidence after a worktree disappears; locate them from the session's actual
-records rather than assuming a fixed transcript layout.
-
-Managed batch manifests retain ownership and result references; pueue owns
-job execution; Beads owns work and dependencies. Use these existing sources
-instead of creating a hook-derived dispatch ledger. Missing capture coverage
-is not proof that an action never occurred.
-
-## Diagnose a surprise
+## Diagnosing a surprise
 
 Keep the exact request, installed version, launch identity, observed result,
 and expected contract together. Reproduce through the user-visible route with
-the smallest safe input. Separate a harness limitation, configuration choice,
-permission refusal, unavailable evidence, and a model implementation error.
-Report decision-relevant conclusions visibly; do not rely on hidden reasoning
-or confidence as evidence. Respect permission refusals rather than rerouting
-the same action around them.
+the smallest safe input. Separate a harness limitation, a configuration
+choice, a permission refusal, missing evidence, and a model error. Respect a
+permission refusal instead of routing the same action around it.

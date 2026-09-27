@@ -1,87 +1,65 @@
 ---
 name: investigate
-description: Investigate bugs, regressions, incidents, performance problems, missing artifacts, and contested claims through reproduction, measurement, evidence preservation, and direct verification.
+description: Diagnose a bug, regression, flaky test, performance problem, incident, or missing artifact, or verify a contested claim, through reproduction, measurement, and preserved evidence.
 ---
 
 # Investigate
 
-One discipline with three entries: a bug to diagnose, an incident to recover
-from, a claim to verify. All three share the spine: **freeze evidence, build a
-feedback loop, measure before touching production code**.
+Three entry points share one discipline: a bug to diagnose, an incident to
+recover from, a claim to verify. Preserve the evidence, build a feedback loop,
+and measure before changing production code. The deliverable is the
+assessment; apply a fix only when the task is a fix.
 
-## Freeze first (incidents)
+## Incidents: freeze first
 
-Before resolving conflicts, restoring files, or restarting services in an
-incident: capture the current state (copy the conflicted worktree, save the
-journal slice, snapshot the receipt/log) somewhere mutation cannot reach.
-Recovery actions destroy evidence; a five-minute freeze is cheaper than a
-lost cause. Then recover by checking authorities in order: filesystem and
-worktree → git index and reflog → agent session records (claude-sessions,
-Polylogue when live) → external Beads state → snapshots and backups.
+Recovery destroys evidence. Before resolving conflicts, restoring files, or
+restarting services, copy the current state somewhere mutation cannot reach:
+`scripts/freeze.sh --repo <path> --out <dir> [--conflict <file>…]` captures
+status, reflog, diffs, and named conflicted files with hashes
+([checklist](references/freeze-checklist.md)). Then recover by consulting
+authorities in order, filesystem and worktree, Git index and reflog, session
+transcripts, Beads, snapshots and backups, using
+`scripts/recover-probe.sh` to probe them read-only
+([matrix](references/recovery-matrix.md)). The freeze authorizes no repair;
+each mutation names its exact target and is verified against the frozen state.
 
-## The diagnosis loop (hard bugs)
+## Bugs: the diagnosis loop
 
-**Phase 1 — build a feedback loop. This is the skill; everything else is
-mechanical.** A **tight** loop is one command that goes red on THIS bug:
-fast (seconds), deterministic, agent-runnable. Here the loop
-runner is `devtools test <selector>` — it carries the checkout guard,
-frozen clock, and isolated fixtures (`workspace_env`); bare pytest silently
-drops all three (`POLYLOGUE_ALLOW_BARE_PYTEST=1` exists for the genuine
-one-off; needing it twice means the harness is missing something — fix the
-harness). For non-test loops: a curl against a dev daemon, a CLI invocation
-diffed against known-good output, a replayed captured artifact, a bounded
-property loop. Flaky bugs: raise the reproduction rate (loop ×100,
-parallelize, narrow timing) until debuggable.
+1. **Build a loop.** One command that goes red on this exact symptom: fast,
+   deterministic, runnable by you. Use the repository's focused test runner
+   (it carries the project's isolation and fixtures), a request against a dev
+   service, a CLI run diffed against known-good output, or a replayed
+   artifact. For a flaky bug, raise the reproduction rate (repeat, parallelize,
+   narrow timing) until it is debuggable. Done when you have run a command
+   that asserts the symptom. If you cannot build one, say what you tried and
+   ask for the artifact or access that would allow it.
+2. **Minimize.** Cut one element at a time until every remaining element is
+   needed. The minimal case becomes the regression fixture.
+3. **Hypothesize.** Write three to five ranked, falsifiable hypotheses ("if X,
+   then changing Y removes it") before testing any; one idea anchors, a list
+   does not. Record disproved ones on the owning task.
+4. **Instrument.** One prediction per probe, one variable at a time. A
+   debugger beats logs; targeted logs beat logging everything; tag debug
+   output with a unique prefix so removal is one grep. For performance,
+   measure first (profiler, query plan, a baseline harness) and fix what the
+   data implicates.
+5. **Fix at a production-reachable seam.** The regression test must travel
+   the path production takes; a test against a parallel or dead
+   implementation proves nothing. Red before the fix, green after. If no such
+   seam exists, that is the finding: file it rather than ship a test that
+   cannot fail.
+6. **Clean up.** Re-run the original reproduction, remove instrumentation and
+   throwaway harnesses, and state the confirmed cause in the commit, PR, or
+   task.
 
-Completion criterion: you can name one command, already run at least once,
-that asserts the user's exact symptom — not "runs without erroring". No
-red-capable command, no hypotheses. If you cannot build one, say so, list
-what you tried, and ask for the artifact or access that would enable it.
+## Claims: "is X still true?"
 
-**Phase 2 — reproduce and minimise.** Watch it go red. Then shrink to the
-smallest scenario that still fails, cutting one element at a time; done when
-every remaining element is load-bearing. The minimised repro becomes the
-regression fixture.
-
-**Phase 3 — hypothesise.** 3–5 ranked, falsifiable hypotheses ("if X is the
-cause, changing Y makes it disappear") BEFORE testing any. One plausible
-idea anchors; a ranked list doesn't. Show the list to the operator if
-present; proceed on your ranking if not. Record disproved hypotheses on the
-owning bead — the next session must not re-derive them.
-
-**Phase 4 — instrument.** Each probe maps to one prediction; change one
-variable at a time. Debugger/REPL beats logs; targeted logs beat log-
-everything. Tag debug logs with a unique prefix so cleanup is one grep.
-Performance: measure first (baseline harness, profiler, query plan), then
-bisect — logs are usually the wrong instrument (absorbed from
-the measure-first discipline: build the measuring harness BEFORE touching production
-code; fix what the data implicates, not what the hypothesis flags).
-
-**Phase 5 — fix + regression test at a production-reachable seam.** The
-test must exercise the real bug path as production reaches it — a test
-against a dead or parallel implementation certifies nothing (oracle-
-integrity rules; this repo has four recorded wrong deletions from
-grep-level reasoning). Red before the fix, green after. Where the check has
-a registry home, give it a **red twin** — the mutation that proves the
-detector notices. **If no correct seam exists, that is the finding**: file
-it as a bead; do not ship a false-confidence test.
-
-**Phase 6 — cleanup.** Original repro re-run green; tagged instrumentation
-grepped out; throwaway harnesses deleted or moved to the scratch dir; the
-confirmed hypothesis stated in the commit/PR/bead so the next debugger
-inherits it.
-
-## Verifying claims ("is X still true")
-
-Check the fact that decides the question, not a proxy. Preconditions
-inherited from notes or earlier passes are re-verified, not obeyed. Where
-beads or docs make measured claims, re-measure before relying on them;
-where they conflict with code, code wins and the stale document gets fixed
-in the same change or a filed follow-up.
+Check the fact that decides the question, not a proxy. Re-verify
+preconditions inherited from notes or earlier passes; re-measure measured
+claims before relying on them. When a document disagrees with the code, the
+code wins, and the document is fixed in the same change or a filed task.
 
 ## Boundaries
 
-Read-only by default: an investigation's deliverable is the assessment.
-Do not apply fixes until asked (or the task is explicitly a fix). Never
-mutate live archives, durable tiers, or services to test a theory —
-copy to scratch and experiment there.
+Never mutate live archives, durable state, or running services to test a
+theory; copy to scratch and experiment there.

@@ -151,9 +151,8 @@ mkFeatureModule {
             };
           };
 
-          # AGENTS.md is a committed symlink to CLAUDE.md in sinnix's repos
-          # but noise in everyone else's; result* are the symlinks `nix build`
-          # drops into whatever directory it was run from.
+          # result* are the symlinks `nix build` drops into whatever directory
+          # it was run from.
           #
           # The result* entries belong here rather than in each repo because they
           # are a property of the tool, not of any project: every repo that has
@@ -162,7 +161,6 @@ mkFeatureModule {
           # nobody will edit -- a dbus-broker worktree was showing result and
           # result-man as committable untracked entries for exactly that reason.
           home.file.".config/git/ignore_global".text = ''
-            AGENTS.md
             result
             result-*
           '';

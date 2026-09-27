@@ -47,7 +47,9 @@ extract_frontmatter() {
           printf "%s\t%s\t%s\t%s\n", fields["name"], fields["description"], fields["model"], fields["effort"]
       }
     ' "$file" >> "$result"
-  done < <(find "$root" -type f \( -name '*.md' -o -name '*.markdown' \) -print0 | sort -z)
+  # Depth 2 covers <root>/<name>.md agent files and <root>/<skill>/SKILL.md;
+  # deeper trees are references or harness-owned mirrors, not skills.
+  done < <(find "$root" -maxdepth 2 -type f \( -name '*.md' -o -name '*.markdown' \) -print0 | sort -z)
   sort -t $'\t' -k1,1 -u "$result" -o "$result"
 }
 

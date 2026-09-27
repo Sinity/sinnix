@@ -29,7 +29,3 @@ scripts/sinnix-claude-session prose <session-id-or-path> [--thinking] [--tools] 
   summarize, or pass `--out` and read selectively.
 - `--sidechains` includes subagent transcripts — usually noise for
   understanding the main line of work.
-- The stripped-reopenable-forked-session idea (condense a session by
-  filtering its JSONL and resuming it) is deliberately NOT implemented here:
-  resuming a hand-edited transcript is untested against the harness and
-  belongs to a careful experiment, not a routine tool.

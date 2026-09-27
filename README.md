@@ -185,8 +185,7 @@ AgentCTL project operation; `switch` remains the supported activation command.
 - [Project overview](https://sinity.github.io/sinnix/)
 - [Roadmap and operating record](https://sinity.github.io/sinnix/beads/)
 
-Editing and publication rules live in [CLAUDE.md](CLAUDE.md). `AGENTS.md` is a
-symlink to the same contract.
+Editing and publication rules live in [AGENTS.md](AGENTS.md).
 
 ## Status
 

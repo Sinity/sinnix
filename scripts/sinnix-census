@@ -410,7 +410,7 @@ def main() -> int:
         for name, meta in declared_services().items():
             unit = meta.get("unit") or ""
             # `kind` is always a real systemd unit type and `unit` always
-            # ends in it -- CLAUDE.md's runtime-governance invariant, so the
+            # ends in it -- AGENTS.md's runtime-governance invariant, so the
             # unit suffix alone tells journalctl-eligibility without needing
             # a separate field.
             kind = unit.rsplit(".", 1)[-1] if "." in unit else meta.get("kind", "service")

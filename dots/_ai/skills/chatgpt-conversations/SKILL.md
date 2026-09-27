@@ -121,11 +121,3 @@ characters to recover the canvas document alone.
   when the operator asks for that result.
 - This skill is for `chatgpt.com/c/...` tabs already open in the browser. It
   does not authenticate, open new chats, or search the user’s account.
-
-## Routing validation
-
-The original routing description only promised reading. The request “inspect
-the ChatGPT-generated audit attachments in this open conversation” now selects
-this skill: `artifacts` lists the rendered generated controls, and `download`
-verified a generated JSON file in Downloads. The non-trigger “open a new
-ChatGPT chat and submit this prompt” remains browser-action work.

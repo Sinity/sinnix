@@ -35,10 +35,8 @@ Works especially well as a cheap second pass with a fast/small model against
 a narrow 1-4 file target — the model doesn't need deep judgment to narrate
 correctly, and narration is what surfaces the invariant worth judging.
 
-This complements, rather than duplicates, the `analyze` skill's interactive
-survey→narrate→synthesize workflow — `analyze` is for a user-steered single
-session; this is the same core technique baked into an unattended, fan-out-
-capable dispatch prompt for a whole campaign wave.
+The same technique works interactively for a user-steered walkthrough; here
+it is baked into an unattended dispatch prompt for a whole campaign wave.
 
 ## Cross-referencing related functions
 

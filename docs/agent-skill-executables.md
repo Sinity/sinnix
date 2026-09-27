@@ -4,7 +4,6 @@ This audit records every executable beneath `dots/_ai/skills`. pueue, through `a
 
 | Executable                                                   | Positive caller                               | Retained role                                              |
 | ------------------------------------------------------------ | --------------------------------------------- | ---------------------------------------------------------- |
-| `orchestrate/scripts/build_plan_batch_prompts.py`            | `orchestrate` skill                           | Writes operator-reviewed prompt files only.                |
 | `orchestrate/scripts/probe_agent_runtime.sh`                 | `orchestrate` skill                           | Direct vendor and quota availability probe.                |
 | `agentctl-agent` (from the AgentCTL package)                 | `agentctl batch start`                        | Private backend argv translator for a worker's agent job.  |
 | `chatgpt-conversations/scripts/sinnix-chatgpt-conversations` | `chatgpt-conversations` skill                 | Read-only conversation extraction from the shared browser. |
@@ -13,6 +12,7 @@ This audit records every executable beneath `dots/_ai/skills`. pueue, through `a
 | `desktop-control-plane/scripts/keyboard-control.sh`          | Agent module                                  | Explicit keyboard UI helper.                               |
 | `desktop-control-plane/scripts/kitty-remote-control.sh`      | Agent module and desktop-control-plane skill  | Visible terminal UI helper.                                |
 | `desktop-control-plane/scripts/screenshot-color-lab.sh`      | Agent module and capture registry             | Screenshot and display diagnostic helper.                  |
+| `grok/scripts/defect_priors.py`                             | `grok` skill                                  | Ranks Polylogue modules for an audit wave.                 |
 | `grok/scripts/partition_by_size.sh`                          | `grok` skill                                  | Measured source partitioning for a code audit.             |
 | `html-report/generators/embed-path-popups.py`                | `html-report` skill                           | HTML report navigation generator.                          |
 | `investigate/scripts/freeze.sh`                              | `investigate` skill                           | Evidence preservation before recovery mutation.            |

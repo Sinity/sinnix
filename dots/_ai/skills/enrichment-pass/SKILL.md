@@ -93,12 +93,8 @@ pluralise, do not add qualifiers — pick the closest match and put the nuance i
 | `self-degraded`            | this pass itself was impaired (tool failure, truncation) |
 | `other`                    | nothing above fits; explain fully in `summary`           |
 
-Why this is closed: across the first 27 passes an open `kind` field produced 96
-distinct values, including seven separate spellings of "the journal is flooded"
-(`journal-storm`, `journal-flood`, `log-spam`, `log-flood`, `journald-noise`,
-`journal-warning-flood`, `log-flooded-by-single-warning`). Free-text kinds make
-the flags unaggregatable across runs, which defeats the point of emitting
-structured output alongside the prose.
+The vocabulary is closed so flags aggregate across runs; an open field
+quickly produced many spellings of the same condition.
 
 ## Invariants (do not violate)
 

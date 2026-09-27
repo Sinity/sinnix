@@ -1,101 +1,62 @@
-# Model allocation from observed work
+# Model allocation and attribution
 
-Choose from the remaining decisions, implementation scope, available evidence,
-and worker authority. The assignments in `../SKILL.md` are starting choices,
-not capability rankings. Preparing a specification is work; include it when
-comparing dispatch choices.
+The table in `../SKILL.md` gives starting assignments, not capability rankings.
+Choose from the decisions that remain open, the size of the implementation,
+the evidence available, and the authority the worker needs. Writing the
+specification is part of the work; count it when comparing choices.
 
-## Dispatch and inheritance
+## What actually ran
 
-- Native Codex spawn exposes `model`, `reasoning_effort`, and `fork_turns`;
-  backend is harness-determined. Claude's tool may lack an effort field, so
-  use the current role/runner schema. AgentCTL queued launches explicitly set
-  backend, model, and effort.
-- Explicit model-controlled native dispatch uses the default agent role and a
-  self-contained packet of role instructions. Role-constrained work uses the
-  existing runner or AgentCTL route after inspecting its config; a native
-  model/effort request cannot be assumed to override that role.
-- Native dispatch defaults to `fork_turns='none'`. Deliberate full-history
-  inheritance requires explicit `fork_turns='all'`, the same parent model, and
-  no model or effort override; an omitted fork setting is invalid for that
-  decision. A requested override never proves the child used it.
-- Named roles may pin model and effort only where the current tool/runner
-  schema supports them. Prompt labels, role names, and external batch manifests
-  express intent; verify effective backend/model/effort in owning launch/session
-  metadata, including every resume attempt. Missing evidence is explicitly
-  unknown; persisted/requested config is not provider-resolved per-turn
-  telemetry, so do not infer savings, capability, or attribution from it.
-- Read the installed-mode contract: edits through a live symlink take effect
-  immediately, though already-loaded context may not refresh; copied/generated
-  config needs its owning install or activation, and a fresh context may still
-  be required. Source edits alone are not proof of loaded state. Do not stop or
-  restart an in-flight agent solely to reattribute its model.
-- Use queued AgentCTL external workers for independent durable implementation or
-  publication with explicit launch fields, unattended queueing, or a required
-  backend choice. Use native agents for bounded interactive analysis, help, and
-  cohesive implementation in the shared checkout; coordinate actual edit
-  conflicts and let the coordinator commit the integrated result. Trivial
-  read-only work need not become a batch. Do not add wrappers or ledgers.
+- A requested model, a role name, a prompt label, or a batch manifest states
+  intent. The model that ran is established only by the launch or session
+  metadata, checked for every attempt including resumes. Missing evidence
+  stays unknown; do not infer capability, savings, or attribution from
+  requested configuration.
+- A role or runner may pin its own model and tools. Read its definition
+  before assuming a per-dispatch override took effect.
+- AgentCTL queued launches set backend, model, and effort explicitly.
+- Instruction and skill files reached through live symlinks change on the next
+  read, though a running agent keeps what it already loaded. Generated
+  configuration changes only after its install or activation.
+- Do not restart a running agent only to change its recorded model.
 
 ## Before dispatch
 
-Read the current bead and code. Revalidate existing design and allocation
-judgments in its metadata or notes. These are
-agent judgments: cite the evidence and unresolved choices in a dated bead note.
-A detailed packet does not establish that its design decisions are settled.
-Use existing fields and notes; add metadata only for a demonstrated consumer.
-
-Name the delivery the worker can finish with its authority and available
-evidence. Retain every acceptance criterion; identify any operational proof
-that requires another owner or window. Such a criterion remains open after a
-code-only delivery. Allocate a bounded design task when its answer makes an
-implementation tractable; keep design and implementation together when their
-feedback is necessary to resolve the problem.
-
-Select explicit backend/model/effort using the main skill's assignments and
-record why when departing from them. Check the current launch schema; the
-effective values are established only by owning launch/session metadata.
+Revalidate any design or allocation judgment already recorded on the task
+against current code; note the evidence and open choices in a dated task note.
+A detailed packet does not make its design decisions settled. Name the
+delivery the worker can finish with its authority, and keep every criterion,
+including operational proof another owner must supply. Give a bounded design
+task its own owner when its answer makes the implementation tractable; keep
+design and implementation together when each needs the other's feedback.
 
 ## After an attempt
 
-Join the exact launch, prompt snapshot, starting commit, result, and
-verification by their existing run, worker, and attempt references. A resume
-can change model and inherit code or hints, so inspect every attempt. Missing
-launch or usage evidence stays explicitly unknown.
+Join the launch, prompt, starting commit, result, and verification through
+their run, worker, and attempt references. Launch arguments, commits, timing,
+and recorded check results are observations; a worker's criterion statuses
+are claims; a reviewer's assessment is an attributed judgment. Record
+consequential hints, respecification, reviewer fixes, and inherited work in
+the task note, and count them in the delivery's cost, not only the model that
+made the final commit.
 
-Keep machine facts separate from judgments. Launch arguments, commits, process
-timing and recorded check results are observations. Worker criterion statuses
-are claims; reviewer assessments and explanations of failure are attributed
-judgments with evidence. Record consequential hints, respecification, reviewer
-fixes and inherited work in the owning bead note with attempt references.
+## Escalation
 
-Assess reviewed delivery against the promised scope. Publication, criterion
-supersession, and task closure answer different questions. Preserve partial
-acceptance and missing proof; a changed criterion creates a changed comparison.
-Review, interventions, and inherited work belong to the whole delivery's cost,
-not solely to the model that produced the final commit. Do not infer savings
-from elapsed time, queue slots, or labels.
+Inspect the concrete residual before changing models. When attempts fail
+alike, compare prompts, roles, and launch metadata first. Reopen a design
+judgment when implementation exposes a missing decision; move a concrete
+implementation miss against settled requirements to a stronger tier with the
+failing case and the preserved work. State what the next attempt must resolve;
+repetition without a new diagnosis does not justify another retry or a higher
+effort.
 
-## Escalation and cost
+## Allocation trials
 
-On an unresolved attempt, inspect the concrete residual before changing models.
-When attempts fail alike, compare the prompt snapshot, role, and recorded launch
-metadata before changing allocation; source configuration does not prove what
-the runner loaded. Keep related fixes with one owner while they share diagnosis
-or verification. Resolve missing authority, infrastructure or evidence through
-their owners.
-Reopen a design judgment when implementation exposes a missing decision; use a
-bounded architecture task or design-critical implementation assignment. For a
-concrete implementation miss against settled requirements, consider Sol with
-the failing case and preserved work. Reserve Astra for a specific unresolved
-architecture or design decision. State what the next attempt must resolve.
-Repetition without a new diagnosis does not justify more retries or a higher
-effort setting.
-
-Use observed usage and current applicable pricing for cost comparisons; include
-specification, failed attempts, review, interventions, and inherited work.
-Queue delay and agent runtime are separate measurements. Historical completion
-rates confound task selection, revisions, inheritance, and infrastructure.
-Keep model choice with the accountable agent rather than an automatic router
-or completion leaderboard. For an evidence-driven trial, use the
-[trial protocol](experiment-protocol.md).
+Test an allocation rule on work already worth doing, recorded in the owning
+task rather than a separate ledger. A trial needs one decision it could
+change, eligibility rules, assignment chosen before seeing outcomes
+(alternating or randomized), comparable effort and review, outcome evidence,
+a stopping rule, and an expiry. Resuming another model's work is an
+intervention, not an independent sample. Close with the supported decision
+(keep, revise for the observed task shape, or inconclusive), update the
+instruction that uses it, and leave the outcomes in the task.

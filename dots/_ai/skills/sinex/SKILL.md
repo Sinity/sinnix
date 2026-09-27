@@ -6,7 +6,7 @@ description: Work on Sinex capture, provenance, schemas, sources, automata, xtas
 # Sinex
 
 Sinex is the capture and provenance substrate. Read the repository
-`CLAUDE.md`, `docs/architecture.md`, and `.agentctl/project.toml` for current
+`AGENTS.md`, `docs/architecture.md`, and `.agentctl/project.toml` for current
 semantics and commands.
 
 ## Model

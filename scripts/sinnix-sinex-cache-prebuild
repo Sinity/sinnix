@@ -20,7 +20,7 @@
 # When it has moved:
 #   1. build sinex directly at that locked git revision -- bypassing
 #      sinnix's own flake entirely (sinex intentionally does not follow
-#      sinnix's nixpkgs, see CLAUDE.md's Input Pinning notes, so this
+#      sinnix's nixpkgs, see AGENTS.md's input-pinning rule, so this
 #      produces the exact same closure an eventual `switch` would build).
 #      AgentCTL owns the operation's cgroup, lifecycle, cancellation, and
 #      resource admission;

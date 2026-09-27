@@ -319,7 +319,7 @@ mkFeatureModule {
 
             xdg.configFile = {
               "claude/CLAUDE.md" = {
-                source = mkDotsFile "/claude/CLAUDE.md";
+                source = mkDotsFile "/_ai/AGENTS.md";
                 force = true;
               };
               "claude/skills" = {

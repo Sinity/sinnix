@@ -6,7 +6,7 @@ description: Work on Sinnix NixOS configuration, modules, scripts, dotfiles, age
 # Sinnix
 
 Sinnix declares the workstation, user environment, fixed services, and
-`agentctl`. Read the root `CLAUDE.md` before editing; use `docs/agentctl.md`
+`agentctl`. Read the root `AGENTS.md` before editing; use `docs/agentctl.md`
 and `docs/agent-gateway.md` for those contracts.
 
 ## Map

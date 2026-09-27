@@ -18,7 +18,6 @@ loop on what comes back.
 
 ```
 IF you need ONE file/module reviewed                → dispatch a single `review` agent directly, skip this skill
-IF the user wants to steer phase-by-phase             → use `analyze` (survey→narrate→synthesize, interactive)
 IF it's a routed one-shot dev task (implement/fix/PR)  → use `orchestrate`
 IF you need broad, systematic coverage of a real
    codebase, sized past what one agent's context holds → this skill
@@ -27,9 +26,8 @@ IF you need broad, systematic coverage of a real
 Grok is the campaign layer: it owns measurement-driven partitioning,
 multi-tier model dispatch (including non-Claude fast/cheap models), a bug
 taxonomy to triage against, and coordinator discipline for filing hundreds of
-findings without duplicating or losing them. It does not reinvent
-`orchestrate`'s launch mechanics or `analyze`'s narrate technique —
-it cites both and adds what large campaigns need on top.
+findings without duplicating or losing them. It uses
+`orchestrate` for launch mechanics and adds what large campaigns need on top.
 
 ## Workflow
 
@@ -56,7 +54,8 @@ find <root> -name "*.rs" -not -name "*_test.rs" | xargs wc -l | sort -rn
 
 (swap the extension/exclusion for the target language). Do this per-crate/
 per-package, then drill into whichever subdirectories are still too large to
-read exhaustively. `scripts/partition_by_size.sh` automates this sweep and
+read exhaustively. For a Polylogue hunt, `scripts/defect_priors.py` ranks
+modules by size, thin coverage, churn, and past defects. `scripts/partition_by_size.sh` automates the sweep and
 proposes region boundaries at a target size — see
 [`references/partitioning.md`](references/partitioning.md) for the full
 methodology and worked sizing targets per model tier.

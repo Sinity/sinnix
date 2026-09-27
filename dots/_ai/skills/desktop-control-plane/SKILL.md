@@ -1,6 +1,6 @@
 ---
 name: desktop-control-plane
-description: "Control desktop/runtime surfaces for operator workflows: Kitty remote I/O, Hyprland dispatch/inspection, and screenshot diagnostics/workarounds (including HDR washout handling). Use when coding agents need reliable computer-use primitives on Linux Wayland/Hyprland systems."
+description: Drive the operator's desktop from an agent — shared Chrome through CDP, Kitty remote input and capture, Hyprland windows and shortcuts, and HDR-safe screenshots.
 metadata:
   short-description: Desktop control and automation toolkit
 ---
@@ -120,7 +120,7 @@ Examples:
 sinnix-chrome-control status
 
 # Open an agent window on the inactive named agentbrowser workspace. Prints its page id.
-# Authenticated exactly where the operator is, because it IS his profile.
+# Authenticated exactly where the operator is, because it is the operator's own profile.
 # Each request waits for its matching CDP response within a bounded deadline;
 # nonmatching protocol messages are retained on stderr for diagnosis.
 sinnix-chrome-control agent-window --url https://example.com
@@ -149,9 +149,9 @@ sinnix-chrome-control upload-files <page_id> \
 - When an operation genuinely depends on OS focus, inspect Hyprland's focused
   window immediately before sending input and verify focus again afterward.
 - Use `agent-window` for all agent work; it parks on the hidden workspace, and
-  F7 is how the operator looks at it. Operate on his existing pages only when
-  he asked for that specific thing — the profile is shared, so a stray
-  navigation lands in his session, not a sandbox.
+  F7 is how the operator looks at it. Operate on the operator's existing pages only when
+  they asked for that specific thing — the profile is shared, so a stray
+  navigation lands in their session, not a sandbox.
 - `agent-window` returns only after the exact new compositor address has stayed
   tiled, unpinned, non-fullscreen, and invisible on `agentbrowser` while the
   focused operator client remains unchanged. CDP command responses use positive

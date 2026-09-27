@@ -1,63 +1,46 @@
 ---
 name: polylogue
-description: Query or develop Polylogue session archives, ingestion, storage tiers, lineage, CLI, MCP, daemon convergence, devtools verification, or historical work reconstruction.
+description: Query past AI sessions through Polylogue, or develop Polylogue itself — ingestion, storage tiers, lineage, CLI, MCP, daemon convergence, devtools verification.
 ---
 
 # Polylogue
 
-Polylogue archives AI sessions and exposes them through a query-first CLI, MCP,
-Python API, and daemon. Use it for past-session reconstruction instead of
-guessing. Read the candidate repository `AGENTS.md` for product invariants, and the
-area sheets under `docs/atlas/` (storage, daemon, mcp — code-verified
-anchors) before exploring an area; report an ATLAS-DELTA in your summary if
-reality disagrees with a sheet.
+Polylogue archives AI sessions and serves them through a query-first CLI, an
+MCP server, a Python API, and a daemon. Use it to reconstruct past work
+instead of guessing. For development, the repository's `AGENTS.md` holds the
+product invariants and `docs/atlas/` orients each area.
 
 ## Reading history
 
-Prefer the MCP `query`, `read`, `get`, `explain`, `context`, and `status`
-operations. Query with refs and fetch full message text only when needed.
-Use `context(intent="resume", repo_path=<abs>, cwd=<abs>)` to reconstruct work
-after interruption. If ingestion is unavailable, use the `claude-sessions`
-raw-JSONL stopgap.
+- Prefer the MCP operations: `status` before freshness-sensitive or
+  completeness claims, `explain` when fields or grammar are uncertain,
+  `query` to find sets, `read` or `get` for bounded context, `context` for a
+  resume or prior-art packet (`context(intent="resume", repo_path=<abs>,
+  cwd=<abs>)` after an interruption). Keep the returned refs and fetch full
+  message text only when needed.
+- On the CLI, signal query intent with `find`, a quoted expression, or field
+  syntax, and filter by `origin`, not provider. `polylogued status` shows
+  freshness when results look stale.
+- When ingestion is unavailable, `claude-sessions` reads raw Claude
+  transcripts.
 
-The CLI is query-first. Signal intent with `find`, a quoted expression, or
-field syntax, and filter public surfaces by `origin`, not provider. Confirm
-freshness with `polylogued status` when results look stale.
+## Developing
 
-## Development
-
-Durability separates the six SQLite tiers: source, user, and audit are durable;
-index and embeddings are rebuildable; ops is disposable. Never use rebuildable
-state as authority for durable mutation. Preserve lineage composition and the
-single-writer daemon route.
-
-`devtools` is the repository verification surface:
-
-```text
-devtools test <selector>
-devtools verify --quick
-devtools verify
-devtools verify --all
-devtools why
-devtools render all --check
-```
-
-`devtools verify` selects from and updates the checkout's corpus testmon
-graph. A usable local graph survives newer primary files; a compatible seed
-replaces an absent, unusable, or environment-incompatible copy when it would
-select better. Without a usable seed, verification records a full seed run.
-Package or interpreter changes can also require full execution. `devtools
-why` and the run receipt explain the actual selection; graph usability alone
-does not establish corpus coverage.
-
-`devtools test <selector>` traces a run-local scratch graph, preserving the
-corpus graph. Keep exact selectors in `verification_commands`; the generic
-focused operation is `verify_quick`, which runs static checks only. The
-candidate's hosted `verify` check runs affected verification; only `--all`
-proves the corpus, at the master boundary. Read command, selection counts and
-outcomes before claiming test coverage. Use existing receipt references;
-do not infer success from a process exit or an empty selection.
-
-Product work uses feature branches and squash-merged PRs. Generic lane,
-job, and task lifecycle belongs to `agentctl` and the shared runtime skills, not
-the contributor-facing project contract.
+- Six SQLite tiers, split by durability: `source`, `user`, and `audit` are
+  durable; `index` and `embeddings` rebuildable; `ops` disposable. Rebuildable
+  state is never the authority for a durable mutation. Live writes go through
+  the daemon's single writer; lineage is stored as a divergent tail and
+  recomposed on read.
+- Code edits can move the derived schema identity even without DDL. Check
+  `devtools schema closure <file>` for anything you change and land closure
+  changes before a rebuild starts.
+- `devtools test <selector>` runs an explicit focused selection; keep exact
+  selectors in a task's `verification_commands`. `devtools verify --quick`
+  runs static checks only. `devtools verify` makes one bounded selection from
+  a usable testmon graph and reports zero honestly; if the graph is unusable
+  it refuses, and you run a focused selection instead. `devtools verify
+  --all` runs the complete corpus only when scheduled or explicitly
+  requested. Do not re-run a green or failed verification on the same
+  revision to get a bigger selection. `devtools why` and the run receipt show
+  what ran; an empty selection is not a pass.
+- Product work lands through feature branches and squash-merged PRs.
