@@ -1,6 +1,6 @@
 ---
 name: analyze
-description: Interactive codebase analysis with user steering (survey → narrate → synthesize)
+description: Use for an explicitly interactive codebase walkthrough where the user wants to steer a survey before deeper analysis. Ordinary inspection needs no staged workflow.
 ---
 
 # Interactive Code Analysis

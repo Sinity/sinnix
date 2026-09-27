@@ -1,6 +1,6 @@
 ---
 name: review-land
-description: Review code or prose, audit acceptance criteria, resolve conflicts, commit, publish, merge, and close work through the repository's verified landing discipline.
+description: Land a repository change: inspect the integrated candidate, resolve conflicts, commit, publish, merge, and reconcile task acceptance.
 ---
 
 # Review and land
@@ -24,8 +24,9 @@ anything else).
    expectation recomputed the way the code computes it proves nothing); no
    dead-engine certification; red twins where the change adds a detector;
    seams were pre-agreed, not discovered by the test.
-4. **Operational safety**: durable-tier changes ride numbered migrations
-   with consent; derived-tier changes declare their lifecycle class;
+4. **Operational safety**: apply the candidate's declared schema regime; a
+   fresh-v1 reset is not an old-archive migration. Derived-tier changes declare
+   their lifecycle class;
    deletions carry their declarations with them (no dangling CommandSpec,
    hook, config key, or doc line — a known breakage class).
 5. **Verification authority**: what was actually RUN (exact commands, real
@@ -33,10 +34,11 @@ anything else).
    or selected/attested-green. A claim the evidence doesn't support is worse
    than no claim.
 
-For risky or contested closures, add one adversarial pass: an independent
-reviewer prompted to REFUTE the closure against the AC matrix, iterating
-until it cannot find a legitimate gap (bounded — two clean passes suffice;
-five means the change should be split).
+The coordinator performs these checks on the integrated diff. A separate
+adversarial reviewer needs a named unresolved risk or dispute, or a project
+policy that requires one. Give it a pinned candidate and the specific claim to
+test. Re-review only after a material change or an unresolved finding; a clean
+verdict does not need another clean verdict.
 
 ## Landing
 

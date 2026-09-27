@@ -31,8 +31,8 @@ skill lifecycle and routing, and `orchestrate` for delegation changes.
 
 ## Improve
 
-- Keep global instructions for cross-project constraints and project
-  `CLAUDE.md` for stable semantics. Put procedures in their owning skill,
+- Keep global instructions for cross-project constraints and the repository's
+  `AGENTS.md` or `CLAUDE.md` for stable semantics. Put procedures in their owning skill,
   task state in Beads, and job evidence in runtime artifacts.
 - Update the existing owner before adding a field, rule, skill, or ledger.
   Replace contradictory advice in the same change and name what got shorter.

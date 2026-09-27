@@ -29,7 +29,7 @@ effort = "medium"
 [packets.review]
 backend = "codex"
 model = "gpt-6-sol"
-effort = "high"
+effort = "medium"
 
 [operations.check]
 description = "Run default Sinnix checks"

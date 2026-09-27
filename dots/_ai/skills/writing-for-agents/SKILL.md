@@ -87,8 +87,10 @@ Two cautions:
 
 ## Pruning
 
-- **Single source of truth** per meaning; duplication drifts. Here
-  AGENTS.md is a symlink to CLAUDE.md for exactly this reason.
+- **Single source of truth** per meaning; duplication drifts. Prefer one
+  project `AGENTS.md` where the installed agents load it directly. If a
+  compatibility `CLAUDE.md` is required, import or link the same content
+  rather than maintaining a second copy.
 - **The environment is a source of truth**: `devtools --list-commands`,
   `agentctl --help`, `bd --help`, generated reference docs, `.agentctl/
 project.toml`. A document restating them is a cache that goes stale into

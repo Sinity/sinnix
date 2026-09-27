@@ -1,6 +1,6 @@
 ---
 name: writing-style
-description: Use when writing or editing GitHub issues, pull requests, review comments, commit messages, chat replies, or prose documentation.
+description: Use when writing or editing public GitHub issues, pull requests, review comments, commit messages, or publication prose with repository style constraints.
 ---
 
 ## Writing Style
