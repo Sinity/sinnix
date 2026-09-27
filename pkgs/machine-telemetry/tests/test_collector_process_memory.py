@@ -55,20 +55,46 @@ def test_service_unit_props_batches_each_manager(monkeypatch) -> None:
     )
 
     got = collector.service_unit_props(
-        ["a.service", "polylogued.service", "b.service", "noctalia.service"],
-        user_units={"polylogued.service", "noctalia.service"},
+        [
+            ("system", "a.service"),
+            ("user", "polylogued.service"),
+            ("system", "shared.service"),
+            ("user", "b.service"),
+            ("user", "noctalia.service"),
+            ("user", "shared.service"),
+        ],
         user_name="test",
     )
 
     assert [call[0] for call in calls] == ["system", "user"]
-    assert calls[0][1] == ["a.service", "b.service"]
-    assert calls[1][1] == ["polylogued.service", "noctalia.service"]
-    assert set(got) == {
-        "a.service",
-        "b.service",
+    assert calls[0][1] == ["a.service", "shared.service"]
+    assert calls[1][1] == [
         "polylogued.service",
+        "b.service",
         "noctalia.service",
+        "shared.service",
+    ]
+    assert set(got) == {
+        ("system", "a.service"),
+        ("user", "polylogued.service"),
+        ("system", "shared.service"),
+        ("user", "b.service"),
+        ("user", "noctalia.service"),
+        ("user", "shared.service"),
     }
+    assert got[("system", "shared.service")][0] == "system"
+    assert got[("user", "shared.service")][0] == "user"
+
+
+def test_parse_unit_specs_deduplicates_only_identical_manager_unit_pairs() -> None:
+    collector = _collector()
+
+    assert collector.parse_unit_specs(
+        "system:shared.service,user:shared.service,system:shared.service"
+    ) == [("system", "shared.service"), ("user", "shared.service")]
+
+    with pytest.raises(ValueError, match="invalid manager-qualified"):
+        collector.parse_unit_specs("shared.service")
 
 
 def test_dstate_probe_uses_shared_runner_error_contract(monkeypatch) -> None:

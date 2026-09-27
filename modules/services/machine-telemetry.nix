@@ -138,8 +138,10 @@ mkServiceModule {
       ...
     }:
     let
-      surfaceUnits = map (surface: surface.unit) config.sinnix.runtime.inventory.observedServices;
-      unitArgs = lib.concatStringsSep "," (lib.unique surfaceUnits);
+      surfaceUnitIdentities = map (
+        surface: "${surface.manager}:${surface.unit}"
+      ) config.sinnix.runtime.inventory.observedServices;
+      unitArgs = lib.concatStringsSep "," (lib.unique surfaceUnitIdentities);
       userUid = "1000";
       userSliceRoot = "/user.slice/user-${userUid}.slice/user@${userUid}.service";
       # Slice names encode hierarchy: "agentctl-pytest.slice" is a child of
@@ -160,7 +162,7 @@ mkServiceModule {
         lib.attrNames config.sinnix.runtime.inventory.slices.user
       );
       agentctlPoolCgroups = map (name: {
-        label = "user.${name}";
+        label = "user.agentctl-pool-${lib.removePrefix "agentctl-" name}";
         scope = "user";
         path = userSliceCgroupPath name;
       }) agentctlPoolSliceNames;
@@ -188,7 +190,7 @@ mkServiceModule {
         # Historical label: this samples the job plane ROOT (agentctl.slice),
         # not the agentctl-work.slice nested inside it. The name predates the
         # inner slice and is kept so the existing series stays comparable; the
-        # per-pool children arrive below as user.agentctl-<pool>.
+        # per-pool children arrive below as user.agentctl-pool-<pool>.
         {
           label = "user.agentctl-work";
           scope = "user";

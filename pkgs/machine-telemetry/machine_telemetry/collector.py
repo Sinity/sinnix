@@ -1834,19 +1834,36 @@ SERVICE_PROPERTIES = (
 )
 
 
+def parse_unit_specs(raw: str) -> list[tuple[str, str]]:
+    """Parse manager-qualified unit identities from the --units argument."""
+    units: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for value in raw.split(","):
+        if not value:
+            continue
+        manager, separator, unit = value.partition(":")
+        if not separator or manager not in {"system", "user"} or not unit:
+            raise ValueError(f"invalid manager-qualified unit identity: {value!r}")
+        identity = (manager, unit)
+        if identity not in seen:
+            units.append(identity)
+            seen.add(identity)
+    return units
+
+
 def service_unit_props(
-    units: list[str], *, user_units: set[str], user_name: str
-) -> dict[str, tuple[str, dict[str, str]]]:
-    """Fetch all service state with one probe per systemd manager."""
-    system = [unit for unit in units if unit not in user_units]
-    user = [unit for unit in units if unit in user_units]
-    result: dict[str, tuple[str, dict[str, str]]] = {}
+    units: list[tuple[str, str]], *, user_name: str
+) -> dict[tuple[str, str], tuple[str, dict[str, str]]]:
+    """Fetch declared systemd unit identities from their owning managers."""
+    system = [unit for manager, unit in units if manager == "system"]
+    user = [unit for manager, unit in units if manager == "user"]
+    result: dict[tuple[str, str], tuple[str, dict[str, str]]] = {}
     try:
         system_props = show_units(system, properties=SERVICE_PROPERTIES, timeout=3)
     except (OSError, subprocess.TimeoutExpired):
         system_props = {}
     for unit, props in system_props.items():
-        result[unit] = ("system", props)
+        result[("system", unit)] = ("system", props)
     if user:
         uid = pwd.getpwnam(user_name).pw_uid
         try:
@@ -1859,7 +1876,7 @@ def service_unit_props(
         except (OSError, subprocess.TimeoutExpired):
             user_props = {}
         for unit, props in user_props.items():
-            result[unit] = ("user", props)
+            result[("user", unit)] = ("user", props)
     return result
 
 
@@ -1867,7 +1884,7 @@ def insert_service_states(
     conn: sqlite3.Connection,
     host: str,
     boot_id: str | None,
-    units: list[str],
+    units: list[tuple[str, str]],
     user_name: str,
 ) -> None:
     observed_at = now_iso()
@@ -1875,12 +1892,10 @@ def insert_service_states(
     io_rows: list[dict[str, object]] = []
     pressure_rows: list[dict[str, object]] = []
     cgroup_memory_rows: list[dict[str, object]] = []
-    user_units = {"polylogued.service", "noctalia.service"}
-    service_props = service_unit_props(
-        units, user_units=user_units, user_name=user_name
-    )
-    for unit in units:
-        item = service_props.get(unit)
+    service_props = service_unit_props(units, user_name=user_name)
+    for identity in units:
+        unit = identity[1]
+        item = service_props.get(identity)
         if item is None:
             continue
         scope, props = item
@@ -2156,7 +2171,7 @@ def main() -> int:
     nvme2 = find_hwmon("nvme", 2)
     rapl_zones = discover_rapl()
     boot_id = read_text("/proc/sys/kernel/random/boot_id")
-    units = [unit for unit in args.units.split(",") if unit]
+    units = parse_unit_specs(args.units)
     cgroup_specs = [
         spec
         for raw in args.cgroups.split(",")

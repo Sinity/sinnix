@@ -37,7 +37,11 @@ in
             ) (lib.splitString "-" name)
           )
         }";
-      expectedSpecs = map (name: "user.${name}|user|${expectedPoolPath name}") poolSliceNames ++ [
+      expectedSpecs = map (
+        name:
+        "user.agentctl-pool-${lib.removePrefix "agentctl-" name}|user|${expectedPoolPath name}"
+      ) poolSliceNames ++ [
+        "user.agentctl-work|user|${userSliceRoot}/agentctl.slice"
         "user.app|user|${userSliceRoot}/app.slice"
         "user.session|user|${userSliceRoot}/session.slice"
         "user.desktop-shell|user|${userSliceRoot}/desktop-shell.slice"
@@ -64,12 +68,22 @@ in
       };
       evaluated = evalTestSpec system spec;
       renderedExecStart = toString evaluated.config.systemd.services.machine-telemetry.serviceConfig.ExecStart;
+      declaredUnitArgs = lib.concatStringsSep "," (
+        map (
+          surface: "${surface.manager}:${surface.unit}"
+        ) evaluated.config.sinnix.runtime.inventory.observedServices
+      );
     in
     {
-      checks.machine-telemetry-cgroups = pkgs.runCommand "machine-telemetry-cgroups-check" { } ''
+      checks.machine-telemetry-cgroups = pkgs.runCommand "machine-telemetry-cgroups-check" {
+        nativeBuildInputs = [ pkgs.python3 ];
+      } ''
         cat > exec-start <<'EOF_EXEC_START'
         ${renderedExecStart}
         EOF_EXEC_START
+        cat > declared-units <<'EOF_UNITS'
+        ${declaredUnitArgs}
+        EOF_UNITS
         ${lib.concatMapStringsSep "\n" (want: ''
           grep -qF ${lib.escapeShellArg want} exec-start || {
             echo "FAIL: machine-telemetry does not sample ${want}"
@@ -77,6 +91,23 @@ in
             exit 1
           }
         '') expectedSpecs}
+        python3 - <<'PY'
+        import shlex
+        from pathlib import Path
+
+        args = shlex.split(Path("exec-start").read_text())
+        unit_args = args[args.index("--units") + 1]
+        declared_units = Path("declared-units").read_text().strip().split(",")
+        units = unit_args.split(",") if unit_args else []
+        assert units == list(dict.fromkeys(declared_units)), (units, declared_units)
+
+        cgroup_args = args[args.index("--cgroups") + 1]
+        specs = cgroup_args.split(",")
+        labels = [spec.split("|", 1)[0] for spec in specs]
+        assert len(labels) == len(set(labels)), labels
+        assert "user.agentctl-work" in labels
+        assert "user.agentctl-pool-work" in labels
+        PY
         touch "$out"
       '';
     };
