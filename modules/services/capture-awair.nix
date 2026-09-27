@@ -69,7 +69,6 @@ mkServiceModule (mkCaptureLane {
     "${scriptPkgs.sinnix-capture}/bin/sinnix-capture"
     healthRoot
   ];
-  environment = [ "TMPDIR=/tmp" ];
   privateTmp = true;
   timer = {
     intervalSec = cfg.intervalSec;

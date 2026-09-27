@@ -100,7 +100,6 @@ mkServiceModule (mkCaptureLane {
     "${parseBluez}"
     "${parseSolaar}"
   ];
-  environment = [ "TMPDIR=/tmp" ];
   privateTmp = true;
   timer = {
     intervalSec = cfg.intervalSec;

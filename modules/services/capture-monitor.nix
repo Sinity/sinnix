@@ -108,7 +108,6 @@ mkServiceModule (mkCaptureLane {
   # survives across runs of this oneshot and is the only writable location
   # the sandbox leaves it.
   environment = [
-    "TMPDIR=/tmp"
     "XDG_CACHE_HOME=%t/sinnix-capture-monitor"
   ];
   runtimeDirectory = "sinnix-capture-monitor";

@@ -137,9 +137,6 @@ mkServiceModule (mkCaptureLane {
     "${remotePollScript}"
     "${remotePeriodsScript}"
   ];
-  # ssh needs a real TMPDIR for its own scratch use, and the session TMPDIR
-  # is read-only inside this namespace.
-  environment = [ "TMPDIR=/tmp" ];
   privateTmp = true;
   timer = {
     intervalSec = cfg.intervalSec;
