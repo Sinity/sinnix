@@ -45,10 +45,17 @@ def timer_persistent(on_calendar: str) -> bool:
     return not (spec.startswith("*:") or spec.startswith("*-*-* *:"))
 
 
-def unit_for(project_id: str, operation: str, schedule: str, executable: str) -> str:
-    digest = hashlib.sha256(
-        f"{project_id}:{operation}:{schedule}:{executable}".encode()
-    ).hexdigest()
+def unit_for(
+    project_id: str,
+    operation: str,
+    schedule: str,
+    executable: str,
+    config_path: str | None = None,
+) -> str:
+    identity = f"{project_id}:{operation}:{schedule}:{executable}"
+    if config_path is not None:
+        identity += f":{config_path}"
+    digest = hashlib.sha256(identity.encode()).hexdigest()
     return UNIT_PREFIX + digest[:24]
 
 
@@ -83,6 +90,7 @@ def apply(config: Config) -> dict[str, Any]:
             operation.name,
             operation.schedule,
             config.agentctl_executable,
+            str(config.config_path) if config.config_path is not None else None,
         )
         desired[unit] = {
             "project": project.project_id,
@@ -104,6 +112,10 @@ def apply(config: Config) -> dict[str, Any]:
         if unit in present:
             continue
         persistent = "true" if timer_persistent(entry["schedule"]) else "false"
+        command = [config.agentctl_executable]
+        if config.config_path is not None:
+            command.extend(["--config", str(config.config_path)])
+        command.extend(["job", "fire", entry["project"], entry["operation"]])
         _run(
             [
                 "systemd-run",
@@ -113,11 +125,7 @@ def apply(config: Config) -> dict[str, Any]:
                 f"--on-calendar={entry['schedule']}",
                 f"--timer-property=Persistent={persistent}",
                 "--",
-                config.agentctl_executable,
-                "job",
-                "fire",
-                entry["project"],
-                entry["operation"],
+                *command,
             ]
         )
         started.append(unit)

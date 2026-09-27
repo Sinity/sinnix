@@ -74,6 +74,39 @@ def test_apply_is_idempotent(fake_systemd: dict[str, Any], config: Config) -> No
     assert again["started"] == [] and again["stopped"] == []
 
 
+def test_custom_config_is_forwarded_and_a_path_change_replaces_the_timer(
+    fake_systemd: dict[str, Any], config: Config
+) -> None:
+    from dataclasses import replace
+
+    first_config = replace(config, config_path=Path("/realm/state/agentctl/first.json"))
+    first = schedule.apply(first_config)
+    start = next(call for call in fake_systemd["calls"] if call[0] == "systemd-run")
+    assert start[start.index("--") + 1 :] == [
+        "/fixture/agentctl",
+        "--config",
+        "/realm/state/agentctl/first.json",
+        "job",
+        "fire",
+        "fixture",
+        "nightly",
+    ]
+    assert schedule.apply(first_config)["started"] == []
+
+    second_config = replace(config, config_path=Path("/realm/state/agentctl/second.json"))
+    second = schedule.apply(second_config)
+    assert second["stopped"] == first["started"]
+    assert second["started"] == [
+        schedule.unit_for(
+            "fixture",
+            "nightly",
+            "*-*-* 03:17:00",
+            "/fixture/agentctl",
+            "/realm/state/agentctl/second.json",
+        )
+    ]
+
+
 def test_a_changed_expression_or_executable_is_a_new_unit() -> None:
     assert schedule.unit_for("p", "op", "hourly", "/a") != schedule.unit_for(
         "p", "op", "daily", "/a"
