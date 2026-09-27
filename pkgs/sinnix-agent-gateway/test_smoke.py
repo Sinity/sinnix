@@ -173,6 +173,7 @@ def test_project_diff_rejects_option_injection_before_external_driver(
 
 def test_project_tree_and_read_reject_symlink_escape(tmp_path: Path) -> None:
     cfg = config(tmp_path)
+    subprocess.run(["git", "init", "--quiet", cfg.projects["fixture"].path], check=True)
     outside = tmp_path / "outside.txt"
     outside.write_text("private")
     (cfg.projects["fixture"].path / "escape.txt").symlink_to(outside)
@@ -185,6 +186,7 @@ def test_project_tree_and_read_reject_symlink_escape(tmp_path: Path) -> None:
 def test_remote_project_tools_hide_local_only_agent_state(tmp_path: Path) -> None:
     cfg = config(tmp_path)
     project = cfg.projects["fixture"].path
+    subprocess.run(["git", "init", "--quiet", project], check=True)
     private_files = (
         project / ".agent" / "scratch" / "private.md",
         project / ".beads" / "interactions.jsonl",

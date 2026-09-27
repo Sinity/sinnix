@@ -51,7 +51,7 @@ def test_project_checkouts_are_git_derived_and_explicit(tmp_path: Path) -> None:
     assert rows[0]["branch"] == "master"
     assert rows[0]["upstream"] is None
     assert len(rows[0]["dirty_sha256"]) == 64
-    assert rows[0]["lifecycle"] == "configured-root"
+    assert rows[0]["lifecycle"] == "configured-default"
     assert rows[1]["checkout_id"].startswith("worktree-")
     assert rows[1]["path"] == str(linked)
     assert rows[1]["branch"] == "fixture-linked"
@@ -93,18 +93,18 @@ prunable
     ]
 
 
-def test_project_mutation_requires_an_explicit_checkout_when_ambiguous(
+def test_project_mutation_uses_configured_default_with_linked_checkout(
     tmp_path: Path,
 ) -> None:
     projects, _project, linked = project_service(tmp_path)
     operator = ProjectService(projects.config, Principal.for_name("operator"))
     linked_checkout = operator.checkouts("fixture")["checkouts"][1]["checkout_id"]
 
-    with pytest.raises(ProjectError, match="checkout_id is required"):
-        operator.write("fixture", "operator.txt", "not selected")
+    operator.write("fixture", "operator.txt", "default")
 
     operator.write("fixture", "operator.txt", "selected", linked_checkout)
 
+    assert (_project / "operator.txt").read_text() == "default"
     assert (linked / "operator.txt").read_text() == "selected"
 
 
