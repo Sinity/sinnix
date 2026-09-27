@@ -302,6 +302,7 @@ def test_public_project_list_obeys_scope_after_private_catalog_merge(
     config_path.write_text(
         json.dumps(
             {
+                "stateDir": str(tmp_path / "state"),
                 "projects": {
                     "allowed-public": {"path": str(allowed)},
                     "excluded-public": {"path": str(excluded)},
@@ -333,6 +334,7 @@ def test_public_project_list_keeps_empty_scope_broad(tmp_path: Path) -> None:
     config_path.write_text(
         json.dumps(
             {
+                "stateDir": str(tmp_path / "state"),
                 "projects": {"public-fixture": {"path": str(public)}},
                 "privateProjectCatalogFile": str(catalog),
                 "endpoint": {"scope": {"projects": []}},

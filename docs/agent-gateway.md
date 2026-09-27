@@ -8,7 +8,7 @@ The Sinnix agent gateway is one official-SDK MCP server with an operator endpoin
 ChatGPT operator connector
     -> OpenAI Secure MCP Tunnel
     -> tunnel-client user service
-    -> stdio: sinnix-agent-gateway-operator-mcp
+    -> private Unix socket Streamable HTTP: sinnix-agent-gateway-operator-mcp.service
     -> typed actions over the project, job, artifact, audit and observe services
 
 ```
@@ -16,7 +16,7 @@ ChatGPT operator connector
 Prime runs the ChatGPT `operator` tunnel. Local agents use the AgentCTL CLI
 for jobs and batches.
 
-The gateway owns no HTTP server and no listening port. The official OpenAI tunnel owns the remote connection and launches the MCP server over stdio. The gateway retains capability authorization, project authorization, envelopes, audit and redaction. Jobs are pueue tasks: agentctl (`docs/agentctl.md`) owns the launch input, the pool, the log, the typed result and cancellation; the gateway calls its routes in process and implements no second job controller.
+The tunnel owns the remote connection. A separate gateway user service serves Streamable HTTP at `/mcp` on a private Unix socket under the user runtime directory; the tunnel forwards to it. Each HTTP request is independent of the stdio pipe that tunnel-client can close after a stalled response, causing unrelated calls to receive 502. The gateway retains capability authorization, project authorization, envelopes, audit and redaction. Jobs are pueue tasks: agentctl (`docs/agentctl.md`) owns the launch input, the pool, the log, the typed result and cancellation; the gateway calls its routes in process and implements no second job controller.
 
 ## Authority
 
@@ -100,7 +100,7 @@ sinnix.services.agent-gateway.endpoints.operator = {
 };
 ```
 
-Every enabled endpoint receives its own generated config, MCP wrapper, package consistency gate, state directory, runtime credential, health port, systemd user service and runtime surface. The gateway package generates a principal manifest artifact from its typed action declarations. Startup compares the running tool schemas with that artifact; `agent-gateway-approval` checks the same contract. Principals still receive only their authorized actions. The connector's observed manifest is a separate compatibility fact reported by `gateway.status`, and a connector refresh cannot grant principal capabilities. Prime enables the private operator endpoint on loopback port 3088.
+Every enabled endpoint receives its own generated config, private-socket MCP service, package consistency gate, state directory, runtime credential, tunnel health port, and runtime surfaces. The gateway package generates a principal manifest artifact from its typed action declarations. Gateway service startup compares the running tool schemas with that artifact; `agent-gateway-approval` checks the same contract. Principals still receive only their authorized actions. The connector's observed manifest is a separate compatibility fact reported by `gateway.status`, and a connector refresh cannot grant principal capabilities. Prime uses loopback port 3088 for tunnel health; the MCP socket is accessible only through its owner-only runtime directory.
 
 ## Deployment and proof
 

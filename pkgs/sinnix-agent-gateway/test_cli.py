@@ -4,7 +4,12 @@ import base64
 import hashlib
 import json
 import os
+import socket
+import stat
 import subprocess
+import sys
+import time
+from http.client import HTTPConnection
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -46,6 +51,87 @@ def test_cli_config_environment_overrides_the_deployed_default(
     configured = tmp_path / "configured.json"
     monkeypatch.setenv("SINNIX_AGENT_GATEWAY_CONFIG", str(configured))
     assert cli.parser().parse_args(["info"]).config == configured
+
+
+def test_private_http_transport_serves_operator_tools(tmp_path: Path) -> None:
+    class UnixHTTP(HTTPConnection):
+        def __init__(self, path: Path) -> None:
+            super().__init__("localhost", timeout=10)
+            self.path = path
+
+        def connect(self) -> None:
+            self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            self.sock.connect(str(self.path))
+
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps({"stateDir": str(tmp_path / "state"), "projects": {}}))
+    socket_path = tmp_path / "mcp.sock"
+    command = [
+        sys.executable,
+        "-c",
+        "from sinnix_agent_gateway.cli import main; main()",
+        "--config",
+        str(config_path),
+        "serve-http",
+        "--socket",
+        str(socket_path),
+    ]
+    with subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE) as process:
+        try:
+            deadline = time.monotonic() + 10
+            while not socket_path.exists():
+                assert process.poll() is None
+                assert time.monotonic() < deadline, "MCP socket did not appear"
+                time.sleep(0.05)
+
+            def request(payload: dict[str, object], session: str | None = None):
+                connection = UnixHTTP(socket_path)
+                headers = {
+                    "Host": "localhost:8000",
+                    "Content-Type": "application/json",
+                    "Accept": "application/json, text/event-stream",
+                }
+                if session:
+                    headers["Mcp-Session-Id"] = session
+                try:
+                    connection.request("POST", "/mcp", json.dumps(payload), headers)
+                    response = connection.getresponse()
+                    return response.status, dict(response.getheaders()), response.read()
+                finally:
+                    connection.close()
+
+            status, headers, body = request({
+                "jsonrpc": "2.0", "id": 1, "method": "initialize",
+                "params": {"protocolVersion": "2025-06-18", "capabilities": {},
+                           "clientInfo": {"name": "transport-test", "version": "1"}},
+            })
+            assert status == 200 and "result" in json.loads(body)
+            session = headers["mcp-session-id"]
+            assert request({"jsonrpc": "2.0", "method": "notifications/initialized"}, session)[0] == 202
+            status, _, body = request({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}, session)
+            assert status == 200
+            names = {tool["name"] for tool in json.loads(body)["result"]["tools"]}
+            assert names == {action.name for action in action_set.visible("operator")}
+            status, _, body = request({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                                       "params": {"name": "gateway.catalog", "arguments": {"limit": 1}}}, session)
+            assert status == 200 and "result" in json.loads(body)
+            assert stat.S_IMODE(tmp_path.stat().st_mode) & 0o077 == 0
+        finally:
+            process.terminate()
+            process.wait(timeout=5)
+
+    permissive = tmp_path / "permissive"
+    permissive.mkdir(mode=0o755)
+    permissive.chmod(0o755)
+    refused = subprocess.run(
+        [*command[:-1], str(permissive / "mcp.sock")],
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
+    )
+    assert refused.returncode != 0
+    assert "socket directory must be owned by this user and private" in refused.stderr
 
 
 class FakeServer:

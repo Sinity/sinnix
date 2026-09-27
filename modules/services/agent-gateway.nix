@@ -178,10 +178,6 @@ mkServiceModule {
           configFile = endpointConfigs.${name};
         in
         {
-          mcpWrapper = pkgs.writeShellScriptBin "sinnix-agent-gateway-${name}-mcp" ''
-            set -euo pipefail
-            exec ${gatewayBin} --config ${configFile} --principal ${lib.escapeShellArg endpoint.principal} serve "$@"
-          '';
           manifestCheck = pkgs.writeShellScriptBin "sinnix-agent-gateway-${name}-schema" ''
             set -euo pipefail
             exec ${gatewayBin} --config ${configFile} --principal ${lib.escapeShellArg endpoint.principal} manifest
@@ -259,20 +255,20 @@ mkServiceModule {
       ]
       ++ lib.concatLists (
         lib.mapAttrsToList (name: _: [
-          endpointArtifacts.${name}.mcpWrapper
           endpointArtifacts.${name}.manifestCheck
         ]) enabledEndpoints
       );
 
-      environment.etc = lib.optionalAttrs (builtins.hasAttr "operator" endpointConfigs) {
-        "sinnix/agent-gateway.json".source = endpointConfigs.operator;
-      }
-      // lib.mapAttrs' (
-        name: _:
-        lib.nameValuePair "sinnix/agent-gateway-${name}.json" {
-          source = endpointConfigs.${name};
+      environment.etc =
+        lib.optionalAttrs (builtins.hasAttr "operator" endpointConfigs) {
+          "sinnix/agent-gateway.json".source = endpointConfigs.operator;
         }
-      ) enabledEndpoints;
+        // lib.mapAttrs' (
+          name: _:
+          lib.nameValuePair "sinnix/agent-gateway-${name}.json" {
+            source = endpointConfigs.${name};
+          }
+        ) enabledEndpoints;
 
       sinnix.persistence.home.directories = [
         {
@@ -281,71 +277,126 @@ mkServiceModule {
         }
       ];
 
-      sinnix.runtime.surfaces = lib.mapAttrs' (
-        name: endpoint:
-        lib.nameValuePair "agent-gateway-${name}" {
-          unit = "sinnix-agent-gateway-${name}.service";
-          manager = "user";
-          resourceClass = "ordinary";
-          observe = {
-            enable = true;
-            restartable = true;
-          };
-          workload = {
-            class = "protected";
-            rationale = "Outbound ${endpoint.principal} control path for endpoint ${name}; independently bounded and restartable.";
-            processMatchers = [ "tunnel-client" ];
-          };
-          activation = {
-            mode = "direct";
-            publicEndpoint = "127.0.0.1:${toString endpoint.healthPort}";
-          };
-        }
-      ) enabledEndpoints;
+      sinnix.runtime.surfaces =
+        (lib.mapAttrs' (
+          name: endpoint:
+          lib.nameValuePair "agent-gateway-${name}" {
+            unit = "sinnix-agent-gateway-${name}.service";
+            manager = "user";
+            resourceClass = "ordinary";
+            observe = {
+              enable = true;
+              restartable = true;
+            };
+            workload = {
+              class = "protected";
+              rationale = "Outbound ${endpoint.principal} control path for endpoint ${name}; independently bounded and restartable.";
+              processMatchers = [ "tunnel-client" ];
+            };
+            activation = {
+              mode = "direct";
+              publicEndpoint = "127.0.0.1:${toString endpoint.healthPort}";
+            };
+          }
+        ) enabledEndpoints)
+        // (lib.mapAttrs' (
+          name: endpoint:
+          lib.nameValuePair "agent-gateway-${name}-mcp" {
+            unit = "sinnix-agent-gateway-${name}-mcp.service";
+            manager = "user";
+            resourceClass = "ordinary";
+            observe = {
+              enable = true;
+              restartable = true;
+            };
+            workload = {
+              class = "protected";
+              rationale = "Loopback MCP server for the ${name} operator tunnel.";
+              processMatchers = [ "sinnix-agent-gateway" ];
+            };
+            activation = {
+              mode = "direct";
+            };
+          }
+        ) enabledEndpoints);
 
       home-manager.users.${userName} = {
-        systemd.user.services = lib.mapAttrs' (
-          name: endpoint:
-          lib.nameValuePair "sinnix-agent-gateway-${name}" {
-            Unit = {
-              Description = "OpenAI Secure MCP endpoint ${name} for Sinnix ${endpoint.principal} gateway";
-              After = [ "network-online.target" ];
-              Wants = [ "network-online.target" ];
-              ConditionPathExists = endpoint.runtimeKeyFile;
-              StartLimitIntervalSec = 300;
-              StartLimitBurst = 8;
-            };
-            Service = {
-              Type = "simple";
-              ExecStartPre = [
-                endpointArtifacts.${name}.stateScaffold
-                endpointArtifacts.${name}.approvalGate
-                endpointArtifacts.${name}.semanticCanary
-              ];
-              ExecStart = ''
-                ${tunnelClient}/bin/tunnel-client run \
-                  --control-plane.tunnel-id ${lib.escapeShellArg endpoint.tunnelId} \
-                  --control-plane.api-key file:%d/runtime-key \
-                  --mcp.command ${lib.escapeShellArg "command=${endpointArtifacts.${name}.mcpWrapper}/bin/sinnix-agent-gateway-${name}-mcp,channel=main"} \
-                  --health.listen-addr 127.0.0.1:${toString endpoint.healthPort} \
-                  --log.format json
-              '';
-              LoadCredential = "runtime-key:${endpoint.runtimeKeyFile}";
-              Restart = "always";
-              RestartSec = "5s";
-              ProtectHome = false;
-              ReadWritePaths = [
-                "-${endpoint.stateDir}"
-              ];
-              UMask = "0077";
-              Environment = [
-                "PATH=${gatewayPath}"
-                "GI_TYPELIB_PATH=${giTypelibPath}"
-              ];
-            };
-            Install.WantedBy = lib.optionals endpoint.autoStart [ "default.target" ];
-          }
-        ) enabledEndpoints;
+        systemd.user.services =
+          (lib.mapAttrs' (
+            name: endpoint:
+            lib.nameValuePair "sinnix-agent-gateway-${name}" {
+              Unit = {
+                Description = "OpenAI Secure MCP endpoint ${name} for Sinnix ${endpoint.principal} gateway";
+                After = [
+                  "network-online.target"
+                  "sinnix-agent-gateway-${name}-mcp.service"
+                ];
+                Wants = [ "network-online.target" ];
+                Requires = [ "sinnix-agent-gateway-${name}-mcp.service" ];
+                ConditionPathExists = endpoint.runtimeKeyFile;
+                StartLimitIntervalSec = 300;
+                StartLimitBurst = 8;
+              };
+              Service = {
+                Type = "simple";
+                ExecStart = ''
+                  ${tunnelClient}/bin/tunnel-client run \
+                    --control-plane.tunnel-id ${lib.escapeShellArg endpoint.tunnelId} \
+                    --control-plane.api-key file:%d/runtime-key \
+                    --mcp.server-url ${lib.escapeShellArg "url=http://localhost:8000/mcp,channel=main,unix-socket=%t/sinnix-agent-gateway-${name}/mcp.sock"} \
+                    --mcp.startup-wait-timeout 30s \
+                    --health.listen-addr 127.0.0.1:${toString endpoint.healthPort} \
+                    --log.format json
+                '';
+                LoadCredential = "runtime-key:${endpoint.runtimeKeyFile}";
+                Restart = "always";
+                RestartSec = "5s";
+                ProtectHome = false;
+                ReadWritePaths = [
+                  "-${endpoint.stateDir}"
+                ];
+                UMask = "0077";
+                Environment = [
+                  "PATH=${gatewayPath}"
+                  "GI_TYPELIB_PATH=${giTypelibPath}"
+                ];
+              };
+              Install.WantedBy = lib.optionals endpoint.autoStart [ "default.target" ];
+            }
+          ) enabledEndpoints)
+          // (lib.mapAttrs' (
+            name: endpoint:
+            lib.nameValuePair "sinnix-agent-gateway-${name}-mcp" {
+              Unit = {
+                Description = "Loopback MCP server for Sinnix gateway ${name}";
+                StartLimitIntervalSec = 300;
+                StartLimitBurst = 8;
+              };
+              Service = {
+                Type = "simple";
+                RuntimeDirectory = "sinnix-agent-gateway-${name}";
+                RuntimeDirectoryMode = "0700";
+                ExecStartPre = [
+                  endpointArtifacts.${name}.stateScaffold
+                  endpointArtifacts.${name}.approvalGate
+                  endpointArtifacts.${name}.semanticCanary
+                ];
+                ExecStart = ''
+                  ${gatewayBin} --config ${endpointConfigs.${name}} --principal ${lib.escapeShellArg endpoint.principal} serve-http --socket %t/sinnix-agent-gateway-${name}/mcp.sock
+                '';
+                Restart = "always";
+                RestartSec = "5s";
+                ProtectHome = false;
+                ReadWritePaths = [ "-${endpoint.stateDir}" ];
+                UMask = "0077";
+                Environment = [
+                  "PATH=${gatewayPath}"
+                  "GI_TYPELIB_PATH=${giTypelibPath}"
+                ];
+              };
+              Install.WantedBy = lib.optionals endpoint.autoStart [ "default.target" ];
+            }
+          ) enabledEndpoints);
       };
     };
 } args

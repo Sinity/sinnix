@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import stat
 from pathlib import Path
 from typing import Any
 
@@ -116,6 +117,11 @@ def parser() -> argparse.ArgumentParser:
     ):
         subcommands.add_parser(name)
 
+    http_serve = subcommands.add_parser(
+        "serve-http", help="serve MCP over a private Unix socket"
+    )
+    http_serve.add_argument("--socket", type=Path, required=True)
+
     call = subcommands.add_parser(
         "call",
         help="invoke an action by name, e.g. call files.read --set path=/etc/os-release",
@@ -155,6 +161,23 @@ def main() -> None:
     principal = arguments.principal
     if command == "serve":
         create_server(config, principal).run("stdio")
+    elif command == "serve-http":
+        import uvicorn
+
+        if not arguments.socket.is_absolute():
+            raise SystemExit("socket path must be absolute")
+        parent = arguments.socket.parent.resolve(strict=True)
+        parent_stat = parent.stat()
+        if parent_stat.st_uid != os.getuid() or stat.S_IMODE(parent_stat.st_mode) & 0o077:
+            raise SystemExit("socket directory must be owned by this user and private")
+        app = create_server(config, principal).streamable_http_app(
+            json_response=True, host="localhost"
+        )
+        original_umask = os.umask(0o077)
+        try:
+            uvicorn.run(app, uds=str(arguments.socket), log_level="warning")
+        finally:
+            os.umask(original_umask)
     elif command == "manifest":
         print(json.dumps(anyio.run(build_manifest, config, principal), indent=2))
     elif command == "catalog-hash":
