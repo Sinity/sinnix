@@ -3,9 +3,10 @@
 Every verb runs to completion in this process, does what it was told, and
 reports.
 
-Output: a read verb (``project``, ``job list|get|logs|result|wait``,
-``batch status|list``, ``view``, ``events tail``) prints a table in local
-time with an age column, or the document with ``--json``. A write verb
+Output: a read verb (``project``, ``result validate-worker``,
+``job list|get|logs|result|wait``, ``batch status|list``, ``view``,
+``events tail``) prints a table in local time with an age column, or the
+document with ``--json``. A write verb
 (``job start|fire|cancel|retry|clean``, ``batch start|land|abandon|clean|result|resume``,
 ``schedule apply``, ``pools apply``, ``backpressure tick``) prints the
 document as JSON on stdout and one summary line on stderr. Tables show a
@@ -42,6 +43,7 @@ from . import (
     launch,
     operator_view,
     pools,
+    results,
     schedule,
 )
 from .config import Config, ConfigError, load_config, resolve_project
@@ -149,6 +151,14 @@ def parser() -> argparse.ArgumentParser:
         one.add_argument("selector", nargs="?", metavar="project", help=PROJECT_HELP)
         _project_option(one)
         _output_arguments(one)
+
+    result = verbs.add_parser("result", help="validate agent result documents")
+    result_verbs = result.add_subparsers(dest="result_verb", required=True)
+    validate_worker = result_verbs.add_parser(
+        "validate-worker", help="validate one worker result with the batch contract"
+    )
+    validate_worker.add_argument("path", type=Path)
+    _output_arguments(validate_worker)
 
     job = verbs.add_parser("job", help="declared operations as pueue tasks")
     job_verbs = job.add_subparsers(dest="job_verb", required=True)
@@ -909,10 +919,24 @@ def _project(arguments: argparse.Namespace, config: Config, out: Output) -> int:
     return EXIT_OK
 
 
+def _result(arguments: argparse.Namespace, out: Output) -> int:
+    if arguments.result_verb == "validate-worker":
+        _value, errors = results.load_result(arguments.path, kind="worker")
+        if errors:
+            raise BatchRefusal(
+                "invalid_result", "; ".join(errors[:6]), errors=errors
+            )
+        out.read({"valid": True}, "worker result is valid")
+        return EXIT_OK
+    raise AssertionError(arguments.result_verb)
+
+
 def _dispatch(arguments: argparse.Namespace, config: Config, out: Output) -> int:
     verb = arguments.verb
     if verb == "project":
         return _project(arguments, config, out)
+    if verb == "result":
+        return _result(arguments, out)
     if verb == "job":
         return _job(arguments, config, out)
     if verb == "batch":

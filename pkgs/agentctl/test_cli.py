@@ -57,6 +57,81 @@ def test_job_start_get_logs_and_wait_round_trip(
     assert line.startswith("job 1 fixture:check succeeded finished ")
 
 
+@pytest.mark.parametrize(
+    ("overrides", "expected_error"),
+    [
+        ({"schema_version": 99}, "schema_version"),
+        ({"attempt": 0}, "attempt"),
+    ],
+)
+def test_result_validate_worker_uses_owner_contract(
+    tmp_path: Path,
+    cli_config: Config,
+    capsys: pytest.CaptureFixture[str],
+    overrides: dict[str, object],
+    expected_error: str,
+) -> None:
+    result = {
+        "candidate_sha": "a" * 40,
+        "beads": [
+            {
+                "id": "fixture-1",
+                "criteria": [
+                    {
+                        "text": "synthetic criterion",
+                        "status": "satisfied",
+                        "evidence": "synthetic verification",
+                    }
+                ],
+            }
+        ],
+        "unresolved": [],
+        "verification": [
+            {"command": "synthetic check", "receipt": "synthetic receipt"}
+        ],
+        **overrides,
+    }
+    path = tmp_path / "worker-result.json"
+    path.write_text(json.dumps(result))
+
+    assert cli.main(["result", "validate-worker", str(path)]) == cli.EXIT_REFUSED
+    assert expected_error in capsys.readouterr().err
+
+
+def test_result_validate_worker_accepts_a_valid_synthetic_result(
+    tmp_path: Path,
+    cli_config: Config,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    path = tmp_path / "worker-result.json"
+    path.write_text(
+        json.dumps(
+            {
+                "candidate_sha": "a" * 40,
+                "beads": [
+                    {
+                        "id": "fixture-1",
+                        "criteria": [
+                            {
+                                "text": "synthetic criterion",
+                                "status": "satisfied",
+                                "evidence": "synthetic verification",
+                            }
+                        ],
+                    }
+                ],
+                "unresolved": [],
+                "verification": [
+                    {"command": "synthetic check", "receipt": "synthetic receipt"}
+                ],
+            }
+        )
+    )
+
+    assert cli.main(["result", "validate-worker", str(path)]) == cli.EXIT_OK
+    assert capsys.readouterr().out.strip() == "worker result is valid"
+
+
 def test_cli_cancel_before_start_retains_not_started_across_reads(
     fake_pueue: FakePueue, cli_config: Config, capsys: pytest.CaptureFixture[str]
 ) -> None:

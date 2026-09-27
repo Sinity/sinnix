@@ -62,9 +62,9 @@ Agents have `lane` on PATH:
   profile; it runs that operation through `agentctl job start`. A worker does
   not assume a focused profile or launch broad verification from inside its
   own run; the coordinator chooses any broader check explicitly.
-- `lane done <result.json>` requires a clean tree, validates the document
-  against `.agentctl/worker.schema.json` with `candidate_sha` equal to HEAD, and
-  prints it as the final message. It never pushes; the landing task
+- `lane done <result.json>` requires a clean tree, validates through
+  `agentctl result validate-worker`, checks `candidate_sha` against HEAD, and
+  prints the document as the final message. It never pushes; the landing task
   publishes.
 
 ## Failures
