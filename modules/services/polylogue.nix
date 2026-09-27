@@ -154,10 +154,8 @@ mkServiceModule {
         }
       ];
 
-      # The inbox is where `polylogue import` stages exports. The account
-      # export roots are acquired directly through `sources.roots` below, so
-      # no inbox links point at them: a link escaping the inbox root is refused
-      # by discovery, and would otherwise name the same bytes twice.
+      # The inbox is where `polylogue import <path>` stages account exports.
+      # Exports are imported deliberately, never watched in place.
       systemd.tmpfiles.rules = [
         "d ${cfg.dataDir} 0755 ${userName} users -"
         "d ${cfg.dataDir}/inbox 0755 ${userName} users -"
@@ -241,12 +239,6 @@ mkServiceModule {
               # Coalesce bursts from actively written transcripts instead of
               # re-reading a growing file every two seconds.
               debounce-s = 30;
-              # Provider account exports live outside every built-in source
-              # root; all built-in sources come from Polylogue's own defaults.
-              watch = [
-                "/realm/accounts/chatgpt"
-                "/realm/accounts/claude"
-              ];
             };
 
             daemon-api = {
