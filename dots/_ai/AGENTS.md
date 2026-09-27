@@ -62,6 +62,11 @@ Host `sinnix-prime`. Root storage is wear-limited; heavy work belongs on
 - `/realm/tmp/work/` is the managed `$TMPDIR`. Put scratch in a per-task
   subdirectory and remove it when done; retained results go to their owning
   store. `/tmp` is a small tmpfs.
+- Claude Code asks a person before running, even in bypass mode, any `rm`
+  whose target it cannot resolve statically (a shell variable, a glob after
+  `cd`) and any compound command that changes directory and then writes. In
+  unattended work, give `rm` literal absolute paths and use `git -C <path>`,
+  tool options, or absolute paths instead of `cd <dir> && …`.
 - Home Manager rebuilds `$HOME`; edit the declared source of a managed file.
   `xdg-user-dir` gives user-facing download and document locations.
 
