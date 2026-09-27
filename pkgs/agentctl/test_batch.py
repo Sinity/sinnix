@@ -48,6 +48,26 @@ OTHER = "f" * 40
 MERGED = "9" * 40
 
 
+def test_focused_packet_marks_a_required_selector(
+    config: Config, project_root: Path
+) -> None:
+    descriptor = project_root / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text().replace(
+            'exec = ["fixture-verify-quick"]',
+            'exec = ["fixture-verify-quick"]\narguments = "required"',
+        )
+    )
+    project = load_project_adapter(project_root)
+
+    command = start.focused_verification(config, project, Path("/tmp/worker"))
+
+    assert command == (
+        "/fixture/agentctl job start fixture verify_quick "
+        "--workspace /tmp/worker --wait -- <selector>"
+    )
+
+
 @dataclass
 class FakeBeads(FakeBd):
     """FakeBd plus the four writes a batch makes; a claim held by another actor refuses."""

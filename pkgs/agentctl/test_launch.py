@@ -124,6 +124,10 @@ def test_an_argument_requiring_operation_is_refused_without_supplied_argv(
     project = load_project_adapter(project_root)
     with pytest.raises(JobError, match='arguments = "required"'):
         launch.start_operation(config, project, project.operation("check"))
+    with pytest.raises(JobError, match='arguments = "required"'):
+        launch.start_operation(
+            config, project, project.operation("check"), extra_argv=(" ",)
+        )
     started = launch.start_operation(
         config, project, project.operation("check"), extra_argv=("--sel",)
     )

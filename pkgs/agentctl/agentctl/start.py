@@ -93,10 +93,13 @@ def focused_verification(
     operation = workspace_of(project).verify.get("focused")
     if not operation:
         return None
-    return (
+    command = (
         f"{config.agentctl_executable} job start {project.project_id} {operation} "
         f"--workspace {worktree} --wait"
     )
+    if project.operation(operation).arguments == "required":
+        command += " -- <selector>"
+    return command
 
 
 def _latest_attempt_selection(worker: Mapping[str, Any]) -> tuple[str, str, str] | None:

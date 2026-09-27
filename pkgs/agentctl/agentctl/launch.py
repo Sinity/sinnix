@@ -774,7 +774,9 @@ def _start_operation(
     working_directory, candidate_commit = _working_directory(
         project, operation, workspace
     )
-    if operation.arguments == "required" and not extra_argv:
+    if operation.arguments == "required" and not any(
+        argument.strip() for argument in extra_argv
+    ):
         raise JobError(
             f'{project.project_id}.{operation.name} declares arguments = "required" '
             "but no arguments were supplied"

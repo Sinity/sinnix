@@ -68,11 +68,10 @@ def test_focused_verification_must_run_on_a_worker_worktree(tmp_path: Path) -> N
         load_project_adapter(root)
 
 
-def test_focused_verification_refuses_a_declared_argument_requirement(
+def test_focused_verification_accepts_an_explicit_selector_requirement(
     tmp_path: Path,
 ) -> None:
-    """A focused profile is compiled with no extra argv. arguments=required
-    cannot execute as emitted (sinnix-59zd)."""
+    """A focused profile forwards a caller selector to its operation."""
     root = write_project(tmp_path / "p")
     descriptor = root / ".agentctl" / "project.toml"
     descriptor.write_text(
@@ -81,10 +80,8 @@ def test_focused_verification_refuses_a_declared_argument_requirement(
             'exec = ["fixture-verify-quick"]\narguments = "required"',
         )
     )
-    with pytest.raises(
-        ProjectConfigError, match="runs without extra arguments"
-    ):
-        load_project_adapter(root)
+    operation = load_project_adapter(root).operation("verify_quick")
+    assert operation.arguments == "required"
 
 
 def test_workspace_artifacts_must_be_relative(tmp_path: Path) -> None:

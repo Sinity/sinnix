@@ -41,7 +41,8 @@ CACHE_KINDS = frozenset({"none", "tree+environment"})
 SCRATCH_KINDS = frozenset({"none", "tmpfs", "nvme"})
 # Whether `job start` may be invoked with extra argv. `required` is a
 # declaration that the operation cannot execute without a caller-supplied
-# selector; a focused profile must not name such an operation.
+# selector. A focused profile can name such an operation; its packet command
+# then makes the selector position explicit.
 ARGUMENTS_KINDS = frozenset({"none", "required"})
 
 _TABLES = frozenset(
@@ -683,7 +684,8 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
         # exists to serve -- every worker's verification would raise JobError,
         # and a `candidate` one would verify the base instead of the worker's
         # own commit. Refuse the declaration here rather than let each packet
-        # discover it (sinnix-59zd).
+        # discover it (sinnix-59zd). Required selectors are supported by adding
+        # an explicit placeholder to that command.
         focused = workspace.verify.get("focused")
         focused_operation = next(
             (operation for operation in operations if operation.name == focused), None
@@ -693,12 +695,6 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
                 f"{descriptor} workspace.verify.focused must name an operation that runs "
                 f"on a worker worktree, but {focused} declares "
                 f'checkout = "{focused_operation.checkout}"'
-            )
-        if focused_operation is not None and focused_operation.arguments == "required":
-            raise ProjectConfigError(
-                f"{descriptor} workspace.verify.focused must name an operation that "
-                f"runs without extra arguments, but {focused} declares "
-                'arguments = "required"'
             )
     visiting: set[str] = set()
     visited: set[str] = set()

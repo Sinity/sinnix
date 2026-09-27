@@ -352,10 +352,10 @@ The packet is a JSON snapshot followed by the worker contract. The snapshot
 carries the beads without their owner, author, timestamps or counters, the
 union of their `write_scope` globs, and under `batch` the run id, base
 commit, worktree, result path and schema, harness, and
-`focused_verification`: the exact `agentctl job start <p> <focused>
---workspace <worktree> --wait` line for the descriptor's `verify.focused`.
-That operation must run without extra arguments, for example `verify_quick`.
-Exact test selections belong in the bead's `verification_commands`;
+`focused_verification`: the command for the descriptor's `verify.focused`
+operation on that worker's worktree. If the operation declares
+`arguments = "required"`, the command ends in `-- <selector>`; replace that
+marker with a non-empty selector from the bead's `verification_commands`.
 `affected_paths` remains code-scope metadata. A static green is not test evidence.
 
 ### List-valued bead metadata
@@ -685,7 +685,8 @@ An operation declares `description`, `exec` (argv, no shell), `pool` (a
 pueue group), `result` (`exit`, `json`, `pytest`), `timeout_seconds` (1 to
 28,800; default 3,600), `checkout` (see below), `arguments` (`none`, or
 `required` when the operation cannot execute without a caller-supplied
-selector; a focused profile must not name a `required` operation), `schedule`
+selector; a focused profile may name a `required` operation, whose worker
+command must include a selector after `--`), `schedule`
 (an `OnCalendar` expression), `cache` (`none` or `tree+environment`),
 `scratch` (`none`, `tmpfs` or `nvme`), `admission` (see below) and
 `dependencies` (declared operation names). Dependencies are
