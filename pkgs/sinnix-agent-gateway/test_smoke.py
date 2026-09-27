@@ -443,7 +443,11 @@ def test_gateway_status_keeps_unapproved_principal_unobserved(tmp_path: Path) ->
     runtime = Runtime.create(config(tmp_path), "agent-control")
 
     status = runtime.observe.gateway_status(
-        "agent-control", "capability-hash", "control-live-hash", "catalog-hash", "v2-test"
+        "agent-control",
+        "capability-hash",
+        "control-live-hash",
+        "catalog-hash",
+        "v2-test",
     )
 
     assert status["manifests"]["package_generated"] is None
@@ -808,15 +812,19 @@ def test_machine_query_reduces_page_to_response_bound(
         GatewayConfig(
             state_dir=tmp_path / "state",
             projects={},
-            max_result_bytes=1_024,
+            max_result_bytes=262_144,
         ),
         "operator",
     )
     rows = [
-        {"unit": f"fixture-{index}.service", "detail": "x" * 700} for index in range(3)
+        {"unit": f"fixture-{index}.service", "detail": "x" * 1_450}
+        for index in range(500)
     ]
+    calls = 0
 
     def collect(_operation: str, cursor: int, page_limit: int) -> dict[str, object]:
+        nonlocal calls
+        calls += 1
         selected = rows[cursor : cursor + page_limit]
         next_cursor = cursor + len(selected)
         return {
@@ -824,7 +832,7 @@ def test_machine_query_reduces_page_to_response_bound(
             "report": {
                 "schema": "sinnix.observe.v1",
                 "generated_at": "2026-08-21T00:00:00Z",
-                "window": {},
+                "window": {"start": "2026-08-20T00:00:00Z"},
                 "systemd_units": {
                     "total": len(rows),
                     "cursor": cursor,
@@ -836,10 +844,20 @@ def test_machine_query_reduces_page_to_response_bound(
 
     monkeypatch.setattr(runtime.observe, "_collect_report", collect)
 
-    result = runtime.observe.machine_query("units", limit=3)
+    result = runtime.observe.machine_query("units", cursor=17, limit=500)
 
-    assert len(result["rows"]) == 1
-    assert result["next_cursor"] == 1
+    assert calls == 1
+    assert result["available"] is True
+    assert len(result["rows"]) > 100
+    assert len(json.dumps(result, separators=(",", ":")).encode()) <= 262_144
+    assert result["total"] == 500
+    assert result["cursor"] == 17
+    assert result["next_cursor"] == 17 + len(result["rows"])
+    assert result["source"] == {
+        "schema": "sinnix.observe.v1",
+        "generated_at": "2026-08-21T00:00:00Z",
+        "window": {"start": "2026-08-20T00:00:00Z"},
+    }
 
 
 def test_manifests_are_typed_actions_filtered_by_principal(tmp_path: Path) -> None:

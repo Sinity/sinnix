@@ -190,55 +190,78 @@ class ObserveService:
             page_limit = limit
             while True:
                 collected = self._collect_report(operation, cursor, page_limit)
-                if not collected["available"]:
-                    return collected
-                report = collected["report"]
-                source = {
-                    "schema": report.get("schema"),
-                    "generated_at": report.get("generated_at"),
-                    "window": report.get("window"),
-                }
-                page = report.get(key)
-                if not isinstance(page, dict):
-                    return {
-                        "available": False,
-                        "failure_class": "malformed_report",
-                        "reason": f"sinnix-observe section {key} is not a page",
-                    }
-                rows = page.get("rows")
-                total = page.get("total")
-                next_cursor = page.get("next_cursor")
+                if collected["available"]:
+                    break
                 if (
-                    not isinstance(rows, list)
-                    or not isinstance(total, int)
-                    or not isinstance(page.get("cursor"), int)
-                    or page["cursor"] != cursor
-                    or (next_cursor is not None and not isinstance(next_cursor, int))
+                    collected.get("failure_class") != "collector_response_bound"
+                    or page_limit == 1
                 ):
-                    return {
-                        "available": False,
-                        "failure_class": "malformed_report",
-                        "reason": f"sinnix-observe section {key} has an invalid page",
-                    }
-                response = {
+                    return collected
+                page_limit = max(1, page_limit // 2)
+            report = collected["report"]
+            source = {
+                "schema": report.get("schema"),
+                "generated_at": report.get("generated_at"),
+                "window": report.get("window"),
+            }
+            page = report.get(key)
+            if not isinstance(page, dict):
+                return {
+                    "available": False,
+                    "failure_class": "malformed_report",
+                    "reason": f"sinnix-observe section {key} is not a page",
+                }
+            rows = page.get("rows")
+            total = page.get("total")
+            next_cursor = page.get("next_cursor")
+            if (
+                not isinstance(rows, list)
+                or not isinstance(total, int)
+                or not isinstance(page.get("cursor"), int)
+                or page["cursor"] != cursor
+                or (next_cursor is not None and not isinstance(next_cursor, int))
+            ):
+                return {
+                    "available": False,
+                    "failure_class": "malformed_report",
+                    "reason": f"sinnix-observe section {key} has an invalid page",
+                }
+
+            # The collector result is one observation. Trim its selected rows
+            # locally so response sizing does not rerun that observation.
+            def response_for(count: int) -> dict[str, Any]:
+                selected_next_cursor = cursor + count
+                return {
                     "available": True,
                     "operation": operation,
                     "source": source,
                     "total": total,
                     "cursor": cursor,
-                    "next_cursor": next_cursor,
-                    "rows": rows,
+                    "next_cursor": selected_next_cursor
+                    if selected_next_cursor < total
+                    else None,
+                    "rows": rows[:count],
                 }
-                bounded = self._within_response_bound(response)
-                if bounded["available"]:
-                    return bounded
-                if len(rows) <= 1:
-                    return {
-                        "available": False,
-                        "failure_class": "response_bound",
-                        "reason": "one machine row exceeded response bound",
-                    }
-                page_limit = len(rows) - 1
+
+            low, high = 0, len(rows)
+            while low < high:
+                middle = (low + high + 1) // 2
+                if (
+                    len(
+                        json.dumps(response_for(middle), separators=(",", ":")).encode()
+                    )
+                    <= self.config.max_result_bytes
+                ):
+                    low = middle
+                else:
+                    high = middle - 1
+            if rows and low == 0:
+                return {
+                    "available": False,
+                    "failure_class": "response_bound",
+                    "reason": "one machine row exceeded response bound",
+                }
+            return self._within_response_bound(response_for(low))
         collected = self._collect_report(operation)
         if not collected["available"]:
             return collected
