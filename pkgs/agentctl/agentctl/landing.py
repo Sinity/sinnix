@@ -1420,7 +1420,10 @@ def land(
     if run.project != project.project_id:
         raise BatchRefusal("project", f"run {run_id} belongs to {run.project}")
     beads = beads or SubprocessBeads(project.root)
-    with transition_locked(config, run.run_id), landing_locked(config, run.run_id):
+    with (
+        transition_locked(config, run.run_id, blocking=False),
+        landing_locked(config, run.run_id),
+    ):
         run = load(config, run.run_id)
         return _land_locked(
             config, project, run, beads, sleep=sleep, keep_integration=keep_integration

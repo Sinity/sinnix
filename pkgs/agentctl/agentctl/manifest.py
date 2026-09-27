@@ -282,9 +282,17 @@ def land_lock_path(config: Config, run_id: str) -> Path:
 
 
 @contextmanager
-def transition_locked(config: Config, run_id: str) -> Iterator[None]:
+def transition_locked(
+    config: Config, run_id: str, *, blocking: bool = True
+) -> Iterator[None]:
     """Serialize run transitions before taking landing, recovery or manifest locks."""
-    with _flock(runs_dir(config) / f"{run_id}.transition.lock"):
+    with _flock(
+        runs_dir(config) / f"{run_id}.transition.lock", blocking=blocking
+    ) as held:
+        if not held:
+            raise BatchRefusal(
+                "landing_in_progress", f"run {run_id} has another active transition"
+            )
         yield
 
 

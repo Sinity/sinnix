@@ -937,9 +937,19 @@ def _result_locked(
                 f"result attempt {value.get('attempt')} differs from current attempt {number}",
             )
         expected_path = latest.get("result_path")
+        bindings = worker.get("evidence_binding")
+        strict_dispatch = (
+            isinstance(bindings, list)
+            and bool(bindings)
+            and all(
+                isinstance(row, Mapping) and row.get("v2_available") is True
+                for row in bindings
+            )
+        )
         if (
             run.harness == "queued"
             and expected_path
+            and (strict_dispatch or isinstance(number, int) and number > 1)
             and path.resolve() != Path(expected_path).resolve()
         ):
             raise BatchRefusal(
