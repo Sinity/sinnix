@@ -280,6 +280,12 @@ def describe(
         percent = evidence_field(evidence, "swap_percent")
         return "Swap headroom is back", f"Now at {percent}% consumed."
     if type_ == "mount_capacity":
+        if status == "unknown":
+            return (
+                f"Cannot check capacity for {unit}",
+                "The df probe did not return a usable reading, so this is "
+                "neither a capacity warning nor a pass.",
+            )
         if status == "healthy":
             return (
                 f"{unit} has room again",
@@ -702,7 +708,7 @@ def sweep_probes(captures: Iterable[dict[str, Any]], emitter: Emitter) -> None:
             )
 
 
-def mount_usage_percent(path: str) -> int:
+def mount_usage_percent(path: str) -> int | None:
     """df's own percentage, not a recomputation of it: the warn/fail lines were
     set against what df reports, reserved blocks and all."""
     try:
@@ -710,17 +716,19 @@ def mount_usage_percent(path: str) -> int:
             ["df", "-P", path], check=False, capture_output=True, text=True, timeout=10
         )
     except (OSError, subprocess.TimeoutExpired):
-        return 100
+        return None
+    if result.returncode != 0:
+        return None
     lines = result.stdout.splitlines()
     if len(lines) < 2:
-        return 100
+        return None
     fields = lines[1].split()
     if len(fields) < 5:
-        return 100
+        return None
     try:
         return int(fields[4].rstrip("%"))
     except ValueError:
-        return 100
+        return None
 
 
 def sweep_mounts(mounts: Iterable[dict[str, Any]], emitter: Emitter) -> None:
@@ -731,17 +739,24 @@ def sweep_mounts(mounts: Iterable[dict[str, Any]], emitter: Emitter) -> None:
         warn = int(mount.get("warnPct") or 100)
         fail = int(mount.get("failPct") or 100)
         usage = mount_usage_percent(path)
-        status = "healthy"
-        if usage >= warn:
-            status = "warning"
-        if usage >= fail:
-            status = "failed"
+        if usage is None:
+            status = "unknown"
+            evidence = f"usage_percent=unknown;warn_percent={warn};fail_percent={fail};probe=unavailable"
+        else:
+            status = "healthy"
+            if usage >= warn:
+                status = "warning"
+            if usage >= fail:
+                status = "failed"
+            evidence = (
+                f"usage_percent={usage};warn_percent={warn};fail_percent={fail}"
+            )
         emitter.emit(
             f"mount:{path}",
             "mount_capacity",
             path,
             status,
-            f"usage_percent={usage};warn_percent={warn};fail_percent={fail}",
+            evidence,
         )
 
 

@@ -88,6 +88,15 @@ let
       failPct = 90;
     }
     {
+      # /outer-realm holds the Borg destination. Like /realm, a full
+      # filesystem prevents new durable state from being written, so apply
+      # the existing critical-storage headroom policy rather than the
+      # high-occupancy /neo-outer-realm media policy below.
+      path = cfg.paths.outerRealm;
+      warnPct = 80;
+      failPct = 90;
+    }
+    {
       # /neo-outer-realm is a bulk media archive, not a service write path:
       # nothing on it is a live database, a snapshot queue, or a backup
       # destination, so "nearly full" is its normal working state rather than

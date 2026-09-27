@@ -317,6 +317,59 @@ def find(events: list[dict[str, Any]], type_: str, unit: str) -> dict[str, Any] 
     return matches[-1] if matches else None
 
 
+@pytest.mark.parametrize(
+    ("usage", "expected"),
+    [
+        (79, "healthy"),
+        (80, "warning"),
+        (89, "warning"),
+        (90, "failed"),
+        (91, "failed"),
+    ],
+)
+def test_mount_capacity_uses_inclusive_existing_thresholds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, usage: int, expected: str
+) -> None:
+    monkeypatch.setattr(health, "mount_usage_percent", lambda _path: usage)
+    ledger = tmp_path / "events.jsonl"
+    emitter = health.Emitter(
+        tmp_path / "state.json", ledger, lambda *_: None, confirm_samples=1
+    )
+
+    health.sweep_mounts(
+        [{"path": "/outer-realm", "warnPct": 80, "failPct": 90}], emitter
+    )
+
+    event = json.loads(ledger.read_text().splitlines()[-1])
+    assert event["unit"] == "/outer-realm"
+    assert event["status"] == expected
+    assert "warn_percent=80;fail_percent=90" in event["evidence"]
+
+
+def test_unavailable_mount_probe_is_unknown_not_full(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def unavailable(*_args: Any, **_kwargs: Any) -> Any:
+        raise FileNotFoundError("df unavailable")
+
+    monkeypatch.setattr(health.subprocess, "run", unavailable)
+    ledger = tmp_path / "events.jsonl"
+    emitter = health.Emitter(
+        tmp_path / "state.json", ledger, lambda *_: None, confirm_samples=1
+    )
+
+    assert health.mount_usage_percent("/outer-realm") is None
+    health.sweep_mounts(
+        [{"path": "/outer-realm", "warnPct": 80, "failPct": 90}], emitter
+    )
+
+    event = json.loads(ledger.read_text().splitlines()[-1])
+    assert event["status"] == "unknown"
+    assert event["evidence"] == (
+        "usage_percent=unknown;warn_percent=80;fail_percent=90;probe=unavailable"
+    )
+
+
 def test_every_lane_and_unit_shape_reaches_the_ledger(world) -> None:
     world["run"]()
     events = world["run"]()  # confirm-2: a transition needs two agreeing sweeps
