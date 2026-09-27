@@ -2,9 +2,8 @@
 # Global instruction file is ~/.codex/AGENTS.md.
 # Shared skills are linked directly from dots/_ai/skills; app-installed and
 # .system skills remain private to Codex.
-# MCP servers are registry-generated into full/lean/browser profile files by
-# modules/features/dev/agents/mcp.nix. The wrapper invokes the intended
-# profile explicitly so lean sessions do not inherit the full MCP table.
+# MCP servers are merged from the registry into the generated system config.
+# Bare codex uses that default; local and DeepSeek keep backend-specific files.
 model = "gpt-6-luna"
 model_reasoning_effort = "high"
 approval_policy = "never"

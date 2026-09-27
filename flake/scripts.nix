@@ -78,35 +78,56 @@ let
     sinnix = import ./cli-dispatcher.nix { inherit lib pkgs registry; };
   };
   mcpRegistry = import ./data/mcp-registry.nix { inherit lib; };
+  agentLanes = import ./data/agent-lanes.nix;
+  agentEnvironmentSelections = [
+    {
+      name = "claude";
+      client = "claude";
+      selection = "default";
+    }
+    {
+      name = "codex";
+      client = "codex";
+      selection = "default";
+    }
+    {
+      name = "codex-local";
+      client = "codex";
+      selection = "full";
+    }
+    {
+      name = "codex-deepseek";
+      client = "codex";
+      selection = "full";
+    }
+    {
+      name = "gemini";
+      client = "gemini";
+      selection = "full";
+    }
+    {
+      name = "antigravity";
+      client = "antigravity";
+      selection = "antigravity";
+    }
+    {
+      name = "hermes";
+      client = "hermes";
+      selection = "evidence";
+    }
+  ]
+  ++ lib.mapAttrsToList (name: profile: {
+    name = "hermes-${name}";
+    client = "hermes";
+    selection = profile.mcpProfile or "evidence";
+  }) agentLanes.hermesProfiles;
   agentEnvironmentData = pkgs.writeText "sinnix-agent-environment-data.json" (
     builtins.toJSON {
-      profiles =
-        lib.concatMap
-          (
-            profile:
-            map
-              (client: {
-                name = profile;
-                inherit client;
-                tiers = mcpRegistry.profileTiers.${profile};
-                servers = lib.attrNames (mcpRegistry.selectClientServersForProfile profile client);
-              })
-              [
-                "claude"
-                "codex"
-                "gemini"
-                "antigravity"
-                "hermes"
-              ]
-          )
-          [
-            "default"
-            "lean"
-            "evidence"
-            "full"
-            "browser"
-            "antigravity"
-          ];
+      profiles = map (row: {
+        inherit (row) name client;
+        tiers = mcpRegistry.profileTiers.${row.selection};
+        servers = lib.attrNames (mcpRegistry.selectClientServersForProfile row.selection row.client);
+      }) agentEnvironmentSelections;
       servers = lib.mapAttrsToList (name: server: {
         inherit name;
         inherit (server) tier transport clients;

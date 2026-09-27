@@ -1,7 +1,5 @@
-# Registry-driven per-client MCP config generation: Codex full/lean/
-# evidence/browser profiles plus the alternate-backend (deepseek/local)
-# profiles and the Gemini settings.json MCP table. Plain helper — imported by mcp.nix's
-# configFn, not picked up by auto-import.
+# Registry-driven MCP config generation for the default Codex configuration,
+# its alternate backends, and Gemini/Antigravity. Imported by mcp.nix.
 {
   lib,
   pkgs,
@@ -19,12 +17,12 @@ let
     renderGeminiServer
     renderAntigravityServer
     ;
-  mkCodexProfileFile =
-    profile:
-    tomlFormat.generate "codex-${profile}-profile.toml" {
-      mcp_servers = lib.mapAttrs renderCodexServer (selectClientServersForProfile profile "codex");
-    };
-  codexProfileFiles = lib.genAttrs mcpRegistry.codexProfileNames mkCodexProfileFile;
+  codexSystemConfigFile = tomlFormat.generate "codex-system-config.toml" (
+    builtins.fromTOML (builtins.readFile (inputs.self + "/dots/codex/config.toml"))
+    // {
+      mcp_servers = lib.mapAttrs renderCodexServer (selectClientServersForProfile "default" "codex");
+    }
+  );
   # Alternate-backend profiles: the full MCP table plus a model + provider.
   # `codex --profile <name>` layers these over ~/.codex/config.toml, so the
   # provider's base_url/env_key and the chosen model override the gpt-6-luna
@@ -39,9 +37,7 @@ let
     );
   codexEndpointProfileNames = lib.unique (
     lib.mapAttrsToList (_: lane: lane.mcpProfile) (
-      lib.filterAttrs (
-        _: lane: lane ? env && !(builtins.elem lane.mcpProfile mcpRegistry.codexProfileNames)
-      ) agentLanes.codexLanes
+      lib.filterAttrs (_: lane: lane ? env) agentLanes.codexLanes
     )
   );
   codexEndpointFiles = lib.genAttrs codexEndpointProfileNames (
@@ -64,7 +60,7 @@ let
 in
 {
   inherit
-    codexProfileFiles
+    codexSystemConfigFile
     codexEndpointFiles
     geminiSettingsFile
     antigravityMcpConfigFile

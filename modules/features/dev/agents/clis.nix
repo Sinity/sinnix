@@ -213,20 +213,11 @@ mkFeatureModule {
       # `.mcp.json` (project), `~/.claude.json` (user), or `--mcp-config <file>`
       # recognise stdio servers.
       #
-      # Lanes share MCP tiers (deepseek/local reuse "full"'s file), so this
-      # builds one config per distinct `mcpProfile` value, not one per lane.
-      claudeMcpFileBaseName = mcpProfile: if mcpProfile == "full" then "mcp" else "mcp-${mcpProfile}";
-      claudeMcpProfiles = lib.unique (
-        lib.mapAttrsToList (_: lane: lane.mcpProfile) agentLanes.claudeLanes
-      );
-      claudeMcpConfigFilesByProfile = lib.genAttrs claudeMcpProfiles (
-        mcpProfile:
-        jsonFormat.generate "claude-${claudeMcpFileBaseName mcpProfile}.json" {
-          mcpServers = lib.mapAttrs mcpRegistry.renderClaudeServer (
-            mcpRegistry.selectClientServersForProfile mcpProfile "claude"
-          );
-        }
-      );
+      claudeMcpConfigFile = jsonFormat.generate "claude-mcp.json" {
+        mcpServers = lib.mapAttrs mcpRegistry.renderClaudeServer (
+          mcpRegistry.selectClientServersForProfile "default" "claude"
+        );
+      };
       backends = import ./backends.nix {
         inherit
           lib
@@ -336,12 +327,9 @@ mkFeatureModule {
                 force = true;
               };
             }
-            # Registry-driven MCP configs consumed by the claude wrapper, one
-            # for the declared Claude default.
-            // lib.mapAttrs' (
-              mcpProfile: file:
-              lib.nameValuePair "claude/${claudeMcpFileBaseName mcpProfile}.json" { source = file; }
-            ) claudeMcpConfigFilesByProfile;
+            // {
+              "claude/mcp.json".source = claudeMcpConfigFile;
+            };
 
             home.activation.claudeSymlink = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
               run ${pkgs.python3}/bin/python ${./claude-state.py} \
@@ -384,7 +372,7 @@ mkFeatureModule {
                 lib.nameValuePair ".local/bin/${lane.binName}" (
                   mkClaudeCodeWrapper (
                     {
-                      mcpConfigName = claudeMcpFileBaseName lane.mcpProfile;
+                      mcpConfigName = "mcp";
                       profile = name;
                     }
                     // lib.optionalAttrs (lane ? env) {
@@ -404,9 +392,9 @@ mkFeatureModule {
                 name: lane:
                 lib.nameValuePair ".local/bin/${lane.binName}" (
                   mkCodexWrapper (
-                    {
+                    (lib.optionalAttrs (lane ? env) {
                       profile = lane.mcpProfile;
-                    }
+                    })
                     // lib.optionalAttrs (lane ? env) {
                       extraEnv = mkCodexBackendEnv ({ inherit name; } // lane.env);
                     }

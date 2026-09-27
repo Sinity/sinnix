@@ -9,27 +9,29 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import shlex
 import subprocess
 import sys
 import time
-import tomllib
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import tomllib
+
 SCHEMA = "sinnix-agent-profile-benchmark-v1"
 DEFAULT_PROFILES = (
-    "claude", "codex", "codex-local", "codex-deepseek",
+    "claude",
+    "codex",
+    "codex-local",
+    "codex-deepseek",
     "gateway-operator",
 )
 GATEWAY_PRINCIPALS = {
     "gateway-operator": "operator",
 }
 STATIC_FILES = {
-    "claude": (".config/claude/mcp-default.json",),
-    "codex": (".codex/lean.config.toml",),
+    "claude": (".config/claude/mcp.json",),
     "codex-local": (".codex/local.config.toml",),
     "codex-deepseek": (".codex/deepseek.config.toml",),
 }
@@ -37,11 +39,16 @@ STATIC_FILES = {
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--output", type=Path, required=True, help="Raw JSON capture path")
+    parser.add_argument(
+        "--output", type=Path, required=True, help="Raw JSON capture path"
+    )
     parser.add_argument("--summary-output", type=Path, required=True)
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--profiles", default=",".join(DEFAULT_PROFILES))
     parser.add_argument("--home", type=Path, default=Path.home())
+    parser.add_argument(
+        "--codex-config", type=Path, default=Path("/etc/codex/config.toml")
+    )
     parser.add_argument("--gateway-bin", default="sinnix-agent-gateway")
     parser.add_argument("--gateway-config", type=Path)
     parser.add_argument("--instruction-file", type=Path)
@@ -59,7 +66,9 @@ def digest(path: Path) -> tuple[str, int]:
 def files_under(path: Path) -> list[Path]:
     if not path.is_dir():
         return []
-    return sorted(item for item in path.rglob("*") if item.is_file() and not item.is_symlink())
+    return sorted(
+        item for item in path.rglob("*") if item.is_file() and not item.is_symlink()
+    )
 
 
 def contract(args: argparse.Namespace, profile: str) -> dict[str, Any]:
@@ -69,6 +78,8 @@ def contract(args: argparse.Namespace, profile: str) -> dict[str, Any]:
     roots = [instruction, skills]
     if profile in STATIC_FILES:
         roots.extend(home / relative for relative in STATIC_FILES[profile])
+    if profile == "codex":
+        roots.append(args.codex_config)
     hashes: list[dict[str, Any]] = []
     paths: list[str] = []
     tool_names: list[str] = []
@@ -81,7 +92,11 @@ def contract(args: argparse.Namespace, profile: str) -> dict[str, Any]:
             total_bytes += size
             paths.append(str(path))
             try:
-                payload = json.loads(path.read_text()) if path.suffix == ".json" else tomllib.loads(path.read_text())
+                payload = (
+                    json.loads(path.read_text())
+                    if path.suffix == ".json"
+                    else tomllib.loads(path.read_text())
+                )
                 key = "mcpServers" if path.suffix == ".json" else "mcp_servers"
                 servers = payload.get(key, {})
                 if isinstance(servers, dict):
@@ -100,8 +115,13 @@ def contract(args: argparse.Namespace, profile: str) -> dict[str, Any]:
         "estimated_input_tokens_method": "bytes_divided_by_4",
         "tool_count": len(set(tool_names)),
         "tool_names": sorted(set(tool_names)),
-        "duplicate_tool_names": sorted(name for name in set(tool_names) if tool_names.count(name) > 1),
-        "unused_capabilities": {"status": "unavailable", "reason": "no representative task was started"},
+        "duplicate_tool_names": sorted(
+            name for name in set(tool_names) if tool_names.count(name) > 1
+        ),
+        "unused_capabilities": {
+            "status": "unavailable",
+            "reason": "no representative task was started",
+        },
         "provider_usage": {"status": "unavailable", "reason": "static contract probe"},
     }
 
@@ -112,7 +132,8 @@ def proc_tree(root_pid: int) -> list[int]:
         try:
             fields = {
                 line.split(":", 1)[0]: line.split(":", 1)[1].strip()
-                for line in status.read_text().splitlines() if ":" in line
+                for line in status.read_text().splitlines()
+                if ":" in line
             }
             parents[int(status.parent.name)] = int(fields.get("PPid", "0"))
         except (OSError, ValueError):
@@ -149,7 +170,9 @@ def gateway_run(args: argparse.Namespace, profile: str) -> dict[str, Any]:
         command.extend(["--config", str(args.gateway_config)])
     command.extend(["--principal", GATEWAY_PRINCIPALS[profile], "manifest"])
     started = time.monotonic_ns()
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    process = subprocess.Popen(
+        command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+    )
     peak_rss = peak_pss = peak_processes = 0
     while process.poll() is None:
         pids = proc_tree(process.pid)
@@ -175,12 +198,22 @@ def gateway_run(args: argparse.Namespace, profile: str) -> dict[str, Any]:
         "peak_pss_anon_kb": peak_pss,
         "peak_process_count": peak_processes,
         "tool_count": len(manifest.get("tools", [])),
-        "tool_names": sorted(tool.get("name") for tool in manifest.get("tools", []) if isinstance(tool, dict) and isinstance(tool.get("name"), str)),
+        "tool_names": sorted(
+            tool.get("name")
+            for tool in manifest.get("tools", [])
+            if isinstance(tool, dict) and isinstance(tool.get("name"), str)
+        ),
         "duplicate_tool_names": [],
-        "unused_capabilities": {"status": "unavailable", "reason": "no representative task was started"},
+        "unused_capabilities": {
+            "status": "unavailable",
+            "reason": "no representative task was started",
+        },
         "manifest_hash": manifest.get("sha256"),
         "stderr_class": "empty" if not stderr else "diagnostic",
-        "provider_usage": {"status": "unavailable", "reason": "gateway manifest probe does not call a provider"},
+        "provider_usage": {
+            "status": "unavailable",
+            "reason": "gateway manifest probe does not call a provider",
+        },
     }
 
 
@@ -212,32 +245,72 @@ def main() -> int:
     records: list[dict[str, Any]] = []
     for profile in profiles:
         for sample in range(1, args.repeats + 1):
-            measurement = gateway_run(args, profile) if profile in GATEWAY_PRINCIPALS else static_run(args, profile)
-            records.append({
-                "schema": SCHEMA,
-                "profile": profile,
-                "sample": sample,
-                "observed_at": datetime.now(timezone.utc).isoformat(),
-                "client_version": "nixos-profile-current",
-                **measurement,
-            })
+            measurement = (
+                gateway_run(args, profile)
+                if profile in GATEWAY_PRINCIPALS
+                else static_run(args, profile)
+            )
+            records.append(
+                {
+                    "schema": SCHEMA,
+                    "profile": profile,
+                    "sample": sample,
+                    "observed_at": datetime.now(timezone.utc).isoformat(),
+                    "client_version": "nixos-profile-current",
+                    **measurement,
+                }
+            )
     args.output.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    args.output.write_text(json.dumps({"schema": SCHEMA, "records": records}, indent=2) + "\n")
+    args.output.write_text(
+        json.dumps({"schema": SCHEMA, "records": records}, indent=2) + "\n"
+    )
     args.output.chmod(0o600)
     by_profile: dict[str, dict[str, Any]] = {}
     for profile in profiles:
         profile_records = [record for record in records if record["profile"] == profile]
-        successful = [record for record in profile_records if record["exit_status"] == 0]
+        successful = [
+            record for record in profile_records if record["exit_status"] == 0
+        ]
         by_profile[profile] = {
             "profile": profile,
-            "contract_hash": next((record.get("contract_hash") for record in successful if record.get("contract_hash")), None),
+            "contract_hash": next(
+                (
+                    record.get("contract_hash")
+                    for record in successful
+                    if record.get("contract_hash")
+                ),
+                None,
+            ),
             "sample_count": len(profile_records),
             "successful_samples": len(successful),
             "wall_ns": [record["wall_ns"] for record in profile_records],
-            "tool_count": next((record.get("tool_count") for record in successful if record.get("tool_count") is not None), None),
-            "tool_names": next((record.get("tool_names") for record in successful if record.get("tool_names") is not None), []),
-            "duplicate_tool_names": sorted({name for record in successful for name in record.get("duplicate_tool_names", [])}),
-            "provider_usage": {"status": "unavailable", "reason": "no provider session was started by this credential-free benchmark"},
+            "tool_count": next(
+                (
+                    record.get("tool_count")
+                    for record in successful
+                    if record.get("tool_count") is not None
+                ),
+                None,
+            ),
+            "tool_names": next(
+                (
+                    record.get("tool_names")
+                    for record in successful
+                    if record.get("tool_names") is not None
+                ),
+                [],
+            ),
+            "duplicate_tool_names": sorted(
+                {
+                    name
+                    for record in successful
+                    for name in record.get("duplicate_tool_names", [])
+                }
+            ),
+            "provider_usage": {
+                "status": "unavailable",
+                "reason": "no provider session was started by this credential-free benchmark",
+            },
         }
     summary = {
         "schema": SCHEMA,
@@ -247,7 +320,7 @@ def main() -> int:
         "recommendations": {
             "coordinator": "claude",
             "implementation_worker": "codex",
-                                                "task_success_guard": "No budget is enforced from this credential-free probe; require representative task success and observed provider usage before changing defaults.",
+            "task_success_guard": "No budget is enforced from this credential-free probe; require representative task success and observed provider usage before changing defaults.",
         },
     }
     args.summary_output.parent.mkdir(mode=0o700, parents=True, exist_ok=True)

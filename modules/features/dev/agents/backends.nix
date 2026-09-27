@@ -37,7 +37,7 @@ let
       # removed launch.sh to reconstruct them. Keep the managed command
       # directory ahead of the private npm prefix: Codex can launch further
       # interactive app processes, and their `codex` lookup must re-enter the
-      # lean wrapper instead of bypassing its selected profile. The wrapper
+      # managed wrapper instead of bypassing the default configuration. The wrapper
       # invokes the private binary by its absolute path below, so this does
       # not affect its own final exec or the writable ~/.codex overlay.
       export npm_config_prefix="$STATE/npm"
@@ -329,7 +329,7 @@ let
   };
   mkCodexWrapper =
     {
-      profile,
+      profile ? null,
       # Extra shell injected after the npm bootstrap — used to export the
       # provider API key the layered `<profile>.config.toml` expects.
       extraEnv ? "",
@@ -349,64 +349,73 @@ let
 
         ${extraEnv}
 
-        export SINNIX_CODEX_PROFILE=${lib.escapeShellArg profile}
-        # Codex rejects --profile for utility commands such as app-server;
-        # its own runtime diagnostic names the supported command family.
-        # Keep ordinary prompts in the profiled runtime path, while utility
-        # commands pass through without an unsupported global option.
-        codex_uses_profile() {
-          # Only consume Codex's known global flags.  An arbitrary first word
-          # remains an interactive prompt, rather than being normalized as a
-          # command by this wrapper.
-          while [ "$#" -gt 0 ]; do
-            case "$1" in
-              -p|--profile)
-                if [ "$#" -ge 2 ]; then
-                  export SINNIX_CODEX_PROFILE="$2"
-                fi
-                return 1
-                ;;
-              --profile=*)
-                export SINNIX_CODEX_PROFILE="''${1#--profile=}"
-                return 1
-                ;;
-              -p?*)
-                export SINNIX_CODEX_PROFILE="''${1#-p}"
-                return 1
-                ;;
-              -c|--config|--enable|--disable|--remote|--remote-auth-token-env|-m|--model|--local-provider|-s|--sandbox|-C|--cd|--add-dir|-a|--ask-for-approval)
-                [ "$#" -ge 2 ] || return 0
-                shift 2
-                ;;
-              --config=*|--enable=*|--disable=*|--remote=*|--remote-auth-token-env=*|--model=*|--local-provider=*|--sandbox=*|--cd=*|--add-dir=*|--ask-for-approval=*)
-                shift
-                ;;
-              --strict-config|--oss|--approve-for-me|--dangerously-bypass-approvals-and-sandbox|--dangerously-bypass-hook-trust|--worktree|--search|--no-alt-screen)
-                shift
-                ;;
-              *)
-                break
-                ;;
-            esac
-          done
-          case "''${1:-}" in
-            agents|app-server|apply|cloud|completion|doctor|exec-server|features|help|login|logout|migrate-rollouts|plugin|remote-control|update)
-              return 1
-              ;;
-            debug)
-              [ "''${2:-}" = prompt-input ]
-              ;;
-            *)
-              return 0
-              ;;
-          esac
-        }
-        codex_args=()
-        if codex_uses_profile "$@"; then
-          codex_args=(--profile ${lib.escapeShellArg profile})
-        fi
+        ${
+          if profile == null then
+            ''
+              exec "$STATE/npm/bin/codex" "$@"
+            ''
+          else
+            ''
+              export SINNIX_CODEX_PROFILE=${lib.escapeShellArg profile}
+              # Codex rejects --profile for utility commands such as app-server;
+              # its own runtime diagnostic names the supported command family.
+              # Keep ordinary prompts in the profiled runtime path, while utility
+              # commands pass through without an unsupported global option.
+              codex_uses_profile() {
+                # Only consume Codex's known global flags.  An arbitrary first word
+                # remains an interactive prompt, rather than being normalized as a
+                # command by this wrapper.
+                while [ "$#" -gt 0 ]; do
+                  case "$1" in
+                    -p|--profile)
+                      if [ "$#" -ge 2 ]; then
+                        export SINNIX_CODEX_PROFILE="$2"
+                      fi
+                      return 1
+                      ;;
+                    --profile=*)
+                      export SINNIX_CODEX_PROFILE="''${1#--profile=}"
+                      return 1
+                      ;;
+                    -p?*)
+                      export SINNIX_CODEX_PROFILE="''${1#-p}"
+                      return 1
+                      ;;
+                    -c|--config|--enable|--disable|--remote|--remote-auth-token-env|-m|--model|--local-provider|-s|--sandbox|-C|--cd|--add-dir|-a|--ask-for-approval)
+                      [ "$#" -ge 2 ] || return 0
+                      shift 2
+                      ;;
+                    --config=*|--enable=*|--disable=*|--remote=*|--remote-auth-token-env=*|--model=*|--local-provider=*|--sandbox=*|--cd=*|--add-dir=*|--ask-for-approval=*)
+                      shift
+                      ;;
+                    --strict-config|--oss|--approve-for-me|--dangerously-bypass-approvals-and-sandbox|--dangerously-bypass-hook-trust|--worktree|--search|--no-alt-screen)
+                      shift
+                      ;;
+                    *)
+                      break
+                      ;;
+                  esac
+                done
+                case "''${1:-}" in
+                  agents|app-server|apply|cloud|completion|doctor|exec-server|features|help|login|logout|migrate-rollouts|plugin|remote-control|update)
+                    return 1
+                    ;;
+                  debug)
+                    [ "''${2:-}" = prompt-input ]
+                    ;;
+                  *)
+                    return 0
+                    ;;
+                esac
+              }
+              codex_args=()
+              if codex_uses_profile "$@"; then
+                codex_args=(--profile ${lib.escapeShellArg profile})
+              fi
 
-        exec "$STATE/npm/bin/codex" "''${codex_args[@]}" "$@"
+              exec "$STATE/npm/bin/codex" "''${codex_args[@]}" "$@"
+            ''
+        }
       '';
       executable = true;
       force = true;

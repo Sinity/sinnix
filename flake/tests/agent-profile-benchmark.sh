@@ -10,8 +10,8 @@ trap 'rm -rf "$root"' EXIT
 mkdir -p "$root/home/.config/claude/skills/demo" "$root/home/.codex" "$root/out"
 printf 'standing instructions\n' >"$root/home/.config/claude/CLAUDE.md"
 printf 'description: demo\n' >"$root/home/.config/claude/skills/demo/SKILL.md"
-printf '{"mcpServers":{"demo":{}}}\n' >"$root/home/.config/claude/mcp-default.json"
-cat >"$root/home/.codex/lean.config.toml" <<'EOF'
+printf '{"mcpServers":{"demo":{}}}\n' >"$root/home/.config/claude/mcp.json"
+cat >"$root/home/.codex/system-config.toml" <<'EOF'
 [mcp_servers.demo]
 command = "demo"
 EOF
@@ -23,20 +23,22 @@ EOF
 chmod +x "$root/fake-gateway"
 python3 "$benchmark" \
   --home "$root/home" \
+  --codex-config "$root/home/.codex/system-config.toml" \
   --gateway-bin "bash $root/fake-gateway" \
-  --profiles claude,gateway-operator \
+  --profiles claude,codex,gateway-operator \
   --repeats 3 \
   --output "$root/out/raw.json" \
   --summary-output "$root/out/summary.json" >"$root/out/stdout.json"
 jq -e '
   .schema == "sinnix-agent-profile-benchmark-v1"
-  and (.profiles | keys == ["claude", "gateway-operator"])
+  and (.profiles | keys == ["claude", "codex", "gateway-operator"])
   and .profiles["claude"].sample_count == 3
   and .profiles["gateway-operator"].sample_count == 3
   and .profiles["claude"].tool_count == 1
+  and .profiles["codex"].tool_count == 1
   and .profiles["gateway-operator"].tool_count == 1
   and .recommendations.task_success_guard
   and (all(.profiles[]; has("wall_ns") and (has("cold_wall_ns") | not) and (has("warm_wall_ns") | not)))
 ' "$root/out/summary.json" >/dev/null
-jq -e '(.schema == "sinnix-agent-profile-benchmark-v1") and ((.records | length) == 6) and all(.records[]; .provider_usage.status == "unavailable" and (has("phase") | not))' "$root/out/raw.json" >/dev/null
+jq -e '(.schema == "sinnix-agent-profile-benchmark-v1") and ((.records | length) == 9) and all(.records[]; .provider_usage.status == "unavailable" and (has("phase") | not))' "$root/out/raw.json" >/dev/null
 echo 'agent-profile-benchmark fixture passed'

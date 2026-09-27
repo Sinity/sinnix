@@ -99,8 +99,8 @@
     };
   };
 
-  # Codex variants. The default lane owns bare `codex`; profiles and backend
-  # environment details are rendered outside this registry.
+  # The default Codex command reads the generated system config. Only the
+  # local and DeepSeek variants select native backend profiles.
   codexLanes = {
     default = {
       binName = "codex";

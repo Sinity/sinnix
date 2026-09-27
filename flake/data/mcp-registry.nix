@@ -207,10 +207,6 @@ let
       "remote-core"
       "recall"
     ];
-    lean = [
-      "remote-core"
-      "recall"
-    ];
     evidence = [
       "remote-core"
       "recall"
@@ -235,16 +231,6 @@ let
       "recall"
     ];
   };
-
-  # Codex's native `--profile` layers. MCP membership comes from profileTiers;
-  # endpoint profiles are derived from agent-lanes.nix below.
-  codexProfileNames = [
-    "default"
-    "lean"
-    "evidence"
-    "full"
-    "browser"
-  ];
 
   codexEndpoints = {
     deepseek = {
@@ -408,7 +394,6 @@ in
   inherit
     registry
     profileTiers
-    codexProfileNames
     codexEndpoints
     selectClientServers
     selectClientServersForProfile

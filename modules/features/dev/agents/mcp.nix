@@ -1,6 +1,6 @@
 # Model Context Protocol (MCP) servers and AI-integrated tool settings: server
-# wrappers, the lean/full/browser agent profiles, and Claude/Codex/Gemini
-# dotfile integration.
+# wrappers, default Claude/Codex integration, alternate Codex backends, and
+# Gemini dotfile integration.
 #
 # Domain pieces live in sibling plain-nix helpers, imported below:
 # mcp-tools.nix (generic MCP wrappers), client-profiles.nix
@@ -24,26 +24,6 @@ mkFeatureModule {
       type = lib.types.path;
       internal = true;
       description = "Path to the generated Codex config derivation (for tests)";
-    };
-    codexFullConfigSource = lib.mkOption {
-      type = lib.types.path;
-      internal = true;
-      description = "Path to the generated Codex full profile derivation (for tests)";
-    };
-    codexLeanConfigSource = lib.mkOption {
-      type = lib.types.path;
-      internal = true;
-      description = "Path to the generated Codex lean profile derivation (for tests)";
-    };
-    codexEvidenceConfigSource = lib.mkOption {
-      type = lib.types.path;
-      internal = true;
-      description = "Path to the generated Codex evidence profile derivation (for tests)";
-    };
-    codexBrowserConfigSource = lib.mkOption {
-      type = lib.types.path;
-      internal = true;
-      description = "Path to the generated Codex browser profile derivation (for tests)";
     };
     codexDeepseekConfigSource = lib.mkOption {
       type = lib.types.path;
@@ -291,16 +271,12 @@ mkFeatureModule {
         mcpPolylogueText
         ;
       inherit (clientProfiles)
-        codexProfileFiles
+        codexSystemConfigFile
         codexEndpointFiles
         geminiSettingsFile
         antigravityMcpConfigFile
         ;
-      codexConfigFiles = codexProfileFiles // codexEndpointFiles;
-      codexFullConfigFile = codexProfileFiles.full;
-      codexLeanConfigFile = codexProfileFiles.lean;
-      codexEvidenceConfigFile = codexProfileFiles.evidence;
-      codexBrowserConfigFile = codexProfileFiles.browser;
+      codexConfigFiles = codexEndpointFiles;
       codexDeepseekConfigFile = codexEndpointFiles.deepseek;
       codexLocalConfigFile = codexEndpointFiles.local;
     in
@@ -334,13 +310,9 @@ mkFeatureModule {
       )
       {
         # Codex reads this live system layer before its private overlay.
-        environment.etc."codex/config.toml".source = "${dotsRoot}/codex/config.toml";
+        environment.etc."codex/config.toml".source = codexSystemConfigFile;
         environment.etc."codex/agents/explorer.toml".source = "${dotsRoot}/codex/agents/explorer.toml";
-        sinnix.features.dev.mcp-servers.codexConfigSource = inputs.self + "/dots/codex/config.toml";
-        sinnix.features.dev.mcp-servers.codexFullConfigSource = codexFullConfigFile;
-        sinnix.features.dev.mcp-servers.codexLeanConfigSource = codexLeanConfigFile;
-        sinnix.features.dev.mcp-servers.codexEvidenceConfigSource = codexEvidenceConfigFile;
-        sinnix.features.dev.mcp-servers.codexBrowserConfigSource = codexBrowserConfigFile;
+        sinnix.features.dev.mcp-servers.codexConfigSource = codexSystemConfigFile;
         sinnix.features.dev.mcp-servers.codexDeepseekConfigSource = codexDeepseekConfigFile;
         sinnix.features.dev.mcp-servers.codexLocalConfigSource = codexLocalConfigFile;
         sinnix.features.dev.mcp-servers.codexHooksSource = codexHooksFile;
@@ -441,6 +413,36 @@ mkFeatureModule {
                       "$codex_home/${codex_name}.config.toml" \
                       "$codex_backup/${codex_name}.config.toml"
                   '') (lib.attrNames codexConfigFiles)}
+                '';
+                codexRetireOldProfiles = lib.hm.dag.entryAfter [ "codexNativeProfiles" ] ''
+                  codex_home="$HOME/.codex"
+                  retired="$codex_home/.sinnix-retired-profiles-v1"
+                  if [ ! -e "$retired/.complete" ]; then
+                    retirement_complete=1
+                    for name in default lean evidence full browser; do
+                      current="$codex_home/$name.config.toml"
+                      saved="$retired/$name.config.toml"
+                      if [ ! -e "$current" ] && [ ! -L "$current" ]; then
+                        continue
+                      fi
+                      if [ -e "$saved" ] || [ -L "$saved" ]; then
+                        echo "codex: preserved existing $current because $saved already exists" >&2
+                        retirement_complete=0
+                        continue
+                      fi
+                      run mkdir -p "$retired"
+                      if [ -L "$current" ] && [ -f "$current" ]; then
+                        run cp -L -p "$current" "$saved"
+                        run rm "$current"
+                      else
+                        run mv "$current" "$saved"
+                      fi
+                    done
+                    if [ "$retirement_complete" = 1 ]; then
+                      run mkdir -p "$retired"
+                      run touch "$retired/.complete"
+                    fi
+                  fi
                 '';
                 # ~/.codex/skills can contain app-installed skills and Codex's
                 # .system directory. Expand only a recognisable old Sinnix
