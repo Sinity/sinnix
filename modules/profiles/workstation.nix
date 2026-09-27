@@ -15,7 +15,6 @@
 }:
 let
   runtimeInventory = config.sinnix.runtime.inventory;
-  user = config.sinnix.user.name;
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   userTmpRoot = "/realm/tmp/work";
   earlyoomAvoidPattern = runtimeInventory.earlyoomEmergencyAvoidPattern;
