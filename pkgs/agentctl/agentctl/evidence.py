@@ -8,6 +8,7 @@ task, make a worktree, or schedule work.
 from __future__ import annotations
 
 import hashlib
+import heapq
 import json
 import os
 import re
@@ -531,14 +532,15 @@ def list_records(
         return {**document, "coverage": "unavailable", "gaps": [str(error)]}
     records: list[dict[str, Any]] = []
     try:
-        paths = sorted(
+        paths = heapq.nsmallest(
+            MAX_RECORDS + 1,
             (
                 entry.name
                 for entry in entries
                 if entry.name.endswith(".json")
                 and not entry.name.endswith(".artifact.json")
                 and (cursor is None or entry.name > cursor)
-            )
+            ),
         )
         page_paths = paths[:MAX_RECORDS]
         scanned: list[str] = []

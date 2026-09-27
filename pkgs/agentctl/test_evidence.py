@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import tracemalloc
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from agentctl import cli, evidence, launch
@@ -372,6 +374,41 @@ def test_list_cursor_crosses_other_projects_and_retrieves_later_record(
         row["evidence_id"] == target_id for item in pages for row in item["records"]
     )
     assert evidence.get_record(config, "fixture", target_id) == target
+
+
+def test_list_selects_a_page_from_a_large_directory_with_bounded_memory(
+    config: Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    count = 50_000
+    observed = 0
+    closed = False
+
+    class SyntheticEntries:
+        def __iter__(self):
+            nonlocal observed
+            for index in range(count, 0, -1):
+                observed += 1
+                yield SimpleNamespace(name=f"{index:032x}.json")
+
+        def close(self) -> None:
+            nonlocal closed
+            closed = True
+
+    monkeypatch.setattr(evidence.os, "scandir", lambda directory: SyntheticEntries())
+    monkeypatch.setattr(evidence.launch, "read_bounded", lambda path, limit: None)
+    tracemalloc.start()
+    try:
+        page = evidence.list_records(config, "fixture")
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    assert observed == count
+    assert closed
+    assert page["next_cursor"] == f"{evidence.MAX_RECORDS:032x}.json"
+    assert page["coverage"] == "partial"
+    assert len(page["gaps"]) == evidence.MAX_RECORDS + 1
+    assert peak < 1_500_000
 
 
 def test_read_paths_need_no_owner_and_reject_misaddressed_reference(
