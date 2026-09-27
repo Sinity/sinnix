@@ -3,7 +3,7 @@
 # These are per-package overrides, NOT a global `nixpkgs.config.cudaSupport`
 # flip — that would rebuild the world. CUDA itself ships as downloaded
 # redistributables; only these named packages recompile. The
-# `cuda-maintainers.cachix.org` substituter (see flake.nix nixConfig) usually
+# `cache.nixos-cuda.org` substituter (see flake.nix nixConfig) usually
 # turns even that recompile into a download.
 #
 # Host has exactly one GPU (RTX 3080, compute capability 8.6). Building from

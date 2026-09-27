@@ -233,9 +233,9 @@
 
   # CUDA builds (ollama-cuda and llama-cpp-cuda) are served
   # by this cache; without it they compile locally. Trusted at switch time.
-  nix.settings.substituters = [ "https://cuda-maintainers.cachix.org" ];
+  nix.settings.substituters = [ "https://cache.nixos-cuda.org" ];
   nix.settings.trusted-public-keys = [
-    "cuda-maintainers.cachix.org-1:0dq3bujKpuEPMCX6U4WylrUDZ9JyUG0VpVZa7CNfq5E="
+    "cache.nixos-cuda.org:74DUi4Ye579gUqzH4ziL9IyiJBlDpMRn9MBN8oNan9M="
   ];
   # This board's fTPM blocks system activation in systemd-tpm2-setup. Keep
   # TPM2 setup masked on sinnix-prime; Secure Boot key material is file-backed.

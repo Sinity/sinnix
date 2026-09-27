@@ -7,11 +7,11 @@
       # cache.nixos.org does not reliably serve CUDA builds (ollama-cuda,
       # llama-cpp with cudaSupport); this cache turns
       # those nvcc compiles into downloads. See flake/overlay/package/local-ai.nix.
-      "https://cuda-maintainers.cachix.org"
+      "https://cache.nixos-cuda.org"
     ];
     extra-trusted-public-keys = [
       "numtide.cachix.org-1:2ps1kLBUWjxIneOy1Ik6cQjb41X0iXVXeHigGmycPPE="
-      "cuda-maintainers.cachix.org-1:0dq3bujKpuEPMCX6U4WylrUDZ9JyUG0VpVZa7CNfq5E="
+      "cache.nixos-cuda.org:74DUi4Ye579gUqzH4ziL9IyiJBlDpMRn9MBN8oNan9M="
     ];
     # Do not bake workstation-local parallelism throttles into repository-level
     # flake config; the host owns containment policy.
