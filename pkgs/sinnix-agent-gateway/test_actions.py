@@ -251,6 +251,37 @@ def test_image_read_returns_an_image_block(tmp_path: Path) -> None:
     assert "�" not in encoded
 
 
+def test_text_file_pages_preserve_utf8_at_byte_boundaries(tmp_path: Path) -> None:
+    server = create_server(config(tmp_path), "operator")
+    target = tmp_path / "unicode.txt"
+    original = "AB🙂ż日終"
+    target.write_text(original, encoding="utf-8")
+
+    parts = []
+    offset = 0
+    while True:
+        data = structured(
+            call(
+                server,
+                "files.read",
+                {
+                    "target": {"path": str(target)},
+                    "offset": offset,
+                    "max_bytes": 4,
+                },
+            )
+        )["data"]
+        parts.append(data["text"])
+        assert data["returned_bytes"] == len(data["text"].encode("utf-8"))
+        if not data["truncated"]:
+            break
+        next_offset = offset + data["returned_bytes"]
+        assert next_offset > offset
+        offset = next_offset
+
+    assert "".join(parts) == original
+
+
 def test_binary_read_never_attaches_bytes_to_the_chat(tmp_path: Path) -> None:
     server = create_server(config(tmp_path), "operator")
     pdf = tmp_path / "page.pdf"

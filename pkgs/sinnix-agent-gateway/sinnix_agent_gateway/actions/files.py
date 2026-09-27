@@ -36,6 +36,7 @@ from ..owner_execution import (
 )
 from ..results import ProtocolError
 from ..schemas import GatewayModel
+from ..text_paging import decode_utf8_page
 
 if TYPE_CHECKING:
     from ..runtime import Runtime
@@ -392,12 +393,18 @@ def _read(runtime: Runtime, inp: ReadInput) -> ActionResult:
             data = handle.read(max_bytes + 1)
         truncated = len(data) > max_bytes
         data = data[:max_bytes]
+        text, consumed = decode_utf8_page(data, final=not truncated)
+        if truncated and consumed == 0:
+            raise ProtocolError(
+                "invalid_request",
+                "max_bytes cannot fit the next UTF-8 character; retry with at least 4",
+            )
         return ActionResult(
             FileContent(
                 **base,
-                text=data.decode("utf-8", errors="replace"),
+                text=text,
                 offset=inp.offset,
-                returned_bytes=len(data),
+                returned_bytes=consumed,
                 truncated=truncated,
             )
         )

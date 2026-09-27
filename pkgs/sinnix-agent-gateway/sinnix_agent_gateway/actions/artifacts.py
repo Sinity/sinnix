@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import codecs
 import hashlib
 import json
 from pathlib import Path
@@ -18,6 +17,7 @@ from ..contracts import VerbFamily
 from ..locators import ARTIFACT_REF_PREFIX, ArtifactLocator
 from ..results import ProtocolError
 from ..schemas import GatewayModel
+from ..text_paging import decode_utf8_page
 
 if TYPE_CHECKING:
     from ..runtime import Runtime
@@ -220,9 +220,7 @@ def _read(runtime: Runtime, inp: ReadInput) -> ActionResult:
             data = handle.read(max_bytes + 1)
         truncated = len(data) > max_bytes
         data = data[:max_bytes]
-        decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
-        text = decoder.decode(data, final=not truncated)
-        consumed = len(data) - len(decoder.getstate()[0])
+        text, consumed = decode_utf8_page(data, final=not truncated)
         if truncated and consumed == 0:
             raise ProtocolError(
                 "invalid_request",
