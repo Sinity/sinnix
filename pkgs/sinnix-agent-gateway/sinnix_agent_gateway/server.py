@@ -63,8 +63,11 @@ def _bounded_resource_json(runtime: Runtime, payload: Any, kind: str) -> str:
     return encoded_envelope.decode()
 
 
-def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
+def create_server(
+    config: GatewayConfig, principal_name: str, transport: str = "stdio"
+) -> MCPServer:
     runtime = Runtime.create(config, principal_name)
+    runtime.transport = transport
     subscription_bus = DemandAwareSubscriptionBus(InMemorySubscriptionBus())
     revision_publisher = OwnerRevisionPublisher(runtime, subscription_bus)
     event_publisher = EventSpoolPublisher(config.event_spool, subscription_bus)

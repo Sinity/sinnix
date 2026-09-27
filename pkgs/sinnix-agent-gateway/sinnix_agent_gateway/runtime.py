@@ -170,6 +170,7 @@ class Runtime:
     files: HostFileService
     mcp_broker: McpBrokerService
     route_preflight: GatewayRoutePreflight
+    transport: str = "stdio"
     normalized_events: NormalizedEventService | None = None
     waits: BoundedWaitService | None = None
     tool_manifest: Callable[[], Awaitable[dict[str, Any]]] | None = None
@@ -263,6 +264,7 @@ class Runtime:
             manifest_hash,
             action_catalog_hash,
             catalog_revision,
+            transport=self.transport,
         )
         preflight = self.route_preflight.run()
         if Capability.MCP_READ in self.principal.capabilities:

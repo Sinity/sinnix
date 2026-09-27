@@ -267,6 +267,18 @@ def test_gateway_status_reports_distinct_manifest_provenance(tmp_path: Path) -> 
         "v2-test",
     )
     assert status["principal_contract_hash"] == "capability-hash"
+    assert status["transport"] == "stdio"
+    assert (
+        runtime.observe.gateway_status(
+            "operator",
+            "capability-hash",
+            "approved-fixture-hash",
+            "catalog-hash",
+            "v2-test",
+            transport="streamable_http_unix",
+        )["transport"]
+        == "streamable_http_unix"
+    )
     assert status["tool_manifest_hash"] == "approved-fixture-hash"
     assert status["action_catalog_hash"] == "catalog-hash"
     assert status["catalog"] == {
@@ -695,7 +707,9 @@ def test_project_scope_rejects_unknown_catalog_ids(tmp_path: Path) -> None:
         )
     )
 
-    with pytest.raises(ValueError, match="scope names unknown projects: missing-project"):
+    with pytest.raises(
+        ValueError, match="scope names unknown projects: missing-project"
+    ):
         GatewayConfig.load(path)
 
 

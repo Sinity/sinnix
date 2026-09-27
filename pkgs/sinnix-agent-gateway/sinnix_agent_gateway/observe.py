@@ -287,6 +287,7 @@ class ObserveService:
         live_manifest_hash: str,
         action_catalog_hash: str,
         catalog_revision: str,
+        transport: str = "stdio",
     ) -> dict[str, Any]:
         self.principal.require(Capability.MACHINE_READ)
         inventory_available = self.config.runtime_inventory.is_file()
@@ -388,5 +389,5 @@ class ObserveService:
                 },
             },
             "runtime_inventory": "available" if inventory_available else "unavailable",
-            "transport": "stdio",
+            "transport": transport,
         }

@@ -168,11 +168,14 @@ def main() -> None:
             raise SystemExit("socket path must be absolute")
         parent = arguments.socket.parent.resolve(strict=True)
         parent_stat = parent.stat()
-        if parent_stat.st_uid != os.getuid() or stat.S_IMODE(parent_stat.st_mode) & 0o077:
+        if (
+            parent_stat.st_uid != os.getuid()
+            or stat.S_IMODE(parent_stat.st_mode) & 0o077
+        ):
             raise SystemExit("socket directory must be owned by this user and private")
-        app = create_server(config, principal).streamable_http_app(
-            json_response=True, host="localhost"
-        )
+        app = create_server(
+            config, principal, transport="streamable_http_unix"
+        ).streamable_http_app(json_response=True, host="localhost")
         original_umask = os.umask(0o077)
         try:
             uvicorn.run(app, uds=str(arguments.socket), log_level="warning")
