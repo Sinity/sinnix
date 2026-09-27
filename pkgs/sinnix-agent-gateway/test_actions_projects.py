@@ -126,6 +126,10 @@ def test_export_covers_source_and_continues_explicit_pages(tmp_path: Path) -> No
     (project / ".venv").mkdir()
     (project / ".venv" / "generated.bin").write_bytes(b"x" * 100_000)
     (project / "large.txt").write_bytes(b"source" * 10_000)
+    executable = project / "run.sh"
+    executable.write_text("#!/bin/sh\nexit 0\n")
+    executable.chmod(0o755)
+    (project / "run-link").symlink_to("run.sh")
     (project / "MANIFEST.json").write_text("source manifest\n")
     runtime = create_server(config, "operator")._sinnix_revision_publisher.runtime
 
@@ -140,6 +144,13 @@ def test_export_covers_source_and_continues_explicit_pages(tmp_path: Path) -> No
         assert bundle.read("large.txt") == b"source" * 10_000
         assert bundle.read("MANIFEST.json") == b"source manifest\n"
         assert bundle.read(whole["manifest"]["manifest_path"])
+        assert bundle.getinfo("run.sh").external_attr >> 16 & 0o777 == 0o755
+        link_info = bundle.getinfo("run-link")
+        assert link_info.external_attr >> 16 & 0o170000 == 0o120000
+        assert bundle.read("run-link") == b"run.sh"
+        entries = {row["path"]: row for row in whole["manifest"]["files"]}
+        assert entries["run.sh"]["mode"] == 0o755
+        assert entries["run-link"]["kind"] == "symlink"
 
     first = runtime.projects.export("fixture", max_files=2)
     assert first["manifest"]["truncated"] is True
@@ -152,15 +163,18 @@ def test_export_covers_source_and_continues_explicit_pages(tmp_path: Path) -> No
     first_paths = {row["path"] for row in first["manifest"]["files"]}
     second_paths = {row["path"] for row in second["manifest"]["files"]}
     assert first_paths.isdisjoint(second_paths)
-    third = runtime.projects.export(
-        "fixture",
-        max_files=2,
-        start_after=second["manifest"]["next_start_after"],
-        expected_revision=second["manifest"]["checkout_revision"],
-    )
-    assert first_paths | second_paths | {
-        row["path"] for row in third["manifest"]["files"]
-    } == {row["path"] for row in whole["manifest"]["files"]}
+    page_paths = first_paths | second_paths
+    cursor = second["manifest"]["next_start_after"]
+    while cursor is not None:
+        page = runtime.projects.export(
+            "fixture",
+            max_files=2,
+            start_after=cursor,
+            expected_revision=first["manifest"]["checkout_revision"],
+        )
+        page_paths.update(row["path"] for row in page["manifest"]["files"])
+        cursor = page["manifest"]["next_start_after"]
+    assert page_paths == {row["path"] for row in whole["manifest"]["files"]}
     with pytest.raises(ProjectError, match="increase max_bytes"):
         runtime.projects.export("fixture", max_bytes=1)
     (project / "README.md").write_text("changed\n")
@@ -316,9 +330,7 @@ def test_public_project_list_obeys_scope_after_private_catalog_merge(
 
     listing = ok(server, "projects.list", {})
 
-    assert [row["project_id"] for row in listing["projects"]] == [
-        "allowed-public"
-    ]
+    assert [row["project_id"] for row in listing["projects"]] == ["allowed-public"]
 
 
 def test_public_project_list_keeps_empty_scope_broad(tmp_path: Path) -> None:
@@ -485,14 +497,12 @@ def test_revision_frames_file_boundaries_and_skips_ignored_files(
     for root in (first, second):
         git(root, "config", "user.email", "fixture@example.invalid")
     mode = (0o644).to_bytes(4, "big")
-    (first / "a").write_bytes(
-        b"x" + len(b"b").to_bytes(8, "big") + b"b" + mode + b"y"
-    )
+    (first / "a").write_bytes(b"x" + len(b"b").to_bytes(8, "big") + b"b" + mode + b"y")
     (second / "a").write_bytes(b"x")
     (second / "b").write_bytes(b"y")
-    assert projects_module._content_revision(first) != projects_module._content_revision(
-        second
-    )
+    assert projects_module._content_revision(
+        first
+    ) != projects_module._content_revision(second)
 
     (first / ".gitignore").write_text("ignored.bin\n")
     ignored = first / "ignored.bin"
@@ -506,6 +516,37 @@ def test_revision_frames_file_boundaries_and_skips_ignored_files(
 
     monkeypatch.setattr(Path, "open", guarded_open)
     projects_module._content_revision(first)
+
+
+def test_revision_tracks_symlink_target_and_mode(tmp_path: Path) -> None:
+    root = tmp_path / "checkout"
+    root.mkdir()
+    git(root, "init", "--quiet")
+    (root / "first").write_text("first")
+    (root / "second").write_text("second")
+    link = root / "current"
+    link.symlink_to("first")
+    before = projects_module._content_revision(root)
+    link.unlink()
+    link.symlink_to("second")
+    assert projects_module._content_revision(root) != before
+
+
+def test_write_preserves_existing_mode_and_uses_readable_default(
+    tmp_path: Path,
+) -> None:
+    config, project, _ = fixture(tmp_path)
+    runtime = create_server(config, "operator")._sinnix_revision_publisher.runtime
+    script = project / "script.sh"
+    script.write_text("#!/bin/sh\n")
+    script.chmod(0o755)
+    runtime.projects.write(
+        "fixture", "script.sh", "#!/bin/sh\necho updated\n", checkout_id="default"
+    )
+    assert script.read_text() == "#!/bin/sh\necho updated\n"
+    assert script.stat().st_mode & 0o777 == 0o755
+    runtime.projects.write("fixture", "new.txt", "new file\n", checkout_id="default")
+    assert (project / "new.txt").stat().st_mode & 0o777 == 0o644
 
 
 def test_diff_spools_complete_output_before_result_artifact(tmp_path: Path) -> None:

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
 from pathlib import Path
 
 from mcp.types import ImageContent
@@ -110,6 +112,36 @@ def test_text_chunks_preserve_utf8(tmp_path: Path) -> None:
         assert data["next_offset"] > offset
         offset = data["next_offset"]
     assert "".join(parts) == original
+
+
+def test_binary_chunks_reassemble_registered_artifact(tmp_path: Path) -> None:
+    rt = runtime(tmp_path)
+    original = bytes(range(251)) * 37
+    artifact_id = register(rt, "archive.zip", original, "project-export")
+    parts = []
+    offset = 0
+    while True:
+        data = call(
+            rt,
+            "artifacts.read",
+            {
+                "target": {"artifact_id": artifact_id},
+                "representation": "binary",
+                "offset": offset,
+                "max_bytes": 701,
+            },
+            BY_NAME,
+        )["data"]
+        chunk = base64.b64decode(data["base64"], validate=True)
+        assert len(chunk) == data["returned_bytes"]
+        assert data["bytes"] == len(original)
+        assert data["sha256"] == hashlib.sha256(original).hexdigest()
+        parts.append(chunk)
+        if data["next_offset"] is None:
+            break
+        assert data["next_offset"] == offset + len(chunk)
+        offset = data["next_offset"]
+    assert b"".join(parts) == original
 
 
 def test_filtered_listing_continues_immutable_snapshot(tmp_path: Path) -> None:

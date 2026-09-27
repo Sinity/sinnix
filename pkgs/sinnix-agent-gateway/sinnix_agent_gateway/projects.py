@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import io
 import json
 import os
 import re
@@ -107,7 +108,18 @@ def _content_revision(root: Path) -> str:
     for relative in paths:
         path = root / os.fsdecode(relative)
         relative_path = Path(os.fsdecode(relative))
-        if _is_excluded(relative_path) or path.is_symlink() or not path.is_file():
+        if _is_excluded(relative_path):
+            continue
+        if path.is_symlink():
+            target = os.fsencode(os.readlink(path))
+            digest.update(b"symlink\0")
+            digest.update(len(relative).to_bytes(8, "big"))
+            digest.update(relative)
+            digest.update(stat.S_IMODE(path.lstat().st_mode).to_bytes(4, "big"))
+            digest.update(len(target).to_bytes(8, "big"))
+            digest.update(target)
+            continue
+        if not path.is_file():
             continue
         file_digest = hashlib.sha256()
         size = 0
@@ -512,9 +524,7 @@ class ProjectService:
                 if used + len(encoded) > max_bytes:
                     remaining = max_bytes - used
                     if remaining:
-                        fragment = encoded[:remaining].decode(
-                            "utf-8", errors="ignore"
-                        )
+                        fragment = encoded[:remaining].decode("utf-8", errors="ignore")
                         content.append(fragment)
                         used += len(fragment.encode("utf-8"))
                     truncated = True
@@ -567,7 +577,11 @@ class ProjectService:
         total = 0
         for relative in paths:
             path = project.path / relative
-            size = path.stat().st_size
+            size = (
+                len(os.fsencode(os.readlink(path)))
+                if path.is_symlink()
+                else path.stat().st_size
+            )
             if max_files is not None and len(selected) >= max_files:
                 break
             if max_bytes is not None and total + size > max_bytes:
@@ -597,19 +611,39 @@ class ProjectService:
                     path = project.path / relative
                     digest = hashlib.sha256()
                     size = 0
-                    with (
-                        path.open("rb") as source,
-                        bundle.open(relative.as_posix(), "w") as target,
-                    ):
-                        for chunk in iter(lambda: source.read(1_048_576), b""):
-                            size += len(chunk)
-                            digest.update(chunk)
-                            target.write(chunk)
+                    info = zipfile.ZipInfo(relative.as_posix())
+                    info.create_system = 3
+                    mode = stat.S_IMODE(path.lstat().st_mode)
+                    is_link = path.is_symlink()
+                    info.external_attr = (
+                        (stat.S_IFLNK if is_link else stat.S_IFREG) | mode
+                    ) << 16
+                    info.compress_type = (
+                        zipfile.ZIP_STORED if is_link else zipfile.ZIP_DEFLATED
+                    )
+                    source = (
+                        io.BytesIO(os.fsencode(os.readlink(path)))
+                        if is_link
+                        else path.open("rb")
+                    )
+                    with source, bundle.open(info, "w") as target:
+                        if is_link:
+                            link_bytes = os.fsencode(os.readlink(path))
+                            target.write(link_bytes)
+                            digest.update(link_bytes)
+                            size += len(link_bytes)
+                        else:
+                            while chunk := source.read(1_048_576):
+                                size += len(chunk)
+                                digest.update(chunk)
+                                target.write(chunk)
                     rows.append(
                         {
                             "path": relative.as_posix(),
                             "bytes": size,
                             "sha256": digest.hexdigest(),
+                            "mode": mode,
+                            "kind": "symlink" if is_link else "file",
                         }
                     )
                 after_paths = self._export_paths(project)
@@ -657,7 +691,7 @@ class ProjectService:
             ):
                 continue
             path = project.path / relative
-            if path.is_file() and not path.is_symlink():
+            if path.is_symlink() or path.is_file():
                 paths.add(relative)
         return sorted(paths, key=lambda path: path.as_posix())
 
@@ -669,7 +703,16 @@ class ProjectService:
             name = relative.as_posix().encode()
             digest.update(len(name).to_bytes(8, "big"))
             digest.update(name)
-            digest.update(stat.S_IMODE(path.stat().st_mode).to_bytes(4, "big"))
+            info = path.lstat()
+            mode = stat.S_IMODE(info.st_mode)
+            digest.update(mode.to_bytes(4, "big"))
+            if stat.S_ISLNK(info.st_mode):
+                target = os.fsencode(os.readlink(path))
+                digest.update(b"symlink\0")
+                digest.update(len(target).to_bytes(8, "big"))
+                digest.update(target)
+                continue
+            digest.update(b"file\0")
             with path.open("rb") as handle:
                 for chunk in iter(lambda: handle.read(1_048_576), b""):
                     digest.update(chunk)
@@ -1062,7 +1105,15 @@ class ProjectService:
             parts = _mutation_parts(project, path)
             parent = _open_pinned_directory(project, parts[:-1], create=True)
             try:
-                _atomic_publish(parent, parts[-1], content.encode(), 0o600)
+                try:
+                    current = os.stat(parts[-1], dir_fd=parent, follow_symlinks=False)
+                except FileNotFoundError:
+                    mode = 0o644
+                else:
+                    if not stat.S_ISREG(current.st_mode):
+                        raise ProjectError("path must identify a regular project file")
+                    mode = stat.S_IMODE(current.st_mode)
+                _atomic_publish(parent, parts[-1], content.encode(), mode)
             finally:
                 os.close(parent)
         return {"project_id": project_id, "path": path, "bytes": len(content.encode())}

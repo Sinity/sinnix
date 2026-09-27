@@ -154,11 +154,13 @@ def _get(runtime: Runtime, inp: GetInput) -> Metadata:
 
 class ReadInput(RequestControls):
     target: ArtifactLocator
-    offset: int = Field(default=0, ge=0, description="Byte offset for text reads.")
+    offset: int = Field(
+        default=0, ge=0, description="Byte offset for text or binary reads."
+    )
     max_bytes: int = Field(
         default=64_000, ge=1, description="Maximum inline text bytes."
     )
-    representation: Literal["auto", "text"] = "auto"
+    representation: Literal["auto", "text", "binary"] = "auto"
 
 
 class Content(GatewayModel):
@@ -173,6 +175,8 @@ class Content(GatewayModel):
     returned_bytes: int = 0
     next_offset: int | None = None
     truncated: bool = False
+    base64: str | None = None
+    sha256: str | None = None
     artifact: Artifact | None = Field(
         default=None,
         description="Set for binary artifacts; bytes are represented by a canonical read-only link.",
@@ -197,6 +201,19 @@ def _read(runtime: Runtime, inp: ReadInput) -> ActionResult:
     textual = inp.representation == "text" or (
         inp.representation == "auto" and is_text(media) and media not in IMAGE_TYPES
     )
+    if inp.representation == "binary":
+        chunk = runtime.artifacts.read(raw["artifact_id"], inp.offset, max_bytes)
+        return ActionResult(
+            Content(
+                **base,
+                offset=chunk["offset"],
+                returned_bytes=chunk["returned_bytes"],
+                next_offset=chunk["next_offset"],
+                truncated=chunk["next_offset"] is not None,
+                base64=chunk["base64"],
+                sha256=raw["sha256"],
+            )
+        )
     if textual:
         with source.open("rb") as handle:
             handle.seek(inp.offset)
@@ -275,7 +292,7 @@ ACTIONS: tuple[Action, ...] = (
         name="artifacts.read",
         family=VerbFamily.QUERY,
         owner="artifacts",
-        summary="Read an artifact: text inline with offsets, images as image blocks, other binary as read-only links.",
+        summary="Read text with offsets, binary bytes in resumable base64 chunks, images as image blocks, or other binary as a link.",
         Input=ReadInput,
         Output=Content,
         handler=_read,

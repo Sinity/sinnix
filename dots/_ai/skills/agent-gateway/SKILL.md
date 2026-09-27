@@ -5,7 +5,7 @@ description: Use when invoking, inspecting, or documenting Sinnix Agent Gateway 
 
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: 02367b48337f4ce1c1e01211f0d9129008983fb6dcec58eb324216ed96d6adca -->
+<!-- gateway-catalog-sha256: b5666c50dfe6cd40c351ed580fee6eed174c864f460b867d7e204183d311aebd -->
 
 # Agent Gateway
 
@@ -78,7 +78,7 @@ Effectful actions (families change, operate, run) require `idempotency_key`. Con
 - `processes.list` — List live processes filtered by name, pid, unit, cgroup or user, with a canonical ref each.
 - `processes.tree` — Parent/child process tree from one root or from every top-level process, bounded by depth and node count.
 - `mcp.call` — Reads require an owner read-only annotation or an exact match to trusted registry selectors. Other requests require mcp.change (operator only). A target using server=sinnix-agent-gateway is routed to the named direct read action, preserving its native content blocks; changes stay direct-only.
-- `artifacts.read` — Read an artifact: text inline with offsets, images as image blocks, other binary as read-only links.
+- `artifacts.read` — Read text with offsets, binary bytes in resumable base64 chunks, images as image blocks, or other binary as a link.
 - `captures.query` — List runtime-declared capture lanes, describe one, or read per-lane record deltas since a time.
 - `activity.query` — Reads sinnix-capture-v1 envelope files under each lane path within the time window; coverage lists which lanes contributed and which have no envelope files.
 - `sessions.query` — Read indexed session pages or explicit original-source fallback through Polylogue.
@@ -179,4 +179,4 @@ Effectful actions (families change, operate, run) require `idempotency_key`. Con
 
 The complete schemas and examples are in `docs/generated/agent-gateway-reference.md`.
 
-Catalog revision: `v3-typed-actions`. Catalog SHA-256: `02367b48337f4ce1c1e01211f0d9129008983fb6dcec58eb324216ed96d6adca`.
+Catalog revision: `v3-typed-actions`. Catalog SHA-256: `b5666c50dfe6cd40c351ed580fee6eed174c864f460b867d7e204183d311aebd`.

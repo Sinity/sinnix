@@ -1,11 +1,11 @@
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: 02367b48337f4ce1c1e01211f0d9129008983fb6dcec58eb324216ed96d6adca -->
+<!-- gateway-catalog-sha256: b5666c50dfe6cd40c351ed580fee6eed174c864f460b867d7e204183d311aebd -->
 # Sinnix Agent Gateway reference
 
 Generated from `sinnix_agent_gateway.actions`. Every action is one MCP tool whose `tools/list` input schema is the one below; the catalog hash changes when any principal-visible action catalog row changes, including its schema, principal set, example or affordance.
 
-Revision: `v3-typed-actions`. Catalog SHA-256: `02367b48337f4ce1c1e01211f0d9129008983fb6dcec58eb324216ed96d6adca`.
+Revision: `v3-typed-actions`. Catalog SHA-256: `b5666c50dfe6cd40c351ed580fee6eed174c864f460b867d7e204183d311aebd`.
 
 ## Invocation
 
@@ -144,7 +144,7 @@ MCP: call the tool named after the action. CLI: `sinnix-agent-gateway call <acti
 | `mcp.change`                 | `change`  | `mcp-broker`       | `operator` | Invoke an upstream request not admitted as read-only by annotation or trusted registry selectors.                                                                                                                                                                                                                                                |
 | `artifacts.list`             | `catalog` | `artifacts`        | `operator` | List principal-visible artifacts with kind, owner, size and canonical ref.                                                                                                                                                                                                                                                                       |
 | `artifacts.get`              | `get`     | `artifacts`        | `operator` | Metadata of one artifact without its bytes.                                                                                                                                                                                                                                                                                                      |
-| `artifacts.read`             | `query`   | `artifacts`        | `operator` | Read an artifact: text inline with offsets, images as image blocks, other binary as read-only links.                                                                                                                                                                                                                                             |
+| `artifacts.read`             | `query`   | `artifacts`        | `operator` | Read text with offsets, binary bytes in resumable base64 chunks, images as image blocks, or other binary as a link.                                                                                                                                                                                                                              |
 | `captures.query`             | `query`   | `captures`         | `operator` | List runtime-declared capture lanes, describe one, or read per-lane record deltas since a time.                                                                                                                                                                                                                                                  |
 | `activity.query`             | `query`   | `captures`         | `operator` | Reads sinnix-capture-v1 envelope files under each lane path within the time window; coverage lists which lanes contributed and which have no envelope files.                                                                                                                                                                                     |
 | `sessions.query`             | `query`   | `polylogue`        | `operator` | Read indexed session pages or explicit original-source fallback through Polylogue.                                                                                                                                                                                                                                                               |
@@ -23016,7 +23016,7 @@ By ref:
 
 ### `artifacts.read`
 
-Read an artifact: text inline with offsets, images as image blocks, other binary as read-only links.
+Read text with offsets, binary bytes in resumable base64 chunks, images as image blocks, or other binary as a link.
 
 Family: `query`. Owner: `artifacts`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
@@ -23097,7 +23097,7 @@ Input schema:
     },
     "offset": {
       "default": 0,
-      "description": "Byte offset for text reads.",
+      "description": "Byte offset for text or binary reads.",
       "minimum": 0,
       "type": "integer"
     },
@@ -23118,7 +23118,8 @@ Input schema:
       "default": "auto",
       "enum": [
         "auto",
-        "text"
+        "text",
+        "binary"
       ],
       "type": "string"
     },
