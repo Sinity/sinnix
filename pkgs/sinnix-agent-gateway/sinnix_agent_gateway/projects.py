@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import stat
+import subprocess
 import tempfile
 import uuid
 import zipfile
@@ -84,31 +85,42 @@ def _file_sha256(path: Path) -> str:
 
 
 def _content_revision(root: Path) -> str:
-    """Hash the visible checkout bytes, not merely Git's status text."""
+    """Hash tracked and non-ignored checkout files with unambiguous framing."""
     digest = hashlib.sha256()
-    files: list[Path] = []
-    for current, dirs, names in os.walk(root, followlinks=False):
-        current_path = Path(current)
-        dirs[:] = sorted(
-            name
-            for name in dirs
-            if not _is_excluded((current_path / name).relative_to(root))
-            and not (current_path / name).is_symlink()
-        )
-        for name in names:
-            path = current_path / name
-            relative = path.relative_to(root)
-            if path.is_symlink() or _is_excluded(relative) or not path.is_file():
-                continue
-            files.append(path)
-    for path in sorted(files, key=lambda item: item.relative_to(root).as_posix()):
-        relative = path.relative_to(root).as_posix().encode()
-        digest.update(len(relative).to_bytes(8, "big"))
-        digest.update(relative)
-        digest.update((stat.S_IMODE(path.stat().st_mode)).to_bytes(4, "big"))
+    digest.update(b"sinnix-project-content-revision-v2\0")
+    listing = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(root),
+            "ls-files",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "-z",
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        check=True,
+    ).stdout
+    paths = sorted(set(filter(None, listing.split(b"\0"))))
+    for relative in paths:
+        path = root / os.fsdecode(relative)
+        relative_path = Path(os.fsdecode(relative))
+        if _is_excluded(relative_path) or path.is_symlink() or not path.is_file():
+            continue
+        file_digest = hashlib.sha256()
+        size = 0
         with path.open("rb") as handle:
             for chunk in iter(lambda: handle.read(1_048_576), b""):
-                digest.update(chunk)
+                file_digest.update(chunk)
+                size += len(chunk)
+        digest.update(b"file\0")
+        digest.update(len(relative).to_bytes(8, "big"))
+        digest.update(relative)
+        digest.update(stat.S_IMODE(path.stat().st_mode).to_bytes(4, "big"))
+        digest.update(size.to_bytes(8, "big"))
+        digest.update(file_digest.digest())
     return digest.hexdigest()
 
 
@@ -235,6 +247,9 @@ class ProjectService:
         root = project.path.resolve(strict=True)
         if resolved != root and root not in resolved.parents:
             raise ProjectError("path resolves outside the project")
+        resolved_relative = resolved.relative_to(root)
+        if resolved != root and _is_excluded(resolved_relative):
+            raise ProjectError("path is excluded by project policy")
         return resolved
 
     def list(self) -> dict[str, Any]:
@@ -497,9 +512,11 @@ class ProjectService:
                 if used + len(encoded) > max_bytes:
                     remaining = max_bytes - used
                     if remaining:
-                        content.append(
-                            encoded[:remaining].decode("utf-8", errors="ignore")
+                        fragment = encoded[:remaining].decode(
+                            "utf-8", errors="ignore"
                         )
+                        content.append(fragment)
+                        used += len(fragment.encode("utf-8"))
                     truncated = True
                     break
                 content.append(line)
@@ -866,11 +883,33 @@ class ProjectService:
             ).strip()
             if not re.fullmatch(r"[0-9a-f]{40,64}", resolved_ref):
                 raise ProjectError("git ref did not resolve to a commit")
-        command = ["git", "diff", "--no-ext-diff", "--no-textconv"]
+        name_command = ["git", "diff", "--no-renames", "--name-only", "-z"]
         if resolved_ref is not None:
-            command.append(resolved_ref)
-        command.append("--")
-        output = self._run_spooled(command, project.path)
+            name_command.append(resolved_ref)
+        name_command.append("--")
+        changed = self._run_spooled(name_command, project.path).encode(
+            "utf-8", "surrogateescape"
+        )
+        allowed = [
+            os.fsdecode(raw)
+            for raw in changed.split(b"\0")
+            if raw and not _is_excluded(Path(os.fsdecode(raw)))
+        ]
+        if allowed:
+            command = [
+                "git",
+                "diff",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--no-renames",
+            ]
+            if resolved_ref is not None:
+                command.append(resolved_ref)
+            command.append("--")
+            command.extend(f":(literal){path}" for path in allowed)
+            output = self._run_spooled(command, project.path)
+        else:
+            output = ""
         return {
             "project_id": project_id,
             "diff": output,

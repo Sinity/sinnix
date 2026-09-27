@@ -364,6 +364,85 @@ def test_tree_read_diff_and_search_keep_authority_checks(tmp_path: Path) -> None
     assert search["truncated"] is False and search["query"] == "mkServiceModule"
 
 
+def test_read_rechecks_resolved_symlink_targets_and_reports_emitted_bytes(
+    tmp_path: Path,
+) -> None:
+    config, project, _ = fixture(tmp_path)
+    secret = project / "secrets" / "fixture.txt"
+    secret.parent.mkdir()
+    secret.write_text("SYNTHETIC_PRIVATE\n")
+    (project / "alias.txt").symlink_to("secrets/fixture.txt")
+    (project / "aliasdir").symlink_to("secrets", target_is_directory=True)
+    (project / "tiny.txt").write_text("abcde\n")
+    server = create_server(config, "operator")
+    target = {"target": {"project": "fixture"}}
+
+    assert (
+        error(server, "projects.read", {**target, "path": "alias.txt"})
+        == "policy_denied"
+    )
+    assert (
+        error(server, "projects.read", {**target, "path": "aliasdir/fixture.txt"})
+        == "policy_denied"
+    )
+    bounded = ok(
+        server,
+        "projects.read",
+        {**target, "path": "tiny.txt", "max_bytes": 3},
+    )
+    assert bounded["content"] == "abc" and bounded["bytes"] == 3
+    assert bounded["truncated"] is True
+
+
+def test_diff_omits_policy_excluded_paths(tmp_path: Path) -> None:
+    config, project, _ = fixture(tmp_path)
+    (project / ".env").write_text("SYNTHETIC_PRIVATE=hidden\n")
+    (project / "README.md").write_text("visible change\n")
+    server = create_server(config, "operator")
+
+    result = ok(server, "projects.diff", {"target": {"project": "fixture"}})
+    assert "visible change" in result["diff"]
+    assert "SYNTHETIC_PRIVATE" not in result["diff"]
+    assert ".env" not in result["diff"]
+
+
+def test_revision_frames_file_boundaries_and_skips_ignored_files(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from sinnix_agent_gateway import projects as projects_module
+
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    git(first, "init", "--quiet")
+    git(second, "init", "--quiet")
+    for root in (first, second):
+        git(root, "config", "user.email", "fixture@example.invalid")
+    mode = (0o644).to_bytes(4, "big")
+    (first / "a").write_bytes(
+        b"x" + len(b"b").to_bytes(8, "big") + b"b" + mode + b"y"
+    )
+    (second / "a").write_bytes(b"x")
+    (second / "b").write_bytes(b"y")
+    assert projects_module._content_revision(first) != projects_module._content_revision(
+        second
+    )
+
+    (first / ".gitignore").write_text("ignored.bin\n")
+    ignored = first / "ignored.bin"
+    ignored.write_bytes(b"synthetic ignored build output")
+    original_open = Path.open
+
+    def guarded_open(path: Path, *args, **kwargs):
+        if path == ignored:
+            raise AssertionError("ignored files must not be read for revisions")
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", guarded_open)
+    projects_module._content_revision(first)
+
+
 def test_diff_spools_complete_output_before_result_artifact(tmp_path: Path) -> None:
     config, project, _ = fixture(tmp_path)
     config = GatewayConfig(
