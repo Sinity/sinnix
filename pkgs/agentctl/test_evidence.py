@@ -171,7 +171,9 @@ def test_file_keeps_claim_separate_from_clean_receipt_observation(
     assert record["task_snapshot"][0]["acceptance_criteria"] == [
         {"id": "AC-1", "text": "the check passes"}
     ]
-    assert evidence.list_records(config, "fixture")["records"] == [record]
+    summary = evidence.list_records(config, "fixture")["records"][0]
+    assert summary["evidence_id"] == record["evidence_id"]
+    assert evidence.get_record(config, "fixture", record["evidence_id"]) == record
 
 
 def test_v2_claim_must_match_the_current_filing_snapshot(
@@ -281,6 +283,97 @@ def test_list_ignores_malformed_or_other_project_records(config: Config) -> None
     assert listed["coverage"] == "partial"
 
 
+def test_large_valid_execution_receipt_is_filed_and_retrievable(
+    config: Config,
+    fake_pueue: FakePueue,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    project = resolve_project(config, "fixture")
+    job_id, reference = _receipt_job(config, fake_pueue, project)
+    outcome = outcome_path_for(config.jobs_dir / f"{reference}.log")
+    value = json.loads(outcome.read_text())
+    value["execution_evidence"] = {
+        "dirty_manifest": [
+            {"path": f"tree/{i:05d}", "sha256": "b" * 64} for i in range(4_000)
+        ]
+    }
+    outcome.write_text(json.dumps(value))
+    monkeypatch.setattr(evidence, "SubprocessBdReader", lambda root: _beads())
+    monkeypatch.setattr(
+        evidence, "_candidate", lambda project, candidate: {"candidate_sha": candidate}
+    )
+    monkeypatch.setattr(
+        evidence, "_publication", lambda project, candidate: {"state": "unknown"}
+    )
+    path = tmp_path / "native.json"
+    path.write_text(json.dumps(_claim(receipt=f"agentctl://jobs/{job_id}/{reference}")))
+
+    record = evidence.file(config, project, path)
+    listed = evidence.list_records(config, "fixture")
+    fetched = evidence.get_record(config, "fixture", record["evidence_id"])
+
+    assert listed["records"][0]["bytes"] > evidence.MAX_EVIDENCE_BYTES
+    assert len(json.dumps(listed)) < evidence.MAX_EVIDENCE_BYTES
+    assert (
+        fetched["verification"][0]["observation"]["execution_evidence"]
+        == value["execution_evidence"]
+    )
+    artifact = (
+        config.state_dir / "native-evidence" / f"{record['evidence_id']}.artifact.json"
+    )
+    artifact.write_bytes(artifact.read_bytes() + b" ")
+    with pytest.raises(launch.JobError, match="identity mismatch"):
+        evidence.get_record(config, "fixture", record["evidence_id"])
+
+
+def test_list_cursor_crosses_other_projects_and_retrieves_later_record(
+    config: Config,
+) -> None:
+    directory = config.state_dir / "native-evidence"
+    directory.mkdir(parents=True)
+    for index in range(1, evidence.MAX_RECORDS + 3):
+        evidence_id = f"{index:032x}"
+        (directory / f"{evidence_id}.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "kind": "native_evidence",
+                    "evidence_id": evidence_id,
+                    "project": "other",
+                    "recorded_at": "fixture",
+                    "payload": "x" * 2_000,
+                }
+            )
+        )
+    target_id = f"{evidence.MAX_RECORDS + 3:032x}"
+    target = {
+        "schema_version": 1,
+        "kind": "native_evidence",
+        "evidence_id": target_id,
+        "project": "fixture",
+        "recorded_at": "fixture",
+        "identity": "complete",
+    }
+    (directory / f"{target_id}.json").write_text(json.dumps(target))
+
+    page = evidence.list_records(config, "fixture", limit=2)
+    pages = [page]
+    while pages[-1]["next_cursor"] is not None:
+        pages.append(
+            evidence.list_records(
+                config, "fixture", cursor=pages[-1]["next_cursor"], limit=2
+            )
+        )
+
+    assert all(len(item["records"]) <= 2 for item in pages)
+    assert pages[0]["records"] == []
+    assert any(
+        row["evidence_id"] == target_id for item in pages for row in item["records"]
+    )
+    assert evidence.get_record(config, "fixture", target_id) == target
+
+
 def test_evidence_discover_parser_keeps_project_ref_and_limit_explicit() -> None:
     arguments = cli.parser().parse_args(
         [
@@ -387,11 +480,26 @@ def test_cleaned_receipt_still_requires_complete_project_bound_execution_evidenc
 
 def test_native_evidence_record_is_private_and_exclusive(tmp_path: Path) -> None:
     path = tmp_path / "record.json"
-    document = {"schema_version": 1, "kind": "native_evidence"}
+    document = {
+        "schema_version": 1,
+        "kind": "native_evidence",
+        "evidence_id": "a" * 32,
+        "project": "fixture",
+        "recorded_at": "fixture",
+        "complete": True,
+    }
 
     evidence._write_record(path, document)
-    assert json.loads(path.read_text()) == document
+    pointer = json.loads(path.read_text())
+    assert pointer["kind"] == "native_evidence_reference"
+    assert (
+        pointer["sha256"]
+        == __import__("hashlib")
+        .sha256(json.dumps(document, sort_keys=True, separators=(",", ":")).encode())
+        .hexdigest()
+    )
     assert path.stat().st_mode & 0o777 == 0o600
+    assert path.with_suffix(".artifact.json").stat().st_mode & 0o777 == 0o600
     with pytest.raises(FileExistsError):
         evidence._write_record(path, {"replacement": True})
-    assert json.loads(path.read_text()) == document
+    assert json.loads(path.read_text()) == pointer

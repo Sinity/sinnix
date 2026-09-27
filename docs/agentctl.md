@@ -130,7 +130,9 @@ Native agents can file the same worker-result document without pretending that t
 
 ```text
 agentctl evidence file result.json --project <project>
-agentctl evidence list <project> --json
+agentctl evidence list <project> --limit 100 --json
+agentctl evidence list <project> --cursor <next_cursor> --json
+agentctl evidence get <evidence_id> --project <project> --json
 ```
 
 The result must name a candidate SHA and its Beads tasks. A version-two result uses `execution = "native"` and must copy the Beads row revision, acceptance digest, and `{ac_id, text}` dispatch snapshot. A legacy result remains retained when a historical dispatch has no binding, but cannot automatically close a Bead. AgentCTL binds the exact owner acceptance field when structured criteria are unavailable; it never substitutes worker prose for that snapshot.
@@ -139,7 +141,7 @@ Each native verification claim must use a durable AgentCTL job receipt, `agentct
 
 Filing also records the local checkout observation and one bounded `git ls-remote` observation of the declared base branch. Publication is `published` only when the local `origin/<branch>` ref equals that advertised head and Git proves the candidate is its ancestor. The candidate need not be the current checkout HEAD: a clean candidate-bound verification receipt and the publication observation decide its evidence eligibility. Reading retained evidence performs no network or owner subprocess calls.
 
-Native evidence records are private, immutable result artifacts under `$XDG_STATE_HOME/agentctl/native-evidence/`. `evidence list --json` returns the retained records with a coverage state and gaps. Its scan is bounded to 1,000 records of 256 KiB each, so an unreadable, oversized or excess record makes coverage partial instead of disappearing. The records do not drive scheduling, task ownership, publication or cleanup. Session references remain worker claims for Polylogue to correlate; AgentCTL does not promote them to an observed executor fact.
+Native evidence records are private, immutable result artifacts under `$XDG_STATE_HOME/agentctl/native-evidence/`. Each small index entry names a complete artifact by evidence id, byte length and SHA-256. `evidence list` returns bounded summaries and a continuation cursor; each page scans at most 1,000 directory entries and returns at most 100 summaries by default. Continue with the returned cursor to reach records after other projects' entries. `evidence get <id>` retrieves one complete artifact and verifies its content hash. Malformed entries or remaining pages are reported through coverage and gaps. The records do not drive scheduling, task ownership, publication or cleanup. Session references remain worker claims for Polylogue to correlate; AgentCTL does not promote them to an observed executor fact.
 
 `evidence discover --bead <id> --project <project> [--ref <revision>] [--limit <n>]` reads at most 1,000 reachable commits and reports explicit task-id or canonical Beads-reference mentions. Each result is an association only. It does not establish a worker result, acceptance decision, verification, publication or task completion. The response reports the requested ref, scan bound and whether the bounded history was complete.
 

@@ -7,6 +7,7 @@ task, make a worktree, or schedule work.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -26,8 +27,14 @@ from .prompts import PromptError, SubprocessBdReader, evidence_binding
 RECORD_SCHEMA_VERSION = 1
 MAX_EVIDENCE_BYTES = 256 * 1024
 MAX_RECORDS = 1_000
+MAX_PAGE_SIZE = 100
 MAX_BEADS = 100
 MAX_VERIFICATIONS = 100
+MAX_ARTIFACT_BYTES = (
+    MAX_VERIFICATIONS * launch.MAX_OUTCOME_BYTES
+    + launch.MAX_LAUNCH_INPUT_BYTES
+    + MAX_EVIDENCE_BYTES
+)
 _RECEIPT = re.compile(r"^agentctl://jobs/([0-9]+)/([A-Za-z0-9._-]+)$")
 
 
@@ -230,7 +237,9 @@ def _receipt_observation(
         # runner's endpoint receipt below, never this enqueue-time snapshot.
         "tree_receipt": tree_receipt,
         "execution_receipt": execution_receipt,
-        "execution_evidence": outcome.get("execution_evidence") if isinstance(outcome, Mapping) else None,
+        "execution_evidence": outcome.get("execution_evidence")
+        if isinstance(outcome, Mapping)
+        else None,
         "result_kind": launch_input.get("result_kind"),
         "checked": True,
         "eligible": clean_candidate,
@@ -349,9 +358,29 @@ def _candidate(project: ProjectAdapter, candidate: str) -> dict[str, Any]:
 def _write_record(path: Path, document: Mapping[str, Any]) -> None:
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     encoded = json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
-    if len(encoded) > MAX_EVIDENCE_BYTES:
-        raise JobError(f"native evidence record exceeds {MAX_EVIDENCE_BYTES} bytes")
-    if not atomic_publish(path, encoded, exclusive=True, fsync=True, mode=0o600):
+    if len(encoded) > MAX_ARTIFACT_BYTES:
+        raise JobError(f"native evidence artifact exceeds {MAX_ARTIFACT_BYTES} bytes")
+    digest = hashlib.sha256(encoded).hexdigest()
+    artifact = path.with_suffix(".artifact.json")
+    if not atomic_publish(artifact, encoded, exclusive=True, fsync=True, mode=0o600):
+        raise FileExistsError(artifact)
+    pointer = {
+        "schema_version": 2,
+        "kind": "native_evidence_reference",
+        "evidence_id": document["evidence_id"],
+        "project": document["project"],
+        "recorded_at": document["recorded_at"],
+        "artifact": artifact.name,
+        "sha256": digest,
+        "bytes": len(encoded),
+    }
+    if not atomic_publish(
+        path,
+        json.dumps(pointer, sort_keys=True, separators=(",", ":")).encode(),
+        exclusive=True,
+        fsync=True,
+        mode=0o600,
+    ):
         raise FileExistsError(path)
 
 
@@ -405,8 +434,78 @@ def file(config: Config, project: ProjectAdapter, path: Path) -> dict[str, Any]:
     return document
 
 
-def list_records(config: Config, project_id: str) -> dict[str, Any]:
-    """The bounded read route for retained native evidence records."""
+def get_record(config: Config, project_id: str, evidence_id: str) -> dict[str, Any]:
+    """Retrieve one immutable evidence artifact and verify its content identity."""
+    if not re.fullmatch(r"[0-9a-f]{32}", evidence_id):
+        raise JobError("invalid native evidence id")
+    path = _records_dir(config) / f"{evidence_id}.json"
+    raw = launch.read_bounded(path, MAX_EVIDENCE_BYTES + 1)
+    if raw is None or len(raw) > MAX_EVIDENCE_BYTES:
+        raise JobError(
+            f"native evidence record is unavailable or oversized: {evidence_id}"
+        )
+    try:
+        pointer = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise JobError(f"invalid native evidence reference: {evidence_id}") from error
+    if not isinstance(pointer, dict) or pointer.get("evidence_id") != evidence_id:
+        raise JobError(f"invalid native evidence reference: {evidence_id}")
+    if pointer.get("project") != project_id:
+        raise JobError(
+            f"native evidence record does not belong to project {project_id}"
+        )
+    if pointer.get("kind") == "native_evidence_reference":
+        artifact_name = pointer.get("artifact")
+        if artifact_name != f"{evidence_id}.artifact.json":
+            raise JobError("native evidence reference has an invalid artifact path")
+        artifact_raw = launch.read_bounded(
+            _records_dir(config) / artifact_name, MAX_ARTIFACT_BYTES + 1
+        )
+        if artifact_raw is None or len(artifact_raw) > MAX_ARTIFACT_BYTES:
+            raise JobError(
+                f"native evidence artifact is unavailable or oversized: {evidence_id}"
+            )
+        if hashlib.sha256(artifact_raw).hexdigest() != pointer.get("sha256"):
+            raise JobError(f"native evidence artifact identity mismatch: {evidence_id}")
+        try:
+            value = json.loads(artifact_raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise JobError(
+                f"invalid native evidence artifact: {evidence_id}"
+            ) from error
+        if (
+            not isinstance(value, dict)
+            or value.get("evidence_id") != evidence_id
+            or value.get("project") != project_id
+        ):
+            raise JobError(
+                f"native evidence artifact does not match its reference: {evidence_id}"
+            )
+        return value
+    if (
+        pointer.get("kind") == "native_evidence"
+        and pointer.get("schema_version") == RECORD_SCHEMA_VERSION
+    ):
+        return pointer
+    raise JobError(f"invalid native evidence reference: {evidence_id}")
+
+
+def list_records(
+    config: Config,
+    project_id: str,
+    *,
+    cursor: str | None = None,
+    limit: int = MAX_PAGE_SIZE,
+) -> dict[str, Any]:
+    """Return bounded summaries; cursor advances through the shared record directory."""
+    if not 1 <= limit <= MAX_PAGE_SIZE:
+        raise JobError(f"native evidence list limit must be 1..{MAX_PAGE_SIZE}")
+    if cursor is not None and (
+        not isinstance(cursor, str)
+        or len(cursor) > 255
+        or not re.fullmatch(r"[A-Za-z0-9._-]+", cursor)
+    ):
+        raise JobError("invalid native evidence list cursor")
     directory = _records_dir(config)
     document: dict[str, Any] = {
         "schema_version": 1,
@@ -417,6 +516,7 @@ def list_records(config: Config, project_id: str) -> dict[str, Any]:
         "records": [],
         "coverage": "retained_records",
         "gaps": [],
+        "next_cursor": None,
     }
     try:
         entries = os.scandir(directory)
@@ -426,14 +526,20 @@ def list_records(config: Config, project_id: str) -> dict[str, Any]:
         return {**document, "coverage": "unavailable", "gaps": [str(error)]}
     records: list[dict[str, Any]] = []
     try:
-        paths = (Path(entry.path) for entry in entries if entry.name.endswith(".json"))
-        for index, path in enumerate(paths):
-            if index >= MAX_RECORDS:
-                document["coverage"] = "partial"
-                document["gaps"].append(
-                    f"native evidence read is bounded to {MAX_RECORDS} records"
-                )
-                break
+        paths = sorted(
+            (
+                entry.name
+                for entry in entries
+                if entry.name.endswith(".json")
+                and not entry.name.endswith(".artifact.json")
+                and (cursor is None or entry.name > cursor)
+            )
+        )
+        page_paths = paths[:MAX_RECORDS]
+        scanned: list[str] = []
+        for path_name in page_paths:
+            scanned.append(path_name)
+            path = directory / path_name
             raw = launch.read_bounded(path, MAX_EVIDENCE_BYTES + 1)
             if raw is None or len(raw) > MAX_EVIDENCE_BYTES:
                 document["coverage"] = "partial"
@@ -445,13 +551,67 @@ def list_records(config: Config, project_id: str) -> dict[str, Any]:
                 document["coverage"] = "partial"
                 document["gaps"].append(f"invalid record: {path.name}")
                 continue
+            if not isinstance(value, dict):
+                document["coverage"] = "partial"
+                document["gaps"].append(f"invalid record: {path.name}")
+                continue
+            if value.get("project") != project_id:
+                continue
             if (
-                isinstance(value, dict)
-                and value.get("schema_version") == RECORD_SCHEMA_VERSION
-                and value.get("kind") == "native_evidence"
-                and value.get("project") == project_id
+                value.get("kind") == "native_evidence_reference"
+                and value.get("schema_version") == 2
             ):
-                records.append(value)
+                if (
+                    not re.fullmatch(
+                        r"[0-9a-f]{32}", str(value.get("evidence_id") or "")
+                    )
+                    or value.get("artifact")
+                    != f"{value.get('evidence_id')}.artifact.json"
+                    or not re.fullmatch(r"[0-9a-f]{64}", str(value.get("sha256") or ""))
+                    or not isinstance(value.get("bytes"), int)
+                ):
+                    document["coverage"] = "partial"
+                    document["gaps"].append(f"invalid reference: {path.name}")
+                    continue
+                records.append(
+                    {
+                        key: value.get(key)
+                        for key in (
+                            "evidence_id",
+                            "project",
+                            "recorded_at",
+                            "sha256",
+                            "bytes",
+                        )
+                    }
+                )
+            elif (
+                value.get("schema_version") == RECORD_SCHEMA_VERSION
+                and value.get("kind") == "native_evidence"
+            ):
+                encoded = json.dumps(
+                    value, sort_keys=True, separators=(",", ":")
+                ).encode()
+                records.append(
+                    {
+                        "evidence_id": value.get("evidence_id"),
+                        "project": project_id,
+                        "recorded_at": value.get("recorded_at"),
+                        "sha256": hashlib.sha256(encoded).hexdigest(),
+                        "bytes": len(encoded),
+                    }
+                )
+            else:
+                document["coverage"] = "partial"
+                document["gaps"].append(f"unsupported record: {path.name}")
+            if len(records) >= limit:
+                break
+        if len(paths) > len(scanned) and scanned:
+            document["next_cursor"] = scanned[-1]
+            document["coverage"] = "partial"
+            document["gaps"].append(
+                "more retained records are available; continue with next_cursor"
+            )
     except OSError as error:
         return {**document, "coverage": "unavailable", "gaps": [str(error)]}
     finally:

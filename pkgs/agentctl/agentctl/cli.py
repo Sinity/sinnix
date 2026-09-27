@@ -361,8 +361,16 @@ def parser() -> argparse.ArgumentParser:
     evidence_list.add_argument(
         "selector", nargs="?", metavar="project", help=PROJECT_HELP
     )
+    evidence_list.add_argument("--cursor")
+    evidence_list.add_argument("--limit", type=int, default=evidence.MAX_PAGE_SIZE)
     _project_option(evidence_list)
     _output_arguments(evidence_list)
+    evidence_get = evidence_verbs.add_parser(
+        "get", help="retrieve one complete native-work evidence artifact by id"
+    )
+    evidence_get.add_argument("evidence_id")
+    _project_option(evidence_get)
+    _output_arguments(evidence_get)
     evidence_discover = evidence_verbs.add_parser(
         "discover", help="find bounded explicit Beads links in reachable Git history"
     )
@@ -490,9 +498,7 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         out.write(fired, text)
         if fired.get("terminal"):
             return (
-                EXIT_OK
-                if fired.get("phase") == "succeeded"
-                else EXIT_JOB_NOT_SUCCEEDED
+                EXIT_OK if fired.get("phase") == "succeeded" else EXIT_JOB_NOT_SUCCEEDED
             )
         return EXIT_OK
     if verb == "list":
@@ -765,8 +771,15 @@ def _evidence(arguments: argparse.Namespace, config: Config, out: Output) -> int
         return EXIT_OK
     if arguments.evidence_verb == "list":
         project = _select_project(config, arguments.project, arguments.selector)
-        records = evidence.list_records(config, project.project_id)
+        records = evidence.list_records(
+            config, project.project_id, cursor=arguments.cursor, limit=arguments.limit
+        )
         out.read(records, json.dumps(records, indent=2, sort_keys=True))
+        return EXIT_OK
+    if arguments.evidence_verb == "get":
+        project = resolve_project(config, arguments.project)
+        record = evidence.get_record(config, project.project_id, arguments.evidence_id)
+        out.read(record, json.dumps(record, indent=2, sort_keys=True))
         return EXIT_OK
     if arguments.evidence_verb == "discover":
         project = resolve_project(config, arguments.project)
