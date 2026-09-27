@@ -579,3 +579,103 @@ def test_snapshot_continuation_can_resize_pages_without_changing_position(
                 first["next_cursor"], query_sha256=query_sha, page_size=invalid_size
             )
         assert failure.value.failure_class == "invalid_request"
+
+
+def test_snapshot_pages_seek_to_index_without_rereading_prefix(
+    tmp_path, monkeypatch
+) -> None:
+    results = ResultService(config(tmp_path), Principal.for_name("operator"))
+    query_sha = hashlib.sha256(b"indexed-snapshot-pages").hexdigest()
+    writer = results.start_snapshot(
+        query_sha256=query_sha, source_revision="revision-one", page_size=17
+    )
+    expected = [
+        {"index": index, "body": f"synthetic row {index}"} for index in range(500)
+    ]
+    for row in expected:
+        writer.append(row)
+    metadata = writer.finish()
+    rows_path = results.snapshots_root / metadata["snapshot_id"] / "rows.jsonl"
+    bytes_read = 0
+    original_open = Path.open
+
+    class CountingHandle:
+        def __init__(self, handle):
+            self.handle = handle
+
+        def __enter__(self):
+            self.handle.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self.handle.__exit__(*args)
+
+        def readline(self, *args):
+            nonlocal bytes_read
+            line = self.handle.readline(*args)
+            bytes_read += len(line)
+            return line
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            nonlocal bytes_read
+            line = next(self.handle)
+            bytes_read += len(line)
+            return line
+
+        def __getattr__(self, name):
+            return getattr(self.handle, name)
+
+    def counted_open(path: Path, *args, **kwargs):
+        handle = original_open(path, *args, **kwargs)
+        return CountingHandle(handle) if path == rows_path else handle
+
+    monkeypatch.setattr(Path, "open", counted_open)
+    cursor = results._cursor(
+        {
+            "snapshot_id": metadata["snapshot_id"],
+            "principal": "operator",
+            "query_sha256": query_sha,
+            "source_revision": "revision-one",
+            "offset": 0,
+            "page_size": 17,
+            "expires_at": metadata["expires_at"],
+        }
+    )
+    observed = []
+    while cursor is not None:
+        page = results.continue_snapshot(cursor, query_sha256=query_sha)
+        observed.extend(page["rows"])
+        cursor = page["next_cursor"]
+    assert observed == expected
+    assert bytes_read == rows_path.stat().st_size
+
+
+def test_snapshot_page_refuses_corrupt_offset_index(tmp_path) -> None:
+    results = ResultService(config(tmp_path), Principal.for_name("operator"))
+    query_sha = hashlib.sha256(b"corrupt-index").hexdigest()
+    writer = results.start_snapshot(
+        query_sha256=query_sha, source_revision="revision-one", page_size=2
+    )
+    for value in range(4):
+        writer.append(value)
+    metadata = writer.finish()
+    directory = results.snapshots_root / metadata["snapshot_id"]
+    offsets = bytearray((directory / "offsets.bin").read_bytes())
+    offsets[8:16] = b"\0" * 8
+    (directory / "offsets.bin").write_bytes(offsets)
+    cursor = results._cursor(
+        {
+            "snapshot_id": metadata["snapshot_id"],
+            "principal": "operator",
+            "query_sha256": query_sha,
+            "source_revision": "revision-one",
+            "offset": 0,
+            "page_size": 2,
+            "expires_at": metadata["expires_at"],
+        }
+    )
+    with pytest.raises(ResultError, match="snapshot row index"):
+        results.continue_snapshot(cursor, query_sha256=query_sha)

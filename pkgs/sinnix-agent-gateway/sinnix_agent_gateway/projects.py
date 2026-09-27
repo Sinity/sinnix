@@ -14,6 +14,7 @@ import uuid
 import zipfile
 from contextlib import contextmanager
 from dataclasses import replace
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterator, Mapping, TextIO
 
@@ -78,10 +79,41 @@ def _is_excluded(path: Path) -> bool:
 
 
 def _file_sha256(path: Path) -> str:
+    info = path.stat()
+    identity = _stat_identity(info)
+    return _cached_file_sha256(str(path), identity)
+
+
+def _stat_identity(info: os.stat_result) -> tuple[int, int, int, int, int, int]:
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_mode,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+    )
+
+
+@lru_cache(maxsize=32_768)
+def _cached_file_sha256(
+    path: str, identity: tuple[int, int, int, int, int, int]
+) -> str:
+    """Reuse a digest only while the kernel's file identity remains unchanged."""
+    return _compute_file_sha256(Path(path), identity)
+
+
+def _compute_file_sha256(
+    path: Path, identity: tuple[int, int, int, int, int, int]
+) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
+        if _stat_identity(os.fstat(handle.fileno())) != identity:
+            raise ProjectPreconditionError("project file changed while being read")
         for chunk in iter(lambda: handle.read(1_048_576), b""):
             digest.update(chunk)
+        if _stat_identity(os.fstat(handle.fileno())) != identity:
+            raise ProjectPreconditionError("project file changed while being read")
     return digest.hexdigest()
 
 
@@ -110,29 +142,31 @@ def _content_revision(root: Path) -> str:
         relative_path = Path(os.fsdecode(relative))
         if _is_excluded(relative_path):
             continue
-        if path.is_symlink():
+        try:
+            info = path.lstat()
+        except FileNotFoundError:
+            digest.update(b"missing\0")
+            digest.update(len(relative).to_bytes(8, "big"))
+            digest.update(relative)
+            continue
+        if stat.S_ISLNK(info.st_mode):
             target = os.fsencode(os.readlink(path))
             digest.update(b"symlink\0")
             digest.update(len(relative).to_bytes(8, "big"))
             digest.update(relative)
-            digest.update(stat.S_IMODE(path.lstat().st_mode).to_bytes(4, "big"))
+            digest.update(stat.S_IMODE(info.st_mode).to_bytes(4, "big"))
             digest.update(len(target).to_bytes(8, "big"))
             digest.update(target)
             continue
-        if not path.is_file():
+        if not stat.S_ISREG(info.st_mode):
             continue
-        file_digest = hashlib.sha256()
-        size = 0
-        with path.open("rb") as handle:
-            for chunk in iter(lambda: handle.read(1_048_576), b""):
-                file_digest.update(chunk)
-                size += len(chunk)
+        file_digest = _cached_file_sha256(str(path), _stat_identity(info))
         digest.update(b"file\0")
         digest.update(len(relative).to_bytes(8, "big"))
         digest.update(relative)
-        digest.update(stat.S_IMODE(path.stat().st_mode).to_bytes(4, "big"))
-        digest.update(size.to_bytes(8, "big"))
-        digest.update(file_digest.digest())
+        digest.update(stat.S_IMODE(info.st_mode).to_bytes(4, "big"))
+        digest.update(info.st_size.to_bytes(8, "big"))
+        digest.update(bytes.fromhex(file_digest))
     return digest.hexdigest()
 
 
@@ -308,14 +342,14 @@ class ProjectService:
             records.append(current)
         return records
 
-    def _checkout_rows(self, project: ProjectConfig) -> list[dict[str, Any]]:
+    def _checkout_candidates(self, project: ProjectConfig) -> list[dict[str, Any]]:
         if project.checkout_discovery != "git-worktree":
             raise ProjectError("project checkout discovery is unsupported")
         configured_root = project.path.resolve(strict=True)
         output = self._run_spooled(
             ["git", "worktree", "list", "--porcelain"], project.path
         )
-        rows: list[dict[str, Any]] = []
+        candidates: list[dict[str, Any]] = []
         for record in self._worktree_records(output):
             raw_path = record.get("worktree")
             head = record.get("HEAD")
@@ -324,6 +358,27 @@ class ProjectService:
             path = Path(raw_path).resolve()
             if not path.is_dir():
                 continue
+            candidates.append(
+                {
+                    "checkout_id": self._checkout_id(path, configured_root),
+                    "path": str(path),
+                    "head": head,
+                    "lifecycle": "configured-root"
+                    if path == configured_root
+                    else "linked-worktree",
+                }
+            )
+        candidates.sort(
+            key=lambda row: (row["checkout_id"] != "default", row["checkout_id"])
+        )
+        if not candidates or candidates[0]["checkout_id"] != "default":
+            raise ProjectError("configured project root is not a live Git worktree")
+        return candidates
+
+    def _checkout_rows(self, project: ProjectConfig) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for candidate in self._checkout_candidates(project):
+            path = Path(candidate["path"])
             status = self._run_spooled(
                 ["git", "-C", str(path), "status", "--porcelain=v2", "--branch"],
                 project.path,
@@ -337,20 +392,12 @@ class ProjectService:
                     upstream = line.removeprefix("# branch.upstream ")
             rows.append(
                 {
-                    "checkout_id": self._checkout_id(path, configured_root),
-                    "path": str(path),
-                    "head": head,
+                    **candidate,
                     "branch": branch,
                     "upstream": upstream,
                     "dirty_sha256": _content_revision(path),
-                    "lifecycle": "configured-root"
-                    if path == configured_root
-                    else "linked-worktree",
                 }
             )
-        rows.sort(key=lambda row: (row["checkout_id"] != "default", row["checkout_id"]))
-        if not rows or rows[0]["checkout_id"] != "default":
-            raise ProjectError("configured project root is not a live Git worktree")
         return rows
 
     def checkouts(self, project_id: str) -> dict[str, Any]:
@@ -383,7 +430,7 @@ class ProjectService:
         if checkout_id is None:
             if not require_explicit:
                 return project
-            checkouts = self._checkout_rows(project)
+            checkouts = self._checkout_candidates(project)
             if len(checkouts) == 1:
                 return project
             choices = ", ".join(row["checkout_id"] for row in checkouts)
@@ -392,7 +439,7 @@ class ProjectService:
             )
         if not isinstance(checkout_id, str) or not checkout_id:
             raise ProjectError("checkout_id must be a non-empty string")
-        for checkout in self._checkout_rows(project):
+        for checkout in self._checkout_candidates(project):
             if checkout["checkout_id"] == checkout_id:
                 return replace(project, path=Path(checkout["path"]))
         raise ProjectError("unknown configured checkout")
@@ -461,11 +508,14 @@ class ProjectService:
         project = self.code_checkout(
             project_id, checkout_id, write=False, require_explicit=False
         )
+        before = _content_revision(project.path)
         result = self._read_file(project, path, start_line, end_line, max_bytes)
+        if before != _content_revision(project.path):
+            raise ProjectPreconditionError("project changed while file was read")
         return {
             "project_id": project_id,
             **result,
-            "checkout_revision": _content_revision(project.path),
+            "checkout_revision": before,
         }
 
     def read_many(

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import subprocess
 import zipfile
 from pathlib import Path
@@ -118,6 +119,29 @@ def test_read_many_observes_checkout_once_per_batch(
         row["checkout_revision"] == result["checkout_revision"]
         for row in result["files"]
     )
+
+
+def test_project_reads_reuse_verified_hashes_and_invalidate_changed_files(
+    tmp_path: Path,
+) -> None:
+    config, project, _ = fixture(tmp_path)
+    runtime = create_server(config, "operator")._sinnix_revision_publisher.runtime
+    projects_module._cached_file_sha256.cache_clear()
+    first = runtime.projects.read("fixture", "README.md")
+    cold_misses = projects_module._cached_file_sha256.cache_info().misses
+    assert cold_misses >= 2
+
+    repeated = runtime.projects.read("fixture", "README.md")
+    assert repeated["checkout_revision"] == first["checkout_revision"]
+    assert projects_module._cached_file_sha256.cache_info().misses == cold_misses
+
+    changed = project / "src" / "main.py"
+    before = changed.stat()
+    changed.write_bytes(b"x" * before.st_size)
+    os.utime(changed, ns=(before.st_atime_ns, before.st_mtime_ns))
+    after = runtime.projects.read("fixture", "README.md")
+    assert after["checkout_revision"] != first["checkout_revision"]
+    assert projects_module._cached_file_sha256.cache_info().misses == cold_misses + 1
 
 
 def test_export_covers_source_and_continues_explicit_pages(tmp_path: Path) -> None:

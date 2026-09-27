@@ -6,6 +6,7 @@ import hmac
 import json
 import os
 import secrets
+import struct
 import time
 import uuid
 from dataclasses import dataclass
@@ -136,6 +137,8 @@ class ResultSnapshotWriter:
         self.directory.mkdir(mode=0o700)
         self.rows_path = self.directory / "rows.jsonl"
         self.handle = self.rows_path.open("xb")
+        self.offsets_path = self.directory / "offsets.bin"
+        self.offsets_handle = self.offsets_path.open("xb")
         self.first_page: list[Any] = []
         self.row_count = 0
         self.hasher = hashlib.sha256()
@@ -151,6 +154,7 @@ class ResultSnapshotWriter:
                 "JSONL owner row is not serializable", "owner_failed"
             ) from exc
         line = encoded + b"\n"
+        self.offsets_handle.write(struct.pack(">Q", self.handle.tell()))
         self.handle.write(line)
         self.hasher.update(line)
         self.row_count += 1
@@ -162,6 +166,7 @@ class ResultSnapshotWriter:
             return
         self.closed = True
         self.handle.close()
+        self.offsets_handle.close()
         for path in self.directory.glob("*"):
             path.unlink(missing_ok=True)
         self.directory.rmdir()
@@ -173,6 +178,9 @@ class ResultSnapshotWriter:
         self.handle.flush()
         os.fsync(self.handle.fileno())
         self.handle.close()
+        self.offsets_handle.flush()
+        os.fsync(self.offsets_handle.fileno())
+        self.offsets_handle.close()
         expires_at = time.time() + self.service.cursor_ttl_seconds
         metadata = {
             "schema": "sinnix.gateway-result-snapshot.v1",
@@ -183,10 +191,12 @@ class ResultSnapshotWriter:
             "row_count": self.row_count,
             "expires_at": expires_at,
             "rows_sha256": self.hasher.hexdigest(),
+            "row_offsets_bytes": self.row_count * 8,
             "metadata": self.metadata,
         }
         metadata_path = self.directory / "metadata.json"
         self.rows_path.chmod(0o600)
+        self.offsets_path.chmod(0o600)
         atomic_publish(metadata_path, _canonical(metadata), fsync=True)
         destination = self.service.snapshots_root / self.snapshot_id
         os.replace(self.directory, destination)
@@ -379,21 +389,87 @@ class ResultService:
     ) -> dict[str, Any]:
         if offset < 0 or page_size < 1:
             raise ResultError("cursor page is invalid", "stale_cursor")
+        row_count = metadata["row_count"]
+        if offset > row_count:
+            raise ResultError(
+                "cursor offset exceeds snapshot row count", "stale_cursor"
+            )
+        rows_path = directory / "rows.jsonl"
+        offsets_path = directory / "offsets.bin"
         rows = []
         next_offset = None
-        with (directory / "rows.jsonl").open("rb") as handle:
-            for index, line in enumerate(handle):
-                if index < offset:
-                    continue
-                if len(rows) == page_size:
-                    next_offset = index
-                    break
-                try:
-                    rows.append(json.loads(line))
-                except json.JSONDecodeError as exc:
-                    raise ResultError(
-                        "snapshot row is malformed", "unavailable"
-                    ) from exc
+        if offsets_path.exists():
+            expected_bytes = row_count * 8
+            try:
+                if offsets_path.stat().st_size != expected_bytes:
+                    raise ResultError("snapshot row index is malformed", "unavailable")
+                count = min(page_size, row_count - offset)
+                index_count = count + int(offset + count < row_count)
+                with offsets_path.open("rb") as index_handle:
+                    index_handle.seek(offset * 8)
+                    encoded_offsets = index_handle.read(index_count * 8)
+                if len(encoded_offsets) != index_count * 8:
+                    raise ResultError("snapshot row index is truncated", "unavailable")
+                positions = [
+                    struct.unpack_from(">Q", encoded_offsets, index * 8)[0]
+                    for index in range(index_count)
+                ]
+                with rows_path.open("rb") as handle:
+                    size = rows_path.stat().st_size
+                    previous = None
+                    for index in range(count):
+                        position = positions[index]
+                        if position >= size or (
+                            previous is not None and position <= previous
+                        ):
+                            raise ResultError(
+                                "snapshot row index is malformed", "unavailable"
+                            )
+                        handle.seek(position)
+                        line = handle.readline()
+                        if not line:
+                            raise ResultError(
+                                "snapshot row index does not match rows", "unavailable"
+                            )
+                        if (
+                            index + 1 < index_count
+                            and handle.tell() != positions[index + 1]
+                        ):
+                            raise ResultError(
+                                "snapshot row index does not match rows", "unavailable"
+                            )
+                        try:
+                            rows.append(json.loads(line))
+                        except json.JSONDecodeError as exc:
+                            raise ResultError(
+                                "snapshot row is malformed", "unavailable"
+                            ) from exc
+                        previous = position
+                    if count and offset + count == row_count and handle.tell() != size:
+                        raise ResultError(
+                            "snapshot row index does not cover rows", "unavailable"
+                        )
+            except OSError as exc:
+                raise ResultError(
+                    "snapshot row index is unavailable", "unavailable"
+                ) from exc
+            next_offset = offset + count if offset + count < row_count else None
+        else:
+            # Snapshots created before row offsets were introduced remain readable
+            # until their normal expiry; new snapshots always take the indexed path.
+            with rows_path.open("rb") as handle:
+                for index, line in enumerate(handle):
+                    if index < offset:
+                        continue
+                    if len(rows) == page_size:
+                        next_offset = index
+                        break
+                    try:
+                        rows.append(json.loads(line))
+                    except json.JSONDecodeError as exc:
+                        raise ResultError(
+                            "snapshot row is malformed", "unavailable"
+                        ) from exc
         return {
             "rows": rows,
             "row_count": metadata["row_count"],
