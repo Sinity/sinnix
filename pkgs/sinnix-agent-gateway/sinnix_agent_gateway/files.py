@@ -4,7 +4,6 @@ import errno
 import ctypes
 import stat
 import hashlib
-import mimetypes
 import os
 import shutil
 from pathlib import Path
@@ -130,85 +129,24 @@ class HostFileService:
             raise FileError("destination already exists")
         return self._resolve(path, existing=False)
 
-    def _read_file(self, path: Path, offset: int, max_bytes: int) -> dict[str, Any]:
-        if not path.is_file():
-            raise FileError("path is not a regular file")
-        if offset < 0:
-            raise FileError("offset must not be negative")
-        max_bytes = max(1, min(max_bytes, self.config.max_result_bytes))
-        with path.open("rb") as handle:
-            handle.seek(offset)
-            data = handle.read(max_bytes + 1)
-        truncated = len(data) > max_bytes
-        data = data[:max_bytes]
-        return {
-            "path": str(path),
-            "offset": offset,
-            "bytes": len(data),
-            "truncated": truncated,
-            "sha256": _sha256(path),
-            "mime_type": mimetypes.guess_type(path.name)[0]
-            or "application/octet-stream",
-            "content": data.decode("utf-8", errors="replace"),
-        }
-
-    def read(
-        self,
-        operation: str,
-        path: str,
-        *,
-        offset: int = 0,
-        max_bytes: int = 64_000,
-        max_entries: int = 200,
-    ) -> dict[str, Any]:
+    def stat(self, path: str) -> dict[str, Any]:
         self.principal.require(Capability.FILE_READ)
         target = self._resolve(path, existing=True)
-        if operation == "stat":
-            details = target.stat()
-            return {
-                "path": str(target),
-                "kind": (
-                    "directory"
-                    if target.is_dir()
-                    else "file"
-                    if target.is_file()
-                    else "other"
-                ),
-                "bytes": details.st_size,
-                "mode": oct(details.st_mode & 0o777),
-                "mtime_ns": details.st_mtime_ns,
-                "sha256": _sha256(target) if target.is_file() else None,
-            }
-        if operation == "read":
-            return self._read_file(target, offset, max_bytes)
-        if operation == "list":
-            if not target.is_dir():
-                raise FileError("path is not a directory")
-            max_entries = max(1, min(max_entries, 2_000))
-            entries = []
-            for child in sorted(target.iterdir(), key=lambda item: item.name):
-                try:
-                    details = child.stat()
-                except OSError:
-                    continue
-                entries.append(
-                    {
-                        "name": child.name,
-                        "kind": (
-                            "directory"
-                            if child.is_dir()
-                            else "file"
-                            if child.is_file()
-                            else "other"
-                        ),
-                        "bytes": details.st_size if child.is_file() else None,
-                        "symlink": child.is_symlink(),
-                    }
-                )
-                if len(entries) >= max_entries:
-                    return {"path": str(target), "entries": entries, "truncated": True}
-            return {"path": str(target), "entries": entries, "truncated": False}
-        raise FileError("operation must be stat, read, or list")
+        details = target.stat()
+        return {
+            "path": str(target),
+            "kind": (
+                "directory"
+                if target.is_dir()
+                else "file"
+                if target.is_file()
+                else "other"
+            ),
+            "bytes": details.st_size,
+            "mode": oct(details.st_mode & 0o777),
+            "mtime_ns": details.st_mtime_ns,
+            "sha256": _sha256(target) if target.is_file() else None,
+        }
 
     def write(
         self,

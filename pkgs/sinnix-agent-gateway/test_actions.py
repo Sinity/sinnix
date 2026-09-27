@@ -169,14 +169,23 @@ def test_files_actions_accept_paths_and_return_child_refs(tmp_path: Path) -> Non
     (root / "a.txt").write_text("alpha")
     (root / ".hidden").write_text("")
     (root / "sub").mkdir()
+    (root / "link").symlink_to(root / "a.txt")
 
     listing = structured(call(server, "files.list", {"target": {"path": str(root)}}))
     assert listing["result"]["outcome"] == "ok", listing
     names = [entry["name"] for entry in listing["data"]["entries"]]
-    assert names == ["a.txt", "b.txt", "sub"]
+    assert names == ["a.txt", "b.txt", "link", "sub"]
     child = listing["data"]["entries"][1]
     assert decode_file_ref(child["ref"]) == str(root / "b.txt")
     assert child["kind"] == "file" and child["bytes"] == 25
+    link = listing["data"]["entries"][2]
+    assert link["kind"] == "file" and link["symlink_target"] == str(root / "a.txt")
+
+    page = structured(
+        call(server, "files.list", {"target": {"path": str(root)}, "limit": 2})
+    )["data"]
+    assert [entry["name"] for entry in page["entries"]] == ["a.txt", "b.txt"]
+    assert page["truncated"] is True and page["next_offset"] == 2
 
     hidden = structured(
         call(

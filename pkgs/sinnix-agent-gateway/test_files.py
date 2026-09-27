@@ -21,7 +21,7 @@ def test_operator_write_uses_compare_and_swap_and_receipts(tmp_path: Path) -> No
     target = tmp_path / "fixture.txt"
     target.write_text("before")
     operator = service(tmp_path, "operator")
-    before = operator.read("stat", str(target))["sha256"]
+    before = operator.stat(str(target))["sha256"]
 
     replaced = operator.write(
         "replace", str(target), content="after", expected_sha256=before
@@ -70,7 +70,7 @@ def test_operator_copies_and_moves_regular_files_without_replacing_destination(
     moved = tmp_path / "moved.txt"
     source.write_text("gateway fixture")
     operator = service(tmp_path, "operator")
-    source_hash = operator.read("stat", str(source))["sha256"]
+    source_hash = operator.stat(str(source))["sha256"]
 
     copied = operator.write(
         "copy", str(source), destination=str(copy), expected_sha256=source_hash
@@ -101,23 +101,6 @@ def test_operator_rejects_symlink_mutation(tmp_path: Path) -> None:
     assert target.read_text() == "before"
 
 
-
-
-def test_list_is_bounded_and_reports_symlink(tmp_path: Path) -> None:
-    directory = tmp_path / "directory"
-    directory.mkdir()
-    (directory / "a").write_text("a")
-    (directory / "b").write_text("b")
-    (directory / "link").symlink_to(directory / "a")
-
-    observer = service(tmp_path, "operator")
-    bounded = observer.read("list", str(directory), max_entries=2)
-    complete = observer.read("list", str(directory), max_entries=3)
-
-    assert [entry["name"] for entry in bounded["entries"]] == ["a", "b"]
-    assert bounded["truncated"] is True
-    assert complete["entries"][-1]["name"] == "link"
-    assert complete["entries"][-1]["symlink"] is True
 
 
 def test_same_filesystem_move_has_no_hardlink_unlink_intermediate(tmp_path, monkeypatch):

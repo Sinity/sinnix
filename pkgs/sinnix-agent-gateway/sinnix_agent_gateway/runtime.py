@@ -1020,7 +1020,7 @@ class Runtime:
         if request.target is WaitTarget.FILE_HASH:
             if resource.kind != "host_file":
                 raise ValueError("file waits require a canonical host file reference")
-            current = self.files.read("stat", decode_file_ref(request.reference))
+            current = self.files.stat(decode_file_ref(request.reference))
             wanted = expected.get("sha256") or expected.get("hash")
             return WaitEvidence(
                 current.get("sha256") == wanted, current, str(current.get("sha256"))
