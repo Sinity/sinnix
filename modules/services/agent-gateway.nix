@@ -331,8 +331,10 @@ mkServiceModule {
                   "network-online.target"
                   "sinnix-agent-gateway-${name}-mcp.service"
                 ];
-                Wants = [ "network-online.target" ];
-                Requires = [ "sinnix-agent-gateway-${name}-mcp.service" ];
+                Wants = [
+                  "network-online.target"
+                  "sinnix-agent-gateway-${name}-mcp.service"
+                ];
                 ConditionPathExists = endpoint.runtimeKeyFile;
                 StartLimitIntervalSec = 300;
                 StartLimitBurst = 8;
