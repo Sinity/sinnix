@@ -174,7 +174,7 @@ read, so the agentctl calls inside a task (`batch result`, `batch land`) see
 the same projects, state directory and event spool.
 
 Groups admit work: `agent:12 land-agent:2 pytest:2 pytest-heavy:1
-pytest-quick:2 bulk:2 normal:2 interactive:4`, plus `<project>-land` of parallelism 1 per
+pytest-quick:6 bulk:2 normal:3 interactive:4`, plus `<project>-land` of parallelism 1 per
 configured project (`polylogue-land:3`), declared by
 `sinnix.services.agentctl.pools` and carried in `/etc/sinnix/agentctl.json`.
 pueued keeps its groups in its own state, so `agentctl pools apply` writes

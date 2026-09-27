@@ -440,7 +440,7 @@ rec {
       };
       # Short, bounded pytest selections (one file, one worker's focused
       # check): a separate pool so they never queue behind the corpus.
-      # The ceiling is shared by all three quick jobs. Keep it above their
+      # The ceiling is shared by every running quick job. Keep it above their
       # measured combined peak so memory.high does not create sustained reclaim
       # that triggers oomd for healthy focused runs. The 12G parent arbitrates
       # this pool against concurrent heavy tests.
