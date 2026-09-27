@@ -345,10 +345,11 @@ read_full_transcript() {
   read_transcript "$page_id" 0 null 0 0
 }
 
-read_full_native_chunked() {
+read_full_native_chunked() (
   local page_id="$1" target="$2" chunk_size=900000 start=0 part total next_start chunk
   local assembled
   assembled=$(mktemp /realm/tmp/work/sinnix-chatgpt-native.XXXXXX.json)
+  trap 'rm -f -- "$assembled" "$assembled.checked"' EXIT
   : >"$assembled"
   while :; do
     part=$(evaluate "$page_id" "$(native_chunk_js "$start" "$chunk_size")")
@@ -356,7 +357,7 @@ read_full_native_chunked() {
     next_start=$(jq -r '.next_start' <<<"$part")
     chunk=$(jq -r '.chunk' <<<"$part")
     printf '%s' "$chunk" >>"$assembled"
-    [[ $next_start -gt $start ]] || { rm -f -- "$assembled"; printf 'native transcript chunk did not advance\n' >&2; exit 1; }
+    [[ $next_start -gt $start ]] || { printf 'native transcript chunk did not advance\n' >&2; exit 1; }
     start=$next_start
     [[ $start -ge $total ]] && break
   done
@@ -366,7 +367,7 @@ read_full_native_chunked() {
   else
     cat "$assembled.checked"
   fi
-}
+)
 
 render_markdown() {
   jq -r '
@@ -542,9 +543,7 @@ case "$command_name" in
     shift
     parse_full_options "$@"
     if [[ $MARKDOWN -eq 1 ]]; then
-      markdown_input=$(mktemp /realm/tmp/work/sinnix-chatgpt-native-markdown.XXXXXX.json)
-      read_full_native_chunked "$page_id" "$markdown_input"
-      render_markdown <"$markdown_input"
+      read_full_native_chunked "$page_id" "" | render_markdown
     elif [[ -n $OUTPUT_FILE ]]; then
       read_full_native_chunked "$page_id" "$OUTPUT_FILE"
     else
