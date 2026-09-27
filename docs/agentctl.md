@@ -431,10 +431,11 @@ still running, and creates the landing groups the daemon lacks.
    that task, decide nothing. A worker with no result refuses on its task's
    state (`worker_not_done`) or on the missing result. A
    worker whose result carries no commit (`kind` `verified` or `no_op`) is
-   left out of the integration; when no worker carries one the run accepts
-   on the results alone, with no candidate, verification or publication.
+   left out of the integration while its branch remains at the base. When
+   every worker remains there, the run skips candidate verification and
+   publication, then applies its configured review policy to the evidence.
 2. Fetch the current publication base and prepare the integration worktree
-   from it. Record `refreshed_base` and merge the worker branches in manifest
+   from it. Record `refreshed_base` and merge the observed worker commit SHAs in manifest
    order with `git merge --no-ff`. A conflict
    queues one integration agent (label `<p>:integrate:<run>`) with the
    conflicts and the remaining branches; the merged head is
@@ -570,6 +571,8 @@ check failing). The codes:
 | `project`                      | the run belongs to another project                                                  |
 | `publish_rejected`             | the push was rejected for a reason a refresh cannot fix                             |
 | `result_evidence_binding`      | a v2 worker result differs from its dispatch-time stable acceptance binding         |
+| `result_attempt`               | the result does not belong to the worker's current dispatch attempt                 |
+| `result_already_filed`         | the worker already has an accepted result for this attempt                          |
 | `review_failed`                | the review task did not succeed                                                     |
 | `review_invalid`               | the verdict does not validate against the judge schema                              |
 | `review_rejected`              | the verdict is not `pass`                                                           |
@@ -587,16 +590,19 @@ check failing). The codes:
 ### Result
 
 A worker exits with the JSON document `worker.schema.json` describes:
-`candidate_sha` (the worktree HEAD when filed), `beads` with each acceptance
+`candidate_sha` (the submitted commit), `beads` with each acceptance
 criterion marked `satisfied`, `unsatisfied` or `superseded` with evidence,
 `unresolved` findings, and `verification` receipts. A worktree head that
-descends from the filed `candidate_sha` with a clean tree rebinds the result
-to the head; a dirty tree or an unrelated head is `candidate_mismatch`. A
+descends from the filed `candidate_sha` with a clean tree is recorded separately
+as `integration_head`; the submitted claim and its verification remain bound
+to the filed SHA. Its additional paths enter the integration scope. A dirty
+tree or an unrelated head is `candidate_mismatch`. A
 `candidate_sha` equal to the run's base commit carries no commit to land:
 `kind = "verified"` when every criterion is satisfied (the bead closes from
 the evidence), else `kind = "no_op"` (the bead stays open with the residual).
-Either way the result is filed, the worker is left out of the integration and
-its siblings land; a batch of only such results lands with no PR. A candidate that
+Either way the result is filed, the worker is left out of the integration while
+its branch remains at the base, and its siblings land; a batch of only such
+results follows the configured review policy and lands with no PR. A candidate that
 does not descend from the base is `candidate_off_base`; one covering a bead
 outside the worker is `foreign_beads`.
 It then reads `git diff --name-only <base>..<candidate>`: when the worker's

@@ -8,6 +8,8 @@ import json
 import os
 import shutil
 import subprocess
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -225,7 +227,14 @@ class FakeGit:
             self.aborts.append(key)
             raise error("git merge: no merge to abort")
         if verb == "merge":
-            branch = arguments[-1]
+            target = arguments[-1]
+            matches = sorted(
+                branch for branch, head in self.branches.items() if head == target
+            )
+            branch = next(
+                (name for name in matches if name not in self.merges),
+                matches[0] if matches else target,
+            )
             self.merges.append(branch)
             if branch in self.conflict_on:
                 self.conflict_on.discard(branch)
@@ -817,7 +826,7 @@ def test_strict_dispatch_refuses_a_satisfied_partial_acceptance_claim(
     with pytest.raises(BatchRefusal, match="criteria differ from dispatch"):
         harness.file_result(run, "fx-solo", beads=[partial])
 
-    downgraded = Path(worker["worktree"]) / "legacy-result.json"
+    downgraded = Path(worker["result_path"])
     downgraded.write_text(json.dumps(worker_result(["fx-solo"])))
     with pytest.raises(BatchRefusal, match="strict dispatch requires"):
         batch.result(
@@ -1204,7 +1213,7 @@ def test_result_validates_and_binds_to_the_worktree_head(harness: Harness) -> No
         )
     with pytest.raises(BatchRefusal, match="candidate_mismatch"):
         harness.file_result(run, "fx-solo", sha=MOVED)
-    with pytest.raises(BatchRefusal, match="strict dispatch requires"):
+    with pytest.raises(BatchRefusal, match="result_attempt"):
         path = Path(worker["worktree"]) / "foreign.json"
         path.write_text(json.dumps(worker_result(["fx-other"])))
         batch.result(
@@ -2071,10 +2080,6 @@ def test_a_result_must_name_a_commit_that_descends_from_the_run_base(
     run = harness.start("fx-solo")
     worker = run["workers"][0]
 
-    filed = harness.file_result(run, "fx-solo")
-    assert filed["result"]["candidate_sha"] == SHA
-    assert (BASE, SHA) in harness.git.ancestry
-
     harness.git.heads[worker["worktree"]] = MOVED
     harness.git.off_base.add(MOVED)
     with pytest.raises(BatchRefusal, match="candidate_off_base"):
@@ -2089,6 +2094,7 @@ def test_a_verified_result_on_the_base_lands_without_a_candidate(
     run = harness.start("fx-solo")
     worker = run["workers"][0]
     harness.git.heads[worker["worktree"]] = BASE
+    harness.git.branches[worker["branch"]] = BASE
     harness.pueue.succeed(worker["task_id"])
     filed = harness.file_result(run, "fx-solo", sha=BASE)
     assert filed["result"]["kind"] == "verified"
@@ -2097,6 +2103,45 @@ def test_a_verified_result_on_the_base_lands_without_a_candidate(
     assert landed["acceptance"]["beads"]["fx-solo"]["state"] == "closed"
     assert harness.git.merges == [] and harness.git.pushes == []
     assert [item[0] for item in harness.beads.closed] == ["fx-solo"]
+
+
+def test_evidence_only_result_still_obeys_configured_review(harness: Harness) -> None:
+    run = harness.start("fx-solo")
+    worker = run["workers"][0]
+    harness.git.heads[worker["worktree"]] = BASE
+    harness.git.branches[worker["branch"]] = BASE
+    harness.pueue.succeed(worker["task_id"])
+    harness.file_result(run, "fx-solo", sha=BASE)
+    harness.verdict = verdict(verdict="fail")
+
+    with pytest.raises(BatchRefusal, match="review_rejected"):
+        harness.land(run["run_id"])
+
+    stored = manifest.load(harness.config, run["run_id"])
+    assert stored.acceptance is None
+    assert stored.landing["failure"]["code"] == "review_rejected"
+    assert any(":review:" in task["label"] for task in harness.pueue.added)
+    assert not any(task["label"] == "fixture:check" for task in harness.pueue.added)
+    assert harness.git.merges == [] and harness.git.pushes == []
+
+
+def test_new_commit_after_verified_result_enters_integration(harness: Harness) -> None:
+    run = harness.start("fx-solo")
+    worker = run["workers"][0]
+    harness.git.heads[worker["worktree"]] = BASE
+    harness.git.branches[worker["branch"]] = BASE
+    harness.pueue.succeed(worker["task_id"])
+    harness.file_result(run, "fx-solo", sha=BASE)
+    harness.git.heads[worker["worktree"]] = SHA
+    harness.git.branches[worker["branch"]] = SHA
+
+    landed = harness.land(run["run_id"])
+
+    recorded = manifest.load(harness.config, run["run_id"]).worker("fx-solo")
+    assert recorded["result"]["candidate_sha"] == BASE
+    assert recorded["integration_head"] == SHA
+    assert landed["acceptance"]["candidate_sha"] == SHA
+    assert harness.git.merges == [worker["branch"]]
 
 
 def no_op_worker(harness: Harness, run: dict[str, Any], worker_id: str) -> None:
@@ -2147,21 +2192,98 @@ def test_a_run_whose_every_worker_has_nothing_to_land_accepts_without_a_candidat
     assert harness.beads.closed == []
 
 
-def test_a_head_that_descends_from_the_filed_candidate_rebinds_the_result(
+def test_a_descendant_head_preserves_the_claim_and_updates_integration_scope(
     harness: Harness,
 ) -> None:
-    """Breaks if one more commit after writing the result costs a re-file: a
-    clean head descending from the filed sha is the same worker's work."""
+    """Breaks if B replaces the submitted A claim and inherits A verification."""
     run = harness.start("fx-solo")
     worker = run["workers"][0]
     harness.git.parents[MOVED_AGAIN] = (SHA,)
     harness.git.heads[worker["worktree"]] = MOVED_AGAIN
+    harness.git.branches[worker["branch"]] = MOVED_AGAIN
     filed = harness.file_result(run, "fx-solo", sha=SHA)
-    assert filed["result"]["candidate_sha"] == MOVED_AGAIN
+    assert filed["result"]["candidate_sha"] == SHA
+    assert filed["integration_head"] == MOVED_AGAIN
+    assert filed["result"]["verification"][0]["tested_sha"] == SHA
     harness.git.status[worker["worktree"]] = " M a.py"
     harness.git.heads[worker["worktree"]] = MOVED_AGAIN
-    with pytest.raises(BatchRefusal, match="candidate_mismatch"):
+    with pytest.raises(BatchRefusal, match="result_already_filed"):
         harness.file_result(run, "fx-solo", sha=SHA)
+
+
+def test_accepted_result_cannot_be_replaced(harness: Harness) -> None:
+    run = harness.start("fx-solo")
+    harness.file_result(run, "fx-solo")
+    with pytest.raises(BatchRefusal, match="result_already_filed"):
+        harness.file_result(run, "fx-solo", unsatisfied={"fx-solo"})
+    harness.land(run["run_id"])
+    with pytest.raises(BatchRefusal, match="already_accepted"):
+        harness.file_result(run, "fx-solo")
+
+
+def test_old_attempt_result_cannot_be_filed_after_resume(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = harness.start("fx-solo")
+    monkeypatch.setattr(start, "SubprocessBeads", lambda root: harness.beads)
+    harness.pueue.fail(run["workers"][0]["task_id"], exit_code=1)
+    batch.resume(harness.config, harness.project, run["run_id"], "fx-solo")
+    with pytest.raises(BatchRefusal, match="result_attempt"):
+        harness.file_result(run, "fx-solo")
+
+
+def test_concurrent_resumes_admit_one_worker(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = harness.start("fx-solo")
+    monkeypatch.setattr(start, "SubprocessBeads", lambda root: harness.beads)
+    harness.pueue.fail(run["workers"][0]["task_id"], exit_code=1)
+    entered = threading.Event()
+    release = threading.Event()
+    original = start.queue_agent
+
+    def paused_queue(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        entered.set()
+        assert release.wait(5)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(start, "queue_agent", paused_queue)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(
+            batch.resume, harness.config, harness.project, run["run_id"], "fx-solo"
+        )
+        assert entered.wait(5)
+        second = executor.submit(
+            batch.resume, harness.config, harness.project, run["run_id"], "fx-solo"
+        )
+        release.set()
+        first.result(timeout=5)
+        with pytest.raises(BatchRefusal, match="worker_active"):
+            second.result(timeout=5)
+    assert len([row for row in harness.pueue.added if ":resume:" in row["label"]]) == 1
+
+
+def test_resume_recovers_enqueued_attempt_after_lost_response(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = harness.start("fx-solo")
+    monkeypatch.setattr(start, "SubprocessBeads", lambda root: harness.beads)
+    harness.pueue.fail(run["workers"][0]["task_id"], exit_code=1)
+    original = start.queue_agent
+
+    def lost_response(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        original(*args, **kwargs)
+        raise launch.JobError("response lost after enqueue")
+
+    monkeypatch.setattr(start, "queue_agent", lost_response)
+    with pytest.raises(launch.JobError, match="response lost"):
+        batch.resume(harness.config, harness.project, run["run_id"], "fx-solo")
+    pending = manifest.load(harness.config, run["run_id"]).worker("fx-solo")
+    assert pending["pending_launch"]
+    monkeypatch.setattr(start, "queue_agent", original)
+    resumed = batch.resume(harness.config, harness.project, run["run_id"], "fx-solo")
+    assert resumed["workers"][0]["pending_launch"] is None
+    assert len([row for row in harness.pueue.added if ":resume:" in row["label"]]) == 1
 
 
 def test_resume_replaces_a_queued_landing_so_it_waits_on_the_current_workers(

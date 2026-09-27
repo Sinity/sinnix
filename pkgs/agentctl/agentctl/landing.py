@@ -45,6 +45,7 @@ from .manifest import (
     load,
     now,
     project_locked,
+    transition_locked,
     update,
 )
 from .projects import ProjectAdapter
@@ -218,6 +219,10 @@ def _landable(run: Run) -> list[dict[str, Any]]:
         worker
         for worker in run.workers
         if (worker.get("result") or {}).get("kind") not in NO_CANDIDATE_KINDS
+        or worker.get(
+            "integration_head", (worker.get("result") or {}).get("candidate_sha")
+        )
+        != run.base_commit
     ]
 
 
@@ -297,41 +302,8 @@ def _landing_inputs(
     config: Config, project: ProjectAdapter, run: Run, base: str, beads: Beads
 ) -> str:
     """Bind reuse to declared inputs, including the evidence the reviewer sees."""
-    workers = []
-    for worker in run.workers:
-        head = _git(
-            project.root, "rev-parse", "--verify", f"{worker['branch']}^{{commit}}"
-        )
-        if head != worker["result"]["candidate_sha"]:
-            filed = worker["result"]["candidate_sha"]
-            try:
-                _git(project.root, "merge-base", "--is-ancestor", filed, head)
-            except BatchError as error:
-                raise BatchRefusal(
-                    "candidate_mismatch",
-                    f"worker {worker['id']} branch moved to {head[:12]}, which does not descend from its filed {filed[:12]}",
-                ) from error
-            worker_id = worker["id"]
-
-            def rebind(
-                document: dict[str, Any],
-                *,
-                worker_id: str = worker_id,
-                head: str = head,
-            ) -> None:
-                for entry in document["workers"]:
-                    if entry["id"] == worker_id and entry.get("result"):
-                        entry["result"]["candidate_sha"] = head
-                        # The branch carries a commit the result was filed
-                        # without, so it is no longer a result with nothing
-                        # to integrate.
-                        entry["result"].pop("kind", None)
-
-            run = update(config, run.run_id, rebind)
-            worker = run.worker(worker_id)
-        workers.append(
-            {"branch": worker["branch"], "head": head, "result": worker["result"]}
-        )
+    workers = _observe_worker_heads(config, project, run, beads)
+    run = load(config, run.run_id)
     try:
         runner = config.agent_runner.read_bytes()
     except OSError as error:
@@ -352,6 +324,56 @@ def _landing_inputs(
         "runner": hashlib.sha256(runner).hexdigest(),
     }
     return hashlib.sha256(_agent_json(contract).encode()).hexdigest()
+
+
+def _observe_worker_heads(
+    config: Config, project: ProjectAdapter, run: Run, beads: Beads
+) -> list[dict[str, Any]]:
+    workers = []
+    for worker in run.workers:
+        head = _git(
+            project.root, "rev-parse", "--verify", f"{worker['branch']}^{{commit}}"
+        )
+        if head != worker["result"]["candidate_sha"]:
+            filed = worker["result"]["candidate_sha"]
+            try:
+                _git(project.root, "merge-base", "--is-ancestor", filed, head)
+            except BatchError as error:
+                raise BatchRefusal(
+                    "candidate_mismatch",
+                    f"worker {worker['id']} branch moved to {head[:12]}, which does not descend from its filed {filed[:12]}",
+                ) from error
+        # A later branch commit changes integration scope, not the worker's
+        # submitted claim or the verification tied to that claim.
+        if worker.get("integration_head") != head:
+            from .start import _scope_check
+
+            scope = _scope_check(run, worker, head, beads)
+            worker_id = worker["id"]
+
+            def observe(
+                document: dict[str, Any],
+                *,
+                worker_id: str = worker_id,
+                head: str = head,
+                scope: dict[str, Any] = scope,
+            ) -> None:
+                for entry in document["workers"]:
+                    if entry["id"] == worker_id:
+                        entry["integration_head"] = head
+                        entry.update(scope)
+
+            run = update(config, run.run_id, observe)
+            worker = run.worker(worker_id)
+        workers.append(
+            {
+                "branch": worker["branch"],
+                "head": head,
+                "result": worker["result"],
+                "scope": worker.get("changed_paths"),
+            }
+        )
+    return workers
 
 
 def _integrate(
@@ -403,10 +425,17 @@ def _integrate(
     run = land_update(
         config, run.run_id, integration_worktree=str(path), refreshed_base=base
     )
-    branches = [worker["branch"] for worker in _landable(run)]
-    for position, worker_branch in enumerate(branches):
+    workers = _landable(run)
+    branches = [worker["branch"] for worker in workers]
+    targets = [
+        str(worker.get("integration_head") or worker["result"]["candidate_sha"])
+        for worker in workers
+    ]
+    for position, (worker_branch, target) in enumerate(
+        zip(branches, targets, strict=True)
+    ):
         try:
-            _git(path, "merge", "--no-ff", "--no-edit", worker_branch)
+            _git(path, "merge", "--no-ff", "--no-edit", target)
             continue
         except BatchError:
             conflicts = _git(path, "diff", "--name-only", "--diff-filter=U")
@@ -452,7 +481,7 @@ def _integrate(
                 "integration_failed",
                 f"integration task {waited['job_id']} {waited.get('phase')}",
             )
-        _refuse_unless_integrated(path, branches, who="integration agent")
+        _refuse_unless_integrated(path, targets, who="integration agent")
         break
     candidate = _git(path, "rev-parse", "HEAD")
     _refuse_conflict_markers(path, base, candidate)
@@ -514,7 +543,12 @@ def _kept_integration(config: Config, run: Run, base: str) -> str:
         )
     path = Path(worktree)
     _refuse_unless_integrated(
-        path, [worker["branch"] for worker in _landable(run)], who="the kept worktree"
+        path,
+        [
+            str(worker.get("integration_head") or worker["result"]["candidate_sha"])
+            for worker in _landable(run)
+        ],
+        who="the kept worktree",
     )
     candidate = _git(path, "rev-parse", "HEAD")
     try:
@@ -1345,7 +1379,10 @@ def queue(config: Config, project: ProjectAdapter, run_id: str) -> dict[str, Any
     landing that runs before then only refuses `worker_not_done`.
     """
     run = load(config, run_id)
-    with landing_recovery_locked(config, run.run_id):
+    with (
+        transition_locked(config, run.run_id),
+        landing_recovery_locked(config, run.run_id),
+    ):
         run = load(config, run.run_id)
         if run.project != project.project_id:
             raise BatchRefusal("project", f"run {run_id} belongs to {run.project}")
@@ -1383,7 +1420,7 @@ def land(
     if run.project != project.project_id:
         raise BatchRefusal("project", f"run {run_id} belongs to {run.project}")
     beads = beads or SubprocessBeads(project.root)
-    with landing_locked(config, run.run_id):
+    with transition_locked(config, run.run_id), landing_locked(config, run.run_id):
         run = load(config, run.run_id)
         return _land_locked(
             config, project, run, beads, sleep=sleep, keep_integration=keep_integration
@@ -1403,6 +1440,8 @@ def _land_locked(
     try:
         _refuse_unless_workers_done(run)
         base = str(run.landing.get("refreshed_base") or run.base_commit)
+        _observe_worker_heads(config, project, run, beads)
+        run = load(config, run_id)
         if not _landable(run):
             # No worker committed anything, so there is no candidate to
             # integrate, verify or publish. Acceptance closes the beads whose
@@ -1415,18 +1454,21 @@ def _land_locked(
                 )
                 else "no_op"
             )
+            evidence = {"kind": kind, "candidate_sha": base}
+            if project.workspace.review == "none":
+                review_verdict = _review_by_policy(run, evidence, base)
+            else:
+                path = Path(run.workers[0]["worktree"])
+                run = land_update(config, run_id, verify_run=evidence)
+                review_verdict = _review(config, project, run, path, base, base, beads)
             run = _accept(
                 config,
                 project,
                 run,
                 beads,
                 candidate=base,
-                verify_run={"kind": kind, "candidate_sha": base},
-                review_verdict={
-                    "verdict": "pass",
-                    "policy": kind,
-                    "candidate_sha": base,
-                },
+                verify_run=evidence,
+                review_verdict=review_verdict,
                 published={
                     "kind": kind,
                     "candidate_sha": base,
@@ -1978,6 +2020,7 @@ def abandon(
     _refuse_unless_live(run)
     beads = beads or SubprocessBeads(project.root)
     with (
+        transition_locked(config, run.run_id),
         landing_locked(config, run.run_id),
         landing_recovery_locked(config, run.run_id),
         project_locked(config, project.project_id),

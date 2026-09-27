@@ -42,6 +42,7 @@ from .manifest import (
     now,
     project_locked,
     set_worker,
+    transition_locked,
     update,
 )
 from .projects import ProjectAdapter
@@ -889,14 +890,62 @@ def result(
     project: ProjectAdapter | None = None,
     reader: BdReader | None = None,
 ) -> dict[str, Any]:
+    with transition_locked(config, run_id):
+        return _result_locked(
+            config, run_id, worker_id, path, project=project, reader=reader
+        )
+
+
+def _result_locked(
+    config: Config,
+    run_id: str,
+    worker_id: str,
+    path: Path,
+    *,
+    project: ProjectAdapter | None = None,
+    reader: BdReader | None = None,
+) -> dict[str, Any]:
     """File a worker's result after validating it and binding it to the worktree head."""
     run = load(config, run_id)
+    if run.acceptance is not None:
+        raise BatchRefusal("already_accepted", f"run {run_id} has landed")
     if run.abandoned is not None:
         raise BatchRefusal("abandoned", f"run {run_id} was abandoned")
     worker = run.worker(worker_id)
+    if worker.get("result") is not None:
+        raise BatchRefusal(
+            "result_already_filed", f"worker {worker_id} already filed a result"
+        )
+    if worker.get("pending_launch"):
+        raise BatchRefusal(
+            "result_attempt", f"worker {worker_id} has an unresolved dispatch attempt"
+        )
     value, errors = results.load_result(path, kind="worker")
     if errors:
         raise BatchRefusal("invalid_result", "; ".join(errors[:6]), errors=errors)
+    attempts = worker.get("attempts") or []
+    latest = attempts[-1] if attempts else None
+    if isinstance(latest, Mapping):
+        number = latest.get("number")
+        if (
+            value.get("schema_version") == results.RESULT_SCHEMA_VERSION
+            or isinstance(number, int)
+            and number > 1
+        ) and value.get("attempt") != number:
+            raise BatchRefusal(
+                "result_attempt",
+                f"result attempt {value.get('attempt')} differs from current attempt {number}",
+            )
+        expected_path = latest.get("result_path")
+        if (
+            run.harness == "queued"
+            and expected_path
+            and path.resolve() != Path(expected_path).resolve()
+        ):
+            raise BatchRefusal(
+                "result_attempt",
+                f"result path {path} differs from current attempt path {expected_path}",
+            )
     binding_errors = _v2_binding_errors(worker, value)
     if binding_errors:
         raise BatchRefusal(
@@ -911,9 +960,12 @@ def result(
             # A worker that committed once more after writing its result is
             # still the same worker: take the head when the tree is clean and
             # the head descends from what was filed.
-            value["candidate_sha"] = _rebind_candidate(
-                Path(worktree), filed=value["candidate_sha"], head=head
-            )
+            _rebind_candidate(Path(worktree), filed=value["candidate_sha"], head=head)
+            observed_head = head
+        else:
+            observed_head = head
+    else:
+        observed_head = value["candidate_sha"]
     if value["candidate_sha"] == run.base_commit:
         verdicts = results.satisfied_beads([value])
         # Nothing was committed. When every criterion holds, the wanted state
@@ -953,13 +1005,14 @@ def result(
         if project is None:
             raise BatchError("batch result needs the project to read write scopes")
         reader = SubprocessBeads(project.root)
-    scope = _scope_check(run, worker, value["candidate_sha"], reader)
+    scope = _scope_check(run, worker, observed_head, reader)
     expansion = _declared_expansion(worker, value, scope)
 
     def record(document: dict[str, Any]) -> None:
         for entry in document["workers"]:
             if entry["id"] == worker_id:
                 entry["result"] = value
+                entry["integration_head"] = observed_head
                 entry["provenance"] = result_provenance(run, entry, value)
                 entry["result_path"] = str(path)
                 entry["result_recorded_at"] = now()
@@ -1052,6 +1105,28 @@ def resume(
     model: str | None = None,
     effort: str | None = None,
 ) -> dict[str, Any]:
+    with transition_locked(config, run_id):
+        return _resume_locked(
+            config,
+            project,
+            run_id,
+            worker_id,
+            backend=backend,
+            model=model,
+            effort=effort,
+        )
+
+
+def _resume_locked(
+    config: Config,
+    project: ProjectAdapter,
+    run_id: str,
+    worker_id: str,
+    *,
+    backend: str | None = None,
+    model: str | None = None,
+    effort: str | None = None,
+) -> dict[str, Any]:
     """Queue a fresh agent into the worker's worktree with its original packet."""
     run = load(config, run_id)
     if run.acceptance is not None:
@@ -1059,6 +1134,10 @@ def resume(
     if run.abandoned is not None:
         raise BatchRefusal("abandoned", f"run {run_id} was abandoned")
     worker = run.worker(worker_id)
+    if worker.get("result") is not None:
+        raise BatchRefusal(
+            "result_already_filed", f"worker {worker_id} already filed a result"
+        )
     worktree = worker.get("worktree")
     if not worktree or not Path(worktree).is_dir():
         raise BatchRefusal(
@@ -1069,7 +1148,11 @@ def resume(
     current = launch.find_task(
         tasks, worker.get("task_id"), worker.get("task_reference")
     )
-    if current is not None and not current.terminal:
+    if (
+        current is not None
+        and not current.terminal
+        and not worker.get("pending_launch")
+    ):
         raise BatchRefusal(
             "worker_active", f"task {current.task_id} is still {current.status.lower()}"
         )
@@ -1098,29 +1181,48 @@ def resume(
         model=model,
         effort=effort,
     )
-    job = queue_agent(
-        config,
-        project,
-        label=f"{project.project_id}:resume:{run_id}:{worker_id}",
-        worktree=path,
-        prompt=prompt,
-        prompt_name=prompt_name,
-        backend=effective_backend,
-        model=effective_model,
-        effort=effective_effort,
-        schema="worker",
-        then=worker_then(config, run_id, worker_id, resume_result),
-        binding={
-            **binding(run, worker_id),
-            "requested": {
-                "backend": effective_backend,
-                "model": effective_model,
-                "effort": effective_effort,
+    pending = worker.get("pending_launch")
+    recovered = pending_task(config, pending, tasks) if pending else None
+    if recovered is not None:
+        job = {
+            "job_id": recovered.task_id,
+            "reference": launch.launch_reference(recovered),
+        }
+    else:
+
+        def record_pending(reference: str) -> None:
+            def apply(document: dict[str, Any]) -> None:
+                for entry in document["workers"]:
+                    if entry["id"] == worker_id:
+                        entry["pending_launch"] = reference
+                        entry["pending_attempt"] = attempt
+
+            update(config, run_id, apply)
+
+        job = queue_agent(
+            config,
+            project,
+            label=f"{project.project_id}:resume:{run_id}:{worker_id}",
+            worktree=path,
+            prompt=prompt,
+            prompt_name=prompt_name,
+            backend=effective_backend,
+            model=effective_model,
+            effort=effective_effort,
+            schema="worker",
+            then=worker_then(config, run_id, worker_id, resume_result),
+            binding={
+                **binding(run, worker_id),
+                "requested": {
+                    "backend": effective_backend,
+                    "model": effective_model,
+                    "effort": effective_effort,
+                },
+                "attempt": attempt,
             },
-            "attempt": attempt,
-        },
-        inaccessible=other_worktrees(project, run, worker_id),
-    )
+            inaccessible=other_worktrees(project, run, worker_id),
+            before_enqueue=record_pending,
+        )
     task_id = job["job_id"]
 
     def record(document: dict[str, Any]) -> None:
@@ -1129,6 +1231,8 @@ def resume(
                 entry["task_id"] = task_id
                 entry["task_ids"] = [*entry.get("task_ids", []), task_id]
                 entry["task_reference"] = job.get("reference")
+                entry["pending_launch"] = None
+                entry["pending_attempt"] = None
                 entry["backend"] = effective_backend
                 entry["model"] = effective_model
                 entry["effort"] = effective_effort

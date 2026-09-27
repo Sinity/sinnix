@@ -58,6 +58,8 @@ REFUSALS: dict[str, str] = {
     "review_invalid": "the verdict does not validate against the judge schema",
     "review_rejected": "the verdict is not `pass`",
     "result_evidence_binding": "a v2 worker result differs from its dispatch-time stable acceptance binding",
+    "result_attempt": "the result does not belong to the worker's current dispatch attempt",
+    "result_already_filed": "the worker already has an accepted result for this attempt",
     "runner": "the agent runner is missing or not executable",
     "target_moved_twice": "the default branch moved again after one refresh",
     "unknown_run": "no run has this id or suffix",
@@ -277,6 +279,13 @@ def project_locked(config: Config, project_id: str) -> Iterator[bool]:
 
 def land_lock_path(config: Config, run_id: str) -> Path:
     return runs_dir(config) / f"{run_id}.land.lock"
+
+
+@contextmanager
+def transition_locked(config: Config, run_id: str) -> Iterator[None]:
+    """Serialize run transitions before taking landing, recovery or manifest locks."""
+    with _flock(runs_dir(config) / f"{run_id}.transition.lock"):
+        yield
 
 
 def landing_recovery_lock_path(config: Config, run_id: str) -> Path:
