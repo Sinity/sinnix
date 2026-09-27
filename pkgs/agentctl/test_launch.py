@@ -247,6 +247,13 @@ def test_cached_operation_retries_success_that_executed_on_another_tree(
     _write_execution_attempt(
         config, fake_pueue.task(first["job_id"]), "c" * 40, "d" * 40
     )
+    attempted = launch.successful_cached_attempt(
+        config,
+        fake_pueue.task(first["job_id"]),
+        {"head": "a" * 40, "tree": "b" * 40, "dirty": False},
+        None,
+    )
+    assert attempted is None
     # The checkout returns to A before the request. Enqueue identity still
     # matches, but the pinned attempt proves it actually ran on C.
     state.update(head="a" * 40, tree="b" * 40)
@@ -256,6 +263,11 @@ def test_cached_operation_retries_success_that_executed_on_another_tree(
     assert retried["job_id"] != first["job_id"]
     assert len(fake_pueue.added) == 2
     assert fake_pueue.task(first["job_id"]).succeeded
+    assert read_launch(config, fake_pueue.task(first["job_id"]))["tree_receipt"] == {
+        "head": "a" * 40,
+        "tree": "b" * 40,
+        "dirty": False,
+    }
 
 
 def test_operation_dependencies_are_pueue_edges(
@@ -1874,7 +1886,7 @@ def test_candidate_preparation_failure_does_not_enqueue_or_touch_an_active_tree(
     assert marker.read_text() == "A\n"
 
 
-def test_candidate_cache_reuses_active_content_without_allocating_a_second_tree(
+def test_candidate_cache_reuses_active_and_completed_content_without_second_tree(
     fake_pueue: FakePueue, tmp_path: Path
 ) -> None:
     root, _ = _candidate_project(tmp_path)
@@ -1898,6 +1910,20 @@ def test_candidate_cache_reuses_active_content_without_allocating_a_second_tree(
     again = launch.start_operation(config, project, project.operation("corpus"))
     assert again["job_id"] == first["job_id"]
     assert again["reused"] is True
+
+    written = read_launch(config, fake_pueue.task(first["job_id"]))
+    receipt = written["tree_receipt"]
+    fake_pueue.succeed(first["job_id"])
+    _write_execution_attempt(
+        config,
+        fake_pueue.task(first["job_id"]),
+        receipt["head"],
+        receipt["tree"],
+    )
+    completed = launch.start_operation(config, project, project.operation("corpus"))
+
+    assert completed["job_id"] == first["job_id"]
+    assert completed["reused"] is True
     assert len(fake_pueue.added) == 1
 
 
