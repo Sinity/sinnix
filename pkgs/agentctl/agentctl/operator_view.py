@@ -57,7 +57,12 @@ class Vanished:
 NOTHING_VANISHED = Vanished()
 
 
-def vanished_of(run: Run, tasks: Mapping[int, Task] | None) -> Vanished:
+def vanished_of(
+    run: Run,
+    tasks: Mapping[int, Task] | None,
+    *,
+    references: Mapping[str, Task] | None = None,
+) -> Vanished:
     """What the queue lost of this run; ``None`` tasks means it was unreadable.
 
     An unreadable queue is not evidence of loss: every id would look vanished.
@@ -67,13 +72,21 @@ def vanished_of(run: Run, tasks: Mapping[int, Task] | None) -> Vanished:
     landing_id = run.landing.get("task_id")
     return Vanished(
         landing=landing_id
-        if launch.vanished(tasks, landing_id, run.landing.get("task_reference"))
+        if launch.vanished(
+            tasks,
+            landing_id,
+            run.landing.get("task_reference"),
+            references=references,
+        )
         else None,
         workers=tuple(
             worker["id"]
             for worker in run.workers
             if launch.vanished(
-                tasks, worker.get("task_id"), worker.get("task_reference")
+                tasks,
+                worker.get("task_id"),
+                worker.get("task_reference"),
+                references=references,
             )
         ),
     )
@@ -137,11 +150,15 @@ def status(
     """The manifest with each task's pueue view and the landing PR's state."""
     run = load(config, run_id)
     tasks = pueue.tasks()
-    lost = vanished_of(run, tasks)
+    references = launch.index_task_references(tuple(tasks.values()))
+    lost = vanished_of(run, tasks, references=references)
     document = run.to_dict()
     for worker in document["workers"]:
         task = launch.find_task(
-            tasks, worker.get("task_id"), worker.get("task_reference")
+            tasks,
+            worker.get("task_id"),
+            worker.get("task_reference"),
+            references=references,
         )
         worker["task"] = job_view(task) if task else None
         worker["vanished"] = worker["id"] in lost.workers
@@ -150,13 +167,17 @@ def status(
         tasks,
         document["landing"].get("task_id"),
         document["landing"].get("task_reference"),
+        references=references,
     )
     document["landing"]["task"] = job_view(landing_task) if landing_task else None
     for attempt in document["landing"].get("agent_attempts") or []:
         if not isinstance(attempt, dict):
             continue
         task = launch.find_task(
-            tasks, attempt.get("job_id"), attempt.get("launch_reference")
+            tasks,
+            attempt.get("job_id"),
+            attempt.get("launch_reference"),
+            references=references,
         )
         attempt["task"] = job_view(task) if task else None
     # The recorded landing id when pueue no longer has it, so a reader never
@@ -166,7 +187,12 @@ def status(
         run,
         landing_task,
         [
-            launch.find_task(tasks, w.get("task_id"), w.get("task_reference"))
+            launch.find_task(
+                tasks,
+                w.get("task_id"),
+                w.get("task_reference"),
+                references=references,
+            )
             for w in run.workers
         ],
         vanished=lost,
@@ -198,6 +224,7 @@ class Snapshot:
     queue_read: bool = True
 
     def to_dict(self) -> dict[str, Any]:
+        references = launch.index_task_references(self.tasks)
         return {
             "schema": "sinnix.agentctl.view.v3",
             "project": self.project_id,
@@ -216,7 +243,13 @@ class Snapshot:
                 for task in self.tasks
             ],
             "runs": [
-                run_dict(run, self.tasks, self.now, queue_read=self.queue_read)
+                run_dict(
+                    run,
+                    self.tasks,
+                    self.now,
+                    queue_read=self.queue_read,
+                    references=references,
+                )
                 for run in self.runs
             ],
             "ready": [
@@ -269,19 +302,34 @@ def local_clock(stamp: str | None, *, seconds: bool = False) -> str:
 
 
 def run_dict(
-    run: Run, tasks: Sequence[Task], now: datetime, *, queue_read: bool = True
+    run: Run,
+    tasks: Sequence[Task],
+    now: datetime,
+    *,
+    queue_read: bool = True,
+    references: Mapping[str, Task] | None = None,
 ) -> dict[str, Any]:
     """One run's rows: stage from pueue first, the manifest second."""
+    if references is None:
+        references = launch.index_task_references(tasks)
     # By launch reference where the manifest has one: an id alone names a
     # queue position, which `pueue switch` and a daemon reset both reassign.
     index = {task.task_id: task for task in tasks}
-    lost = vanished_of(run, index if queue_read else None)
+    lost = vanished_of(run, index if queue_read else None, references=references)
     worker_tasks = [
-        launch.find_task(index, worker.get("task_id"), worker.get("task_reference"))
+        launch.find_task(
+            index,
+            worker.get("task_id"),
+            worker.get("task_reference"),
+            references=references,
+        )
         for worker in run.workers
     ]
     landing_task = launch.find_task(
-        index, run.landing.get("task_id"), run.landing.get("task_reference")
+        index,
+        run.landing.get("task_id"),
+        run.landing.get("task_reference"),
+        references=references,
     )
     workers = []
     for worker, task in zip(run.workers, worker_tasks, strict=True):
@@ -517,6 +565,7 @@ def _lost_jobs(row: Mapping[str, Any]) -> str:
 
 def render(snapshot: Snapshot) -> str:
     now = snapshot.now
+    references = launch.index_task_references(snapshot.tasks)
     lines = [
         f"== {snapshot.project_id} at {now.astimezone().strftime('%Y-%m-%d %H:%M')}"
     ]
@@ -543,7 +592,13 @@ def render(snapshot: Snapshot) -> str:
     ]
     failed.sort(key=lambda task: task.ended_at or "", reverse=True)
     runs = [
-        run_dict(run, snapshot.tasks, now, queue_read=snapshot.queue_read)
+        run_dict(
+            run,
+            snapshot.tasks,
+            now,
+            queue_read=snapshot.queue_read,
+            references=references,
+        )
         for run in snapshot.runs
     ]
     attention = [

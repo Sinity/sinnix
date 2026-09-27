@@ -2019,10 +2019,16 @@ def retry(config: Config, task_id: int, reference: str | None = None) -> dict[st
 
 
 def find_task(
-    tasks: Mapping[int, Task], task_id: object, reference: object = None
+    tasks: Mapping[int, Task],
+    task_id: object,
+    reference: object = None,
+    *,
+    references: Mapping[str, Task] | None = None,
 ) -> Task | None:
     """Resolve a stored job identity after pueue may have reassigned its id."""
     if isinstance(reference, str):
+        if references is not None:
+            return references.get(reference)
         return next(
             (task for task in tasks.values() if launch_reference(task) == reference),
             None,
@@ -2030,8 +2036,22 @@ def find_task(
     return tasks.get(task_id) if isinstance(task_id, int) else None
 
 
+def index_task_references(tasks: Sequence[Task]) -> dict[str, Task]:
+    """Index launch identities once for callers resolving several saved jobs."""
+    references: dict[str, Task] = {}
+    for task in tasks:
+        reference = launch_reference(task)
+        if reference is not None:
+            references.setdefault(reference, task)
+    return references
+
+
 def vanished(
-    tasks: Mapping[int, Task], task_id: object, reference: object = None
+    tasks: Mapping[int, Task],
+    task_id: object,
+    reference: object = None,
+    *,
+    references: Mapping[str, Task] | None = None,
 ) -> bool:
     """Whether a recorded job identity names nothing the queue holds any more.
 
@@ -2042,7 +2062,7 @@ def vanished(
     """
     if not isinstance(task_id, int) and not isinstance(reference, str):
         return False
-    return find_task(tasks, task_id, reference) is None
+    return find_task(tasks, task_id, reference, references=references) is None
 
 
 def addressed(task_id: int, reference: str | None = None) -> Task:

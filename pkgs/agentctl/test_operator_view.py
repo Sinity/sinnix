@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -187,6 +188,50 @@ def test_stage_and_next_follow_from_the_queue_then_the_manifest() -> None:
     assert stages["run-5"]["stage"] == "stashed"
     assert stages["run-5"]["next"].startswith("batch result")
     assert stages["run-5"]["workers"][0]["stage"] == "awaiting result"
+
+
+def test_run_view_indexes_task_references_once_for_many_workers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Breaks if each worker lookup reparses every queued command."""
+    task_count = 1_200
+    worker_count = 48
+    tasks = [
+        replace(
+            task(index, "other:long-command"),
+            command="/bin/echo " + ("x" * 2_048),
+        )
+        for index in range(task_count - worker_count)
+    ]
+    workers = []
+    for offset in range(worker_count):
+        task_id = task_count - worker_count + offset
+        reference = f"worker-{offset}"
+        tasks.append(
+            replace(
+                task(task_id, f"fixture:worker:run-many:fx-{offset}"),
+                command=f"agentctl-run /s/inputs/{reference}.json",
+            )
+        )
+        entry = worker(f"fx-{offset}", task_id=task_id)
+        entry["task_reference"] = reference
+        workers.append(entry)
+
+    parsed = 0
+    original = operator_view.launch.launch_reference
+
+    def count_parses(value: Task) -> str | None:
+        nonlocal parsed
+        parsed += 1
+        return original(value)
+
+    monkeypatch.setattr(operator_view.launch, "launch_reference", count_parses)
+    row = operator_view.run_dict(run("run-many", workers), tasks, NOW)
+
+    assert [entry["job"] for entry in row["workers"]] == [
+        task_count - worker_count + offset for offset in range(worker_count)
+    ]
+    assert parsed == task_count
 
 
 def test_an_active_worker_or_landing_task_is_never_landed() -> None:
