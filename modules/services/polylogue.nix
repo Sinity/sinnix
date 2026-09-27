@@ -235,12 +235,6 @@ mkServiceModule {
           settings = {
             archive.root = cfg.dataDir;
 
-            daemon = {
-              # Coalesce bursts from actively written transcripts instead of
-              # re-reading a growing file every two seconds.
-              debounce-s = 30;
-            };
-
             daemon-api = {
               host = cfg.daemon.host;
               port = cfg.daemon.apiPort;
