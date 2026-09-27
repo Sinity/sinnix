@@ -322,7 +322,7 @@ def test_large_valid_execution_receipt_is_filed_and_retrievable(
     artifact = (
         config.state_dir / "native-evidence" / f"{record['evidence_id']}.artifact.json"
     )
-    artifact.write_bytes(artifact.read_bytes() + b" ")
+    artifact.write_bytes(artifact.read_bytes()[:-1] + b" ")
     with pytest.raises(launch.JobError, match="identity mismatch"):
         evidence.get_record(config, "fixture", record["evidence_id"])
 
@@ -372,6 +372,45 @@ def test_list_cursor_crosses_other_projects_and_retrieves_later_record(
         row["evidence_id"] == target_id for item in pages for row in item["records"]
     )
     assert evidence.get_record(config, "fixture", target_id) == target
+
+
+def test_read_paths_need_no_owner_and_reject_misaddressed_reference(
+    config: Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    evidence_id = "a" * 32
+    path = config.state_dir / "native-evidence" / f"{evidence_id}.json"
+    document = {
+        "schema_version": 1,
+        "kind": "native_evidence",
+        "evidence_id": evidence_id,
+        "project": "fixture",
+        "recorded_at": "fixture",
+    }
+    evidence._write_record(path, document)
+
+    def unavailable(*args: object, **kwargs: object) -> None:
+        raise AssertionError("read path called the owner")
+
+    monkeypatch.setattr(evidence, "SubprocessBdReader", unavailable)
+    monkeypatch.setattr(evidence, "_publication", unavailable)
+    assert (
+        evidence.list_records(config, "fixture")["records"][0]["evidence_id"]
+        == evidence_id
+    )
+    assert evidence.get_record(config, "fixture", evidence_id) == document
+
+    reference = json.loads(path.read_text())
+    reference["bytes"] += 1
+    path.write_text(json.dumps(reference))
+    with pytest.raises(launch.JobError, match="size mismatch"):
+        evidence.get_record(config, "fixture", evidence_id)
+
+    reference["bytes"] -= 1
+    reference["evidence_id"] = "b" * 32
+    path.write_text(json.dumps(reference))
+    listed = evidence.list_records(config, "fixture")
+    assert listed["records"] == []
+    assert listed["coverage"] == "partial"
 
 
 def test_evidence_discover_parser_keeps_project_ref_and_limit_explicit() -> None:

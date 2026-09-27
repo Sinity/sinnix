@@ -454,7 +454,10 @@ def get_record(config: Config, project_id: str, evidence_id: str) -> dict[str, A
         raise JobError(
             f"native evidence record does not belong to project {project_id}"
         )
-    if pointer.get("kind") == "native_evidence_reference":
+    if (
+        pointer.get("kind") == "native_evidence_reference"
+        and pointer.get("schema_version") == 2
+    ):
         artifact_name = pointer.get("artifact")
         if artifact_name != f"{evidence_id}.artifact.json":
             raise JobError("native evidence reference has an invalid artifact path")
@@ -465,6 +468,8 @@ def get_record(config: Config, project_id: str, evidence_id: str) -> dict[str, A
             raise JobError(
                 f"native evidence artifact is unavailable or oversized: {evidence_id}"
             )
+        if len(artifact_raw) != pointer.get("bytes"):
+            raise JobError(f"native evidence artifact size mismatch: {evidence_id}")
         if hashlib.sha256(artifact_raw).hexdigest() != pointer.get("sha256"):
             raise JobError(f"native evidence artifact identity mismatch: {evidence_id}")
         try:
@@ -565,10 +570,12 @@ def list_records(
                     not re.fullmatch(
                         r"[0-9a-f]{32}", str(value.get("evidence_id") or "")
                     )
+                    or path_name != f"{value.get('evidence_id')}.json"
                     or value.get("artifact")
                     != f"{value.get('evidence_id')}.artifact.json"
                     or not re.fullmatch(r"[0-9a-f]{64}", str(value.get("sha256") or ""))
-                    or not isinstance(value.get("bytes"), int)
+                    or type(value.get("bytes")) is not int
+                    or not 0 < value["bytes"] <= MAX_ARTIFACT_BYTES
                 ):
                     document["coverage"] = "partial"
                     document["gaps"].append(f"invalid reference: {path.name}")
