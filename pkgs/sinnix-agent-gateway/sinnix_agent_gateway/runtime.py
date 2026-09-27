@@ -581,10 +581,6 @@ class Runtime:
         owner_request_key: str | None = None,
     ) -> dict[str, Any]:
         self.principal.require(Capability.JOB_START)
-        if self.principal.name not in {"agent-control", "operator"}:
-            raise PolicyError(
-                "declared operations require agent-control or operator principal"
-            )
         if not isinstance(project_id, str) or not 1 <= len(project_id) <= 128:
             raise ProtocolError("invalid_request", "project_id is malformed")
         if not isinstance(operation, str) or not 1 <= len(operation) <= 128:

@@ -128,21 +128,11 @@ def test_event_cursor_is_opaque_tamper_and_scope_bound(tmp_path: Path) -> None:
         )
 
 
-def test_event_cursor_secret_is_private_principal_bound_and_bounded(
+def test_event_cursor_secret_is_private_and_bounded(
     tmp_path: Path,
 ) -> None:
     events, _projects, _beads, _audit = service(tmp_path)
     cursor = events.read(limit=2)["next_cursor"]
-    other = NormalizedEventService(
-        principal="agent-control",
-        cursor_key=b"e" * 32,
-        projects=events.projects,  # type: ignore[arg-type]
-        beads=events.beads,  # type: ignore[arg-type]
-        audit=events.audit,
-        transitions_path=events.transitions_path,
-    )
-    with pytest.raises(EventCursorError, match="authentication|scope"):
-        other.read(limit=2, cursor=cursor)
     rotated = NormalizedEventService(
         principal="operator",
         cursor_key=b"r" * 32,

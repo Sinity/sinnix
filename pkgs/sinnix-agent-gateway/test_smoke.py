@@ -14,7 +14,6 @@ from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from sinnix_agent_gateway import actions as action_set
 from sinnix_agent_gateway.app import Runtime, create_server
-from sinnix_agent_gateway.artifacts import ArtifactError
 from sinnix_agent_gateway.capabilities import PolicyError
 from sinnix_agent_gateway.cli import (
     build_manifest,
@@ -58,16 +57,6 @@ def test_gateway_resource_bounds_fall_back_to_an_attested_artifact(
     assert runtime.artifacts.list()["artifacts"][0]["kind"] == "gateway-fixture"
 
 
-def test_readonly_policy_is_checked_inside_write_operation(tmp_path: Path) -> None:
-    cfg = config(tmp_path)
-    runtime = Runtime.create(cfg, "agent-control")
-    assert runtime.projects.list()["projects"][0]["writable"] is False
-    target = cfg.projects["fixture"].path / "forbidden.txt"
-    with pytest.raises(PolicyError):
-        runtime.projects.write("fixture", target.name, "forbidden")
-    assert not target.exists()
-
-
 def test_operator_project_writes_are_available(
     tmp_path: Path,
 ) -> None:
@@ -85,6 +74,7 @@ def test_operator_project_writes_are_available(
 
 def test_project_read_applies_late_line_range_before_byte_bound(tmp_path: Path) -> None:
     cfg = config(tmp_path)
+    subprocess.run(["git", "init", "--quiet", cfg.projects["fixture"].path], check=True)
     target = cfg.projects["fixture"].path / "large.txt"
     target.write_text("".join(f"line-{line:04d} padding\n" for line in range(1, 301)))
     runtime = Runtime.create(cfg, "operator")
@@ -241,27 +231,25 @@ def test_audit_chain_survives_concurrent_writers(tmp_path: Path) -> None:
     }
 
 
-def test_v2_events_are_principal_scoped_and_receipted(tmp_path: Path) -> None:
+def test_v2_events_are_receipted(tmp_path: Path) -> None:
     cfg = config(tmp_path)
-    observer = Runtime.create(cfg, "agent-control")
     operator = Runtime.create(cfg, "operator")
-    observer.audit.append("observer_event", "ok")
     operator.audit.append("operator_event", "ok")
 
     async def invoke():
         async def callback():
-            return observer.v2_events(100)
+            return operator.v2_events(100)
 
-        return await observer.execute_v2_async(
+        return await operator.execute_v2_async(
             action_set.BY_NAME["events.tail"], callback, {"limit": 100}
         )
 
     response = anyio.run(invoke)
 
     events = response["data"]["events"]
-    assert {event["principal"] for event in events} == {"agent-control"}
+    assert {event["principal"] for event in events} == {"operator"}
     audit_events = [event for event in events if event["kind"] == "gateway_receipt"]
-    assert {event["operation"] for event in audit_events} == {"observer_event"}
+    assert {event["operation"] for event in audit_events} == {"operator_event"}
     assert response["meta"]["resource_refs"] == [
         f"sinnix://receipts/{audit_events[0]['event_id']}"
     ]
@@ -439,11 +427,13 @@ def test_gateway_status_reports_broker_route_evidence(
     }
 
 
-def test_gateway_status_keeps_unapproved_principal_unobserved(tmp_path: Path) -> None:
-    runtime = Runtime.create(config(tmp_path), "agent-control")
+def test_gateway_status_keeps_unapproved_manifest_unobserved(tmp_path: Path) -> None:
+    runtime = Runtime.create(
+        dataclasses.replace(config(tmp_path), approved_manifest_hash=None), "operator"
+    )
 
     status = runtime.observe.gateway_status(
-        "agent-control",
+        "operator",
         "capability-hash",
         "control-live-hash",
         "catalog-hash",
@@ -462,7 +452,7 @@ def test_gateway_status_keeps_unapproved_principal_unobserved(tmp_path: Path) ->
 
 def test_state_is_private_and_artifact_ids_are_opaque(tmp_path: Path) -> None:
     cfg = config(tmp_path)
-    runtime = Runtime.create(cfg, "agent-control")
+    runtime = Runtime.create(cfg, "operator")
     directory = cfg.state_dir / "diagnostics" / "fixture"
     directory.mkdir(parents=True)
     source = directory / "fixture.log"
@@ -486,43 +476,9 @@ def test_state_is_private_and_artifact_ids_are_opaque(tmp_path: Path) -> None:
     assert "source" not in chunk
 
 
-def test_artifacts_are_scoped_to_the_creating_principal(tmp_path: Path) -> None:
-    cfg = config(tmp_path)
-    operator = Runtime.create(cfg, "operator")
-    observer = Runtime.create(cfg, "agent-control")
-
-    operator_artifact = operator.artifacts.register_json(
-        {"secret": "operator-only"},
-        kind="operator-fixture",
-        owner_id="operator-test",
-        source="test.operator",
-        target={"id": "operator"},
-    )
-
-    assert observer.artifacts.list()["artifacts"] == []
-    with pytest.raises(ArtifactError, match="unavailable to this principal"):
-        observer.artifacts.read(operator_artifact["artifact_id"])
-
-    observer_artifact = observer.artifacts.register_json(
-        {"visible": True},
-        kind="observer-fixture",
-        owner_id="observer-test",
-        source="test.observer",
-        target={"id": "operator"},
-    )
-    assert (
-        observer.artifacts.read(observer_artifact["artifact_id"])["kind"]
-        == "observer-fixture"
-    )
-    assert (
-        operator.artifacts.read(observer_artifact["artifact_id"])["kind"]
-        == "observer-fixture"
-    )
-
-
 def test_unknown_principal_is_rejected_before_server_creation(tmp_path: Path) -> None:
     with pytest.raises(PolicyError):
-        create_server(config(tmp_path), "unknown")
+        create_server(config(tmp_path), "agent-control")
 
 
 def test_approval_check_requires_the_current_paired_contract(tmp_path: Path) -> None:
@@ -543,7 +499,7 @@ def test_approval_check_requires_the_current_paired_contract(tmp_path: Path) -> 
             dataclasses.replace(approved, approved_manifest_hash="stale"), "operator"
         )
     with pytest.raises(ValueError, match="principal"):
-        verify_approval(approved, "agent-control")
+        verify_approval(approved, "retired")
 
 
 def test_semantic_canary_exercises_catalog_and_project_list_envelopes(
@@ -860,16 +816,12 @@ def test_machine_query_reduces_page_to_response_bound(
     }
 
 
-def test_manifests_are_typed_actions_filtered_by_principal(tmp_path: Path) -> None:
+def test_operator_manifest_contains_typed_actions(tmp_path: Path) -> None:
     cfg = config(tmp_path)
-    observer = anyio.run(build_manifest, cfg, "agent-control")
     operator = anyio.run(build_manifest, cfg, "operator")
     operator_names = {row["name"] for row in operator["tools"]}
-    observer_names = {row["name"] for row in observer["tools"]}
     assert operator_names == {a.name for a in action_set.visible("operator")}
-    assert observer_names == {a.name for a in action_set.visible("agent-control")}
-    assert observer_names < operator_names
-    assert "files.change" not in observer_names and "files.change" in operator_names
+    assert "files.change" in operator_names
     for row in operator["tools"]:
         action = action_set.BY_NAME[row["name"]]
         assert row["inputSchema"] == action.input_schema()
@@ -886,7 +838,6 @@ def test_manifests_are_typed_actions_filtered_by_principal(tmp_path: Path) -> No
             "wait",
         }
         assert row["annotations"]["readOnlyHint"] is expected_read
-    assert observer["sha256"] != operator["sha256"]
     assert operator["measurement"]["tool_count"] == len(operator_names)
 
 

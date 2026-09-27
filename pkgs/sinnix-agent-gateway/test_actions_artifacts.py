@@ -86,17 +86,6 @@ def test_list_get_read_text_and_image(tmp_path: Path) -> None:
     assert missing["error"]["code"] == "not_found"
 
 
-def test_principal_scoping(tmp_path: Path) -> None:
-    operator = runtime(tmp_path)
-    artifact_id = register(operator, "op.txt", b"x", "note")
-    observer = Runtime.create(operator.config, "agent-control")
-    assert call(observer, "artifacts.list", {}, BY_NAME)["data"]["artifacts"] == []
-    denied = call(
-        observer, "artifacts.read", {"target": {"artifact_id": artifact_id}}, BY_NAME
-    )
-    assert denied["error"]["code"] == "policy_denied"
-
-
 def test_text_chunks_preserve_utf8(tmp_path: Path) -> None:
     rt = runtime(tmp_path)
     original = "a🙂ż日" * 12

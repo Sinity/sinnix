@@ -1569,12 +1569,16 @@ def test_the_landing_stays_queued_until_the_workers_finish_and_land_refuses_mean
 def test_an_integration_agent_leaving_a_branch_unmerged_is_integration_incomplete(
     harness: Harness,
 ) -> None:
-    run = prepared_run(harness, "fx-lead", "fx-solo")
+    run = harness.start("fx-lead", "fx-solo")
     solo = f"batch/{run['run_id']}/fx-solo"
     harness.git.branches[solo] = OTHER
     harness.git.parents[OTHER] = (BASE,)
     solo_worker = next(worker for worker in run["workers"] if worker["id"] == "fx-solo")
     harness.git.heads[solo_worker["worktree"]] = OTHER
+    for worker in run["workers"]:
+        harness.pueue.succeed(worker["task_id"])
+        if worker["id"] != "fx-solo":
+            harness.file_result(run, worker["id"])
     harness.file_result(run, "fx-solo", sha=OTHER)
     harness.git.conflict_on = {solo}
     harness.integration_merges = False
@@ -1582,7 +1586,7 @@ def test_an_integration_agent_leaving_a_branch_unmerged_is_integration_incomplet
     with pytest.raises(BatchRefusal, match="integration_incomplete") as refused:
         harness.land(run["run_id"])
 
-    assert f"batch/{run['run_id']}/fx-solo is not merged" in refused.value.detail
+    assert f"{OTHER} is not merged" in refused.value.detail
     stored = manifest.load(harness.config, run["run_id"])
     assert stored.landing["failure"]["code"] == "integration_incomplete"
     assert stored.acceptance is None and harness.git.pushes == []
@@ -1699,7 +1703,10 @@ def test_target_moved_once_refreshes_and_twice_stops(harness: Harness) -> None:
 
     assert landed["landing"]["refreshes"] == 1
     assert harness.git.resets == [MOVED]
-    assert harness.git.merges == [f"batch/{run['run_id']}/fx-solo"] * 2
+    assert harness.git.merges == [
+        f"batch/{run['run_id']}/fx-solo",
+        f"batch/{run['run_id']}/integration",
+    ]
     assert len([label for label in labels(harness.pueue) if ":review:" in label]) == 2
     assert harness.git.pushes[-1][1] == f"--force-with-lease=refs/heads/master:{MOVED}"
     assert landed["acceptance"]["published"]["base_commit"] == MOVED

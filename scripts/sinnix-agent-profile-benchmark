@@ -22,10 +22,9 @@ from typing import Any
 SCHEMA = "sinnix-agent-profile-benchmark-v1"
 DEFAULT_PROFILES = (
     "claude", "codex", "codex-local", "codex-deepseek",
-    "gateway-agent-control", "gateway-operator",
+    "gateway-operator",
 )
 GATEWAY_PRINCIPALS = {
-    "gateway-agent-control": "agent-control",
     "gateway-operator": "operator",
 }
 STATIC_FILES = {

@@ -738,15 +738,6 @@ def test_files_change_operations(tmp_path: Path) -> None:
         removed["data"]["removed"] is True and not (root / "nested" / "a.txt").exists()
     )
 
-    (tmp_path / "agent").mkdir()
-    agent = create_server(config(tmp_path / "agent"), "agent-control")
-
-    async def agent_tools():
-        return {tool.name for tool in await agent.list_tools()}
-
-    assert "files.change" not in anyio.run(agent_tools)
-
-
 def test_gateway_status_and_catalog_are_typed(tmp_path: Path) -> None:
     server = create_server(config(tmp_path), "operator")
     status = structured(call(server, "gateway.status", {}))

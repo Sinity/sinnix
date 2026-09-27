@@ -10,7 +10,7 @@ from sinnix_agent_gateway.audit import AuditService
 from sinnix_agent_gateway.capabilities import Principal
 from sinnix_agent_gateway.cli import build_manifest, verify_approval
 from sinnix_agent_gateway.config import GatewayConfig
-from sinnix_agent_gateway.results import RequestContext, ResultError, ResultService
+from sinnix_agent_gateway.results import RequestContext, ResultService
 
 
 @pytest.mark.parametrize("size", [200, 20000])
@@ -51,10 +51,6 @@ def test_full_observations_survive_restart_and_share_only_payload_bytes(tmp_path
     assert len(blobs) == 1
     if size > 8192:
         assert all(row["data"]["truncated"] for row in responses)
-    with pytest.raises(ResultError):
-        ResultService(config, Principal.for_name("agent-control")).read(
-            responses[0]["result"]["result_id"]
-        )
 
 
 @pytest.mark.parametrize("after_effect", [False, True])
@@ -133,7 +129,7 @@ def test_package_manifest_checks_code_and_principal_separately_from_connector(tm
     assert (
         verify_approval(config, "operator")["tool_manifest_hash"] == manifest["sha256"]
     )
-    path.write_text(json.dumps({"principal": "agent-control", "manifest": manifest}))
+    path.write_text(json.dumps({"principal": "unknown", "manifest": manifest}))
     with pytest.raises(ValueError, match="principal"):
         verify_approval(config, "operator")
     path.write_text(

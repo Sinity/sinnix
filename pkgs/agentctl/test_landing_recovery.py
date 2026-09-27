@@ -581,9 +581,9 @@ def test_repeated_result_does_not_release_an_operator_restash_after_ours(
     assert landing is not None
     harness.pueue._tasks[landing_id] = replace(landing, status="Stashed")
 
-    repeated = harness.file_result(run, "fx-solo")
+    with pytest.raises(BatchRefusal, match="result_already_filed"):
+        harness.file_result(run, "fx-solo")
 
-    assert repeated["landing_released"] is False
     assert harness.pueue.task(landing_id).status == "Stashed"
     assert (
         manifest.load(harness.config, run["run_id"]).landing["waiting_for_results"]

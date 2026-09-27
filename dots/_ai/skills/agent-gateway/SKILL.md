@@ -5,7 +5,7 @@ description: Use when invoking, inspecting, or documenting Sinnix Agent Gateway 
 
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: a4ac083c12169b4aa5ad6a36378c9ae40de7a37c6bffcd5aa0f357066008d530 -->
+<!-- gateway-catalog-sha256: e9972cefee5100b6604052e9cb370b85c4c4214f06006094b87491169684cbb2 -->
 
 # Agent Gateway
 
@@ -179,4 +179,4 @@ Effectful actions (families change, operate, run) require `idempotency_key`. Con
 
 The complete schemas and examples are in `docs/generated/agent-gateway-reference.md`.
 
-Catalog revision: `v3-typed-actions`. Catalog SHA-256: `a4ac083c12169b4aa5ad6a36378c9ae40de7a37c6bffcd5aa0f357066008d530`.
+Catalog revision: `v3-typed-actions`. Catalog SHA-256: `e9972cefee5100b6604052e9cb370b85c4c4214f06006094b87491169684cbb2`.

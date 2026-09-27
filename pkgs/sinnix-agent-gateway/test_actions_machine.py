@@ -389,8 +389,8 @@ def test_operate_and_units_operate_go_through_reducer(tmp_path: Path) -> None:
 
 
 
-def test_agent_can_prepare_exact_target_precondition(tmp_path: Path) -> None:
-    runtime = make_runtime(tmp_path, "agent-control")
+def test_operator_can_prepare_exact_target_precondition(tmp_path: Path) -> None:
+    runtime = make_runtime(tmp_path, "operator")
     result = call(
         runtime,
         "machine.prepare",

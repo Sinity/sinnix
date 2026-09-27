@@ -959,11 +959,6 @@ in
               fi
               bash -n "$helper"
             done
-            agent_control_mcp=${
-              inputs.self.packages.${system}.sinnix-agent-control-mcp
-            }/bin/sinnix-agent-control-mcp
-            test -x "$agent_control_mcp"
-            grep -Fq '/etc/sinnix/agent-gateway.json' "$agent_control_mcp"
           '';
         }
       );

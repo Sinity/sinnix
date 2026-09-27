@@ -49,11 +49,8 @@ def config(tmp_path: Path) -> tuple[GatewayConfig, dict[str, Path]]:
     )
 
 
-@pytest.mark.parametrize("principal_name", ("operator", "agent-control", "operator"))
-def test_principals_have_full_operator_authorized_capture_read_access(
-    principal_name: str,
-) -> None:
-    principal = Principal.for_name(principal_name)
+def test_operator_has_authorized_capture_read_access() -> None:
+    principal = Principal.for_name("operator")
 
     assert principal.allowed_lanes is None
     principal.require_lane("clipboard")

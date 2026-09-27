@@ -207,11 +207,11 @@ def test_missing_index_is_an_honest_unavailable_result(tmp_path: Path) -> None:
     }
 
 
-def test_agent_control_can_search_but_unknown_principal_cannot(tmp_path: Path) -> None:
-    agent_control = service(
+def test_operator_can_search_but_unknown_principal_cannot(tmp_path: Path) -> None:
+    operator = service(
         tmp_path,
         [{"kind": "script", "name": "status", "description": "Show status"}],
-        principal_name="agent-control",
+        principal_name="operator",
     )
     denied = CapabilityIndexService(
         GatewayConfig(
@@ -225,7 +225,7 @@ def test_agent_control_can_search_but_unknown_principal_cannot(tmp_path: Path) -
         Principal("restricted", frozenset(), None),
     )
 
-    assert agent_control.search()["available"] is True
+    assert operator.search()["available"] is True
     with pytest.raises(PolicyError, match="capability.read"):
         denied.search()
 

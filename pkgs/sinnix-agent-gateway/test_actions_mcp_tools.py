@@ -19,8 +19,8 @@ BY_NAME = {action.name: action for action in mcp_tools.ACTIONS}
 
 
 class WriteSession(FakeSession):
-    async def list_tools(self) -> object:
-        tools = (await super().list_tools()).tools
+    async def list_tools(self, *, params: object | None = None) -> object:
+        tools = (await super().list_tools(params=params)).tools
         tools.append(
             SimpleNamespace(
                 name="refresh",
@@ -29,7 +29,7 @@ class WriteSession(FakeSession):
                 annotations=None,
             )
         )
-        return SimpleNamespace(tools=tools)
+        return SimpleNamespace(tools=tools, next_cursor=None)
 
     async def call_tool(self, name, arguments):
         return SimpleNamespace(
@@ -104,7 +104,7 @@ def test_servers_tools_call_change(
     assert (
         servers["fixture"]["availability"] == "available"
         and servers["fixture"]["tool_count"] == 2
-    )
+    ), servers["fixture"]
     assert (
         servers["fixture"]["latency_ms"] is not None
         and servers["fixture"]["last_successful_probe"]

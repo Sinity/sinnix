@@ -131,34 +131,33 @@ Servers: context7, firecrawl, github, lynchpin, polylogue, sinex.
 
 ### antigravity (claude)
 
-Tiers: remote-core, recall, agent-control.
-Servers: agent-control, context7, github, polylogue, sinex.
+Tiers: remote-core, recall.
+Servers: context7, github, polylogue, sinex.
 
 ### antigravity (codex)
 
-Tiers: remote-core, recall, agent-control.
-Servers: agent-control, context7, github, polylogue, sinex.
+Tiers: remote-core, recall.
+Servers: context7, github, polylogue, sinex.
 
 ### antigravity (gemini)
 
-Tiers: remote-core, recall, agent-control.
-Servers: agent-control, context7, github, polylogue, sinex.
+Tiers: remote-core, recall.
+Servers: context7, github, polylogue, sinex.
 
 ### antigravity (antigravity)
 
-Tiers: remote-core, recall, agent-control.
-Servers: agent-control, context7, github, polylogue, sinex.
+Tiers: remote-core, recall.
+Servers: context7, github, polylogue, sinex.
 
 ### antigravity (hermes)
 
-Tiers: remote-core, recall, agent-control.
-Servers: agent-control, context7, github, polylogue, sinex.
+Tiers: remote-core, recall.
+Servers: context7, github, polylogue, sinex.
 
 ## MCP servers
 
 | Server            | Tier            | Transport | Command or URL                 | Clients                                    |
 | ----------------- | --------------- | --------- | ------------------------------ | ------------------------------------------ |
-| `agent-control`   | `agent-control` | `stdio`   | `sinnix-agent-control-mcp`     | claude, codex, gemini, antigravity, hermes |
 | `chrome-devtools` | `browser-mcp`   | `stdio`   | `mcp-chrome-devtools`          | claude, codex, gemini                      |
 | `context7`        | `remote-core`   | `http`    | `https://mcp.context7.com/mcp` | claude, codex, gemini, antigravity, hermes |
 | `firecrawl`       | `browser-mcp`   | `stdio`   | `mcp-firecrawl`                | claude, hermes                             |

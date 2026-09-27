@@ -125,24 +125,6 @@ def test_result_snapshot_preserves_owner_page_and_receipt(tmp_path) -> None:
     assert results.read(snapshot["result"]["result_id"]) == snapshot
 
 
-def test_result_snapshot_rejects_cross_principal_reads(tmp_path) -> None:
-    cfg = config(tmp_path)
-    audit = AuditService(cfg, Principal.for_name("operator"))
-    snapshot = ResultService(cfg, Principal.for_name("operator")).record(
-        action="gateway.status",
-        owner="gateway",
-        route="observe.gateway_status",
-        outcome="ok",
-        payload={"status": "ready"},
-        receipt=audit.append("gateway.status", "ok"),
-    )
-
-    with pytest.raises(ResultError, match="unavailable"):
-        ResultService(cfg, Principal.for_name("agent-control")).read(
-            snapshot["result"]["result_id"]
-        )
-
-
 def test_runtime_v2_envelopes_success_and_public_error(tmp_path) -> None:
     runtime = Runtime.create(config(tmp_path), "operator")
     action = ACTIONS["gateway.catalog"]

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 from sinnix_agent_gateway.beads import BeadsError, BeadsService
-from sinnix_agent_gateway.capabilities import PolicyError, Principal
+from sinnix_agent_gateway.capabilities import Principal
 from sinnix_agent_gateway.config import (
     GatewayConfig,
     ProjectConfig,
@@ -155,10 +155,3 @@ def test_native_mutation_preserves_body_and_owner_preconditions(tmp_path):
         )
     assert raised.value.code == "precondition_failed"
     assert raised.value.details["owner_error"]["detail"] == "row revision changed"
-
-
-def test_authority_and_write_policy_are_checked_before_native_action(tmp_path):
-    beads, log = beads_service(tmp_path, "agent-control")
-    with pytest.raises(PolicyError):
-        beads.native("fixture", "createIssue", {}, write=True)
-    assert not log.exists()

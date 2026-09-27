@@ -81,18 +81,6 @@ def test_call_replays_through_the_named_tool_after_local_validation(
         anyio.run(
             cli_support.invoke_mcp, _config(tmp_path), "operator", "files.rea", {}
         )
-    with pytest.raises(CliInputError, match="cannot invoke"):
-        anyio.run(
-            cli_support.invoke_mcp,
-            _config(tmp_path),
-            "agent-control",
-            "files.change",
-            {
-                "target": {"path": "/x"},
-                "change": {"operation": "remove"},
-                "idempotency_key": "k",
-            },
-        )
 
 
 def test_cli_projection_preserves_binary_content_blocks() -> None:

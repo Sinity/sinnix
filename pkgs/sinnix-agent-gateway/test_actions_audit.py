@@ -66,13 +66,6 @@ def test_verify_and_receipt(tmp_path: Path) -> None:
         BY_NAME,
     )
     assert missing["error"]["code"] == "not_found"
-    foreign = call(
-        Runtime.create(rt.config, "agent-control"),
-        "audit.receipt",
-        {"receipt_id": receipt_id},
-        BY_NAME,
-    )
-    assert foreign["error"]["code"] == "policy_denied"
 
 
 def test_results_get(tmp_path: Path) -> None:

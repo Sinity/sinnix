@@ -60,20 +60,6 @@ let
       ];
     };
 
-    agent-control = {
-      description = "Local-agent-control profile of the Sinnix agent gateway: inspect and steer agent jobs";
-      transport = "stdio";
-      tier = "agent-control";
-      command = "sinnix-agent-control-mcp";
-      clients = [
-        "claude"
-        "codex"
-        "gemini"
-        "antigravity"
-        "hermes"
-      ];
-    };
-
     firecrawl = {
       description = "Web page scraping and crawling for readable page content";
       transport = "stdio";
@@ -242,12 +228,11 @@ let
       "browser-mcp"
     ];
     # Antigravity blocks print-mode startup while any MCP remains pending.
-    # Keep the ordinary coding and orchestration surface, but leave slow
-    # deep-evidence servers to clients with bounded MCP startup handling.
+    # Keep the ordinary coding surface, but leave slow deep-evidence servers
+    # to clients with bounded MCP startup handling.
     antigravity = [
       "remote-core"
       "recall"
-      "agent-control"
     ];
   };
 

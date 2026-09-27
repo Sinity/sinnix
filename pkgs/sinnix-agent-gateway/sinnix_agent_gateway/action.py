@@ -30,7 +30,6 @@ from .schemas import GatewayModel, V2ToolEnvelope
 
 ALL_PRINCIPALS = KNOWN_PRINCIPALS
 OPERATOR_ONLY = frozenset({"operator"})
-CONTROL_OPERATOR = frozenset({"agent-control", "operator"})
 
 READ_FAMILIES = frozenset(
     {
