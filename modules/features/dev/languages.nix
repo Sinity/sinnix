@@ -53,6 +53,16 @@ mkFeatureModule {
         ];
       })
 
+      # Seeded 2026-09-28 from ~/.cache/uv (built wheels and the archive
+      # entries they point at, including the source-built free-threaded
+      # duckdb); a fresh worktree then provisions with no wheel build.
+      (lib.mkIf cfg.python.enable {
+        home-manager.users.${user}.home.sessionVariables = {
+          UV_CACHE_DIR = "/realm/state/cache/uv";
+          UV_LINK_MODE = "clone";
+        };
+      })
+
       # Python with common packages
       (lib.mkIf cfg.python.enable {
         # The uv cache lives on /realm beside the worktrees so venvs clone
