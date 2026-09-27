@@ -2,15 +2,14 @@ from __future__ import annotations
 
 import json
 import os
-import selectors
-import signal
 import subprocess
-import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
+
+from sinnix_lib.process import run_bounded
 
 
 class EnvironmentProfile(StrEnum):
@@ -214,32 +213,6 @@ class OwnerExecution:
                 f"command_unavailable:{type(exc).__name__}"
             ) from exc
 
-    @staticmethod
-    def terminate(process: subprocess.Popen[bytes]) -> None:
-        """Terminate one detached process group, escalating after one second."""
-        if process.poll() is not None:
-            # The leader can exit while a descendant still holds its stdout or
-            # stderr pipe.  The group remains addressable even though wait()
-            # returns immediately for the leader; kill it before cleanup reads
-            # either pipe, otherwise that read defeats the caller's deadline.
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            return
-        try:
-            os.killpg(process.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            return
-        try:
-            process.wait(timeout=1)
-        except subprocess.TimeoutExpired:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                return
-            process.wait()
-
     def run(
         self,
         command: Sequence[str],
@@ -250,146 +223,70 @@ class OwnerExecution:
         if not command:
             raise ValueError("owner command cannot be empty")
         normalized = tuple(str(part) for part in command)
-        try:
-            process = self.start(
-                normalized,
-                profile,
-                stdin=(
-                    subprocess.PIPE
-                    if profile.stdin_bytes is not None
-                    else subprocess.DEVNULL
-                ),
-            )
-        except OwnerExecutionStartError as exc:
+        environment, missing_environment = self.environment_for(
+            profile.route, profile.environment
+        )
+        if missing_environment is not None:
             return ExecutionResult(
                 command=normalized,
                 exit_status=None,
                 stdout=b"",
                 stderr=b"",
-                failure_class=exc.failure_class,
+                failure_class=f"environment_unavailable:{missing_environment}",
             )
-
-        stdout = bytearray()
-        stderr = bytearray()
-        combined_output = bytearray()
-        pending_stdin = memoryview(profile.stdin_bytes or b"")
-        exceeded = False
-        stopped_early = False
-        stream_failure: str | None = None
-        selector = selectors.DefaultSelector()
-        assert process.stdout is not None
-        assert process.stderr is not None
-        selector.register(process.stdout, selectors.EVENT_READ, ("stdout", stdout))
-        selector.register(process.stderr, selectors.EVENT_READ, ("stderr", stderr))
-        if process.stdin is not None:
-            selector.register(process.stdin, selectors.EVENT_WRITE, ("stdin", None))
-        deadline = time.monotonic() + profile.timeout_seconds
-        timed_out = False
         try:
-            while selector.get_map():
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    timed_out = True
-                    self.terminate(process)
-                    break
-                for key, _ in selector.select(min(remaining, 0.1)):
-                    stream, destination = key.data
-                    if stream == "stdin":
-                        try:
-                            written = os.write(key.fd, pending_stdin[:65_536])
-                        except BrokenPipeError:
-                            pending_stdin = memoryview(b"")
-                        else:
-                            pending_stdin = pending_stdin[written:]
-                        if not pending_stdin:
-                            selector.unregister(key.fileobj)
-                            key.fileobj.close()
-                        continue
-                    chunk = os.read(key.fd, 65_536)
-                    if not chunk:
-                        selector.unregister(key.fileobj)
-                        continue
-                    assert destination is not None
-                    if profile.max_combined_output_bytes is not None:
-                        combined_limit = profile.max_combined_output_bytes
-                        combined_room = combined_limit + 1 - len(combined_output)
-                        if combined_room > 0:
-                            combined_output.extend(chunk[:combined_room])
-                        if len(combined_output) > combined_limit:
-                            exceeded = True
-                    elif stdout_chunk_callback is None:
-                        combined_output.extend(chunk)
-                    if stream == "stdout" and stdout_chunk_callback is not None:
-                        try:
-                            keep_reading = stdout_chunk_callback(chunk)
-                        except Exception:
-                            stream_failure = "command_stream_decode"
-                            self.terminate(process)
-                            break
-                        if keep_reading is False:
-                            stopped_early = True
-                            self.terminate(process)
-                            break
-                    else:
-                        limit = (
-                            profile.max_stdout_bytes
-                            if stream == "stdout"
-                            else profile.max_stderr_bytes
-                        )
-                        room = limit + 1 - len(destination)
-                        if room > 0:
-                            destination.extend(chunk[:room])
-                        if len(destination) > limit:
-                            exceeded = True
-                    if exceeded or stream_failure is not None:
-                        self.terminate(process)
-                        break
-                if exceeded or stream_failure is not None:
-                    break
-        finally:
-            if process.poll() is None:
-                self.terminate(process)
-            # Termination may race a selector event: stderr can already be in
-            # the pipe even when the failing stdout event was delivered first.
-            # The child is reaped above, so bounded reads cannot wait for more
-            # producer output and retain diagnostics without weakening limits.
-            for stream, destination, limit in (
-                (process.stdout, stdout, profile.max_stdout_bytes),
-                (process.stderr, stderr, profile.max_stderr_bytes),
-            ):
-                room = limit + 1 - len(destination)
-                if room <= 0:
-                    continue
-                remainder = stream.read(room)
-                if remainder:
-                    destination.extend(remainder)
-            selector.close()
-            if process.stdin is not None:
-                process.stdin.close()
-        exit_status = process.wait()
-        if stream_failure is not None:
-            failure = stream_failure
-        elif timed_out:
-            failure = "command_timeout"
-        elif exceeded:
-            failure = "command_output_bound"
-        elif not stopped_early and exit_status != 0:
-            failure = "command_failed"
-        else:
-            failure = None
+            result = run_bounded(
+                normalized,
+                timeout=profile.timeout_seconds,
+                cwd=profile.cwd,
+                env=environment,
+                stdin=profile.stdin_bytes,
+                stdout_limit=profile.max_stdout_bytes,
+                stderr_limit=profile.max_stderr_bytes,
+                combined_limit=profile.max_combined_output_bytes,
+                on_stdout_chunk=stdout_chunk_callback,
+                capture_stdout=stdout_chunk_callback is None,
+                capture_combined=(
+                    stdout_chunk_callback is None
+                    or profile.max_combined_output_bytes is not None
+                ),
+            )
+        except OSError as exc:
+            return ExecutionResult(
+                command=normalized,
+                exit_status=None,
+                stdout=b"",
+                stderr=b"",
+                failure_class=f"command_unavailable:{type(exc).__name__}",
+            )
+        if result.error_type is not None:
+            return ExecutionResult(
+                command=normalized,
+                exit_status=None,
+                stdout=result.stdout,
+                stderr=result.stderr,
+                failure_class=f"command_unavailable:{result.error_type}",
+            )
+        failure = (
+            "command_stream_decode"
+            if result.error and "stdout callback failed:" in result.error
+            else "command_timeout"
+            if result.timed_out
+            else "command_output_bound"
+            if result.limited
+            else "command_failed"
+            if not result.stopped_early and result.returncode != 0
+            else None
+        )
         return ExecutionResult(
             command=normalized,
-            exit_status=exit_status,
-            stdout=bytes(stdout[: profile.max_stdout_bytes]),
-            stderr=bytes(stderr[: profile.max_stderr_bytes]),
-            combined_output=bytes(
-                combined_output[: profile.max_combined_output_bytes]
-                if profile.max_combined_output_bytes is not None
-                else combined_output
-            ),
-            timed_out=timed_out,
-            output_exceeded=exceeded,
-            stopped_early=stopped_early,
+            exit_status=result.exit_status,
+            stdout=result.stdout,
+            stderr=result.stderr,
+            combined_output=result.combined_output,
+            timed_out=result.timed_out,
+            output_exceeded=result.limited,
+            stopped_early=result.stopped_early,
             failure_class=failure,
         )
 

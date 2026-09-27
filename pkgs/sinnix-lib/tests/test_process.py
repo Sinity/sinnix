@@ -1,9 +1,11 @@
 """Contracts of the one subprocess wrapper and the lenient scalar reads."""
 
+import errno
 import os
 import sys
 import time
 
+from sinnix_lib import process as process_module
 from sinnix_lib.process import NO_EXIT_STATUS, run, run_bounded
 from sinnix_lib.values import float_or_none, int_or_none, read_text
 
@@ -101,6 +103,35 @@ def test_run_bounded_accepts_bytes_stdin_and_environment(tmp_path):
     )
     assert result.ok
     assert result.stdout == b"from-env:from-stdin"
+    assert result.combined_output == b""
+
+
+def test_run_bounded_retries_stdin_after_would_block(monkeypatch):
+    original_write = os.write
+    writes = 0
+
+    def write_with_one_would_block(fd, data):
+        nonlocal writes
+        writes += 1
+        if writes == 1:
+            raise BlockingIOError(errno.EAGAIN, "temporarily unavailable")
+        return original_write(fd, data)
+
+    monkeypatch.setattr(process_module.os, "write", write_with_one_would_block)
+    payload = b"stdin survives a readiness race"
+    result = run_bounded(
+        [
+            sys.executable,
+            "-c",
+            "import sys; sys.stdout.buffer.write(sys.stdin.buffer.read())",
+        ],
+        timeout=5,
+        stdin=payload,
+    )
+
+    assert result.ok
+    assert result.stdout == payload
+    assert writes >= 2
 
 
 def test_run_bounded_drains_both_streams_and_reports_stdout_chunks():
@@ -139,9 +170,11 @@ def test_run_bounded_enforces_per_stream_and_combined_limits():
         ],
         timeout=30,
         combined_limit=25,
+        capture_combined=True,
     )
     assert combined.limited
     assert len(combined.stdout) + len(combined.stderr) == 25
+    assert len(combined.combined_output) == 25
     assert "combined output exceeded" in (combined.error or "")
 
 

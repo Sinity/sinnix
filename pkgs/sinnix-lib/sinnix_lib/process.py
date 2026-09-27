@@ -76,6 +76,10 @@ class BoundedResult:
     error: str | None = None
     timed_out: bool = False
     limited: bool = False
+    combined_output: bytes = b""
+    stopped_early: bool = False
+    error_type: str | None = None
+    exit_status: int | None = None
 
     @property
     def ok(self) -> bool:
@@ -101,15 +105,19 @@ def run_bounded(
     stdout_limit: int | None = None,
     stderr_limit: int | None = None,
     combined_limit: int | None = None,
-    on_stdout_chunk: Callable[[bytes], None] | None = None,
+    on_stdout_chunk: Callable[[bytes], bool | None] | None = None,
+    capture_stdout: bool = True,
+    capture_combined: bool = False,
 ) -> BoundedResult:
     """Run *argv* with byte-oriented pipes and bounded supervision.
 
     The child starts a new process group.  Its stdout and stderr are drained
     concurrently, so a noisy child cannot deadlock on either pipe.  Limits
     count bytes retained and cause the whole process group to be killed when
-    crossed.  ``on_stdout_chunk`` receives each retained stdout chunk in
-    arrival order, before it is appended to the result.
+    crossed.  ``on_stdout_chunk`` receives stdout chunks in arrival order.
+    Returning ``False`` stops the process successfully. Set ``capture_stdout``
+    false when a consumer handles the bytes directly and the result should not
+    buffer them.
 
     ``stdin`` is written as bytes and then closed.  ``env`` follows
     :class:`subprocess.Popen` semantics: ``None`` inherits the current
@@ -138,17 +146,22 @@ def run_bounded(
             start_new_session=True,
         )
     except OSError as exc:
-        return BoundedResult(args, None, b"", b"", error=str(exc))
+        return BoundedResult(
+            args, None, b"", b"", error=str(exc), error_type=type(exc).__name__
+        )
 
     selector = selectors.DefaultSelector()
     stdout_chunks: list[bytes] = []
     stderr_chunks: list[bytes] = []
+    combined_chunks: list[bytes] = []
     stdout_size = stderr_size = 0
+    total_output_size = 0
     started = time.monotonic()
     killed = False
     timed_out = False
     limited = False
     failure: str | None = None
+    stopped_early = False
 
     def close_stream(fileobj: object) -> None:
         try:
@@ -217,11 +230,13 @@ def run_bounded(
                 kind = key.data
                 if kind == "stdin":
                     try:
-                        written = os.write(key.fd, input_view)
+                        written = os.write(key.fd, input_view[:65536])
                         input_view = input_view[written:]
                         if not input_view:
                             selector.unregister(key.fileobj)
                             close_stream(process.stdin)
+                    except BlockingIOError:
+                        continue
                     except (BrokenPipeError, OSError):
                         selector.unregister(key.fileobj)
                         close_stream(process.stdin)
@@ -239,23 +254,34 @@ def run_bounded(
                         continue
 
                     stream_size = stdout_size if kind == "stdout" else stderr_size
-                    stream_limit = stdout_limit if kind == "stdout" else stderr_limit
-                    combined_size = stdout_size + stderr_size
+                    stream_limit = (
+                        stdout_limit
+                        if kind == "stdout" and capture_stdout
+                        else stderr_limit if kind == "stderr" else None
+                    )
+                    total_size_before = total_output_size
+                    total_output_size += len(chunk)
                     allowed = len(chunk)
                     if stream_limit is not None:
                         allowed = min(allowed, max(stream_limit - stream_size, 0))
                     if combined_limit is not None:
-                        allowed = min(allowed, max(combined_limit - combined_size, 0))
+                        allowed = min(allowed, max(combined_limit - total_size_before, 0))
                     retained = chunk[:allowed]
+                    if capture_combined and retained:
+                        combined_chunks.append(retained)
                     if kind == "stdout":
-                        if retained:
+                        if retained and capture_stdout:
                             stdout_chunks.append(retained)
                             stdout_size += len(retained)
-                            if on_stdout_chunk is not None:
-                                try:
-                                    on_stdout_chunk(retained)
-                                except Exception as exc:
-                                    kill(f"stdout callback failed: {exc}")
+                        if on_stdout_chunk is not None and not stopped_early:
+                            try:
+                                callback_chunk = chunk if not capture_stdout else retained
+                                if on_stdout_chunk(callback_chunk) is False:
+                                    stopped_early = True
+                                    _kill_group(process)
+                                    killed = True
+                            except Exception as exc:
+                                kill(f"stdout callback failed: {exc}")
                     else:
                         if retained:
                             stderr_chunks.append(retained)
@@ -267,14 +293,14 @@ def run_bounded(
                     )
                     exceeded_combined = (
                         combined_limit is not None
-                        and combined_size + len(chunk) > combined_limit
+                        and total_size_before + len(chunk) > combined_limit
                     )
                     if exceeded_stream or exceeded_combined:
                         if exceeded_stream:
                             description = (
                                 f"{kind} exceeded limit of {stream_limit} bytes"
                             )
-                        else:
+                        elif exceeded_combined:
                             description = f"combined output exceeded limit of {combined_limit} bytes"
                         kill(description, is_limit=True)
 
@@ -300,6 +326,9 @@ def run_bounded(
         error=failure,
         timed_out=timed_out,
         limited=limited,
+        combined_output=b"".join(combined_chunks),
+        stopped_early=stopped_early,
+        exit_status=returncode,
     )
 
 

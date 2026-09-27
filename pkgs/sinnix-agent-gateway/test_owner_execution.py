@@ -62,6 +62,56 @@ def test_owner_execution_terminates_timed_out_command() -> None:
     assert result.exit_status is not None
 
 
+def test_owner_execution_waits_for_child_after_both_output_pipes_close() -> None:
+    result = OwnerExecution().run(
+        [
+            sys.executable,
+            "-c",
+            "import os, time; os.close(1); os.close(2); time.sleep(0.2)",
+        ],
+        ExecutionProfile(route=OwnerRoute("fixture"), timeout_seconds=1),
+    )
+
+    assert result.available is True
+    assert result.timed_out is False
+
+
+def test_owner_execution_timeout_does_not_wait_for_sigterm_ignoring_child() -> None:
+    started = time.monotonic()
+    result = OwnerExecution().run(
+        [
+            sys.executable,
+            "-c",
+            "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(60)",
+        ],
+        ExecutionProfile(route=OwnerRoute("fixture"), timeout_seconds=0.05),
+    )
+
+    assert result.failure_class == "command_timeout"
+    assert time.monotonic() - started < 0.4
+
+
+def test_owner_execution_deadline_covers_blocked_large_stdin_write() -> None:
+    started = time.monotonic()
+    result = OwnerExecution().run(
+        [
+            sys.executable,
+            "-c",
+            "import sys, time; sys.stdin.buffer.read(1); "
+            "sys.stdout.buffer.write(b'y' * 131072); "
+            "sys.stdout.buffer.flush(); time.sleep(60)",
+        ],
+        ExecutionProfile(
+            route=OwnerRoute("fixture"),
+            timeout_seconds=0.05,
+            stdin_bytes=b"x" * (8 * 1024 * 1024),
+        ),
+    )
+
+    assert result.failure_class == "command_timeout"
+    assert time.monotonic() - started < 0.4
+
+
 def test_owner_execution_deadline_kills_descendant_holding_pipes() -> None:
     started = time.monotonic()
     result = OwnerExecution().run(
@@ -117,6 +167,7 @@ def test_owner_execution_allows_a_stream_consumer_to_stop_a_command_early() -> N
     )
 
     assert seen == [b"first\n"]
+    assert result.stdout == b""
     assert result.stopped_early is True
     assert result.available is True
 
