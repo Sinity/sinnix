@@ -420,6 +420,7 @@ def test_job_operations_pass_the_launch_reference_through_to_agentctl(
     for name in ("wait", "get", "cancel", "retry", "clean", "result"):
         args, kwargs = seen[name]
         assert reference in (*args, *kwargs.values()), name
+    assert seen["retry"][0][0] is adapter.config
 
 
 def test_a_launch_reference_that_is_a_path_is_refused(adapter: LocalJobs) -> None:

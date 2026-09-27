@@ -532,7 +532,9 @@ class LocalJobs:
     def _retry(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         return job_payload(
             launch.retry(
-                _require_int(arguments, "job_id"), _launch_reference(arguments)
+                self.config,
+                _require_int(arguments, "job_id"),
+                _launch_reference(arguments),
             )
         )
 
