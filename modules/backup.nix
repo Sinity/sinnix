@@ -107,19 +107,27 @@ let
   borgCacheDir = "/persist/root/.cache/borg";
   borgStaleLockMinutes = 120;
   borgGlobalLock = "/run/lock/sinnix-borg.lock";
-  sinexProjectPath = "${realmRoot}/project/sinex";
-  sinexBeadsDoltArchivePath = "project/sinex/.beads/dolt";
-  sinexBeadsIssuesArchivePath = "project/sinex/.beads/issues.jsonl";
+  sinexTaskAuthority = config.sinnix.projects.entries.sinex.taskAuthority;
+  sinexBeadsArchivePath =
+    assert lib.assertMsg (
+      sinexTaskAuthority != null
+      && lib.hasPrefix "${realmRoot}/" sinexTaskAuthority.workspace
+      && lib.hasPrefix "${sinexTaskAuthority.workspace}/" sinexTaskAuthority.database
+    ) "The Sinex Beads drill requires a task authority and database inside /realm";
+    lib.removePrefix "${realmRoot}/" sinexTaskAuthority.workspace;
+  sinexBeadsDatabaseRelativePath = lib.removePrefix "${sinexTaskAuthority.workspace}/" sinexTaskAuthority.database;
   sinexBeadsDrillLog = "${config.sinnix.paths.machineRoot}/borg_beads_drill.jsonl";
-  sinexBeadsArchivePaths = [
-    sinexBeadsDoltArchivePath
-    sinexBeadsIssuesArchivePath
-  ];
   # Elicitation state (items, the append-only comparison log, the fitted
   # model): operator judgments that cannot be recomputed from anything.
   elicitStateArchivePath = "state/elicit";
   # Paths under /realm no exclude pattern may cover, ancestors included.
-  protectedRealmArchivePaths = sinexBeadsArchivePaths ++ [ elicitStateArchivePath ];
+  protectedRealmArchivePaths = [
+    sinexBeadsArchivePath
+    "${sinexBeadsArchivePath}/metadata.json"
+    "${sinexBeadsArchivePath}/config.yaml"
+    "${sinexBeadsArchivePath}/${sinexBeadsDatabaseRelativePath}/sinex/.dolt"
+    elicitStateArchivePath
+  ];
   # A six-hour snapshot can take about an hour to archive after acquisition.
   # Keep data age distinct from the last-success wall clock.
   borgDataFreshnessMaxAgeSec = 8 * 60 * 60;
@@ -764,71 +772,15 @@ let
     ".Trash-1000"
   ];
 
-  # Borg excludes are glob patterns relative to /realm. Test both an item and
-  # its ancestors: excluding .beads or project/sinex excludes its children
-  # even when the protected item itself does not match the pattern directly.
-  borgGlobToRegex =
-    pattern:
-    let
-      globStarPlaceholder = "__SINNIX_BORG_GLOBSTAR__";
-      withGlobStarPlaceholder = lib.replaceStrings [ "**" ] [ globStarPlaceholder ] pattern;
-      escaped =
-        lib.replaceStrings
-          [
-            "\\"
-            "."
-            "+"
-            "("
-            ")"
-            "["
-            "]"
-            "{"
-            "}"
-            "^"
-            "$"
-            "|"
-          ]
-          [
-            "\\\\"
-            "\\."
-            "\\+"
-            "\\("
-            "\\)"
-            "\\["
-            "\\]"
-            "\\{"
-            "\\}"
-            "\\^"
-            "\\$"
-            "\\|"
-          ]
-          withGlobStarPlaceholder;
-      withSingleStar = lib.replaceStrings [ "*" ] [ "[^/]*" ] escaped;
-      withQuestion = lib.replaceStrings [ "?" ] [ "[^/]" ] withSingleStar;
-    in
-    "^${lib.replaceStrings [ globStarPlaceholder ] [ ".*" ] withQuestion}$";
-  protectedPathAndAncestors =
-    path:
-    let
-      parts = lib.splitString "/" path;
-    in
-    lib.genList (index: lib.concatStringsSep "/" (lib.take (index + 1) parts)) (builtins.length parts);
-  realmExcludeMatchesProtectedPath =
-    exclude:
-    lib.any (
-      path:
-      lib.any (candidate: builtins.match (borgGlobToRegex exclude) candidate != null) (
-        protectedPathAndAncestors path
-      )
-    ) protectedRealmArchivePaths;
+  realmExcludeMatchesProtectedPath = import ./lib/backup/protected-paths.nix {
+    inherit lib;
+    paths = protectedRealmArchivePaths;
+  };
 
   mkSinexBeadsDrillScript = ''
     set -euo pipefail
 
-    archive_paths=(
-      ${lib.escapeShellArg sinexBeadsDoltArchivePath}
-      ${lib.escapeShellArg sinexBeadsIssuesArchivePath}
-    )
+    archive_path=${lib.escapeShellArg sinexBeadsArchivePath}
 
     exec 9>${lib.escapeShellArg borgGlobalLock}
     if ! flock -n 9; then
@@ -843,9 +795,7 @@ let
     fi
     archive="''${archives[$(( ''${#archives[@]} - 1 ))]}"
 
-    for archive_path in "''${archive_paths[@]}"; do
-      borg list --short "${borgRepoRealm}::''${archive}" "$archive_path" | grep -Fxq "$archive_path"
-    done
+    borg list --short "${borgRepoRealm}::''${archive}" "$archive_path" | grep -Fxq "$archive_path"
 
     restore_root="$(mktemp -d)"
     cleanup() {
@@ -855,29 +805,37 @@ let
 
     (
       cd "$restore_root"
-      borg extract "${borgRepoRealm}::''${archive}" "''${archive_paths[@]}"
+      borg extract "${borgRepoRealm}::''${archive}" "$archive_path"
     )
 
-    issues_path="$restore_root/${sinexBeadsIssuesArchivePath}"
-    dolt_path="$restore_root/${sinexBeadsDoltArchivePath}"
-    test -s "$issues_path"
-    jq -e -s 'length > 0' "$issues_path" >/dev/null
-    test -d "$dolt_path/.dolt"
+    beads_path="$restore_root/$archive_path"
+    test -s "$beads_path/metadata.json"
+    jq -e 'type == "object"' "$beads_path/metadata.json" >/dev/null
+    test -s "$beads_path/config.yaml"
+    database_path="$beads_path/${sinexBeadsDatabaseRelativePath}"
+    test -d "$database_path/sinex/.dolt"
 
-    source_git_head="$(${pkgs.git}/bin/git -c safe.directory=${lib.escapeShellArg sinexProjectPath} -C ${lib.escapeShellArg sinexProjectPath} rev-parse HEAD)"
-    dolt_commit="$(${pkgs.dolt}/bin/dolt --data-dir "$dolt_path" --use-db sinex sql \
+    # A restored server configuration can name a live port. Open the database
+    # in a separate scratch data directory without that configuration.
+    offline_root="$restore_root/offline"
+    mkdir "$offline_root"
+    mv "$database_path/sinex" "$offline_root/sinex"
+    dolt_commit="$(${pkgs.dolt}/bin/dolt --data-dir "$offline_root" --use-db sinex sql \
       -q 'SELECT commit_hash FROM dolt_log LIMIT 1' -r json \
-      | jq -er '.rows[0].commit_hash // empty')"
+      | jq -er '.rows[0].commit_hash | select(test("^[0-9a-v]{32}$"))')"
+    issue="$(${pkgs.dolt}/bin/dolt --data-dir "$offline_root" --use-db sinex sql \
+      -q 'SELECT id, title FROM issues ORDER BY id LIMIT 1' -r json \
+      | jq -cer '.rows[0] | select(.id != null and .id != "" and .title != null and .title != "")')"
 
     install -d -m 0755 ${lib.escapeShellArg (builtins.dirOf sinexBeadsDrillLog)}
     jq -nc \
       --arg type sinex_beads_restore_drill \
       --arg archive "$archive" \
-      --arg source_git_head "$source_git_head" \
+      --arg authority_path "$archive_path" \
       --arg dolt_commit "$dolt_commit" \
-      --arg issues_jsonl_sha256 "$(sha256sum "$issues_path" | cut -d ' ' -f 1)" \
+      --argjson issue "$issue" \
       --arg ts "$(date -Iseconds)" \
-      '{ts:$ts,type:$type,archive:$archive,source_git_head:$source_git_head,dolt_commit:$dolt_commit,issues_jsonl_sha256:$issues_jsonl_sha256,ok:true}' \
+      '{ts:$ts,type:$type,archive:$archive,authority_path:$authority_path,dolt_commit:$dolt_commit,issue:$issue,ok:true}' \
       | tee -a ${lib.escapeShellArg sinexBeadsDrillLog}
   '';
 

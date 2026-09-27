@@ -5,7 +5,30 @@
 { inputs, ... }:
 let
   inherit (inputs.nixpkgs) lib;
+  defaultBeadsPath = "state/tasks/sinex/.beads";
+  protectedPathMatches = import ../../modules/lib/backup/protected-paths.nix {
+    inherit lib;
+    paths = [
+      defaultBeadsPath
+      "${defaultBeadsPath}/metadata.json"
+      "${defaultBeadsPath}/config.yaml"
+      "${defaultBeadsPath}/dolt/sinex/.dolt"
+    ];
+  };
 in
+assert lib.assertMsg (
+  lib.all protectedPathMatches [
+    "state"
+    "state/tasks"
+    "state/tasks/sinex"
+    defaultBeadsPath
+    "${defaultBeadsPath}/dolt"
+    "${defaultBeadsPath}/dolt/sinex/.dolt"
+    "${defaultBeadsPath}/metadata.json"
+    "state/**"
+  ]
+  && !protectedPathMatches "project/sinex/.beads"
+) "Realm exclusions must reject the canonical Sinex task store and every ancestor";
 {
   perSystem =
     { system, ... }:
@@ -112,6 +135,33 @@ in
             message = "A capture lane's liveness probe must carry a real command and a bounded timeout";
           }
         ];
+      };
+      customAuthorityEval = evalTestSpec system {
+        name = "backup-custom-sinex-task-authority";
+        modules = [
+          mountTmpfsRoots
+          baseTestConfig
+          inputs.sinex.nixosModules.default
+          (_: {
+            networking.hostName = "backup-custom-authority";
+            sinnix.backup.enable = true;
+            sinnix.services = {
+              "machine-telemetry".enable = true;
+              polylogue.enable = true;
+              sinex.prepareHost = true;
+            };
+            services.sinex = {
+              stateRoot = "/var/lib/sinex/state";
+              storage.blob.repositoryPath = "/var/lib/sinex/state/blob-repository";
+            };
+            sinnix.services.polylogue.dataDir = "/tmp/sentinel-polylogue-root";
+            sinnix.projects.entries.sinex.taskAuthority = {
+              workspace = "/realm/authority/sinex/.beads";
+              database = "/realm/authority/sinex/.beads/dolt";
+            };
+          })
+        ];
+        assertions = _: [ ];
       };
       headlessBackupEval = evalTestSpec system {
         name = "backup-headless-default";
@@ -413,6 +463,9 @@ in
       ];
 
       sinexBeadsDrillScript =
+        assert lib.assertMsg (
+          lib.hasInfix "authority/sinex/.beads" customAuthorityEval.config.systemd.services.sinnix-borg-beads-drill.script
+        ) "The Beads drill must follow a configured Sinex task authority outside state/tasks";
         rewriteBackupHook backupRuntimeEval.config.systemd.services.sinnix-borg-beads-drill.script
           [
             {
@@ -424,16 +477,8 @@ in
               to = "$TMPDIR/state/sinnix-borg.lock";
             }
             {
-              from = "/realm/project/sinex";
-              to = "$TMPDIR/sinex-source";
-            }
-            {
               from = "/realm";
               to = "$TMPDIR/realm-data";
-            }
-            {
-              from = "${pkgs.git}/bin/git";
-              to = "$TMPDIR/mock-bin/git";
             }
             {
               from = "${pkgs.dolt}/bin/dolt";

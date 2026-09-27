@@ -327,17 +327,15 @@
     '';
   })
 
-  # The realm archive is the production authority for Sinex's checkout,
-  # including the mutable Beads Dolt directory and tracked JSONL export.
-  # This drill lists both exact paths, extracts them into an ephemeral
-  # directory, validates their formats, and records archive/source commits.
+  # The realm archive covers Sinex's external Beads task store. The drill
+  # extracts that store into scratch and reads a task and commit offline.
   #
   # Its failure notification comes from the renderer, not from a hand-wired
   # onFailure: the drill is deliberately not an observed surface (its
   # evidence is the drill log, not unit state), so runtime.nix's
   # surface-driven attachment skips it and mkScheduledJob's does not.
   (mkBackupJob "sinnix-borg-beads-drill" {
-    description = "Restore drill for Sinex Beads Dolt and issues JSONL";
+    description = "Restore drill for the external Sinex Beads task store";
     unit = {
       reloadIfChanged = false;
       stopIfChanged = false;
@@ -352,7 +350,6 @@
       borgbackup
       coreutils
       dolt
-      git
       gnugrep
       jq
       util-linux

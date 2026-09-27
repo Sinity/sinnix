@@ -800,13 +800,24 @@ elif command=='btrfs':
             for name in ("mountpoint", "mount", "umount", "btrfs", "borg", "systemctl"):
                 (root / "mock-bin" / name).write_text(mock)
                 (root / "mock-bin" / name).chmod(0o755)
-            (root / "mock-bin/git").write_text(
-                "#!/bin/sh\nprintf '%s\\n' synthetic-source-git-head\n"
-            )
             (root / "mock-bin/dolt").write_text(
-                '#!/bin/sh\nprintf \'%s\\n\' \'{"rows":[{"commit_hash":"synthetic-dolt-commit"}]}\'\n'
+                """#!/usr/bin/env python3
+import json, pathlib, sys
+args = sys.argv[1:]
+repo = pathlib.Path(args[args.index('--data-dir') + 1]) / 'sinex'
+head = repo / '.dolt/HEAD'
+issue = repo / 'issue.json'
+if not head.is_file() or not issue.is_file(): sys.exit(1)
+commit = head.read_text().strip()
+if len(commit) != 32 or any(c not in '0123456789abcdefghijklmnopqrstuv' for c in commit): sys.exit(1)
+if 'FROM dolt_log' in args[args.index('-q') + 1]:
+    print(json.dumps({'rows': [{'commit_hash': commit}]}))
+elif 'FROM issues' in args[args.index('-q') + 1]:
+    print(json.dumps({'rows': [json.loads(issue.read_text())]}))
+else: sys.exit(1)
+"""
             )
-            for name in ("git", "dolt"):
+            for name in ("dolt",):
                 (root / "mock-bin" / name).chmod(0o755)
             env["PATH"] = str(root / "mock-bin") + ":" + env["PATH"]
             for script_name, script in scripts.items():
@@ -873,8 +884,11 @@ elif command=='btrfs':
                     "same-name": "new",
                     "inbox/download": "canonical",
                     "tmp/scratch": "scratch",
-                    "project/sinex/.beads/issues.jsonl": '{"id":"synthetic-bead"}\n',
-                    "project/sinex/.beads/dolt/.dolt/HEAD": "synthetic",
+                    "project/sinex/.beads/issues.jsonl": '{"id":"stale-checkout-decoy"}\n',
+                    "state/tasks/sinex/.beads/metadata.json": '{}',
+                    "state/tasks/sinex/.beads/config.yaml": 'issue-prefix: sinex',
+                    "state/tasks/sinex/.beads/dolt/sinex/.dolt/HEAD": "0123456789abcdefghijklmnopqrstuv",
+                    "state/tasks/sinex/.beads/dolt/sinex/issue.json": '{"id":"canonical-task","title":"Current task"}',
                     "project/build/precious": "source build material",
                     "project/dist/precious": "source distribution material",
                     "project/node_modules/precious": "source package material",
@@ -987,8 +1001,11 @@ elif command=='btrfs':
             interrupted = snapshot(
                 "realm.20260402T080000+0000", {
                     "same-name": "interrupted proof",
-                    "project/sinex/.beads/issues.jsonl": '{"id":"synthetic-bead"}\n',
-                    "project/sinex/.beads/dolt/.dolt/HEAD": "synthetic",
+                    "project/sinex/.beads/issues.jsonl": '{"id":"stale-checkout-decoy"}\n',
+                    "state/tasks/sinex/.beads/metadata.json": '{}',
+                    "state/tasks/sinex/.beads/config.yaml": 'issue-prefix: sinex',
+                    "state/tasks/sinex/.beads/dolt/sinex/.dolt/HEAD": "0123456789abcdefghijklmnopqrstuv",
+                    "state/tasks/sinex/.beads/dolt/sinex/issue.json": '{"id":"canonical-task","title":"Current task"}',
                 }
             )
             before = latest_marker.read_bytes()
@@ -1125,7 +1142,28 @@ elif command=='btrfs':
             self.assertEqual(empty_hook_members, [])
             run("beads")
             receipt = next((root / "realm-data").rglob("borg_beads_drill.jsonl"))
-            self.assertTrue(json.loads(receipt.read_text())["ok"])
+            evidence = json.loads(receipt.read_text())
+            self.assertTrue(evidence["ok"])
+            self.assertEqual(evidence["authority_path"], "state/tasks/sinex/.beads")
+            self.assertEqual(evidence["issue"], {"id": "canonical-task", "title": "Current task"})
+            self.assertEqual(evidence["dolt_commit"], "0123456789abcdefghijklmnopqrstuv")
+            self.assertNotIn("stale-checkout-decoy", receipt.read_text())
+
+            snapshot("realm.20260402T090000+0000", {
+                "project/sinex/.beads/issues.jsonl": '{"id":"stale-checkout-decoy"}\n',
+            })
+            run()
+            run("beads", ok=False)
+            snapshot("realm.20260402T100000+0000", {
+                "project/sinex/.beads/issues.jsonl": '{"id":"stale-checkout-decoy"}\n',
+                "state/tasks/sinex/.beads/metadata.json": '{}',
+                "state/tasks/sinex/.beads/config.yaml": 'issue-prefix: sinex',
+                "state/tasks/sinex/.beads/dolt/sinex/.dolt/HEAD": "corrupt",
+                "state/tasks/sinex/.beads/dolt/sinex/issue.json": '{"id":"canonical-task","title":"Current task"}',
+            })
+            run()
+            run("beads", ok=False)
+            self.assertEqual(len(receipt.read_text().splitlines()), 1)
 
             older = snapshot("realm.20260403T010000+0000", {"old-only": "older bytes"})
             middle = snapshot("realm.20260403T020000+0000", {"same-name": "middle"})
