@@ -498,6 +498,13 @@ mkFeatureModule {
                     [ -L "$codex_entry" ] || continue
                     codex_name="$(basename "$codex_entry")"
                     codex_target="$(readlink -f "$codex_entry" || true)"
+                    codex_raw_target="$(readlink "$codex_entry" || true)"
+                    # Remove only broken links from the former Sinnix skill
+                    # tree. A broken user-owned link is still private state.
+                    if [ "$codex_raw_target" = "${dotsRoot}/codex/skills/$codex_name" ] && [ ! -e "$codex_entry" ]; then
+                      run rm "$codex_entry"
+                      continue
+                    fi
                     if [ "$codex_target" = "${dotsRoot}/_ai/skills/$codex_name" ] && [ ! -e "$declared_skills/$codex_name" ]; then
                       run rm "$codex_entry"
                     fi

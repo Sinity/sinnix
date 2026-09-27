@@ -46,9 +46,11 @@ For anything discoverable, prefer "inspect X and derive it" over baking in
 facts that rot — but bake in facts the executor cannot discover (operator
 decisions, off-repo context, negative results already known).
 
-Give handoff agents _more_ evidence than seems necessary plus an index and an
-inspection route; withholding for brevity forces re-derivation or guessing.
-The exception is a demonstrated token/upload cap or privacy boundary.
+Give handoff agents the decisions and negative results they cannot rediscover
+cheaply, plus concise pointers to current code, task criteria, and evidence.
+Historical notes stay behind those pointers. Large diffs and logs should be
+read in bounded, question-driven slices; repeated bulk output consumes fresh
+context without making the task clearer.
 
 ## 4. Output contracts
 
