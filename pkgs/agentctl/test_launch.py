@@ -843,6 +843,94 @@ def test_cancelling_a_queued_retry_keeps_the_previous_attempt_and_its_output(
     assert Path(written["result_path"]).read_bytes() == original_result
 
 
+def test_get_job_keeps_first_attempt_allocation_out_of_its_selected_view(
+    fake_pueue: FakePueue,
+    config: Config,
+    project_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The first view has no attempt, even if allocation finishes before outcome reading."""
+    project = load_project_adapter(project_root)
+    started = launch.start_operation(config, project, project.operation("check"))
+    task = fake_pueue.task(started["job_id"])
+    document = read_launch(config, task)
+    input_path = launch.launch_input_path(task)
+    assert input_path is not None
+
+    original_view = launch._artifact_view
+    views = 0
+
+    def allocate_after_view(
+        config: Config, task: Task, attempt: int | None = None
+    ) -> dict:
+        nonlocal views
+        view = original_view(config, task, attempt)
+        views += 1
+        if views == 1:
+            assert view["attempt"] == 0 and view["artifacts"] == {}
+            allocated = artifacts.begin(document, str(input_path))
+            Path(allocated["log_path"]).write_text("attempt one\n")
+            outcome_path_for(allocated["log_path"]).write_text(
+                json.dumps({"outcome": "success", "exit_code": 0})
+            )
+        return view
+
+    monkeypatch.setattr(launch, "_artifact_view", allocate_after_view)
+    first = launch.get_job(started["job_id"], config, started["reference"])
+    assert views == 1
+    assert first["attempt"] == 0
+    assert first["attempts"] == [] and first["attempt_count"] == 0
+    assert first["artifacts"] == {} and "outcome" not in first
+    assert first["phase"] == "running"
+
+    second = launch.get_job(started["job_id"], config, started["reference"])
+    assert second["attempt"] == 1 and second["attempt_count"] == 1
+    assert second["outcome"] == {"outcome": "success", "exit_code": 0}
+    assert second["phase"] == "running"
+    with pytest.raises(JobError, match="has no attempt 0"):
+        launch.get_job(started["job_id"], config, started["reference"], attempt=0)
+
+
+def test_result_keeps_first_attempt_allocation_out_of_its_selected_view(
+    fake_pueue: FakePueue,
+    config: Config,
+    project_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = load_project_adapter(project_root)
+    started = launch.start_operation(config, project, project.operation("verify"))
+    task = fake_pueue.task(started["job_id"])
+    document = read_launch(config, task)
+    input_path = launch.launch_input_path(task)
+    assert input_path is not None
+
+    original_view = launch._artifact_view
+    views = 0
+
+    def allocate_after_view(
+        config: Config, task: Task, attempt: int | None = None
+    ) -> dict:
+        nonlocal views
+        view = original_view(config, task, attempt)
+        views += 1
+        if views == 1:
+            assert view["attempt"] == 0 and view["artifacts"] == {}
+            allocated = artifacts.begin(document, str(input_path))
+            Path(allocated["result_path"]).write_text('{"passed": 4}')
+        return view
+
+    monkeypatch.setattr(launch, "_artifact_view", allocate_after_view)
+    first = launch.result(config, started["job_id"], started["reference"])
+    assert views == 1
+    assert first["attempt"] == first["page"]["attempt"] == 0
+    assert first["attempt_count"] == 0 and first["page"]["available"] is False
+    assert first["value"] is None and first["kind"] == "exit"
+
+    second = launch.result(config, started["job_id"], started["reference"])
+    assert second["attempt"] == second["page"]["attempt"] == 1
+    assert second["value"] == {"passed": 4}
+
+
 def test_cancel_racing_runner_start_does_not_fabricate_not_started(
     fake_pueue: FakePueue, config: Config, project_root: Path
 ) -> None:
@@ -961,6 +1049,34 @@ def test_an_artifact_outside_the_task_own_directories_is_not_published(
     assert "secret material" not in launch.logs(config, tasks["outside"])
     # The same rule must publish the artifacts a task really does own.
     assert "this task's own output" in launch.logs(config, tasks["reachable"])
+
+
+def test_get_job_does_not_read_outcome_beside_an_outside_log_symlink(
+    fake_pueue: FakePueue, config: Config, tmp_path: Path
+) -> None:
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    owned_log = checkout / "owned.log"
+    owned_log.write_text("owned output\n")
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    outside_log = outside / "linked.log"
+    outside_log.symlink_to(owned_log)
+    outcome_path_for(outside_log).write_text('{"outcome": "failed", "exit_code": 7}')
+    launch_input = checkout / "external.json"
+    launch_input.write_text(json.dumps({"log_path": str(outside_log)}))
+    task_id = fake_pueue.add(
+        group="pytest",
+        label="polylogue:test:linked",
+        command=("agentctl-run", str(launch_input)),
+        working_directory=checkout,
+    )
+
+    detail = launch.get_job(task_id, config)
+
+    assert detail["attempt"] == 1
+    assert detail["artifacts"] == {"log": str(outside_log)}
+    assert "outcome" not in detail
 
 
 def test_an_artifact_that_is_not_a_regular_file_is_refused_without_blocking(

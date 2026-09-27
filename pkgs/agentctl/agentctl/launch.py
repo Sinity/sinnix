@@ -1116,7 +1116,11 @@ def _job_detail(
         if launch_input.get(key):
             view[key] = launch_input[key]
     view.update(_artifact_view(config, task, attempt))
-    receipt = _outcome(config, task, view["attempt"]).get("outcome") or {}
+    selected_outcome = view["artifacts"].get("outcome")
+    outcome_path = Path(selected_outcome).resolve() if selected_outcome else None
+    if outcome_path is not None and not _task_owned(config, task, outcome_path):
+        outcome_path = None
+    receipt = _outcome_from_path(outcome_path).get("outcome") or {}
     records = view["attempts"]
     view["attempts"] = records[attempt_offset : attempt_offset + attempt_limit]
     view["attempt_count"] = len(records)
@@ -1193,6 +1197,8 @@ def _read_artifact(
     artifact: str,
     offset: int,
     limit: int,
+    *,
+    selected_view: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     import base64
 
@@ -1209,9 +1215,15 @@ def _read_artifact(
         raise JobError(
             f"offset must be nonnegative and limit must be 1..{MAX_LOG_BYTES}"
         )
-    view = _artifact_view(config, task, attempt)
+    view = (
+        selected_view
+        if selected_view is not None
+        else _artifact_view(config, task, attempt)
+    )
     declared = view["artifacts"].get(artifact)
     path = Path(declared).resolve() if declared else None
+    if path is not None and not _task_owned(config, task, path):
+        path = None
     raw = b""
     size = 0
     available = False
@@ -1282,7 +1294,9 @@ def result(
     """Bound the view only; large typed results remain complete valid artifacts."""
     task = _read_task(config, task_id, reference)
     view = _job_detail(config, task, attempt)
-    page = _read_artifact(config, task, view["attempt"], "result", offset, limit)
+    page = _read_artifact(
+        config, task, view["attempt"], "result", offset, limit, selected_view=view
+    )
     value: Any = None
     if page["complete"]:
         try:
@@ -1299,7 +1313,11 @@ def result(
 
 def _outcome(config: Config, task: Task, attempt: int | None = None) -> dict[str, Any]:
     log = _artifact(config, task, ".log", attempt)
-    raw = read_bounded(outcome_path_for(log), 4096) if log is not None else None
+    return _outcome_from_path(outcome_path_for(log) if log is not None else None)
+
+
+def _outcome_from_path(path: Path | None) -> dict[str, Any]:
+    raw = read_bounded(path, 4096) if path is not None else None
     try:
         record = json.loads(raw.decode("utf-8")) if raw else None
     except (UnicodeDecodeError, json.JSONDecodeError):
