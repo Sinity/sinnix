@@ -5,11 +5,13 @@ from __future__ import annotations
 import base64
 import json
 import subprocess
+import zipfile
 from pathlib import Path
 
 import anyio
 import pytest
 from conftest import call, error, ok
+from sinnix_agent_gateway import projects as projects_module
 from sinnix_agent_gateway import server as server_module
 from sinnix_agent_gateway.action import MutationControls, validate_actions
 from sinnix_agent_gateway.actions import files, projects
@@ -17,6 +19,7 @@ from sinnix_agent_gateway.app import create_server
 from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
 from sinnix_agent_gateway.contracts import VerbFamily
 from sinnix_agent_gateway.locators import BeadLocator, CheckoutLocator, ProjectLocator
+from sinnix_agent_gateway.projects import ProjectError, ProjectPreconditionError
 from sinnix_agent_gateway.tooling import build_tool, tool_signature_matches
 
 ACTIONS = validate_actions(
@@ -73,6 +76,103 @@ def test_tree_exact_limit_and_large_requested_read(tmp_path: Path) -> None:
     assert not result["truncated"]
 
 
+def test_tree_pages_continue_past_default_limit(tmp_path: Path) -> None:
+    config, project, _ = fixture(tmp_path)
+    for index in range(6):
+        (project / f"file-{index}.txt").write_text(str(index))
+    runtime = create_server(config, "operator")._sinnix_revision_publisher.runtime
+    complete = runtime.projects.tree("fixture", max_entries=100)
+    seen = []
+    cursor = None
+    while True:
+        page = runtime.projects.tree("fixture", max_entries=2, start_after=cursor)
+        seen.extend(row["path"] for row in page["entries"])
+        cursor = page["next_start_after"]
+        if cursor is None:
+            break
+    assert seen == [row["path"] for row in complete["entries"]]
+
+
+def test_read_many_observes_checkout_once_per_batch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config, _, _ = fixture(tmp_path)
+    runtime = create_server(config, "operator")._sinnix_revision_publisher.runtime
+    observed = []
+    original = projects_module._content_revision
+
+    def record(path: Path) -> str:
+        observed.append(path)
+        return original(path)
+
+    monkeypatch.setattr(projects_module, "_content_revision", record)
+    result = runtime.projects.read_many(
+        "fixture",
+        [
+            {"path": "README.md", "start_line": 1, "end_line": 1, "max_bytes": 100},
+            {"path": "src/main.py", "start_line": 1, "end_line": 1, "max_bytes": 100},
+        ],
+    )
+    assert len(observed) == 2
+    assert all(
+        row["checkout_revision"] == result["checkout_revision"]
+        for row in result["files"]
+    )
+
+
+def test_export_covers_source_and_continues_explicit_pages(tmp_path: Path) -> None:
+    config, project, _ = fixture(tmp_path)
+    (project / ".gitignore").write_text(".venv/\n")
+    (project / ".venv").mkdir()
+    (project / ".venv" / "generated.bin").write_bytes(b"x" * 100_000)
+    (project / "large.txt").write_bytes(b"source" * 10_000)
+    (project / "MANIFEST.json").write_text("source manifest\n")
+    runtime = create_server(config, "operator")._sinnix_revision_publisher.runtime
+
+    whole = runtime.projects.export("fixture")
+    assert whole["manifest"]["truncated"] is False
+    with zipfile.ZipFile(whole["archive"]) as bundle:
+        names = set(bundle.namelist())
+        assert "large.txt" in names
+        assert ".venv/generated.bin" not in names
+        assert ".env" not in names
+        assert ".git/config" not in names
+        assert bundle.read("large.txt") == b"source" * 10_000
+        assert bundle.read("MANIFEST.json") == b"source manifest\n"
+        assert bundle.read(whole["manifest"]["manifest_path"])
+
+    first = runtime.projects.export("fixture", max_files=2)
+    assert first["manifest"]["truncated"] is True
+    second = runtime.projects.export(
+        "fixture",
+        max_files=2,
+        start_after=first["manifest"]["next_start_after"],
+        expected_revision=first["manifest"]["checkout_revision"],
+    )
+    first_paths = {row["path"] for row in first["manifest"]["files"]}
+    second_paths = {row["path"] for row in second["manifest"]["files"]}
+    assert first_paths.isdisjoint(second_paths)
+    third = runtime.projects.export(
+        "fixture",
+        max_files=2,
+        start_after=second["manifest"]["next_start_after"],
+        expected_revision=second["manifest"]["checkout_revision"],
+    )
+    assert first_paths | second_paths | {
+        row["path"] for row in third["manifest"]["files"]
+    } == {row["path"] for row in whole["manifest"]["files"]}
+    with pytest.raises(ProjectError, match="increase max_bytes"):
+        runtime.projects.export("fixture", max_bytes=1)
+    (project / "README.md").write_text("changed\n")
+    with pytest.raises(ProjectPreconditionError, match="previous export page"):
+        runtime.projects.export(
+            "fixture",
+            max_files=2,
+            start_after=first["manifest"]["next_start_after"],
+            expected_revision=first["manifest"]["checkout_revision"],
+        )
+
+
 def fixture(tmp_path: Path) -> tuple[GatewayConfig, Path, Path]:
     project = tmp_path / "project"
     linked = tmp_path / "linked"
@@ -89,11 +189,7 @@ def fixture(tmp_path: Path) -> tuple[GatewayConfig, Path, Path]:
     git(project, "worktree", "add", "--quiet", "-b", "fixture-linked", str(linked))
     config = GatewayConfig(
         state_dir=tmp_path / "state",
-        projects={
-            "fixture": ProjectConfig(
-                project_id="fixture", path=project
-            )
-        },
+        projects={"fixture": ProjectConfig(project_id="fixture", path=project)},
         approved_manifest_hash="approved-fixture-hash",
     )
     return config, project, linked
@@ -226,6 +322,8 @@ def test_tree_read_diff_and_search_keep_authority_checks(tmp_path: Path) -> None
     )
     assert export["manifest"]["file_count"] >= 2
     assert export["manifest"]["truncated"] is False
+    assert "files" not in export["manifest"]
+    assert export["manifest"]["manifest_path"] == "MANIFEST.json"
     assert export["artifact"]["ref"].startswith("sinnix://artifacts/")
     assert error(server, "projects.read", {**target, "path": ".env"}) == "policy_denied"
     assert (
@@ -294,8 +392,6 @@ def test_diff_spools_complete_output_before_result_artifact(tmp_path: Path) -> N
     retained = json.loads(b"".join(chunks))
     assert retained["truncated"] is False
     assert "changed " + "x" * 5_000 in retained["diff"]
-
-
 
 
 def test_change_requires_matching_preconditions_and_echoes_new_state(

@@ -124,9 +124,15 @@ Every enabled endpoint receives its own generated config, MCP wrapper, package c
 
 The gateway is the primary project interface: use `projects.get`, `projects.read_many`,
 `projects.export`, `projects.diff`, and the guarded `projects.change` route for
-current checkout work. The export is a bounded, attested ZIP with a manifest, so a
-turn can move a portable project snapshot through the connector without exposing
-the checkout path or sensitive/local-only state.
+current checkout work. Export streams tracked and nonignored untracked files to an
+attested ZIP artifact. It excludes sensitive, local-only and symlinked paths and
+Git's private object store. The result contains a source revision and counts; the
+complete file manifest is inside the ZIP at `manifest_path`, and the ZIP is fetched
+through its artifact ref. Optional `max_files` and `max_bytes`
+bound one export page. A truncated page supplies `next_start_after`; pass that as
+`start_after` with the page's `checkout_revision` as `expected_revision` to continue
+against the same source state. Git history and live Beads evidence use their owner
+routes separately.
 
 Chisel remains supported and is not retired. It continues to provide Lynchpin's
 curated, materialized historical/code-snapshot products; the gateway's live
@@ -157,7 +163,7 @@ changing the gateway action family cannot suppress a client-side approval policy
 
 ## Generated reference
 
-This section is generated from the action set. Revision `v3-typed-actions`, catalog SHA-256 `139198878a4367fab3bee2f77070ea2aefd6eaf9bcfacb9ccf531da9b5864390`.
+This section is generated from the action set. Revision `v3-typed-actions`, catalog SHA-256 `a4ac083c12169b4aa5ad6a36378c9ae40de7a37c6bffcd5aa0f357066008d530`.
 
 The full schemas and examples are in [the generated gateway reference](generated/agent-gateway-reference.md). The matching agent skill is [agent-gateway](../dots/_ai/skills/agent-gateway/SKILL.md).
 
@@ -176,10 +182,10 @@ The full schemas and examples are in [the generated gateway reference](generated
 | `files.references`           | `query`   | `organization`     | `operator`                | Runs the existing bounded files.search text primitive once for each supplied old path. It only reports provenance and never rewrites references.                                                                                                                                                                                                 |
 | `projects.list`              | `query`   | `projects`         | `agent-control, operator` | List the projects this principal may read, with canonical refs.                                                                                                                                                                                                                                                                                  |
 | `projects.get`               | `get`     | `projects`         | `agent-control, operator` | The checkout row carries head and dirty_sha256, the preconditions projects.change requires.                                                                                                                                                                                                                                                      |
-| `projects.tree`              | `query`   | `projects`         | `agent-control, operator` | List files under a project-relative directory without following symlinks.                                                                                                                                                                                                                                                                        |
+| `projects.tree`              | `query`   | `projects`         | `agent-control, operator` | Lists project files without following symlinks. When truncated, pass next_start_after as start_after to list the next page of the same directory.                                                                                                                                                                                                |
 | `projects.read`              | `query`   | `projects`         | `agent-control, operator` | Read a bounded line range of one project file.                                                                                                                                                                                                                                                                                                   |
 | `projects.read_many`         | `query`   | `projects`         | `agent-control, operator` | Read several bounded project files from one checkout observation.                                                                                                                                                                                                                                                                                |
-| `projects.export`            | `query`   | `projects`         | `agent-control, operator` | Sensitive, local-only, hidden, and symlinked paths are excluded. The export is bounded and includes a manifest with file hashes and the checkout revision.                                                                                                                                                                                       |
+| `projects.export`            | `query`   | `projects`         | `agent-control, operator` | Exports tracked and nonignored untracked files, excluding sensitive, local-only, and symlinked paths. Optional file and byte bounds return next_start_after; pass it with checkout_revision as expected_revision to continue. Fetch the ZIP through its artifact ref; its manifest_path holds the complete per-file manifest.                    |
 | `projects.diff`              | `query`   | `projects`         | `agent-control, operator` | Show uncommitted changes in a checkout, optionally against a git ref.                                                                                                                                                                                                                                                                            |
 | `projects.search`            | `query`   | `projects`         | `agent-control, operator` | Search project file contents with ripgrep.                                                                                                                                                                                                                                                                                                       |
 | `projects.change`            | `change`  | `projects`         | `operator`                | Paths stay project-relative and policy-excluded paths (.git, secrets, local-only agent state) are refused. Take expected_dirty_sha256 or expected_head from projects.get, or expected_file_sha256 from projects.read.                                                                                                                            |

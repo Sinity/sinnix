@@ -5,7 +5,7 @@ description: Use when invoking, inspecting, or documenting Sinnix Agent Gateway 
 
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: 139198878a4367fab3bee2f77070ea2aefd6eaf9bcfacb9ccf531da9b5864390 -->
+<!-- gateway-catalog-sha256: a4ac083c12169b4aa5ad6a36378c9ae40de7a37c6bffcd5aa0f357066008d530 -->
 
 # Agent Gateway
 
@@ -47,10 +47,10 @@ Effectful actions (families change, operate, run) require `idempotency_key`. Con
 - `files.plan` — The caller supplies every mapping. The plan hashes each regular source file and records collision, parent and filesystem facts without changing host files.
 - `files.references` — Runs the existing bounded files.search text primitive once for each supplied old path. It only reports provenance and never rewrites references.
 - `projects.list` — List the projects this principal may read, with canonical refs.
-- `projects.tree` — List files under a project-relative directory without following symlinks.
+- `projects.tree` — Lists project files without following symlinks. When truncated, pass next_start_after as start_after to list the next page of the same directory.
 - `projects.read` — Read a bounded line range of one project file.
 - `projects.read_many` — Read several bounded project files from one checkout observation.
-- `projects.export` — Sensitive, local-only, hidden, and symlinked paths are excluded. The export is bounded and includes a manifest with file hashes and the checkout revision.
+- `projects.export` — Exports tracked and nonignored untracked files, excluding sensitive, local-only, and symlinked paths. Optional file and byte bounds return next_start_after; pass it with checkout_revision as expected_revision to continue. Fetch the ZIP through its artifact ref; its manifest_path holds the complete per-file manifest.
 - `projects.diff` — Show uncommitted changes in a checkout, optionally against a git ref.
 - `projects.search` — Search project file contents with ripgrep.
 - `beads.closure` — Read native dependency closure, cycles, readiness and incomplete frontier at one revision.
@@ -179,4 +179,4 @@ Effectful actions (families change, operate, run) require `idempotency_key`. Con
 
 The complete schemas and examples are in `docs/generated/agent-gateway-reference.md`.
 
-Catalog revision: `v3-typed-actions`. Catalog SHA-256: `139198878a4367fab3bee2f77070ea2aefd6eaf9bcfacb9ccf531da9b5864390`.
+Catalog revision: `v3-typed-actions`. Catalog SHA-256: `a4ac083c12169b4aa5ad6a36378c9ae40de7a37c6bffcd5aa0f357066008d530`.

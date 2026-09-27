@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import stat
 import tempfile
 import uuid
@@ -375,6 +376,7 @@ class ProjectService:
         path: str = ".",
         max_entries: int = 500,
         checkout_id: str | None = None,
+        start_after: str | None = None,
     ) -> dict[str, Any]:
         project = self.code_checkout(
             project_id, checkout_id, write=False, require_explicit=False
@@ -385,6 +387,7 @@ class ProjectService:
         if max_entries < 1:
             raise ProjectError("max_entries must be positive")
         entries: list[dict[str, Any]] = []
+        cursor_found = start_after is None
         for current, dirs, files in os.walk(root, followlinks=False):
             current_path = Path(current)
             dirs[:] = sorted(
@@ -398,6 +401,10 @@ class ProjectService:
                 relative = target.relative_to(project.path)
                 if target.is_symlink() or _is_excluded(relative):
                     continue
+                if not cursor_found:
+                    if relative.as_posix() == start_after:
+                        cursor_found = True
+                    continue
                 entries.append(
                     {
                         "path": str(relative),
@@ -406,8 +413,14 @@ class ProjectService:
                     }
                 )
                 if len(entries) > max_entries:
-                    return {"entries": entries[:max_entries], "truncated": True}
-        return {"entries": entries, "truncated": False}
+                    return {
+                        "entries": entries[:max_entries],
+                        "truncated": True,
+                        "next_start_after": entries[max_entries - 1]["path"],
+                    }
+        if not cursor_found:
+            raise ProjectError("start_after does not identify a listed entry")
+        return {"entries": entries, "truncated": False, "next_start_after": None}
 
     def read(
         self,
@@ -421,6 +434,49 @@ class ProjectService:
         project = self.code_checkout(
             project_id, checkout_id, write=False, require_explicit=False
         )
+        result = self._read_file(project, path, start_line, end_line, max_bytes)
+        return {
+            "project_id": project_id,
+            **result,
+            "checkout_revision": _content_revision(project.path),
+        }
+
+    def read_many(
+        self,
+        project_id: str,
+        requests: list[dict[str, Any]],
+        checkout_id: str | None = None,
+    ) -> dict[str, Any]:
+        project = self.code_checkout(
+            project_id, checkout_id, write=False, require_explicit=False
+        )
+        before = _content_revision(project.path)
+        files = [
+            self._read_file(
+                project,
+                request["path"],
+                request["start_line"],
+                request["end_line"],
+                request["max_bytes"],
+            )
+            for request in requests
+        ]
+        if before != _content_revision(project.path):
+            raise ProjectPreconditionError("project changed while files were read")
+        return {
+            "project_id": project_id,
+            "files": [{**file, "checkout_revision": before} for file in files],
+            "checkout_revision": before,
+        }
+
+    def _read_file(
+        self,
+        project: ProjectConfig,
+        path: str,
+        start_line: int,
+        end_line: int | None,
+        max_bytes: int,
+    ) -> dict[str, Any]:
         target = self._safe_path(project, path, existing=True)
         if not target.is_file() or target.is_symlink():
             raise ProjectError("path must identify a regular project file")
@@ -449,7 +505,6 @@ class ProjectService:
                 content.append(line)
                 used += len(encoded)
         return {
-            "project_id": project_id,
             "path": path,
             "start_line": start_line,
             "end_line": end_line,
@@ -457,79 +512,151 @@ class ProjectService:
             "bytes": used,
             "truncated": truncated,
             "content_sha256": _file_sha256(target),
-            "checkout_revision": _content_revision(project.path),
         }
 
     def export(
         self,
         project_id: str,
         checkout_id: str | None = None,
-        max_files: int = 2_000,
-        max_bytes: int = 16 * 1024 * 1024,
+        max_files: int | None = None,
+        max_bytes: int | None = None,
+        start_after: str | None = None,
+        expected_revision: str | None = None,
     ) -> dict[str, Any]:
-        """Create a bounded, policy-filtered ZIP snapshot in attested state."""
+        """Stream the Git source set into a policy-filtered ZIP artifact."""
         project = self.code_checkout(
             project_id, checkout_id, write=False, require_explicit=False
         )
-        max_files = max(1, min(max_files, 10_000))
-        max_bytes = max(1, min(max_bytes, 64 * 1024 * 1024))
-        before = _content_revision(project.path)
-        files: list[tuple[str, bytes, str]] = []
-        total = 0
-        truncated = False
-        for current, dirs, names in os.walk(project.path, followlinks=False):
-            current_path = Path(current)
-            dirs[:] = sorted(
-                name
-                for name in dirs
-                if not _is_excluded((current_path / name).relative_to(project.path))
-                and not (current_path / name).is_symlink()
+        if (start_after is None) != (expected_revision is None):
+            raise ProjectError(
+                "start_after and expected_revision must be supplied together"
             )
-            for name in sorted(names):
-                path = current_path / name
-                relative = path.relative_to(project.path)
-                if path.is_symlink() or _is_excluded(relative) or not path.is_file():
-                    continue
-                if len(files) >= max_files:
-                    truncated = True
-                    break
-                with path.open("rb") as handle:
-                    data = handle.read(max_bytes - total + 1)
-                if total + len(data) > max_bytes:
-                    truncated = True
-                    break
-                files.append(
-                    (relative.as_posix(), data, hashlib.sha256(data).hexdigest())
-                )
-                total += len(data)
-            if truncated:
+        if max_files is not None and max_files < 1:
+            raise ProjectError("max_files must be positive")
+        if max_bytes is not None and max_bytes < 1:
+            raise ProjectError("max_bytes must be positive")
+        paths = self._export_paths(project)
+        before = self._export_revision(project.path, paths)
+        if expected_revision is not None and expected_revision != before:
+            raise ProjectPreconditionError(
+                "project changed since the previous export page"
+            )
+        if start_after is not None:
+            cursor = Path(start_after)
+            if cursor not in paths:
+                raise ProjectError("start_after does not identify an exported file")
+            paths = paths[paths.index(cursor) + 1 :]
+        selected: list[Path] = []
+        total = 0
+        for relative in paths:
+            path = project.path / relative
+            size = path.stat().st_size
+            if max_files is not None and len(selected) >= max_files:
                 break
-        after = _content_revision(project.path)
-        if before != after:
-            raise ProjectPreconditionError("project changed while export was collected")
+            if max_bytes is not None and total + size > max_bytes:
+                if not selected:
+                    raise ProjectError(
+                        f"file {relative.as_posix()} is {size} bytes; increase max_bytes"
+                    )
+                break
+            selected.append(relative)
+            total += size
+        truncated = len(selected) < len(paths)
         capture = self.config.state_dir / "captures" / uuid.uuid4().hex
         capture.mkdir(mode=0o700, parents=True)
         archive = capture / "project-export.zip"
-        manifest = {
-            "schema": "sinnix.project-export.v1",
-            "project_id": project_id,
-            "checkout_id": checkout_id or "default",
-            "checkout_revision": before,
-            "files": [
-                {"path": path, "bytes": len(data), "sha256": digest}
-                for path, data, digest in files
-            ],
-            "file_count": len(files),
-            "bytes": total,
-            "truncated": truncated,
-        }
-        with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
-            for path, data, _digest in files:
-                bundle.writestr(path, data)
-            bundle.writestr(
-                "MANIFEST.json", json.dumps(manifest, sort_keys=True, indent=2) + "\n"
-            )
+        manifest_name = "MANIFEST.json"
+        suffix = 1
+        selected_names = {path.as_posix() for path in selected}
+        while manifest_name in selected_names:
+            manifest_name = f"MANIFEST.{suffix}.json"
+            suffix += 1
+        try:
+            rows = []
+            with zipfile.ZipFile(
+                archive, "w", compression=zipfile.ZIP_DEFLATED
+            ) as bundle:
+                for relative in selected:
+                    path = project.path / relative
+                    digest = hashlib.sha256()
+                    size = 0
+                    with (
+                        path.open("rb") as source,
+                        bundle.open(relative.as_posix(), "w") as target,
+                    ):
+                        for chunk in iter(lambda: source.read(1_048_576), b""):
+                            size += len(chunk)
+                            digest.update(chunk)
+                            target.write(chunk)
+                    rows.append(
+                        {
+                            "path": relative.as_posix(),
+                            "bytes": size,
+                            "sha256": digest.hexdigest(),
+                        }
+                    )
+                after_paths = self._export_paths(project)
+                after = self._export_revision(project.path, after_paths)
+                if before != after:
+                    raise ProjectPreconditionError(
+                        "project changed while export was collected"
+                    )
+                manifest = {
+                    "schema": "sinnix.project-export.v1",
+                    "project_id": project_id,
+                    "checkout_id": checkout_id or "default",
+                    "checkout_revision": before,
+                    "files": rows,
+                    "file_count": len(rows),
+                    "bytes": sum(row["bytes"] for row in rows),
+                    "truncated": truncated,
+                    "start_after": start_after,
+                    "next_start_after": rows[-1]["path"] if truncated else None,
+                    "manifest_path": manifest_name,
+                }
+                bundle.writestr(
+                    manifest_name, json.dumps(manifest, sort_keys=True, indent=2) + "\n"
+                )
+        except Exception:
+            shutil.rmtree(capture)
+            raise
         return {"directory": capture, "archive": archive, "manifest": manifest}
+
+    def _export_paths(self, project: ProjectConfig) -> list[Path]:
+        """Include tracked and nonignored untracked files, subject to project policy."""
+        output = self._run_spooled(
+            ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+            project.path,
+        )
+        paths = set()
+        for name in output.split("\0"):
+            if not name:
+                continue
+            relative = Path(name)
+            if (
+                relative.is_absolute()
+                or ".." in relative.parts
+                or _is_excluded(relative)
+            ):
+                continue
+            path = project.path / relative
+            if path.is_file() and not path.is_symlink():
+                paths.add(relative)
+        return sorted(paths, key=lambda path: path.as_posix())
+
+    @staticmethod
+    def _export_revision(root: Path, paths: list[Path]) -> str:
+        digest = hashlib.sha256()
+        for relative in paths:
+            path = root / relative
+            name = relative.as_posix().encode()
+            digest.update(len(name).to_bytes(8, "big"))
+            digest.update(name)
+            digest.update(stat.S_IMODE(path.stat().st_mode).to_bytes(4, "big"))
+            with path.open("rb") as handle:
+                for chunk in iter(lambda: handle.read(1_048_576), b""):
+                    digest.update(chunk)
+        return digest.hexdigest()
 
     def _run_spooled(self, command: list[str], cwd: Path, timeout: int = 15) -> str:
         with self._spooled_output(command, cwd, timeout) as output:

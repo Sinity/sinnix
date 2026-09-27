@@ -1,11 +1,11 @@
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: 139198878a4367fab3bee2f77070ea2aefd6eaf9bcfacb9ccf531da9b5864390 -->
+<!-- gateway-catalog-sha256: a4ac083c12169b4aa5ad6a36378c9ae40de7a37c6bffcd5aa0f357066008d530 -->
 # Sinnix Agent Gateway reference
 
 Generated from `sinnix_agent_gateway.actions`. Every action is one MCP tool whose `tools/list` input schema is the one below; the catalog hash changes when any principal-visible action catalog row changes, including its schema, principal set, example or affordance.
 
-Revision: `v3-typed-actions`. Catalog SHA-256: `139198878a4367fab3bee2f77070ea2aefd6eaf9bcfacb9ccf531da9b5864390`.
+Revision: `v3-typed-actions`. Catalog SHA-256: `a4ac083c12169b4aa5ad6a36378c9ae40de7a37c6bffcd5aa0f357066008d530`.
 
 ## Invocation
 
@@ -53,10 +53,10 @@ MCP: call the tool named after the action. CLI: `sinnix-agent-gateway call <acti
 | `files.references`           | `query`   | `organization`     | `operator`                | Runs the existing bounded files.search text primitive once for each supplied old path. It only reports provenance and never rewrites references.                                                                                                                                                                                                 |
 | `projects.list`              | `query`   | `projects`         | `agent-control, operator` | List the projects this principal may read, with canonical refs.                                                                                                                                                                                                                                                                                  |
 | `projects.get`               | `get`     | `projects`         | `agent-control, operator` | The checkout row carries head and dirty_sha256, the preconditions projects.change requires.                                                                                                                                                                                                                                                      |
-| `projects.tree`              | `query`   | `projects`         | `agent-control, operator` | List files under a project-relative directory without following symlinks.                                                                                                                                                                                                                                                                        |
+| `projects.tree`              | `query`   | `projects`         | `agent-control, operator` | Lists project files without following symlinks. When truncated, pass next_start_after as start_after to list the next page of the same directory.                                                                                                                                                                                                |
 | `projects.read`              | `query`   | `projects`         | `agent-control, operator` | Read a bounded line range of one project file.                                                                                                                                                                                                                                                                                                   |
 | `projects.read_many`         | `query`   | `projects`         | `agent-control, operator` | Read several bounded project files from one checkout observation.                                                                                                                                                                                                                                                                                |
-| `projects.export`            | `query`   | `projects`         | `agent-control, operator` | Sensitive, local-only, hidden, and symlinked paths are excluded. The export is bounded and includes a manifest with file hashes and the checkout revision.                                                                                                                                                                                       |
+| `projects.export`            | `query`   | `projects`         | `agent-control, operator` | Exports tracked and nonignored untracked files, excluding sensitive, local-only, and symlinked paths. Optional file and byte bounds return next_start_after; pass it with checkout_revision as expected_revision to continue. Fetch the ZIP through its artifact ref; its manifest_path holds the complete per-file manifest.                    |
 | `projects.diff`              | `query`   | `projects`         | `agent-control, operator` | Show uncommitted changes in a checkout, optionally against a git ref.                                                                                                                                                                                                                                                                            |
 | `projects.search`            | `query`   | `projects`         | `agent-control, operator` | Search project file contents with ripgrep.                                                                                                                                                                                                                                                                                                       |
 | `projects.change`            | `change`  | `projects`         | `operator`                | Paths stay project-relative and policy-excluded paths (.git, secrets, local-only agent state) are refused. Take expected_dirty_sha256 or expected_head from projects.get, or expected_file_sha256 from projects.read.                                                                                                                            |
@@ -2550,7 +2550,7 @@ Checkout containing a path:
 
 ### `projects.tree`
 
-List files under a project-relative directory without following symlinks.
+Lists project files without following symlinks. When truncated, pass next_start_after as start_after to list the next page of the same directory.
 
 Family: `query`. Owner: `projects`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
@@ -2689,6 +2689,18 @@ Input schema:
       ],
       "default": null,
       "description": "Caller-chosen correlation id."
+    },
+    "start_after": {
+      "anyOf": [
+        {
+          "maxLength": 4096,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "target": {
       "$ref": "#/$defs/CheckoutLocator"
@@ -3115,7 +3127,7 @@ Read two files:
 
 ### `projects.export`
 
-Sensitive, local-only, hidden, and symlinked paths are excluded. The export is bounded and includes a manifest with file hashes and the checkout revision.
+Exports tracked and nonignored untracked files, excluding sensitive, local-only, and symlinked paths. Optional file and byte bounds return next_start_after; pass it with checkout_revision as expected_revision to continue. Fetch the ZIP through its artifact ref; its manifest_path holds the complete per-file manifest.
 
 Family: `query`. Owner: `projects`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
@@ -3217,17 +3229,41 @@ Input schema:
       "default": null,
       "description": "Unix timestamp after which the call is refused."
     },
+    "expected_revision": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "max_bytes": {
-      "default": 16777216,
-      "maximum": 67108864,
-      "minimum": 1,
-      "type": "integer"
+      "anyOf": [
+        {
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "max_files": {
-      "default": 2000,
-      "maximum": 10000,
-      "minimum": 1,
-      "type": "integer"
+      "anyOf": [
+        {
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "reason": {
       "anyOf": [
@@ -3254,6 +3290,17 @@ Input schema:
       ],
       "default": null,
       "description": "Caller-chosen correlation id."
+    },
+    "start_after": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "target": {
       "$ref": "#/$defs/CheckoutLocator"

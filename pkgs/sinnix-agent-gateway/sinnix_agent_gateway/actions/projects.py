@@ -189,6 +189,7 @@ class TreeInput(RequestControls):
         description="Project-relative directory.",
     )
     max_entries: int = Field(default=500, ge=1)
+    start_after: str | None = Field(default=None, max_length=4_096)
 
 
 class TreeEntry(GatewayModel):
@@ -201,6 +202,7 @@ class Tree(Identity):
     path: str
     entries: list[TreeEntry]
     truncated: bool
+    next_start_after: str | None = None
 
 
 def _tree(runtime: Runtime, inp: TreeInput) -> Tree:
@@ -211,12 +213,14 @@ def _tree(runtime: Runtime, inp: TreeInput) -> Tree:
         inp.path,
         inp.max_entries,
         resolved.checkout_id,
+        inp.start_after,
     )
     return Tree(
         **_identity(resolved),
         path=inp.path,
         entries=result["entries"],
         truncated=result["truncated"],
+        next_start_after=result["next_start_after"],
     )
 
 
@@ -283,37 +287,33 @@ class ReadMany(Identity):
 
 def _read_many(runtime: Runtime, inp: ReadManyInput) -> ReadMany:
     resolved = inp.target.resolve(runtime)
-    rows: list[ProjectFile] = []
-    for request in inp.files:
-        result = owner(
-            runtime.projects.read,
-            resolved.project_id,
-            request.path,
-            request.start_line,
-            request.end_line,
-            request.max_bytes,
-            resolved.checkout_id,
+    result = owner(
+        runtime.projects.read_many,
+        resolved.project_id,
+        [request.model_dump() for request in inp.files],
+        resolved.checkout_id,
+    )
+    rows = [
+        ProjectFile(
+            **_identity(resolved),
+            **file,
+            affordances=["projects.change", "projects.diff"],
         )
-        result.pop("project_id")
-        rows.append(
-            ProjectFile(
-                **_identity(resolved),
-                **result,
-                affordances=["projects.change", "projects.diff"],
-            )
-        )
-    revisions = {row.checkout_revision for row in rows}
+        for file in result["files"]
+    ]
     return ReadMany(
         **_identity(resolved),
         files=rows,
-        checkout_revision=next(iter(revisions)) if len(revisions) == 1 else None,
+        checkout_revision=result["checkout_revision"],
     )
 
 
 class ExportInput(RequestControls):
     target: CheckoutLocator
-    max_files: int = Field(default=2_000, ge=1, le=10_000)
-    max_bytes: int = Field(default=16 * 1024 * 1024, ge=1, le=64 * 1024 * 1024)
+    max_files: int | None = Field(default=None, ge=1)
+    max_bytes: int | None = Field(default=None, ge=1)
+    start_after: str | None = None
+    expected_revision: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
 
 class ProjectExport(Identity):
@@ -330,6 +330,8 @@ def _export(runtime: Runtime, inp: ExportInput) -> ActionResult:
         resolved.checkout_id,
         inp.max_files,
         inp.max_bytes,
+        inp.start_after,
+        inp.expected_revision,
     )
     archive = result["archive"]
     receipt = runtime.artifacts.attest_capture(
@@ -347,7 +349,14 @@ def _export(runtime: Runtime, inp: ExportInput) -> ActionResult:
     output = ProjectExport(
         **_identity(resolved),
         checkout_revision=result["manifest"]["checkout_revision"],
-        manifest={**result["manifest"], "receipt_id": receipt["capture_id"]},
+        manifest={
+            **{
+                key: value
+                for key, value in result["manifest"].items()
+                if key != "files"
+            },
+            "receipt_id": receipt["capture_id"],
+        },
         artifact=artifact,
     )
     return ActionResult(output, blocks=blocks)
@@ -689,6 +698,7 @@ ACTIONS: tuple[Action, ...] = (
         resource_kinds=_KINDS,
         affordances=("projects.read", "projects.search"),
         aliases=("ls", "file list", "directory", "layout"),
+        documentation="Lists project files without following symlinks. When truncated, pass next_start_after as start_after to list the next page of the same directory.",
         examples=(
             Example(
                 title="Top-level modules",
@@ -744,7 +754,7 @@ ACTIONS: tuple[Action, ...] = (
         name="projects.export",
         family=VerbFamily.QUERY,
         owner="projects",
-        summary="Create a bounded policy-filtered ZIP snapshot of a project checkout.",
+        summary="Create a policy-filtered ZIP snapshot of the Git source set.",
         Input=ExportInput,
         Output=ProjectExport,
         handler=_export,
@@ -752,7 +762,7 @@ ACTIONS: tuple[Action, ...] = (
         resource_kinds=_KINDS,
         affordances=("projects.get", "projects.read"),
         aliases=("snapshot", "bundle", "download project", "portable export"),
-        documentation="Sensitive, local-only, hidden, and symlinked paths are excluded. The export is bounded and includes a manifest with file hashes and the checkout revision.",
+        documentation="Exports tracked and nonignored untracked files, excluding sensitive, local-only, and symlinked paths. Optional file and byte bounds return next_start_after; pass it with checkout_revision as expected_revision to continue. Fetch the ZIP through its artifact ref; its manifest_path holds the complete per-file manifest.",
         examples=(
             Example(
                 title="Export a bounded checkout",
