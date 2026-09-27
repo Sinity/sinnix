@@ -3,8 +3,9 @@
 systemd's only role: the durable wake-up a calendar needs. Each declared
 schedule is one transient user timer running `agentctl job fire`. The timer
 set is reconciled from the descriptors alone — the unit name encodes the
-project, operation, expression and the agentctl executable, so a changed
-schedule or a rebuilt agentctl is a new unit and the old one is stopped. No
+project, operation, expression, agentctl executable and selected config path,
+so a changed input is a new unit and the old one is stopped. The set has one
+host-wide owner: applying another config replaces the prior timer set. No
 state file.
 """
 
