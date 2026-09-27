@@ -360,8 +360,8 @@ def test_write_verbs_print_json_and_one_summary_line_on_stderr(
     capsys.readouterr()
     assert cli.main(["job", "cancel", "1"]) == 0
     captured = capsys.readouterr()
-    assert json.loads(captured.out)["state"] == "stopped"
-    assert captured.err.count("\n") == 1 and "; stopped" in captured.err
+    assert json.loads(captured.out)["state"] == "unresolved"
+    assert captured.err.count("\n") == 1 and "; unresolved" in captured.err
     assert cli.main(["job", "clean", "1"]) == 0
     captured = capsys.readouterr()
     assert json.loads(captured.out)["cleaned"] is True
