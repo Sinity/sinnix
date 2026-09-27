@@ -698,6 +698,15 @@ class DrainFixture(unittest.TestCase):
             prefix="backup-drain-", dir=os.environ.get("TMPDIR")
         ) as scratch:
             root = Path(scratch)
+            scripts["polylogue"] = (
+                scripts["polylogue"]
+                .replace("$TMPDIR/live-polylogue", str(root / "live-polylogue"))
+                .replace("$TMPDIR/polylogue-stage", str(root / "polylogue-stage-root"))
+                .replace(
+                    "/realm/state/cache/polylogue-backup-hooks",
+                    str(root / "polylogue-stage-root"),
+                )
+            )
             env = os.environ | {
                 "TMPDIR": scratch,
                 "BORG_SECURITY_DIR": scratch + "/security",
@@ -735,6 +744,7 @@ class DrainFixture(unittest.TestCase):
                 "realm-snapshots",
                 "persist-snapshots",
                 "realm-empty",
+                "polylogue-stage-root",
             ):
                 (root / path).mkdir(parents=True, exist_ok=True)
             (root / "identities.json").write_text("{}")
@@ -745,6 +755,11 @@ root=pathlib.Path(os.environ['TMPDIR']); command=pathlib.Path(sys.argv[0]).name;
 with (root/'logs/commands').open('a') as log: log.write(json.dumps([command,*args])+'\\n')
 if command=='borg':
     if args[0]=='create' and (root/'fail-create').exists(): sys.exit(2)
+    if args[0]=='create' and any(arg.startswith('::polylogue-state-') for arg in args):
+        if (root/'live-polylogue/hooks').is_dir():
+            for relative in ('hooks/codex-session-live.jsonl', 'hooks/carriers/codex/2026-09-27/4242.ndjson'):
+                with (root/'live-polylogue'/relative).open('a') as stream:
+                    stream.write('{"event":"written-during-borg-create"}\\n')
     if args[0]=='debug' and (root/'fail-read').exists(): sys.exit(2)
     if args[:2]==['list','--json'] and (root/'fail-read').exists(): sys.exit(2)
     if args[:2]==['list','--json'] and (root/'fail-proof-list').exists(): sys.exit(2)
@@ -876,6 +891,7 @@ elif command=='btrfs':
                     "project/tagged/precious": "source content beside cache tag",
                     "project/marked/.nobackup": "",
                     "project/marked/precious": "source content beside backup marker",
+                    "state/cache/polylogue-backup-hooks/state/polylogue/hooks/sealed.ndjson": "synthetic sealed hook",
                 },
             )
             self.assertFalse((root / "state/borg-drain/realm.latest-archived").exists())
@@ -892,6 +908,24 @@ elif command=='btrfs':
                 ["borg", "list", "--short", str(root / "repos/borg-realm-v2")], env=env, text=True
             ).splitlines())
             self.assertEqual(extract(new.name, "same-name"), "new")
+            realm_members = subprocess.check_output(
+                [
+                    "borg",
+                    "list",
+                    "--short",
+                    str(root / "repos/borg-realm-v2") + "::realm-" + new.name,
+                ],
+                env=env,
+                text=True,
+            ).splitlines()
+            self.assertFalse(
+                any(
+                    path.endswith(
+                        "state/cache/polylogue-backup-hooks/state/polylogue/hooks/sealed.ndjson"
+                    )
+                    for path in realm_members
+                )
+            )
             for relative, content in {
                 "project/build/precious": "source build material",
                 "project/dist/precious": "source distribution material",
@@ -995,6 +1029,8 @@ elif command=='btrfs':
                 "live-cas/objects/ab/cdef": "synthetic CAS",
                 "live-polylogue/blob/objects/cd/ef01": "synthetic blob",
                 "live-polylogue/source.db": "mutable database",
+                "live-polylogue/hooks/codex-session-live.jsonl": '{"event":"sealed-before-create"}\n',
+                "live-polylogue/hooks/carriers/codex/2026-09-27/4242.ndjson": '{"event":"carrier-before-create"}\n',
             }.items():
                 file = root / relative
                 file.parent.mkdir(parents=True, exist_ok=True)
@@ -1036,6 +1072,57 @@ elif command=='btrfs':
                     self.assertFalse(
                         any(path.endswith("/" + excluded) for path in entries)
                     )
+            polylogue_repo = str(root / "repos/borg-polylogue-state-v1")
+            polylogue_archive = subprocess.check_output(
+                ["borg", "list", "--short", polylogue_repo], env=env, text=True
+            ).splitlines()[0]
+            for relative, original in (
+                (
+                    "hooks/codex-session-live.jsonl",
+                    '{"event":"sealed-before-create"}\n',
+                ),
+                (
+                    "hooks/carriers/codex/2026-09-27/4242.ndjson",
+                    '{"event":"carrier-before-create"}\n',
+                ),
+            ):
+                members = [path for path in subprocess.check_output(
+                    ["borg", "list", "--short", polylogue_repo + "::" + polylogue_archive],
+                    env=env,
+                    text=True,
+                ).splitlines() if path.endswith("/" + relative)]
+                self.assertEqual(len(members), 1)
+                archived = subprocess.check_output(
+                    [
+                        "borg",
+                        "extract",
+                        "--stdout",
+                        polylogue_repo + "::" + polylogue_archive,
+                        members[0],
+                    ],
+                    env=env,
+                    text=True,
+                )
+                self.assertEqual(archived, original)
+                self.assertEqual(
+                    (root / "live-polylogue" / relative).read_text(),
+                    original + '{"event":"written-during-borg-create"}\n',
+                )
+            shutil.rmtree(root / "live-polylogue/hooks")
+            run("polylogue")
+            archive_names = subprocess.check_output(
+                ["borg", "list", "--short", polylogue_repo], env=env, text=True
+            ).splitlines()
+            self.assertEqual(len(archive_names), 2)
+            empty_hooks_archive = archive_names[-1]
+            empty_hook_members = [
+                path for path in subprocess.check_output(
+                    ["borg", "list", "--short", polylogue_repo + "::" + empty_hooks_archive],
+                    env=env,
+                    text=True,
+                ).splitlines() if "/hooks/" in path
+            ]
+            self.assertEqual(empty_hook_members, [])
             run("beads")
             receipt = next((root / "realm-data").rglob("borg_beads_drill.jsonl"))
             self.assertTrue(json.loads(receipt.read_text())["ok"])
@@ -1338,8 +1425,8 @@ elif command=='btrfs':
             ]
             self.assertEqual(
                 calls[-2:],
-                [["systemctl", "start", "borgbackup-job-persist.service"],
-                 ["systemctl", "start", "borgbackup-job-realm.service"]],
+                [["systemctl", "start", "borgbackup-job-realm.service"],
+                 ["systemctl", "start", "borgbackup-job-persist.service"]],
             )
             (root / "fail-persist-unit").unlink()
             run("coordinator")

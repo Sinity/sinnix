@@ -144,6 +144,7 @@ in
       polylogueStateBorgScriptChecked =
         let
           script = backupRuntimeEval.config.systemd.services.borgbackup-job-polylogue-state.script;
+          timer = backupRuntimeEval.config.systemd.timers.borgbackup-job-polylogue-state.timerConfig;
           root = "tmp/sentinel-polylogue-root";
         in
         assert lib.assertMsg (lib.hasInfix "--exclude ${root}/source.db " script)
@@ -152,6 +153,20 @@ in
           "Polylogue state Borg job must exclude source.db's WAL sidecar to avoid a torn copy";
         assert lib.assertMsg (!lib.hasInfix "embeddings.db.retired" script)
           "Polylogue state Borg job must not name retired database siblings in its exclude list -- they must stay covered by this direct-path job";
+        assert lib.assertMsg (lib.hasInfix "/tmp/sentinel-polylogue-root/hooks/**" script)
+          "Polylogue state Borg job must omit only the live hook input by its physical source path";
+        assert lib.assertMsg (lib.hasInfix "seal-polylogue-hooks.py" script)
+          "Polylogue state Borg job must seal hook carriers before archiving them";
+        assert lib.assertMsg (lib.hasInfix "state/cache/polylogue-backup-hooks" script)
+          "Polylogue state Borg job must use its stable private hooks cache";
+        assert lib.assertMsg (lib.hasInfix "install -d -m 0700 -o root -g root" script)
+          "Polylogue state hook cache must be private to root";
+        assert lib.assertMsg (
+          timer.OnCalendar == "*-*-* 04:15:00"
+          && timer.RandomizedDelaySec == "5min"
+          && !(timer.Persistent or false)
+          && backupRuntimeEval.config.systemd.services.borgbackup-job-polylogue-state.serviceConfig.TimeoutStartSec == "90min"
+        ) "Polylogue state Borg job must run outside the 06:05 drain window without late catch-up";
         script;
       rewriteBackupHook =
         hook: replacements:
@@ -517,13 +532,16 @@ in
           && !(builtins.hasAttr "borgbackup-job-realm" backupRuntimeEval.config.systemd.timers)
           && builtins.hasAttr "borgbackup-drain-coordinator" backupRuntimeEval.config.systemd.timers
           && backupRuntimeEval.config.systemd.timers.borgbackup-drain-coordinator.timerConfig.OnCalendar == "*-*-* 00,06,12,18:05,25:00"
-          && backupRuntimeEval.config.systemd.timers.btrbk.timerConfig.OnCalendar == "*-*-* *:00,30:00"
+          && backupRuntimeEval.config.systemd.timers.btrbk.timerConfig.OnCalendar == "*-*-* 00,06,12,18:00:00"
           && backupRuntimeEval.config.systemd.services.borgbackup-job-realm.serviceConfig.Slice == "borgdrain.slice"
           && backupRuntimeEval.config.systemd.services.borgbackup-job-realm.serviceConfig.MemoryHigh == "4G"
           && backupRuntimeEval.config.systemd.services.borgbackup-job-realm.serviceConfig.MemoryMax == "6G"
           && backupRuntimeEval.config.systemd.slices.borgdrain.sliceConfig.MemoryHigh == "6G"
           && backupRuntimeEval.config.systemd.slices.borgdrain.sliceConfig.MemoryMax == "8G"
-        ) "Half-hour acquisition and bounded newest-only archival must have separate schedules";
+          && builtins.length (builtins.filter
+            (line: lib.hasInfix "$TMPDIR/bind/realm/state/cache" line)
+            (lib.splitString "\n" realmBorgDrainScript)) == 1
+        ) "Six-hour acquisition and bounded newest-only archival must have separate schedules";
         mkRuntimeCheck system {
           name = "backup-borg-hook-runtime-check";
           nativeBuildInputs = [
@@ -584,11 +602,133 @@ in
         ${borgHealthLanesJson}
         EOF_LANES
       '';
+      polylogueHookSealRuntime = pkgs.runCommand "backup-polylogue-hook-seal-check" {
+        nativeBuildInputs = [ pkgs.python3 ];
+      } ''
+        missing_state="$TMPDIR/state-root"
+        missing_source="$missing_state/hooks"
+        missing_stage="$TMPDIR/missing-sealed/realm/state/polylogue/hooks"
+        mkdir -p "$missing_state" "$missing_stage"
+        printf 'stale-cache' > "$missing_stage/previous.ndjson"
+        ${pkgs.python3}/bin/python3 ${../../modules/lib/backup/seal-polylogue-hooks.py} \
+          "$missing_source" "$missing_stage"
+        test -d "$missing_stage"
+        test -z "$(find "$missing_stage" -mindepth 1 -print -quit)"
+        if ${pkgs.python3}/bin/python3 ${../../modules/lib/backup/seal-polylogue-hooks.py} \
+          "$TMPDIR/unavailable-state/hooks" "$TMPDIR/unavailable-sealed/hooks"; then
+          echo 'unavailable Polylogue state root unexpectedly succeeded' >&2
+          exit 1
+        fi
+        mkdir -p "$TMPDIR/source/hooks/carriers/codex/2026-09-27"
+        printf '%s\n' '{"event":"captured"}' > "$TMPDIR/source/hooks/carriers/codex/2026-09-27/4242.ndjson"
+        ${pkgs.python3}/bin/python3 ${../../modules/lib/backup/seal-polylogue-hooks.py} \
+          "$TMPDIR/source/hooks" "$TMPDIR/sealed/realm/state/polylogue/hooks"
+        before_inode=$(stat -c %i "$TMPDIR/sealed/realm/state/polylogue/hooks/carriers/codex/2026-09-27/4242.ndjson")
+        cmp "$TMPDIR/source/hooks/carriers/codex/2026-09-27/4242.ndjson" \
+          "$TMPDIR/sealed/realm/state/polylogue/hooks/carriers/codex/2026-09-27/4242.ndjson"
+        printf '%s\n' '{"event":"appended-after-seal"}' \
+          >> "$TMPDIR/source/hooks/carriers/codex/2026-09-27/4242.ndjson"
+        ${pkgs.python3}/bin/python3 ${../../modules/lib/backup/seal-polylogue-hooks.py} \
+          "$TMPDIR/source/hooks" "$TMPDIR/sealed/realm/state/polylogue/hooks"
+        after_inode=$(stat -c %i "$TMPDIR/sealed/realm/state/polylogue/hooks/carriers/codex/2026-09-27/4242.ndjson")
+        test "$before_inode" != "$after_inode"
+        printf '%s\n' '{"event":"new-carrier"}' \
+          > "$TMPDIR/source/hooks/carriers/codex/2026-09-27/4343.ndjson"
+        ${pkgs.python3}/bin/python3 ${../../modules/lib/backup/seal-polylogue-hooks.py} \
+          "$TMPDIR/source/hooks" "$TMPDIR/sealed/realm/state/polylogue/hooks"
+        cmp "$TMPDIR/source/hooks/carriers/codex/2026-09-27/4343.ndjson" \
+          "$TMPDIR/sealed/realm/state/polylogue/hooks/carriers/codex/2026-09-27/4343.ndjson"
+        before_inode=$(stat -c %i "$TMPDIR/sealed/realm/state/polylogue/hooks/carriers/codex/2026-09-27/4343.ndjson")
+        ${pkgs.python3}/bin/python3 ${../../modules/lib/backup/seal-polylogue-hooks.py} \
+          "$TMPDIR/source/hooks" "$TMPDIR/sealed/realm/state/polylogue/hooks"
+        test "$before_inode" = "$(stat -c %i "$TMPDIR/sealed/realm/state/polylogue/hooks/carriers/codex/2026-09-27/4343.ndjson")"
+        printf 'outside' > "$TMPDIR/outside"
+        ln -s "$TMPDIR/outside" "$TMPDIR/source/hooks/transition"
+        ${pkgs.python3}/bin/python3 ${../../modules/lib/backup/seal-polylogue-hooks.py} \
+          "$TMPDIR/source/hooks" "$TMPDIR/sealed/realm/state/polylogue/hooks"
+        rm "$TMPDIR/source/hooks/transition"
+        mkdir "$TMPDIR/source/hooks/transition"
+        printf 'inside' > "$TMPDIR/source/hooks/transition/child"
+        ${pkgs.python3}/bin/python3 ${../../modules/lib/backup/seal-polylogue-hooks.py} \
+          "$TMPDIR/source/hooks" "$TMPDIR/sealed/realm/state/polylogue/hooks"
+        test -d "$TMPDIR/sealed/realm/state/polylogue/hooks/transition"
+        test "$(cat "$TMPDIR/outside")" = outside
+        rm "$TMPDIR/source/hooks/transition/child"
+        rmdir "$TMPDIR/source/hooks/transition"
+        printf 'replacement' > "$TMPDIR/source/hooks/transition"
+        ${pkgs.python3}/bin/python3 ${../../modules/lib/backup/seal-polylogue-hooks.py} \
+          "$TMPDIR/source/hooks" "$TMPDIR/sealed/realm/state/polylogue/hooks"
+        test -f "$TMPDIR/sealed/realm/state/polylogue/hooks/transition"
+        rm "$TMPDIR/source/hooks/transition"
+        mkdir "$TMPDIR/source/hooks/transition"
+        ln -s "$TMPDIR/outside" "$TMPDIR/source/hooks/transition/link"
+        ${pkgs.python3}/bin/python3 ${../../modules/lib/backup/seal-polylogue-hooks.py} \
+          "$TMPDIR/source/hooks" "$TMPDIR/sealed/realm/state/polylogue/hooks"
+        rm -r "$TMPDIR/source/hooks/transition"
+        ln -s "$TMPDIR/outside" "$TMPDIR/source/hooks/transition"
+        ${pkgs.python3}/bin/python3 ${../../modules/lib/backup/seal-polylogue-hooks.py} \
+          "$TMPDIR/source/hooks" "$TMPDIR/sealed/realm/state/polylogue/hooks"
+        test -L "$TMPDIR/sealed/realm/state/polylogue/hooks/transition"
+        ${pkgs.python3}/bin/python3 - ${../../modules/lib/backup/seal-polylogue-hooks.py} <<'PY'
+        import importlib.util
+        import os
+        import tempfile
+        from pathlib import Path
+        import sys
+
+        spec = importlib.util.spec_from_file_location("hook_sealer", sys.argv[1])
+        sealer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(sealer)
+        root = Path(tempfile.mkdtemp())
+        source = root / "source"
+        source.mkdir()
+        outside = root / "outside"
+        outside.write_text("outside")
+        original = source / "event"
+        original.write_text("inside")
+        record = sealer._file_record(os.stat(original, follow_symlinks=False))
+        original.unlink()
+        original.symlink_to(outside)
+        try:
+            sealer._clone_file(source, "event", root / "sealed-event", record)
+            raise AssertionError("final symlink replacement was followed")
+        except OSError:
+            pass
+        assert outside.read_text() == "outside"
+
+        nested = source / "nested"
+        nested.mkdir()
+        (nested / "event").write_text("inside nested")
+        nested_record = sealer._file_record(
+            os.stat(nested / "event", follow_symlinks=False)
+        )
+        outside_directory = root / "outside-directory"
+        outside_directory.mkdir()
+        (outside_directory / "event").write_text("outside nested")
+        nested.rename(source / "held-directory")
+        nested.symlink_to(outside_directory, target_is_directory=True)
+        try:
+            sealer._clone_file(source, "nested/event", root / "sealed-nested", nested_record)
+            raise AssertionError("intermediate symlink replacement was followed")
+        except OSError:
+            pass
+        assert (outside_directory / "event").read_text() == "outside nested"
+        manifest = sealer._manifest(source)
+        assert manifest["nested"]["kind"] == "symlink"
+        assert "nested/event" not in manifest
+        os.utime(source / "held-directory", ns=(1, 2))
+        assert sealer._manifest(source) == sealer._manifest(source)
+        PY
+        cmp "$TMPDIR/sealed/realm/state/polylogue/hooks/carriers/codex/2026-09-27/4242.ndjson" \
+          <(printf '%s\n' '{"event":"captured"}' '{"event":"appended-after-seal"}')
+        touch "$out"
+      '';
     in
     {
       checks = {
         backup-borg-hook-runtime = backupBorgHookRuntime;
         backup-health-lanes-runtime = borgHealthLanesRuntime;
+        backup-polylogue-hook-seal = polylogueHookSealRuntime;
         backup-headless-default =
           assert headlessBackupUnits == [ ];
           pkgs.runCommand "backup-headless-default-check" { } ''

@@ -2,6 +2,7 @@
 {
   pkgs,
   lib,
+  realmRoot,
   sinexBlobRepositoryPath,
   scriptPkgs,
   username,
@@ -155,11 +156,9 @@
     '';
   })
 
-  # Direct-path borg over the live state root, same reasoning as
-  # borgbackup-job-sinex-blobs: excluded files are the live databases
-  # (torn-copy risk, covered by the dump job above instead); everything
-  # else here is either immutable CAS or currently-static, so a plain
-  # file-level copy is safe without a btrfs snapshot.
+  # Direct-path borg covers the state root, except live SQLite files and the
+  # append-only hook tree. SQLite is covered by the dump job above; hooks are
+  # reflink-sealed first so Borg reads a stable copy while producers append.
   (mkBackupJob "borgbackup-job-polylogue-state" {
     description = "Back up Polylogue state (blob CAS and non-live files) into Borg";
     unit = {
@@ -173,7 +172,10 @@
       ];
       unitConfig.RequiresMountsFor = [ polylogueStateRoot ];
     };
-    serviceConfig.TimeoutStopSec = "15s";
+    serviceConfig = {
+      TimeoutStartSec = "90min";
+      TimeoutStopSec = "15s";
+    };
     path = with pkgs; [
       borgbackup
       coreutils
@@ -181,9 +183,12 @@
       util-linux
     ];
     timer = {
-      onCalendar = "*-*-* 05:55:00";
-      randomizedDelaySec = "10min";
-      persistent = true;
+      # Leave 105 minutes before the drain coordinator; a 90-minute service
+      # deadline leaves time for Borg to stop and release its shared lock.
+      # Do not catch up a missed wake near the drain window on late boot.
+      onCalendar = "*-*-* 04:15:00";
+      randomizedDelaySec = "5min";
+      persistent = false;
     };
     script = ''
       set -euo pipefail
@@ -197,12 +202,21 @@
       fi
 
       archive_name="polylogue-state-$(date -u +%Y%m%dT%H%M%SZ)"
+      stage_root=${lib.escapeShellArg "${realmRoot}/state/cache/polylogue-backup-hooks"}
+      install -d -m 0700 -o root -g root "$stage_root"
+      stage_relative_root=${lib.escapeShellArg (lib.removePrefix "/" polylogueStateRoot)}
+      stage_hooks="$stage_root/$stage_relative_root/hooks"
+      staged_hook_source="$stage_root/./$stage_relative_root/hooks"
+      ${pkgs.python3}/bin/python3 ${./seal-polylogue-hooks.py} \
+        ${lib.escapeShellArg "${polylogueStateRoot}/hooks"} "$stage_hooks"
       with_borg_lock borg create \
         --compression auto,zstd,1 \
         --lock-wait ${toString borgLockWaitSec} \
         ${mkBorgExcludeArgs polylogueStateRoot polylogueDbExcludes} \
+        --exclude ${lib.escapeShellArg "${polylogueStateRoot}/hooks/**"} \
         "::$archive_name" \
-        ${lib.escapeShellArg polylogueStateRoot}
+        ${lib.escapeShellArg polylogueStateRoot} \
+        "$staged_hook_source"
       echo "polylogue state backup complete: $archive_name"
 
       install -d -m 0755 -o root -g root ${lib.escapeShellArg borgDrainStateRoot}

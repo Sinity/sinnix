@@ -1369,6 +1369,7 @@ in
         inherit
           pkgs
           lib
+          realmRoot
           sinexBlobRepositoryPath
           scriptPkgs
           username
