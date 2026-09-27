@@ -62,6 +62,7 @@ def collect_blocked_tasks(offline: bool) -> list[dict[str, Any]]:
         parts = line.split(None, 9)
         if len(parts) < 10 or not parts[0].startswith("D"):
             continue
+        wchan = parts[7]
         rows.append(
             {
                 "stat": parts[0],
@@ -71,7 +72,10 @@ def collect_blocked_tasks(offline: bool) -> list[dict[str, Any]]:
                 "cpu_pct": float_or_none(parts[4]),
                 "mem_pct": float_or_none(parts[5]),
                 "rss_kb": int_or_none(parts[6]),
-                "wchan": parts[7],
+                "wchan": wchan,
+                "wait_kind": (
+                    "pipe_read" if wchan == "anon_pipe_read" else "unclassified_d_state"
+                ),
                 "comm": parts[8],
                 "cmdline": parts[9],
             }

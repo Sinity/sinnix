@@ -63,6 +63,56 @@ def test_pressure_offline_returns_marker() -> None:
     assert parsed == {"raw": ""}
 
 
+def test_blocked_process_rows_distinguish_pipe_wait_from_unknown_d_state(
+    monkeypatch,
+) -> None:
+    class PsResult:
+        stdout = (
+            "STAT PID PPID ELAPSED %CPU %MEM RSS WCHAN COMMAND\n"
+            "DN 10 1 600 0.0 0.1 1000 anon_pipe_read capture-stream capture-stream\n"
+            "D 11 1 30 1.0 0.2 2000 wait_on_page_bit worker worker\n"
+            "S 12 1 900 0.0 0.1 1000 anon_pipe_read idle-reader idle-reader\n"
+        )
+
+    monkeypatch.setattr(pressure, "run", lambda *args, **kwargs: PsResult())
+
+    rows = pressure.collect_blocked_tasks(offline=False)
+
+    assert [(row["pid"], row["wait_kind"]) for row in rows] == [
+        (10, "pipe_read"),
+        (11, "unclassified_d_state"),
+    ]
+    assert rows[0]["stat"] == "DN"
+    assert rows[0]["wchan"] == "anon_pipe_read"
+
+
+def test_pressure_rendering_does_not_claim_d_state_proves_storage_blockage() -> None:
+    report = {
+        "generated_at": "fixture",
+        "window": {"since": "fixture"},
+        "blocked_tasks": [
+            {
+                "stat": "DN",
+                "wait_kind": "pipe_read",
+                "pid": 10,
+                "ppid": 1,
+                "elapsed_secs": 600,
+                "cpu_pct": 0.0,
+                "rss_kb": 1000,
+                "wchan": "anon_pipe_read",
+                "cmdline": "capture-stream",
+            }
+        ],
+        "storage": {},
+    }
+
+    rendered = render.render_human(report)
+
+    assert "uninterruptible process waits (D state)" in rendered
+    assert "clues, not proof of storage blockage" in rendered
+    assert "pipe_read" in rendered
+
+
 def test_systemd_offline_returns_empty() -> None:
     assert systemd.collect_systemd_units(offline=True) == []
     assert systemd.collect_resource_slices(offline=True) == []

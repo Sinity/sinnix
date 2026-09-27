@@ -25,17 +25,23 @@ def render_human(report: dict[str, Any]) -> str:
     if pressure.get("free_h"):
         lines.append(pressure["free_h"].rstrip())
 
-    section("blocked tasks")
+    section("uninterruptible process waits (D state)")
     blocked = report.get("blocked_tasks", [])
     if not blocked:
         lines.append("none")
     else:
         lines.append(
-            f"{'STAT':<6} {'PID':<8} {'PPID':<8} {'SEC':<8} {'CPU':<6} {'RSS_KB':<9} {'WCHAN':<24} COMMAND"
+            "D-state and wait-channel names are clues, not proof of storage blockage; "
+            "correlate them with PSI and service I/O."
+        )
+        lines.append(
+            f"{'STAT':<6} {'WAIT':<24} {'PID':<8} {'PPID':<8} {'SEC':<8} "
+            f"{'CPU':<6} {'RSS_KB':<9} {'WCHAN':<24} COMMAND"
         )
         for task in blocked[:20]:
             lines.append(
-                f"{task.get('stat', ''):<6} {task.get('pid', '')!s:<8} {task.get('ppid', '')!s:<8} "
+                f"{task.get('stat', ''):<6} {task.get('wait_kind', 'unclassified_d_state'):<24} "
+                f"{task.get('pid', '')!s:<8} {task.get('ppid', '')!s:<8} "
                 f"{task.get('elapsed_secs', '')!s:<8} {task.get('cpu_pct', '')!s:<6} {task.get('rss_kb', '')!s:<9} "
                 f"{task.get('wchan', ''):<24} {task.get('cmdline', '')}"
             )
