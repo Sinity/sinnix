@@ -5,6 +5,7 @@ import binascii
 import hashlib
 import hmac
 import json
+import os
 import time
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -22,6 +23,7 @@ MAX_RESPONSE_BYTES = 262_144
 MAX_EVENT_PROJECTS = 16
 MAX_OWNER_REVISIONS = MAX_EVENT_PROJECTS * 2
 MAX_RUNTIME_ROW_BYTES = 1_048_576
+BOOT_ID_PATH = Path("/proc/sys/kernel/random/boot_id")
 # Job observation uses a fixed owner page so changing the event `limit`
 # cannot fabricate a domain transition, and incompleteness lives on the
 # jobs source rather than the event cursor.
@@ -57,12 +59,13 @@ class OpaqueEventCursor:
         return {
             "audit_sequence": 0,
             "runtime_offset": 0,
+            "runtime_generation": None,
             "owner_revisions": {},
             "job_revision": None,
         }
 
     def encode(self, state: Mapping[str, Any], projects: list[str]) -> str:
-        body = {"v": 1, "scope": self._scope(projects), "state": dict(state)}
+        body = {"v": 2, "scope": self._scope(projects), "state": dict(state)}
         payload = base64.urlsafe_b64encode(_canonical(body)).decode().rstrip("=")
         mac = hmac.new(self._key, payload.encode(), hashlib.sha256).hexdigest()
         value = f"{payload}.{mac}"
@@ -95,7 +98,7 @@ class OpaqueEventCursor:
             raise EventCursorError("event cursor is not valid JSON") from exc
         if (
             not isinstance(body, Mapping)
-            or body.get("v") != 1
+            or body.get("v") not in {1, 2}
             or body.get("scope") != self._scope(projects)
         ):
             raise EventCursorError(
@@ -104,9 +107,12 @@ class OpaqueEventCursor:
         state = body.get("state")
         if not isinstance(state, Mapping):
             raise EventCursorError("event cursor state is malformed")
+        if body.get("v") == 1:
+            raise EventCursorError("legacy event cursor is stale; restart continuation")
         if set(state) != {
             "audit_sequence",
             "runtime_offset",
+            "runtime_generation",
             "owner_revisions",
             "job_revision",
         }:
@@ -118,6 +124,11 @@ class OpaqueEventCursor:
             for key in ("audit_sequence", "runtime_offset")
         ):
             raise EventCursorError("event cursor position is malformed")
+        runtime_generation = state["runtime_generation"]
+        if runtime_generation is not None and (
+            not isinstance(runtime_generation, str) or len(runtime_generation) > 256
+        ):
+            raise EventCursorError("event cursor runtime generation is malformed")
         owner_revisions = state["owner_revisions"]
         if (
             not isinstance(owner_revisions, Mapping)
@@ -257,10 +268,36 @@ class NormalizedEventService:
                 return b"".join(chunks), total, True
 
     def _runtime_events(
-        self, offset: int, limit: int, accept: Callable[[dict[str, Any]], bool]
-    ) -> tuple[int, dict[str, Any], bool]:
+        self,
+        offset: int,
+        generation: str | None,
+        limit: int,
+        accept: Callable[[dict[str, Any]], bool],
+    ) -> tuple[int, str | None, dict[str, Any], bool]:
         try:
             with self.transitions_path.open("rb") as handle:
+                stat = os.fstat(handle.fileno())
+                try:
+                    boot_id = BOOT_ID_PATH.read_text().strip()
+                except OSError as exc:
+                    raise EventCursorError(
+                        "runtime ledger boot identity is unavailable"
+                    ) from exc
+                opened_generation = f"{boot_id}:{stat.st_dev}:{stat.st_ino}"
+                if generation is not None and generation != opened_generation:
+                    raise EventCursorError(
+                        "runtime event cursor is stale; restart continuation"
+                    )
+                if offset > stat.st_size:
+                    raise EventCursorError(
+                        "runtime event cursor is stale; offset is beyond the ledger"
+                    )
+                if offset:
+                    handle.seek(offset - 1)
+                    if handle.read(1) != b"\n":
+                        raise EventCursorError(
+                            "runtime event cursor is stale; offset is not at a row boundary"
+                        )
                 handle.seek(max(0, offset))
                 next_offset = offset
                 while True:
@@ -290,6 +327,7 @@ class NormalizedEventService:
                     if not accept(event):
                         return (
                             next_offset,
+                            opened_generation,
                             {"availability": "available", "offset": next_offset},
                             True,
                         )
@@ -301,11 +339,19 @@ class NormalizedEventService:
                     handle.seek(-1, 1)
                 return (
                     next_offset,
+                    opened_generation,
                     {"availability": "available", "offset": next_offset},
                     bool(probe),
                 )
+        except EventCursorError:
+            raise
         except OSError as exc:
-            return offset, {"availability": "unavailable", "reason": str(exc)}, False
+            return (
+                offset,
+                generation,
+                {"availability": "unavailable", "reason": str(exc)},
+                False,
+            )
 
     def read(
         self,
@@ -500,20 +546,25 @@ class NormalizedEventService:
                 }
 
         runtime_offset = int(state["runtime_offset"])
-        if len(events) < limit:
-            runtime_offset, runtime_source, runtime_more = self._runtime_events(
-                runtime_offset,
-                limit - len(events),
-                lambda event: self._accept(events, sources, event, limit),
-            )
-            sources["ops-reducer.transitions"] = runtime_source
-            truncated = truncated or runtime_more
-        else:
-            sources["ops-reducer.transitions"] = {"availability": "not_requested"}
+        runtime_generation = state["runtime_generation"]
+        (
+            runtime_offset,
+            runtime_generation,
+            runtime_source,
+            runtime_more,
+        ) = self._runtime_events(
+            runtime_offset,
+            runtime_generation,
+            limit - len(events),
+            lambda event: self._accept(events, sources, event, limit),
+        )
+        sources["ops-reducer.transitions"] = runtime_source
+        truncated = truncated or runtime_more
 
         next_state = {
             "audit_sequence": audit_sequence,
             "runtime_offset": runtime_offset,
+            "runtime_generation": runtime_generation,
             "owner_revisions": owner_revisions,
             "job_revision": job_revision,
         }

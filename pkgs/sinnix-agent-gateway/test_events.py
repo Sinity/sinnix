@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import json
 from pathlib import Path
 
@@ -120,6 +123,7 @@ def test_event_cursor_is_opaque_tamper_and_scope_bound(tmp_path: Path) -> None:
                 {
                     "audit_sequence": 0,
                     "runtime_offset": 0,
+                    "runtime_generation": None,
                     "owner_revisions": {},
                     "job_revision": None,
                 },
@@ -204,6 +208,81 @@ def test_event_cursor_state_and_runtime_continuation_preserve_rows(
             break
     assert seen == ["row-0", "row-1", "row-2", "row-3"]
     assert len(seen) == len(set(seen))
+
+
+@pytest.mark.parametrize("change", ["replace", "truncate"])
+def test_runtime_cursor_rejects_replaced_or_truncated_ledger(
+    tmp_path: Path, change: str
+) -> None:
+    events, _projects, _beads, _audit = service(tmp_path)
+    events.transitions_path.write_text(
+        json.dumps(
+            {
+                "schema": "sinnix-health-transition-v1",
+                "event_id": "old",
+                "data": "x" * 512,
+            }
+        )
+        + "\n"
+    )
+    page = events.read(limit=20)
+    assert any(row["event_id"] == "old" for row in page["events"])
+
+    replacement = (
+        json.dumps({"schema": "sinnix-health-transition-v1", "event_id": "new"}) + "\n"
+    )
+    if change == "replace":
+        replacement_path = tmp_path / "replacement.jsonl"
+        replacement_path.write_text(replacement)
+        replacement_path.replace(events.transitions_path)
+    else:
+        events.transitions_path.write_text(replacement)
+
+    with pytest.raises(EventCursorError, match="runtime event cursor is stale"):
+        events.read(limit=20, cursor=page["next_cursor"])
+
+
+def test_legacy_offset_cursor_is_explicitly_stale(tmp_path: Path) -> None:
+    events, _projects, _beads, _audit = service(tmp_path)
+    body = {
+        "v": 1,
+        "scope": events.cursor._scope(["fixture"]),
+        "state": {
+            "audit_sequence": 0,
+            "runtime_offset": 1,
+            "owner_revisions": {},
+            "job_revision": None,
+        },
+    }
+    payload = (
+        base64.urlsafe_b64encode(
+            json.dumps(body, sort_keys=True, separators=(",", ":")).encode()
+        )
+        .decode()
+        .rstrip("=")
+    )
+    mac = hmac.new(events.cursor._key, payload.encode(), hashlib.sha256).hexdigest()
+
+    with pytest.raises(EventCursorError, match="legacy event cursor is stale"):
+        events.read(limit=20, cursor=f"{payload}.{mac}")
+
+
+def test_full_page_still_checks_runtime_ledger_generation(tmp_path: Path) -> None:
+    events, _projects, _beads, audit = service(tmp_path)
+    audit.append("fixture.read", "ok", {})
+    page = events.read(limit=1)
+    assert len(page["events"]) == 1
+    assert page["sources"]["ops-reducer.transitions"]["availability"] == "available"
+
+    replacement_path = tmp_path / "replacement.jsonl"
+    replacement_path.write_text(
+        '{"schema":"sinnix-health-transition-v1","event_id":"new"}\n'
+    )
+    replacement_path.replace(events.transitions_path)
+    audit.append("fixture.read", "ok", {})
+
+    with pytest.raises(EventCursorError, match="runtime event cursor is stale"):
+        events.read(limit=1, cursor=page["next_cursor"])
 
 
 def test_event_cursor_state_is_bounded_independently_of_job_population(
