@@ -7,7 +7,7 @@ import sys
 import time
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Sequence, TextIO
+from typing import Any, Sequence, TextIO
 
 import anyio
 import pytest
@@ -137,12 +137,12 @@ def test_catalog_and_invocation_traverse_every_tool_page(
         "sinnix_agent_gateway.mcp_broker.stdio_client",
         lambda _params, **_kwargs: FakeTransport(),
     )
-    monkeypatch.setattr(
-        "sinnix_agent_gateway.mcp_broker.ClientSession", TwoPageSession
-    )
+    monkeypatch.setattr("sinnix_agent_gateway.mcp_broker.ClientSession", TwoPageSession)
 
     catalog = anyio.run(broker.catalog)
-    fixture = next(server for server in catalog["servers"] if server["name"] == "fixture")
+    fixture = next(
+        server for server in catalog["servers"] if server["name"] == "fixture"
+    )
     assert [item["name"] for item in fixture["tools"]] == ["first", "second"]
     assert [item["ref"] for item in fixture["tools"]] == [
         "sinnix://mcp/fixture/tools/first",
@@ -169,16 +169,16 @@ def test_repeated_tool_cursor_reports_partial_coverage(
     )
 
     catalog = anyio.run(broker.catalog)
-    fixture = next(server for server in catalog["servers"] if server["name"] == "fixture")
+    fixture = next(
+        server for server in catalog["servers"] if server["name"] == "fixture"
+    )
     assert fixture["availability"] == "available"
     assert fixture["coverage_complete"] is False
     assert fixture["failure_class"] == "pagination_incomplete"
     assert fixture["tools"][0]["name"] == "first"
     assert RepeatingCursorSession.calls == [None, "loop"]
     with pytest.raises(McpBrokerError, match="tool listing is incomplete"):
-        anyio.run(
-            lambda: broker.call("fixture", "missing", {}, write=False)
-        )
+        anyio.run(lambda: broker.call("fixture", "missing", {}, write=False))
 
 
 def broker_service(
@@ -209,10 +209,6 @@ def broker_service(
     )
     principal = Principal.for_name(principal_name)
     return McpBrokerService(config, principal, ArtifactService(config, principal))
-
-
-
-
 
 
 class LargeSchemaSession(FakeSession):
@@ -310,8 +306,6 @@ def test_catalog_probes_admitted_servers_and_keeps_exclusions_static(
     }
 
 
-
-
 def write_stdio_fixture(tmp_path: Path, source: str) -> Path:
     fixture = tmp_path / "fixture_mcp.py"
     fixture.write_text(source)
@@ -374,6 +368,77 @@ for line in sys.stdin:
     }
 
 
+def test_real_stdio_catalog_tail_is_discoverable_and_session_stays_warm(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    broker = broker_service(tmp_path, "operator", max_bytes=4_096)
+    monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")
+    monkeypatch.setenv("XDG_RUNTIME_DIR", "/run/user/1000")
+    fixture = write_stdio_fixture(
+        tmp_path,
+        """import json
+import pathlib
+import sys
+
+counter = pathlib.Path(sys.argv[1])
+counter.write_text(str(int(counter.read_text()) + 1) if counter.exists() else "1")
+tools = [{
+    "name": f"fixture_{index:04d}",
+    "description": "fixture tool " + ("x" * 120),
+    "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}}},
+    "annotations": {"readOnlyHint": True},
+} for index in range(120)]
+
+for line in sys.stdin:
+    request = json.loads(line)
+    method = request["method"]
+    if method == "initialize":
+        result = {
+            "protocolVersion": request["params"]["protocolVersion"],
+            "capabilities": {"tools": {}},
+            "serverInfo": {"name": "fixture", "version": "1"},
+        }
+    elif method == "tools/list":
+        result = {"tools": tools}
+    elif method == "tools/call":
+        result = {
+            "content": [{"type": "text", "text": request["params"]["name"]}],
+            "isError": False,
+        }
+    else:
+        continue
+    print(json.dumps({"jsonrpc": "2.0", "id": request["id"], "result": result}), flush=True)
+""",
+    )
+    counter = tmp_path / "launches.txt"
+    broker.config.mcp_broker_servers["fixture"].update(
+        command=sys.executable, args=[str(fixture), str(counter)]
+    )
+
+    async def discover_and_call() -> tuple[dict[str, Any], dict[str, Any]]:
+        async with broker.lifespan():
+            bounded = await broker.catalog()
+            complete = await broker.catalog(server_names={"fixture"}, bounded=False)
+            result = await broker.call(
+                "fixture", "fixture_0119", {"query": "tail"}, write=False
+            )
+            return bounded, {"complete": complete, "call": result}
+
+    bounded, complete_and_call = anyio.run(discover_and_call)
+    bounded_fixture = next(
+        server for server in bounded["servers"] if server["name"] == "fixture"
+    )
+    complete_fixture = complete_and_call["complete"]["servers"][0]
+
+    assert bounded["truncated"] is True
+    assert "fixture_0119" not in {
+        tool["name"] for tool in bounded_fixture.get("tools", [])
+    }
+    assert "fixture_0119" in {tool["name"] for tool in complete_fixture["tools"]}
+    assert complete_and_call["call"]["response"]["content"][0]["text"] == "fixture_0119"
+    assert counter.read_text() == "1"
+
+
 def test_catalog_attests_real_stdio_probe_failure(tmp_path: Path) -> None:
     broker = broker_service(tmp_path, "operator")
     fixture = write_stdio_fixture(
@@ -420,6 +485,89 @@ def test_broker_enforces_live_read_only_tool_metadata(
         anyio.run(
             lambda: broker.call("fixture", "lookup", {"query": "fixture"}, write=True)
         )
+
+
+def test_gateway_lifespan_reuses_healthy_upstream_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    broker = broker_service(tmp_path, "operator")
+    launches = 0
+    closes = 0
+
+    class CountingTransport(FakeTransport):
+        async def __aexit__(self, *args: object) -> None:
+            nonlocal closes
+            closes += 1
+            await super().__aexit__(*args)
+
+    def stdio(_params: object, **_kwargs: object) -> FakeTransport:
+        nonlocal launches
+        launches += 1
+        return CountingTransport()
+
+    monkeypatch.setattr("sinnix_agent_gateway.mcp_broker.stdio_client", stdio)
+    monkeypatch.setattr("sinnix_agent_gateway.mcp_broker.ClientSession", FakeSession)
+
+    async def calls() -> tuple[dict[str, object], dict[str, object]]:
+        async with broker.lifespan():
+            await broker.catalog()
+            first = await broker.call(
+                "fixture", "lookup", {"query": "first"}, write=False
+            )
+            second = await broker.call(
+                "fixture", "lookup", {"query": "second"}, write=False
+            )
+            return first, second
+
+    first, second = anyio.run(calls)
+
+    assert first["response"]["content"][0]["text"] == "lookup:first"
+    assert second["response"]["content"][0]["text"] == "lookup:second"
+    assert launches == 1
+    assert closes == 1
+
+
+def test_failed_persistent_write_is_not_resent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    broker = broker_service(tmp_path, "operator")
+    calls = 0
+    launches = 0
+
+    class UncertainWriteSession(FakeSession):
+        async def list_tools(self, *, params: object | None = None) -> object:
+            response = await super().list_tools(params=params)
+            response.tools[0].annotations = None
+            return response
+
+        async def call_tool(self, name: str, arguments: dict[str, object]) -> object:
+            nonlocal calls
+            calls += 1
+            raise OSError("connection lost after dispatch")
+
+    monkeypatch.setattr(
+        "sinnix_agent_gateway.mcp_broker.stdio_client",
+        lambda _params, **_kwargs: launch(),
+    )
+    monkeypatch.setattr(
+        "sinnix_agent_gateway.mcp_broker.ClientSession", UncertainWriteSession
+    )
+
+    def launch() -> FakeTransport:
+        nonlocal launches
+        launches += 1
+        return FakeTransport()
+
+    async def invoke() -> None:
+        async with broker.lifespan():
+            with pytest.raises(McpBrokerError, match="session failed"):
+                await broker.call("fixture", "lookup", {"query": "mutate"}, write=True)
+            await broker.catalog()
+
+    anyio.run(invoke)
+
+    assert calls == 1
+    assert launches == 2
 
 
 @pytest.mark.parametrize("annotation", [None, False])
@@ -473,9 +621,7 @@ def test_read_only_subroute_requires_exact_tool_and_explicit_selector(
     assert calls == [("lookup", safe)]
 
 
-def test_read_only_tools_admit_unannotated_tools(
-    tmp_path, monkeypatch
-) -> None:
+def test_read_only_tools_admit_unannotated_tools(tmp_path, monkeypatch) -> None:
     broker = broker_service(tmp_path, "operator")
     broker.config.mcp_broker_servers["fixture"]["readOnlyTools"] = ["lookup"]
     calls = []
@@ -502,7 +648,9 @@ def test_read_only_tools_admit_unannotated_tools(
     )
     assert result["response"]["content"][0]["text"] == "lookup:fixture"
     catalog = anyio.run(broker.catalog)
-    fixture = next(server for server in catalog["servers"] if server["name"] == "fixture")
+    fixture = next(
+        server for server in catalog["servers"] if server["name"] == "fixture"
+    )
     assert fixture["tools"][0]["effect"] == "read"
     assert fixture["read_only_tool_count"] == 1
     with pytest.raises(McpBrokerError, match="declared read-only"):
@@ -536,10 +684,6 @@ def test_read_only_subroute_rejects_unbounded_or_malformed_configuration(
     broker.config.mcp_broker_servers["fixture"]["readOnlyRoutes"] = routes
     with pytest.raises(McpBrokerError, match="configuration is malformed"):
         broker._server("fixture")
-
-
-
-
 
 
 def test_broker_attests_upstream_stderr_on_transport_failure(

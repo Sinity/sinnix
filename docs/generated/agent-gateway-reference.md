@@ -1,11 +1,11 @@
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: e9972cefee5100b6604052e9cb370b85c4c4214f06006094b87491169684cbb2 -->
+<!-- gateway-catalog-sha256: 02367b48337f4ce1c1e01211f0d9129008983fb6dcec58eb324216ed96d6adca -->
 # Sinnix Agent Gateway reference
 
 Generated from `sinnix_agent_gateway.actions`. Every action is one MCP tool whose `tools/list` input schema is the one below; the catalog hash changes when any principal-visible action catalog row changes, including its schema, principal set, example or affordance.
 
-Revision: `v3-typed-actions`. Catalog SHA-256: `e9972cefee5100b6604052e9cb370b85c4c4214f06006094b87491169684cbb2`.
+Revision: `v3-typed-actions`. Catalog SHA-256: `02367b48337f4ce1c1e01211f0d9129008983fb6dcec58eb324216ed96d6adca`.
 
 ## Invocation
 

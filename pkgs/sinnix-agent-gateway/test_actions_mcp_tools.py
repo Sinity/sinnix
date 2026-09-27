@@ -219,8 +219,6 @@ def test_tools_reports_incomplete_upstream_coverage_for_no_match(
     assert "fixture" in result["data"]["coverage_incomplete"]
 
 
-
-
 def test_broker_timeout_is_diagnosable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -235,7 +233,9 @@ def test_broker_timeout_is_diagnosable(
     monkeypatch.setattr("sinnix_agent_gateway.mcp_broker.ClientSession", Hanging)
     row = {
         r["name"]: r
-        for r in call(rt, "mcp.servers", {"servers": ["fixture"]}, BY_NAME)["data"]["servers"]
+        for r in call(rt, "mcp.servers", {"servers": ["fixture"]}, BY_NAME)["data"][
+            "servers"
+        ]
     }["fixture"]
     assert row["failure_class"] == "timeout" and row["last_successful_probe"] is None
 

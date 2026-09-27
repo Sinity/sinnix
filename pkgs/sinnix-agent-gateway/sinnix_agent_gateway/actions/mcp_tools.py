@@ -180,7 +180,9 @@ async def _tools(runtime: Runtime, inp: ToolsInput) -> Tools:
     configured = runtime.config.mcp_broker_servers
     if inp.server is not None and inp.server not in configured:
         raise ProtocolError(
-            "not_found", "MCP server is not configured", details={"unknown": [inp.server]}
+            "not_found",
+            "MCP server is not configured",
+            details={"unknown": [inp.server]},
         )
     try:
         catalog = await runtime.mcp_broker.catalog(

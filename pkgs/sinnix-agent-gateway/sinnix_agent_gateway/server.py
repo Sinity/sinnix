@@ -74,11 +74,12 @@ def create_server(
 
     @asynccontextmanager
     async def gateway_lifespan(_server: MCPServer):
-        async with anyio.create_task_group() as task_group:
-            task_group.start_soon(revision_publisher.run, 1.0)
-            task_group.start_soon(event_publisher.run, 1.0)
-            yield {}
-            task_group.cancel_scope.cancel()
+        async with runtime.mcp_broker.lifespan():
+            async with anyio.create_task_group() as task_group:
+                task_group.start_soon(revision_publisher.run, 1.0)
+                task_group.start_soon(event_publisher.run, 1.0)
+                yield {}
+                task_group.cancel_scope.cancel()
 
     mcp = MCPServer(
         name="sinnix-agent-gateway",

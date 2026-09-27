@@ -6,9 +6,12 @@ import math
 import shutil
 import time
 import uuid
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import anyio
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.types import PaginatedRequestParams
@@ -48,6 +51,39 @@ MAX_MCP_TOOL_LIST_PAGES = 128
 MAX_MCP_TOOL_COUNT = 10_000
 
 
+@dataclass
+class _SessionRequest:
+    operation: str
+    payload: Any
+    reply: Any
+
+
+class _PersistentSession:
+    def __init__(self, service: "McpBrokerService", name: str, sender: Any):
+        self.service = service
+        self.name = name
+        self.sender = sender
+
+    async def initialize(self) -> None:
+        return None
+
+    async def list_tools(self, *, params: Any = None) -> Any:
+        return await self._request("list_tools", params)
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
+        return await self._request("call_tool", (name, arguments))
+
+    async def _request(self, operation: str, payload: Any) -> Any:
+        send, receive = anyio.create_memory_object_stream[Any](1)
+        async with send, receive:
+            await self.sender.send(_SessionRequest(operation, payload, send))
+            ok, value = await receive.receive()
+        if not ok:
+            await self.service._discard_session(self.name)
+            raise value
+        return value
+
+
 class McpBrokerService:
     def __init__(
         self,
@@ -60,6 +96,131 @@ class McpBrokerService:
         self.principal = principal
         self.artifacts = artifacts
         self.execution = execution
+        self._task_group: Any | None = None
+        self._sessions: dict[str, _PersistentSession] = {}
+        self._session_lock = anyio.Lock()
+
+    @asynccontextmanager
+    async def lifespan(self):
+        """Own warm upstream processes for exactly one gateway lifespan."""
+        if self._task_group is not None:
+            raise RuntimeError("MCP broker lifespan is already active")
+        async with anyio.create_task_group() as task_group:
+            self._task_group = task_group
+            try:
+                yield
+            finally:
+                self._task_group = None
+                self._sessions.clear()
+                task_group.cancel_scope.cancel()
+
+    async def _persistent_session(
+        self,
+        name: str,
+        server: dict[str, Any],
+        environment: dict[str, str],
+        stderr_directory: Path,
+    ) -> _PersistentSession | None:
+        task_group = self._task_group
+        if task_group is None:
+            return None
+        async with self._session_lock:
+            session = self._sessions.get(name)
+            if session is not None:
+                return session
+            sender, receiver = anyio.create_memory_object_stream[_SessionRequest](32)
+            parameters = self._parameters(server, environment)
+            stderr_directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+            stderr_path = stderr_directory / "stderr.log"
+            session = await task_group.start(
+                self._serve_session,
+                name,
+                parameters,
+                stderr_path,
+                receiver,
+            )
+            session.sender = sender
+            self._sessions[name] = session
+            return session
+
+    async def _serve_session(
+        self,
+        name: str,
+        parameters: StdioServerParameters,
+        stderr_path: Path,
+        receiver: Any,
+        *,
+        task_status: Any = anyio.TASK_STATUS_IGNORED,
+    ) -> None:
+        current_tool = "initialize"
+        started = False
+        failed_request: _SessionRequest | None = None
+        try:
+            with stderr_path.open("w", encoding="utf-8") as stderr:
+                async with stdio_client(parameters, errlog=stderr) as (
+                    read,
+                    write_stream,
+                ):
+                    async with ClientSession(read, write_stream) as client:
+                        await client.initialize()
+                        proxy = _PersistentSession(self, name, None)
+                        task_status.started(proxy)
+                        started = True
+                        async with receiver:
+                            async for request in receiver:
+                                current_tool = (
+                                    request.payload[0]
+                                    if request.operation == "call_tool"
+                                    else "tools/list"
+                                )
+                                try:
+                                    if request.operation == "list_tools":
+                                        result = await client.list_tools(
+                                            params=request.payload
+                                        )
+                                    else:
+                                        tool_name, arguments = request.payload
+                                        result = await client.call_tool(
+                                            tool_name, arguments
+                                        )
+                                except Exception:
+                                    failed_request = request
+                                    raise
+                                else:
+                                    try:
+                                        await request.reply.send((True, result))
+                                    except (
+                                        anyio.BrokenResourceError,
+                                        anyio.ClosedResourceError,
+                                    ):
+                                        # The caller timed out or disconnected. The
+                                        # upstream result may already exist; keep it
+                                        # only in this session and never resend it.
+                                        continue
+        except Exception as exc:
+            artifact_id = self._store_upstream_stderr(
+                stderr_path.parent, name, current_tool
+            )
+            diagnostic = f"; diagnostic artifact {artifact_id}" if artifact_id else ""
+            message = McpBrokerError(
+                f"MCP upstream {name} session failed: {type(exc).__name__}{diagnostic}"
+            )
+            if failed_request is not None:
+                with anyio.CancelScope(shield=True):
+                    try:
+                        await failed_request.reply.send((False, message))
+                    except (anyio.BrokenResourceError, anyio.ClosedResourceError):
+                        pass
+            if not started:
+                task_status.started(exception=message)
+            return
+        finally:
+            if stderr_path.exists() and stderr_path.stat().st_size == 0:
+                shutil.rmtree(stderr_path.parent, ignore_errors=True)
+
+    async def _discard_session(self, name: str) -> None:
+        async with self._session_lock:
+            self._sessions.pop(name, None)
 
     @staticmethod
     def _string(value: Any, name: str, maximum: int = 8_192) -> str:
@@ -199,12 +360,11 @@ class McpBrokerService:
         call_timeout = self._call_timeout(server)
         timeout = min(call_timeout, DEFAULT_MCP_CALL_TIMEOUT_SECONDS)
         discovery_truncated = timeout < call_timeout
-        parameters = self._parameters(
-            server, environment
-        )
+        parameters = self._parameters(server, environment)
         stderr_directory = self.config.state_dir / "captures" / uuid.uuid4().hex
         stderr_directory.mkdir(mode=0o700, parents=True)
         stderr_path = stderr_directory / "stderr.log"
+        discovery_deadline = asyncio.get_running_loop().time() + timeout
 
         async def inspect() -> tuple[list[dict[str, Any]], int, dict[str, Any]]:
             with stderr_path.open("w", encoding="utf-8") as stderr:
@@ -227,9 +387,31 @@ class McpBrokerService:
             )
 
         try:
-            tools, read_only_tool_count, coverage = await asyncio.wait_for(
-                inspect(), timeout=timeout
+            session = await asyncio.wait_for(
+                self._persistent_session(
+                    server_name, server, environment, stderr_directory
+                ),
+                timeout=timeout,
             )
+            if session is None:
+                tools, read_only_tool_count, coverage = await asyncio.wait_for(
+                    inspect(),
+                    timeout=max(
+                        0.001, discovery_deadline - asyncio.get_running_loop().time()
+                    ),
+                )
+            else:
+                tools, coverage = await asyncio.wait_for(
+                    self._list_tools(session),
+                    timeout=max(
+                        0.001, discovery_deadline - asyncio.get_running_loop().time()
+                    ),
+                )
+                contracts = [self._tool_contract(server_name, tool) for tool in tools]
+                read_only_tool_count = sum(
+                    contract["effect"] == "read" for contract in contracts
+                )
+                tools = contracts
         except asyncio.TimeoutError:
             artifact_id = self._store_upstream_stderr(
                 stderr_directory, server_name, "tools/list"
@@ -258,14 +440,20 @@ class McpBrokerService:
             if artifact_id is not None:
                 result["diagnostic_artifact_id"] = artifact_id
             return result
-        except Exception:
-            artifact_id = self._store_upstream_stderr(
-                stderr_directory, server_name, "tools/list"
+        except Exception as exc:
+            artifact_id = (
+                None
+                if "diagnostic artifact " in str(exc)
+                else self._store_upstream_stderr(
+                    stderr_directory, server_name, "tools/list"
+                )
             )
             result = {
                 "availability": "unavailable",
                 "failure_class": "upstream_unavailable",
-                "reason": "upstream did not complete initialize and tools/list",
+                "reason": str(exc)
+                if isinstance(exc, McpBrokerError)
+                else "upstream did not complete initialize and tools/list",
             }
             if artifact_id is not None:
                 result["diagnostic_artifact_id"] = artifact_id
@@ -609,32 +797,24 @@ class McpBrokerService:
         stderr_directory.mkdir(mode=0o700, parents=True)
         stderr_path = stderr_directory / "stderr.log"
 
-        async def invoke() -> dict[str, Any]:
+        async def invoke_session(session: Any) -> dict[str, Any]:
             tool: Any | None = None
             response: Any | None = None
-            with stderr_path.open("w", encoding="utf-8") as stderr:
-                async with stdio_client(parameters, errlog=stderr) as (
-                    read,
-                    write_stream,
+            await session.initialize()
+            tools, coverage = await self._list_tools(session)
+            tool = self._tool(tools, tool_name)
+            if tool is None and not coverage["complete"]:
+                raise McpBrokerError(
+                    "MCP tool listing is incomplete; cannot determine "
+                    f"whether the server exposes tool {tool_name!r}: "
+                    f"{coverage['reason']}"
+                )
+            if tool is not None:
+                read_only = self._request_is_read_only(server, tool, arguments)
+                if (not write and read_only is True) or (
+                    write and read_only is not True
                 ):
-                    async with ClientSession(read, write_stream) as session:
-                        await session.initialize()
-                        tools, coverage = await self._list_tools(session)
-                        tool = self._tool(tools, tool_name)
-                        if tool is None and not coverage["complete"]:
-                            raise McpBrokerError(
-                                "MCP tool listing is incomplete; cannot determine "
-                                f"whether the server exposes tool {tool_name!r}: "
-                                f"{coverage['reason']}"
-                            )
-                        if tool is not None:
-                            read_only = self._request_is_read_only(
-                                server, tool, arguments
-                            )
-                            if (not write and read_only is True) or (
-                                write and read_only is not True
-                            ):
-                                response = await session.call_tool(tool_name, arguments)
+                    response = await session.call_tool(tool_name, arguments)
 
             if tool is None:
                 raise McpBrokerError(f"MCP server does not expose tool {tool_name!r}")
@@ -651,6 +831,20 @@ class McpBrokerService:
                 raise McpBrokerError("MCP server returned no tool result")
             return self._response_payload(response)
 
+        async def invoke() -> dict[str, Any]:
+            persistent = await self._persistent_session(
+                server_name, server, self._environment(server), stderr_directory
+            )
+            if persistent is not None:
+                return await invoke_session(persistent)
+            with stderr_path.open("w", encoding="utf-8") as stderr:
+                async with stdio_client(parameters, errlog=stderr) as (
+                    read,
+                    write_stream,
+                ):
+                    async with ClientSession(read, write_stream) as session:
+                        return await invoke_session(session)
+
         try:
             response = await asyncio.wait_for(invoke(), timeout=timeout)
         except asyncio.TimeoutError as exc:
@@ -666,8 +860,9 @@ class McpBrokerService:
             raise McpBrokerTimeoutError(
                 f"MCP upstream {server_name} timed out after {timeout:g}s{diagnostic}"
             ) from exc
-        except McpBrokerError:
-            shutil.rmtree(stderr_directory, ignore_errors=True)
+        except McpBrokerError as exc:
+            if "diagnostic artifact " not in str(exc):
+                shutil.rmtree(stderr_directory, ignore_errors=True)
             raise
         except Exception as exc:
             artifact_id = self._store_upstream_stderr(
