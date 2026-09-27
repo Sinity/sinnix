@@ -113,6 +113,9 @@ class Catalog(GatewayModel):
     resources: list[CatalogResource]
     mcp_tools: list[CatalogMcpTool] = Field(default_factory=list)
     mcp_unavailable: list[str] = Field(default_factory=list)
+    mcp_coverage_incomplete: dict[str, str] = Field(default_factory=dict)
+    mcp_catalog_truncated: bool = False
+    mcp_catalog_artifact: dict[str, Any] | None = None
     truncated: bool = False
 
 
@@ -160,20 +163,29 @@ async def _catalog(runtime: Runtime, inp: CatalogInput) -> Catalog:
     resources = search_rows(resources, inp.query, ("kind", "owner", "actions"))
     mcp_tools: list[dict[str, Any]] = []
     unavailable: list[str] = []
+    incomplete: dict[str, str] = {}
+    mcp_catalog_truncated = False
+    catalog_artifact: dict[str, Any] | None = None
     if (
         inp.include_mcp_tools
         and (inp.query or "").strip()
         and Capability.MCP_READ in runtime.principal.capabilities
     ):
         try:
-            broker = await runtime.mcp_broker.catalog()
+            broker = await runtime.mcp_broker.catalog(bounded=False)
         except Exception as exc:  # broker failures are catalog gaps, not errors
             unavailable.append(f"mcp: {type(exc).__name__}")
             broker = {"servers": []}
+        mcp_catalog_truncated = bool(broker.get("truncated"))
+        catalog_artifact = broker.get("catalog_artifact")
         for server in broker.get("servers", []):
             if server.get("availability") != "available":
                 unavailable.append(f"mcp.{server.get('name')}")
                 continue
+            if server.get("coverage_complete") is False:
+                incomplete[server["name"]] = (
+                    server.get("reason") or "incomplete tools/list"
+                )
             for tool in server.get("tools", []):
                 mcp_tools.append(
                     {
@@ -200,7 +212,10 @@ async def _catalog(runtime: Runtime, inp: CatalogInput) -> Catalog:
         resources=[CatalogResource(**row) for row in resources[: inp.limit]],
         mcp_tools=[CatalogMcpTool(**row) for row in mcp_tools[: inp.limit]],
         mcp_unavailable=unavailable,
-        truncated=total > inp.limit,
+        mcp_coverage_incomplete=incomplete,
+        mcp_catalog_truncated=mcp_catalog_truncated,
+        mcp_catalog_artifact=catalog_artifact,
+        truncated=total > inp.limit or bool(incomplete),
     )
 
 

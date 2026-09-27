@@ -881,3 +881,82 @@ def test_catalog_search_probes_brokers_and_preserves_filtering_and_effects(
     )
     assert without_broker["data"]["mcp_tools"] == []
     assert probes == []
+
+
+def test_catalog_search_finds_tool_beyond_broker_inline_crop(
+    tmp_path: Path, monkeypatch
+) -> None:
+    server = create_server(
+        replace(
+            config(tmp_path),
+            max_result_bytes=4_096,
+            mcp_broker_servers={"fixture": {}},
+        ),
+        "operator",
+    )
+    broker = server._sinnix_revision_publisher.runtime.mcp_broker
+
+    async def probe(name, _configuration):
+        return {
+            "name": name,
+            "availability": "available",
+            "coverage_complete": True,
+            "tools": [
+                {
+                    "name": f"ordinary_{index}",
+                    "description": "ordinary tool " + "x" * 100,
+                    "effect": "read",
+                }
+                for index in range(80)
+            ]
+            + [{"name": "unique_tail_match", "effect": "read"}],
+        }
+
+    monkeypatch.setattr(broker, "_catalog_server", probe)
+    bounded = anyio.run(broker.catalog)
+    assert bounded["truncated"] is True
+    assert bounded["catalog_artifact"]["ref"].startswith("sinnix://artifacts/")
+    assert all(
+        tool["name"] != "unique_tail_match" for tool in bounded["servers"][0]["tools"]
+    )
+
+    response = structured(
+        call(server, "gateway.catalog", {"query": "unique_tail_match"})
+    )
+    assert [tool["name"] for tool in response["data"]["mcp_tools"]] == [
+        "unique_tail_match"
+    ]
+    assert response["data"]["mcp_catalog_artifact"]["ref"].startswith(
+        "sinnix://artifacts/"
+    )
+    assert response["data"]["mcp_catalog_truncated"] is True
+    assert response["data"]["truncated"] is False
+
+
+def test_catalog_search_reports_incomplete_upstream_without_matches(
+    tmp_path: Path, monkeypatch
+) -> None:
+    server = create_server(
+        replace(config(tmp_path), mcp_broker_servers={"fixture": {}}),
+        "operator",
+    )
+    broker = server._sinnix_revision_publisher.runtime.mcp_broker
+
+    async def probe(name, _configuration):
+        return {
+            "name": name,
+            "availability": "available",
+            "coverage_complete": False,
+            "reason": "repeated tools/list cursor",
+            "tools": [{"name": "other", "effect": "read"}],
+        }
+
+    monkeypatch.setattr(broker, "_catalog_server", probe)
+    response = structured(call(server, "gateway.catalog", {"query": "missing_tool"}))
+
+    assert response["data"]["mcp_tools"] == []
+    assert response["data"]["mcp_coverage_incomplete"] == {
+        "fixture": "repeated tools/list cursor"
+    }
+    assert response["data"]["mcp_catalog_truncated"] is True
+    assert response["data"]["truncated"] is True

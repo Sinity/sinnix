@@ -36,7 +36,7 @@ Binary content never rides as text. `files.read`, `desktop.screenshot`, `browser
 
 `maxResultBytes` budgets only external presentation. Internal MCP adapters receive the lossless owner result before presentation budgeting, so a successful oversized analytical product remains available. Every result retains its full payload and metadata as an immutable observation; `results.get` and legacy result references remain readable after restart. Identical canonical payload bytes share one stored blob, while each observation retains its own attribution, timestamp, receipt, coverage and provenance. Oversized presentations return an artifact reference without deleting the full observation.
 
-`gateway.catalog` searches actions, resource kinds and brokered MCP tools by plain words (names, summaries, aliases, owners, resource kinds). `gateway.status` reports the principal, the live tool manifest hash, the package-generated hash, the connector-observed hash and per-route availability including each brokered MCP server.
+`gateway.catalog` searches actions, resource kinds and brokered MCP tools by plain words (names, summaries, aliases, owners, resource kinds). MCP search examines every tool returned by the broker before limiting matches. `mcp_coverage_incomplete` names upstream servers whose `tools/list` did not finish; `mcp_catalog_truncated` and `mcp_catalog_artifact` expose the broker's full catalog when its inline copy exceeds the byte limit. The top-level `truncated` also reports incomplete upstream coverage. `gateway.status` reports the principal, the live tool manifest hash, the package-generated hash, the connector-observed hash and per-route availability including each brokered MCP server.
 
 The generated reference below lists every action; `docs/generated/agent-gateway-reference.md` carries the schemas and examples and `sinnix-agent-gateway catalog <action> --schema` prints them live.
 
@@ -155,7 +155,7 @@ changing the gateway action family cannot suppress a client-side approval policy
 
 ## Generated reference
 
-This section is generated from the action set. Revision `v3-typed-actions`, catalog SHA-256 `f7a5314ffa57cc4c42ccc407b815db8df6faa8383490e0d53f6d3ee996bd8a22`.
+This section is generated from the action set. Revision `v3-typed-actions`, catalog SHA-256 `e92e3654e5d865f211a1a1e7fc151b0d75c5f4684d351a97f4713150e06c7399`.
 
 The full schemas and examples are in [the generated gateway reference](generated/agent-gateway-reference.md). The matching agent skill is [agent-gateway](../dots/_ai/skills/agent-gateway/SKILL.md).
 
