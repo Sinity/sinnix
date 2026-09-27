@@ -44,6 +44,24 @@ def test_operator_write_uses_compare_and_swap_and_receipts(tmp_path: Path) -> No
     assert not target.exists()
 
 
+def test_operator_create_publishes_exclusively_and_preserves_replace(tmp_path: Path) -> None:
+    target = tmp_path / "new.txt"
+    operator = service(tmp_path, "operator")
+
+    created = operator.write("create", str(target), content="new")
+
+    assert target.read_bytes() == b"new"
+    assert target.stat().st_mode & 0o777 == 0o600
+    assert created["operation"] == "create"
+    with pytest.raises(FileError, match="destination already exists"):
+        operator.write("create", str(target), content="lost update")
+    assert target.read_bytes() == b"new"
+
+    replaced = operator.write("replace", str(target), content="replacement")
+    assert target.read_bytes() == b"replacement"
+    assert replaced["operation"] == "replace"
+
+
 def test_operator_copies_and_moves_regular_files_without_replacing_destination(
     tmp_path: Path,
 ) -> None:

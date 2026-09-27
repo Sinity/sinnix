@@ -283,9 +283,10 @@ class HostFileService:
                 "sha256": before_hash,
                 "removed": operation == "move",
             }
-        if operation not in {"replace", "append"}:
+        if operation not in {"create", "replace", "append"}:
             raise FileError(
-                "operation must be replace, append, mkdir, remove, copy, or move"
+                "operation must be create, replace, append, mkdir, remove, "
+                "copy, or move"
             )
         if content is None:
             raise FileError("content is required")
@@ -298,6 +299,11 @@ class HostFileService:
         if operation == "append":
             with target.open("ab") as handle:
                 handle.write(encoded)
+        elif operation == "create":
+            if not atomic_publish(
+                target, encoded, fsync=True, mode=0o600, exclusive=True
+            ):
+                raise FileError("destination already exists")
         else:
             atomic_publish(target, encoded, fsync=True, mode=0o600)
         return {

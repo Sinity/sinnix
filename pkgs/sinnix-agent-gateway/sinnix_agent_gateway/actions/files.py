@@ -1213,7 +1213,7 @@ def _change(runtime: Runtime, inp: ChangeInput) -> ChangeResult:
         if isinstance(op, CreateOp):
             if Path(path).exists() or Path(path).is_symlink():
                 raise ProtocolError("conflict", "path already exists")
-            result = runtime.files.write("replace", path, content=op.content)
+            result = runtime.files.write("create", path, content=op.content)
             result["created"] = True
         elif isinstance(op, ReplaceOp):
             if not op.create and not Path(path).exists():

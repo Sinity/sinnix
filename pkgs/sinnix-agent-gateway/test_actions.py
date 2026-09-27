@@ -738,6 +738,36 @@ def test_files_change_operations(tmp_path: Path) -> None:
         removed["data"]["removed"] is True and not (root / "nested" / "a.txt").exists()
     )
 
+
+def test_files_change_create_preserves_writer_after_preflight(tmp_path: Path) -> None:
+    server = create_server(config(tmp_path), "operator")
+    runtime = server._sinnix_revision_publisher.runtime
+    target = tmp_path / "concurrent.txt"
+    write = runtime.files.write
+
+    def competing_writer(operation: str, path: str, **kwargs):
+        assert operation == "create"
+        target.write_bytes(b"concurrent owner content")
+        return write(operation, path, **kwargs)
+
+    runtime.files.write = competing_writer
+    result = structured(
+        call(
+            server,
+            "files.change",
+            {
+                "target": {"path": str(target)},
+                "change": {"operation": "create", "content": "request content"},
+                "idempotency_key": "create-race",
+            },
+        )
+    )
+
+    assert result["error"]["code"] == "conflict"
+    assert result["data"] is None
+    assert target.read_bytes() == b"concurrent owner content"
+
+
 def test_gateway_status_and_catalog_are_typed(tmp_path: Path) -> None:
     server = create_server(config(tmp_path), "operator")
     status = structured(call(server, "gateway.status", {}))
