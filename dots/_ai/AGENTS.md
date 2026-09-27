@@ -66,7 +66,9 @@ Host `sinnix-prime`. Root storage is wear-limited; heavy work belongs on
   whose target it cannot resolve statically (a shell variable, a glob after
   `cd`) and any compound command that changes directory and then writes. In
   unattended work, give `rm` literal absolute paths and use `git -C <path>`,
-  tool options, or absolute paths instead of `cd <dir> && …`.
+  `env -C <dir> <cmd>`, tool options, or absolute paths instead of
+  `cd <dir> && …`. The shell's working directory may reset between tool
+  calls, so a check meant for a worktree must name it explicitly.
 - Home Manager rebuilds `$HOME`; edit the declared source of a managed file.
   `xdg-user-dir` gives user-facing download and document locations.
 

@@ -19,6 +19,10 @@ next, not on supervising progress.
   - In Claude Code, prefer forks (`subagent_type: "fork"`) for
     implementation: they inherit the conversation and the parent model. A
     fork that hits its 200-turn cap is resumed with a short continue message.
+  - Dispatch every editing agent with `isolation: "worktree"`. An agent's
+    shell working directory resets to the session's project directory
+    between calls, so a worktree named only in the prompt lets checks
+    silently run against the main checkout.
   - Use a fresh `general-purpose` agent only when a clean context is the
     point (an independent review, a self-contained packet that must not
     inherit bias) or a different model is needed; Fable costs most and needs
