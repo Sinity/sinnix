@@ -39,9 +39,7 @@
       enable = true;
       endpoints = {
         operator = {
-          # This is the operator's private ChatGPT connector. The stable
-          # tunnel was previously constrained to observer authority; retain
-          # its credential while promoting the endpoint truthfully.
+          # The private ChatGPT tunnel uses the single operator gateway identity.
           enable = true;
           label = "Private ChatGPT operator";
           principal = "operator";
