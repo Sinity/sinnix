@@ -47,7 +47,9 @@ next, not on supervising progress.
   for writing the first patch. Start independent code now; serialize only
   what truly shares a contract, and give that seam one owner.
 - The packet names the base commit, assigned tasks, the source seam,
-  exclusions, the shared focused selection, and what to report. Pass
+  exclusions, the shared focused selection, and what to report. It does not
+  repeat the repository's `AGENTS.md` (verification cadence, PR rules); the
+  worker reads it. Pass
   pointers (task IDs, paths, SHAs), not pasted state.
 - Ask the owner to read every assigned task, write the whole connected change
   in one pass, run the focused selection once, inspect its final diff against
