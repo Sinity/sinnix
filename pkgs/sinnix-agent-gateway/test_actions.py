@@ -282,6 +282,65 @@ def test_text_file_pages_preserve_utf8_at_byte_boundaries(tmp_path: Path) -> Non
     assert "".join(parts) == original
 
 
+def test_line_read_bounds_skipping_a_giant_physical_line(
+    tmp_path: Path, monkeypatch
+) -> None:
+    server = create_server(config(tmp_path), "operator")
+    target = tmp_path / "giant-lines.txt"
+    target.write_bytes(b"x" * (2 * 1024 * 1024) + b"\nselected\n")
+
+    original_open = Path.open
+    read_sizes: list[int] = []
+
+    class BoundedReader:
+        def __init__(self, handle):
+            self.handle = handle
+
+        def __enter__(self):
+            self.handle.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self.handle.__exit__(*args)
+
+        def read(self, size=-1):
+            assert 0 <= size <= files._LINE_SCAN_BYTES
+            read_sizes.append(size)
+            return self.handle.read(size)
+
+        def readline(self, size=-1):
+            assert 0 <= size <= files._LINE_SCAN_BYTES
+            read_sizes.append(size)
+            return self.handle.readline(size)
+
+        def __iter__(self):
+            raise AssertionError("line paging must not iterate unbounded lines")
+
+    def bounded_open(path: Path, *args, **kwargs):
+        handle = original_open(path, *args, **kwargs)
+        return BoundedReader(handle) if path == target else handle
+
+    monkeypatch.setattr(Path, "open", bounded_open)
+    data = structured(
+        call(
+            server,
+            "files.read",
+            {
+                "target": {"path": str(target)},
+                "line_start": 2,
+                "line_count": 1,
+                "max_bytes": 4,
+            },
+        )
+    )["data"]
+
+    assert data["text"] == "sele"
+    assert data["returned_bytes"] == 4 and data["truncated"] is True
+    assert data["line_start"] == data["line_end"] == 2
+    assert read_sizes and max(read_sizes) <= files._LINE_SCAN_BYTES
+    assert 5 in read_sizes  # The selected excerpt reads only its byte budget + 1.
+
+
 def test_binary_read_never_attaches_bytes_to_the_chat(tmp_path: Path) -> None:
     server = create_server(config(tmp_path), "operator")
     pdf = tmp_path / "page.pdf"

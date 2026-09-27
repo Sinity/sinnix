@@ -42,6 +42,22 @@ if TYPE_CHECKING:
     from ..runtime import Runtime
 
 Kind = Literal["file", "directory", "symlink", "other"]
+_LINE_SCAN_BYTES = 64 * 1024
+
+
+def _skip_physical_lines(handle, count: int) -> int:
+    """Skip lines with bounded reads and return how many lines were found."""
+    skipped = 0
+    while skipped < count:
+        chunk = handle.readline(_LINE_SCAN_BYTES)
+        if not chunk:
+            break
+        if chunk.endswith(b"\n"):
+            skipped += 1
+        elif len(chunk) < _LINE_SCAN_BYTES:
+            # EOF ended a final unterminated line.
+            skipped += 1
+    return skipped
 
 
 def _kind(path: Path, *, follow: bool = True) -> Kind:
@@ -351,37 +367,42 @@ def _read(runtime: Runtime, inp: ReadInput) -> ActionResult:
             with target.open("rb") as handle:
                 start = inp.line_start
                 count = inp.line_count or 200
+                found_before = _skip_physical_lines(handle, start - 1)
                 selected: list[bytes] = []
                 returned = 0
                 truncated = False
-                for number, line in enumerate(handle, start=1):
-                    if number < start:
-                        continue
-                    if len(selected) >= count:
-                        truncated = True
-                        break
-                    remaining = max_bytes + 1 - returned
-                    if remaining <= 0:
-                        truncated = True
-                        break
-                    selected.append(line[:remaining])
-                    returned += len(selected[-1])
-                    if len(line) > len(selected[-1]):
-                        truncated = True
-                        break
-                    if len(selected) >= count:
-                        truncated = bool(handle.read(1))
-                        break
+                if found_before == start - 1:
+                    while len(selected) < count:
+                        if returned >= max_bytes + 1:
+                            truncated = bool(handle.read(1))
+                            break
+                        remaining = max_bytes + 1 - returned
+                        line = handle.readline(remaining)
+                        if not line:
+                            break
+                        selected.append(line)
+                        returned += len(line)
+                        if not line.endswith(b"\n"):
+                            if len(line) == remaining:
+                                # Distinguish an exact-size final line from a
+                                # longer line without reading its remainder.
+                                truncated = bool(handle.read(1))
+                            break
+                        if len(selected) == count:
+                            truncated = bool(handle.read(1))
+                            break
             data = b"".join(selected)
             if data.endswith(b"\n"):
                 data = data[:-1]
-            truncated = truncated or len(data) > max_bytes
+            byte_truncated = len(data) > max_bytes
+            truncated = truncated or byte_truncated
             data = data[:max_bytes]
+            text, consumed = decode_utf8_page(data, final=not byte_truncated)
             return ActionResult(
                 FileContent(
                     **base,
-                    text=data.decode("utf-8", errors="replace"),
-                    returned_bytes=len(data),
+                    text=text,
+                    returned_bytes=consumed,
                     truncated=truncated,
                     line_start=start,
                     line_end=start + len(selected) - 1 if selected else None,
