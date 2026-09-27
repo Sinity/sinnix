@@ -49,11 +49,12 @@ Host: `sinnix-prime`. Root storage is wear-limited; use `/realm` for heavy work.
 - `/realm/`: subject folders and service storage. Read `/realm/INVENTORY.md`;
   mutations go through its owning tools.
 - `/realm/state/`: live service state and external Beads databases.
-- `/realm/tmp/work/` is the managed `$TMPDIR`; clean disposable probes when
-  done. The 30-day age limit is a backstop, not a reason to retain them.
+- `/realm/tmp/work/` is managed `$TMPDIR`: put generated scratch in a per-task
+  subdirectory, remove it on exit, and keep retained results in their owning
+  store.
   `/realm/worktrees/`: isolated checkouts and compile-heavy work.
-- `/tmp` is small tmpfs. `TMPDIR` is managed; do not invent heavy work roots
-  there. Home is rebuilt by Home Manager; edit the declared source of managed
+- `/tmp` is small tmpfs; do not put heavy work there. Home is rebuilt by Home
+  Manager; edit the declared source of managed
   files. Query `xdg-user-dir` for user-facing download/document locations.
 
 Treat tracked files, commits, task exports, CI logs, and publication text as
