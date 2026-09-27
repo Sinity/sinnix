@@ -773,10 +773,11 @@ def _worktree_attestation(path: Path) -> dict[str, Any]:
     try:
         return {
             "head": _git(path, "rev-parse", "HEAD"),
+            "tree": _git(path, "rev-parse", "HEAD^{tree}"),
             "dirty": bool(_git(path, "status", "--porcelain")),
         }
     except BatchError:
-        return {"head": None, "dirty": None}
+        return {"head": None, "tree": None, "dirty": None}
 
 
 def _hosted_check_attestation(
@@ -827,6 +828,8 @@ def _verify(
     candidate: str,
     sleep: Callable[[float], None],
     beads: Beads,
+    *,
+    _retried_unbound_cache: bool = False,
 ) -> tuple[Run, dict[str, Any]]:
     profile = run.verify_profile or workspace_of(project).verify.get("candidate")
     if not profile:
@@ -936,6 +939,8 @@ def _verify(
     clean_candidate = (
         before["head"] == candidate
         and after["head"] == candidate
+        and before.get("tree") is not None
+        and after.get("tree") == before.get("tree")
         and before["dirty"] is False
         and after["dirty"] is False
     )
@@ -944,6 +949,38 @@ def _verify(
         raise BatchRefusal(
             "verify_failed",
             f"verification {profile} succeeded without an AgentCTL launch reference",
+        )
+    task = launch.find_task(pueue.tasks(), waited["job_id"], started.get("reference"))
+    execution = (
+        launch.successful_cached_attempt(
+            config,
+            task,
+            {"head": candidate, "tree": before.get("tree"), "dirty": False},
+            started.get("environment_receipt")
+            if isinstance(started.get("environment_receipt"), Mapping)
+            else None,
+        )
+        if task is not None and clean_candidate
+        else None
+    )
+    if execution is None and clean_candidate:
+        if started.get("reused") is True and not _retried_unbound_cache:
+            # An active task can be reused before its execution binding exists.
+            # If it ran a different checkout, keep that queue record as
+            # diagnostic evidence and submit one fresh verification.
+            return _verify(
+                config,
+                project,
+                run,
+                path,
+                candidate,
+                sleep,
+                beads,
+                _retried_unbound_cache=True,
+            )
+        raise BatchRefusal(
+            "verify_failed",
+            f"verification {profile} succeeded without an attempt bound to clean candidate {candidate[:12]}",
         )
     receipt = {
         "kind": "operation",
@@ -965,9 +1002,9 @@ def _verify(
         ),
         "recorded_at": now(),
     }
-    if clean_candidate:
+    if clean_candidate and execution is not None:
         receipt["tested_sha"] = candidate
-    task = launch.find_task(pueue.tasks(), waited["job_id"], started.get("reference"))
+        receipt["executed_attempt"] = execution["attempt"]
     if task is not None:
         for key, suffix in (("log_path", ".log"), ("result_path", ".result")):
             artifact = launch._artifact(config, task, suffix)

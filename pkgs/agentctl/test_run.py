@@ -151,7 +151,9 @@ def test_run_records_execution_receipt_even_without_cache_policy(
     )
 
     assert main([str(launch)]) == 0
-    receipt = outcome_of(tmp_path)["execution_receipt"]
+    outcome = outcome_of(tmp_path)
+    assert outcome["attempt"] == 1
+    receipt = outcome["execution_receipt"]
     assert receipt["binding"] == "unchanged_endpoints"
     assert receipt["start"]["head"] == "a"
     assert events(tmp_path)[-1]["execution_receipt"] == receipt

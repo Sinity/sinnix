@@ -650,6 +650,7 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
     end_git = git_observation(Path(launch["working_directory"]))
 
     record: dict[str, Any] = {
+        "attempt": launch["attempt"],
         "outcome": outcome.value,
         "exit_code": status,
         "unit": unit,

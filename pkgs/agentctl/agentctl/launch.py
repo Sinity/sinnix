@@ -165,8 +165,115 @@ def _matching_task(
             or launch_input.get("environment_receipt") != dict(environment_receipt)
         ):
             continue
-        if not task.terminal or task.succeeded:
+        if not task.terminal:
             return task
+        if (
+            task.succeeded
+            and successful_cached_attempt(
+                config, task, tree_receipt, environment_receipt
+            )
+            is not None
+        ):
+            return task
+    return None
+
+
+def successful_cached_attempt(
+    config: Config,
+    task: Task,
+    tree_receipt: Mapping[str, Any],
+    environment_receipt: Mapping[str, str] | None,
+) -> dict[str, Any] | None:
+    """Resolve a successful task only when its pinned execution matches its key.
+
+    The enqueue-time tree and environment describe what was requested. The
+    attempt receipt describes what the wrapper observed around execution; both
+    must agree before a terminal task can satisfy a cached request.
+    """
+    if not task.terminal or not task.succeeded:
+        return None
+    launch_path = launch_input_path(task)
+    launch_input = _launch_input(config, task)
+    if (
+        launch_path is None
+        or launch_input is None
+        or (
+            environment_receipt is not None
+            and (
+                launch_input.get("tree_receipt") != dict(tree_receipt)
+                or launch_input.get("environment_receipt") != dict(environment_receipt)
+            )
+        )
+    ):
+        return None
+    expected_environment = hashlib.sha256(
+        json.dumps(launch_input.get("environment") or {}, sort_keys=True).encode()
+    ).hexdigest()
+    attempts = artifacts.attempts(launch_input)
+    if not attempts:
+        return None
+    # Pueue's terminal result describes the last execution. A successful older
+    # attempt cannot stand in for a later restart that ran against another tree.
+    for attempt in attempts[-1:]:
+        if not isinstance(attempt, Mapping):
+            return None
+        number = attempt.get("attempt")
+        artifact_map = attempt.get("artifacts")
+        outcome_path = (
+            Path(artifact_map["outcome"])
+            if isinstance(artifact_map, Mapping)
+            and isinstance(artifact_map.get("outcome"), str)
+            else None
+        )
+        if (
+            number is None
+            or outcome_path is None
+            or not _task_owned(config, task, outcome_path)
+        ):
+            continue
+        # Attempt metadata pins the immutable artifact directory to this exact
+        # launch input. A mutable latest alias alone is not execution evidence.
+        metadata_path = outcome_path.parent / "attempt.json"
+        metadata_raw = read_bounded(metadata_path, 16_384)
+        try:
+            metadata = (
+                json.loads(metadata_raw.decode("utf-8")) if metadata_raw else None
+            )
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            metadata = None
+        if (
+            not isinstance(metadata, Mapping)
+            or metadata.get("attempt") != number
+            or metadata.get("launch_input") != str(launch_path)
+        ):
+            continue
+        raw = read_bounded(outcome_path, MAX_OUTCOME_BYTES)
+        try:
+            outcome = json.loads(raw.decode("utf-8")) if raw else None
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            outcome = None
+        if not isinstance(outcome, Mapping) or outcome.get("attempt") != number:
+            continue
+        execution = outcome.get("execution_receipt")
+        evidence = outcome.get("execution_evidence")
+        if (
+            outcome.get("outcome") != "success"
+            or not isinstance(execution, Mapping)
+            or execution.get("binding") != "unchanged_endpoints"
+            or not isinstance(evidence, Mapping)
+            or evidence.get("environment_identity") != expected_environment
+        ):
+            continue
+        observations = [execution.get("start"), execution.get("end")]
+        if all(
+            isinstance(observation, Mapping)
+            and observation.get("status") == "observed"
+            and observation.get("head") == tree_receipt.get("head")
+            and observation.get("tree") == tree_receipt.get("tree")
+            and observation.get("dirty") is False
+            for observation in observations
+        ):
+            return {**dict(outcome), "attempt": number}
     return None
 
 

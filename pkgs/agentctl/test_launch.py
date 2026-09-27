@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -150,6 +151,9 @@ def test_cached_operation_reuses_an_active_and_completed_exact_receipt(
     first = launch.start_operation(config, project, project.operation("verify"))
     second = launch.start_operation(config, project, project.operation("verify"))
     fake_pueue.succeed(first["job_id"])
+    _write_execution_attempt(
+        config, fake_pueue.task(first["job_id"]), "a" * 40, "b" * 40
+    )
     third = launch.start_operation(config, project, project.operation("verify"))
 
     assert len(fake_pueue.added) == 1
@@ -163,6 +167,84 @@ def test_cached_operation_reuses_an_active_and_completed_exact_receipt(
         "dirty": False,
     }
     assert written["environment_receipt"]["digest"].startswith("sha256:")
+
+
+def _write_execution_attempt(config: Config, task: Task, head: str, tree: str) -> None:
+    launch_input = read_launch(config, task)
+    input_path = launch.launch_input_path(task)
+    assert input_path is not None
+    attempt_dir = artifacts.root_for(Path(launch_input["log_path"])) / "1"
+    attempt_dir.mkdir(parents=True)
+    (attempt_dir / "attempt.json").write_text(
+        json.dumps({"attempt": 1, "launch_input": str(input_path)})
+    )
+    observation = {
+        "status": "observed",
+        "head": head,
+        "tree": tree,
+        "dirty": False,
+    }
+    environment_identity = hashlib.sha256(
+        json.dumps(launch_input["environment"], sort_keys=True).encode()
+    ).hexdigest()
+    (attempt_dir / "output.outcome").write_text(
+        json.dumps(
+            {
+                "attempt": 1,
+                "outcome": "success",
+                "execution_receipt": {
+                    "binding": "unchanged_endpoints",
+                    "start": observation,
+                    "end": observation,
+                },
+                "execution_evidence": {
+                    "environment_identity": environment_identity,
+                },
+            }
+        )
+    )
+
+
+def test_cached_operation_retries_success_that_executed_on_another_tree(
+    fake_pueue: FakePueue,
+    config: Config,
+    project_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    descriptor = project_root / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text().replace(
+            '[operations.verify]\ndescription = "Fixture typed verification"',
+            '[operations.verify]\ndescription = "Fixture typed verification"\ncache = "tree+environment"',
+        )
+    )
+    state = {"head": "a" * 40, "tree": "b" * 40}
+    monkeypatch.setattr(
+        launch,
+        "_git",
+        lambda path, *arguments: (
+            state["head"]
+            if arguments == ("rev-parse", "HEAD")
+            else state["tree"]
+            if arguments == ("rev-parse", "HEAD^{tree}")
+            else ""
+        ),
+    )
+    project = load_project_adapter(project_root)
+    first = launch.start_operation(config, project, project.operation("verify"))
+    fake_pueue.succeed(first["job_id"])
+    _write_execution_attempt(
+        config, fake_pueue.task(first["job_id"]), "c" * 40, "d" * 40
+    )
+    # The checkout returns to A before the request. Enqueue identity still
+    # matches, but the pinned attempt proves it actually ran on C.
+    state.update(head="a" * 40, tree="b" * 40)
+
+    retried = launch.start_operation(config, project, project.operation("verify"))
+
+    assert retried["job_id"] != first["job_id"]
+    assert len(fake_pueue.added) == 2
+    assert fake_pueue.task(first["job_id"]).succeeded
 
 
 def test_operation_dependencies_are_pueue_edges(

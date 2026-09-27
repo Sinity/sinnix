@@ -15,6 +15,7 @@ from typing import Any, Callable
 
 import pytest
 from agentctl import (
+    artifacts,
     batch,
     gitcmd,
     github,
@@ -333,6 +334,7 @@ class Harness:
     waited: list[int] = field(default_factory=list)
     # Whether the fake integration agent merges every worker branch.
     integration_merges: bool = True
+    execution_head_override: str | None = None
 
     def start(self, *seeds: str, **kwargs: Any) -> dict[str, Any]:
         return batch.start(
@@ -517,6 +519,51 @@ def harness(
             for worker in manifest.load(built.config, run_id).workers:
                 git.merge(task.path, worker["branch"])
         fake_pueue.succeed(job_id)
+        if task.label == "fixture:check":
+            launch_input = read_launch(built.config, task)
+            input_path = launch.launch_input_path(task)
+            assert input_path is not None
+            requested = launch_input.get("tree_receipt") or {
+                "head": git.heads.get(task.path, SHA),
+                "tree": BASE,
+            }
+            executed_head = built.execution_head_override or requested["head"]
+            executed_tree = (
+                requested["tree"]
+                if executed_head == requested["head"]
+                else hashlib.sha256(executed_head.encode()).hexdigest()
+            )
+            executed_dirty = bool(git.status.get(task.path, ""))
+            attempt_dir = artifacts.root_for(Path(launch_input["log_path"])) / "1"
+            attempt_dir.mkdir(parents=True)
+            (attempt_dir / "attempt.json").write_text(
+                json.dumps({"attempt": 1, "launch_input": str(input_path)})
+            )
+            observation = {
+                "status": "observed",
+                "head": executed_head,
+                "tree": executed_tree,
+                "dirty": executed_dirty,
+            }
+            environment_identity = hashlib.sha256(
+                json.dumps(launch_input["environment"], sort_keys=True).encode()
+            ).hexdigest()
+            (attempt_dir / "output.outcome").write_text(
+                json.dumps(
+                    {
+                        "attempt": 1,
+                        "outcome": "success",
+                        "execution_receipt": {
+                            "binding": "unchanged_endpoints",
+                            "start": observation,
+                            "end": observation,
+                        },
+                        "execution_evidence": {
+                            "environment_identity": environment_identity
+                        },
+                    }
+                )
+            )
         return launch.job_view(fake_pueue.task(job_id))
 
     monkeypatch.setattr(launch, "wait", wait)
@@ -1341,6 +1388,26 @@ def test_land_integrates_verifies_reviews_publishes_and_closes_satisfied_members
     assert acceptance["advisory"] == []
     with pytest.raises(BatchRefusal, match="already_accepted"):
         harness.land(run_id)
+
+
+def test_landing_rejects_successful_check_bound_to_another_execution_tree(
+    harness: Harness,
+) -> None:
+    """Breaks if enqueue identity plus a later clean checkout invents tested_sha."""
+    run = prepared_run(harness, "fx-solo")
+    harness.execution_head_override = MOVED
+
+    with pytest.raises(BatchRefusal, match="verify_failed") as refused:
+        harness.land(run["run_id"])
+
+    assert "without an attempt bound to clean candidate" in refused.value.detail
+    verify_tasks = [
+        task for task in harness.pueue.tasks().values() if task.label == "fixture:check"
+    ]
+    assert len(verify_tasks) == 1
+    assert harness.pueue.task(verify_tasks[0].task_id).succeeded
+    stored = manifest.load(harness.config, run["run_id"])
+    assert stored.acceptance is None
 
 
 def test_landing_removes_every_worktree_whose_work_the_candidate_carries(
