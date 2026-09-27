@@ -1,6 +1,6 @@
 ---
 name: drive
-description: Drive autonomous iterative work when the user says keep going, iterate, or take it further: choose the best next move, stress-test it, execute, externalize results, and continue.
+description: Use when the user explicitly invokes /drive for an open-ended iterative goal with its own pass controls. Ordinary requests to continue need no special workflow.
 ---
 
 # Drive

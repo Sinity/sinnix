@@ -18,10 +18,11 @@ get|logs|result <id>` is one job. Job ids are pueue task ids; a run id is
 - **Events**: one persistent watch on `agentctl events tail --follow
 --project <p>` (spool: `/realm/state/agentctl/events.jsonl`): every task's
   start and finish, and backpressure freezes, in local time.
-- **Project rules and history**: read the repository's `CLAUDE.md` and its
-  per-project memory index (`~/.claude/projects/<p>/memory/MEMORY.md`) before
-  dispatch or integration; the project's atlas directory, when the
-  descriptor declares one, is product orientation.
+- **Project rules and history**: read `AGENTS.md` or `CLAUDE.md` from the
+  candidate checkout before dispatch or integration. Consult the relevant
+  project memory when a decision is not available from current code or Beads;
+  historical memory does not override them. Atlas sheets, when declared, are
+  task-specific orientation.
 
 ## Who drives
 
@@ -73,8 +74,8 @@ call.
 
 Publication policy is the descriptor's `[workspace].publish`: `pr` pushes the
 candidate as one PR (titled with the leader bead's subject) and
-squash-merges it on exactly that head after the required checks and the
-reviewer verdict, then deletes the remote integration branch; the beads
+squash-merges it on exactly that head after the required checks and any
+review verdict the project declares, then deletes the remote integration branch; the beads
 close on the merge commit. `master` fast-forwards the default branch to the
 candidate. Hosted review comments are handled as `docs/agentctl.md` states.
 

@@ -1,7 +1,7 @@
 # Sinity Environment Contract
 
-Cross-project rules. Repository semantics live in its `CLAUDE.md`;
-`AGENTS.md` is an alias. Query runtime and task state from their owners.
+Cross-project rules. Repository semantics live in the repo's `AGENTS.md` or
+`CLAUDE.md`. Query runtime and task state from their owners.
 
 ## Work and authority
 
@@ -91,13 +91,9 @@ command; never guess syntax or repeat a mutation whose result is unclear.
   `result`; a queued job is still running work, so wait on its event or inspect
   its recorded state instead of repeating `start`. Retry only after reading
   the terminal result and correcting its named cause.
-- Before DB-backed checks or a push, confirm this worktree's ready `dev_services`
-  job with `agentctl job list --active` and its logs; keep it running through
-  the pre-push hook. Service ports are checkout-scoped. If PostgreSQL is
-  unavailable, compare this worktree's `SINEX_DEV_*_PORT` values with the job
-  endpoints before retrying. For other heavy work, check active jobs; do not
-  duplicate jobs or construct background reapers, `systemd-run`, or resource
-  envelopes by hand.
+- For heavy work, check active jobs; do not duplicate jobs or construct
+  background reapers, `systemd-run`, or resource envelopes by hand. Project
+  skills own any service dependencies.
 - Act on recorded task IDs and worktree paths, not inferred process names.
   For standalone process searches, bracket a character in `pgrep -f` patterns
   so the search cannot match its own shell command.
@@ -123,9 +119,10 @@ owns takeover, dispatch, recovery, and landing procedures.
 - A batch has isolated workers on one base and one integrated
   candidate. Start independent, non-overlapping work; its queued landing task
   owns integration, the declared checks, review, and publication.
-- Read the repository rules and memory index before dispatch. Task readiness
-  includes its dependencies, remaining design decisions, and required live
-  authority. A ready queue entry alone does not establish executability.
+- Read the candidate checkout's repository rules before dispatch. Consult
+  relevant project memory for decisions that current code and Beads cannot
+  supply; historical memory never overrides them. Task readiness includes
+  dependencies, remaining design decisions, and required live authority.
 - Use `bd` from the owning repository, with an explicit actor. Task state is
   external to feature branches. Read/write tasks through `task-backend`;
   mature their specification through `bead-authoring`.

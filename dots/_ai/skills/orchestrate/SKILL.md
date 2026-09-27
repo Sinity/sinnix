@@ -20,6 +20,13 @@ Read [allocation and dispatch guidance](references/model-landscape.md). Native
 dispatch defaults to `fork_turns='none'`; deliberate full-history inheritance
 uses explicit `fork_turns='all'` with no model or effort override. A bounded
 packet expresses intent; check execution against owning launch/session metadata.
+Give a native implementation worker one coherent ownership group and authority
+to fix in-scope defects. Name the candidate base, assigned Beads, relevant
+source seam, excluded scope, shared focused selection, and completion evidence.
+Ask it to inspect its final diff against the base, trace affected production
+callers and any predecessor path, fix what that inspection finds, then report
+each unmet criterion with its actual blocker. Do not turn implementation,
+testing, and self-check into separate handoffs for the same owner.
 
 ## The operating loop
 
@@ -43,8 +50,8 @@ packet expresses intent; check execution against owning launch/session metadata.
 
 | Assignment                                                       | Initial model   | Effort |
 | ---------------------------------------------------------------- | --------------- | ------ |
-| Bounded supervision, evidence collection, settled implementation | `gpt-6-luna`  | high   |
-| Substantial implementation, investigation, candidate review      | `gpt-6-sol` | high   |
+| Bounded supervision, evidence collection, settled implementation | `gpt-6-luna`  | medium |
+| Substantial implementation, investigation, candidate review      | `gpt-6-sol` | medium |
 | Unresolved architecture, design-critical implementation          | `gpt-6-astra`   | high   |
 
 These are starting assignments to revise from experience. Read
@@ -52,9 +59,10 @@ These are starting assignments to revise from experience. Read
 escalating a model. Use Astra only when a specific unresolved architecture or
 design decision warrants it.
 
-Use additional independent analysis for a named unresolved question involving
-irreversible action, destructive-data risk, no executable oracle, or concrete
-disagreement. One accountable reviewer decides from the evidence.
+Raise effort for a concrete problem that needs it; medium is the ordinary
+starting point. Use independent analysis for a named unresolved question
+involving irreversible action, destructive-data risk, no executable oracle,
+or concrete disagreement. One accountable reviewer decides from the evidence.
 
 References: [worker contract](references/worker-contract.md) (for external
 batch workers), [coordinator contract](references/coordinator-contract.md)
@@ -103,12 +111,15 @@ tests, and broad suites prove different scopes; retain the command and receipt
 for each check that actually ran.
 For Polylogue's graph and selection behavior, use the `polylogue` skill.
 
-## Structural review
+## Review at integration
 
-Follow the project's declared review policy. When review is required, its
-assigned reviewer reads the candidate diff, verification evidence and worker
-results; the root resolves escalated questions. If an authorized policy omits
-independent review, report that fact. Model tier does not establish correctness.
+The coordinator reads the integrated diff, assigned Beads, and verification
+evidence before landing. It traces the consequential call paths, fixes or
+returns concrete defects, and rechecks only affected evidence. This is ordinary
+integration work, including when the project omits an independent review gate.
+Add a separate reviewer only for a named unresolved risk, concrete dispute, or
+declared project policy. Give that reviewer one question and a pinned candidate;
+another pass requires a material diff change or an unresolved finding.
 
 ## Continuous queue mode
 

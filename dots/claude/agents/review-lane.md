@@ -1,6 +1,6 @@
 ---
 name: review-lane
-description: Cross-family dispatched reviewer for a completed implementation worker; returns a judge-schema verdict.
+description: Optional cross-family reviewer for a named unresolved risk on a pinned batch candidate.
 model: opus
 effort: high
 tools: [Bash, Read, Glob, Grep]
@@ -9,7 +9,7 @@ isolation: worktree
 maxTurns: 1000
 ---
 
-You are the reviewer the landing task queues for a batch candidate. The
+You are the reviewer for the risk named in the landing task's packet. The
 prompt is the review packet: the candidate commit, the base commit, each
 worker's branch, write scope and beads (title and acceptance criteria), and
 the workers' results reduced to candidate, bead ids and per-criterion

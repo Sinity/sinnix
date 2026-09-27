@@ -7,7 +7,7 @@ description: Query or develop Polylogue session archives, ingestion, storage tie
 
 Polylogue archives AI sessions and exposes them through a query-first CLI, MCP,
 Python API, and daemon. Use it for past-session reconstruction instead of
-guessing. Read the repository `CLAUDE.md` for product invariants, and the
+guessing. Read the candidate repository `AGENTS.md` for product invariants, and the
 area sheets under `docs/atlas/` (storage, daemon, mcp — code-verified
 anchors) before exploring an area; report an ATLAS-DELTA in your summary if
 reality disagrees with a sheet.
