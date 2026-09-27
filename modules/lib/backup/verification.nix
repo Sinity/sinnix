@@ -50,18 +50,16 @@
     description = "Borg backup integrity check and bounded restore drill";
     serviceConfig = {
       TimeoutStopSec = "15s";
-      # Repository checks are capped at 3h (1800+7200+1800s) by their own
-      # --max-duration budgets; the drill's borg check --verify-data on a
-      # multi-GB archive can take tens of minutes more on HDD. 12h total,
-      # matching the retired sinnix-borg-drill.service's own allowance.
-      TimeoutStartSec = "12h";
+      # Leave the next six-hour archive window free. Repository checks have
+      # a 3h internal budget, with the remaining time for the restore drill.
+      TimeoutStartSec = "5h";
     };
     environment = {
       BORG_PASSCOMMAND = "${pkgs.coreutils}/bin/cat ${borgPassphrasePath}";
       BORG_CACHE_DIR = borgCacheDir;
     };
     timer = {
-      onCalendar = "Sun 06:17:00";
+      onCalendar = "Sun 06:30:00";
       persistent = false;
     };
     path = with pkgs; [
@@ -151,13 +149,14 @@
       requires = [ "realm.mount" outerRealmMountUnit ];
     };
     serviceConfig = {
-      TimeoutStartSec = "24h";
+      # The independent comparison yields before the next archive window.
+      TimeoutStartSec = "5h";
       TimeoutStopSec = "15s";
     };
     timer = {
       # A missed lock window retries the next day; a successful comparison
       # makes the other daily wakes no-ops until its seven-day age expires.
-      onCalendar = "*-*-* 04:50:00";
+      onCalendar = "*-*-* 06:35:00";
       persistent = false;
     };
     path = with pkgs; [ borgbackup btrfs-progs coreutils util-linux ];
