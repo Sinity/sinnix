@@ -78,6 +78,15 @@ let
           --slice=agent.slice -- "$0" "$@"
         ;;
     esac
+    # Build tools default to one job per core. Agents shell out to source
+    # builds (a `uv sync` without a wheel, cargo, cmake) from inside
+    # agent.slice; a bounded default keeps one such build from filling the
+    # slice. An explicit caller setting still wins.
+    export CMAKE_BUILD_PARALLEL_LEVEL="''${CMAKE_BUILD_PARALLEL_LEVEL:-4}"
+    export MAKEFLAGS="''${MAKEFLAGS:--j4}"
+    export CARGO_BUILD_JOBS="''${CARGO_BUILD_JOBS:-4}"
+    export UV_CONCURRENT_BUILDS="''${UV_CONCURRENT_BUILDS:-2}"
+    export MAX_JOBS="''${MAX_JOBS:-4}"
   '';
 
   # Backend-switch env builder for the claude-deepseek/claude-local wrappers

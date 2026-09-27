@@ -413,6 +413,16 @@ in
             && !(managedWork ? ManagedOOMMemoryPressure)
             && userSlices.app.MemoryLow == "6G"
             && userSlices.session.MemoryLow == "5G"
+            # Interactive agents and whatever they shell out to are bounded:
+            # they yield CPU to the desktop, throttle before swapping, and
+            # never carry a pressure kill that would take the coordinator.
+            && userSlices.agent.CPUWeight < userSlices.app.CPUWeight
+            && userSlices.agent ? CPUQuota
+            && userSlices.agent ? MemoryHigh
+            && userSlices.agent ? MemoryMax
+            && userSlices.agent ? MemorySwapMax
+            && userSlices.agent ? TasksMax
+            && !(userSlices.agent ? ManagedOOMMemoryPressure)
             && !(poolSlices.agentctl-agent ? MemoryMax)
             && !(poolSlices.agentctl-agent ? ManagedOOMPreference)
             && !(poolSlices.agentctl-agent ? ManagedOOMMemoryPressure)

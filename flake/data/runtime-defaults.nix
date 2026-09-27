@@ -264,11 +264,37 @@ rec {
       };
     };
     user = {
+      # Interactive agent CLIs and everything they run directly: in-process
+      # subagents, their Bash tools, ad-hoc builds and probes. Heavy declared
+      # work belongs to agentctl.slice and keeps its own budget there.
+      # 2026-09-27 an agent's `uv sync` source-built a C++ wheel here with ~25
+      # parallel cc1plus at ~800 MB each; with no ceiling and CPUWeight 400
+      # this slice outranked the desktop and took the host to load 74, RAM
+      # exhausted and 14 GB of swap.
       agent = {
         IOAccounting = true;
-        CPUWeight = 400;
-        IOWeight = 300;
+        # Below app/session (100) so the desktop wins contention, above the
+        # agentctl job plane (90) so a coordinator stays responsive during a
+        # wave. The quota keeps 8 of 24 cores out of reach whatever the
+        # weights say, since an idle desktop's share is otherwise lent away.
+        CPUWeight = 95;
+        CPUQuota = "1600%";
+        IOWeight = 100;
+        # The agent processes themselves stay resident (measured ~0.6 GB for
+        # a coordinator with twenty forks).
         MemoryLow = "3G";
+        # Throttle, never kill: every in-process subagent shell is a child of
+        # the coordinator's Claude process in the same scope, so an oomd
+        # policy here would take the session down with its runaway child.
+        # 10G leaves the desktop reservation (app 6G + session 5G +
+        # desktop-shell 512M) and the job plane room on a 31 GB host.
+        MemoryHigh = "10G";
+        # Hard backstop only if throttling cannot hold: the kernel's
+        # cgroup-local OOM then picks the largest single process, which for
+        # a runaway build is the build, not a ~1 GB agent process.
+        MemoryMax = "14G";
+        MemorySwapMax = "2G";
+        TasksMax = 8192;
       };
       app = {
         IOAccounting = true;
