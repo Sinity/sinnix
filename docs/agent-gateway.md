@@ -58,7 +58,7 @@ The endpoint manifest command emits the canonical sorted tool manifest and its S
 
 ## Project and path authority
 
-`sinnix.projects.entries` is the only project registry, filtered into each `/etc/sinnix/agent-gateway-<endpoint>.json` according to that endpoint's project scope. Project paths are always relative: reads and writes reject absolute paths, parent traversal, sensitive components and symlink escapes; tree traversal does not follow symlinks. Host-file actions take absolute paths and refuse secret roots for every principal but the operator. `projects.change` requires the checkout `head` and `dirty_sha256` preconditions; `files.patch` and `files.change` accept `expected_sha256`.
+`sinnix.projects.entries` and the private runtime catalog are merged before the endpoint's `scope.projects` is applied, so excluded private projects cannot reappear after loading. An empty project scope keeps the broad operator default. Endpoint capture selectors are currently not applied: runtime inventory declares capture lane names and paths, but no subject membership from which the declared lane-or-subject scope can be resolved. Capture reads therefore continue to use principal lane authority until that mapping is declared. Project paths are always relative: reads and writes reject absolute paths, parent traversal, sensitive components and symlink escapes; tree traversal does not follow symlinks. Host-file actions take absolute paths and refuse secret roots for every principal but the operator. `projects.change` requires the checkout `head` and `dirty_sha256` preconditions; `files.patch` and `files.change` accept `expected_sha256`.
 
 ## Jobs and artifacts
 

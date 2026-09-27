@@ -601,6 +601,104 @@ def test_config_merges_private_runtime_project_catalog(tmp_path: Path) -> None:
     assert loaded.projects["private-fixture"].path == private
 
 
+def test_config_applies_project_scope_after_private_catalog_merge(
+    tmp_path: Path,
+) -> None:
+    allowed = tmp_path / "allowed"
+    excluded = tmp_path / "excluded"
+    private = tmp_path / "private"
+    for path in (allowed, excluded, private):
+        path.mkdir()
+    catalog = tmp_path / "private-projects.json"
+    catalog.write_text(
+        json.dumps({"projects": {"excluded-private": {"path": str(private)}}})
+    )
+    path = tmp_path / "gateway.json"
+    path.write_text(
+        json.dumps(
+            {
+                "projects": {
+                    "allowed-public": {"path": str(allowed)},
+                    "excluded-public": {"path": str(excluded)},
+                },
+                "privateProjectCatalogFile": str(catalog),
+                "endpoint": {"scope": {"projects": ["allowed-public"]}},
+            }
+        )
+    )
+
+    loaded = GatewayConfig.load(path)
+
+    assert set(loaded.projects) == {"allowed-public"}
+
+
+def test_empty_project_scope_keeps_merged_public_and_private_catalogs(
+    tmp_path: Path,
+) -> None:
+    public = tmp_path / "public"
+    private = tmp_path / "private"
+    public.mkdir()
+    private.mkdir()
+    catalog = tmp_path / "private-projects.json"
+    catalog.write_text(
+        json.dumps({"projects": {"private-fixture": {"path": str(private)}}})
+    )
+    path = tmp_path / "gateway.json"
+    path.write_text(
+        json.dumps(
+            {
+                "projects": {"public-fixture": {"path": str(public)}},
+                "privateProjectCatalogFile": str(catalog),
+                "endpoint": {"scope": {"projects": []}},
+            }
+        )
+    )
+
+    loaded = GatewayConfig.load(path)
+
+    assert set(loaded.projects) == {"public-fixture", "private-fixture"}
+
+
+def test_project_scope_can_select_a_private_catalog_row(tmp_path: Path) -> None:
+    public = tmp_path / "public"
+    private = tmp_path / "private"
+    public.mkdir()
+    private.mkdir()
+    catalog = tmp_path / "private-projects.json"
+    catalog.write_text(
+        json.dumps({"projects": {"private-fixture": {"path": str(private)}}})
+    )
+    path = tmp_path / "gateway.json"
+    path.write_text(
+        json.dumps(
+            {
+                "projects": {"public-fixture": {"path": str(public)}},
+                "privateProjectCatalogFile": str(catalog),
+                "endpoint": {"scope": {"projects": ["private-fixture"]}},
+            }
+        )
+    )
+
+    loaded = GatewayConfig.load(path)
+
+    assert set(loaded.projects) == {"private-fixture"}
+
+
+def test_project_scope_rejects_unknown_catalog_ids(tmp_path: Path) -> None:
+    path = tmp_path / "gateway.json"
+    path.write_text(
+        json.dumps(
+            {
+                "projects": {},
+                "endpoint": {"scope": {"projects": ["missing-project"]}},
+            }
+        )
+    )
+
+    with pytest.raises(ValueError, match="scope names unknown projects: missing-project"):
+        GatewayConfig.load(path)
+
+
 def test_config_rejects_private_catalog_collision(tmp_path: Path) -> None:
     project = tmp_path / "project"
     project.mkdir()

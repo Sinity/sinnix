@@ -89,6 +89,20 @@ class GatewayConfig:
             raw: dict[str, Any] = {}
         else:
             raw = json.loads(path.read_text())
+        endpoint = raw.get("endpoint", {})
+        if not isinstance(endpoint, Mapping):
+            raise ValueError("endpoint must be an object")
+        scope = endpoint.get("scope", {})
+        if not isinstance(scope, Mapping):
+            raise ValueError("endpoint.scope must be an object")
+        project_scope_values = scope.get("projects", [])
+        if not isinstance(project_scope_values, list) or any(
+            not isinstance(value, str) or not value for value in project_scope_values
+        ):
+            raise ValueError(
+                "endpoint.scope.projects must be a list of non-empty strings"
+            )
+        project_scope = frozenset(project_scope_values)
         project_rows = raw.get("projects", {})
         if not isinstance(project_rows, Mapping):
             raise ValueError("projects must be an object")
@@ -120,6 +134,18 @@ class GatewayConfig:
                         + ", ".join(collisions)
                     )
                 project_rows = {**project_rows, **private_rows}
+        missing_projects = sorted(project_scope.difference(project_rows))
+        if missing_projects:
+            raise ValueError(
+                "endpoint project scope names unknown projects: "
+                + ", ".join(missing_projects)
+            )
+        if project_scope:
+            project_rows = {
+                project_id: row
+                for project_id, row in project_rows.items()
+                if project_id in project_scope
+            }
         projects: dict[str, ProjectConfig] = {}
         for project_id, row in project_rows.items():
             if not isinstance(project_id, str) or not project_id:

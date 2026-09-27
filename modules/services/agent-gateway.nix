@@ -155,11 +155,6 @@ mkServiceModule {
           inherit mcpBrokerServers;
         }
         // approvals;
-      endpointProjects =
-        endpoint:
-        lib.filterAttrs (
-          projectId: _: endpoint.scope.projects == [ ] || builtins.elem projectId endpoint.scope.projects
-        ) config.sinnix.projects.entries;
       endpointConfigs = lib.mapAttrs (
         name: endpoint:
         jsonFormat.generate "sinnix-agent-gateway-${name}.json" (mkGatewayConfig {
@@ -170,7 +165,7 @@ mkServiceModule {
             principal = endpoint.principal;
             scope = endpoint.scope;
           };
-          projects = endpointProjects endpoint;
+          projects = config.sinnix.projects.entries;
           approvals = {
             packageManifestPath = "${scriptPkgs.sinnix-agent-gateway}/share/sinnix-agent-gateway/manifests/${endpoint.principal}.json";
             approvedManifestPrincipal = endpoint.principal;
@@ -228,16 +223,6 @@ mkServiceModule {
         lib.filter (value: builtins.length (builtins.filter (candidate: candidate == value) values) > 1) (
           lib.unique values
         );
-      invalidProjects = lib.concatLists (
-        lib.mapAttrsToList (
-          name: endpoint:
-          map (projectId: "${name}:${projectId}") (
-            lib.filter (
-              projectId: !(builtins.hasAttr projectId config.sinnix.projects.entries)
-            ) endpoint.scope.projects
-          )
-        ) enabledEndpoints
-      );
     in
     {
       sinnix.runtime.dataStores.agent-gateway-state = {
@@ -246,10 +231,6 @@ mkServiceModule {
       };
 
       assertions = [
-        {
-          assertion = invalidProjects == [ ];
-          message = "agent-gateway endpoint scopes name unknown projects: ${lib.concatStringsSep ", " invalidProjects}";
-        }
         {
           assertion = duplicateValues "tunnelId" == [ ];
           message = "agent-gateway endpoints must use distinct tunnel IDs";

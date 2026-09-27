@@ -286,6 +286,69 @@ def test_list_get_and_locators_resolve_projects_and_checkouts(tmp_path: Path) ->
     assert error(server, "projects.get", {"target": {}}) == "invalid_request"
 
 
+def test_public_project_list_obeys_scope_after_private_catalog_merge(
+    tmp_path: Path,
+) -> None:
+    allowed = tmp_path / "allowed"
+    excluded = tmp_path / "excluded"
+    private = tmp_path / "private"
+    for path in (allowed, excluded, private):
+        path.mkdir()
+    catalog = tmp_path / "private-projects.json"
+    catalog.write_text(
+        json.dumps({"projects": {"excluded-private": {"path": str(private)}}})
+    )
+    config_path = tmp_path / "gateway.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "projects": {
+                    "allowed-public": {"path": str(allowed)},
+                    "excluded-public": {"path": str(excluded)},
+                },
+                "privateProjectCatalogFile": str(catalog),
+                "endpoint": {"scope": {"projects": ["allowed-public"]}},
+            }
+        )
+    )
+    server = create_server(GatewayConfig.load(config_path), "operator")
+
+    listing = ok(server, "projects.list", {})
+
+    assert [row["project_id"] for row in listing["projects"]] == [
+        "allowed-public"
+    ]
+
+
+def test_public_project_list_keeps_empty_scope_broad(tmp_path: Path) -> None:
+    public = tmp_path / "public"
+    private = tmp_path / "private"
+    public.mkdir()
+    private.mkdir()
+    catalog = tmp_path / "private-projects.json"
+    catalog.write_text(
+        json.dumps({"projects": {"private-fixture": {"path": str(private)}}})
+    )
+    config_path = tmp_path / "gateway.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "projects": {"public-fixture": {"path": str(public)}},
+                "privateProjectCatalogFile": str(catalog),
+                "endpoint": {"scope": {"projects": []}},
+            }
+        )
+    )
+    server = create_server(GatewayConfig.load(config_path), "operator")
+
+    listing = ok(server, "projects.list", {})
+
+    assert [row["project_id"] for row in listing["projects"]] == [
+        "private-fixture",
+        "public-fixture",
+    ]
+
+
 def test_tree_read_diff_and_search_keep_authority_checks(tmp_path: Path) -> None:
     config, project, linked = fixture(tmp_path)
     server = create_server(config, "operator")
