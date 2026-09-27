@@ -1,6 +1,6 @@
 ---
 name: lane
-description: External AgentCTL batch worker in an isolated worktree. Dispatch prompts carry only task scope and file ownership.
+description: External AgentCTL batch worker in an isolated worktree. Dispatch prompts carry task scope and conflict-planning estimates.
 model: sonnet
 effort: medium
 tools: [Bash, Read, Write, Edit, Glob, Grep]

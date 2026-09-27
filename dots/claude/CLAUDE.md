@@ -74,10 +74,10 @@ command; never guess syntax or repeat a mutation whose result is unclear.
   `agentctl job start <project> <operation> [AgentCTL options] [-- <declared operation args>]`.
   Put AgentCTL options before `--`; pass only declared parameters after it.
 - Native agents handle investigation, bounded help, and cohesive implementation
-  in the shared checkout with disjoint write scopes; the coordinator commits
-  the result. AgentCTL batches integrate independent isolated groups; external
-  workers use native agents and queued workers support unattended execution
-  and explicit backends.
+  in the shared checkout; coordinate actual edit conflicts and let the
+  coordinator commit the integrated result. AgentCTL batches integrate
+  independent isolated groups; external workers use native agents and queued
+  workers support unattended execution and explicit backends.
 - `agentctl` is an in-process CLI. pueue owns queued jobs, pause/resume, and
   terminal results; Git/worktrunk own commits/worktrees; GitHub owns hosted
   publication; Beads owns task state. Systemd owns fixed services, timer wake-ups

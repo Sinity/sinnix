@@ -30,8 +30,9 @@ The operator or the coordinating agent starts every batch; `agentctl` does
 what it is told and reports. A started batch lands itself: the landing task
 is queued behind its workers and runs when they all succeed. A run's "next"
 on the view describes its state. Native agents remain under the coordinator's
-direct supervision in the shared checkout; keep their write scopes disjoint and
-let the coordinator commit the integrated result.
+direct supervision in the shared checkout. Their write scopes are conflict-
+planning estimates; coordinate actual edit conflicts and let the coordinator
+commit the integrated result.
 
 For several live workers, assign one accountable supervisor per concern for the
 event watch, result collection, routine in-scope recovery, and one consolidated,

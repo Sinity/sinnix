@@ -7,9 +7,9 @@ description: Orchestrate parallel implementation, research, or queue work with e
 
 The root session owns priorities, scope, allocation, and consequential
 decisions. Use native agents for investigation, bounded help, and cohesive
-implementation: they work in the shared checkout with disjoint write scopes,
-while the coordinator commits the result. Use an AgentCTL external batch when
-independent ownership groups need isolated worktrees and one integrated
+implementation in the shared checkout; coordinate actual edit conflicts while
+the coordinator commits the integrated result. Use an AgentCTL external batch
+when independent ownership groups need isolated worktrees and one integrated
 candidate. Queued workers handle unattended work or execution through another
 backend. Shared heavy commands are declared jobs. Each concern has
 one accountable supervisor; a completed worker reports its result and exits.
@@ -86,7 +86,8 @@ that prior evidence.
   `dispatch_group` members, or `--worker a,b` named explicitly. Beads that
   share a reproduced failure family, invariant, files, evidence, or a
   verification boundary go in one worker even when their initial file lists
-  differ. Keep write scopes disjoint across workers.
+  differ. Treat write scopes as conflict-planning estimates; coordinate actual
+  edit conflicts and preserve each owner's accepted outcome.
 - External workers use `batch start … --workers external`; the manifest names
   their worktrees and packets. File each result with `batch result`; the last
   result enqueues landing. Confirm each result is bound to the manifest's

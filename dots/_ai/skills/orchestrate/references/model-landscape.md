@@ -33,9 +33,9 @@ comparing dispatch choices.
 - Use queued AgentCTL external workers for independent durable implementation or
   publication with explicit launch fields, unattended queueing, or a required
   backend choice. Use native agents for bounded interactive analysis, help, and
-  cohesive implementation in the shared checkout; keep write scopes disjoint
-  and let the coordinator commit. Trivial read-only work need not become a
-  batch. Do not add wrappers or ledgers.
+  cohesive implementation in the shared checkout; coordinate actual edit
+  conflicts and let the coordinator commit the integrated result. Trivial
+  read-only work need not become a batch. Do not add wrappers or ledgers.
 
 ## Before dispatch
 

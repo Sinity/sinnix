@@ -43,10 +43,10 @@ The ownership boundaries are:
   tools; it calls agentctl's launch and batch routes in process and does not
   implement another job controller.
 - Native agents are appropriate for investigation, bounded help, and cohesive
-  implementation in a shared checkout with disjoint write scopes; the
-  coordinator commits their integrated result. AgentCTL batches integrate
-  independent isolated groups; external workers use native agents, while
-  queued workers support unattended execution and explicit backends.
+  implementation in a shared checkout; coordinate actual edit conflicts and
+  let the coordinator commit their integrated result. AgentCTL batches
+  integrate independent isolated groups; external workers use native agents,
+  while queued workers support unattended execution and explicit backends.
 - Project descriptors (`.agentctl/project.toml`) own repository semantics:
   environment, declared operations, result parsing, packet defaults.
 - Systemd remains live process/service authority. Do not duplicate its process
