@@ -118,11 +118,12 @@
     };
   })
 
-  # One timer gives both fresh lanes an attempt in each cycle. systemctl start waits
-  # for each oneshot's result; a persist failure must still start realm.
+  # One timer gives both fresh lanes an attempt in each cycle. Archive /realm
+  # first so a long /persist full verification cannot delay its space-critical
+  # snapshot drain. A realm failure must still start persist.
   # This unit never takes the Borg lock. The children own the archive gate.
   (mkBackupJob "borgbackup-drain-coordinator" {
-    description = "Run persist and realm snapshot drains in sequence";
+    description = "Run realm and persist snapshot drains in sequence";
     unit.unitConfig.PropagatesStopTo = [
       "borgbackup-job-persist.service"
       "borgbackup-job-realm.service"
@@ -137,13 +138,16 @@
         echo "Fresh snapshot admission window closed"
         exit 0
       fi
+      # An unfinished independent check can be retried. Stop it before
+      # draining, so it cannot hold the Borg lock across this backup window.
+      systemctl stop borgbackup-verify.service borgbackup-coverage-audit-realm.service
       failed=0
-      if ! systemctl start borgbackup-job-persist.service; then
-        echo "Persist snapshot drain failed; continuing to realm" >&2
+      if ! systemctl start borgbackup-job-realm.service; then
+        echo "Realm snapshot drain failed; continuing to persist" >&2
         failed=1
       fi
-      if ! systemctl start borgbackup-job-realm.service; then
-        echo "Realm snapshot drain failed" >&2
+      if ! systemctl start borgbackup-job-persist.service; then
+        echo "Persist snapshot drain failed" >&2
         failed=1
       fi
       exit "$failed"
