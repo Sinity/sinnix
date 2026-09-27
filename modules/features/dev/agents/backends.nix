@@ -183,10 +183,12 @@ let
     claude_args=(
       "''${mcp_args[@]}"
     )
+    # --add-dir accepts multiple values and would consume a following
+    # subcommand such as `mcp list` when passed as separate words.
     if [ -d "${sinnixCfg.paths.realmRoot}" ]; then
-      claude_args+=(--add-dir "${sinnixCfg.paths.realmRoot}" "/home/${user}")
+      claude_args+=(--add-dir=${lib.escapeShellArg sinnixCfg.paths.realmRoot} --add-dir=/home/${user})
     else
-      claude_args+=(--add-dir "/home/${user}")
+      claude_args+=(--add-dir=/home/${user})
     fi
   '';
 

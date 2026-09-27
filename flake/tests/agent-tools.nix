@@ -855,6 +855,8 @@ in
               | any(contains("pretooluse-agent-model.sh"))
             ' "$HOME/.codex/hooks.json" >/dev/null
             ${claudeLaneWrapperChecks}
+            grep -Fq 'claude_args+=(--add-dir=' "$HOME/.local/bin/claude"
+            ! grep -Fq 'claude_args+=(--add-dir "' "$HOME/.local/bin/claude"
             ${codexLaneWrapperChecks}
             grep -Fq '@bman654/clodex' "$HOME/.local/bin/claude-clodex"
             grep -Fq 'CLODEX_REQUIRE_SERVER=1' "$HOME/.local/bin/claude-clodex"
