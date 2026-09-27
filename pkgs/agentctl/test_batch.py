@@ -27,6 +27,7 @@ from agentctl import (
 )
 from agentctl import landing as landing_module
 from agentctl.batch import BatchError, BatchRefusal
+from agentctl.beads import SubprocessBeads
 from agentctl.config import Config
 from agentctl.projects import ProjectAdapter, load_project_adapter
 from agentctl.pueue import PueueError
@@ -50,9 +51,10 @@ class FakeBeads(FakeBd):
 
     claims: list[tuple[str, str]] = field(default_factory=list)
     released: list[tuple[str, str]] = field(default_factory=list)
-    closed: list[tuple[str, str, str]] = field(default_factory=list)
+    closed: list[tuple[str, str, str, int]] = field(default_factory=list)
     comments: list[tuple[str, str]] = field(default_factory=list)
     refuse_close: set[str] = field(default_factory=set)
+    mutate_before_close: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def claim(self, bead_id: str, *, actor: str) -> None:
         record = self.beads[bead_id]
@@ -70,11 +72,16 @@ class FakeBeads(FakeBd):
             record["status"] = "open"
         self.released.append((bead_id, actor))
 
-    def close(self, bead_id: str, *, reason: str, actor: str) -> None:
+    def close(
+        self, bead_id: str, *, reason: str, actor: str, expected_version: int
+    ) -> None:
+        self.beads[bead_id].update(self.mutate_before_close.pop(bead_id, {}))
+        if int(self.beads[bead_id]["revision"]) != expected_version:
+            raise BatchError("bd owner call closeIssue: precondition_failed")
         if bead_id in self.refuse_close:
             raise BatchError(f"bd close {bead_id}: refused")
         self.beads[bead_id]["status"] = "closed"
-        self.closed.append((bead_id, reason, actor))
+        self.closed.append((bead_id, reason, actor, expected_version))
 
     def comment(self, bead_id: str, text: str, *, actor: str) -> None:
         self.comments.append((bead_id, text))
@@ -89,8 +96,8 @@ def beads() -> FakeBeads:
         "fx-solo": bead("fx-solo", "Solo", issue_type="bug"),
         "fx-other": bead("fx-other", "Other"),
     }
-    for bead_id, record in records.items():
-        record["revision"] = f"revision-{bead_id}"
+    for revision, (bead_id, record) in enumerate(records.items(), 101):
+        record["revision"] = revision
         record["acceptance_criteria"] = f"Acceptance for {bead_id}"
     return FakeBeads(beads=records)
 
@@ -624,7 +631,7 @@ def test_result_read_projection_separates_dispatch_from_worker_claims(
         "task_id": run["workers"][0]["task_id"],
         "launch_reference": run["workers"][0]["task_reference"],
     }
-    assert provenance["bead_revisions"] == {"fx-solo": "revision-fx-solo"}
+    assert provenance["bead_revisions"] == {"fx-solo": "103"}
     assert provenance["worker_claim"] == {
         "model_segments": [
             {"attempt": 1, "planned_model": "fixture-model", "measured_usage": None}
@@ -672,6 +679,9 @@ def test_launch_binds_beads_authored_v2_criteria_into_the_worker_result(
         "bead_revision": str(revision),
         "criteria": [{"ac_id": "AC-solo-1", "text": "the focused check passes"}],
         "acceptance_digest": "a74f76920cdca65a2af2b1c0e8bdd4c7f32d7873959f11e79a006796674f5541",
+        "semantic_digest": prompts.evidence_binding(harness.beads.beads["fx-solo"])[
+            "semantic_digest"
+        ],
     }
     assert packet["beads"][0]["evidence_binding"] == binding
     assert packet["result_contract"]["schema_version"] == 2
@@ -792,6 +802,94 @@ def test_landing_keeps_a_bead_open_when_its_acceptance_changes(
     state = landed["acceptance"]["beads"]["fx-solo"]
     assert state["state"] == "open"
     assert "acceptance changed after dispatch" in state["evidence"]
+
+
+def test_landing_closes_after_administrative_revision_drift(harness: Harness) -> None:
+    run = prepared_run(harness, "fx-solo")
+    harness.beads.beads["fx-solo"]["revision"] = 7773497739344011640
+    harness.beads.beads["fx-solo"]["notes"] = "coordinator progress note"
+
+    landed = harness.land(run["run_id"])
+
+    state = landed["acceptance"]["beads"]["fx-solo"]
+    assert state["state"] == "closed"
+    assert harness.beads.closed[-1][3] == 7773497739344011640
+
+
+def test_landing_refuses_scope_drift_as_a_task_contract_change(
+    harness: Harness,
+) -> None:
+    harness.beads.beads["fx-solo"]["metadata"]["write_scope"] = ["pkgs/agentctl"]
+    run = prepared_run(harness, "fx-solo")
+    harness.beads.beads["fx-solo"]["metadata"]["write_scope"] = ["modules"]
+
+    landed = harness.land(run["run_id"])
+
+    state = landed["acceptance"]["beads"]["fx-solo"]
+    assert state["state"] == "open"
+    assert "task contract changed after dispatch" in state["evidence"]
+    assert "acceptance changed after dispatch" not in state["evidence"]
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("design", "new implementation constraints"),
+        ("dependencies", [{"id": "fx-other", "dependency_type": "blocks"}]),
+    ],
+)
+def test_landing_refuses_design_and_dependency_drift(
+    harness: Harness, field: str, value: Any
+) -> None:
+    run = prepared_run(harness, "fx-solo")
+    harness.beads.beads["fx-solo"][field] = value
+
+    landed = harness.land(run["run_id"])
+
+    state = landed["acceptance"]["beads"]["fx-solo"]
+    assert state["state"] == "open"
+    assert "task contract changed after dispatch" in state["evidence"]
+
+
+def test_owner_close_cas_refuses_a_revision_move_after_verdict(
+    harness: Harness,
+) -> None:
+    run = prepared_run(harness, "fx-solo")
+    harness.beads.mutate_before_close["fx-solo"] = {"revision": 7773497739344011640}
+
+    landed = harness.land(run["run_id"])
+
+    state = landed["acceptance"]["beads"]["fx-solo"]
+    assert state["state"] == "open"
+    assert "precondition_failed" in state["evidence"]
+    assert not harness.beads.closed
+
+
+def test_subprocess_close_sends_the_exact_owner_cas_revision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[dict[str, Any]] = []
+
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append({"argv": argv, **kwargs})
+        return subprocess.CompletedProcess(argv, 0, "{}", "")
+
+    monkeypatch.setattr("agentctl.beads.subprocess.run", run)
+    revision = 7773497739344011640
+
+    SubprocessBeads(tmp_path).close(
+        "fx-solo", reason="verified", actor="codex", expected_version=revision
+    )
+
+    assert calls[0]["argv"] == ["bd", "owner", "call", "closeIssue"]
+    assert json.loads(calls[0]["input"]) == {
+        "path": {"id": "fx-solo"},
+        "body": {
+            "actor": "codex",
+            "expected_version": revision,
+            "reason": "verified",
+        },
+    }
 
 
 def test_versioned_worker_claim_never_becomes_observed_executor_fact(

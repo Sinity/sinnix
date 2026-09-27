@@ -712,11 +712,39 @@ def evidence_binding(bead: Mapping[str, Any]) -> dict[str, Any]:
             "utf-8"
         )
     ).hexdigest()
+    metadata = _metadata(bead)
+    # Keep the close contract separate from the row revision: the latter also
+    # moves for notes, claims and other administrative edits. These are the
+    # owner-authored fields that change what the worker was asked to do.
+    semantic = {
+        key: bead.get(key) for key in ("title", "description", "design", "issue_type")
+    }
+    semantic["criteria"] = list(criteria)
+    semantic["scope"] = {
+        key: metadata.get(key)
+        for key in ("scope", "affected_paths", "write_scope", "verification_commands")
+        if key in metadata
+    }
+    dependencies = bead.get("dependencies")
+    if isinstance(dependencies, list):
+        semantic["dependencies"] = [
+            {
+                key: row.get(key)
+                for key in ("id", "dependency_type", "edge_type", "type", "relation")
+                if key in row
+            }
+            for row in dependencies
+            if isinstance(row, Mapping)
+        ]
+    semantic_digest = hashlib.sha256(
+        json.dumps(semantic, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    ).hexdigest()
     return {
         "v2_available": available,
         "bead_revision": revision,
         "criteria": list(criteria),
         "acceptance_digest": digest if available else None,
+        "semantic_digest": semantic_digest if available else None,
         **(
             {}
             if available

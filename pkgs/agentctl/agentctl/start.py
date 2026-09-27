@@ -207,6 +207,7 @@ def _evidence_binding(beads: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]
                 "bead_revision": binding.get("bead_revision"),
                 "criteria": list(binding.get("criteria") or ()),
                 "acceptance_digest": binding.get("acceptance_digest"),
+                "semantic_digest": binding.get("semantic_digest"),
             }
         )
     return records

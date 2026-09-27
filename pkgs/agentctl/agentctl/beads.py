@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 from typing import Any, Mapping, Protocol, Sequence
 
@@ -19,7 +20,9 @@ class Beads(Protocol):
 
     def unclaim(self, bead_id: str, *, actor: str) -> None: ...
 
-    def close(self, bead_id: str, *, reason: str, actor: str) -> None: ...
+    def close(
+        self, bead_id: str, *, reason: str, actor: str, expected_version: int
+    ) -> None: ...
 
     def comment(self, bead_id: str, text: str, *, actor: str) -> None: ...
 
@@ -50,8 +53,35 @@ class SubprocessBeads(SubprocessBdReader):
     def unclaim(self, bead_id: str, *, actor: str) -> None:
         self._write(("unclaim", bead_id, "--if-assignee", actor), actor=actor)
 
-    def close(self, bead_id: str, *, reason: str, actor: str) -> None:
-        self._write(("close", bead_id, "--reason", reason), actor=actor)
+    def close(
+        self, bead_id: str, *, reason: str, actor: str, expected_version: int
+    ) -> None:
+        if isinstance(expected_version, bool) or not 0 <= expected_version < 2**64:
+            raise BatchError("owner close revision is not an unsigned 64-bit integer")
+        request = {
+            "path": {"id": bead_id},
+            "body": {
+                "actor": actor,
+                "expected_version": expected_version,
+                "reason": reason,
+            },
+        }
+        try:
+            completed = subprocess.run(
+                [self.executable, "owner", "call", "closeIssue"],
+                cwd=self.root,
+                input=json.dumps(request),
+                capture_output=True,
+                text=True,
+                timeout=CALL_TIMEOUT_SECONDS,
+            )
+        except (OSError, subprocess.SubprocessError) as error:
+            raise BatchError(
+                f"bd owner call closeIssue failed in {self.root}"
+            ) from error
+        if completed.returncode != 0:
+            detail = completed.stderr.strip() or completed.stdout.strip()
+            raise BatchError(f"bd owner call closeIssue: {detail}")
 
     def comment(self, bead_id: str, text: str, *, actor: str) -> None:
         self._write(("comment", bead_id, text), actor=actor)

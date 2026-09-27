@@ -158,10 +158,16 @@ def _closure_verdicts(run: Run, beads: Beads) -> tuple[dict[str, bool], dict[str
                 continue
             if any(
                 current.get(key) != binding.get(key)
-                for key in ("bead_revision", "acceptance_digest", "criteria")
+                for key in ("acceptance_digest", "criteria")
             ):
                 verdicts[bead_id] = False
                 residuals[bead_id] = "acceptance changed after dispatch"
+                continue
+            if not isinstance(binding.get("semantic_digest"), str) or current.get(
+                "semantic_digest"
+            ) != binding.get("semantic_digest"):
+                verdicts[bead_id] = False
+                residuals[bead_id] = "task contract changed after dispatch"
                 continue
             if claimed.get(bead_id):
                 verdicts[bead_id] = True
@@ -169,6 +175,35 @@ def _closure_verdicts(run: Run, beads: Beads) -> tuple[dict[str, bool], dict[str
                 verdicts[bead_id] = False
                 residuals[bead_id] = "dispatch acceptance was not fully satisfied"
     return verdicts, residuals
+
+
+def _close_revision(run: Run, beads: Beads, bead_id: str) -> int:
+    """Re-observe semantic eligibility and return the exact owner CAS token."""
+    worker = next(worker for worker in run.workers if bead_id in worker["beads"])
+    bindings = worker.get("evidence_binding") or ()
+    binding = next(
+        (
+            row
+            for row in bindings
+            if isinstance(row, Mapping) and row.get("id") == bead_id
+        ),
+        None,
+    )
+    if not isinstance(binding, Mapping):
+        raise BatchError("no closure-eligible dispatch acceptance binding")
+    current = prompts.evidence_binding(beads.show(bead_id))
+    if any(
+        current.get(key) != binding.get(key)
+        for key in ("acceptance_digest", "criteria", "semantic_digest")
+    ):
+        raise BatchError("task contract changed before close")
+    revision = current.get("bead_revision")
+    if not isinstance(revision, str) or not revision.isdecimal():
+        raise BatchError("current owner revision is not an exact decimal integer")
+    expected_version = int(revision, 10)
+    if not 0 <= expected_version < 2**64:
+        raise BatchError("current owner revision is outside the unsigned 64-bit range")
+    return expected_version
 
 
 # A result filed on the run's base commit carries no branch to integrate: the
@@ -1191,8 +1226,12 @@ def _accept(
     for bead_id in run.beads:
         if verdicts.get(bead_id):
             try:
+                expected_version = _close_revision(run, beads, bead_id)
                 beads.close(
-                    bead_id, reason=f"batch {run.run_id} {landed}", actor=run.actor
+                    bead_id,
+                    reason=f"batch {run.run_id} {landed}",
+                    actor=run.actor,
+                    expected_version=expected_version,
                 )
                 beads_state[bead_id] = {
                     "state": "closed",
