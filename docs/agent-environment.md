@@ -81,6 +81,7 @@ Servers: context7, github, lynchpin, polylogue, sinex.
 | Name | Description | Model | Effort |
 | --- | --- | --- | --- |
 | `boilerplate-scribe` | Apply a supplied mechanical code or configuration pattern within an explicit file scope, then verify the affected behavior. | `haiku` | `` |
+| `implementer` | Implementation worker for one coherent ownership group in its own worktree — writes the whole change, verifies it, publishes it, and drives the PR through hosted review. Use instead of a fork when the work may exceed a fork's turn cap. | `` | `` |
 | `judge` | Headless structured judge with an explicit refutation attempt and honest unsupported path. | `sonnet` | `high` |
 | `lane` | External AgentCTL batch worker in an isolated worktree. Dispatch prompts carry task scope and conflict-planning estimates. | `sonnet` | `medium` |
 | `review` | Read-only adversarial reviewer that cites exact evidence and tests the strongest counterclaim. | `opus` | `high` |

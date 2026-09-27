@@ -17,9 +17,11 @@ next, not on supervising progress.
   implementation. Give each one its own worktree (under `/realm/worktrees/`)
   or a disjoint area of a shared checkout; the coordinator integrates.
   - In Claude Code, a fork (`subagent_type: "fork"`) inherits the whole
-    conversation and the parent model, which suits an implementer that needs
-    the decisions made so far. Every non-fork dispatch passes an explicit
-    `model`; the dispatch hook refuses one without it.
+    conversation and the parent model, and is capped at 200 turns. Use one
+    when inherited context matters and the work fits that cap. Otherwise
+    dispatch the `implementer` agent (1000 turns) with a self-contained
+    packet. Every non-fork dispatch passes an explicit `model`; the dispatch
+    hook refuses one without it.
   - In Codex, native spawn takes `model`, `reasoning_effort`, and `fork_turns`
     (`'none'` by default; `'all'` for deliberate full-history inheritance,
     with no model or effort override).
