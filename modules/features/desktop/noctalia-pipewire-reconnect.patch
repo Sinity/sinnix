@@ -39,6 +39,14 @@ diff --git a/src/pipewire/pipewire_service.cpp b/src/pipewire/pipewire_service.c
 index 6861c7ae..b0b63b42 100644
 --- a/src/pipewire/pipewire_service.cpp
 +++ b/src/pipewire/pipewire_service.cpp
+@@ -11,6 +11,7 @@
+ #include <algorithm>
+ #include <array>
+ #include <cctype>
++#include <cerrno>
+ #include <charconv>
+ #include <chrono>
+ #include <cmath>
 @@ -70,6 +70,15 @@ namespace {
        .global_remove = onRegistryGlobalRemove,
    };
@@ -212,7 +220,7 @@ index 6861c7ae..b0b63b42 100644
 +}
 +
 +void PipeWireService::onCoreError(std::uint32_t id, int result, const char* message) {
-+  if (id != PW_ID_CORE || result >= 0) {
++  if (id != PW_ID_CORE || result != -EPIPE) {
 +    kLog.warn("PipeWire object error (id {}, {}): {}", id, result, message != nullptr ? message : "unknown error");
 +    return;
 +  }
@@ -256,9 +264,10 @@ diff --git a/src/pipewire/wireplumber_mixer.cpp b/src/pipewire/wireplumber_mixer
 index 91eff65b..ccfe3423 100644
 --- a/src/pipewire/wireplumber_mixer.cpp
 +++ b/src/pipewire/wireplumber_mixer.cpp
-@@ -3,9 +3,11 @@
+@@ -3,9 +3,12 @@
  #include "core/log.h"
  
++#include <cerrno>
  #include <functional>
 +#include <chrono>
  #include <glib.h>
@@ -314,7 +323,7 @@ index 91eff65b..ccfe3423 100644
 +    if (self == nullptr) {
 +      return;
 +    }
-+    if (id != PW_ID_CORE || result >= 0) {
++    if (id != PW_ID_CORE || result != -EPIPE) {
 +      kLog.warn("WirePlumber object error (id {}, {}): {}", id, result, message != nullptr ? message : "unknown");
 +      return;
 +    }
