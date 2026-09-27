@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 from typing import Callable
 
@@ -446,8 +447,9 @@ def test_cancel_marks_then_stops_the_unit_then_kills_the_task(
     assert fake_pueue.killed == [started["job_id"]]
     calls = recording_systemctl()
     assert ["systemctl", "--user", "stop", unit] in calls
-    assert ["systemctl", "--user", "is-active", "--quiet", unit] in calls
-    assert cancelled["state"] == "stopped"
+    assert ["systemctl", "--user", "show", "-p", "LoadState,ActiveState", unit] in calls
+    assert cancelled["state"] == "unresolved"
+    assert cancelled["unresolved"] is True
     assert cancelled["unit"] == unit
     assert cancelled["phase"] == "cancelled"
 
@@ -469,7 +471,31 @@ def test_cancel_fails_when_the_unit_is_still_active_afterwards(
 
     cancelled = launch.cancel(config, started["job_id"], settle_seconds=0)
 
-    assert cancelled["state"] == "failed"
+    assert cancelled["state"] == "unresolved"
+    assert cancelled["unresolved"] is True
+
+
+@pytest.mark.parametrize(
+    ("properties", "expected"),
+    [
+        ("LoadState=not-found\n", "stopped"),
+        ("LoadState=loaded\nActiveState=inactive\n", "stopped"),
+        ("LoadState=loaded\nActiveState=active\n", "failed"),
+        ("", "unresolved"),
+    ],
+)
+def test_cancel_unit_state_requires_observed_inactivity(
+    monkeypatch: pytest.MonkeyPatch, properties: str, expected: str
+) -> None:
+    monkeypatch.setattr(
+        launch.subprocess,
+        "run",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=properties
+        ),
+    )
+
+    assert launch._unit_state("fixture.service") == expected
 
 
 def test_cancel_lets_the_wrapper_record_the_outcome_before_any_kill(
@@ -513,7 +539,7 @@ def test_cancel_lets_the_wrapper_record_the_outcome_before_any_kill(
     assert fake_pueue.killed == []
     assert slept == [launch.CANCEL_POLL_SECONDS]
     assert not marker.exists()
-    assert cancelled["phase"] == "cancelled" and cancelled["state"] == "stopped"
+    assert cancelled["phase"] == "cancelled" and cancelled["state"] == "unresolved"
     assert cancelled["outcome"] == {"outcome": "cancelled", "exit_code": 130}
     stop = ["systemctl", "--user", "stop", launch.unit_of(task)]
     assert stop in recording_systemctl()
@@ -1032,6 +1058,64 @@ def test_cancel_racing_runner_start_does_not_fabricate_not_started(
     assert cancelled.get("started") is not False
     assert cancelled["phase"] == "unresolved"
     assert cancelled["disposition"]["unresolved"] is True
+
+
+def test_cancel_start_race_targets_the_attempt_allocated_after_it(
+    fake_pueue: FakePueue,
+    config: Config,
+    project_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    recording_systemctl: Callable[[], list[list[str]]],
+    tmp_path: Path,
+) -> None:
+    """Pre-allocation cancellation is preserved when pueue starts under its lock."""
+    project = load_project_adapter(project_root)
+    started = launch.start_operation(config, project, project.operation("check"))
+    task_id = started["job_id"]
+    fake_pueue.queue(task_id)
+    original_task = fake_pueue.task
+    raced = False
+
+    def task_after_runner_start(asked: int) -> Task | None:
+        nonlocal raced
+        if asked == task_id and not raced:
+            raced = True
+            queued = original_task(asked)
+            assert queued is not None
+            fake_pueue._tasks[asked] = replace(
+                queued,
+                status="Running",
+                started_at="2026-09-27T00:00:00+00:00",
+            )
+        return original_task(asked)
+
+    monkeypatch.setattr(launch.pueue, "task", task_after_runner_start)
+    cancelled = launch.cancel(
+        config, task_id, reference=started["reference"], settle_seconds=0
+    )
+
+    document = read_launch(config, original_task(task_id))
+    marker = cancel_marker_for(document["log_path"])
+    assert json.loads(marker.read_text()) == {"attempt": 1}
+    assert cancelled["phase"] == "cancelled"
+    assert original_task(task_id).terminal
+
+    side_effect = tmp_path / "cancelled-runner-side-effect"
+    document["argv"] = ["sh", "-c", f"touch {side_effect}"]
+    write_input(launch.launch_input_path(original_task(task_id)), document)
+    monkeypatch.setattr("agentctl.run.unit_pool", lambda _pool: None)
+
+    assert (
+        run_main([str(launch.launch_input_path(original_task(task_id)))])
+        == CANCELLED_EXIT_CODE
+    )
+    assert not side_effect.exists()
+    assert [
+        "systemctl",
+        "--user",
+        "stop",
+        launch.unit_of(original_task(task_id)),
+    ] in recording_systemctl()
 
 
 def test_a_task_whose_launch_input_agentctl_did_not_write_names_its_own_scope(

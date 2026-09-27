@@ -96,6 +96,21 @@ def begin(launch: Mapping[str, Any], launch_input: str) -> dict[str, Any]:
             migration.unlink()
             existing = attempts(launch)
         number = max((item["attempt"] for item in existing), default=0) + 1
+        # Cancellation can arrive after pueue has started the wrapper but
+        # before this allocation. The canceller records the attempt it expects
+        # under this same lock. Preserve that intent; discard only a marker
+        # left for an earlier invocation.
+        marker = paths["log"].with_name(
+            paths["log"].name[:-4] + ".cancel"
+            if paths["log"].name.endswith(".log")
+            else paths["log"].name + ".cancel"
+        )
+        try:
+            requested = json.loads(marker.read_text()).get("attempt")
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, AttributeError):
+            requested = None
+        if requested != number:
+            marker.unlink(missing_ok=True)
         directory = root / str(number)
         directory.mkdir(mode=0o700)
         record = {

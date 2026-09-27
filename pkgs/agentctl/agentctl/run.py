@@ -13,9 +13,11 @@ shell does with it.
 That path also names the task's containment: a transient service
 ``agentctl-<pueue group>-<stem>-<digest of the path>.service`` in the pool's
 slice, every part of which a reader recovers from ``pueue status`` alone. The
-service exits with its cgroup (``ExitType=cgroup``), so ``systemd-run --wait``
-returns only once nothing the workload started is left, and a canceller stops
-the unit without this wrapper's help.
+service exits with its cgroup (``ExitType=cgroup``). Without ``--no-block``,
+``systemd-run`` waits for unit startup; ``Type=exec`` makes its successful
+return confirm the command was exec'd before releasing the allocation lock.
+After that, the wrapper observes service completion while a canceller can
+stop the unit without this wrapper's help.
 
 The unit's Description is ``agentctl:<daemon>:<pool>:<pueue task id>``: the
 pueue daemon the task belongs to and the exact pool, so the single-slot guard
@@ -26,6 +28,7 @@ another daemon (a test's private pueued) and is left alone.
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -60,6 +63,7 @@ REFUSED_EXIT_CODE = 125
 CANCELLED_EXIT_CODE = 130
 VANISHED_EXIT_CODE = 126
 SLOT_OCCUPIED_EXIT_CODE = 75
+UNIT_OBSERVATION_GRACE_SECONDS = 10
 
 
 class Outcome(str, Enum):
@@ -146,6 +150,39 @@ def _sibling(log_path: object, suffix: str) -> Path:
 def cancel_marker_for(log_path: object) -> Path:
     """``<jobs_dir>/<ref>.cancel``: written by the canceller before it stops the unit."""
     return _sibling(log_path, ".cancel")
+
+
+def _marker_targets(marker: Path, attempt: int) -> bool:
+    try:
+        record = json.loads(marker.read_text())
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    return isinstance(record, Mapping) and record.get("attempt") == attempt
+
+
+def _attempt_root_for_marker(marker: Path) -> Path:
+    stem = marker.name[:-7] if marker.name.endswith(".cancel") else marker.name
+    return marker.parent / f"{stem}.attempts"
+
+
+def _start_service(command: Sequence[str], marker: Path, attempt: int, log: Any):
+    """Serialize service start acknowledgement with cancellation."""
+    root = _attempt_root_for_marker(marker)
+    with (root / ".allocation.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if _marker_targets(marker, attempt):
+            return None
+        # Without --no-block, systemd-run waits for unit startup. Type=exec
+        # makes successful return an exec acknowledgement rather than a
+        # successful fork. This is the lock boundary; waiting for ActiveState
+        # here can retain the lock until workload exit if a property read fails.
+        return subprocess.run(
+            command,
+            stdout=subprocess.DEVNULL,
+            stderr=log,
+            check=False,
+            env=systemd_environment(),
+        )
 
 
 def outcome_path_for(log_path: object) -> Path:
@@ -340,15 +377,45 @@ def _systemctl(*arguments: str) -> str | None:
     return completed.stdout if completed.returncode == 0 else None
 
 
-def unit_properties(unit: str) -> dict[str, str]:
-    """The unit's terminal state, empty once systemd no longer knows it."""
+def _unit_snapshot(unit: str) -> dict[str, str] | None:
+    """A successful show, including not-found, or None when observation failed."""
     shown = _systemctl(
         "show", "-p", "LoadState,ActiveState,Result,ExecMainStatus,ExecMainCode", unit
     )
-    properties = dict(
-        line.partition("=")[::2] for line in (shown or "").splitlines() if "=" in line
+    if shown is None:
+        return None
+    return dict(line.partition("=")[::2] for line in shown.splitlines() if "=" in line)
+
+
+def unit_properties(unit: str) -> dict[str, str]:
+    """The unit's terminal state, empty once systemd no longer knows it."""
+    properties = _unit_snapshot(unit)
+    return (
+        properties
+        if properties is not None and properties.get("LoadState") == "loaded"
+        else {}
     )
-    return properties if properties.get("LoadState") == "loaded" else {}
+
+
+def _wait_for_unit(unit: str, timeout_seconds: int) -> dict[str, str] | None:
+    """Wait outside the allocation lock until completion or its observation deadline.
+
+    Failed property queries are not evidence that the service completed. Bound
+    the wait by the declared service runtime plus a short reporting grace so a
+    broken systemd connection cannot strand the pueue wrapper indefinitely.
+    """
+    deadline = time.monotonic() + timeout_seconds + UNIT_OBSERVATION_GRACE_SECONDS
+    while time.monotonic() < deadline:
+        properties = _unit_snapshot(unit)
+        if properties is not None:
+            load_state = properties.get("LoadState")
+            active_state = properties.get("ActiveState")
+            if load_state and load_state != "loaded":
+                return {}
+            if load_state == "loaded" and active_state in {"inactive", "failed"}:
+                return properties
+        time.sleep(0.05)
+    return None
 
 
 def active_units(daemon: str, pool: str) -> list[str]:
@@ -433,7 +500,6 @@ def _service_command(
     return [
         "systemd-run",
         "--user",
-        "--wait",
         "--quiet",
         f"--unit={unit}",
         f"--slice={pool_slice(pool)}",
@@ -446,16 +512,18 @@ def _service_command(
 
 
 def _classify(
-    client_status: int, marker: Path, properties: Mapping[str, str]
+    client_status: int, cancelled: bool, properties: Mapping[str, str] | None
 ) -> tuple[Outcome, int]:
-    """What the run's unit says it did, or what `systemd-run --wait` says.
+    """What the started unit says it did, or what its start request says.
 
-    systemd unloads a successful transient service the moment it is inactive
-    and keeps a failed one, so an unobservable unit after a zero client status
-    is a success and after any other status is one nothing can account for.
+    systemd unloads a successful transient service after it is inactive and
+    keeps a failed one. A confirmed missing unit after a successful start
+    request is therefore success; a failed observation is unresolved.
     """
-    if marker.exists():
+    if cancelled:
         return Outcome.CANCELLED, CANCELLED_EXIT_CODE
+    if properties is None:
+        return Outcome.VANISHED, VANISHED_EXIT_CODE
     if not properties:
         if client_status == 0:
             return Outcome.SUCCESS, 0
@@ -640,7 +708,6 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
     pool = unit_pool(os.environ.get("PUEUE_GROUP")) or unit_pool(launch.get("pool"))
     unit = unit_for(launch_input, pool) if pool else None
     daemon = pueue.daemon_tag()
-    marker.unlink(missing_ok=True)
     event = {
         "kind": "queue-task",
         "job_id": launch["job_id"],
@@ -680,52 +747,73 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
     log_path.write_bytes(b"")
     stdout_path.write_bytes(b"")
     with open(log_path, "ab") as log, open(stdout_path, "ab") as stdout:
-        if executable is None:
-            log.write(f"could not start the command: {argv[0]} not found\n".encode())
-            remove_scratch(scratch_dir)
-            return refused()
-        argv[0] = executable
-        try:
-            if unit is None or pool is None:
-                outcome, status = _run_bare(argv, launch, environment, stdout, log)
-            else:
-                refusal, own = _occupancy(pool, unit, daemon, log)
-                if own is not None:
-                    event["task_id"] = own.task_id
-                if refusal:
-                    outcome, status = Outcome.SLOT_OCCUPIED, SLOT_OCCUPIED_EXIT_CODE
+        if _marker_targets(marker, launch["attempt"]):
+            outcome, status = Outcome.CANCELLED, CANCELLED_EXIT_CODE
+        else:
+            if executable is None:
+                log.write(
+                    f"could not start the command: {argv[0]} not found\n".encode()
+                )
+                remove_scratch(scratch_dir)
+                return refused()
+            argv[0] = executable
+            try:
+                if unit is None or pool is None:
+                    outcome, status = _run_bare(argv, launch, environment, stdout, log)
                 else:
-                    command = _service_command(
-                        launch,
-                        unit=unit,
-                        pool=pool,
-                        description=unit_description(
-                            daemon,
-                            pool,
-                            str(own.task_id) if own is not None else launch_input,
-                        ),
-                        argv=argv,
-                        environment=environment,
-                        stdout=stdout_path,
-                        log_path=log_path,
-                    )
-                    client = subprocess.run(
-                        command, stderr=log, check=False, env=systemd_environment()
-                    )
-                    properties = unit_properties(unit)
-                    outcome, status = _classify(client.returncode, marker, properties)
-                    _systemctl("reset-failed", unit)
-                    if outcome is Outcome.VANISHED:
-                        log.write(
-                            f"unit {unit} vanished (rc {client.returncode})\n".encode()
+                    refusal, own = _occupancy(pool, unit, daemon, log)
+                    if own is not None:
+                        event["task_id"] = own.task_id
+                    if refusal:
+                        outcome, status = Outcome.SLOT_OCCUPIED, SLOT_OCCUPIED_EXIT_CODE
+                    else:
+                        command = _service_command(
+                            launch,
+                            unit=unit,
+                            pool=pool,
+                            description=unit_description(
+                                daemon,
+                                pool,
+                                str(own.task_id) if own is not None else launch_input,
+                            ),
+                            argv=argv,
+                            environment=environment,
+                            stdout=stdout_path,
+                            log_path=log_path,
                         )
-        except OSError as error:
-            log.write(f"could not start the command: {error}\n".encode())
-            remove_scratch(scratch_dir)
-            return refused()
-        if outcome is Outcome.TIMEOUT:
-            log.write(f"timed out after {launch['timeout_seconds']} seconds\n".encode())
-    marker.unlink(missing_ok=True)
+                        client = _start_service(command, marker, launch["attempt"], log)
+                        if client is None:
+                            outcome, status = Outcome.CANCELLED, CANCELLED_EXIT_CODE
+                        else:
+                            return_code = client.returncode
+                            properties = (
+                                _wait_for_unit(unit, launch["timeout_seconds"])
+                                if return_code == 0
+                                else unit_properties(unit)
+                            )
+                            outcome, status = _classify(
+                                return_code,
+                                _marker_targets(marker, launch["attempt"]),
+                                properties,
+                            )
+                            _systemctl("reset-failed", unit)
+                            if outcome is Outcome.VANISHED:
+                                log.write(
+                                    f"unit {unit} vanished (rc {return_code})\n".encode()
+                                )
+            except OSError as error:
+                log.write(f"could not start the command: {error}\n".encode())
+                remove_scratch(scratch_dir)
+                return refused()
+            if outcome is Outcome.TIMEOUT:
+                log.write(
+                    f"timed out after {launch['timeout_seconds']} seconds\n".encode()
+                )
+    with (_attempt_root_for_marker(marker) / ".allocation.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if _marker_targets(marker, launch["attempt"]):
+            marker.unlink(missing_ok=True)
+        fcntl.flock(lock, fcntl.LOCK_UN)
 
     end_git = git_observation(Path(launch["working_directory"]))
 
@@ -735,7 +823,7 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
         "exit_code": status,
         "unit": unit,
         "pool": pool,
-        "systemd_result": properties.get("Result"),
+        "systemd_result": properties.get("Result") if properties is not None else None,
         "execution_receipt": execution_receipt(start_git, end_git),
         "execution_evidence": {
             "schema_version": 1,

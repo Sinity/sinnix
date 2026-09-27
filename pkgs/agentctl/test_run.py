@@ -1,16 +1,18 @@
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import pytest
-from agentctl import pueue
+from agentctl import artifacts, pueue
 from agentctl import run as run_module
 from agentctl.run import (
     CANCELLED_EXIT_CODE,
@@ -85,7 +87,10 @@ def test_git_observation_is_read_only_and_fails_closed(
 
     monkeypatch.setattr(run_module.subprocess, "run", probe)
 
-    monkeypatch.setattr("agentctl.content_identity.content_manifest", lambda _path: {"schema_version": 1, "sha256": "fixture"})
+    monkeypatch.setattr(
+        "agentctl.content_identity.content_manifest",
+        lambda _path: {"schema_version": 1, "sha256": "fixture"},
+    )
     observed = run_module.git_observation(tmp_path, observed_at="2026-09-11T00:00:00Z")
 
     assert observed == {
@@ -292,8 +297,7 @@ def test_worker_exports_queue_identity_to_the_child(
 def test_a_declared_pool_runs_the_child_as_a_service_that_exits_with_its_cgroup(
     tmp_path: Path, fake_systemd: FakeSystemd, fake_pueue: FakePueue
 ) -> None:
-    """The unit is named for the launch input, so a canceller rebuilds it from
-    `pueue status` alone; it ends with its cgroup, so the wait does too."""
+    """The unit is recoverable from pueue; wrapper completion follows its cgroup."""
     launch = write_launch(
         tmp_path,
         pool="pytest",
@@ -307,7 +311,7 @@ def test_a_declared_pool_runs_the_child_as_a_service_that_exits_with_its_cgroup(
     assert unit.endswith(".service")
     assert f"--unit={unit}" in argv
     assert "--slice=agentctl-pytest.slice" in argv
-    assert "--wait" in argv and "--collect" not in argv
+    assert "--collect" not in argv
     for setting in (
         "ExitType=cgroup",
         "KillMode=control-group",
@@ -604,7 +608,7 @@ def test_a_cancel_marker_turns_a_stopped_unit_into_a_cancellation(
 ) -> None:
     """`systemctl stop` ends the wait with success; only the marker says why."""
     marker = cancel_marker_for(tmp_path / "job-a.log")
-    marker.write_text("stale")
+    marker.write_text(json.dumps({"attempt": 1}))
     launch = write_launch(tmp_path, pool="pytest", argv=["sh", "-c", f"touch {marker}"])
 
     assert main([str(launch)]) == CANCELLED_EXIT_CODE
@@ -612,6 +616,157 @@ def test_a_cancel_marker_turns_a_stopped_unit_into_a_cancellation(
     assert outcome_of(tmp_path)["outcome"] == "cancelled"
     assert not marker.exists()
     assert events(tmp_path)[-1]["outcome"] == "cancelled"
+
+
+def test_cancel_during_preparation_prevents_service_creation(
+    tmp_path: Path,
+    fake_systemd: FakeSystemd,
+    fake_pueue: FakePueue,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cancellation after allocation remains attached through Git preparation.
+
+    Anti-vacuity: the old unconditional marker unlink let this workload create
+    its side-effect file and return success.
+    """
+    side_effect = tmp_path / "workload-started"
+    launch = write_launch(
+        tmp_path,
+        pool="pytest",
+        argv=["sh", "-c", f"touch {side_effect}"],
+    )
+    marker = cancel_marker_for(tmp_path / "job-a.log")
+
+    def cancel_during_git(_cwd: Path) -> dict[str, Any]:
+        marker.write_text(json.dumps({"attempt": 1}))
+        return {"status": "unavailable"}
+
+    monkeypatch.setattr(run_module, "git_observation", cancel_during_git)
+
+    assert main([str(launch)]) == CANCELLED_EXIT_CODE
+
+    assert not side_effect.exists()
+    assert fake_systemd.run_argv() == []
+    assert outcome_of(tmp_path)["outcome"] == "cancelled"
+    assert events(tmp_path)[-1]["outcome"] == "cancelled"
+
+
+def test_property_failures_do_not_hold_the_cancellation_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Unknown unit state after admission does not block cancellation.
+
+    systemd-run's default service mode waits for startup, and Type=exec makes
+    its successful return an exec acknowledgement. Property reads happen after
+    that acknowledgement and
+    outside the allocation lock, so a temporary observation failure cannot
+    strand cancellation behind the workload.
+    """
+    marker = cancel_marker_for(tmp_path / "job-a.log")
+    root = tmp_path / "job-a.attempts"
+    root.mkdir()
+    observation_failed = threading.Event()
+    cancellation_finished = threading.Event()
+    outcome: list[tuple[run_module.Outcome, int]] = []
+
+    def admitted(*_args: Any, **_kwargs: Any) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+    def observation(_unit: str) -> dict[str, str] | None:
+        if not marker.exists():
+            observation_failed.set()
+            return None
+        return {"LoadState": "not-found"}
+
+    monkeypatch.setattr(run_module.subprocess, "run", admitted)
+    monkeypatch.setattr(run_module, "_unit_snapshot", observation)
+
+    def run_and_observe() -> None:
+        client = run_module._start_service(["systemd-run", "--quiet"], marker, 1, None)
+        assert client is not None
+        properties = run_module._wait_for_unit("fixture.service", 30)
+        outcome.append(
+            run_module._classify(
+                client.returncode, run_module._marker_targets(marker, 1), properties
+            )
+        )
+
+    submitter = threading.Thread(target=run_and_observe)
+    submitter.start()
+    assert observation_failed.wait(5)
+
+    def cancel() -> None:
+        with (root / ".allocation.lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            marker.write_text(json.dumps({"attempt": 1}))
+            fcntl.flock(lock, fcntl.LOCK_UN)
+        cancellation_finished.set()
+
+    canceller = threading.Thread(target=cancel)
+    canceller.start()
+    assert cancellation_finished.wait(5)
+    submitter.join(5)
+    canceller.join(5)
+    assert not submitter.is_alive() and not canceller.is_alive()
+    assert outcome == [(run_module.Outcome.CANCELLED, CANCELLED_EXIT_CODE)]
+    assert json.loads(marker.read_text()) == {"attempt": 1}
+
+
+def test_persistent_unit_observation_failure_is_bounded_and_unresolved(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A lost systemd connection cannot hold the wrapper or imply success."""
+    clock = [0.0]
+
+    def monotonic() -> float:
+        value = clock[0]
+        clock[0] += 1
+        return value
+
+    monkeypatch.setattr(run_module, "_unit_snapshot", lambda _unit: None)
+    monkeypatch.setattr(run_module.time, "monotonic", monotonic)
+    monkeypatch.setattr(run_module.time, "sleep", lambda _delay: None)
+
+    properties = run_module._wait_for_unit("fixture.service", timeout_seconds=2)
+
+    assert properties is None
+    assert run_module._classify(0, False, properties) == (
+        run_module.Outcome.VANISHED,
+        run_module.VANISHED_EXIT_CODE,
+    )
+
+
+def test_retry_discards_predecessor_cancel_but_keeps_new_attempt_cancel(
+    tmp_path: Path,
+    fake_systemd: FakeSystemd,
+    fake_pueue: FakePueue,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    launch = write_launch(tmp_path, pool="pytest", argv=["true"])
+    marker = cancel_marker_for(tmp_path / "job-a.log")
+    assert main([str(launch)]) == 0
+
+    # A delayed cancel from attempt one is stale when attempt two allocates.
+    marker.write_text(json.dumps({"attempt": 1}))
+
+    def cancel_attempt_two(_cwd: Path) -> dict[str, Any]:
+        marker.write_text(json.dumps({"attempt": 2}))
+        return {"status": "unavailable"}
+
+    monkeypatch.setattr(run_module, "git_observation", cancel_attempt_two)
+
+    assert main([str(launch)]) == CANCELLED_EXIT_CODE
+
+    records = artifacts.attempts(json.loads(launch.read_text()))
+    assert len(records) == 2
+    assert (
+        json.loads(Path(records[0]["artifacts"]["outcome"]).read_text())["outcome"]
+        == "success"
+    )
+    assert (
+        json.loads(Path(records[1]["artifacts"]["outcome"]).read_text())["outcome"]
+        == "cancelled"
+    )
 
 
 def test_a_unit_that_cannot_be_observed_after_the_wait_is_vanished(
@@ -625,6 +780,33 @@ def test_a_unit_that_cannot_be_observed_after_the_wait_is_vanished(
 
     assert outcome_of(tmp_path)["outcome"] == "vanished"
     assert "vanished" in log_of(tmp_path)
+
+
+def test_run_publishes_vanished_when_unit_state_remains_unobservable(
+    tmp_path: Path,
+    fake_systemd: FakeSystemd,
+    fake_pueue: FakePueue,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The wrapper publishes a typed unresolved outcome if show keeps failing."""
+    clock = [0.0]
+
+    def monotonic() -> float:
+        value = clock[0]
+        clock[0] += 100
+        return value
+
+    monkeypatch.setattr(run_module, "_unit_snapshot", lambda _unit: None)
+    monkeypatch.setattr(run_module.time, "monotonic", monotonic)
+    monkeypatch.setattr(run_module.time, "sleep", lambda _delay: None)
+    launch = write_launch(tmp_path, pool="pytest", timeout_seconds=1)
+
+    assert main([str(launch)]) == VANISHED_EXIT_CODE
+
+    record = outcome_of(tmp_path)
+    assert record["outcome"] == "vanished"
+    assert record["exit_code"] == VANISHED_EXIT_CODE
+    assert record["systemd_result"] is None
 
 
 def test_a_single_slot_pool_held_by_a_running_task_refuses_the_run(

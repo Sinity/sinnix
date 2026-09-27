@@ -1608,18 +1608,36 @@ def _write_disposition(
         write_input(_disposition_path(path), dict(disposition))
 
 
-def _unit_active(unit: str) -> bool:
+def _unit_state(unit: str) -> str:
+    """Classify the exact service; a failed query leaves cancellation unknown."""
     try:
         completed = subprocess.run(
-            ["systemctl", "--user", "is-active", "--quiet", unit],
+            ["systemctl", "--user", "show", "-p", "LoadState,ActiveState", unit],
             capture_output=True,
+            text=True,
             check=False,
             timeout=SYSTEMCTL_TIMEOUT_SECONDS,
             env=systemd_environment(),
         )
     except (OSError, subprocess.TimeoutExpired):
-        return False
-    return completed.returncode == 0
+        return "unresolved"
+    if completed.returncode != 0:
+        return "unresolved"
+    properties = dict(
+        line.partition("=")[::2]
+        for line in (completed.stdout or "").splitlines()
+        if "=" in line
+    )
+    if properties.get("LoadState") == "not-found":
+        return "stopped"
+    if properties.get("LoadState") != "loaded":
+        return "unresolved"
+    active = properties.get("ActiveState")
+    if active in {"inactive", "failed"}:
+        return "stopped"
+    if active in {"active", "activating", "deactivating", "reloading"}:
+        return "failed"
+    return "unresolved"
 
 
 def cancel(
@@ -1726,10 +1744,10 @@ def _cancel_not_started(
     document = _launch_input(config, task) or {}
     log = document.get("log_path")
     lock_root = None
+    marker = None
     if owned and isinstance(log, str) and _task_owned(config, task, Path(log)):
         marker = cancel_marker_for(log)
         marker.parent.mkdir(parents=True, exist_ok=True)
-        marker.write_text("")
         lock_root = artifacts.root_for(Path(log))
         lock_root.mkdir(parents=True, exist_ok=True)
     lock_handle = None
@@ -1738,6 +1756,14 @@ def _cancel_not_started(
         fcntl.flock(lock_handle, fcntl.LOCK_EX)
     try:
         before = _attempt_count(config, task)
+        marker_attempt = None
+        if marker is not None:
+            records = artifacts.attempts(document)
+            latest = records[-1]["attempt"] if records else 0
+            marker_attempt = (
+                latest if latest and _unfinished_attempt(config, task) else latest + 1
+            )
+            write_input(marker, {"attempt": marker_attempt})
         current = pueue.task(task.task_id)
         if current is not None and current.started_at is not None:
             return None
@@ -1805,6 +1831,12 @@ def _cancel_not_started(
                 job_view(current), unit=unit_of(current), disposition=unresolved
             )
         confirmed = dict(NOT_STARTED_CANCEL)
+        if marker is not None and marker_attempt is not None:
+            try:
+                if json.loads(marker.read_text()).get("attempt") == marker_attempt:
+                    marker.unlink(missing_ok=True)
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError, AttributeError):
+                pass
         _retain_disposition(config, task, confirmed, owned=owned)
         try:
             release_candidate_checkout(
@@ -1868,8 +1900,31 @@ def _cancel(
     if log is not None:
         marker = cancel_marker_for(log)
         marker.parent.mkdir(parents=True, exist_ok=True)
-        marker.write_text("")
-    if unit is not None:
+        root = artifacts.root_for(log)
+        root.mkdir(parents=True, exist_ok=True)
+        allocation = (root / ".allocation.lock").open("a")
+        if not allocation_locked:
+            fcntl.flock(allocation, fcntl.LOCK_EX)
+        try:
+            records = artifacts.attempts(_launch_input(config, task) or {})
+            latest = records[-1]["attempt"] if records else 0
+            active_attempt = (
+                latest if latest and _unfinished_attempt(config, task) else latest + 1
+            )
+            write_input(marker, {"attempt": active_attempt})
+            if unit is not None:
+                subprocess.run(
+                    ["systemctl", "--user", "stop", unit],
+                    capture_output=True,
+                    check=False,
+                    timeout=CALL_TIMEOUT_SECONDS,
+                    env=systemd_environment(),
+                )
+        finally:
+            if not allocation_locked:
+                fcntl.flock(allocation, fcntl.LOCK_UN)
+            allocation.close()
+    elif unit is not None:
         subprocess.run(
             ["systemctl", "--user", "stop", unit],
             capture_output=True,
@@ -1889,10 +1944,11 @@ def _cancel(
             break
         sleep(CANCEL_POLL_SECONDS)
         current = pueue.task(task_id)
-    state = "failed" if unit is not None and _unit_active(unit) else "stopped"
+    state = _unit_state(unit) if unit is not None else "stopped"
     return {
         **(job_view(current) if current is not None else view),
         "state": state,
+        **({"unresolved": True} if state == "unresolved" else {}),
         "unit": unit,
         **_outcome(config, current if current is not None else task),
     }
