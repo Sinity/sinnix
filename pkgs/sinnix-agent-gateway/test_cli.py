@@ -15,6 +15,8 @@ from types import SimpleNamespace
 
 import anyio
 import pytest
+from mcp import ClientSession
+from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.types import BlobResourceContents, CallToolResult, EmbeddedResource
 from sinnix_agent_gateway import actions as action_set
 from sinnix_agent_gateway import cli, cli_support
@@ -25,6 +27,7 @@ from sinnix_agent_gateway.cli_support import (
 )
 from sinnix_agent_gateway.config import GatewayConfig
 from sinnix_agent_gateway.gateway_codegen import FIXTURE_PATH
+from sinnix_agent_gateway.runtime import Runtime
 
 
 def _config(tmp_path: Path) -> GatewayConfig:
@@ -317,6 +320,93 @@ def test_cli_subprocess_keeps_binary_bytes_out_of_the_chat(tmp_path: Path) -> No
     assert not any(
         block["type"] in {"resource_link", "resource"} for block in response["content"]
     )
+
+
+def test_stdio_mcp_client_consumes_complete_binary_artifact(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    runtime = Runtime.create(config, "operator")
+    capture = config.state_dir / "captures" / "client-witness"
+    capture.mkdir(parents=True)
+    source = capture / "archive.zip"
+    original = bytes(range(251)) * 11
+    source.write_bytes(original)
+    runtime.artifacts.attest_capture(
+        capture, source="client-witness", target={}, files=[source]
+    )
+    artifact_id = runtime.artifacts.register(
+        source, kind="project-export", owner_id="client-witness"
+    )
+    config_path = tmp_path / "gateway.json"
+    config_path.write_text(
+        json.dumps({"stateDir": str(config.state_dir), "projects": {}}),
+        encoding="utf-8",
+    )
+    ref = f"sinnix://artifacts/{artifact_id}"
+
+    async def read_pages() -> list[dict]:
+        parameters = StdioServerParameters(
+            command=sys.executable,
+            args=[
+                "-m",
+                "sinnix_agent_gateway.cli",
+                "--config",
+                str(config_path),
+                "serve",
+            ],
+            env=dict(os.environ),
+        )
+        pages = []
+        async with stdio_client(parameters) as (reader, writer):
+            async with ClientSession(reader, writer) as client:
+                await client.initialize()
+                offset = 0
+                while True:
+                    result = await client.call_tool(
+                        "artifacts.read",
+                        {
+                            "target": {"ref": ref},
+                            "representation": "binary",
+                            "offset": offset,
+                            "max_bytes": 257,
+                        },
+                    )
+                    assert result.structured_content is not None
+                    envelope = result.structured_content
+                    assert envelope["result"]["outcome"] == "ok", envelope
+                    page = envelope["data"]
+                    pages.append(page)
+                    if page["next_offset"] is None:
+                        return pages
+                    assert page["next_offset"] > offset
+                    offset = page["next_offset"]
+
+    pages = anyio.run(read_pages)
+
+    def consume(available: list[dict]) -> bytes:
+        chunks = []
+        offset = 0
+        for page in available:
+            chunk = base64.b64decode(page["base64"], validate=True)
+            assert page["ref"] == ref
+            assert page["offset"] == offset
+            assert page["returned_bytes"] == len(chunk) <= 257
+            assert page["bytes"] == len(original)
+            assert page["sha256"] == hashlib.sha256(original).hexdigest()
+            chunks.append(chunk)
+            offset += len(chunk)
+            assert page["truncated"] == (page["next_offset"] is not None)
+            if page["next_offset"] is not None:
+                assert page["next_offset"] == offset
+        if not available or available[-1]["next_offset"] is not None:
+            raise ValueError("binary artifact coverage is incomplete")
+        if offset != available[-1]["bytes"]:
+            raise ValueError("binary artifact byte count is incomplete")
+        return b"".join(chunks)
+
+    assert len(pages) > 1
+    with pytest.raises(ValueError, match="coverage is incomplete"):
+        consume(pages[:1])
+    assert consume(pages) == original
 
 
 def test_input_sources_are_bounded_and_require_a_json_object(tmp_path: Path) -> None:
