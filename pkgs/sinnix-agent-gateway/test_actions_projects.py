@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import shutil
 import subprocess
 import zipfile
 from pathlib import Path
@@ -264,15 +265,22 @@ def test_list_get_and_locators_resolve_projects_and_checkouts(tmp_path: Path) ->
     server = create_server(config, "operator")
 
     listing = ok(server, "projects.list", {})
-    assert listing["projects"] == [
-        {
-            "ref": "sinnix://projects/fixture",
-            "project_id": "fixture",
-            "available": True,
-            "default_ref": "master",
-            "writable": True,
-        }
-    ]
+    listed = listing["projects"][0]
+    assert listed["ref"] == "sinnix://projects/fixture"
+    assert listed["project_id"] == "fixture"
+    assert listed["available"] is True
+    assert listed["default_ref"] == "master"
+    assert listed["repository_path"] == str(project.resolve())
+    assert listed["repository_kind"] == "worktree"
+    assert listed["default_checkout_id"] == "default"
+    assert listed["default_checkout_path"] == str(project.resolve())
+    assert {row["checkout_id"] for row in listed["checkouts"]} == {
+        "default",
+        projects_module.ProjectService._checkout_id(
+            linked.resolve(), project.resolve()
+        ),
+    }
+    assert listed["writable"] is True
 
     summary = ok(server, "projects.get", {"target": {"project": "fixture"}})
     assert summary["ref"] == "sinnix://projects/fixture/checkouts/default"
@@ -322,6 +330,147 @@ def test_list_get_and_locators_resolve_projects_and_checkouts(tmp_path: Path) ->
         == "not_found"
     )
     assert error(server, "projects.get", {"target": {}}) == "invalid_request"
+
+
+def _bare_fixture(
+    tmp_path: Path, *, default_checkout: Path | None
+) -> tuple[GatewayConfig, Path, Path, Path]:
+    source = tmp_path / "source"
+    store = tmp_path / "repository.git"
+    primary = tmp_path / "primary"
+    secondary = tmp_path / "secondary"
+    source.mkdir()
+    git(source, "init", "--quiet", "--initial-branch=main")
+    git(source, "config", "user.name", "Fixture")
+    git(source, "config", "user.email", "fixture@example.invalid")
+    (source / "README.md").write_text("bare repository fixture\n")
+    git(source, "add", "README.md")
+    git(source, "commit", "--quiet", "-m", "fixture")
+    subprocess.run(
+        ["git", "clone", "--quiet", "--bare", str(source), str(store)],
+        check=True,
+        capture_output=True,
+    )
+    git(store, "worktree", "add", "--quiet", "--detach", str(primary), "main")
+    git(store, "worktree", "add", "--quiet", "--detach", str(secondary), "main")
+    config = GatewayConfig(
+        state_dir=tmp_path / "state",
+        projects={
+            "fixture": ProjectConfig(
+                project_id="fixture",
+                path=store,
+                default_ref="refs/heads/main",
+                default_checkout=default_checkout,
+            )
+        },
+    )
+    return config, store, primary, secondary
+
+
+def test_bare_repository_lists_store_and_explicit_default_checkout(
+    tmp_path: Path,
+) -> None:
+    config, store, primary, secondary = _bare_fixture(
+        tmp_path, default_checkout=tmp_path / "primary"
+    )
+    runtime = create_server(config, "operator")._sinnix_revision_publisher.runtime
+
+    listed = runtime.projects.list()["projects"][0]
+    assert listed["repository_kind"] == "bare"
+    assert listed["default_ref"] == "refs/heads/main"
+    assert listed["default_checkout_id"] == "default"
+    assert len(listed["checkouts"]) == 2
+    assert store.resolve().as_posix() not in {
+        row["path"] for row in listed["checkouts"]
+    }
+
+    catalog = runtime.projects.checkouts("fixture")
+    assert catalog["repository"] == {
+        "kind": "bare",
+        "path": str(store.resolve()),
+        "default_ref": "refs/heads/main",
+        "default_checkout_path": str(primary.resolve()),
+    }
+    default = next(row for row in catalog["checkouts"] if row["checkout_id"] == "default")
+    assert default["path"] == str(primary.resolve())
+    assert all(row["path"] != str(store.resolve()) for row in catalog["checkouts"])
+    assert runtime.projects.read("fixture", "README.md")["content"] == (
+        "bare repository fixture\n"
+    )
+    assert runtime.projects.read(
+        "fixture",
+        "README.md",
+        checkout_id=projects_module.ProjectService._checkout_id(
+            secondary.resolve(), store.resolve()
+        ),
+    )["content"] == "bare repository fixture\n"
+    public_view = ok(
+        create_server(config, "operator"),
+        "projects.get",
+        {
+            "target": {"project": "fixture", "checkout": "default"},
+            "projection": "git",
+        },
+    )
+    assert public_view["repository"]["kind"] == "bare"
+    assert public_view["repository"]["path"] == str(store.resolve())
+    assert public_view["checkout"]["path"] == str(primary.resolve())
+
+
+def test_bare_repository_without_default_requires_explicit_checkout(
+    tmp_path: Path,
+) -> None:
+    config, _store, _primary, _secondary = _bare_fixture(
+        tmp_path, default_checkout=None
+    )
+    runtime = create_server(config, "operator")._sinnix_revision_publisher.runtime
+    listed = runtime.projects.list()["projects"][0]
+    assert listed["repository_kind"] == "bare"
+    assert listed["default_checkout_id"] is None
+    assert len(listed["checkouts"]) == 2
+    with pytest.raises(ProjectError, match="no configured default checkout"):
+        runtime.projects.read("fixture", "README.md")
+    selected = listed["checkouts"][0]
+    assert runtime.projects.read(
+        "fixture", "README.md", checkout_id=selected["checkout_id"]
+    )["content"] == "bare repository fixture\n"
+    server = create_server(config, "operator")
+    assert (
+        error(
+            server,
+            "projects.get",
+            {"target": {"project": "fixture"}, "projection": "git"},
+        )
+        == "invalid_request"
+    )
+
+
+def test_bare_checkout_discovery_omits_missing_and_prunable_records(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config, store, primary, secondary = _bare_fixture(
+        tmp_path, default_checkout=tmp_path / "primary"
+    )
+    stale = tmp_path / "stale"
+    git(store, "worktree", "add", "--quiet", "--detach", str(stale), "main")
+    shutil.rmtree(stale)
+    runtime = create_server(config, "operator")._sinnix_revision_publisher.runtime
+    service = runtime.projects
+    original = service._run_spooled
+    missing = tmp_path / "missing"
+
+    def with_missing_record(command: list[str], cwd: Path, timeout: int = 15) -> str:
+        output = original(command, cwd, timeout)
+        if command[1:4] == ["worktree", "list", "--porcelain"]:
+            output += f"\nworktree {missing}\nHEAD {git(store, 'rev-parse', 'HEAD')}\n\n"
+        return output
+
+    monkeypatch.setattr(service, "_run_spooled", with_missing_record)
+    catalog = service.checkouts("fixture")
+    paths = {row["path"] for row in catalog["checkouts"]}
+    assert paths == {str(primary.resolve()), str(secondary.resolve())}
+    assert str(stale) not in paths
+    assert str(missing) not in paths
 
 
 def test_public_project_list_obeys_scope_after_private_catalog_merge(

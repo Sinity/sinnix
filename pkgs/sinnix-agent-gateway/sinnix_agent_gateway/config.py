@@ -52,6 +52,7 @@ class ProjectConfig:
     path: Path
     remote: str | None = None
     default_ref: str = "master"
+    default_checkout: Path | None = None
     checkout_discovery: str = "git-worktree"
     devtools_entrypoint: str | None = None
     task_authority: TaskAuthorityConfig | None = None
@@ -229,11 +230,24 @@ class GatewayConfig:
                 raise ValueError(
                     f"project {project_id} devtoolsEntrypoint must be a string"
                 )
+            default_checkout_value = row.get("defaultCheckout")
+            if default_checkout_value is not None and (
+                not isinstance(default_checkout_value, str)
+                or not Path(default_checkout_value).is_absolute()
+            ):
+                raise ValueError(
+                    f"project {project_id} defaultCheckout must be an absolute path"
+                )
             projects[project_id] = ProjectConfig(
                 project_id=project_id,
                 path=Path(row["path"]).resolve(),
                 remote=row.get("remote"),
                 default_ref=row.get("defaultRef", "master"),
+                default_checkout=(
+                    Path(default_checkout_value).resolve()
+                    if default_checkout_value is not None
+                    else None
+                ),
                 checkout_discovery=checkout_discovery,
                 devtools_entrypoint=devtools_entrypoint,
                 task_authority=task_authority,

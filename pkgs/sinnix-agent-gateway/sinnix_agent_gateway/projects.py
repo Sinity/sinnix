@@ -303,11 +303,41 @@ class ProjectService:
         can_write = Capability.PROJECT_WRITE in self.principal.capabilities
         rows = []
         for project in self.config.projects.values():
+            candidates: list[dict[str, Any]] = []
+            repository_kind: str | None = None
+            checkout_discovery_error: str | None = None
+            if project.path.is_dir():
+                try:
+                    repository_kind = self._repository_kind(project)
+                    candidates = self._checkout_candidates(project)
+                except ProjectError as exc:
+                    # Listing still identifies a configured but unavailable
+                    # or not-yet-initialized project; checkout-specific tools
+                    # report the owner error when asked to read it.
+                    checkout_discovery_error = str(exc)
             rows.append(
                 {
                     "project_id": project.project_id,
                     "available": project.path.is_dir(),
                     "default_ref": project.default_ref,
+                    "repository_path": str(project.path.resolve()),
+                    "repository_kind": repository_kind,
+                    "default_checkout_path": (
+                        str(self._default_checkout_path(project))
+                        if repository_kind is not None
+                        and self._default_checkout_path(project) is not None
+                        else None
+                    ),
+                    "checkout_discovery_error": checkout_discovery_error,
+                    "default_checkout_id": next(
+                        (
+                            row["checkout_id"]
+                            for row in candidates
+                            if row["checkout_id"] == "default"
+                        ),
+                        None,
+                    ),
+                    "checkouts": candidates,
                     "writable": can_write,
                 }
             )
@@ -319,6 +349,21 @@ class ProjectService:
             return "default"
         digest = hashlib.sha256(str(path).encode()).hexdigest()[:16]
         return f"worktree-{digest}"
+
+    def _repository_kind(self, project: ProjectConfig) -> str:
+        result = self._run_spooled(
+            ["git", "rev-parse", "--is-bare-repository"], project.path
+        ).strip()
+        if result not in {"true", "false"}:
+            raise ProjectError("git did not identify the configured repository")
+        return "bare" if result == "true" else "worktree"
+
+    def _default_checkout_path(self, project: ProjectConfig) -> Path | None:
+        if project.default_checkout is not None:
+            return project.default_checkout.resolve()
+        if self._repository_kind(project) == "bare":
+            return None
+        return project.path.resolve()
 
     @staticmethod
     def _worktree_records(output: str) -> list[dict[str, str]]:
@@ -346,11 +391,18 @@ class ProjectService:
         if project.checkout_discovery != "git-worktree":
             raise ProjectError("project checkout discovery is unsupported")
         configured_root = project.path.resolve(strict=True)
+        repository_kind = self._repository_kind(project)
+        default_path = self._default_checkout_path(project)
         output = self._run_spooled(
             ["git", "worktree", "list", "--porcelain"], project.path
         )
         candidates: list[dict[str, Any]] = []
         for record in self._worktree_records(output):
+            # The bare marker describes the object store, which has no
+            # checkout HEAD or working files. It never enters status/hash
+            # readers below.
+            if "bare" in record or "prunable" in record:
+                continue
             raw_path = record.get("worktree")
             head = record.get("HEAD")
             if raw_path is None or head is None:
@@ -360,10 +412,14 @@ class ProjectService:
                 continue
             candidates.append(
                 {
-                    "checkout_id": self._checkout_id(path, configured_root),
+                    "checkout_id": self._checkout_id(
+                        path, default_path or configured_root
+                    ),
                     "path": str(path),
                     "head": head,
-                    "lifecycle": "configured-root"
+                    "lifecycle": "configured-default"
+                    if default_path is not None and path == default_path
+                    else "configured-root"
                     if path == configured_root
                     else "linked-worktree",
                 }
@@ -371,13 +427,27 @@ class ProjectService:
         candidates.sort(
             key=lambda row: (row["checkout_id"] != "default", row["checkout_id"])
         )
-        if not candidates or candidates[0]["checkout_id"] != "default":
+        if default_path is not None and not any(
+            row["checkout_id"] == "default" for row in candidates
+        ):
+            raise ProjectError(
+                "configured default checkout is not a live worktree of the repository"
+            )
+        if repository_kind != "bare" and not any(
+            row["checkout_id"] == "default" for row in candidates
+        ):
             raise ProjectError("configured project root is not a live Git worktree")
         return candidates
 
-    def _checkout_rows(self, project: ProjectConfig) -> list[dict[str, Any]]:
+    def _checkout_rows(
+        self,
+        project: ProjectConfig,
+        *,
+        candidates: list[dict[str, Any]] | None = None,
+    ) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
-        for candidate in self._checkout_candidates(project):
+        selected = candidates if candidates is not None else self._checkout_candidates(project)
+        for candidate in selected:
             path = Path(candidate["path"])
             status = self._run_spooled(
                 ["git", "-C", str(path), "status", "--porcelain=v2", "--branch"],
@@ -402,10 +472,25 @@ class ProjectService:
 
     def checkouts(self, project_id: str) -> dict[str, Any]:
         project = self._project(project_id)
+        candidates = self._checkout_candidates(project)
+        default_checkout = self._default_checkout_path(project)
         return {
             "project_id": project.project_id,
-            "checkouts": self._checkout_rows(project),
+            "repository": {
+                "kind": self._repository_kind(project),
+                "path": str(project.path.resolve()),
+                "default_ref": project.default_ref,
+                "default_checkout_path": (
+                    str(default_checkout) if default_checkout is not None else None
+                ),
+            },
+            "checkouts": self._checkout_rows(project, candidates=candidates),
         }
+
+    def checkout_candidates(self, project_id: str) -> list[dict[str, Any]]:
+        """Return live checkout identities without status or content reads."""
+        project = self._project(project_id)
+        return self._checkout_candidates(project)
 
     def checkout(self, project_id: str, checkout_id: str) -> dict[str, Any]:
         project = self._project(project_id)
@@ -428,11 +513,24 @@ class ProjectService:
     ) -> ProjectConfig:
         project = self._project(project_id, write=write)
         if checkout_id is None:
+            checkouts = self._checkout_candidates(project)
+            default_path = self._default_checkout_path(project)
+            default_row = next(
+                (row for row in checkouts if row["checkout_id"] == "default"), None
+            )
+            if default_path is not None and default_row is not None:
+                return replace(project, path=Path(default_row["path"]))
+            if self._repository_kind(project) == "bare":
+                choices = ", ".join(row["checkout_id"] for row in checkouts)
+                detail = f"; available checkouts: {choices}" if choices else ""
+                raise ProjectError(
+                    "bare repository has no configured default checkout; pass an explicit checkout_id"
+                    + detail
+                )
             if not require_explicit:
                 return project
-            checkouts = self._checkout_candidates(project)
             if len(checkouts) == 1:
-                return project
+                return replace(project, path=Path(checkouts[0]["path"]))
             choices = ", ".join(row["checkout_id"] for row in checkouts)
             raise ProjectError(
                 f"checkout_id is required; available checkouts: {choices}"
@@ -1059,8 +1157,12 @@ class ProjectService:
             "truncated": False,
         }
 
-    def summary(self, project_id: str) -> dict[str, Any]:
-        project = self._project(project_id)
+    def summary(
+        self, project_id: str, checkout_id: str | None = None
+    ) -> dict[str, Any]:
+        project = self.code_checkout(
+            project_id, checkout_id, write=False, require_explicit=False
+        )
         status = self._run_spooled(
             ["git", "status", "--porcelain=v2", "--branch"], project.path
         )

@@ -1,11 +1,11 @@
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: b5666c50dfe6cd40c351ed580fee6eed174c864f460b867d7e204183d311aebd -->
+<!-- gateway-catalog-sha256: f7a5314ffa57cc4c42ccc407b815db8df6faa8383490e0d53f6d3ee996bd8a22 -->
 # Sinnix Agent Gateway reference
 
 Generated from `sinnix_agent_gateway.actions`. Every action is one MCP tool whose `tools/list` input schema is the one below; the catalog hash changes when any principal-visible action catalog row changes, including its schema, principal set, example or affordance.
 
-Revision: `v3-typed-actions`. Catalog SHA-256: `b5666c50dfe6cd40c351ed580fee6eed174c864f460b867d7e204183d311aebd`.
+Revision: `v3-typed-actions`. Catalog SHA-256: `f7a5314ffa57cc4c42ccc407b815db8df6faa8383490e0d53f6d3ee996bd8a22`.
 
 ## Invocation
 
@@ -51,7 +51,7 @@ MCP: call the tool named after the action. CLI: `sinnix-agent-gateway call <acti
 | `files.plan`                 | `query`   | `organization`     | `operator` | The caller supplies every mapping. The plan hashes each regular source file and records collision, parent and filesystem facts without changing host files.                                                                                                                                                                                      |
 | `files.changeset`            | `change`  | `organization`     | `operator` | All planned sources, destinations and parents are revalidated before the first mutation. Transfers never overwrite. Results are honest about partial completion and no global atomicity is claimed.                                                                                                                                              |
 | `files.references`           | `query`   | `organization`     | `operator` | Runs the existing bounded files.search text primitive once for each supplied old path. It only reports provenance and never rewrites references.                                                                                                                                                                                                 |
-| `projects.list`              | `query`   | `projects`         | `operator` | List the projects this principal may read, with canonical refs.                                                                                                                                                                                                                                                                                  |
+| `projects.list`              | `query`   | `projects`         | `operator` | List configured repository stores, their explicit default ref, and live checkout ids.                                                                                                                                                                                                                                                            |
 | `projects.get`               | `get`     | `projects`         | `operator` | The checkout row carries head and dirty_sha256, the preconditions projects.change requires.                                                                                                                                                                                                                                                      |
 | `projects.tree`              | `query`   | `projects`         | `operator` | Lists project files without following symlinks. When truncated, pass next_start_after as start_after to list the next page of the same directory.                                                                                                                                                                                                |
 | `projects.read`              | `query`   | `projects`         | `operator` | Read a bounded line range of one project file.                                                                                                                                                                                                                                                                                                   |
@@ -2282,7 +2282,7 @@ Find one old path:
 
 ### `projects.list`
 
-List the projects this principal may read, with canonical refs.
+List configured repository stores, their explicit default ref, and live checkout ids.
 
 Family: `query`. Owner: `projects`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
@@ -2468,7 +2468,7 @@ Input schema:
     },
     "projection": {
       "default": "summary",
-      "description": "summary: branch, change counts and latest commit plus the selected checkout; git: every checkout with head, branch and dirty_sha256; authority: summary, checkouts, code_revision and the Beads task authority.",
+      "description": "summary: branch, change counts and latest commit for the selected checkout; git: repository-store identity plus live checkouts with head, branch and dirty_sha256; authority: summary, checkouts, code_revision and Beads task authority.",
       "enum": [
         "summary",
         "git",

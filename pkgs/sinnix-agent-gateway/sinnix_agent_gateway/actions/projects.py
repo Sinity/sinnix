@@ -80,6 +80,12 @@ class ProjectRow(GatewayModel):
     project_id: str
     available: bool
     default_ref: str
+    repository_path: str
+    repository_kind: Literal["bare", "worktree"] | None
+    default_checkout_id: str | None
+    default_checkout_path: str | None
+    checkout_discovery_error: str | None
+    checkouts: list[dict[str, Any]]
     writable: bool
 
 
@@ -101,13 +107,17 @@ class GetInput(RequestControls):
     target: CheckoutLocator
     projection: Literal["summary", "git", "authority"] = Field(
         default="summary",
-        description="summary: branch, change counts and latest commit plus the selected checkout; git: every checkout with head, branch and dirty_sha256; authority: summary, checkouts, code_revision and the Beads task authority.",
+        description="summary: branch, change counts and latest commit for the selected checkout; git: repository-store identity plus live checkouts with head, branch and dirty_sha256; authority: summary, checkouts, code_revision and Beads task authority.",
     )
 
 
 class ProjectView(Identity):
     projection: Literal["summary", "git", "authority"]
     project: dict[str, Any] = Field(description="Project summary from git status.")
+    repository: dict[str, Any] | None = Field(
+        default=None,
+        description="Repository-store identity and configured default ref, separate from checkout status.",
+    )
     checkout: dict[str, Any] | None = Field(
         default=None, description="The selected checkout: head, branch, dirty_sha256."
     )
@@ -149,9 +159,10 @@ def _get(runtime: Runtime, inp: GetInput) -> ProjectView:
             task_authority=authority["task_authority"],
             affordances=affordances,
         )
-    summary = owner(runtime.projects.summary, resolved.project_id)
+    summary = owner(runtime.projects.summary, resolved.project_id, resolved.checkout_id)
     if inp.projection == "git":
-        checkouts = owner(runtime.projects.checkouts, resolved.project_id)["checkouts"]
+        catalog = owner(runtime.projects.checkouts, resolved.project_id)
+        checkouts = catalog["checkouts"]
         checkout = next(
             (row for row in checkouts if row["checkout_id"] == selected), None
         )
@@ -161,6 +172,7 @@ def _get(runtime: Runtime, inp: GetInput) -> ProjectView:
             **identity,
             projection="git",
             project=summary,
+            repository=catalog["repository"],
             checkout=checkout,
             checkouts=checkouts,
             affordances=affordances,
@@ -643,7 +655,7 @@ ACTIONS: tuple[Action, ...] = (
         name="projects.list",
         family=VerbFamily.QUERY,
         owner="projects",
-        summary="List the projects this principal may read, with canonical refs.",
+        summary="List configured repository stores, their explicit default ref, and live checkout ids.",
         Input=ListInput,
         Output=ProjectList,
         handler=_list,
@@ -657,7 +669,7 @@ ACTIONS: tuple[Action, ...] = (
         name="projects.get",
         family=VerbFamily.GET,
         owner="projects",
-        summary="Describe one project or checkout: git status, checkouts, task authority.",
+        summary="Describe a selected checkout and its repository store; bare stores require an explicit default checkout or checkout id for code reads.",
         Input=GetInput,
         Output=ProjectView,
         handler=_get,

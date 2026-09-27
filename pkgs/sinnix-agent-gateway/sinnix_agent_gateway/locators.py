@@ -143,24 +143,11 @@ def _checkout_by_path(runtime: Any, raw: str) -> tuple[str, str]:
         path = path.resolve()
     except OSError as exc:
         raise ProtocolError("invalid_request", "project path is unreadable") from exc
-    best: tuple[int, str, str] | None = None
-    for project in runtime.config.projects.values():
-        try:
-            root = project.path.resolve()
-        except OSError:
-            continue
-        if path != root and root not in path.parents:
-            continue
-        depth = len(root.parts)
-        if best is None or depth > best[0]:
-            best = (depth, project.project_id, "default")
-    if best is not None:
-        return best[1], best[2]
     from .projects import ProjectError
 
     for project in runtime.config.projects.values():
         try:
-            rows = runtime.projects.checkouts(project.project_id)["checkouts"]
+            rows = runtime.projects.checkout_candidates(project.project_id)
         except (ProjectError, ProtocolError):
             continue
         for row in rows:

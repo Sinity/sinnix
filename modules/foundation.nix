@@ -136,6 +136,11 @@ in
                       type = types.str;
                       default = "master";
                     };
+                    defaultCheckout = mkOption {
+                      type = types.nullOr types.str;
+                      default = null;
+                      description = "Explicit linked worktree path used as the default code checkout when path names a bare repository.";
+                    };
                     agentctl = mkOption {
                       type = types.bool;
                       default = true;

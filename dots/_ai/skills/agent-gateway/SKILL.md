@@ -5,7 +5,7 @@ description: Use when invoking, inspecting, or documenting Sinnix Agent Gateway 
 
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: b5666c50dfe6cd40c351ed580fee6eed174c864f460b867d7e204183d311aebd -->
+<!-- gateway-catalog-sha256: f7a5314ffa57cc4c42ccc407b815db8df6faa8383490e0d53f6d3ee996bd8a22 -->
 
 # Agent Gateway
 
@@ -46,7 +46,7 @@ Effectful actions (families change, operate, run) require `idempotency_key`. Con
 - `files.search` — Without content_regex the search is over paths (fd); with it, matching lines are returned (ripgrep --json). Results are bounded by limit and timeout.
 - `files.plan` — The caller supplies every mapping. The plan hashes each regular source file and records collision, parent and filesystem facts without changing host files.
 - `files.references` — Runs the existing bounded files.search text primitive once for each supplied old path. It only reports provenance and never rewrites references.
-- `projects.list` — List the projects this principal may read, with canonical refs.
+- `projects.list` — List configured repository stores, their explicit default ref, and live checkout ids.
 - `projects.tree` — Lists project files without following symlinks. When truncated, pass next_start_after as start_after to list the next page of the same directory.
 - `projects.read` — Read a bounded line range of one project file.
 - `projects.read_many` — Read several bounded project files from one checkout observation.
@@ -179,4 +179,4 @@ Effectful actions (families change, operate, run) require `idempotency_key`. Con
 
 The complete schemas and examples are in `docs/generated/agent-gateway-reference.md`.
 
-Catalog revision: `v3-typed-actions`. Catalog SHA-256: `b5666c50dfe6cd40c351ed580fee6eed174c864f460b867d7e204183d311aebd`.
+Catalog revision: `v3-typed-actions`. Catalog SHA-256: `f7a5314ffa57cc4c42ccc407b815db8df6faa8383490e0d53f6d3ee996bd8a22`.

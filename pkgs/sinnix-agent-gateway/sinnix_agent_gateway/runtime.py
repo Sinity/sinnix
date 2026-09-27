@@ -310,8 +310,19 @@ class Runtime:
                 },
             )
         canonical_checkout = next(
-            checkout for checkout in checkouts if checkout["checkout_id"] == "default"
+            (
+                checkout
+                for checkout in checkouts
+                if checkout["checkout_id"] == "default"
+            ),
+            None,
         )
+        if canonical_checkout is None:
+            from .projects import ProjectError
+
+            raise ProjectError(
+                "project has no configured default checkout; select a linked checkout"
+            )
         task_authority_ref = REGISTRY.reference(
             "task_authority", {"project_id": project_id}
         )
