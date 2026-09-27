@@ -219,3 +219,29 @@ def test_heavy_hold_releases_after_the_agent_wave_drains(
 
     assert [row["task_id"] for row in result["released"]] == [held]
     assert fake_pueue.task(held).status == "Queued"
+
+
+def test_operator_restash_after_automatic_release_keeps_its_intent(
+    fake_pueue: FakePueue, config: Config, project_root: Path
+) -> None:
+    project = load_project_adapter(project_root)
+    config = heavy_policy(config)
+    fake_pueue.groups["pytest-heavy"] = 1
+    worker = agent_task(config, project)
+    corpus = replace(project.operation("verify"), pool="pytest-heavy")
+    held = launch.start_operation(config, project, corpus)["job_id"]
+    fake_pueue.kill_directly(worker)
+
+    released = launch.release_holds(config)
+    task = fake_pueue.task(held)
+    assert task is not None and task.status == "Queued"
+    assert "hold" not in read_launch(config, task)
+
+    # The operator explicitly stashes the task after AgentCTL has released it.
+    fake_pueue._tasks[held] = replace(task, status="Stashed")
+    later = launch.release_holds(config)
+
+    assert later["released"] == []
+    assert fake_pueue.enqueued == [held]
+    assert fake_pueue.task(held).status == "Stashed"
+    assert [row["task_id"] for row in released["released"]] == [held]

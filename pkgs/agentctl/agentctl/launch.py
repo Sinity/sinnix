@@ -476,6 +476,27 @@ def _hold_of(config: Config, task: Task) -> dict[str, Any] | None:
     return dict(hold)
 
 
+def _consume_hold(config: Config, task: Task, expected: Mapping[str, Any]) -> bool:
+    """Clear the exact admission intent after its queued task was released.
+
+    The launch input outlives queue transitions. Leaving the marker there would
+    make a later operator stash look like an unresolved AgentCTL hold.
+    """
+    path = launch_input_path(task)
+    value = _launch_input(config, task)
+    if (
+        path is None
+        or value is None
+        or value.get("queue_task_id") != task.task_id
+        or value.get("hold") != dict(expected)
+    ):
+        return False
+    updated = dict(value)
+    updated.pop("hold", None)
+    write_input(path, updated)
+    return True
+
+
 def release_holds(config: Config) -> dict[str, list[dict[str, Any]]]:
     """Release only AgentCTL-created cross-pool holds whose partners drained."""
     try:
@@ -510,6 +531,7 @@ def release_holds(config: Config) -> dict[str, list[dict[str, Any]]]:
                     waiting.append(row)
                     continue
                 pueue.enqueue(task_id)
+                _consume_hold(config, task, held[task_id])
                 released.append(row)
                 append_event(
                     config.event_spool,
