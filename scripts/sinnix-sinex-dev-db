@@ -40,7 +40,7 @@ set -euo pipefail
 
 CACHE_ROOT="${SINEX_DEV_CACHE_BASE:-/var/cache/sinex}"
 POLL_INTERVAL="${SINEX_DEV_DB_POLL_SECS:-15}"
-PG_PORT="${SINEX_DEV_PG_PORT:-5432}"
+PG_PORT="${SINEX_DEV_POSTGRES_PORT:-${PGPORT:-5432}}"
 DEFAULT_IDLE_SECS="${SINEX_DEV_DB_IDLE_SECS:-7200}" # 2h backstop
 STOP_FAST_WAIT=25                                   # SIGINT (fast) grace, seconds
 STOP_IMMEDIATE_WAIT=5                               # SIGQUIT (immediate) grace, seconds

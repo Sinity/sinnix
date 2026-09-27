@@ -77,6 +77,14 @@
     in
     {
       checks = {
+        # The per-checkout dev-service reaper must use the assigned PostgreSQL
+        # port and collect NATS-only orphans without crossing checkout scope.
+        sinex-dev-db-reaper-suite = mkScriptSuite {
+          name = "sinex-dev-db-reaper";
+          suiteDir = ../../scripts/tests/sinex-dev-db-reaper;
+          scripts = [ "sinnix-sinex-dev-db" ];
+          nativeBuildInputs = [ pkgs.procps ];
+        };
         # The SQLite backup remains a standalone script package. Its regression
         # suite drives the source script through subprocess, while the
         # machine-telemetry package owns collector tests in its checkPhase.
