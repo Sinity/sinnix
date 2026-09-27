@@ -72,7 +72,7 @@ class FakeSession:
     async def initialize(self) -> None:
         return None
 
-    async def list_tools(self) -> object:
+    async def list_tools(self, *, params: object | None = None) -> object:
         return SimpleNamespace(
             tools=[
                 SimpleNamespace(
@@ -84,7 +84,8 @@ class FakeSession:
                     },
                     annotations=SimpleNamespace(read_only_hint=True),
                 )
-            ]
+            ],
+            next_cursor=None,
         )
 
     async def call_tool(self, name: str, arguments: dict[str, object]) -> object:
@@ -93,6 +94,90 @@ class FakeSession:
                 "content": [{"type": "text", "text": f"{name}:{arguments['query']}"}],
                 "isError": False,
             }
+        )
+
+
+class TwoPageSession(FakeSession):
+    calls: list[str | None] = []
+
+    async def list_tools(self, *, params: object | None = None) -> object:
+        cursor = getattr(params, "cursor", None)
+        self.calls.append(cursor)
+        if cursor is None:
+            return SimpleNamespace(tools=[tool("first")], next_cursor="page-2")
+        if cursor == "page-2":
+            return SimpleNamespace(tools=[tool("second")], next_cursor=None)
+        raise AssertionError(f"unexpected cursor: {cursor!r}")
+
+
+def tool(name: str) -> SimpleNamespace:
+    return SimpleNamespace(
+        name=name,
+        description=f"Fixture {name} tool",
+        inputSchema={"type": "object", "properties": {"query": {"type": "string"}}},
+        annotations=SimpleNamespace(read_only_hint=True),
+    )
+
+
+class RepeatingCursorSession(FakeSession):
+    calls: list[str | None] = []
+
+    async def list_tools(self, *, params: object | None = None) -> object:
+        cursor = getattr(params, "cursor", None)
+        self.calls.append(cursor)
+        return SimpleNamespace(tools=[tool("first")], next_cursor="loop")
+
+
+def test_catalog_and_invocation_traverse_every_tool_page(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    broker = broker_service(tmp_path, "operator")
+    TwoPageSession.calls.clear()
+    monkeypatch.setattr(
+        "sinnix_agent_gateway.mcp_broker.stdio_client",
+        lambda _params, **_kwargs: FakeTransport(),
+    )
+    monkeypatch.setattr(
+        "sinnix_agent_gateway.mcp_broker.ClientSession", TwoPageSession
+    )
+
+    catalog = anyio.run(broker.catalog)
+    fixture = next(server for server in catalog["servers"] if server["name"] == "fixture")
+    assert [item["name"] for item in fixture["tools"]] == ["first", "second"]
+    assert [item["ref"] for item in fixture["tools"]] == [
+        "sinnix://mcp/fixture/tools/first",
+        "sinnix://mcp/fixture/tools/second",
+    ]
+    result = anyio.run(
+        lambda: broker.call("fixture", "second", {"query": "page two"}, write=False)
+    )
+    assert result["response"]["content"][0]["text"] == "second:page two"
+    assert TwoPageSession.calls == [None, "page-2", None, "page-2"]
+
+
+def test_repeated_tool_cursor_reports_partial_coverage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    broker = broker_service(tmp_path, "operator")
+    RepeatingCursorSession.calls.clear()
+    monkeypatch.setattr(
+        "sinnix_agent_gateway.mcp_broker.stdio_client",
+        lambda _params, **_kwargs: FakeTransport(),
+    )
+    monkeypatch.setattr(
+        "sinnix_agent_gateway.mcp_broker.ClientSession", RepeatingCursorSession
+    )
+
+    catalog = anyio.run(broker.catalog)
+    fixture = next(server for server in catalog["servers"] if server["name"] == "fixture")
+    assert fixture["availability"] == "available"
+    assert fixture["coverage_complete"] is False
+    assert fixture["failure_class"] == "pagination_incomplete"
+    assert fixture["tools"][0]["name"] == "first"
+    assert RepeatingCursorSession.calls == [None, "loop"]
+    with pytest.raises(McpBrokerError, match="tool listing is incomplete"):
+        anyio.run(
+            lambda: broker.call("fixture", "missing", {}, write=False)
         )
 
 
@@ -131,7 +216,7 @@ def broker_service(
 
 
 class LargeSchemaSession(FakeSession):
-    async def list_tools(self) -> object:
+    async def list_tools(self, *, params: object | None = None) -> object:
         return SimpleNamespace(
             tools=[
                 SimpleNamespace(
@@ -145,7 +230,8 @@ class LargeSchemaSession(FakeSession):
                     },
                     annotations=SimpleNamespace(read_only_hint=True),
                 )
-            ]
+            ],
+            next_cursor=None,
         )
 
 
@@ -347,8 +433,8 @@ def test_read_only_subroute_requires_exact_tool_and_explicit_selector(
     calls = []
 
     class UnannotatedSession(FakeSession):
-        async def list_tools(self):
-            response = await super().list_tools()
+        async def list_tools(self, *, params=None):
+            response = await super().list_tools(params=params)
             response.tools[0].annotations = (
                 None
                 if annotation is None
@@ -395,8 +481,8 @@ def test_read_only_tools_admit_unannotated_tools(
     calls = []
 
     class UnannotatedSession(FakeSession):
-        async def list_tools(self):
-            response = await super().list_tools()
+        async def list_tools(self, *, params=None):
+            response = await super().list_tools(params=params)
             response.tools[0].annotations = None
             return response
 

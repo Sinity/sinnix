@@ -11,6 +11,7 @@ from typing import Any
 
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
+from mcp.types import PaginatedRequestParams
 
 from .artifacts import ArtifactService
 from .capabilities import Capability, Principal
@@ -41,6 +42,10 @@ class McpBrokerTimeoutError(McpBrokerError):
 
 class McpBrokerDeadlineError(McpBrokerError):
     pass
+
+
+MAX_MCP_TOOL_LIST_PAGES = 128
+MAX_MCP_TOOL_COUNT = 10_000
 
 
 class McpBrokerService:
@@ -188,7 +193,7 @@ class McpBrokerService:
         stderr_directory.mkdir(mode=0o700, parents=True)
         stderr_path = stderr_directory / "stderr.log"
 
-        async def inspect() -> tuple[list[dict[str, Any]], int]:
+        async def inspect() -> tuple[list[dict[str, Any]], int, dict[str, Any]]:
             with stderr_path.open("w", encoding="utf-8") as stderr:
                 async with stdio_client(parameters, errlog=stderr) as (
                     read,
@@ -196,14 +201,20 @@ class McpBrokerService:
                 ):
                     async with ClientSession(read, write_stream) as session:
                         await session.initialize()
-                        tools = (await session.list_tools()).tools
+                        tools, coverage = await self._list_tools(session)
+                        if not coverage["complete"] and coverage["pages_read"] == 0:
+                            raise McpBrokerError(
+                                f"upstream tools/list failed before returning a page: {coverage['reason']}"
+                            )
             contracts = [self._tool_contract(server_name, tool) for tool in tools]
-            return contracts, sum(
-                contract["effect"] == "read" for contract in contracts
+            return (
+                contracts,
+                sum(contract["effect"] == "read" for contract in contracts),
+                coverage,
             )
 
         try:
-            tools, read_only_tool_count = await asyncio.wait_for(
+            tools, read_only_tool_count, coverage = await asyncio.wait_for(
                 inspect(), timeout=timeout
             )
         except asyncio.TimeoutError:
@@ -247,12 +258,86 @@ class McpBrokerService:
                 result["diagnostic_artifact_id"] = artifact_id
             return result
         shutil.rmtree(stderr_directory, ignore_errors=True)
-        return {
+        result = {
             "availability": "available",
             "tool_count": len(tools),
             "read_only_tool_count": read_only_tool_count,
             "tools": tools,
         }
+        if not coverage["complete"]:
+            result.update(
+                {
+                    "coverage_complete": False,
+                    "failure_class": "pagination_incomplete",
+                    "reason": coverage["reason"],
+                    "pages_read": coverage["pages_read"],
+                }
+            )
+        return result
+
+    @staticmethod
+    async def _list_tools(session: Any) -> tuple[list[Any], dict[str, Any]]:
+        """Read all upstream tool pages, stopping safely on malformed cursors."""
+        tools: list[Any] = []
+        seen_cursors: set[str] = set()
+        cursor: str | None = None
+        pages_read = 0
+
+        while pages_read < MAX_MCP_TOOL_LIST_PAGES:
+            if cursor is not None:
+                if cursor in seen_cursors:
+                    return tools, {
+                        "complete": False,
+                        "pages_read": pages_read,
+                        "reason": "upstream repeated a pagination cursor",
+                    }
+                seen_cursors.add(cursor)
+            try:
+                page = await session.list_tools(
+                    params=PaginatedRequestParams(cursor=cursor)
+                )
+            except Exception as exc:
+                return tools, {
+                    "complete": False,
+                    "pages_read": pages_read,
+                    "reason": f"upstream tools/list failed on page {pages_read + 1} ({type(exc).__name__})",
+                }
+            pages_read += 1
+            tools.extend(page.tools)
+            if len(tools) > MAX_MCP_TOOL_COUNT:
+                del tools[MAX_MCP_TOOL_COUNT:]
+                return tools, {
+                    "complete": False,
+                    "pages_read": pages_read,
+                    "reason": f"upstream tool listing exceeded {MAX_MCP_TOOL_COUNT} tools",
+                }
+            next_cursor = page.next_cursor
+            if next_cursor is None:
+                return tools, {
+                    "complete": True,
+                    "pages_read": pages_read,
+                    "reason": None,
+                }
+            if not isinstance(next_cursor, str) or not next_cursor:
+                return tools, {
+                    "complete": False,
+                    "pages_read": pages_read,
+                    "reason": "upstream returned an invalid pagination cursor",
+                }
+            if next_cursor in seen_cursors:
+                return tools, {
+                    "complete": False,
+                    "pages_read": pages_read,
+                    "reason": "upstream repeated a pagination cursor",
+                }
+            if pages_read == MAX_MCP_TOOL_LIST_PAGES:
+                return tools, {
+                    "complete": False,
+                    "pages_read": pages_read,
+                    "reason": f"upstream tool listing exceeded {MAX_MCP_TOOL_LIST_PAGES} pages",
+                }
+            cursor = next_cursor
+        raise AssertionError("bounded tools/list traversal exited without a result")
 
     def _tool_contract(self, server_name: str, tool: Any) -> dict[str, Any]:
         """Expose the upstream's actual namespaced schema and declared effect."""
@@ -521,7 +606,14 @@ class McpBrokerService:
                 ):
                     async with ClientSession(read, write_stream) as session:
                         await session.initialize()
-                        tool = self._tool((await session.list_tools()).tools, tool_name)
+                        tools, coverage = await self._list_tools(session)
+                        tool = self._tool(tools, tool_name)
+                        if tool is None and not coverage["complete"]:
+                            raise McpBrokerError(
+                                "MCP tool listing is incomplete; cannot determine "
+                                f"whether the server exposes tool {tool_name!r}: "
+                                f"{coverage['reason']}"
+                            )
                         if tool is not None:
                             read_only = self._request_is_read_only(
                                 server, tool, arguments
