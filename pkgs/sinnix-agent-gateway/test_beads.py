@@ -75,7 +75,6 @@ print(json.dumps(value))
             "fixture": ProjectConfig(
                 project_id="fixture",
                 path=project,
-                observer_read=True,
                 task_authority=TaskAuthorityConfig(
                     owner="beads",
                     workspace=project / ".beads",
@@ -93,7 +92,7 @@ def commands(log: Path):
 
 
 def test_query_preserves_native_request_and_continues_frozen_observation(tmp_path):
-    beads, log = beads_service(tmp_path, "observer")
+    beads, log = beads_service(tmp_path, "operator")
     arguments = {
         "project_ids": ["fixture"],
         "filters": {"status": "open"},
@@ -124,7 +123,7 @@ def test_query_preserves_native_request_and_continues_frozen_observation(tmp_pat
 
 
 def test_get_and_closure_pin_exact_native_revision_and_keep_native_evidence(tmp_path):
-    beads, log = beads_service(tmp_path, "observer")
+    beads, log = beads_service(tmp_path, "operator")
     value = beads.get("fixture", "fixture-1", as_of="historic", includes=["history"])
     assert value["task_revision"] == "historic"
     value = beads.campaign_closure(
@@ -159,7 +158,7 @@ def test_native_mutation_preserves_body_and_owner_preconditions(tmp_path):
 
 
 def test_authority_and_write_policy_are_checked_before_native_action(tmp_path):
-    beads, log = beads_service(tmp_path, "observer")
+    beads, log = beads_service(tmp_path, "agent-control")
     with pytest.raises(PolicyError):
         beads.native("fixture", "createIssue", {}, write=True)
     assert not log.exists()

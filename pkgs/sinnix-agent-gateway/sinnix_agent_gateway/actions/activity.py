@@ -13,7 +13,7 @@ from pydantic import Field
 from .. import generated_polylogue_inputs as session_owner
 from ..action import (
     ALL_PRINCIPALS,
-    OBSERVER_OPERATOR,
+    OPERATOR_ONLY,
     Action,
     ActionResult,
     Example,
@@ -555,7 +555,7 @@ def _session_action(name: str, model: type, summary: str) -> Action:
         Input=Input,
         Output=SessionsResult,
         handler=_timeline,
-        principals=OBSERVER_OPERATOR,
+        principals=OPERATOR_ONLY,
         resource_kinds=(),
         affordances=("sessions.read", "sessions.search", "timeline.query"),
         examples=(_SESSION_EXAMPLES[name],),
@@ -624,7 +624,7 @@ ACTIONS: tuple[Action, ...] = (
         Input=SessionsInput,
         Output=SessionsResult,
         handler=_sessions,
-        principals=OBSERVER_OPERATOR,
+        principals=OPERATOR_ONLY,
         resource_kinds=(),
         affordances=("sessions.read", "sessions.search", "timeline.query"),
         examples=(
@@ -642,7 +642,7 @@ ACTIONS: tuple[Action, ...] = (
         Input=MemoryInput,
         Output=SessionsResult,
         handler=_memory,
-        principals=OBSERVER_OPERATOR,
+        principals=OPERATOR_ONLY,
         resource_kinds=(),
         affordances=("memory.raw.search", "sessions.raw.read"),
         examples=(

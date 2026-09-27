@@ -38,7 +38,7 @@ def server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
         state_dir=tmp_path / "state",
         projects={
             "fixture": ProjectConfig(
-                project_id="fixture", path=project, observer_read=True
+                project_id="fixture", path=project
             )
         },
     )

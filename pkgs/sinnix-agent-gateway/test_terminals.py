@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 from sinnix_agent_gateway.artifacts import ArtifactService
-from sinnix_agent_gateway.capabilities import PolicyError, Principal
+from sinnix_agent_gateway.capabilities import Principal
 from sinnix_agent_gateway.config import GatewayConfig
 from sinnix_agent_gateway.owner_execution import OwnerExecution
 from sinnix_agent_gateway.terminals import (
@@ -53,13 +53,6 @@ def commands(path: Path) -> list[list[str]]:
     return [json.loads(line) for line in path.read_text().splitlines()]
 
 
-def test_observer_can_list_terminal_inventory(tmp_path: Path) -> None:
-    terminals, captured = terminal_service(tmp_path, "observer")
-
-    result = terminals.read("list")
-
-    assert result == {"operation": "list", "result": [{"id": 7, "tabs": []}]}
-    assert commands(captured) == [["list", "--json"]]
 
 
 def test_operator_sends_exact_terminal_text_vector(tmp_path: Path) -> None:
@@ -75,15 +68,10 @@ def test_operator_sends_exact_terminal_text_vector(tmp_path: Path) -> None:
     ]
 
 
-def test_observer_cannot_mutate_terminal(tmp_path: Path) -> None:
-    terminals, _ = terminal_service(tmp_path, "observer")
-
-    with pytest.raises(PolicyError, match="terminal.action"):
-        terminals.action("focus", {"match": "id:7"})
 
 
 def test_terminal_requires_runtime_directory_before_launch(tmp_path: Path) -> None:
-    terminals, _ = terminal_service(tmp_path, "observer")
+    terminals, _ = terminal_service(tmp_path, "operator")
     terminals.execution = OwnerExecution({})
 
     with pytest.raises(TerminalError, match="environment_unavailable:XDG_RUNTIME_DIR"):
@@ -91,7 +79,7 @@ def test_terminal_requires_runtime_directory_before_launch(tmp_path: Path) -> No
 
 
 def test_terminal_failure_writes_redacted_diagnostic_artifact(tmp_path: Path) -> None:
-    terminals, _ = terminal_service(tmp_path, "observer")
+    terminals, _ = terminal_service(tmp_path, "operator")
     runner = Path(terminals.config.kitty_control_command)
     runner.write_text("#!/bin/sh\nprintf 'token=fixture-secret\\n' >&2\nexit 23\n")
     runner.chmod(0o700)

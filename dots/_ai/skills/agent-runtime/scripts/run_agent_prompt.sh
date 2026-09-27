@@ -113,7 +113,7 @@ export AGENTCTL_JOB_PROMPT_FILE="$prompt_file"
 
 resolve_agent_bin() {
   case "$1" in
-  claude) command -v claude-full 2>/dev/null || command -v claude 2>/dev/null ;;
+  claude) command -v claude 2>/dev/null ;;
   codex | gemini | pi) command -v "$1" ;;
   grok) command -v grok-sinnix 2>/dev/null || command -v grok ;;
   antigravity) command -v agy-sinnix 2>/dev/null || command -v agy ;;

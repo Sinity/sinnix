@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import Field
 
 from ..action import (
-    OBSERVER_OPERATOR,
     OPERATOR_ONLY,
     Action,
     Example,
@@ -667,7 +666,7 @@ def _open(runtime: Runtime, inp: OpenInput) -> OpenResult:
 
 _READ = {
     "owner": "terminals",
-    "principals": OBSERVER_OPERATOR,
+    "principals": OPERATOR_ONLY,
     "resource_kinds": ("terminal",),
 }
 _WRITE = {

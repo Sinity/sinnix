@@ -177,7 +177,7 @@ let
           evidence = write;
           browser = write;
           antigravity = write;
-          lean = { };
+          default = { };
         };
       clients = [
         "codex"
@@ -217,6 +217,10 @@ let
   };
 
   profileTiers = {
+    default = [
+      "remote-core"
+      "recall"
+    ];
     lean = [
       "remote-core"
       "recall"
@@ -237,12 +241,6 @@ let
       "deep-evidence"
       "browser-mcp"
     ];
-    orchestrate = [
-      "remote-core"
-      "recall"
-      "deep-evidence"
-      "agent-control"
-    ];
     # Antigravity blocks print-mode startup while any MCP remains pending.
     # Keep the ordinary coding and orchestration surface, but leave slow
     # deep-evidence servers to clients with bounded MCP startup handling.
@@ -256,6 +254,7 @@ let
   # Codex's native `--profile` layers. MCP membership comes from profileTiers;
   # endpoint profiles are derived from agent-lanes.nix below.
   codexProfileNames = [
+    "default"
     "lean"
     "evidence"
     "full"

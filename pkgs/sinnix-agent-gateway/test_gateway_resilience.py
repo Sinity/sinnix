@@ -18,7 +18,7 @@ def test_full_observations_survive_restart_and_share_only_payload_bytes(tmp_path
     config = GatewayConfig(
         projects={}, state_dir=tmp_path / "state", max_result_bytes=8192
     )
-    principal = Principal.for_name("observer")
+    principal = Principal.for_name("operator")
     audit = AuditService(config, principal)
     service = ResultService(config, principal)
     payload = {"text": "x" * size}
@@ -128,19 +128,19 @@ def test_package_manifest_checks_code_and_principal_separately_from_connector(tm
     config = GatewayConfig(
         projects={}, state_dir=tmp_path / "state", package_manifest_path=path
     )
-    manifest = anyio.run(build_manifest, config, "observer")
-    path.write_text(json.dumps({"principal": "observer", "manifest": manifest}))
-    assert (
-        verify_approval(config, "observer")["tool_manifest_hash"] == manifest["sha256"]
-    )
+    manifest = anyio.run(build_manifest, config, "operator")
     path.write_text(json.dumps({"principal": "operator", "manifest": manifest}))
+    assert (
+        verify_approval(config, "operator")["tool_manifest_hash"] == manifest["sha256"]
+    )
+    path.write_text(json.dumps({"principal": "agent-control", "manifest": manifest}))
     with pytest.raises(ValueError, match="principal"):
-        verify_approval(config, "observer")
+        verify_approval(config, "operator")
     path.write_text(
-        json.dumps({"principal": "observer", "manifest": {"sha256": "a" * 64}})
+        json.dumps({"principal": "operator", "manifest": {"sha256": "a" * 64}})
     )
     with pytest.raises(ValueError, match="drift"):
-        verify_approval(config, "observer")
+        verify_approval(config, "operator")
 
 
 @pytest.mark.parametrize("size", [200, 20000])
@@ -154,7 +154,7 @@ def test_owner_product_availability_is_independent_of_presentation_budget(
     from sinnix_agent_gateway.mcp_broker import McpBrokerService
 
     config = GatewayConfig(projects={}, state_dir=tmp_path, max_result_bytes=8192)
-    principal = Principal.for_name("observer")
+    principal = Principal.for_name("operator")
     data = {"evidence": "x" * size, "coverage": {"complete": False}}
 
     class Broker(McpBrokerService):

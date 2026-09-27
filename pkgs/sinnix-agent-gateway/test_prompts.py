@@ -28,7 +28,7 @@ def test_generated_prompts_use_canonical_refs_and_principal_filtered_catalog() -
             ],
         }  # noqa: E731
 
-    generator = PromptGenerator(principal="observer", catalog=catalog)
+    generator = PromptGenerator(principal="operator", catalog=catalog)
 
     assert {row["name"] for row in generator.list()} == {
         spec.name for spec in PROMPT_SPECS
@@ -43,7 +43,7 @@ def test_generated_prompts_use_canonical_refs_and_principal_filtered_catalog() -
 
 def test_prompt_rejects_noncanonical_or_unknown_inputs() -> None:
     generator = PromptGenerator(
-        principal="observer", catalog=lambda _principal: {"actions": []}
+        principal="operator", catalog=lambda _principal: {"actions": []}
     )
     try:
         generator.generate("orient-project", {"ref": "/tmp/project"})
@@ -55,11 +55,11 @@ def test_prompt_rejects_noncanonical_or_unknown_inputs() -> None:
 
 def test_prompt_registry_visibility_intent_kind_and_bounds_are_enforced() -> None:
     generator = PromptGenerator(
-        principal="observer", catalog=lambda _principal: {"actions": []}
+        principal="operator", catalog=lambda _principal: {"actions": []}
     )
     with pytest.raises(ValueError, match="resource kind"):
         generator.generate("orient-project", {"ref": "sinnix://jobs/job-1"})
-    with pytest.raises(ValueError, match="visible"):
+    with pytest.raises(ValueError, match="resource kind"):
         generator.generate(
             "orient-project", {"ref": "sinnix://browser/agent-workspace"}
         )

@@ -82,7 +82,7 @@ in
         "d ${paths.realmRoot} 0755 ${username} users -"
         "f+ ${paths.realmRoot}/.hidden 0644 ${username} users - state\\ntmp\\nworktrees\\n"
         "d /realm/state 0755 ${username} users -"
-        "d /realm/tmp/work 0755 ${username} users -"
+        "d /realm/tmp/work 0700 ${username} users 30d"
         "d ${paths.realmRoot}/accounts 0755 ${username} users -"
         "d ${paths.realmRoot}/notes 0755 ${username} users -"
         "d ${paths.activityRoot} 0755 ${username} users -"

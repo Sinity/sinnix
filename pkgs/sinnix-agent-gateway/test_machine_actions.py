@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
-from sinnix_agent_gateway.capabilities import PolicyError, Principal
+from sinnix_agent_gateway.capabilities import Principal
 from sinnix_agent_gateway.config import GatewayConfig
 from sinnix_agent_gateway.machine_actions import (
     MachineActionError,
@@ -168,22 +168,6 @@ def test_machine_action_returns_owner_rejection(tmp_path: Path) -> None:
         )
 
 
-def test_observer_cannot_submit_machine_action(tmp_path: Path) -> None:
-    actions, _ = service(tmp_path, "observer", FakeResponse(201, {}))
-
-    with pytest.raises(PolicyError, match="machine.action"):
-        actions.execute(
-            "restart",
-            {"unit": "fixture.service"},
-            {
-                "kind": "unit",
-                "unit": "fixture.service",
-                "manager": "user",
-                "properties": {"InvocationID": "fixture-invocation"},
-            },
-            "gateway-fixture",
-            "verify fixture restart",
-        )
 
 
 def test_prepare_reads_target_without_mutation_authority(tmp_path: Path) -> None:
@@ -199,7 +183,7 @@ def test_prepare_reads_target_without_mutation_authority(tmp_path: Path) -> None
         },
         "observed_at": "2026-09-13T00:00:00Z",
     }
-    actions, connection = service(tmp_path, "observer", FakeResponse(200, payload))
+    actions, connection = service(tmp_path, "operator", FakeResponse(200, payload))
     assert actions.prepare("restart", {"unit": "fixture.service"}) == payload
     assert connection.request_args[:2] == ("POST", "/v1/actions/prepare")
     assert json.loads(connection.request_args[2]) == {
@@ -212,7 +196,7 @@ def test_prepare_reads_target_without_mutation_authority(tmp_path: Path) -> None
 def test_prepare_rejects_mismatched_target(tmp_path: Path) -> None:
     actions, _ = service(
         tmp_path,
-        "observer",
+        "operator",
         FakeResponse(
             200,
             {

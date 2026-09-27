@@ -48,7 +48,7 @@ kitty_version=""
 
 resolve_agent_bin() {
   case "${agent}" in
-  claude) command -v claude-full 2>/dev/null || command -v claude 2>/dev/null ;;
+  claude) command -v claude 2>/dev/null ;;
   codex | gemini) command -v "${agent}" 2>/dev/null ;;
   grok) command -v grok-sinnix 2>/dev/null || command -v grok 2>/dev/null ;;
   antigravity) command -v agy-sinnix 2>/dev/null || command -v agy 2>/dev/null ;;

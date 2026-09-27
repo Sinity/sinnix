@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 from sinnix_agent_gateway.artifacts import ArtifactError, ArtifactService
-from sinnix_agent_gateway.capabilities import PolicyError, Principal
+from sinnix_agent_gateway.capabilities import Principal
 from sinnix_agent_gateway.config import GatewayConfig
 from sinnix_agent_gateway.desktop import DesktopDiagnosticError, DesktopService
 from sinnix_agent_gateway.owner_execution import OwnerExecution
@@ -57,17 +57,6 @@ def commands(path: Path) -> list[list[str]]:
     return [json.loads(line) for line in path.read_text().splitlines()]
 
 
-def test_observer_can_read_desktop_state(tmp_path: Path) -> None:
-    desktop, captured = desktop_service(tmp_path, "observer")
-
-    result = desktop.read("clients")
-
-    assert result == {
-        "operation": "clients",
-        "owner": "hypr",
-        "result": {"address": "0xfixture"},
-    }
-    assert commands(captured) == [["clients", "--json"]]
 
 
 def test_operator_focus_uses_wrapper_and_verifies_active_window(tmp_path: Path) -> None:
@@ -94,15 +83,10 @@ def test_operator_dispatch_uses_exact_argument_vector(tmp_path: Path) -> None:
     assert commands(captured) == [["dispatch", "workspace", "name:agentbrowser"]]
 
 
-def test_observer_cannot_mutate_desktop(tmp_path: Path) -> None:
-    desktop, _ = desktop_service(tmp_path, "observer")
-
-    with pytest.raises(PolicyError, match="desktop.action"):
-        desktop.action("focus_window", {"window": "address:0xfixture"})
 
 
 def test_desktop_requires_wayland_environment_before_launch(tmp_path: Path) -> None:
-    desktop, _ = desktop_service(tmp_path, "observer")
+    desktop, _ = desktop_service(tmp_path, "operator")
     desktop.execution = OwnerExecution({})
 
     with pytest.raises(DesktopDiagnosticError) as caught:
@@ -116,7 +100,7 @@ def test_desktop_requires_wayland_environment_before_launch(tmp_path: Path) -> N
 
 
 def test_artifact_rejects_unreceipted_capture_source(tmp_path: Path) -> None:
-    desktop, _ = desktop_service(tmp_path, "observer")
+    desktop, _ = desktop_service(tmp_path, "operator")
     source = desktop.config.state_dir / "captures" / "unreceipted.png"
     source.write_bytes(b"fixture")
 
@@ -129,7 +113,7 @@ def test_artifact_rejects_unreceipted_capture_source(tmp_path: Path) -> None:
 
 
 def test_desktop_capture_registers_raw_and_corrected_artifacts(tmp_path: Path) -> None:
-    desktop, captured = desktop_service(tmp_path, "observer")
+    desktop, captured = desktop_service(tmp_path, "operator")
 
     result = desktop.capture_output()
     artifacts = [

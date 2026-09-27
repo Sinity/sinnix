@@ -26,13 +26,13 @@ def read_resource(server, reference: str) -> dict:
 
 def test_beads_public_snapshot_and_frozen_paging_after_restart(tmp_path: Path) -> None:
     config, log = fixture(tmp_path)
-    server = create_server(config, "observer")
+    server = create_server(config, "operator")
     query = {"projects": ["fixture"], "view": "open", "limit": 1}
     first = ok(server, "beads.query", query)
     reference = first["page"]["snapshot_ref"]
     cursor = first["page"]["next_cursor"]
     (tmp_path / "owner-state.json").write_text(json.dumps({"writes": 10, "created": 0}))
-    restarted = create_server(config, "observer")
+    restarted = create_server(config, "operator")
     reads = len(commands(log))
     second = ok(restarted, "beads.query", {**query, "cursor": cursor})
     assert [row["id"] for row in second["items"]] == ["fixture-2"]
@@ -49,22 +49,24 @@ def test_beads_public_snapshot_and_frozen_paging_after_restart(tmp_path: Path) -
         == "stale_cursor"
     )
     other = create_server(config, "operator")
-    assert error(other, "beads.query", {**query, "cursor": cursor}) == "stale_cursor"
-    assert error(other, "results.get", {"ref": reference}) == "not_found"
+    assert ok(other, "beads.query", {**query, "cursor": cursor})["items"] == second[
+        "items"
+    ]
+    assert ok(other, "results.get", {"ref": reference})["envelope"] == stored
 
 
 def test_context_public_retrieval_after_restart_retains_provenance(
     tmp_path: Path,
 ) -> None:
     config, _ = fixture(tmp_path)
-    server = create_server(config, "observer")
+    server = create_server(config, "operator")
     context = ok(
         server,
         "context.compose",
         {"intent": "project.orientation", "project": {"project": "fixture"}},
     )
     reference = context["snapshot_ref"]
-    restarted = create_server(config, "observer")
+    restarted = create_server(config, "operator")
     stored = ok(restarted, "results.get", {"ref": reference})["envelope"]
     retained = stored["rows"][0]
     assert retained["intent"] == context["intent"]
@@ -80,8 +82,10 @@ def test_context_public_retrieval_after_restart_retains_provenance(
         assert row["snapshot_ref"] == reference
     assert read_resource(restarted, reference) == stored
     assert (
-        error(create_server(config, "operator"), "results.get", {"ref": reference})
-        == "not_found"
+        ok(create_server(config, "operator"), "results.get", {"ref": reference})[
+            "envelope"
+        ]
+        == stored
     )
 
 
@@ -94,19 +98,21 @@ def test_historical_context_refs_remain_publicly_readable_without_rewrite(
     path = (
         config.state_dir
         / "contexts"
-        / "observer"
+        / "operator"
         / f"{reference.rsplit('/', 1)[1]}.json"
     )
     path.parent.mkdir(parents=True)
     contents = json.dumps(snapshot).encode()
     path.write_bytes(contents)
     before = path.stat().st_mtime_ns
-    server = create_server(config, "observer")
+    server = create_server(config, "operator")
     assert ok(server, "results.get", {"ref": reference})["envelope"] == snapshot
     assert read_resource(server, reference)["data"]["envelope"] == snapshot
     assert (
-        error(create_server(config, "operator"), "results.get", {"ref": reference})
-        == "not_found"
+        ok(create_server(config, "operator"), "results.get", {"ref": reference})[
+            "envelope"
+        ]
+        == snapshot
     )
     assert path.read_bytes() == contents and path.stat().st_mtime_ns == before
 
@@ -116,7 +122,7 @@ def test_legacy_beads_cursor_imports_frozen_rows_without_modifying_source(
 ) -> None:
     config, _ = fixture(tmp_path)
     request = {
-        "principal": "observer",
+        "principal": "operator",
         "projects": ["fixture"],
         "view": "open",
         "filters": {},
@@ -146,7 +152,7 @@ def test_legacy_beads_cursor_imports_frozen_rows_without_modifying_source(
         }
     )
     path.write_text(contents)
-    server = create_server(config, "observer")
+    server = create_server(config, "operator")
     page = ok(
         server,
         "beads.query",
@@ -164,7 +170,7 @@ def test_legacy_beads_cursor_imports_frozen_rows_without_modifying_source(
 
 def test_published_prompt_accepts_its_declared_target(tmp_path: Path) -> None:
     config, _ = fixture(tmp_path)
-    server = create_server(config, "observer")
+    server = create_server(config, "operator")
 
     async def get():
         return await server.get_prompt(
@@ -184,12 +190,12 @@ def test_historical_context_read_requires_audit_capability(tmp_path: Path) -> No
     path = (
         config.state_dir
         / "contexts"
-        / "observer"
+        / "operator"
         / f"{reference.rsplit('/', 1)[1]}.json"
     )
     path.parent.mkdir(parents=True)
     path.write_text(json.dumps(snapshot))
-    server = create_server(config, "observer")
+    server = create_server(config, "operator")
     runtime = server._sinnix_revision_publisher.runtime
     runtime.principal = replace(
         runtime.principal,

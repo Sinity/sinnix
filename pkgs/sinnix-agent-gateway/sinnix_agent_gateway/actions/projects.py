@@ -80,7 +80,6 @@ class ProjectRow(GatewayModel):
     project_id: str
     available: bool
     default_ref: str
-    observer_read: bool
     writable: bool
 
 

@@ -466,15 +466,3 @@ def test_screenshot_download_upload_and_close(tmp_path, monkeypatch) -> None:
         and closed["data"]["page"] is None
     )
     assert structured(call(server, "browser.pages", {}))["data"]["owned_refs"] == []
-
-
-def test_observer_lists_but_cannot_operate(tmp_path, monkeypatch) -> None:
-    server, _ = fake_browser(tmp_path, monkeypatch, "observer")
-    assert len(structured(call(server, "browser.pages", {}))["data"]["pages"]) == 2
-    assert "browser.operate" not in server._tool_manager._tools
-    assert (
-        structured(
-            call(server, "browser.page", {"target": {"page_id": "operator-page"}})
-        )["error"]["code"]
-        == "policy_denied"
-    )

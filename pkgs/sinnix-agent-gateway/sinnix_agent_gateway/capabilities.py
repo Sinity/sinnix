@@ -33,24 +33,6 @@ class Capability(StrEnum):
 
 
 PRINCIPAL_CAPABILITIES: dict[str, frozenset[Capability]] = {
-    "observer": frozenset(
-        {
-            Capability.PROJECT_READ,
-            Capability.JOB_READ,
-            Capability.AUDIT_READ,
-            Capability.ARTIFACT_READ,
-            Capability.MACHINE_READ,
-            Capability.DESKTOP_READ,
-            Capability.TERMINAL_READ,
-            Capability.BROWSER_READ,
-            Capability.CAPABILITY_READ,
-            Capability.CAPTURE_READ,
-            Capability.FILE_READ,
-            Capability.SESSION_READ,
-            Capability.TASK_READ,
-            Capability.MCP_READ,
-        }
-    ),
     "agent-control": frozenset(
         {
             Capability.PROJECT_READ,
@@ -72,7 +54,6 @@ PRINCIPAL_CAPABILITIES: dict[str, frozenset[Capability]] = {
 # Holding CAPTURE_READ permits capture queries. The runtime inventory's lane
 # table carries resource-level authority beyond this capability.
 PRINCIPAL_LANE_ACCESS: dict[str, frozenset[str] | None] = {
-    "observer": None,
     "agent-control": None,
     "operator": None,
 }

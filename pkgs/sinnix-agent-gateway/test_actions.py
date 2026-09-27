@@ -13,9 +13,8 @@ from pathlib import Path
 import anyio
 import pytest
 from mcp.types import CallToolResult, ImageContent, ResourceLink
-from sinnix_agent_gateway import files as host_files
 from sinnix_agent_gateway.action import Action, MutationControls, RequestControls
-from sinnix_agent_gateway.actions import ALL_ACTIONS, files, visible
+from sinnix_agent_gateway.actions import ALL_ACTIONS, files
 from sinnix_agent_gateway.app import create_server
 from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
 from sinnix_agent_gateway.contracts import VerbFamily
@@ -291,9 +290,6 @@ def test_unknown_input_field_is_typed_before_file_mutation(tmp_path: Path) -> No
     assert target.read_text() == "before\n"
 
 
-def test_observer_sees_read_actions_only() -> None:
-    assert all(action.principals >= {"operator"} for action in ALL_ACTIONS)
-    assert {a.name for a in visible("observer")} >= {"files.read"}
 
 
 def test_files_search_paths_and_content(tmp_path: Path) -> None:
@@ -486,69 +482,6 @@ def test_files_image_and_pdf_afford_document_inspection(tmp_path: Path) -> None:
         assert "files.change" in read["affordances"]
 
 
-def test_observer_file_listing_and_search_hide_secret_descendants(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    root = tmp_path / "corpus"
-    root.mkdir()
-    visible = root / "visible.txt"
-    visible.write_text("needle visible\n")
-    secret_root = root / ".private"
-    secret_root.mkdir()
-    secret = secret_root / "secret.txt"
-    secret.write_text("needle secret\n")
-    (root / "secret-link").symlink_to(secret)
-    monkeypatch.setattr(host_files, "_SECRET_ROOTS", (secret_root,))
-
-    gateway_config = config(tmp_path)
-    observer = create_server(gateway_config, "observer")
-    listed = structured(
-        call(
-            observer,
-            "files.list",
-            {"target": {"path": str(root)}, "include_hidden": True},
-        )
-    )["data"]
-    assert [entry["name"] for entry in listed["entries"]] == ["visible.txt"]
-
-    searched = structured(
-        call(
-            observer,
-            "files.search",
-            {
-                "roots": [{"path": str(root)}],
-                "content_regex": "needle",
-                "include_hidden": True,
-            },
-        )
-    )["data"]
-    assert [match["name"] for match in searched["matches"]] == ["visible.txt"]
-
-    operator = create_server(gateway_config, "operator")
-    operator_listing = structured(
-        call(
-            operator,
-            "files.list",
-            {"target": {"path": str(root)}, "include_hidden": True},
-        )
-    )["data"]
-    assert {".private", "secret-link", "visible.txt"} == {
-        entry["name"] for entry in operator_listing["entries"]
-    }
-    operator_search = structured(
-        call(
-            operator,
-            "files.search",
-            {
-                "roots": [{"path": str(root)}],
-                "content_regex": "needle",
-                "include_hidden": True,
-            },
-        )
-    )["data"]
-    assert {"secret.txt", "visible.txt"} == {
-        match["name"] for match in operator_search["matches"]
-    }
 
 
 def test_files_stat_reports_hash_coverage(tmp_path: Path) -> None:
@@ -805,13 +738,13 @@ def test_files_change_operations(tmp_path: Path) -> None:
         removed["data"]["removed"] is True and not (root / "nested" / "a.txt").exists()
     )
 
-    (tmp_path / "obs").mkdir()
-    observer = create_server(config(tmp_path / "obs"), "observer")
+    (tmp_path / "agent").mkdir()
+    agent = create_server(config(tmp_path / "agent"), "agent-control")
 
-    async def observer_tools():
-        return {tool.name for tool in await observer.list_tools()}
+    async def agent_tools():
+        return {tool.name for tool in await agent.list_tools()}
 
-    assert "files.change" not in anyio.run(observer_tools)
+    assert "files.change" not in anyio.run(agent_tools)
 
 
 def test_gateway_status_and_catalog_are_typed(tmp_path: Path) -> None:

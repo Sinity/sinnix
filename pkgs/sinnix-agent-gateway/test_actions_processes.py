@@ -56,7 +56,7 @@ def test_locator_resolves_pid_and_rejects_stale_ref(tmp_path: Path) -> None:
 
 
 def test_list_get_tree(tmp_path: Path, child: subprocess.Popen) -> None:
-    rt = runtime(tmp_path, "observer")
+    rt = runtime(tmp_path, "operator")
     listing = call(rt, "processes.list", {"pid": child.pid}, BY_NAME)["data"]
     assert listing["total"] == 1 and listing["processes"][0]["ppid"] == os.getpid()
     assert "time.sleep" in listing["processes"][0]["cmdline"]
@@ -111,7 +111,7 @@ def test_signal_and_wait(tmp_path: Path, child: subprocess.Popen) -> None:
 
 def test_signal_is_operator_only_and_never_self(tmp_path: Path) -> None:
     denied = call(
-        runtime(tmp_path, "observer"),
+        runtime(tmp_path, "operator"),
         "processes.signal",
         {
             "target": {"pid": os.getpid()},

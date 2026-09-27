@@ -35,7 +35,7 @@ def write_lane(path: Path, lane: str, records: list[dict]) -> None:
 
 
 def runtime(
-    tmp_path: Path, principal: str = "observer"
+    tmp_path: Path, principal: str = "operator"
 ) -> tuple[Runtime, dict[str, Path]]:
     inventory, lanes = make_inventory(tmp_path)
     inventory_data = json.loads(inventory.read_text())

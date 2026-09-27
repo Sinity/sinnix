@@ -49,7 +49,8 @@ Host: `sinnix-prime`. Root storage is wear-limited; use `/realm` for heavy work.
 - `/realm/`: subject folders and service storage. Read `/realm/INVENTORY.md`;
   mutations go through its owning tools.
 - `/realm/state/`: live service state and external Beads databases.
-- `/realm/tmp/work/`: private scratch output, aged after 30 days.
+- `/realm/tmp/work/` is the managed `$TMPDIR`; clean disposable probes when
+  done. The 30-day age limit is a backstop, not a reason to retain them.
   `/realm/worktrees/`: isolated checkouts and compile-heavy work.
 - `/tmp` is small tmpfs. `TMPDIR` is managed; do not invent heavy work roots
   there. Home is rebuilt by Home Manager; edit the declared source of managed
@@ -144,10 +145,13 @@ owns takeover, dispatch, recovery, and landing procedures.
 
 ## Desktop and host changes
 
-The operator's Chrome is shared. Agent work uses
-`sinnix-chrome-control agent-window`; requests about the operator's tabs use
-those existing pages without unrelated navigation or closure. Load
-`desktop-control-plane` for browser, Kitty, Hyprland, and screenshot recipes.
+The operator's Chrome is shared. Probe `sinnix-chrome-control status` when
+browser access matters; a failed probe or empty generic browser inventory is
+not lasting evidence that Chrome is unavailable. Retry the probe and inspect
+`list-tabs`. Agent work uses an agent window or background tab with its own
+page ID. Requests about the operator's tabs use those existing pages without
+unrelated navigation or closure. Load `desktop-control-plane` for browser,
+Kitty, Hyprland, and screenshot recipes.
 `sinnix-observe` provides live host evidence.
 
 Sinnix activation changes the live machine. State affected services/files and

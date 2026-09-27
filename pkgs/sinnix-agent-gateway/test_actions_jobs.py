@@ -6,7 +6,6 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-import anyio
 import pytest
 from conftest import DirectJobs, call
 from pydantic import ValidationError
@@ -54,7 +53,7 @@ def make_server(
         state_dir=tmp_path / "state",
         projects={
             "fixture": ProjectConfig(
-                project_id="fixture", path=project, observer_read=True
+                project_id="fixture", path=project
             )
         },
     )
@@ -112,7 +111,7 @@ def test_job_locator_accepts_ref_or_id_and_carries_the_launch_reference() -> Non
 def test_list_pages_with_refs_and_forwards_the_project_filter(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    server, _, fake = make_server(tmp_path, "observer", monkeypatch)
+    server, _, fake = make_server(tmp_path, "operator", monkeypatch)
     fake.responses["job.list"] = {
         "jobs": [
             RUNNING,
@@ -156,7 +155,7 @@ def test_list_pages_with_refs_and_forwards_the_project_filter(
 def test_get_returns_summary_log_range_and_result(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    server, _, fake = make_server(tmp_path, "observer", monkeypatch)
+    server, _, fake = make_server(tmp_path, "operator", monkeypatch)
     fake.responses["job.get"] = DONE
     fake.responses["job.logs"] = lambda args: {
         "job_id": "41",
@@ -228,7 +227,7 @@ def test_get_returns_summary_log_range_and_result(
 def test_wait_reports_terminal_or_timeout_from_the_queue(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    server, _, fake = make_server(tmp_path, "observer", monkeypatch)
+    server, _, fake = make_server(tmp_path, "operator", monkeypatch)
     fake.responses["job.wait"] = {
         **RUNNING,
         "timed_out": True,
@@ -264,7 +263,7 @@ def test_a_wait_carrying_a_launch_reference_follows_its_job_to_another_id(
     its own answer, and one that never sent the reference would be told about
     whatever task the switch moved to that id.
     """
-    server, _, fake = make_server(tmp_path, "observer", monkeypatch)
+    server, _, fake = make_server(tmp_path, "operator", monkeypatch)
     fake.responses["job.wait"] = MOVED
 
     waited = call(
@@ -290,7 +289,7 @@ def test_an_answer_about_another_job_is_refused_whichever_identity_was_sent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Identity is proven against what the call addressed, and always proven."""
-    server, _, fake = make_server(tmp_path, "observer", monkeypatch)
+    server, _, fake = make_server(tmp_path, "operator", monkeypatch)
 
     fake.responses["job.wait"] = MOVED
     by_id = call(server, "jobs.wait", {"target": {"job_id": 41}})
@@ -421,26 +420,6 @@ def test_cancel_checks_the_phase_and_surfaces_reap_survivors(
     )
 
 
-def test_cancel_and_retry_are_not_offered_to_observers(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    server, _, _ = make_server(tmp_path, "observer", monkeypatch)
-
-    async def names() -> set[str]:
-        return {tool.name for tool in await server.list_tools()}
-
-    visible = anyio.run(names)
-    assert {
-        "jobs.list",
-        "jobs.get",
-        "jobs.wait",
-        "wait.for",
-        "events.tail",
-        "context.compose",
-    } <= visible
-    assert visible.isdisjoint(
-        {"jobs.cancel", "jobs.retry", "jobs.clean", "operations.run", "shell.run"}
-    )
 
 
 def test_operations_run_targets_the_root_or_a_linked_worktree(

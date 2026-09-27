@@ -111,7 +111,6 @@ class PromptGenerator:
                 "name": row.get("name"),
                 "family": row.get("verb"),
                 "effect": row.get("effect"),
-                "summary": row.get("documentation"),
                 "resource_kinds": row.get("resource_kinds", []),
             }
             for row in catalog.get("actions", [])

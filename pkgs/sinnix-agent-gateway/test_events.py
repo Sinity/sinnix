@@ -42,14 +42,14 @@ def service(
         state_dir=tmp_path / "state",
         projects={"fixture": projects.config.projects["fixture"]},
     )
-    audit = AuditService(config, Principal.for_name("observer"))
+    audit = AuditService(config, Principal.for_name("operator"))
     transitions = tmp_path / "transitions.jsonl"
     transitions.write_text(
         '{"schema":"sinnix-health-transition-v1","event_id":"transition-1"}\n'
     )
     return (
         NormalizedEventService(
-            principal="observer",
+            principal="operator",
             cursor_key=b"e" * 32,
             projects=projects,  # type: ignore[arg-type]
             beads=beads,  # type: ignore[arg-type]
@@ -134,7 +134,7 @@ def test_event_cursor_secret_is_private_principal_bound_and_bounded(
     events, _projects, _beads, _audit = service(tmp_path)
     cursor = events.read(limit=2)["next_cursor"]
     other = NormalizedEventService(
-        principal="operator",
+        principal="agent-control",
         cursor_key=b"e" * 32,
         projects=events.projects,  # type: ignore[arg-type]
         beads=events.beads,  # type: ignore[arg-type]
@@ -144,7 +144,7 @@ def test_event_cursor_secret_is_private_principal_bound_and_bounded(
     with pytest.raises(EventCursorError, match="authentication|scope"):
         other.read(limit=2, cursor=cursor)
     rotated = NormalizedEventService(
-        principal="observer",
+        principal="operator",
         cursor_key=b"r" * 32,
         projects=events.projects,  # type: ignore[arg-type]
         beads=events.beads,  # type: ignore[arg-type]
@@ -168,9 +168,9 @@ def test_event_scope_bound_matches_cursor_capacity(tmp_path: Path) -> None:
     config = GatewayConfig(
         state_dir=tmp_path / "state", projects=projects.config.projects
     )
-    audit = AuditService(config, Principal.for_name("observer"))
+    audit = AuditService(config, Principal.for_name("operator"))
     events = NormalizedEventService(
-        principal="observer",
+        principal="operator",
         cursor_key=b"e" * 32,
         projects=projects,  # type: ignore[arg-type]
         beads=beads,  # type: ignore[arg-type]

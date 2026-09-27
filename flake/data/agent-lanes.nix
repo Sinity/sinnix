@@ -27,19 +27,6 @@
       voiceEnabled = false;
     };
 
-    orchestrate = {
-      toolsets = [
-        "skills"
-        "todo"
-        "memory"
-        "session_search"
-        "clarify"
-      ];
-      mcpProfile = "orchestrate";
-      reasoningEffort = "high";
-      voiceEnabled = false;
-    };
-
     mirror = {
       toolsets = [
         "skills"
@@ -102,63 +89,22 @@
     };
   };
 
-  # Claude variants. The upstream installer owns bare `claude`; `claude-lean`
-  # is the managed default. `mcpProfile`, `model`, and `env` feed the renderers.
+  # Claude variants. The private npm prefix owns the upstream executable;
+  # the managed `claude` command selects the default MCP set.
+  # `mcpProfile`, `model`, and `env` feed the renderers.
   claudeLanes = {
-    full = {
-      binName = "claude-full";
-      mcpProfile = "full";
-    };
-    lean = {
-      binName = "claude-lean";
-      mcpProfile = "lean";
-    };
-    browser = {
-      binName = "claude-browser";
-      mcpProfile = "browser";
-    };
-    # DeepSeek through the real Claude Code harness via its native
-    # Anthropic-compatible endpoint. Full/default MCP profile.
-    deepseek = {
-      binName = "claude-deepseek";
-      mcpProfile = "full";
-      model = "deepseek-chat";
-      env = {
-        baseUrl = "https://api.deepseek.com/anthropic";
-        authToken.secretName = "deepseek-api-key";
-      };
-    };
-    # Local models through the real Claude Code harness, via the LiteLLM
-    # gateway that translates Anthropic <-> OpenAI
-    # (modules/services/litellm.nix). Keep `model` in sync with an entry in
-    # that module's model_list.
-    local = {
-      binName = "claude-local";
-      mcpProfile = "full";
-      model = "local-chat";
-      env = {
-        # LiteLLM binds loopback with no master key; Claude Code still
-        # requires a non-empty token, so send a dummy.
-        baseUrl = "http://127.0.0.1:4000";
-        authToken.literal = "sk-local";
-      };
+    default = {
+      binName = "claude";
+      mcpProfile = "default";
     };
   };
 
-  # Codex variants. The lean lane owns bare `codex`; profiles and backend
+  # Codex variants. The default lane owns bare `codex`; profiles and backend
   # environment details are rendered outside this registry.
   codexLanes = {
-    full = {
-      binName = "codex-full";
-      mcpProfile = "full";
-    };
-    lean = {
+    default = {
       binName = "codex";
-      mcpProfile = "lean";
-    };
-    browser = {
-      binName = "codex-browser";
-      mcpProfile = "browser";
+      mcpProfile = "default";
     };
     deepseek = {
       binName = "codex-deepseek";

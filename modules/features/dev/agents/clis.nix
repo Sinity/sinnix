@@ -180,7 +180,7 @@ mkFeatureModule {
         toolsets = [ "hermes-cli" ];
       };
       # One mkHermesConfig call per flake/data/agent-lanes.nix hermesProfiles
-      # entry, keyed by profile name (research/orchestrate/mirror/local/...).
+      # entry, keyed by profile name (research/mirror/local/...).
       hermesProfileConfigFiles = lib.mapAttrs (
         name: profile:
         mkHermesConfig (
@@ -338,7 +338,7 @@ mkFeatureModule {
               };
             }
             # Registry-driven MCP configs consumed by the claude wrapper, one
-            # per distinct claudeLanes mcpProfile ("mcp"/"mcp-lean"/"mcp-browser").
+            # for the declared Claude default.
             // lib.mapAttrs' (
               mcpProfile: file:
               lib.nameValuePair "claude/${claudeMcpFileBaseName mcpProfile}.json" { source = file; }
@@ -379,15 +379,14 @@ mkFeatureModule {
             # `home.file."x" = ...` bindings in the same attrset literal is a
             # duplicate-definition error, not a merge.
             home.file =
-              # One entry per claudeLanes lane (full/lean/browser get no
-              # extraEnv; deepseek/local layer a backend switch via
-              # backends.nix's mkClaudeBackendEnv).
+              # The single managed Claude launcher.
               (lib.mapAttrs' (
                 name: lane:
                 lib.nameValuePair ".local/bin/${lane.binName}" (
                   mkClaudeCodeWrapper (
                     {
                       mcpConfigName = claudeMcpFileBaseName lane.mcpProfile;
+                      profile = name;
                     }
                     // lib.optionalAttrs (lane ? env) {
                       extraEnv = mkClaudeBackendEnv {

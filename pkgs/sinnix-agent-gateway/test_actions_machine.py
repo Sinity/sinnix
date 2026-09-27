@@ -287,7 +287,7 @@ def test_query_sections_and_actions_revision(tmp_path: Path) -> None:
 
 
 def test_snapshot_composes_sections_with_availability(tmp_path: Path) -> None:
-    runtime = make_runtime(tmp_path, "observer")
+    runtime = make_runtime(tmp_path, "operator")
     data = call(runtime, "machine.snapshot", {})["data"]
     assert data["load"]["available"] and "1m" in data["load"]["data"]
     assert data["memory"]["data"]["bytes"]["MemTotal"] > 0
@@ -385,29 +385,12 @@ def test_operate_and_units_operate_go_through_reducer(tmp_path: Path) -> None:
     assert no_revision["error"]["code"] == "precondition_failed"
 
 
-def test_observer_cannot_operate(tmp_path: Path) -> None:
-    runtime = make_runtime(tmp_path, "observer")
-    denied = call(
-        runtime,
-        "machine.units.operate",
-        {
-            "target": {"name": "alpha"},
-            "action": "stop",
-            "reason": "r",
-            "expected_target": {
-                "kind": "unit",
-                "unit": "alpha.service",
-                "manager": "user",
-                "properties": {"InvocationID": "fixture-invocation"},
-            },
-            "idempotency_key": "k",
-        },
-    )
-    assert denied["error"]["code"] == "policy_denied"
 
 
-def test_observer_can_prepare_exact_target_precondition(tmp_path: Path) -> None:
-    runtime = make_runtime(tmp_path, "observer")
+
+
+def test_agent_can_prepare_exact_target_precondition(tmp_path: Path) -> None:
+    runtime = make_runtime(tmp_path, "agent-control")
     result = call(
         runtime,
         "machine.prepare",
@@ -417,10 +400,7 @@ def test_observer_can_prepare_exact_target_precondition(tmp_path: Path) -> None:
         },
     )
     assert result["result"]["outcome"] == "ok", result
-    assert (
-        result["data"]["expected_target"]["properties"]["InvocationID"]
-        == "fixture-invocation"
-    )
+    assert result["data"]["expected_target"]["properties"]["InvocationID"] == "fixture-invocation"
     assert result["data"]["ref"] == "sinnix://machine/units/user/alpha.service"
     assert runtime._fake_connection.requests[-1][:2] == ("POST", "/v1/actions/prepare")
 

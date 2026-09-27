@@ -21,24 +21,18 @@ from typing import Any
 
 SCHEMA = "sinnix-agent-profile-benchmark-v1"
 DEFAULT_PROFILES = (
-    "claude-lean", "claude-evidence", "claude-full", "claude-browser",
-    "codex-lean", "codex-evidence", "codex-full", "codex-browser",
-    "gateway-agent-control", "gateway-observer", "gateway-operator",
+    "claude", "codex", "codex-local", "codex-deepseek",
+    "gateway-agent-control", "gateway-operator",
 )
 GATEWAY_PRINCIPALS = {
     "gateway-agent-control": "agent-control",
-    "gateway-observer": "observer",
     "gateway-operator": "operator",
 }
 STATIC_FILES = {
-    "claude-lean": (".config/claude/mcp-lean.json",),
-    "claude-evidence": (".config/claude/mcp.json",),
-    "claude-full": (".config/claude/mcp.json",),
-    "claude-browser": (".config/claude/mcp-browser.json",),
-    "codex-lean": (".codex/lean.config.toml",),
-    "codex-evidence": (".codex/evidence.config.toml",),
-    "codex-full": (".codex/full.config.toml",),
-    "codex-browser": (".codex/browser.config.toml",),
+    "claude": (".config/claude/mcp-default.json",),
+    "codex": (".codex/lean.config.toml",),
+    "codex-local": (".codex/local.config.toml",),
+    "codex-deepseek": (".codex/deepseek.config.toml",),
 }
 
 
@@ -252,12 +246,9 @@ def main() -> int:
         "raw_capture": str(args.output),
         "profiles": by_profile,
         "recommendations": {
-            "coordinator": "claude-lean",
-            "implementation_worker": "codex-full",
-            "read_only_reviewer": "claude-evidence",
-            "browser_operator": "claude-browser",
-            "gateway_observer": "gateway-observer",
-            "task_success_guard": "No budget is enforced from this credential-free probe; require representative task success and observed provider usage before changing defaults.",
+            "coordinator": "claude",
+            "implementation_worker": "codex",
+                                                "task_success_guard": "No budget is enforced from this credential-free probe; require representative task success and observed provider usage before changing defaults.",
         },
     }
     args.summary_output.parent.mkdir(mode=0o700, parents=True, exist_ok=True)

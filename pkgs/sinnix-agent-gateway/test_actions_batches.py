@@ -9,7 +9,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import anyio
 import pytest
 from conftest import DirectJobs, call, ok
 from sinnix_agent_gateway import server as server_module
@@ -75,7 +74,7 @@ def make_server(
         state_dir=tmp_path / "state",
         projects={
             "fixture": ProjectConfig(
-                project_id="fixture", path=project, observer_read=True
+                project_id="fixture", path=project
             )
         },
     )
@@ -105,7 +104,7 @@ def test_status_names_every_worker_bead_and_the_pueue_ids_jobs_actions_take(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Breaks if a supervisor has to parse a task label to learn a run's beads."""
-    server, fake = make_server(tmp_path, "observer", monkeypatch)
+    server, fake = make_server(tmp_path, "operator", monkeypatch)
 
     data = ok(server, "batches.status", {"target": {"run_id": "a2c81926"}})
 
@@ -137,7 +136,7 @@ def test_status_names_every_worker_bead_and_the_pueue_ids_jobs_actions_take(
 def test_list_pages_runs_and_forwards_the_project_filter(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    server, fake = make_server(tmp_path, "observer", monkeypatch)
+    server, fake = make_server(tmp_path, "operator", monkeypatch)
     fake.responses["batch.list"] = {"runs": [RUN], "total": 3, "truncated": True}
 
     page = ok(server, "batches.list", {"project": {"project": "fixture"}, "limit": 1})
@@ -239,7 +238,7 @@ def test_land_and_resume_return_the_queued_task_rather_than_running_it(
 def test_a_landed_run_offers_no_further_transition(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    server, fake = make_server(tmp_path, "observer", monkeypatch)
+    server, fake = make_server(tmp_path, "operator", monkeypatch)
     fake.responses["batch.status"] = {
         **RUN,
         "stage": "landed",
@@ -250,16 +249,3 @@ def test_a_landed_run_offers_no_further_transition(
     data = ok(server, "batches.status", {"target": {"run_id": "a2c81926"}})
 
     assert data["accepted"] is True and data["affordances"] == ["batches.list"]
-
-
-def test_observers_may_read_a_run_but_not_change_one(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    server, _ = make_server(tmp_path, "observer", monkeypatch)
-
-    async def names() -> set[str]:
-        return {tool.name for tool in await server.list_tools()}
-
-    visible = anyio.run(names)
-    assert {"batches.list", "batches.status"} <= visible
-    assert visible.isdisjoint({"batches.start", "batches.land", "batches.resume"})

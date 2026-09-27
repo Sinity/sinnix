@@ -13,10 +13,9 @@
   user,
 }:
 let
-  claudeTmpRoot = "${sinnixCfg.paths.realmRoot}/tmp/claude-code";
   # Mirrors environment.sessionVariables.TMPDIR in profiles/workstation.nix;
   # the wrappers re-assert it because inheritance is not guaranteed.
-  shellTmpRoot = "${sinnixCfg.paths.realmRoot}/tmp/${user}";
+  shellTmpRoot = "${sinnixCfg.paths.realmRoot}/tmp/work";
   clodexCredentialHelper = "${scriptPkgs.sinnix-clodex-credential-helper}/bin/sinnix-clodex-credential-helper";
 
   # Shared npm bootstrap prelude — delegates state-dir setup and first-run npm
@@ -167,11 +166,7 @@ let
     { profile }:
     ''
       if [ -z "''${CLAUDE_CODE_TMPDIR:-}" ]; then
-        if [ -d "${sinnixCfg.paths.realmRoot}" ]; then
-          export CLAUDE_CODE_TMPDIR=${lib.escapeShellArg claudeTmpRoot}
-        else
-          export CLAUDE_CODE_TMPDIR="''${TMPDIR:-/tmp}/claude-code-$UID"
-        fi
+        export CLAUDE_CODE_TMPDIR="''${TMPDIR:-/tmp}"
       fi
       ${pkgs.coreutils}/bin/install -d -m 0700 "$CLAUDE_CODE_TMPDIR"
 

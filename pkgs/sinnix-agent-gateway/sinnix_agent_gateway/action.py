@@ -29,7 +29,6 @@ from .contracts import (
 from .schemas import GatewayModel, V2ToolEnvelope
 
 ALL_PRINCIPALS = KNOWN_PRINCIPALS
-OBSERVER_OPERATOR = frozenset({"observer", "operator"})
 OPERATOR_ONLY = frozenset({"operator"})
 CONTROL_OPERATOR = frozenset({"agent-control", "operator"})
 

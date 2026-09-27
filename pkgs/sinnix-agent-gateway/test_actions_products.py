@@ -40,7 +40,7 @@ class Broker:
 def test_owner_string_return_is_decoded_from_sdk_structured_wrapper(
     tmp_path, monkeypatch, owner_data
 ):
-    _, runtime, _ = make_server(tmp_path, "observer", monkeypatch)
+    _, runtime, _ = make_server(tmp_path, "operator", monkeypatch)
     runtime.mcp_broker = Broker({"result": json.dumps(owner_data)})
     result = anyio.run(
         products._orchestration,
@@ -97,7 +97,7 @@ def test_runtime_projection_keeps_requested_and_observed_evidence_separate():
 
 
 def test_orchestration_preserves_unknown_usage_and_deduplicates(tmp_path, monkeypatch):
-    _, runtime, _ = make_server(tmp_path, "observer", monkeypatch)
+    _, runtime, _ = make_server(tmp_path, "operator", monkeypatch)
     broker = Broker()
     runtime.mcp_broker = broker
     result = anyio.run(
@@ -119,15 +119,15 @@ def test_orchestration_preserves_unknown_usage_and_deduplicates(tmp_path, monkey
 def test_mcp_product_response_is_a_principal_scoped_immutable_result(
     tmp_path, monkeypatch
 ):
-    _, runtime, _ = make_server(tmp_path, "observer", monkeypatch)
+    _, runtime, _ = make_server(tmp_path, "operator", monkeypatch)
     runtime.mcp_broker = Broker()
     monkeypatch.setattr(
         server_module, "visible_actions", lambda principal: products.ACTIONS
     )
-    server = create_server(runtime.config, "observer")
+    server = create_server(runtime.config, "operator")
     response = call(server, "sessions.orchestration", {"session_refs": ["session:a"]})
     assert response["result"]["outcome"] == "ok", response
-    assert response["result"]["principal"] == "observer"
+    assert response["result"]["principal"] == "operator"
     snapshot = runtime.results.read(response["result"]["result_id"])
     assert snapshot["data"] == response["data"]
     runtime.mcp_broker.data["usage"]["tokens"] = 500
@@ -150,7 +150,7 @@ def test_mcp_product_response_is_a_principal_scoped_immutable_result(
     ],
 )
 def test_owner_refusal_is_unavailable(tmp_path, monkeypatch, data):
-    _, runtime, _ = make_server(tmp_path, "observer", monkeypatch)
+    _, runtime, _ = make_server(tmp_path, "operator", monkeypatch)
     runtime.mcp_broker = Broker(data)
     result = anyio.run(
         products._orchestration,
@@ -164,7 +164,7 @@ def test_owner_refusal_is_unavailable(tmp_path, monkeypatch, data):
 def test_campaign_owner_acquires_history_and_preserves_incomplete_scope(
     tmp_path, monkeypatch
 ):
-    _, runtime, _ = make_server(tmp_path, "observer", monkeypatch)
+    _, runtime, _ = make_server(tmp_path, "operator", monkeypatch)
     owner = {
         "closure": {
             "nodes": [{"id": "fixture-1", "status": "closed"}],
@@ -203,7 +203,7 @@ def test_campaign_owner_acquires_history_and_preserves_incomplete_scope(
 
 
 def test_structured_sessions_use_native_owner_pagination(tmp_path, monkeypatch):
-    _, runtime, _ = make_server(tmp_path, "observer", monkeypatch)
+    _, runtime, _ = make_server(tmp_path, "operator", monkeypatch)
     runtime.mcp_broker = Broker(
         {"items": [], "continuation": "owner-next", "coverage": {"complete": False}}
     )
@@ -226,7 +226,7 @@ def test_structured_sessions_use_native_owner_pagination(tmp_path, monkeypatch):
 
 
 def test_context_owner_failure_is_persisted_as_unavailable(tmp_path, monkeypatch):
-    _, runtime, _ = make_server(tmp_path, "observer", monkeypatch)
+    _, runtime, _ = make_server(tmp_path, "operator", monkeypatch)
     runtime.mcp_broker = Broker(failure=True)
     result = anyio.run(
         contexts._compose,
@@ -247,7 +247,7 @@ def test_context_owner_failure_is_persisted_as_unavailable(tmp_path, monkeypatch
 def test_historical_context_owner_contract_preserves_partial_and_unknown(
     tmp_path, monkeypatch, intent, outcome
 ):
-    _, runtime, _ = make_server(tmp_path, "observer", monkeypatch)
+    _, runtime, _ = make_server(tmp_path, "operator", monkeypatch)
     owner_data = {
         "product": intent.replace(".", "_"),
         "outcome": outcome,
@@ -295,7 +295,7 @@ def test_historical_context_owner_contract_preserves_partial_and_unknown(
 def test_lynchpin_envelope_preserves_metadata_and_inner_unavailability(
     tmp_path, monkeypatch
 ):
-    _, runtime, _ = make_server(tmp_path, "observer", monkeypatch)
+    _, runtime, _ = make_server(tmp_path, "operator", monkeypatch)
     runtime.mcp_broker = Broker(
         {
             "ok": True,
@@ -374,7 +374,7 @@ def test_shell_wait_preserves_job_identity_and_returns_output(
 def test_an_owner_terminal_outcome_survives_the_gateway(
     tmp_path, monkeypatch, state, expected
 ):
-    _, runtime, _ = make_server(tmp_path, "observer", monkeypatch)
+    _, runtime, _ = make_server(tmp_path, "operator", monkeypatch)
     runtime.mcp_broker = Broker(
         {
             "sessions": [],
@@ -399,7 +399,7 @@ def test_zero_rows_without_a_declared_outcome_are_not_inferred_empty(
     of the payload. Breaks if `empty` starts being inferred from an absent row
     set, which is what makes a broken owner surface indistinguishable from an
     owner whose scope really holds nothing."""
-    _, runtime, _ = make_server(tmp_path, "observer", monkeypatch)
+    _, runtime, _ = make_server(tmp_path, "operator", monkeypatch)
     runtime.mcp_broker = Broker({"sessions": [], "coverage": {"complete": True}})
     result = anyio.run(
         products._orchestration,
@@ -416,7 +416,7 @@ def test_component_failures_are_carried_and_make_the_answer_degraded(
     field at all, so named per-component gaps are its only gap signal. Breaks if
     the gateway drops them: a context assembled from a failed lineage lookup
     reaches the caller labelled available, with nothing naming what is missing."""
-    _, runtime, _ = make_server(tmp_path, "observer", monkeypatch)
+    _, runtime, _ = make_server(tmp_path, "operator", monkeypatch)
     failures = {"session_lineage": "TimeoutError: lineage lookup timed out"}
     runtime.mcp_broker = Broker(
         {"recent_related_sessions": [], "component_failures": failures}
@@ -459,7 +459,7 @@ def test_a_composed_context_carries_the_owner_state_and_its_failures(
     """The composed context is where the erased label was observed. Breaks if
     `_compose` stops propagating the product's state or its component failures
     into the returned component."""
-    _, runtime, _ = make_server(tmp_path, "observer", monkeypatch)
+    _, runtime, _ = make_server(tmp_path, "operator", monkeypatch)
     failures = {"assertion_guidance": "OperationalError: database is locked"}
     runtime.mcp_broker = Broker(
         {"sessions": [], "component_failures": failures, "outcome": {"state": "empty"}}
@@ -484,7 +484,7 @@ def test_a_composed_context_is_held_to_the_budget_it_declares(tmp_path, monkeypa
     returned envelope exceeds the number it reports as its own budget."""
     import dataclasses
 
-    _, runtime, _ = make_server(tmp_path, "observer", monkeypatch)
+    _, runtime, _ = make_server(tmp_path, "operator", monkeypatch)
     runtime.config = dataclasses.replace(runtime.config, max_result_bytes=4_096)
     payload = {"sessions": [], "evidence": "x" * 64_000}
     runtime.mcp_broker = Broker(payload)

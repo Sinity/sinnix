@@ -12,7 +12,7 @@ from test_actions_jobs import DONE, RUNNING, call, make_server
 def test_wait_for_job_terminal_uses_the_queue_wait(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    server, _, fake = make_server(tmp_path, "observer", monkeypatch)
+    server, _, fake = make_server(tmp_path, "operator", monkeypatch)
     fake.responses["job.wait"] = DONE
     done = call(
         server,
@@ -52,7 +52,7 @@ def test_wait_for_job_terminal_carries_the_launch_reference_to_the_queue(
     Anti-vacuity: without it the queue wait is handed the task id the ref
     encodes, and answers about whatever a reorder moved there.
     """
-    server, _, fake = make_server(tmp_path, "observer", monkeypatch)
+    server, _, fake = make_server(tmp_path, "operator", monkeypatch)
     reference = "fixture-worker-abcd1234"
     fake.responses["job.wait"] = {**DONE, "job_id": "44", "launch_reference": reference}
 
@@ -82,7 +82,7 @@ def test_wait_for_job_terminal_carries_the_launch_reference_to_the_queue(
 def test_wait_for_file_exists_polls_until_the_deadline(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    server, _, _ = make_server(tmp_path, "observer", monkeypatch)
+    server, _, _ = make_server(tmp_path, "operator", monkeypatch)
     target = tmp_path / "out.txt"
     missing = call(
         server,
@@ -168,7 +168,7 @@ def test_wait_condition_union_rejects_mixed_fields() -> None:
 def test_events_tail_pages_with_a_scope_bound_cursor(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    server, _, fake = make_server(tmp_path, "observer", monkeypatch, with_git=True)
+    server, _, fake = make_server(tmp_path, "operator", monkeypatch, with_git=True)
     fake.responses["job.list"] = {
         "jobs": [RUNNING],
         "total": 1,

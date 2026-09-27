@@ -29,7 +29,7 @@ def test_compose_input_binds_target_to_intent():
 def test_project_context_preserves_owner_components_and_observes_each_time(
     tmp_path, monkeypatch, intent
 ):
-    server, runtime, _ = make_server(tmp_path, "observer", monkeypatch, with_git=True)
+    server, runtime, _ = make_server(tmp_path, "operator", monkeypatch, with_git=True)
     product = {
         "components": [
             {"name": "tasks", "status": "unavailable", "reason": "owner offline"}

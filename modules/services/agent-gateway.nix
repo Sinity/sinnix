@@ -30,11 +30,6 @@ let
     polylogue = "${mcpTools.mcpPolylogueBin}/bin/mcp-polylogue";
     sinex = "${scriptPkgs.sinnix-mcp-sinex}/bin/sinnix-mcp-sinex";
   };
-  mcpBrokerObserverWritablePaths = {
-    # Lynchpin readers and publishers coordinate through one runtime-scoped
-    # flock. The checkout and substrate remain read-only in the observer unit.
-    lynchpin = [ "%t/lynchpin/substrate-locks" ];
-  };
   mcpBrokerServers = lib.mapAttrs (
     name: server:
     let
@@ -50,7 +45,6 @@ let
       command = mcpBrokerCommands.${name};
       args = profile.args or server.args or [ ];
       env = server.env or { };
-      observerWritablePaths = mcpBrokerObserverWritablePaths.${name} or [ ];
       readOnlyRoutes = server.gatewayReadOnlyRoutes or [ ];
       readOnlyTools = server.gatewayReadOnlyTools or [ ];
     }
@@ -90,10 +84,9 @@ mkServiceModule {
               enable = lib.mkEnableOption "this OpenAI Secure MCP endpoint";
               principal = lib.mkOption {
                 type = lib.types.enum [
-                  "observer"
                   "operator"
                 ];
-                default = "observer";
+                default = "operator";
                 description = "Gateway principal selected explicitly for this endpoint.";
               };
               label = lib.mkOption {
@@ -380,19 +373,6 @@ mkServiceModule {
               ];
               UMask = "0077";
               Environment = [
-                "PATH=${gatewayPath}"
-                "GI_TYPELIB_PATH=${giTypelibPath}"
-              ];
-            }
-            // lib.optionalAttrs (endpoint.principal == "observer") {
-              NoNewPrivileges = true;
-              PrivateTmp = true;
-              ProtectSystem = "strict";
-              # The user manager's TMPDIR is the NVMe scratch root, read-only
-              # under strict; the private /tmp is where this unit's temporary
-              # files belong.
-              Environment = [
-                "TMPDIR=/tmp"
                 "PATH=${gatewayPath}"
                 "GI_TYPELIB_PATH=${giTypelibPath}"
               ];

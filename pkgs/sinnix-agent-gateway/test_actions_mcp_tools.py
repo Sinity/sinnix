@@ -167,17 +167,12 @@ def test_servers_tools_call_change(
     assert write["result"]["outcome"] == "ok" and write["data"]["mode"] == "write"
 
 
-def test_observer_cannot_change_and_timeout_is_diagnosable(
+
+
+def test_broker_timeout_is_diagnosable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    rt = runtime(tmp_path, "observer", monkeypatch)
-    denied = call(
-        rt,
-        "mcp.change",
-        {"target": {"server": "fixture", "tool": "refresh"}, "idempotency_key": "k"},
-        BY_NAME,
-    )
-    assert denied["error"]["code"] == "policy_denied"
+    rt = runtime(tmp_path, "operator", monkeypatch)
 
     class Hanging(FakeSession):
         async def initialize(self) -> None:
@@ -188,9 +183,7 @@ def test_observer_cannot_change_and_timeout_is_diagnosable(
     monkeypatch.setattr("sinnix_agent_gateway.mcp_broker.ClientSession", Hanging)
     row = {
         r["name"]: r
-        for r in call(rt, "mcp.servers", {"servers": ["fixture"]}, BY_NAME)["data"][
-            "servers"
-        ]
+        for r in call(rt, "mcp.servers", {"servers": ["fixture"]}, BY_NAME)["data"]["servers"]
     }["fixture"]
     assert row["failure_class"] == "timeout" and row["last_successful_probe"] is None
 

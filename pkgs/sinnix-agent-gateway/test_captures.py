@@ -49,7 +49,7 @@ def config(tmp_path: Path) -> tuple[GatewayConfig, dict[str, Path]]:
     )
 
 
-@pytest.mark.parametrize("principal_name", ("observer", "agent-control", "operator"))
+@pytest.mark.parametrize("principal_name", ("operator", "agent-control", "operator"))
 def test_principals_have_full_operator_authorized_capture_read_access(
     principal_name: str,
 ) -> None:
@@ -63,7 +63,7 @@ def test_capture_lanes_tool_lists_runtime_declared_envelope_lanes(
     tmp_path: Path,
 ) -> None:
     gateway_config, lane_paths = config(tmp_path)
-    service = CaptureService(gateway_config, Principal.for_name("observer"))
+    service = CaptureService(gateway_config, Principal.for_name("operator"))
 
     result = service.lanes_visible()
 
@@ -99,7 +99,7 @@ def test_capture_lanes_tool_lists_runtime_declared_envelope_lanes(
 
 
 def test_filter_lanes_returns_requested_or_all_authorized_lanes() -> None:
-    principal = Principal.for_name("observer")
+    principal = Principal.for_name("operator")
     available = ["mpris", "clipboard", "router"]
 
     assert principal.filter_lanes(["clipboard"], available) == ["clipboard"]
@@ -126,7 +126,7 @@ def test_capture_query_groups_declared_lanes_by_inventory_root(tmp_path: Path) -
             runtime_inventory=gateway_config.runtime_inventory,
             capture_command=str(collector),
         ),
-        Principal.for_name("observer"),
+        Principal.for_name("operator"),
     )
 
     result = service.query(["mpris", "router"])
@@ -170,7 +170,7 @@ def test_capture_query_reports_missing_collector_for_declared_lane(
             runtime_inventory=gateway_config.runtime_inventory,
             capture_command=str(tmp_path / "missing-sinnix-capture"),
         ),
-        Principal.for_name("observer"),
+        Principal.for_name("operator"),
     )
 
     result = service.query(["mpris"])
@@ -207,7 +207,7 @@ def test_declared_file_lane_remains_visible_without_a_sidecar_guess(
         GatewayConfig(
             state_dir=tmp_path / "state", projects={}, runtime_inventory=inventory
         ),
-        Principal.for_name("observer"),
+        Principal.for_name("operator"),
     )
 
     assert service.lane("telemetry") == {
@@ -251,7 +251,7 @@ def test_capture_query_uses_the_native_lane_derived_from_a_nested_declared_path(
             runtime_inventory=inventory,
             capture_command=str(collector),
         ),
-        Principal.for_name("observer"),
+        Principal.for_name("operator"),
     )
 
     assert service.query(["peripherals-logitech"]) == {
@@ -281,7 +281,7 @@ def test_freshness_uses_sidecar_progress_when_directory_mtime_is_stale(
     with index.open("a") as handle:
         handle.write('{"ts":2,"seq":2}\n')
 
-    service = CaptureService(gateway_config, Principal.for_name("observer"))
+    service = CaptureService(gateway_config, Principal.for_name("operator"))
     evidence = service.freshness("mpris")
 
     assert evidence["available"] is True
@@ -314,7 +314,7 @@ def test_freshness_uses_declared_file_and_reports_missing_directory_progress(
             projects={},
             runtime_inventory=inventory,
         ),
-        Principal.for_name("observer"),
+        Principal.for_name("operator"),
     )
 
     assert service.freshness("telemetry")["progress_path"] == str(direct_file)

@@ -29,7 +29,7 @@ lanes use `mkCaptureLane`. A bypass needs a structural reason.
 `flake/data/agent-lanes.nix` defines CLI lanes;
 `flake/data/mcp-registry.nix` defines MCP profiles; `dots/_ai/skills/` is the
 source for shared skills and `modules/features/dev/agents/` renders client
-links. `claude-lean` is the managed lean launcher;
+links. `claude` is the managed default launcher;
 the upstream installer owns the bare `~/.local/bin/claude`.
 
 agentctl is in `pkgs/agentctl/`; the gateway is in

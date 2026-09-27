@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from sinnix_agent_gateway.capabilities import PolicyError, Principal
+from sinnix_agent_gateway.capabilities import Principal
 from sinnix_agent_gateway.config import GatewayConfig
 from sinnix_agent_gateway.files import FileError, HostFileService
 
@@ -15,19 +15,6 @@ def service(tmp_path: Path, principal_name: str) -> HostFileService:
     )
 
 
-def test_observer_reads_bounded_host_file_and_cannot_write(tmp_path: Path) -> None:
-    target = tmp_path / "evidence.txt"
-    target.write_text("one\ntwo\nthree\n")
-    observer = service(tmp_path, "observer")
-
-    result = observer.read("read", str(target), offset=4, max_bytes=4)
-
-    assert result["content"] == "two\n"
-    assert result["truncated"] is True
-    assert len(result["sha256"]) == 64
-    with pytest.raises(PolicyError):
-        observer.write("replace", str(target), content="forbidden")
-    assert target.read_text() == "one\ntwo\nthree\n"
 
 
 def test_operator_write_uses_compare_and_swap_and_receipts(tmp_path: Path) -> None:
@@ -96,19 +83,6 @@ def test_operator_rejects_symlink_mutation(tmp_path: Path) -> None:
     assert target.read_text() == "before"
 
 
-def test_observer_cannot_read_secret_root(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from sinnix_agent_gateway import files
-
-    secret_root = tmp_path / "secret-root"
-    secret_root.mkdir()
-    secret = secret_root / "secret.txt"
-    secret.write_text("secret")
-    monkeypatch.setattr(files, "_SECRET_ROOTS", (secret_root,))
-
-    with pytest.raises(FileError, match="unavailable"):
-        service(tmp_path, "observer").read("read", str(secret))
 
 
 def test_list_is_bounded_and_reports_symlink(tmp_path: Path) -> None:
@@ -118,7 +92,7 @@ def test_list_is_bounded_and_reports_symlink(tmp_path: Path) -> None:
     (directory / "b").write_text("b")
     (directory / "link").symlink_to(directory / "a")
 
-    observer = service(tmp_path, "observer")
+    observer = service(tmp_path, "operator")
     bounded = observer.read("list", str(directory), max_entries=2)
     complete = observer.read("list", str(directory), max_entries=3)
 

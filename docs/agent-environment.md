@@ -4,6 +4,31 @@
 
 ## Profiles
 
+### default (claude)
+
+Tiers: remote-core, recall.
+Servers: context7, github, polylogue, sinex.
+
+### default (codex)
+
+Tiers: remote-core, recall.
+Servers: context7, github, polylogue, sinex.
+
+### default (gemini)
+
+Tiers: remote-core, recall.
+Servers: context7, github, polylogue, sinex.
+
+### default (antigravity)
+
+Tiers: remote-core, recall.
+Servers: context7, github, polylogue, sinex.
+
+### default (hermes)
+
+Tiers: remote-core, recall.
+Servers: context7, github, polylogue, sinex.
+
 ### lean (claude)
 
 Tiers: remote-core, recall.
@@ -103,31 +128,6 @@ Servers: context7, github, lynchpin, polylogue, sinex.
 
 Tiers: remote-core, recall, deep-evidence, browser-mcp.
 Servers: context7, firecrawl, github, lynchpin, polylogue, sinex.
-
-### orchestrate (claude)
-
-Tiers: remote-core, recall, deep-evidence, agent-control.
-Servers: agent-control, context7, github, lynchpin, polylogue, sinex.
-
-### orchestrate (codex)
-
-Tiers: remote-core, recall, deep-evidence, agent-control.
-Servers: agent-control, context7, github, lynchpin, polylogue, sinex.
-
-### orchestrate (gemini)
-
-Tiers: remote-core, recall, deep-evidence, agent-control.
-Servers: agent-control, context7, github, lynchpin, polylogue, sinex.
-
-### orchestrate (antigravity)
-
-Tiers: remote-core, recall, deep-evidence, agent-control.
-Servers: agent-control, context7, github, lynchpin, polylogue, sinex.
-
-### orchestrate (hermes)
-
-Tiers: remote-core, recall, deep-evidence, agent-control.
-Servers: agent-control, context7, github, lynchpin, polylogue, sinex.
 
 ### antigravity (claude)
 

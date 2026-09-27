@@ -17,7 +17,7 @@ let
   runtimeInventory = config.sinnix.runtime.inventory;
   user = config.sinnix.user.name;
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
-  userTmpRoot = "/realm/tmp/${user}";
+  userTmpRoot = "/realm/tmp/work";
   earlyoomAvoidPattern = runtimeInventory.earlyoomEmergencyAvoidPattern;
   forbiddenEarlyoomAvoidTokens = [
     "bash"
@@ -116,7 +116,7 @@ in
         {
           inherit config;
           unitName = "sinnix-tmp-sweep";
-          description = "Remove unheld nix-shell.* scratch directories";
+          description = "Remove unheld Nix devshell scratch directories";
         }
         {
           manager = "user";
@@ -317,8 +317,8 @@ in
         systemd.oomd.enable = true;
 
         # Devshell/agent scratch belongs on /realm NVMe, not the RAM-backed /tmp
-        # tmpfs: every `nix develop` creates a `nix-shell.*` tree as its TMPDIR
-        # and removes it only on a clean exit, so a killed shell leaks one. On the
+        # tmpfs: `nix develop` uses `nix-shell.*` and `nix-develop-*` scratch
+        # directories and can leave them after a normal exit. On the
         # 6 GiB /tmp tmpfs that population reaches ENOSPC, which truncates
         # heredocs and gives EMFILE in unrelated processes. The scratch root is
         # private to the operator (0700) rather than a shared 1777 tree, so the
@@ -331,18 +331,8 @@ in
         # the default /tmp.
         environment.sessionVariables.TMPDIR = userTmpRoot;
         systemd.user.settings.Manager.DefaultEnvironment = "TMPDIR=${userTmpRoot}";
-        systemd.tmpfiles.rules = [
-          "d ${userTmpRoot} 0700 ${user} users -"
-          # Claude Code bypasses TMPDIR for task output captures. Managed Claude
-          # wrappers point CLAUDE_CODE_TMPDIR here so concurrent subagents cannot
-          # fill the shared 6 GiB /tmp tmpfs.
-          "d /realm/tmp/claude-code 0700 ${user} users 7d"
-          # The designated home for ad-hoc session/agent output files (bead work
-          # notes, query dumps, one-off analysis). Root /realm/tmp stays unaged by
-          # operator decision — manual sweeps only — so this aged subdir gives new
-          # litter somewhere to expire instead of accumulating at the root.
-          "d /realm/tmp/work 1777 root root 30d"
-        ];
+        # The root is declared once in core.nix. Claude Code's separate
+        # CLAUDE_CODE_TMPDIR points to this same location.
 
         # nix.slice has no explicit unit: it exists only as the implicit
         # dash-hierarchy parent systemd creates for nix-build.slice, and with a

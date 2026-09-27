@@ -54,6 +54,7 @@ QUEUE_RUN_EXECUTABLE = "agentctl-run"
 # workstation has queued is 21 KB. The bound is what keeps a task from naming
 # an arbitrarily large file and having agentctl read it.
 MAX_LAUNCH_INPUT_BYTES = 1_048_576
+MAX_OUTCOME_BYTES = 2 * MAX_LAUNCH_INPUT_BYTES
 # The label kinds under which a batch queues agents rather than declared operations.
 AGENT_OPERATIONS = frozenset({"worker", "resume", "integrate", "review"})
 # A stashed task written by AgentCTL's admission policy carries this marker.
@@ -1317,7 +1318,10 @@ def _outcome(config: Config, task: Task, attempt: int | None = None) -> dict[str
 
 
 def _outcome_from_path(path: Path | None) -> dict[str, Any]:
-    raw = read_bounded(path, 4096) if path is not None else None
+    # The execution receipt includes the exact declared argv. It may exceed
+    # 4 KiB even when the result itself is small, so use a bounded limit that
+    # covers the admitted launch input plus receipt metadata.
+    raw = read_bounded(path, MAX_OUTCOME_BYTES) if path is not None else None
     try:
         record = json.loads(raw.decode("utf-8")) if raw else None
     except (UnicodeDecodeError, json.JSONDecodeError):

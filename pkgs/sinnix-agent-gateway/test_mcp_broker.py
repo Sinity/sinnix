@@ -21,7 +21,6 @@ from sinnix_agent_gateway.mcp_broker import (
     McpBrokerTimeoutError,
 )
 from sinnix_agent_gateway.owner_execution import (
-    EnvironmentProfile,
     ExecutionProfile,
     ExecutionResult,
     OwnerExecution,
@@ -113,7 +112,6 @@ def broker_service(
                 "command": "fixture-mcp",
                 "args": ["--fixture"],
                 "env": {"FIXTURE": "1"},
-                "observerWritablePaths": ["%t/fixture-locks"],
             },
             "blocked": {
                 "description": "Excluded server",
@@ -128,38 +126,8 @@ def broker_service(
     return McpBrokerService(config, principal, ArtifactService(config, principal))
 
 
-def test_broker_stop_uses_the_shared_execution_kernel(tmp_path: Path) -> None:
-    broker = broker_service(tmp_path, "observer")
-    execution = RecordingExecution()
-    broker.execution = execution
-
-    broker._stop("sinnix-gateway-mcp-read-fixture.service")
-
-    command, profile = execution.calls[0]
-    assert command == (
-        broker.config.systemctl_command,
-        "--user",
-        "stop",
-        "sinnix-gateway-mcp-read-fixture.service",
-    )
-    assert profile.route.name == "mcp-broker-cancel"
-    assert profile.route.environment_profile == EnvironmentProfile.USER_BUS_OPTIONAL
-    assert profile.timeout_seconds == 5
 
 
-def test_observer_catalog_reports_missing_user_bus_environment(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.delenv("DBUS_SESSION_BUS_ADDRESS", raising=False)
-    monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
-    broker = broker_service(tmp_path, "observer")
-    catalog = anyio.run(broker.catalog)
-
-    fixture = next(
-        server for server in catalog["servers"] if server["name"] == "fixture"
-    )
-    assert fixture["availability"] == "unavailable"
-    assert fixture["failure_class"] == "environment_unavailable"
 
 
 class LargeSchemaSession(FakeSession):
@@ -184,7 +152,7 @@ class LargeSchemaSession(FakeSession):
 def test_catalog_artifactizes_an_oversized_tool_schema(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    broker = broker_service(tmp_path, "observer", max_bytes=4_096)
+    broker = broker_service(tmp_path, "operator", max_bytes=4_096)
     monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")
     monkeypatch.setenv("XDG_RUNTIME_DIR", "/run/user/1000")
     monkeypatch.setattr(
@@ -256,88 +224,6 @@ def test_catalog_probes_admitted_servers_and_keeps_exclusions_static(
     }
 
 
-@pytest.mark.parametrize(
-    (
-        "configured_timeout",
-        "handshake_seconds",
-        "probe_timeout",
-        "available",
-        "failure_class",
-    ),
-    [
-        (None, 16, 30, True, None),
-        (3, 4, 3, False, "timeout"),
-        (300, 16, 30, True, None),
-        # The capped case: discovery gave up at 30s while the configured call
-        # route gets 300s, so readiness has not proven the route unavailable
-        # and must not report it as a plain timeout (sinnix-4rcy).
-        (300, 31, 30, False, "discovery_timeout"),
-    ],
-)
-def test_probe_admission_and_observer_lifetime_share_the_capped_call_budget(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    configured_timeout: int | None,
-    handshake_seconds: int,
-    probe_timeout: int,
-    available: bool,
-    failure_class: str | None,
-) -> None:
-    broker = broker_service(tmp_path, "observer")
-    broker.execution = RecordingExecution(
-        {
-            "HOME": str(tmp_path),
-            "LANG": "C.UTF-8",
-            "PATH": "/fixture/bin",
-            "DBUS_SESSION_BUS_ADDRESS": f"unix:path={tmp_path}/bus",
-            "XDG_RUNTIME_DIR": str(tmp_path),
-        }
-    )
-    if configured_timeout is not None:
-        broker.config.mcp_broker_servers["fixture"]["callTimeoutSeconds"] = (
-            configured_timeout
-        )
-    monkeypatch.setattr(
-        "sinnix_agent_gateway.mcp_broker.stdio_client",
-        lambda *_args, **_kwargs: FakeTransport(),
-    )
-    monkeypatch.setattr("sinnix_agent_gateway.mcp_broker.ClientSession", FakeSession)
-    captured_parameters = []
-    original_parameters = broker._parameters
-
-    def parameters(*args, **kwargs):
-        result = original_parameters(*args, **kwargs)
-        captured_parameters.append(result[0])
-        return result
-
-    monkeypatch.setattr(broker, "_parameters", parameters)
-    deadlines = []
-
-    async def wait_for(handshake, *, timeout):
-        deadlines.append(timeout)
-        if handshake_seconds > timeout:
-            handshake.close()
-            raise asyncio.TimeoutError
-        return await handshake
-
-    monkeypatch.setattr("sinnix_agent_gateway.mcp_broker.asyncio.wait_for", wait_for)
-    catalog = anyio.run(broker.catalog)
-    fixture = next(row for row in catalog["servers"] if row["name"] == "fixture")
-    assert deadlines == [probe_timeout], fixture
-    assert f"--property=RuntimeMaxSec={probe_timeout}" in captured_parameters[0].args
-    assert fixture["availability"] == ("available" if available else "unavailable")
-    if available:
-        assert fixture["tool_count"] == fixture["read_only_tool_count"] == 1
-    else:
-        assert fixture["failure_class"] == failure_class
-        if failure_class == "discovery_timeout":
-            # The owner error names both budgets, so the reader can tell a slow
-            # start from a dead route without re-deriving the cap.
-            assert f"{probe_timeout}s discovery budget" in fixture["reason"]
-            assert f"callTimeoutSeconds {configured_timeout}" in fixture["reason"]
-        else:
-            assert "discovery budget" not in fixture["reason"]
-        assert len(broker.execution.calls) == 1
 
 
 def write_stdio_fixture(tmp_path: Path, source: str) -> Path:
@@ -566,66 +452,8 @@ def test_read_only_subroute_rejects_unbounded_or_malformed_configuration(
         broker._server("fixture")
 
 
-def test_observer_broker_runs_upstream_in_read_only_unit(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    broker = broker_service(tmp_path, "observer")
-    monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")
-    monkeypatch.setenv("XDG_RUNTIME_DIR", "/run/user/1000")
-    captured = []
-
-    def stdio(parameters: object, **_kwargs: object) -> FakeTransport:
-        captured.append(parameters)
-        return FakeTransport()
-
-    monkeypatch.setattr("sinnix_agent_gateway.mcp_broker.stdio_client", stdio)
-    monkeypatch.setattr("sinnix_agent_gateway.mcp_broker.ClientSession", FakeSession)
-
-    anyio.run(
-        lambda: broker.call("fixture", "lookup", {"query": "fixture"}, write=False)
-    )
-
-    assert captured[0].command == broker.config.systemd_run_command
-    broker.config.mcp_broker_servers["fixture"]["callTimeoutSeconds"] = 120
-    captured.clear()
-    anyio.run(
-        lambda: broker.call("fixture", "lookup", {"query": "fixture"}, write=False)
-    )
-    assert "--property=RuntimeMaxSec=120" in captured[0].args
-    assert "--property=ReadOnlyPaths=/" in captured[0].args
-    assert "--property=ReadWritePaths=/run/user/1000/fixture-locks" in captured[0].args
-    assert "--property=PrivateNetwork=true" in captured[0].args
-    assert "--property=InaccessiblePaths=/run/user" not in captured[0].args
-    assert (
-        "--setenv=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus"
-        in captured[0].args
-    )
-    assert "--setenv=XDG_RUNTIME_DIR=/run/user/1000" in captured[0].args
-    assert captured[0].env["DBUS_SESSION_BUS_ADDRESS"] == "unix:path=/run/user/1000/bus"
-    assert captured[0].env["XDG_RUNTIME_DIR"] == "/run/user/1000"
-    separator = captured[0].args.index("--")
-    assert captured[0].args[separator + 1 :] == ["fixture-mcp", "--fixture"]
 
 
-def test_observer_broker_stops_failed_read_only_unit(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    broker = broker_service(tmp_path, "observer")
-    monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")
-    monkeypatch.setenv("XDG_RUNTIME_DIR", "/run/user/1000")
-    stopped = []
-    monkeypatch.setattr(
-        "sinnix_agent_gateway.mcp_broker.stdio_client",
-        lambda _params, **_kwargs: FakeTransport(),
-    )
-    monkeypatch.setattr("sinnix_agent_gateway.mcp_broker.ClientSession", FakeSession)
-    monkeypatch.setattr(broker, "_stop", stopped.append)
-
-    with pytest.raises(McpBrokerError, match="does not expose"):
-        anyio.run(lambda: broker.call("fixture", "missing", {}, write=False))
-
-    assert len(stopped) == 1
-    assert stopped[0].startswith("sinnix-gateway-mcp-read-")
 
 
 def test_broker_attests_upstream_stderr_on_transport_failure(
@@ -652,7 +480,7 @@ def test_broker_attests_upstream_stderr_on_transport_failure(
 def test_broker_artifactizes_large_upstream_response(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    broker = broker_service(tmp_path, "observer", max_bytes=10)
+    broker = broker_service(tmp_path, "operator", max_bytes=10)
     monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")
     monkeypatch.setenv("XDG_RUNTIME_DIR", "/run/user/1000")
     monkeypatch.setattr(

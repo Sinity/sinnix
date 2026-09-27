@@ -21,7 +21,6 @@ from .config import (
 )
 from .owner_execution import (
     EnvironmentProfile,
-    ExecutionProfile,
     OwnerExecution,
     OwnerRoute,
 )
@@ -163,18 +162,11 @@ class McpBrokerService:
         return {**server, **probe}
 
     def _environment(self, server: dict[str, Any]) -> dict[str, str]:
-        route = OwnerRoute(
-            "mcp-broker",
-            (
-                EnvironmentProfile.USER_BUS
-                if self.principal.name == "observer"
-                else EnvironmentProfile.PLAIN
-            ),
-        )
+        route = OwnerRoute("mcp-broker", EnvironmentProfile.PLAIN)
         execution = self.execution or OwnerExecution()
         environment, missing = execution.environment_for(route, server["env"])
         if missing is not None:
-            raise McpEnvironmentError(f"observer MCP environment is missing {missing}")
+            raise McpEnvironmentError(f"MCP environment is missing {missing}")
         return environment
 
     async def _probe(
@@ -189,8 +181,8 @@ class McpBrokerService:
         call_timeout = self._call_timeout(server)
         timeout = min(call_timeout, DEFAULT_MCP_CALL_TIMEOUT_SECONDS)
         discovery_truncated = timeout < call_timeout
-        parameters, observer_unit = self._parameters(
-            server, environment, runtime_max_seconds=timeout
+        parameters = self._parameters(
+            server, environment
         )
         stderr_directory = self.config.state_dir / "captures" / uuid.uuid4().hex
         stderr_directory.mkdir(mode=0o700, parents=True)
@@ -215,8 +207,6 @@ class McpBrokerService:
                 inspect(), timeout=timeout
             )
         except asyncio.TimeoutError:
-            if observer_unit is not None:
-                self._stop(observer_unit)
             artifact_id = self._store_upstream_stderr(
                 stderr_directory, server_name, "tools/list"
             )
@@ -245,8 +235,6 @@ class McpBrokerService:
                 result["diagnostic_artifact_id"] = artifact_id
             return result
         except Exception:
-            if observer_unit is not None:
-                self._stop(observer_unit)
             artifact_id = self._store_upstream_stderr(
                 stderr_directory, server_name, "tools/list"
             )
@@ -325,7 +313,6 @@ class McpBrokerService:
         command = server.get("command")
         args = server.get("args", [])
         environment = server.get("env", {})
-        observer_writable_paths = server.get("observerWritablePaths", [])
         read_only_routes = server.get("readOnlyRoutes", [])
         read_only_tools = server.get("readOnlyTools", [])
         if (
@@ -337,11 +324,6 @@ class McpBrokerService:
             or any(
                 not isinstance(key, str) or not isinstance(value, str)
                 for key, value in environment.items()
-            )
-            or not isinstance(observer_writable_paths, list)
-            or any(
-                not isinstance(path, str) or not path.startswith(("/", "%t/"))
-                for path in observer_writable_paths
             )
             or not isinstance(read_only_routes, list)
             or len(read_only_routes) > 64
@@ -416,49 +398,9 @@ class McpBrokerService:
         self,
         server: dict[str, Any],
         environment: dict[str, str],
-        *,
-        runtime_max_seconds: int = DEFAULT_MCP_CALL_TIMEOUT_SECONDS,
-    ) -> tuple[StdioServerParameters, str | None]:
-        if self.principal.name != "observer":
-            return (
-                StdioServerParameters(
-                    command=server["command"], args=server["args"], env=environment
-                ),
-                None,
-            )
-        unit = f"sinnix-gateway-mcp-read-{uuid.uuid4().hex}.service"
-        unit_environment = [
-            f"--setenv={name}={value}" for name, value in sorted(environment.items())
-        ]
-        writable_paths = [
-            f"--property=ReadWritePaths={self._observer_writable_path(path, environment)}"
-            for path in server.get("observerWritablePaths", [])
-        ]
-        return (
-            StdioServerParameters(
-                command=self.config.systemd_run_command,
-                args=[
-                    "--user",
-                    "--pipe",
-                    "--quiet",
-                    "--collect",
-                    f"--unit={unit}",
-                    *unit_environment,
-                    *writable_paths,
-                    f"--property=RuntimeMaxSec={runtime_max_seconds}",
-                    "--property=ReadOnlyPaths=/",
-                    "--property=PrivateTmp=true",
-                    "--property=NoNewPrivileges=true",
-                    "--property=ProtectSystem=strict",
-                    "--property=ProtectHome=read-only",
-                    "--property=PrivateNetwork=true",
-                    "--",
-                    server["command"],
-                    *server["args"],
-                ],
-                env=environment,
-            ),
-            unit,
+    ) -> StdioServerParameters:
+        return StdioServerParameters(
+            command=server["command"], args=server["args"], env=environment
         )
 
     @staticmethod
@@ -468,32 +410,6 @@ class McpBrokerService:
             return validate_mcp_call_timeout(timeout)
         except ValueError as exc:
             raise McpBrokerError(str(exc)) from exc
-
-    @staticmethod
-    def _observer_writable_path(path: str, environment: dict[str, str]) -> str:
-        """Resolve systemd specifiers before passing transient-unit properties."""
-        if not path.startswith("%t/"):
-            return path
-        runtime_directory = environment.get("XDG_RUNTIME_DIR")
-        if not runtime_directory or not runtime_directory.startswith("/"):
-            raise McpEnvironmentError(
-                "observer MCP writable paths using %t require XDG_RUNTIME_DIR"
-            )
-        return f"{runtime_directory.rstrip('/')}/{path[3:]}"
-
-    def _stop(self, unit: str) -> None:
-        execution = self.execution or OwnerExecution()
-        execution.run(
-            [self.config.systemctl_command, "--user", "stop", unit],
-            ExecutionProfile(
-                route=OwnerRoute(
-                    "mcp-broker-cancel", EnvironmentProfile.USER_BUS_OPTIONAL
-                ),
-                timeout_seconds=5,
-                max_stdout_bytes=16_384,
-                max_stderr_bytes=8_192,
-            ),
-        )
 
     def _store_large_response(
         self, server_name: str, tool_name: str, encoded: bytes
@@ -587,10 +503,9 @@ class McpBrokerService:
                     f"MCP request deadline elapsed before calling {server_name}"
                 )
             timeout = min(timeout, remaining)
-        parameters, observer_unit = self._parameters(
+        parameters = self._parameters(
             server,
             self._environment(server),
-            runtime_max_seconds=call_timeout,
         )
         stderr_directory = self.config.state_dir / "captures" / uuid.uuid4().hex
         stderr_directory.mkdir(mode=0o700, parents=True)
@@ -634,8 +549,6 @@ class McpBrokerService:
         try:
             response = await asyncio.wait_for(invoke(), timeout=timeout)
         except asyncio.TimeoutError as exc:
-            if observer_unit is not None:
-                self._stop(observer_unit)
             artifact_id = self._store_upstream_stderr(
                 stderr_directory, server_name, tool_name
             )
@@ -649,13 +562,9 @@ class McpBrokerService:
                 f"MCP upstream {server_name} timed out after {timeout:g}s{diagnostic}"
             ) from exc
         except McpBrokerError:
-            if observer_unit is not None:
-                self._stop(observer_unit)
             shutil.rmtree(stderr_directory, ignore_errors=True)
             raise
         except Exception as exc:
-            if observer_unit is not None:
-                self._stop(observer_unit)
             artifact_id = self._store_upstream_stderr(
                 stderr_directory, server_name, tool_name
             )

@@ -94,9 +94,9 @@ def test_large_metadata_has_retrievable_continuation(tmp_path) -> None:
 
 def test_result_snapshot_preserves_owner_page_and_receipt(tmp_path) -> None:
     cfg = config(tmp_path)
-    audit = AuditService(cfg, Principal.for_name("observer"))
+    audit = AuditService(cfg, Principal.for_name("operator"))
     receipt = audit.append("gateway.catalog", "ok", {"count": 2})
-    results = ResultService(cfg, Principal.for_name("observer"))
+    results = ResultService(cfg, Principal.for_name("operator"))
 
     snapshot = results.record(
         action="gateway.catalog",
@@ -127,8 +127,8 @@ def test_result_snapshot_preserves_owner_page_and_receipt(tmp_path) -> None:
 
 def test_result_snapshot_rejects_cross_principal_reads(tmp_path) -> None:
     cfg = config(tmp_path)
-    audit = AuditService(cfg, Principal.for_name("observer"))
-    snapshot = ResultService(cfg, Principal.for_name("observer")).record(
+    audit = AuditService(cfg, Principal.for_name("operator"))
+    snapshot = ResultService(cfg, Principal.for_name("operator")).record(
         action="gateway.status",
         owner="gateway",
         route="observe.gateway_status",
@@ -138,13 +138,13 @@ def test_result_snapshot_rejects_cross_principal_reads(tmp_path) -> None:
     )
 
     with pytest.raises(ResultError, match="unavailable"):
-        ResultService(cfg, Principal.for_name("operator")).read(
+        ResultService(cfg, Principal.for_name("agent-control")).read(
             snapshot["result"]["result_id"]
         )
 
 
 def test_runtime_v2_envelopes_success_and_public_error(tmp_path) -> None:
-    runtime = Runtime.create(config(tmp_path), "observer")
+    runtime = Runtime.create(config(tmp_path), "operator")
     action = ACTIONS["gateway.catalog"]
 
     success = _execute(
@@ -196,7 +196,7 @@ def test_runtime_v2_envelopes_success_and_public_error(tmp_path) -> None:
 def test_runtime_v2_replaces_an_oversized_owner_payload_with_an_artifact(
     tmp_path,
 ) -> None:
-    runtime = Runtime.create(config(tmp_path, max_result_bytes=1_024), "observer")
+    runtime = Runtime.create(config(tmp_path, max_result_bytes=1_024), "operator")
     action = ACTIONS["gateway.catalog"]
 
     response = _execute(
@@ -211,7 +211,7 @@ def test_runtime_v2_replaces_an_oversized_owner_payload_with_an_artifact(
 
 
 def test_large_snapshot_row_survives_paging_and_artifact_transport(tmp_path) -> None:
-    runtime = Runtime.create(config(tmp_path), "observer")
+    runtime = Runtime.create(config(tmp_path), "operator")
     results = runtime.results
     query_sha = hashlib.sha256(b"large-snapshot-row").hexdigest()
     row = {"id": "large", "body": "x" * 300_000}
@@ -224,7 +224,7 @@ def test_large_snapshot_row_survives_paging_and_artifact_transport(tmp_path) -> 
     cursor = results._cursor(
         {
             "snapshot_id": metadata["snapshot_id"],
-            "principal": "observer",
+            "principal": "operator",
             "query_sha256": query_sha,
             "source_revision": "revision-one",
             "offset": 0,
@@ -272,8 +272,8 @@ def test_accepted_failure_classes_are_exactly_the_rendered_envelope_enum() -> No
 
 
 def test_runtime_v2_keeps_each_expected_failure_in_a_typed_envelope(tmp_path) -> None:
-    runtime = Runtime.create(config(tmp_path), "observer")
-    action = _fixture_action("fixture.typed-failure", VerbFamily.QUERY, {"observer"})
+    runtime = Runtime.create(config(tmp_path), "operator")
+    action = _fixture_action("fixture.typed-failure", VerbFamily.QUERY, {"operator"})
 
     for code in EXPECTED_ERROR_CODES:
         response = _execute(
@@ -417,7 +417,7 @@ def test_partial_completion_is_explicitly_non_atomic(tmp_path) -> None:
 
 
 def test_v2_rejects_ignored_preconditions(tmp_path) -> None:
-    runtime = Runtime.create(config(tmp_path), "observer")
+    runtime = Runtime.create(config(tmp_path), "operator")
 
     response = _execute(
         runtime,
@@ -570,7 +570,7 @@ def test_v2_operate_rejects_mismatched_owner_receipt(tmp_path) -> None:
 def test_snapshot_continuation_can_resize_pages_without_changing_position(
     tmp_path,
 ) -> None:
-    results = ResultService(config(tmp_path), Principal.for_name("observer"))
+    results = ResultService(config(tmp_path), Principal.for_name("operator"))
     query_sha = hashlib.sha256(b"resized-snapshot").hexdigest()
     writer = results.start_snapshot(
         query_sha256=query_sha, source_revision="revision-one", page_size=1

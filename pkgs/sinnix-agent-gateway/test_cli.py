@@ -85,7 +85,7 @@ def test_call_replays_through_the_named_tool_after_local_validation(
         anyio.run(
             cli_support.invoke_mcp,
             _config(tmp_path),
-            "observer",
+            "agent-control",
             "files.change",
             {
                 "target": {"path": "/x"},
@@ -195,7 +195,7 @@ def test_cli_subprocess_preserves_failure_envelope_and_status(tmp_path: Path) ->
         "--config",
         str(config),
         "--principal",
-        "observer",
+        "operator",
         "call",
         "files.stat",
         "--input",

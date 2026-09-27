@@ -63,7 +63,7 @@ def make_server(tmp_path, principal, monkeypatch):
 def test_native_operation_envelope_survives_transport(
     tmp_path, monkeypatch, action, payload, operation
 ):
-    server, runtime, _ = make_server(tmp_path, "observer", monkeypatch)
+    server, runtime, _ = make_server(tmp_path, "operator", monkeypatch)
     data = {
         "items": [{"reference": "codex:fixture.jsonl", "indexed_session_id": None}],
         "continuation": "owner-next",
@@ -100,7 +100,7 @@ def test_native_operation_envelope_survives_transport(
 def test_native_input_constraints_reject_before_owner(
     tmp_path, monkeypatch, action, payload
 ):
-    server, runtime, _ = make_server(tmp_path, "observer", monkeypatch)
+    server, runtime, _ = make_server(tmp_path, "operator", monkeypatch)
     runtime.mcp_broker = Broker()
     result = call(server, action, payload)
     assert result["result"]["outcome"] == "error"
@@ -108,7 +108,7 @@ def test_native_input_constraints_reject_before_owner(
 
 
 def test_archive_unavailable_is_retained_without_local_fallback(tmp_path, monkeypatch):
-    server, runtime, _ = make_server(tmp_path, "observer", monkeypatch)
+    server, runtime, _ = make_server(tmp_path, "operator", monkeypatch)
     runtime.mcp_broker = Broker(failure=True)
     result = call(
         server, "sessions.raw.search", {"origin": "codex-session", "query": "needle"}

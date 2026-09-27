@@ -177,9 +177,9 @@ def test_new_kinds_get_census_verdicts_through_the_kind_to_class_map(tmp_path) -
             },
             {
                 "kind": "agent-lane",
-                "name": "claude-lean",
+                "name": "claude",
                 "description": "x",
-                "invoke": "claude-lean",
+                "invoke": "claude",
                 "enabled": None,
                 "owner": "flake/data/agent-lanes.nix",
                 "docs": None,
@@ -231,7 +231,7 @@ def test_new_kinds_get_census_verdicts_through_the_kind_to_class_map(tmp_path) -
             "ts": 1,
             "window_days": 90,
             "class": "agent-lanes",
-            "name": "claude-lean",
+            "name": "claude",
             "evidence": {
                 "atuin": {"n": 12, "last": 1},
                 "polylogue": None,
@@ -249,7 +249,7 @@ def test_new_kinds_get_census_verdicts_through_the_kind_to_class_map(tmp_path) -
     assert census["switch"]["verdict"] == "active"
     assert census["a11y"]["verdict"] == "active"
     assert census["a11y"]["path_written_in_window"] == 1
-    assert census["claude-lean"]["verdict"] == "active"
+    assert census["claude"]["verdict"] == "active"
     assert view["censused"] == 4
 
 

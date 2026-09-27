@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import ConfigDict, Field
 
 from ..action import (
-    OBSERVER_OPERATOR,
     OPERATOR_ONLY,
     Action,
     ActionResult,
@@ -807,7 +806,7 @@ ACTIONS: tuple[Action, ...] = (
         Input=SnapshotInput,
         Output=DesktopSnapshot,
         handler=_snapshot,
-        principals=OBSERVER_OPERATOR,
+        principals=OPERATOR_ONLY,
         resource_kinds=("desktop",),
         affordances=("desktop.screenshot", "desktop.operate", "desktop.tree"),
         aliases=(
@@ -828,7 +827,7 @@ ACTIONS: tuple[Action, ...] = (
         Input=ScreenshotInput,
         Output=Screenshot,
         handler=_screenshot,
-        principals=OBSERVER_OPERATOR,
+        principals=OPERATOR_ONLY,
         resource_kinds=("desktop", "artifact"),
         affordances=("desktop.snapshot", "desktop.operate", "artifacts.read"),
         aliases=(
@@ -857,7 +856,7 @@ ACTIONS: tuple[Action, ...] = (
         Input=TreeInput,
         Output=AccessibleTree,
         handler=_tree,
-        principals=OBSERVER_OPERATOR,
+        principals=OPERATOR_ONLY,
         resource_kinds=("desktop",),
         affordances=("desktop.operate", "desktop.screenshot"),
         aliases=("accessibility tree", "a11y", "widgets", "ui elements"),

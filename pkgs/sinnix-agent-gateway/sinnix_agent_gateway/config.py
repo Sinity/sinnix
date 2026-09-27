@@ -52,7 +52,6 @@ class ProjectConfig:
     path: Path
     remote: str | None = None
     default_ref: str = "master"
-    observer_read: bool = False
     checkout_discovery: str = "git-worktree"
     devtools_entrypoint: str | None = None
     task_authority: TaskAuthorityConfig | None = None
@@ -70,7 +69,7 @@ class GatewayConfig:
     max_result_bytes: int = 262_144
     package_manifest_path: Path | None = None
     approved_manifest_hash: str | None = None
-    approved_manifest_principal: str = "observer"
+    approved_manifest_principal: str = "operator"
     connector_snapshot_path: Path | None = None
     systemd_run_command: str = "systemd-run"
     systemctl_command: str = "systemctl"
@@ -127,12 +126,12 @@ class GatewayConfig:
                 raise ValueError("project IDs must be non-empty strings")
             if not isinstance(row, Mapping):
                 raise ValueError(f"project {project_id} must be an object")
-            obsolete = {"remoteRead", "remoteWrite"}.intersection(row)
+            obsolete = {"remoteRead", "remoteWrite", "observerRead"}.intersection(row)
             if obsolete:
                 fields = ", ".join(sorted(obsolete))
                 raise ValueError(
                     f"project {project_id} uses retired gateway field(s): {fields}; "
-                    "use observerRead"
+                    "remove these retired fields"
                 )
             task_authority_row = row.get("taskAuthority")
             task_authority: TaskAuthorityConfig | None = None
@@ -209,7 +208,6 @@ class GatewayConfig:
                 path=Path(row["path"]).resolve(),
                 remote=row.get("remote"),
                 default_ref=row.get("defaultRef", "master"),
-                observer_read=bool(row.get("observerRead", False)),
                 checkout_discovery=checkout_discovery,
                 devtools_entrypoint=devtools_entrypoint,
                 task_authority=task_authority,
@@ -254,7 +252,7 @@ class GatewayConfig:
             else None,
             approved_manifest_hash=raw.get("approvedManifestHash"),
             approved_manifest_principal=raw.get(
-                "approvedManifestPrincipal", "observer"
+                "approvedManifestPrincipal", "operator"
             ),
             connector_snapshot_path=Path(raw["connectorSnapshotPath"])
             if "connectorSnapshotPath" in raw

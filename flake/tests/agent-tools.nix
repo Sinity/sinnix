@@ -73,15 +73,14 @@ in
           )
         );
       expectedClaudeProfileServersJson = expectedProfileServers "claude" [
-        "full"
-        "lean"
-        "browser"
+        "default"
       ];
       expectedGeminiProfileServersJson = expectedProfileServers "gemini" [
         "full"
         "antigravity"
       ];
       expectedCodexProfileServersJson = expectedProfileServers "codex" [
+        "default"
         "full"
         "lean"
         "evidence"
@@ -292,9 +291,7 @@ in
           }
         ];
         xdgConfigFiles = [
-          "claude/mcp.json"
-          "claude/mcp-lean.json"
-          "claude/mcp-browser.json"
+          "claude/mcp-default.json"
           "claude/skills"
         ];
         useHmZshrc = true;
@@ -683,7 +680,7 @@ in
             test -f "$HOME/.gemini/config/mcp_config.json"
             test -L "$HOME/.gemini/config/skills"
             test -L "$HOME/.gemini/config/AGENTS.md"
-            test -L "$HOME/.config/claude/mcp.json"
+            test -L "$HOME/.config/claude/mcp-default.json"
             test -L "$HOME/.config/hermes/skills"
             patch_check=${clodexPatchCheck}
             test -x "$patch_check"
@@ -708,7 +705,6 @@ in
             assert 'provider: custom' in local_profile
             for profile, required, forbidden in (
                 ('research', ('web', 'browser', 'delegation'), ('terminal',)),
-                ('orchestrate', ('skills', 'todo', 'memory', 'session_search', 'clarify'), ('terminal', 'file', 'code_execution', 'delegation', 'web', 'browser', 'tts')),
                 ('mirror', ('memory', 'session_search', 'tts'), ('terminal', 'web', 'browser', 'delegation')),
             ):
                 path = pathlib.Path.home() / '.hermes' / 'profiles' / profile / 'config.yaml'
@@ -723,8 +719,6 @@ in
                     assert f'- {toolset}' not in profile_config, (profile, toolset)
             research = (pathlib.Path.home() / '.hermes/profiles/research/config.yaml').read_text()
             assert 'firecrawl:' in research
-            orchestrate = (pathlib.Path.home() / '.hermes/profiles/orchestrate/config.yaml').read_text()
-            assert 'agent-control:' in orchestrate
             PYCODE
 
             bash -n "$HOME/.local/bin/claude-clodex"
@@ -754,7 +748,7 @@ in
             # selection -- membership is derived from mcp-registry.nix at eval
             # time, never frozen as literals.
             for pair in \
-              "mcp.json full" "mcp-lean.json lean" "mcp-browser.json browser"; do
+              "mcp-default.json default"; do
               file="''${pair%% *}"; profile="''${pair##* }"
               rendered="$(jq -r '.mcpServers | keys | sort | join(",")' "$HOME/.config/claude/$file")"
               expected="$(jq -r --arg p "$profile" '.[$p] | sort | join(",")' <<'EOF_EXPECTED'
@@ -786,12 +780,13 @@ in
             assert system_config['features']['hooks'] is True
 
             full = keys(pathlib.Path.home().joinpath('.codex/full.config.toml'))
+            default = keys(pathlib.Path.home().joinpath('.codex/default.config.toml'))
             lean = keys(pathlib.Path.home().joinpath('.codex/lean.config.toml'))
             evidence = keys(pathlib.Path.home().joinpath('.codex/evidence.config.toml'))
             browser = keys(pathlib.Path.home().joinpath('.codex/browser.config.toml'))
             import json
             expected = json.loads('${expectedCodexProfileServersJson}')
-            for profile_name, actual in (('full', full), ('lean', lean), ('evidence', evidence), ('browser', browser)):
+            for profile_name, actual in (('default', default), ('full', full), ('lean', lean), ('evidence', evidence), ('browser', browser)):
                 assert actual == set(expected[profile_name]), (
                     f"codex {profile_name} servers {sorted(actual)} != registry selection {sorted(expected[profile_name])}"
                 )
@@ -799,6 +794,7 @@ in
             assert lean_data['model'] == 'private-test-model'
             assert lean_data['hooks']['state']['test-hook']['trusted_hash'] == 'sha256:test-private-trust'
             assert 'unmanaged' not in lean_data['mcp_servers']
+            assert default == lean
 
             # Alternate-backend profiles must layer a provider override while
             # retaining the full MCP surface; model names remain ordinary config.
@@ -818,6 +814,7 @@ in
                 ('evidence.config.toml', True),
                 ('browser.config.toml', True),
                 ('lean.config.toml', False),
+                ('default.config.toml', False),
             ]:
                 data = tomllib.loads(pathlib.Path.home().joinpath('.codex', path_name).read_text())
                 polylogue = data['mcp_servers']['polylogue']
@@ -866,7 +863,7 @@ in
             grep -Fq 'export SINNIX_CLAUDE_PROFILE=full' "$HOME/.local/bin/claude-clodex"
             grep -Fq 'export CLAUDE_CODE_FORK_SUBAGENT=1' "$HOME/.local/bin/claude-clodex"
             grep -Fq 'export CLAUDE_CODE_PROCESS_WRAPPER="$HOME/.local/bin/clodex-claude"' "$HOME/.local/bin/claude-clodex"
-            if grep -Fq 'CLAUDE_CODE_PROCESS_WRAPPER' "$HOME/.local/bin/claude-full"; then
+            if grep -Fq 'CLAUDE_CODE_PROCESS_WRAPPER' "$HOME/.local/bin/claude"; then
               echo "native Claude wrapper must not route children through Clodex" >&2
               exit 1
             fi
@@ -887,7 +884,7 @@ in
             # the shipped wrapper and the guard exercised by the
             # agent-scope-guard fixture cannot diverge.
             for wrapper in \
-              "$HOME/.local/bin/claude-full" \
+              "$HOME/.local/bin/claude" \
               "$HOME/.local/bin/codex" \
               "$HOME/.local/bin/gemini" \
               "$HOME/.local/bin/pi"; do
@@ -897,17 +894,17 @@ in
               grep -Fq -- '--slice=agent.slice' "$wrapper"
               grep -Fq -- '${runtimeDefaults.agentContainedCasePattern}' "$wrapper"
             done
-            if grep -R 'MemoryHigh\|MemoryMax\|MemorySwapMax' "$HOME/.local/bin/claude-full" "$HOME/.local/bin/codex" "$HOME/.local/bin/gemini" "$HOME/.local/bin/pi"; then
+            if grep -R 'MemoryHigh\|MemoryMax\|MemorySwapMax' "$HOME/.local/bin/claude" "$HOME/.local/bin/codex" "$HOME/.local/bin/gemini" "$HOME/.local/bin/pi"; then
               echo "agent wrappers must not hardcode resource limits" >&2
               exit 1
             fi
-            for wrapper in "$HOME/.local/bin/claude-full" "$HOME/.local/bin/codex" "$HOME/.local/bin/gemini" "$HOME/.local/bin/pi"; do
+            for wrapper in "$HOME/.local/bin/claude" "$HOME/.local/bin/codex" "$HOME/.local/bin/gemini" "$HOME/.local/bin/pi"; do
               grep -Fq 'sinnix-agent-npm-bootstrap' "$wrapper"
               grep -Fq 'export npm_config_prefix="$STATE/npm"' "$wrapper"
               grep -Fq 'export NPM_CONFIG_PREFIX="$STATE/npm"' "$wrapper"
               grep -Fq 'export PATH=' "$wrapper"
             done
-            grep -Fq '@anthropic-ai/claude-code' "$HOME/.local/bin/claude-full"
+            grep -Fq '@anthropic-ai/claude-code' "$HOME/.local/bin/claude"
             grep -Fq '@openai/codex' "$HOME/.local/bin/codex"
             grep -Fq '@google/gemini-cli' "$HOME/.local/bin/gemini"
             grep -Fq '@earendil-works/pi-coding-agent' "$HOME/.local/bin/pi"

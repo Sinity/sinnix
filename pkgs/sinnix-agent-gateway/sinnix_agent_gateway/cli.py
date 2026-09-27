@@ -103,7 +103,7 @@ def parser() -> argparse.ArgumentParser:
     )
     result.add_argument("--config", type=Path, default=_default_config_path())
     result.add_argument(
-        "--principal", choices=sorted(PRINCIPAL_CAPABILITIES), default="observer"
+        "--principal", choices=sorted(PRINCIPAL_CAPABILITIES), default="operator"
     )
     subcommands = result.add_subparsers(dest="command")
     for name in (

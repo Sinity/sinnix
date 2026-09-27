@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import Field, model_validator
 
 from ..action import (
-    OBSERVER_OPERATOR,
     OPERATOR_ONLY,
     Action,
     ActionResult,
@@ -727,7 +726,7 @@ def _operate(runtime: Runtime, inp: BrowserOperateInput) -> ActionResult:
     )
 
 
-_READ = {"owner": "browser", "principals": OBSERVER_OPERATOR}
+_READ = {"owner": "browser", "principals": OPERATOR_ONLY}
 _TARGET = {"target": {"url_contains": "example.test"}}
 
 ACTIONS: tuple[Action, ...] = (

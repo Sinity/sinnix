@@ -12,7 +12,6 @@ import anyio
 from pydantic import Field, ValidationError
 
 from ..action import (
-    OBSERVER_OPERATOR,
     OPERATOR_ONLY,
     Action,
     ActionResult,
@@ -408,7 +407,7 @@ ACTIONS: tuple[Action, ...] = (
         Input=ServersInput,
         Output=Servers,
         handler=_servers,
-        principals=OBSERVER_OPERATOR,
+        principals=OPERATOR_ONLY,
         resource_kinds=("mcp_tool",),
         affordances=("mcp.tools", "mcp.call", "artifacts.read"),
         aliases=(
@@ -417,7 +416,7 @@ ACTIONS: tuple[Action, ...] = (
             "upstream servers",
             "broker status",
         ),
-        documentation="Each probe runs initialize + tools/list within the configured call timeout, capped at 30 seconds; the observer process uses the same bound. A timeout stores the upstream stderr as an artifact and returns its ref.",
+        documentation="Each probe runs initialize + tools/list within the configured call timeout, capped at 30 seconds. A timeout stores the upstream stderr as an artifact and returns its ref.",
         examples=(
             Example(title="Probe one server", input={"servers": ["polylogue"]}),
             Example(title="Probe all", input={}),
@@ -431,7 +430,7 @@ ACTIONS: tuple[Action, ...] = (
         Input=ToolsInput,
         Output=Tools,
         handler=_tools,
-        principals=OBSERVER_OPERATOR,
+        principals=OPERATOR_ONLY,
         resource_kinds=("mcp_tool",),
         affordances=("mcp.call", "mcp.change", "mcp.servers"),
         aliases=("list mcp tools", "upstream tools", "tool schema"),
@@ -450,7 +449,7 @@ ACTIONS: tuple[Action, ...] = (
         Input=CallInput,
         Output=CallResult,
         handler=_call,
-        principals=OBSERVER_OPERATOR,
+        principals=OPERATOR_ONLY,
         resource_kinds=("mcp_tool",),
         affordances=("mcp.tools", "artifacts.read"),
         aliases=("call mcp tool", "query upstream", "polylogue search"),

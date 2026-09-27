@@ -100,11 +100,11 @@ let
               ]
           )
           [
+            "default"
             "lean"
             "evidence"
             "full"
             "browser"
-            "orchestrate"
             "antigravity"
           ];
       servers = lib.mapAttrsToList (name: server: {

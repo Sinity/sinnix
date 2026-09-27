@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, Literal, Mapping, Sequence
 
 from pydantic import Field, model_validator
 
-from ..action import OBSERVER_OPERATOR, Action, Example, RequestControls
+from ..action import OPERATOR_ONLY, Action, Example, RequestControls
 from ..capabilities import Capability, PolicyError
 from ..contracts import VerbFamily
 from ..generated_lynchpin_inputs import CampaignInput as OwnerCampaignInput
@@ -327,7 +327,7 @@ ACTIONS = (
         Input=CampaignInput,
         Output=CampaignResult,
         handler=_campaign,
-        principals=OBSERVER_OPERATOR,
+        principals=OPERATOR_ONLY,
         resource_kinds=("project", "bead"),
         affordances=("beads.query", "beads.get", "context.compose"),
         documentation="Task closure, verified delivery and acceptance remain separate. Missing evidence is unknown; bounded closure cannot establish an exact denominator. Historical task state is read at its resolved owner revision.",
@@ -346,7 +346,7 @@ ACTIONS = (
         Input=OrchestrationInput,
         Output=OrchestrationResult,
         handler=_orchestration,
-        principals=OBSERVER_OPERATOR,
+        principals=OPERATOR_ONLY,
         resource_kinds=(),
         affordances=("sessions.query", "context.compose"),
         documentation="Native parent, model and token fields remain unknown when absent from stored evidence. Each owner product retains its coverage, provenance and ingestion watermark.",

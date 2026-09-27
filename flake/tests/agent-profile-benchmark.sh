@@ -10,7 +10,7 @@ trap 'rm -rf "$root"' EXIT
 mkdir -p "$root/home/.config/claude/skills/demo" "$root/home/.codex" "$root/out"
 printf 'standing instructions\n' >"$root/home/.config/claude/CLAUDE.md"
 printf 'description: demo\n' >"$root/home/.config/claude/skills/demo/SKILL.md"
-printf '{"mcpServers":{"demo":{}}}\n' >"$root/home/.config/claude/mcp-lean.json"
+printf '{"mcpServers":{"demo":{}}}\n' >"$root/home/.config/claude/mcp-default.json"
 cat >"$root/home/.codex/lean.config.toml" <<'EOF'
 [mcp_servers.demo]
 command = "demo"
@@ -24,17 +24,17 @@ chmod +x "$root/fake-gateway"
 python3 "$benchmark" \
   --home "$root/home" \
   --gateway-bin "bash $root/fake-gateway" \
-  --profiles claude-lean,gateway-observer \
+  --profiles claude,gateway-operator \
   --repeats 3 \
   --output "$root/out/raw.json" \
   --summary-output "$root/out/summary.json" >"$root/out/stdout.json"
 jq -e '
   .schema == "sinnix-agent-profile-benchmark-v1"
-  and (.profiles | keys == ["claude-lean", "gateway-observer"])
-  and .profiles["claude-lean"].sample_count == 3
-  and .profiles["gateway-observer"].sample_count == 3
-  and .profiles["claude-lean"].tool_count == 1
-  and .profiles["gateway-observer"].tool_count == 1
+  and (.profiles | keys == ["claude", "gateway-operator"])
+  and .profiles["claude"].sample_count == 3
+  and .profiles["gateway-operator"].sample_count == 3
+  and .profiles["claude"].tool_count == 1
+  and .profiles["gateway-operator"].tool_count == 1
   and .recommendations.task_success_guard
   and (all(.profiles[]; has("wall_ns") and (has("cold_wall_ns") | not) and (has("warm_wall_ns") | not)))
 ' "$root/out/summary.json" >/dev/null

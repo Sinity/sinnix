@@ -215,8 +215,6 @@ class ProjectService:
             project = self.config.projects[project_id]
         except KeyError as exc:
             raise ProjectError(f"unknown project: {project_id}") from exc
-        if self.principal.name == "observer" and not project.observer_read:
-            raise ProjectError(f"project is unavailable to {self.principal.name}")
         if not project.path.is_dir():
             raise ProjectError(f"project checkout is unavailable: {project_id}")
         return project
@@ -243,14 +241,11 @@ class ProjectService:
         can_write = Capability.PROJECT_WRITE in self.principal.capabilities
         rows = []
         for project in self.config.projects.values():
-            if self.principal.name == "observer" and not project.observer_read:
-                continue
             rows.append(
                 {
                     "project_id": project.project_id,
                     "available": project.path.is_dir(),
                     "default_ref": project.default_ref,
-                    "observer_read": project.observer_read,
                     "writable": can_write,
                 }
             )

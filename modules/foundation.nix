@@ -136,10 +136,6 @@ in
                       type = types.str;
                       default = "master";
                     };
-                    observerRead = mkOption {
-                      type = types.bool;
-                      default = false;
-                    };
                     agentctl = mkOption {
                       type = types.bool;
                       default = true;
@@ -189,7 +185,6 @@ in
                 sinnix = {
                   path = "${config.root}/sinnix";
                   remote = "https://github.com/Sinity/sinnix.git";
-                  observerRead = true;
                   devtoolsEntrypoint = "nix develop";
                   taskAuthority = {
                     workspace = "${cfg.paths.stateRoot}/tasks/sinnix/.beads";
@@ -200,7 +195,6 @@ in
                 sinex = {
                   path = "${config.root}/sinex";
                   remote = "https://github.com/Sinity/sinex.git";
-                  observerRead = true;
                   taskAuthority = {
                     workspace = "${cfg.paths.stateRoot}/tasks/sinex/.beads";
                     database = "${cfg.paths.stateRoot}/tasks/sinex/.beads/dolt";
@@ -210,7 +204,6 @@ in
                 polylogue = {
                   path = "${config.root}/polylogue";
                   remote = "https://github.com/Sinity/polylogue.git";
-                  observerRead = true;
                   taskAuthority = {
                     workspace = "${cfg.paths.stateRoot}/tasks/polylogue/.beads";
                     database = "${cfg.paths.stateRoot}/tasks/polylogue/.beads/dolt";
@@ -220,7 +213,6 @@ in
                 lynchpin = {
                   path = "${config.root}/sinity-lynchpin";
                   remote = "https://github.com/Sinity/sinity-lynchpin.git";
-                  observerRead = true;
                   taskAuthority = {
                     workspace = "${cfg.paths.stateRoot}/tasks/lynchpin/.beads";
                     database = "${cfg.paths.stateRoot}/tasks/lynchpin/.beads/dolt";

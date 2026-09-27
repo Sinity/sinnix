@@ -29,7 +29,7 @@ for ambient use by agents. The source files below remain the maintenance copy.
 Run `sinnix-observe` first when you need a correlated runtime inventory. Use
 the individual control helpers below to probe browser and desktop availability.
 For browser work, use `sinnix-chrome-control` — one browser, the operator's own.
-Use the browser MCP profile (`claude-browser`/`codex-browser`) only when the
+Use the browser control tools only when the
 shell CDP helper is too small for the task.
 
 ### 1) Kitty Remote Control

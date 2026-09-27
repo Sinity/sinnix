@@ -430,15 +430,3 @@ def test_tree_walks_fake_pyatspi(tmp_path, monkeypatch) -> None:
     assert tree["application"] == "kitty"
     assert tree["root"]["role"] == "application"
     assert tree["root"]["children"][0]["text"] == "prompt"
-
-
-def test_observer_reads_but_cannot_operate(tmp_path, monkeypatch) -> None:
-    server, _ = fake_desktop(tmp_path, monkeypatch, "observer")
-    assert (
-        structured(call(server, "desktop.snapshot", {}))["data"]["active_window"][
-            "address"
-        ]
-        == "0xa"
-    )
-    assert "desktop.operate" not in server._tool_manager._tools
-    assert all(a.principals >= {"operator"} for a in desktop_actions.ACTIONS)

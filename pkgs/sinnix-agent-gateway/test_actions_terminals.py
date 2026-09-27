@@ -408,19 +408,3 @@ def test_focus_and_open(tmp_path, monkeypatch) -> None:
         "--command",
         "htop",
     ] in commands(captured)
-
-
-def test_observer_reads_but_cannot_mutate(tmp_path, monkeypatch) -> None:
-    server, _ = fake_terminals(tmp_path, monkeypatch, "observer")
-    assert (
-        structured(call(server, "terminals.list", {}))["data"]["focused_ref"]
-        == "sinnix://terminals/7"
-    )
-    tools = server._tool_manager._tools
-    assert {
-        "terminals.send",
-        "terminals.run",
-        "terminals.focus",
-        "terminals.open",
-    }.isdisjoint(tools)
-    assert "terminals.wait" in tools

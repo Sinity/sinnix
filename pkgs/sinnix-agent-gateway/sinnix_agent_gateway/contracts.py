@@ -7,7 +7,7 @@ from urllib.parse import quote
 
 from .refs import RefTemplate
 
-KNOWN_PRINCIPALS = frozenset({"observer", "agent-control", "operator"})
+KNOWN_PRINCIPALS = frozenset({"agent-control", "operator"})
 
 JsonSchema = Mapping[str, Any]
 AvailabilityProbe = Callable[[], Mapping[str, Any]]

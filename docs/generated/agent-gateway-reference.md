@@ -1,11 +1,11 @@
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: 3f2c83bdd04a1cc23928d41c8a02be34b51bffab1f950be25a6a85f12c1f77e9 -->
+<!-- gateway-catalog-sha256: 139198878a4367fab3bee2f77070ea2aefd6eaf9bcfacb9ccf531da9b5864390 -->
 # Sinnix Agent Gateway reference
 
 Generated from `sinnix_agent_gateway.actions`. Every action is one MCP tool whose `tools/list` input schema is the one below; the catalog hash changes when any principal-visible action catalog row changes, including its schema, principal set, example or affordance.
 
-Revision: `v3-typed-actions`. Catalog SHA-256: `3f2c83bdd04a1cc23928d41c8a02be34b51bffab1f950be25a6a85f12c1f77e9`.
+Revision: `v3-typed-actions`. Catalog SHA-256: `139198878a4367fab3bee2f77070ea2aefd6eaf9bcfacb9ccf531da9b5864390`.
 
 ## Invocation
 
@@ -38,140 +38,140 @@ MCP: call the tool named after the action. CLI: `sinnix-agent-gateway call <acti
 
 ## Actions
 
-| Action                       | Family    | Owner              | Principals                          | Summary                                                                                                                                                                                                                                                                                                                                          |
-| ---------------------------- | --------- | ------------------ | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `gateway.status`             | `status`  | `gateway`          | `agent-control, observer, operator` | Report the principal, contract hashes, tool count and per-route availability.                                                                                                                                                                                                                                                                    |
-| `gateway.catalog`            | `catalog` | `gateway`          | `agent-control, observer, operator` | Every action is also an MCP tool with its full schema in tools/list; the catalog adds aliases, affordances, resource kinds and the brokered MCP tool inventory (lynchpin, sinex, polylogue).                                                                                                                                                     |
-| `files.stat`                 | `query`   | `files`            | `observer, operator`                | Describe one host path: kind, size, mode, owner, timestamps, MIME, hash.                                                                                                                                                                                                                                                                         |
-| `files.list`                 | `query`   | `files`            | `observer, operator`                | List a directory with a canonical ref for every child.                                                                                                                                                                                                                                                                                           |
-| `files.read`                 | `query`   | `files`            | `observer, operator`                | Read a file: text inline, images as image blocks, other binary as read-only links.                                                                                                                                                                                                                                                               |
-| `files.search`               | `query`   | `files`            | `observer, operator`                | Without content_regex the search is over paths (fd); with it, matching lines are returned (ripgrep --json). Results are bounded by limit and timeout.                                                                                                                                                                                            |
-| `files.patch`                | `change`  | `files`            | `operator`                          | Pass expected_sha256 from the prior read so a concurrent change is refused instead of overwritten. Unified hunks are applied individually; rejected hunks are reported.                                                                                                                                                                          |
-| `files.change`               | `change`  | `files`            | `operator`                          | Copy and move never overwrite an existing destination. Remove supports regular files only.                                                                                                                                                                                                                                                       |
-| `files.plan`                 | `query`   | `organization`     | `operator`                          | The caller supplies every mapping. The plan hashes each regular source file and records collision, parent and filesystem facts without changing host files.                                                                                                                                                                                      |
-| `files.changeset`            | `change`  | `organization`     | `operator`                          | All planned sources, destinations and parents are revalidated before the first mutation. Transfers never overwrite. Results are honest about partial completion and no global atomicity is claimed.                                                                                                                                              |
-| `files.references`           | `query`   | `organization`     | `operator`                          | Runs the existing bounded files.search text primitive once for each supplied old path. It only reports provenance and never rewrites references.                                                                                                                                                                                                 |
-| `projects.list`              | `query`   | `projects`         | `agent-control, observer, operator` | List the projects this principal may read, with canonical refs.                                                                                                                                                                                                                                                                                  |
-| `projects.get`               | `get`     | `projects`         | `agent-control, observer, operator` | The checkout row carries head and dirty_sha256, the preconditions projects.change requires.                                                                                                                                                                                                                                                      |
-| `projects.tree`              | `query`   | `projects`         | `agent-control, observer, operator` | List files under a project-relative directory without following symlinks.                                                                                                                                                                                                                                                                        |
-| `projects.read`              | `query`   | `projects`         | `agent-control, observer, operator` | Read a bounded line range of one project file.                                                                                                                                                                                                                                                                                                   |
-| `projects.read_many`         | `query`   | `projects`         | `agent-control, observer, operator` | Read several bounded project files from one checkout observation.                                                                                                                                                                                                                                                                                |
-| `projects.export`            | `query`   | `projects`         | `agent-control, observer, operator` | Sensitive, local-only, hidden, and symlinked paths are excluded. The export is bounded and includes a manifest with file hashes and the checkout revision.                                                                                                                                                                                       |
-| `projects.diff`              | `query`   | `projects`         | `agent-control, observer, operator` | Show uncommitted changes in a checkout, optionally against a git ref.                                                                                                                                                                                                                                                                            |
-| `projects.search`            | `query`   | `projects`         | `agent-control, observer, operator` | Search project file contents with ripgrep.                                                                                                                                                                                                                                                                                                       |
-| `projects.change`            | `change`  | `projects`         | `operator`                          | Paths stay project-relative and policy-excluded paths (.git, secrets, local-only agent state) are refused. Take expected_dirty_sha256 or expected_head from projects.get, or expected_file_sha256 from projects.read.                                                                                                                            |
-| `projects.context`           | `context` | `projects`         | `agent-control, observer, operator` | Components are budgeted independently; an unavailable component names its reason and source ref so the caller can follow the direct route.                                                                                                                                                                                                       |
-| `beads.closure`              | `query`   | `beads`            | `agent-control, observer, operator` | Read native dependency closure, cycles, readiness and incomplete frontier at one revision.                                                                                                                                                                                                                                                       |
-| `beads.query`                | `query`   | `beads`            | `agent-control, observer, operator` | The owner filters, projects and counts before serialization. limit sizes immutable observation pages; cursors never reread live rows. Owner coverage reports any bounded prefix; beads.read exposes native offset paging. at pins historical reads to an exact resolved Dolt revision. aggregate counts or groups without fetching issue bodies. |
-| `beads.get`                  | `get`     | `beads`            | `agent-control, observer, operator` | Read one bead by ref, id or title fragment, with optional comments, history, dependencies or graph.                                                                                                                                                                                                                                              |
-| `beads.operate`              | `operate` | `beads`            | `operator`                          | Beads maintenance: publish the export snapshot, push or pull sync, create, list or restore backups.                                                                                                                                                                                                                                              |
-| `beads.read`                 | `query`   | `beads`            | `agent-control, observer, operator` | Read native Beads queries, counts or dependency closure with owner revisions and paging.                                                                                                                                                                                                                                                         |
-| `beads.comment`              | `change`  | `beads`            | `operator`                          | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
-| `beads.dependencies.add`     | `change`  | `beads`            | `operator`                          | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
-| `beads.changeset`            | `change`  | `beads`            | `operator`                          | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
-| `beads.batch.close`          | `change`  | `beads`            | `operator`                          | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
-| `beads.graph.create`         | `change`  | `beads`            | `operator`                          | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
-| `beads.claim`                | `change`  | `beads`            | `operator`                          | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
-| `beads.claim_next`           | `change`  | `beads`            | `operator`                          | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
-| `beads.close`                | `change`  | `beads`            | `operator`                          | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
-| `beads.metadata.compare_set` | `change`  | `beads`            | `operator`                          | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
-| `beads.dependencies.count`   | `query`   | `beads`            | `agent-control, observer, operator` | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
-| `beads.create`               | `change`  | `beads`            | `operator`                          | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
-| `beads.memory.forget`        | `change`  | `beads`            | `operator`                          | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
-| `beads.graph`                | `query`   | `beads`            | `agent-control, observer, operator` | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
-| `beads.memory.get`           | `query`   | `beads`            | `agent-control, observer, operator` | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
-| `beads.blockers`             | `query`   | `beads`            | `agent-control, observer, operator` | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
-| `beads.dependencies`         | `query`   | `beads`            | `agent-control, observer, operator` | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
-| `beads.cycles`               | `query`   | `beads`            | `agent-control, observer, operator` | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
-| `beads.memories`             | `query`   | `beads`            | `agent-control, observer, operator` | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
-| `beads.related`              | `query`   | `beads`            | `agent-control, observer, operator` | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
-| `beads.unclaim`              | `change`  | `beads`            | `operator`                          | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
-| `beads.memory.remember`      | `change`  | `beads`            | `operator`                          | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
-| `beads.dependencies.remove`  | `change`  | `beads`            | `operator`                          | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
-| `beads.reopen`               | `change`  | `beads`            | `operator`                          | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
-| `beads.update`               | `change`  | `beads`            | `operator`                          | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
-| `jobs.list`                  | `query`   | `systemd-jobs`     | `agent-control, observer, operator` | List queued jobs (pueue tasks) newest first, optionally for one project.                                                                                                                                                                                                                                                                         |
-| `jobs.get`                   | `get`     | `systemd-jobs`     | `agent-control, observer, operator` | One job's state and bead binding, with its log range or typed result on request.                                                                                                                                                                                                                                                                 |
-| `jobs.logs`                  | `get`     | `systemd-jobs`     | `agent-control, observer, operator` | A byte range of a job's bounded log (workload output, then the wrapper's stderr).                                                                                                                                                                                                                                                                |
-| `jobs.wait`                  | `wait`    | `systemd-jobs`     | `agent-control, observer, operator` | The wait runs in a worker thread; cancelling the MCP request abandons it without stopping the job. A task id is a queue position: pass the launch_reference the start returned and the wait follows its job across a reorder, answering with the id it is at now.                                                                                |
-| `jobs.cancel`                | `operate` | `systemd-jobs`     | `agent-control, operator`           | Pass expected_phase to refuse when the job already moved on. Survivors lists PIDs that outlived the reap.                                                                                                                                                                                                                                        |
-| `jobs.retry`                 | `operate` | `systemd-jobs`     | `agent-control, operator`           | Re-run a terminal job in place with the same launch input and id (pueue restart).                                                                                                                                                                                                                                                                |
-| `jobs.clean`                 | `operate` | `systemd-jobs`     | `agent-control, operator`           | Refused while the job is still queued or running; cancel it first.                                                                                                                                                                                                                                                                               |
-| `operations.run`             | `run`     | `systemd-jobs`     | `agent-control, operator`           | Queue one project-declared operation in its declared pool on the root or a worktree.                                                                                                                                                                                                                                                             |
-| `shell.run`                  | `run`     | `systemd-jobs`     | `operator`                          | cwd is confined to the checkout. Default execution is asynchronous. wait=true waits up to wait_timeout_seconds (default 5, maximum 30) on the same job and returns bounded output; a timeout returns a continuation locator without cancelling the job.                                                                                          |
-| `batches.list`               | `query`   | `systemd-jobs`     | `agent-control, observer, operator` | List batch runs newest first, with each worker's stage and task.                                                                                                                                                                                                                                                                                 |
-| `batches.status`             | `get`     | `systemd-jobs`     | `agent-control, observer, operator` | Every id is a pueue task id: pass a worker's or the landing's job_id to jobs.logs, jobs.wait or jobs.cancel, with its job_launch_reference so the call survives a reorder.                                                                                                                                                                       |
-| `batches.start`              | `run`     | `systemd-jobs`     | `agent-control, operator`           | backend, model and effort default to the project descriptor's packet defaults. Refused when a bead is claimed or already in a live run. The landing task is queued behind the workers and runs itself.                                                                                                                                           |
-| `batches.land`               | `run`     | `systemd-jobs`     | `agent-control, operator`           | batches.start already queues the first landing behind the workers; this re-queues one after a landing failed. The landing runs as a job, so wait on landing_job_id rather than on this call.                                                                                                                                                     |
-| `batches.resume`             | `run`     | `systemd-jobs`     | `agent-control, operator`           | backend, model and effort default to the worker's own. Refused while the worker's task is still queued or running.                                                                                                                                                                                                                               |
-| `wait.for`                   | `wait`    | `waits`            | `agent-control, observer, operator` | Conditions: job_terminal, bead_status, bead_revision, unit_state, file_hash, file_exists, capture_freshness, receipt_appearance, terminal_output. A timeout returns the current evidence and a continuation token.                                                                                                                               |
-| `events.tail`                | `events`  | `events`           | `agent-control, observer, operator` | Pass next_cursor back to continue; a cursor from another principal or project scope fails stale_cursor.                                                                                                                                                                                                                                          |
-| `context.compose`            | `context` | `context`          | `agent-control, observer, operator` | The selected owner supplies domain composition, source coverage and partial results. The gateway preserves its product and availability in an immutable observation under snapshot_ref.                                                                                                                                                          |
-| `desktop.snapshot`           | `status`  | `desktop`          | `observer, operator`                | One observation of the desktop: monitors, workspaces, focus, every window with geometry, and a generation stamp.                                                                                                                                                                                                                                 |
-| `desktop.screenshot`         | `query`   | `desktop`          | `observer, operator`                | full captures the focused output through the HDR-aware screenshot owner; window/rect/monitor targets capture with grim. On HDR outputs a corrected SDR variant is produced and preferred for the image block.                                                                                                                                    |
-| `desktop.tree`               | `query`   | `desktop`          | `observer, operator`                | Walks the AT-SPI tree through pyatspi in the gateway environment; Chromium apps expose a tree only when launched with accessibility forced on.                                                                                                                                                                                                   |
-| `desktop.operate`            | `operate` | `desktop`          | `operator`                          | Pointer clicks, drags and scrolls need a virtual pointer tool (ydotool) on the host and fail unavailable without one; cursor moves always work. Window targets are natural locators; ambiguity returns candidates.                                                                                                                               |
-| `terminals.list`             | `catalog` | `terminals`        | `observer, operator`                | Every kitty window with its ref, title, cwd, shell pid, focus and foreground processes.                                                                                                                                                                                                                                                          |
-| `terminals.get`              | `get`     | `terminals`        | `observer, operator`                | Resolve one terminal by ref, kitty id, title, cwd, pid or focus.                                                                                                                                                                                                                                                                                 |
-| `terminals.screen`           | `query`   | `terminals`        | `observer, operator`                | The visible screen text of one terminal.                                                                                                                                                                                                                                                                                                         |
-| `terminals.scrollback`       | `query`   | `terminals`        | `observer, operator`                | The last N lines of a terminal's history, screen, or last command output.                                                                                                                                                                                                                                                                        |
-| `terminals.processes`        | `query`   | `terminals`        | `observer, operator`                | Foreground processes of one terminal and whether its shell is at a prompt.                                                                                                                                                                                                                                                                       |
-| `terminals.send`             | `operate` | `terminals`        | `operator`                          | Send text (optionally with Enter or bracketed paste) or key presses to one terminal.                                                                                                                                                                                                                                                             |
-| `terminals.run`              | `run`     | `terminals`        | `operator`                          | wait=true appends a visible completion sentinel and waits for it (or for at_prompt when kitty reports it). Captured shells disable prompt marks, so the sentinel is the reliable completion signal. exit_status is parsed from that sentinel.                                                                                                    |
-| `terminals.wait`             | `wait`    | `terminals`        | `observer, operator`                | Wait until a terminal is at its prompt, shows a regex, finishes a process, or changes title.                                                                                                                                                                                                                                                     |
-| `terminals.focus`            | `operate` | `terminals`        | `operator`                          | Focus one kitty window.                                                                                                                                                                                                                                                                                                                          |
-| `terminals.open`             | `operate` | `terminals`        | `operator`                          | Open a new kitty window (OS window, split or tab) with an optional cwd and command; returns its ref.                                                                                                                                                                                                                                             |
-| `browser.pages`              | `catalog` | `browser`          | `observer, operator`                | List every open Chrome page with its ref; flags the gateway-owned pages that can be read, captured or operated.                                                                                                                                                                                                                                  |
-| `browser.page`               | `get`     | `browser`          | `observer, operator`                | Element refs (g<generation>e<n>) are attached to the DOM for this snapshot; a later snapshot or reload replaces them, and a stale ref fails not_found.                                                                                                                                                                                           |
-| `browser.screenshot`         | `query`   | `browser`          | `observer, operator`                | Screenshot a gateway-owned page through CDP; the image rides in an image block and is retained as an artifact.                                                                                                                                                                                                                                   |
-| `browser.operate`            | `operate` | `browser`          | `operator`                          | Operator tabs are never accepted as targets, even when a locator matches one. Element targets take a snapshot ref or a CSS selector.                                                                                                                                                                                                             |
-| `machine.snapshot`           | `status`  | `machine`          | `agent-control, observer, operator` | Each section carries its own availability and source; GPU and network report unavailable because no owner exposes them.                                                                                                                                                                                                                          |
-| `machine.query`              | `query`   | `machine`          | `agent-control, observer, operator` | Read one sinnix-observe section with cursor paging, or the ops-reducer revision (operation=actions).                                                                                                                                                                                                                                             |
-| `machine.units.list`         | `query`   | `machine`          | `agent-control, observer, operator` | List systemd units of one manager with load/active/sub state and a canonical ref each.                                                                                                                                                                                                                                                           |
-| `machine.units.get`          | `get`     | `machine`          | `agent-control, observer, operator` | Describe one unit via systemctl show: states, main pid, cgroup, restarts, timestamps.                                                                                                                                                                                                                                                            |
-| `machine.units.logs`         | `query`   | `machine`          | `agent-control, observer, operator` | Journal entries for one unit (journalctl -o json), bounded by line count and bytes.                                                                                                                                                                                                                                                              |
-| `machine.prepare`            | `get`     | `ops-reducer`      | `agent-control, observer, operator` | Read the selected target identity and action preconditions without changing it.                                                                                                                                                                                                                                                                  |
-| `machine.operate`            | `operate` | `ops-reducer`      | `operator`                          | expected_target must match the target identity returned by machine.prepare; the reducer receipt is verified against the submitted action and target.                                                                                                                                                                                             |
-| `machine.units.operate`      | `operate` | `ops-reducer`      | `operator`                          | Start, stop or restart one unit through the ops reducer (reload and wait are not reducer actions).                                                                                                                                                                                                                                               |
-| `processes.list`             | `query`   | `machine`          | `agent-control, observer, operator` | List live processes filtered by name, pid, unit, cgroup or user, with a canonical ref each.                                                                                                                                                                                                                                                      |
-| `processes.get`              | `get`     | `machine`          | `agent-control, observer, operator` | Describe one process: cmdline, cwd, exe, redacted env, cgroup/unit, parent, children, sockets, cpu and memory.                                                                                                                                                                                                                                   |
-| `processes.tree`             | `query`   | `machine`          | `agent-control, observer, operator` | Parent/child process tree from one root or from every top-level process, bounded by depth and node count.                                                                                                                                                                                                                                        |
-| `processes.signal`           | `operate` | `machine`          | `operator`                          | The reducer path is the attested one and needs expected_target; the direct path is receipted by the gateway audit chain only.                                                                                                                                                                                                                    |
-| `processes.wait`             | `wait`    | `machine`          | `agent-control, observer, operator` | Wait until a process (same pid and start ticks) exits, or the bounded timeout elapses.                                                                                                                                                                                                                                                           |
-| `mcp.servers`                | `status`  | `mcp-broker`       | `observer, operator`                | Each probe runs initialize + tools/list within the configured call timeout, capped at 30 seconds; the observer process uses the same bound. A timeout stores the upstream stderr as an artifact and returns its ref.                                                                                                                             |
-| `mcp.tools`                  | `catalog` | `mcp-broker`       | `observer, operator`                | Catalog of every admitted upstream tool with its namespaced ref, input schema and read/change effect.                                                                                                                                                                                                                                            |
-| `mcp.call`                   | `query`   | `mcp-broker`       | `observer, operator`                | Reads require an owner read-only annotation or an exact match to trusted registry selectors. Other requests require mcp.change (operator only). A target using server=sinnix-agent-gateway is routed to the named direct read action, preserving its native content blocks; changes stay direct-only.                                            |
-| `mcp.change`                 | `change`  | `mcp-broker`       | `operator`                          | Invoke an upstream request not admitted as read-only by annotation or trusted registry selectors.                                                                                                                                                                                                                                                |
-| `artifacts.list`             | `catalog` | `artifacts`        | `agent-control, observer, operator` | List principal-visible artifacts with kind, owner, size and canonical ref.                                                                                                                                                                                                                                                                       |
-| `artifacts.get`              | `get`     | `artifacts`        | `agent-control, observer, operator` | Metadata of one artifact without its bytes.                                                                                                                                                                                                                                                                                                      |
-| `artifacts.read`             | `query`   | `artifacts`        | `agent-control, observer, operator` | Read an artifact: text inline with offsets, images as image blocks, other binary as read-only links.                                                                                                                                                                                                                                             |
-| `captures.query`             | `query`   | `captures`         | `agent-control, observer, operator` | List runtime-declared capture lanes, describe one, or read per-lane record deltas since a time.                                                                                                                                                                                                                                                  |
-| `activity.query`             | `query`   | `captures`         | `agent-control, observer, operator` | Reads sinnix-capture-v1 envelope files under each lane path within the time window; coverage lists which lanes contributed and which have no envelope files.                                                                                                                                                                                     |
-| `sessions.query`             | `query`   | `polylogue`        | `observer, operator`                | Read indexed session pages or explicit original-source fallback through Polylogue.                                                                                                                                                                                                                                                               |
-| `memory.query`               | `query`   | `polylogue`        | `observer, operator`                | Search original session sources or read one source object with explicit coverage.                                                                                                                                                                                                                                                                |
-| `timeline.query`             | `query`   | `polylogue`        | `observer, operator`                | Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.                                                                                                                                                                                        |
-| `sessions.list`              | `query`   | `polylogue`        | `observer, operator`                | Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.                                                                                                                                                                                        |
-| `sessions.search`            | `query`   | `polylogue`        | `observer, operator`                | Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.                                                                                                                                                                                        |
-| `sessions.read`              | `query`   | `polylogue`        | `observer, operator`                | Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.                                                                                                                                                                                        |
-| `sessions.raw.list`          | `query`   | `polylogue`        | `observer, operator`                | Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.                                                                                                                                                                                        |
-| `sessions.raw.search`        | `query`   | `polylogue`        | `observer, operator`                | Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.                                                                                                                                                                                        |
-| `sessions.raw.read`          | `query`   | `polylogue`        | `observer, operator`                | Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.                                                                                                                                                                                        |
-| `sessions.raw.timeline`      | `query`   | `polylogue`        | `observer, operator`                | Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.                                                                                                                                                                                        |
-| `memory.raw.get`             | `query`   | `polylogue`        | `observer, operator`                | Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.                                                                                                                                                                                        |
-| `memory.raw.search`          | `query`   | `polylogue`        | `observer, operator`                | Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.                                                                                                                                                                                        |
-| `sessions.resume`            | `query`   | `polylogue`        | `observer, operator`                | Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.                                                                                                                                                                                        |
-| `campaign.progress`          | `query`   | `lynchpin`         | `observer, operator`                | Task closure, verified delivery and acceptance remain separate. Missing evidence is unknown; bounded closure cannot establish an exact denominator. Historical task state is read at its resolved owner revision.                                                                                                                                |
-| `sessions.orchestration`     | `query`   | `polylogue`        | `observer, operator`                | Native parent, model and token fields remain unknown when absent from stored evidence. Each owner product retains its coverage, provenance and ingestion watermark.                                                                                                                                                                              |
-| `audit.verify`               | `status`  | `audit`            | `agent-control, observer, operator` | Verify the tamper-evident audit hash chain end to end.                                                                                                                                                                                                                                                                                           |
-| `audit.receipt`              | `get`     | `audit`            | `agent-control, observer, operator` | Read one principal-scoped audit receipt by ref or id.                                                                                                                                                                                                                                                                                            |
-| `results.get`                | `get`     | `results`          | `agent-control, observer, operator` | Read one immutable stored response snapshot by ref or id.                                                                                                                                                                                                                                                                                        |
-| `capabilities.query`         | `catalog` | `capability-index` | `agent-control, observer, operator` | Search the generated machine capability index or describe one capability exactly.                                                                                                                                                                                                                                                                |
+| Action                       | Family    | Owner              | Principals                | Summary                                                                                                                                                                                                                                                                                                                                          |
+| ---------------------------- | --------- | ------------------ | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `gateway.status`             | `status`  | `gateway`          | `agent-control, operator` | Report the principal, contract hashes, tool count and per-route availability.                                                                                                                                                                                                                                                                    |
+| `gateway.catalog`            | `catalog` | `gateway`          | `agent-control, operator` | Every action is also an MCP tool with its full schema in tools/list; the catalog adds aliases, affordances, resource kinds and the brokered MCP tool inventory (lynchpin, sinex, polylogue).                                                                                                                                                     |
+| `files.stat`                 | `query`   | `files`            | `operator`                | Describe one host path: kind, size, mode, owner, timestamps, MIME, hash.                                                                                                                                                                                                                                                                         |
+| `files.list`                 | `query`   | `files`            | `operator`                | List a directory with a canonical ref for every child.                                                                                                                                                                                                                                                                                           |
+| `files.read`                 | `query`   | `files`            | `operator`                | Read a file: text inline, images as image blocks, other binary as read-only links.                                                                                                                                                                                                                                                               |
+| `files.search`               | `query`   | `files`            | `operator`                | Without content_regex the search is over paths (fd); with it, matching lines are returned (ripgrep --json). Results are bounded by limit and timeout.                                                                                                                                                                                            |
+| `files.patch`                | `change`  | `files`            | `operator`                | Pass expected_sha256 from the prior read so a concurrent change is refused instead of overwritten. Unified hunks are applied individually; rejected hunks are reported.                                                                                                                                                                          |
+| `files.change`               | `change`  | `files`            | `operator`                | Copy and move never overwrite an existing destination. Remove supports regular files only.                                                                                                                                                                                                                                                       |
+| `files.plan`                 | `query`   | `organization`     | `operator`                | The caller supplies every mapping. The plan hashes each regular source file and records collision, parent and filesystem facts without changing host files.                                                                                                                                                                                      |
+| `files.changeset`            | `change`  | `organization`     | `operator`                | All planned sources, destinations and parents are revalidated before the first mutation. Transfers never overwrite. Results are honest about partial completion and no global atomicity is claimed.                                                                                                                                              |
+| `files.references`           | `query`   | `organization`     | `operator`                | Runs the existing bounded files.search text primitive once for each supplied old path. It only reports provenance and never rewrites references.                                                                                                                                                                                                 |
+| `projects.list`              | `query`   | `projects`         | `agent-control, operator` | List the projects this principal may read, with canonical refs.                                                                                                                                                                                                                                                                                  |
+| `projects.get`               | `get`     | `projects`         | `agent-control, operator` | The checkout row carries head and dirty_sha256, the preconditions projects.change requires.                                                                                                                                                                                                                                                      |
+| `projects.tree`              | `query`   | `projects`         | `agent-control, operator` | List files under a project-relative directory without following symlinks.                                                                                                                                                                                                                                                                        |
+| `projects.read`              | `query`   | `projects`         | `agent-control, operator` | Read a bounded line range of one project file.                                                                                                                                                                                                                                                                                                   |
+| `projects.read_many`         | `query`   | `projects`         | `agent-control, operator` | Read several bounded project files from one checkout observation.                                                                                                                                                                                                                                                                                |
+| `projects.export`            | `query`   | `projects`         | `agent-control, operator` | Sensitive, local-only, hidden, and symlinked paths are excluded. The export is bounded and includes a manifest with file hashes and the checkout revision.                                                                                                                                                                                       |
+| `projects.diff`              | `query`   | `projects`         | `agent-control, operator` | Show uncommitted changes in a checkout, optionally against a git ref.                                                                                                                                                                                                                                                                            |
+| `projects.search`            | `query`   | `projects`         | `agent-control, operator` | Search project file contents with ripgrep.                                                                                                                                                                                                                                                                                                       |
+| `projects.change`            | `change`  | `projects`         | `operator`                | Paths stay project-relative and policy-excluded paths (.git, secrets, local-only agent state) are refused. Take expected_dirty_sha256 or expected_head from projects.get, or expected_file_sha256 from projects.read.                                                                                                                            |
+| `projects.context`           | `context` | `projects`         | `agent-control, operator` | Components are budgeted independently; an unavailable component names its reason and source ref so the caller can follow the direct route.                                                                                                                                                                                                       |
+| `beads.closure`              | `query`   | `beads`            | `agent-control, operator` | Read native dependency closure, cycles, readiness and incomplete frontier at one revision.                                                                                                                                                                                                                                                       |
+| `beads.query`                | `query`   | `beads`            | `agent-control, operator` | The owner filters, projects and counts before serialization. limit sizes immutable observation pages; cursors never reread live rows. Owner coverage reports any bounded prefix; beads.read exposes native offset paging. at pins historical reads to an exact resolved Dolt revision. aggregate counts or groups without fetching issue bodies. |
+| `beads.get`                  | `get`     | `beads`            | `agent-control, operator` | Read one bead by ref, id or title fragment, with optional comments, history, dependencies or graph.                                                                                                                                                                                                                                              |
+| `beads.operate`              | `operate` | `beads`            | `operator`                | Beads maintenance: publish the export snapshot, push or pull sync, create, list or restore backups.                                                                                                                                                                                                                                              |
+| `beads.read`                 | `query`   | `beads`            | `agent-control, operator` | Read native Beads queries, counts or dependency closure with owner revisions and paging.                                                                                                                                                                                                                                                         |
+| `beads.comment`              | `change`  | `beads`            | `operator`                | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
+| `beads.dependencies.add`     | `change`  | `beads`            | `operator`                | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
+| `beads.changeset`            | `change`  | `beads`            | `operator`                | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
+| `beads.batch.close`          | `change`  | `beads`            | `operator`                | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
+| `beads.graph.create`         | `change`  | `beads`            | `operator`                | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
+| `beads.claim`                | `change`  | `beads`            | `operator`                | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
+| `beads.claim_next`           | `change`  | `beads`            | `operator`                | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
+| `beads.close`                | `change`  | `beads`            | `operator`                | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
+| `beads.metadata.compare_set` | `change`  | `beads`            | `operator`                | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
+| `beads.dependencies.count`   | `query`   | `beads`            | `agent-control, operator` | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
+| `beads.create`               | `change`  | `beads`            | `operator`                | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
+| `beads.memory.forget`        | `change`  | `beads`            | `operator`                | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
+| `beads.graph`                | `query`   | `beads`            | `agent-control, operator` | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
+| `beads.memory.get`           | `query`   | `beads`            | `agent-control, operator` | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
+| `beads.blockers`             | `query`   | `beads`            | `agent-control, operator` | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
+| `beads.dependencies`         | `query`   | `beads`            | `agent-control, operator` | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
+| `beads.cycles`               | `query`   | `beads`            | `agent-control, operator` | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
+| `beads.memories`             | `query`   | `beads`            | `agent-control, operator` | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
+| `beads.related`              | `query`   | `beads`            | `agent-control, operator` | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
+| `beads.unclaim`              | `change`  | `beads`            | `operator`                | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
+| `beads.memory.remember`      | `change`  | `beads`            | `operator`                | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
+| `beads.dependencies.remove`  | `change`  | `beads`            | `operator`                | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
+| `beads.reopen`               | `change`  | `beads`            | `operator`                | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
+| `beads.update`               | `change`  | `beads`            | `operator`                | The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.                           |
+| `jobs.list`                  | `query`   | `systemd-jobs`     | `agent-control, operator` | List queued jobs (pueue tasks) newest first, optionally for one project.                                                                                                                                                                                                                                                                         |
+| `jobs.get`                   | `get`     | `systemd-jobs`     | `agent-control, operator` | One job's state and bead binding, with its log range or typed result on request.                                                                                                                                                                                                                                                                 |
+| `jobs.logs`                  | `get`     | `systemd-jobs`     | `agent-control, operator` | A byte range of a job's bounded log (workload output, then the wrapper's stderr).                                                                                                                                                                                                                                                                |
+| `jobs.wait`                  | `wait`    | `systemd-jobs`     | `agent-control, operator` | The wait runs in a worker thread; cancelling the MCP request abandons it without stopping the job. A task id is a queue position: pass the launch_reference the start returned and the wait follows its job across a reorder, answering with the id it is at now.                                                                                |
+| `jobs.cancel`                | `operate` | `systemd-jobs`     | `agent-control, operator` | Pass expected_phase to refuse when the job already moved on. Survivors lists PIDs that outlived the reap.                                                                                                                                                                                                                                        |
+| `jobs.retry`                 | `operate` | `systemd-jobs`     | `agent-control, operator` | Re-run a terminal job in place with the same launch input and id (pueue restart).                                                                                                                                                                                                                                                                |
+| `jobs.clean`                 | `operate` | `systemd-jobs`     | `agent-control, operator` | Refused while the job is still queued or running; cancel it first.                                                                                                                                                                                                                                                                               |
+| `operations.run`             | `run`     | `systemd-jobs`     | `agent-control, operator` | Queue one project-declared operation in its declared pool on the root or a worktree.                                                                                                                                                                                                                                                             |
+| `shell.run`                  | `run`     | `systemd-jobs`     | `operator`                | cwd is confined to the checkout. Default execution is asynchronous. wait=true waits up to wait_timeout_seconds (default 5, maximum 30) on the same job and returns bounded output; a timeout returns a continuation locator without cancelling the job.                                                                                          |
+| `batches.list`               | `query`   | `systemd-jobs`     | `agent-control, operator` | List batch runs newest first, with each worker's stage and task.                                                                                                                                                                                                                                                                                 |
+| `batches.status`             | `get`     | `systemd-jobs`     | `agent-control, operator` | Every id is a pueue task id: pass a worker's or the landing's job_id to jobs.logs, jobs.wait or jobs.cancel, with its job_launch_reference so the call survives a reorder.                                                                                                                                                                       |
+| `batches.start`              | `run`     | `systemd-jobs`     | `agent-control, operator` | backend, model and effort default to the project descriptor's packet defaults. Refused when a bead is claimed or already in a live run. The landing task is queued behind the workers and runs itself.                                                                                                                                           |
+| `batches.land`               | `run`     | `systemd-jobs`     | `agent-control, operator` | batches.start already queues the first landing behind the workers; this re-queues one after a landing failed. The landing runs as a job, so wait on landing_job_id rather than on this call.                                                                                                                                                     |
+| `batches.resume`             | `run`     | `systemd-jobs`     | `agent-control, operator` | backend, model and effort default to the worker's own. Refused while the worker's task is still queued or running.                                                                                                                                                                                                                               |
+| `wait.for`                   | `wait`    | `waits`            | `agent-control, operator` | Conditions: job_terminal, bead_status, bead_revision, unit_state, file_hash, file_exists, capture_freshness, receipt_appearance, terminal_output. A timeout returns the current evidence and a continuation token.                                                                                                                               |
+| `events.tail`                | `events`  | `events`           | `agent-control, operator` | Pass next_cursor back to continue; a cursor from another principal or project scope fails stale_cursor.                                                                                                                                                                                                                                          |
+| `context.compose`            | `context` | `context`          | `agent-control, operator` | The selected owner supplies domain composition, source coverage and partial results. The gateway preserves its product and availability in an immutable observation under snapshot_ref.                                                                                                                                                          |
+| `desktop.snapshot`           | `status`  | `desktop`          | `operator`                | One observation of the desktop: monitors, workspaces, focus, every window with geometry, and a generation stamp.                                                                                                                                                                                                                                 |
+| `desktop.screenshot`         | `query`   | `desktop`          | `operator`                | full captures the focused output through the HDR-aware screenshot owner; window/rect/monitor targets capture with grim. On HDR outputs a corrected SDR variant is produced and preferred for the image block.                                                                                                                                    |
+| `desktop.tree`               | `query`   | `desktop`          | `operator`                | Walks the AT-SPI tree through pyatspi in the gateway environment; Chromium apps expose a tree only when launched with accessibility forced on.                                                                                                                                                                                                   |
+| `desktop.operate`            | `operate` | `desktop`          | `operator`                | Pointer clicks, drags and scrolls need a virtual pointer tool (ydotool) on the host and fail unavailable without one; cursor moves always work. Window targets are natural locators; ambiguity returns candidates.                                                                                                                               |
+| `terminals.list`             | `catalog` | `terminals`        | `operator`                | Every kitty window with its ref, title, cwd, shell pid, focus and foreground processes.                                                                                                                                                                                                                                                          |
+| `terminals.get`              | `get`     | `terminals`        | `operator`                | Resolve one terminal by ref, kitty id, title, cwd, pid or focus.                                                                                                                                                                                                                                                                                 |
+| `terminals.screen`           | `query`   | `terminals`        | `operator`                | The visible screen text of one terminal.                                                                                                                                                                                                                                                                                                         |
+| `terminals.scrollback`       | `query`   | `terminals`        | `operator`                | The last N lines of a terminal's history, screen, or last command output.                                                                                                                                                                                                                                                                        |
+| `terminals.processes`        | `query`   | `terminals`        | `operator`                | Foreground processes of one terminal and whether its shell is at a prompt.                                                                                                                                                                                                                                                                       |
+| `terminals.send`             | `operate` | `terminals`        | `operator`                | Send text (optionally with Enter or bracketed paste) or key presses to one terminal.                                                                                                                                                                                                                                                             |
+| `terminals.run`              | `run`     | `terminals`        | `operator`                | wait=true appends a visible completion sentinel and waits for it (or for at_prompt when kitty reports it). Captured shells disable prompt marks, so the sentinel is the reliable completion signal. exit_status is parsed from that sentinel.                                                                                                    |
+| `terminals.wait`             | `wait`    | `terminals`        | `operator`                | Wait until a terminal is at its prompt, shows a regex, finishes a process, or changes title.                                                                                                                                                                                                                                                     |
+| `terminals.focus`            | `operate` | `terminals`        | `operator`                | Focus one kitty window.                                                                                                                                                                                                                                                                                                                          |
+| `terminals.open`             | `operate` | `terminals`        | `operator`                | Open a new kitty window (OS window, split or tab) with an optional cwd and command; returns its ref.                                                                                                                                                                                                                                             |
+| `browser.pages`              | `catalog` | `browser`          | `operator`                | List every open Chrome page with its ref; flags the gateway-owned pages that can be read, captured or operated.                                                                                                                                                                                                                                  |
+| `browser.page`               | `get`     | `browser`          | `operator`                | Element refs (g<generation>e<n>) are attached to the DOM for this snapshot; a later snapshot or reload replaces them, and a stale ref fails not_found.                                                                                                                                                                                           |
+| `browser.screenshot`         | `query`   | `browser`          | `operator`                | Screenshot a gateway-owned page through CDP; the image rides in an image block and is retained as an artifact.                                                                                                                                                                                                                                   |
+| `browser.operate`            | `operate` | `browser`          | `operator`                | Operator tabs are never accepted as targets, even when a locator matches one. Element targets take a snapshot ref or a CSS selector.                                                                                                                                                                                                             |
+| `machine.snapshot`           | `status`  | `machine`          | `agent-control, operator` | Each section carries its own availability and source; GPU and network report unavailable because no owner exposes them.                                                                                                                                                                                                                          |
+| `machine.query`              | `query`   | `machine`          | `agent-control, operator` | Read one sinnix-observe section with cursor paging, or the ops-reducer revision (operation=actions).                                                                                                                                                                                                                                             |
+| `machine.units.list`         | `query`   | `machine`          | `agent-control, operator` | List systemd units of one manager with load/active/sub state and a canonical ref each.                                                                                                                                                                                                                                                           |
+| `machine.units.get`          | `get`     | `machine`          | `agent-control, operator` | Describe one unit via systemctl show: states, main pid, cgroup, restarts, timestamps.                                                                                                                                                                                                                                                            |
+| `machine.units.logs`         | `query`   | `machine`          | `agent-control, operator` | Journal entries for one unit (journalctl -o json), bounded by line count and bytes.                                                                                                                                                                                                                                                              |
+| `machine.prepare`            | `get`     | `ops-reducer`      | `agent-control, operator` | Read the selected target identity and action preconditions without changing it.                                                                                                                                                                                                                                                                  |
+| `machine.operate`            | `operate` | `ops-reducer`      | `operator`                | expected_target must match the target identity returned by machine.prepare; the reducer receipt is verified against the submitted action and target.                                                                                                                                                                                             |
+| `machine.units.operate`      | `operate` | `ops-reducer`      | `operator`                | Start, stop or restart one unit through the ops reducer (reload and wait are not reducer actions).                                                                                                                                                                                                                                               |
+| `processes.list`             | `query`   | `machine`          | `agent-control, operator` | List live processes filtered by name, pid, unit, cgroup or user, with a canonical ref each.                                                                                                                                                                                                                                                      |
+| `processes.get`              | `get`     | `machine`          | `agent-control, operator` | Describe one process: cmdline, cwd, exe, redacted env, cgroup/unit, parent, children, sockets, cpu and memory.                                                                                                                                                                                                                                   |
+| `processes.tree`             | `query`   | `machine`          | `agent-control, operator` | Parent/child process tree from one root or from every top-level process, bounded by depth and node count.                                                                                                                                                                                                                                        |
+| `processes.signal`           | `operate` | `machine`          | `operator`                | The reducer path is the attested one and needs expected_target; the direct path is receipted by the gateway audit chain only.                                                                                                                                                                                                                    |
+| `processes.wait`             | `wait`    | `machine`          | `agent-control, operator` | Wait until a process (same pid and start ticks) exits, or the bounded timeout elapses.                                                                                                                                                                                                                                                           |
+| `mcp.servers`                | `status`  | `mcp-broker`       | `operator`                | Each probe runs initialize + tools/list within the configured call timeout, capped at 30 seconds. A timeout stores the upstream stderr as an artifact and returns its ref.                                                                                                                                                                       |
+| `mcp.tools`                  | `catalog` | `mcp-broker`       | `operator`                | Catalog of every admitted upstream tool with its namespaced ref, input schema and read/change effect.                                                                                                                                                                                                                                            |
+| `mcp.call`                   | `query`   | `mcp-broker`       | `operator`                | Reads require an owner read-only annotation or an exact match to trusted registry selectors. Other requests require mcp.change (operator only). A target using server=sinnix-agent-gateway is routed to the named direct read action, preserving its native content blocks; changes stay direct-only.                                            |
+| `mcp.change`                 | `change`  | `mcp-broker`       | `operator`                | Invoke an upstream request not admitted as read-only by annotation or trusted registry selectors.                                                                                                                                                                                                                                                |
+| `artifacts.list`             | `catalog` | `artifacts`        | `agent-control, operator` | List principal-visible artifacts with kind, owner, size and canonical ref.                                                                                                                                                                                                                                                                       |
+| `artifacts.get`              | `get`     | `artifacts`        | `agent-control, operator` | Metadata of one artifact without its bytes.                                                                                                                                                                                                                                                                                                      |
+| `artifacts.read`             | `query`   | `artifacts`        | `agent-control, operator` | Read an artifact: text inline with offsets, images as image blocks, other binary as read-only links.                                                                                                                                                                                                                                             |
+| `captures.query`             | `query`   | `captures`         | `agent-control, operator` | List runtime-declared capture lanes, describe one, or read per-lane record deltas since a time.                                                                                                                                                                                                                                                  |
+| `activity.query`             | `query`   | `captures`         | `agent-control, operator` | Reads sinnix-capture-v1 envelope files under each lane path within the time window; coverage lists which lanes contributed and which have no envelope files.                                                                                                                                                                                     |
+| `sessions.query`             | `query`   | `polylogue`        | `operator`                | Read indexed session pages or explicit original-source fallback through Polylogue.                                                                                                                                                                                                                                                               |
+| `memory.query`               | `query`   | `polylogue`        | `operator`                | Search original session sources or read one source object with explicit coverage.                                                                                                                                                                                                                                                                |
+| `timeline.query`             | `query`   | `polylogue`        | `operator`                | Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.                                                                                                                                                                                        |
+| `sessions.list`              | `query`   | `polylogue`        | `operator`                | Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.                                                                                                                                                                                        |
+| `sessions.search`            | `query`   | `polylogue`        | `operator`                | Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.                                                                                                                                                                                        |
+| `sessions.read`              | `query`   | `polylogue`        | `operator`                | Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.                                                                                                                                                                                        |
+| `sessions.raw.list`          | `query`   | `polylogue`        | `operator`                | Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.                                                                                                                                                                                        |
+| `sessions.raw.search`        | `query`   | `polylogue`        | `operator`                | Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.                                                                                                                                                                                        |
+| `sessions.raw.read`          | `query`   | `polylogue`        | `operator`                | Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.                                                                                                                                                                                        |
+| `sessions.raw.timeline`      | `query`   | `polylogue`        | `operator`                | Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.                                                                                                                                                                                        |
+| `memory.raw.get`             | `query`   | `polylogue`        | `operator`                | Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.                                                                                                                                                                                        |
+| `memory.raw.search`          | `query`   | `polylogue`        | `operator`                | Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.                                                                                                                                                                                        |
+| `sessions.resume`            | `query`   | `polylogue`        | `operator`                | Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.                                                                                                                                                                                        |
+| `campaign.progress`          | `query`   | `lynchpin`         | `operator`                | Task closure, verified delivery and acceptance remain separate. Missing evidence is unknown; bounded closure cannot establish an exact denominator. Historical task state is read at its resolved owner revision.                                                                                                                                |
+| `sessions.orchestration`     | `query`   | `polylogue`        | `operator`                | Native parent, model and token fields remain unknown when absent from stored evidence. Each owner product retains its coverage, provenance and ingestion watermark.                                                                                                                                                                              |
+| `audit.verify`               | `status`  | `audit`            | `agent-control, operator` | Verify the tamper-evident audit hash chain end to end.                                                                                                                                                                                                                                                                                           |
+| `audit.receipt`              | `get`     | `audit`            | `agent-control, operator` | Read one principal-scoped audit receipt by ref or id.                                                                                                                                                                                                                                                                                            |
+| `results.get`                | `get`     | `results`          | `agent-control, operator` | Read one immutable stored response snapshot by ref or id.                                                                                                                                                                                                                                                                                        |
+| `capabilities.query`         | `catalog` | `capability-index` | `agent-control, operator` | Search the generated machine capability index or describe one capability exactly.                                                                                                                                                                                                                                                                |
 
 ### `gateway.status`
 
 Report the principal, contract hashes, tool count and per-route availability.
 
-Family: `status`. Owner: `gateway`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `status`. Owner: `gateway`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: health, ready, capabilities, what can you do.
 
@@ -253,7 +253,7 @@ Status:
 
 Every action is also an MCP tool with its full schema in tools/list; the catalog adds aliases, affordances, resource kinds and the brokered MCP tool inventory (lynchpin, sinex, polylogue).
 
-Family: `catalog`. Owner: `gateway`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `catalog`. Owner: `gateway`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: search tools, discover, help, list actions, which tool.
 
@@ -421,7 +421,7 @@ Lynchpin tools:
 
 Describe one host path: kind, size, mode, owner, timestamps, MIME, hash.
 
-Family: `query`. Owner: `files`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `files`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: file info, metadata, size, permissions.
 
@@ -564,7 +564,7 @@ Stat a file:
 
 List a directory with a canonical ref for every child.
 
-Family: `query`. Owner: `files`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `files`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: ls, directory, folder, browse.
 
@@ -719,7 +719,7 @@ List /realm/tmp:
 
 Read a file: text inline, images as image blocks, other binary as read-only links.
 
-Family: `query`. Owner: `files`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `files`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: cat, open, view, image, picture, screenshot file.
 
@@ -910,7 +910,7 @@ Lines 10-30 of a log:
 
 Without content_regex the search is over paths (fd); with it, matching lines are returned (ripgrep --json). Results are bounded by limit and timeout.
 
-Family: `query`. Owner: `files`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `files`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: find, grep, locate, rg, fd, search files, recent files.
 
@@ -2284,7 +2284,7 @@ Find one old path:
 
 List the projects this principal may read, with canonical refs.
 
-Family: `query`. Owner: `projects`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `projects`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: repos, repositories, workspaces, which projects.
 
@@ -2366,7 +2366,7 @@ List projects:
 
 The checkout row carries head and dirty_sha256, the preconditions projects.change requires.
 
-Family: `get`. Owner: `projects`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `get`. Owner: `projects`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: git status, branch, worktrees, checkouts, head, dirty.
 
@@ -2552,7 +2552,7 @@ Checkout containing a path:
 
 List files under a project-relative directory without following symlinks.
 
-Family: `query`. Owner: `projects`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `projects`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: ls, file list, directory, layout.
 
@@ -2721,7 +2721,7 @@ Top-level modules:
 
 Read a bounded line range of one project file.
 
-Family: `query`. Owner: `projects`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `projects`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: cat, open, view file, source.
 
@@ -2907,7 +2907,7 @@ Read CLAUDE.md:
 
 Read several bounded project files from one checkout observation.
 
-Family: `query`. Owner: `projects`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `projects`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: bulk read, read files, batch files.
 
@@ -3117,7 +3117,7 @@ Read two files:
 
 Sensitive, local-only, hidden, and symlinked paths are excluded. The export is bounded and includes a manifest with file hashes and the checkout revision.
 
-Family: `query`. Owner: `projects`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `projects`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: snapshot, bundle, download project, portable export.
 
@@ -3286,7 +3286,7 @@ Export a bounded checkout:
 
 Show uncommitted changes in a checkout, optionally against a git ref.
 
-Family: `query`. Owner: `projects`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `projects`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: git diff, changes, what changed, working tree.
 
@@ -3455,7 +3455,7 @@ Working tree vs HEAD:
 
 Search project file contents with ripgrep.
 
-Family: `query`. Owner: `projects`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `projects`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: grep, rg, find in files, where is.
 
@@ -3936,7 +3936,7 @@ Apply a patch:
 
 Components are budgeted independently; an unavailable component names its reason and source ref so the caller can follow the direct route.
 
-Family: `context`. Owner: `projects`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `context`. Owner: `projects`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: orient, overview, where are we, triage, what is ready.
 
@@ -4097,7 +4097,7 @@ Triage:
 
 Read native dependency closure, cycles, readiness and incomplete frontier at one revision.
 
-Family: `query`. Owner: `beads`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `beads`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: dependency closure, campaign closure.
 
@@ -4249,7 +4249,7 @@ Blocking closure at a historical time:
 
 The owner filters, projects and counts before serialization. limit sizes immutable observation pages; cursors never reread live rows. Owner coverage reports any bounded prefix; beads.read exposes native offset paging. at pins historical reads to an exact resolved Dolt revision. aggregate counts or groups without fetching issue bodies.
 
-Family: `query`. Owner: `beads`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `beads`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: tasks, issues, todo, ready work, what is blocked, bd list, bd ready, backlog.
 
@@ -4691,7 +4691,7 @@ Dependency graph:
 
 Read one bead by ref, id or title fragment, with optional comments, history, dependencies or graph.
 
-Family: `get`. Owner: `beads`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `get`. Owner: `beads`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: show task, bd show, issue details, task notes.
 
@@ -5196,7 +5196,7 @@ Restore a backup:
 
 Read native Beads queries, counts or dependency closure with owner revisions and paging.
 
-Family: `query`. Owner: `beads`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `beads`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Follow-up actions: `beads.get`, `beads.query`.
 
@@ -8073,7 +8073,7 @@ Conditionally set one metadata key on an issue:
 
 The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
 
-Family: `query`. Owner: `beads`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `beads`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Follow-up actions: `beads.get`, `beads.query`.
 
@@ -8834,7 +8834,7 @@ Forget one stored memory:
 
 The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
 
-Family: `query`. Owner: `beads`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `beads`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Follow-up actions: `beads.get`, `beads.query`.
 
@@ -9016,7 +9016,7 @@ Walk the dependency tree of one issue:
 
 The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
 
-Family: `query`. Owner: `beads`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `beads`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Follow-up actions: `beads.get`, `beads.query`.
 
@@ -9177,7 +9177,7 @@ Get one stored memory:
 
 The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
 
-Family: `query`. Owner: `beads`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `beads`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Follow-up actions: `beads.get`, `beads.query`.
 
@@ -9344,7 +9344,7 @@ Read the blocking decoration of several issues:
 
 The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
 
-Family: `query`. Owner: `beads`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `beads`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Follow-up actions: `beads.get`, `beads.query`.
 
@@ -9521,7 +9521,7 @@ List the stored dependency edges of several issues:
 
 The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
 
-Family: `query`. Owner: `beads`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `beads`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Follow-up actions: `beads.get`, `beads.query`.
 
@@ -9661,7 +9661,7 @@ List dependency cycles:
 
 The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
 
-Family: `query`. Owner: `beads`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `beads`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Follow-up actions: `beads.get`, `beads.query`.
 
@@ -9817,7 +9817,7 @@ List the workspace's stored memories:
 
 The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
 
-Family: `query`. Owner: `beads`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `beads`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Follow-up actions: `beads.get`, `beads.query`.
 
@@ -11266,7 +11266,7 @@ Edit the fields of one issue:
 
 List queued jobs (pueue tasks) newest first, optionally for one project.
 
-Family: `query`. Owner: `systemd-jobs`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `systemd-jobs`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: queue, pueue status, running jobs, tasks.
 
@@ -11441,7 +11441,7 @@ One project's jobs:
 
 One job's state and bead binding, with its log range or typed result on request.
 
-Family: `get`. Owner: `systemd-jobs`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `get`. Owner: `systemd-jobs`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: job status, job result, job output, phase.
 
@@ -11638,7 +11638,7 @@ Typed result:
 
 A byte range of a job's bounded log (workload output, then the wrapper's stderr).
 
-Family: `get`. Owner: `systemd-jobs`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `get`. Owner: `systemd-jobs`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: job log, tail, output, stdout.
 
@@ -11815,7 +11815,7 @@ Continue from an offset:
 
 The wait runs in a worker thread; cancelling the MCP request abandons it without stopping the job. A task id is a queue position: pass the launch_reference the start returned and the wait follows its job across a reorder, answering with the id it is at now.
 
-Family: `wait`. Owner: `systemd-jobs`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `wait`. Owner: `systemd-jobs`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: wait for job, block, until done.
 
@@ -12905,7 +12905,7 @@ git status in sinnix:
 
 List batch runs newest first, with each worker's stage and task.
 
-Family: `query`. Owner: `systemd-jobs`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `systemd-jobs`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: runs, agentctl batch list, which batches, active runs.
 
@@ -13067,7 +13067,7 @@ One project's runs:
 
 Every id is a pueue task id: pass a worker's or the landing's job_id to jobs.logs, jobs.wait or jobs.cancel, with its job_launch_reference so the call survives a reorder.
 
-Family: `get`. Owner: `systemd-jobs`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `get`. Owner: `systemd-jobs`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: batch status, run status, how is the batch, agentctl batch status.
 
@@ -13821,7 +13821,7 @@ Resume one worker:
 
 Conditions: job_terminal, bead_status, bead_revision, unit_state, file_hash, file_exists, capture_freshness, receipt_appearance, terminal_output. A timeout returns the current evidence and a continuation token.
 
-Family: `wait`. Owner: `waits`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `wait`. Owner: `waits`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: wait until, block until, poll, watch for.
 
@@ -14380,7 +14380,7 @@ Wait for a unit to be active:
 
 Pass next_cursor back to continue; a cursor from another principal or project scope fails stale_cursor.
 
-Family: `events`. Owner: `events`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `events`. Owner: `events`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: what happened, recent activity, audit log, changes since.
 
@@ -14563,7 +14563,7 @@ One project:
 
 The selected owner supplies domain composition, source coverage and partial results. The gateway preserves its product and availability in an immutable observation under snapshot_ref.
 
-Family: `context`. Owner: `context`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `context`. Owner: `context`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: orient, overview, situation, what is going on, triage, review job, incident.
 
@@ -14889,7 +14889,7 @@ Incident overview:
 
 One observation of the desktop: monitors, workspaces, focus, every window with geometry, and a generation stamp.
 
-Family: `status`. Owner: `desktop`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `status`. Owner: `desktop`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: windows, clients, workspaces, monitors, active window, what is on screen.
 
@@ -14976,7 +14976,7 @@ Observe the desktop:
 
 full captures the focused output through the HDR-aware screenshot owner; window/rect/monitor targets capture with grim. On HDR outputs a corrected SDR variant is produced and preferred for the image block.
 
-Family: `query`. Owner: `desktop`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `desktop`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: screen capture, grab screen, picture of screen, capture window.
 
@@ -15299,7 +15299,7 @@ A window by class:
 
 Walks the AT-SPI tree through pyatspi in the gateway environment; Chromium apps expose a tree only when launched with accessibility forced on.
 
-Family: `query`. Owner: `desktop`. Principals: `observer, operator`. Typed failures: `conflict, invalid_request, not_found, owner_failed, unavailable`.
+Family: `query`. Owner: `desktop`. Principals: `operator`. Typed failures: `conflict, invalid_request, not_found, owner_failed, unavailable`.
 
 Aliases: accessibility tree, a11y, widgets, ui elements.
 
@@ -16261,7 +16261,7 @@ Ctrl+L in the active window:
 
 Every kitty window with its ref, title, cwd, shell pid, focus and foreground processes.
 
-Family: `catalog`. Owner: `terminals`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `catalog`. Owner: `terminals`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: kitty windows, terminal inventory, shells.
 
@@ -16343,7 +16343,7 @@ List terminals:
 
 Resolve one terminal by ref, kitty id, title, cwd, pid or focus.
 
-Family: `get`. Owner: `terminals`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `get`. Owner: `terminals`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: find terminal, which terminal, focused terminal.
 
@@ -16518,7 +16518,7 @@ The focused terminal:
 
 The visible screen text of one terminal.
 
-Family: `query`. Owner: `terminals`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `terminals`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: what does the terminal show, terminal contents, screen text.
 
@@ -16698,7 +16698,7 @@ Screen of a titled terminal:
 
 The last N lines of a terminal's history, screen, or last command output.
 
-Family: `query`. Owner: `terminals`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `terminals`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: history, last output, scroll back, command output.
 
@@ -16906,7 +16906,7 @@ Output of the last command:
 
 Foreground processes of one terminal and whether its shell is at a prompt.
 
-Family: `query`. Owner: `terminals`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `terminals`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: what is running, is it busy, terminal processes.
 
@@ -17613,7 +17613,7 @@ Run with exit status:
 
 Wait until a terminal is at its prompt, shows a regex, finishes a process, or changes title.
 
-Family: `wait`. Owner: `terminals`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `wait`. Owner: `terminals`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: wait for prompt, wait for output, wait until done.
 
@@ -18290,7 +18290,7 @@ Run a command in a new tab:
 
 List every open Chrome page with its ref; flags the gateway-owned pages that can be read, captured or operated.
 
-Family: `catalog`. Owner: `browser`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `catalog`. Owner: `browser`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: tabs, open pages, list tabs, what is open in chrome.
 
@@ -18381,7 +18381,7 @@ List pages:
 
 Element refs (g<generation>e<n>) are attached to the DOM for this snapshot; a later snapshot or reload replaces them, and a stale ref fails not_found.
 
-Family: `get`. Owner: `browser`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `get`. Owner: `browser`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: page text, read page, page content, elements, links, forms.
 
@@ -18545,7 +18545,7 @@ Read a page:
 
 Screenshot a gateway-owned page through CDP; the image rides in an image block and is retained as an artifact.
 
-Family: `query`. Owner: `browser`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `browser`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: page screenshot, capture page, picture of the page.
 
@@ -19446,7 +19446,7 @@ Wait for text:
 
 Each section carries its own availability and source; GPU and network report unavailable because no owner exposes them.
 
-Family: `status`. Owner: `machine`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `status`. Owner: `machine`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: overview, health, how is the machine, system status, top.
 
@@ -19540,7 +19540,7 @@ Machine overview:
 
 Read one sinnix-observe section with cursor paging, or the ops-reducer revision (operation=actions).
 
-Family: `query`. Owner: `machine`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `machine`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: observe, pressure, storage, workloads, slices, revision.
 
@@ -19667,7 +19667,7 @@ Ops revision:
 
 List systemd units of one manager with load/active/sub state and a canonical ref each.
 
-Family: `query`. Owner: `machine`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `machine`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: systemctl list-units, services, timers, failed units.
 
@@ -19801,7 +19801,7 @@ Failed user units:
 
 Describe one unit via systemctl show: states, main pid, cgroup, restarts, timestamps.
 
-Family: `get`. Owner: `machine`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `get`. Owner: `machine`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: systemctl status, unit status, service status, is it running.
 
@@ -19947,7 +19947,7 @@ Describe polylogued:
 
 Journal entries for one unit (journalctl -o json), bounded by line count and bytes.
 
-Family: `query`. Owner: `machine`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `machine`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: journalctl, logs, journal, why did it fail.
 
@@ -20158,7 +20158,7 @@ Last 50 lines:
 
 Read the selected target identity and action preconditions without changing it.
 
-Family: `get`. Owner: `ops-reducer`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `get`. Owner: `ops-reducer`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Follow-up actions: `machine.operate`.
 
@@ -21023,7 +21023,7 @@ Restart by name:
 
 List live processes filtered by name, pid, unit, cgroup or user, with a canonical ref each.
 
-Family: `query`. Owner: `machine`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `machine`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: ps, pgrep, what is running, find process.
 
@@ -21238,7 +21238,7 @@ Processes of a unit:
 
 Describe one process: cmdline, cwd, exe, redacted env, cgroup/unit, parent, children, sockets, cpu and memory.
 
-Family: `get`. Owner: `machine`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `get`. Owner: `machine`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: process info, pid details, what is pid, open sockets, environment.
 
@@ -21446,7 +21446,7 @@ Inspect pid 1234:
 
 Parent/child process tree from one root or from every top-level process, bounded by depth and node count.
 
-Family: `query`. Owner: `machine`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `machine`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: pstree, children, descendants.
 
@@ -21969,7 +21969,7 @@ Direct SIGHUP:
 
 Wait until a process (same pid and start ticks) exits, or the bounded timeout elapses.
 
-Family: `wait`. Owner: `machine`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `wait`. Owner: `machine`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: wait for exit, await process, has it finished.
 
@@ -22174,9 +22174,9 @@ Wait up to 10 s:
 
 ### `mcp.servers`
 
-Each probe runs initialize + tools/list within the configured call timeout, capped at 30 seconds; the observer process uses the same bound. A timeout stores the upstream stderr as an artifact and returns its ref.
+Each probe runs initialize + tools/list within the configured call timeout, capped at 30 seconds. A timeout stores the upstream stderr as an artifact and returns its ref.
 
-Family: `status`. Owner: `mcp-broker`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `status`. Owner: `mcp-broker`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: mcp health, is polylogue mcp up, upstream servers, broker status.
 
@@ -22276,7 +22276,7 @@ Probe all:
 
 Catalog of every admitted upstream tool with its namespaced ref, input schema and read/change effect.
 
-Family: `catalog`. Owner: `mcp-broker`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `catalog`. Owner: `mcp-broker`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: list mcp tools, upstream tools, tool schema.
 
@@ -22405,7 +22405,7 @@ Read tools mentioning search:
 
 Reads require an owner read-only annotation or an exact match to trusted registry selectors. Other requests require mcp.change (operator only). A target using server=sinnix-agent-gateway is routed to the named direct read action, preserving its native content blocks; changes stay direct-only.
 
-Family: `query`. Owner: `mcp-broker`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `mcp-broker`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: call mcp tool, query upstream, polylogue search.
 
@@ -22718,7 +22718,7 @@ Call a write tool:
 
 List principal-visible artifacts with kind, owner, size and canonical ref.
 
-Family: `catalog`. Owner: `artifacts`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `catalog`. Owner: `artifacts`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: captures, diagnostics, stored responses, large results.
 
@@ -22845,7 +22845,7 @@ Recent MCP stderr captures:
 
 Metadata of one artifact without its bytes.
 
-Family: `get`. Owner: `artifacts`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `get`. Owner: `artifacts`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: artifact info, artifact metadata.
 
@@ -22971,7 +22971,7 @@ By ref:
 
 Read an artifact: text inline with offsets, images as image blocks, other binary as read-only links.
 
-Family: `query`. Owner: `artifacts`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `artifacts`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: open artifact, diagnostic log, truncated response, view capture.
 
@@ -23117,7 +23117,7 @@ First 64 KB of a stored response:
 
 List runtime-declared capture lanes, describe one, or read per-lane record deltas since a time.
 
-Family: `query`. Owner: `captures`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `captures`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: capture lanes, lane health, records since, sidecar index.
 
@@ -23306,7 +23306,7 @@ Deltas for two lanes:
 
 Reads sinnix-capture-v1 envelope files under each lane path within the time window; coverage lists which lanes contributed and which have no envelope files.
 
-Family: `query`. Owner: `captures`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `captures`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: what was I doing, recent activity, clipboard history, notifications, now playing.
 
@@ -23490,7 +23490,7 @@ Last hour of clipboard and notifications:
 
 Read indexed session pages or explicit original-source fallback through Polylogue.
 
-Family: `query`. Owner: `polylogue`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `polylogue`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Follow-up actions: `sessions.read`, `sessions.search`, `timeline.query`.
 
@@ -24189,7 +24189,7 @@ Project sessions:
 
 Search original session sources or read one source object with explicit coverage.
 
-Family: `query`. Owner: `polylogue`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `polylogue`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Follow-up actions: `memory.raw.search`, `sessions.raw.read`.
 
@@ -24400,7 +24400,7 @@ Search original sources:
 
 Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.
 
-Family: `query`. Owner: `polylogue`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `polylogue`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Follow-up actions: `sessions.read`, `sessions.search`, `timeline.query`.
 
@@ -24581,7 +24581,7 @@ Indexed session events in a time window:
 
 Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.
 
-Family: `query`. Owner: `polylogue`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `polylogue`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Follow-up actions: `sessions.read`, `sessions.search`, `timeline.query`.
 
@@ -24837,7 +24837,7 @@ Recent indexed project sessions:
 
 Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.
 
-Family: `query`. Owner: `polylogue`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `polylogue`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Follow-up actions: `sessions.read`, `sessions.search`, `timeline.query`.
 
@@ -25093,7 +25093,7 @@ Find sessions discussing pagination:
 
 Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.
 
-Family: `query`. Owner: `polylogue`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `polylogue`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Follow-up actions: `sessions.read`, `sessions.search`, `timeline.query`.
 
@@ -25276,7 +25276,7 @@ Read an indexed session message page:
 
 Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.
 
-Family: `query`. Owner: `polylogue`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `polylogue`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Follow-up actions: `sessions.read`, `sessions.search`, `timeline.query`.
 
@@ -25393,7 +25393,7 @@ List original Codex session sources:
 
 Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.
 
-Family: `query`. Owner: `polylogue`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `polylogue`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Follow-up actions: `sessions.read`, `sessions.search`, `timeline.query`.
 
@@ -25537,7 +25537,7 @@ Search original Claude Code transcripts:
 
 Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.
 
-Family: `query`. Owner: `polylogue`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `polylogue`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Follow-up actions: `sessions.read`, `sessions.search`, `timeline.query`.
 
@@ -25645,7 +25645,7 @@ Read a bounded original transcript page:
 
 Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.
 
-Family: `query`. Owner: `polylogue`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `polylogue`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Follow-up actions: `sessions.read`, `sessions.search`, `timeline.query`.
 
@@ -25810,7 +25810,7 @@ Original sources modified in a time window:
 
 Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.
 
-Family: `query`. Owner: `polylogue`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `polylogue`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Follow-up actions: `sessions.read`, `sessions.search`, `timeline.query`.
 
@@ -25918,7 +25918,7 @@ Read one original memory source:
 
 Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.
 
-Family: `query`. Owner: `polylogue`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `polylogue`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Follow-up actions: `sessions.read`, `sessions.search`, `timeline.query`.
 
@@ -26069,7 +26069,7 @@ Find pagination notes across original sources:
 
 Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.
 
-Family: `query`. Owner: `polylogue`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `polylogue`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Follow-up actions: `sessions.read`, `sessions.search`, `timeline.query`.
 
@@ -26206,7 +26206,7 @@ Resume work in a checkout:
 
 Task closure, verified delivery and acceptance remain separate. Missing evidence is unknown; bounded closure cannot establish an exact denominator. Historical task state is read at its resolved owner revision.
 
-Family: `query`. Owner: `lynchpin`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `lynchpin`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Follow-up actions: `beads.query`, `beads.get`, `context.compose`.
 
@@ -26453,7 +26453,7 @@ Campaign evidence:
 
 Native parent, model and token fields remain unknown when absent from stored evidence. Each owner product retains its coverage, provenance and ingestion watermark.
 
-Family: `query`. Owner: `polylogue`. Principals: `observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `query`. Owner: `polylogue`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Follow-up actions: `sessions.query`, `context.compose`.
 
@@ -26548,7 +26548,7 @@ Session orchestration:
 
 Verify the tamper-evident audit hash chain end to end.
 
-Family: `status`. Owner: `audit`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `status`. Owner: `audit`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: audit chain, integrity, tamper check.
 
@@ -26630,7 +26630,7 @@ Verify:
 
 Read one principal-scoped audit receipt by ref or id.
 
-Family: `get`. Owner: `audit`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `get`. Owner: `audit`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: receipt, what happened in that call.
 
@@ -26739,7 +26739,7 @@ By ref:
 
 Read one immutable stored response snapshot by ref or id.
 
-Family: `get`. Owner: `results`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `get`. Owner: `results`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: result snapshot, replay response.
 
@@ -26848,7 +26848,7 @@ By id:
 
 Search the generated machine capability index or describe one capability exactly.
 
-Family: `catalog`. Owner: `capability-index`. Principals: `agent-control, observer, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+Family: `catalog`. Owner: `capability-index`. Principals: `agent-control, operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
 Aliases: what can this machine do, scripts, services, which command, capability index.
 

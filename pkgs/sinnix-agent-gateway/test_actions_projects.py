@@ -73,9 +73,7 @@ def test_tree_exact_limit_and_large_requested_read(tmp_path: Path) -> None:
     assert not result["truncated"]
 
 
-def fixture(
-    tmp_path: Path, *, observer_read: bool = True
-) -> tuple[GatewayConfig, Path, Path]:
+def fixture(tmp_path: Path) -> tuple[GatewayConfig, Path, Path]:
     project = tmp_path / "project"
     linked = tmp_path / "linked"
     project.mkdir()
@@ -93,7 +91,7 @@ def fixture(
         state_dir=tmp_path / "state",
         projects={
             "fixture": ProjectConfig(
-                project_id="fixture", path=project, observer_read=observer_read
+                project_id="fixture", path=project
             )
         },
         approved_manifest_hash="approved-fixture-hash",
@@ -138,7 +136,6 @@ def test_list_get_and_locators_resolve_projects_and_checkouts(tmp_path: Path) ->
             "project_id": "fixture",
             "available": True,
             "default_ref": "master",
-            "observer_read": True,
             "writable": True,
         }
     ]
@@ -195,7 +192,7 @@ def test_list_get_and_locators_resolve_projects_and_checkouts(tmp_path: Path) ->
 
 def test_tree_read_diff_and_search_keep_authority_checks(tmp_path: Path) -> None:
     config, project, linked = fixture(tmp_path)
-    server = create_server(config, "observer")
+    server = create_server(config, "operator")
     target = {"target": {"project": "fixture"}}
 
     tree = ok(server, "projects.tree", {**target, "max_entries": 10})
@@ -277,7 +274,7 @@ def test_diff_spools_complete_output_before_result_artifact(tmp_path: Path) -> N
         max_result_bytes=1_024,
         approved_manifest_hash=config.approved_manifest_hash,
     )
-    server = create_server(config, "observer")
+    server = create_server(config, "operator")
     (project / "README.md").write_text("changed " + "x" * 5_000 + "\n")
 
     response = call(server, "projects.diff", {"target": {"project": "fixture"}})
@@ -299,18 +296,6 @@ def test_diff_spools_complete_output_before_result_artifact(tmp_path: Path) -> N
     assert "changed " + "x" * 5_000 in retained["diff"]
 
 
-def test_observer_cannot_see_hidden_projects(tmp_path: Path) -> None:
-    config, _, _ = fixture(tmp_path, observer_read=False)
-    server = create_server(config, "observer")
-    assert ok(server, "projects.list", {})["projects"] == []
-    assert (
-        error(
-            server,
-            "projects.read",
-            {"target": {"project": "fixture"}, "path": "README.md"},
-        )
-        == "policy_denied"
-    )
 
 
 def test_change_requires_matching_preconditions_and_echoes_new_state(

@@ -30,7 +30,7 @@ def index_path(tmp_path: Path, rows: list[dict[str, object]]) -> Path:
 def service(
     tmp_path: Path,
     rows: list[dict[str, object]],
-    principal_name: str = "observer",
+    principal_name: str = "operator",
     max_result_bytes: int = 262_144,
 ) -> CapabilityIndexService:
     return CapabilityIndexService(
@@ -198,7 +198,7 @@ def test_missing_index_is_an_honest_unavailable_result(tmp_path: Path) -> None:
             projects={},
             capability_index=tmp_path / "missing.json",
         ),
-        Principal.for_name("observer"),
+        Principal.for_name("operator"),
     )
 
     assert capability_index.search() == {

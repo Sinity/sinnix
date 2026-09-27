@@ -186,7 +186,7 @@ launch_agent_here() {
   local command_path
   case "$agent" in
   codex) command_path="$HOME/.local/bin/codex" ;;
-  claude) command_path="$HOME/.local/bin/claude-lean" ;;
+  claude) command_path="$HOME/.local/bin/claude" ;;
   gemini) command_path="$HOME/.local/bin/gemini" ;;
   hermes) command_path="$HOME/.local/bin/hermes" ;;
   *)

@@ -38,7 +38,7 @@ class NativeOutputTest(unittest.TestCase):
 
     def run_claude(self, output, exit_code=0):
         self.executable(
-            "claude-full", 'printf "%s" "$FIXTURE_STDOUT"\nexit "$FIXTURE_EXIT"\n'
+            "claude", 'printf "%s" "$FIXTURE_STDOUT"\nexit "$FIXTURE_EXIT"\n'
         )
         prompt = self.root / "prompt.md"
         prompt.write_text("Return the fixture result.")

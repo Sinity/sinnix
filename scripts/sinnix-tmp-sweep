@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 # @sinnix-package
-# description: Remove unheld nix-shell.* scratch directories from TMPDIR and /tmp
+# description: Remove unheld Nix devshell scratch directories from TMPDIR and /tmp
 # runtimeInputs: coreutils
 """Reclaim leaked devshell scratch trees.
 
-Every `nix develop` creates a `nix-shell.*` directory as the devshell's
-TMPDIR and removes it only on a clean exit, so a killed shell leaks one. The
-population is bounded by cleanup, not by age: the criterion here is solely
-whether a live process holds the tree.
+Nix creates `nix-shell.*` and `nix-develop-*` directories. Some `nix develop`
+paths leave them behind even on normal exit. The sweeper removes owned,
+unheld trees, with a short age floor for `nix-develop-*` to avoid racing a
+new shell.
 
 A directory is held when a process has it, or anything beneath it, as cwd,
 root, executable, an open descriptor, or the value of TMPDIR / TMP / TEMP /
@@ -27,13 +27,15 @@ from __future__ import annotations
 import os
 import shutil
 import sys
+import time
 
 HOLDER_VARS = (b"TMPDIR=", b"TMP=", b"TEMP=", b"NIX_BUILD_TOP=")
-PREFIX = "nix-shell."
+PREFIXES = ("nix-shell.", "nix-develop-")
+DEVELOP_MIN_AGE_SECONDS = 10 * 60
 
 USAGE = """usage: sinnix-tmp-sweep [--dry-run]
 
-Remove `nix-shell.*` scratch directories that no live process holds, from
+Remove Nix devshell scratch directories that no live process holds, from
 $TMPDIR and from /tmp. Only directories owned by the invoking user are
 considered; anything else is counted as skipped.
 """
@@ -54,21 +56,25 @@ def roots() -> list[str]:
 
 
 def collect_candidates(root: str, uid: int) -> tuple[list[str], int]:
-    """Owned `nix-shell.*` directories directly under root, plus a skip count."""
+    """Owned Nix devshell directories directly under root, plus a skip count."""
     candidates: list[str] = []
     skipped = 0
     try:
         entries = list(os.scandir(root))
     except OSError:
         return candidates, skipped
+    now = time.time()
     for entry in entries:
-        if not entry.name.startswith(PREFIX):
+        if not entry.name.startswith(PREFIXES):
             continue
         try:
             if not entry.is_dir(follow_symlinks=False):
                 continue
-            if entry.stat(follow_symlinks=False).st_uid != uid:
+            stat = entry.stat(follow_symlinks=False)
+            if stat.st_uid != uid:
                 skipped += 1
+                continue
+            if entry.name.startswith("nix-develop-") and now - stat.st_mtime < DEVELOP_MIN_AGE_SECONDS:
                 continue
         except OSError:
             continue

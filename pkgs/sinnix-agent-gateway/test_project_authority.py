@@ -32,11 +32,11 @@ def project_service(tmp_path: Path) -> tuple[ProjectService, Path, Path]:
         state_dir=tmp_path / "state",
         projects={
             "fixture": ProjectConfig(
-                project_id="fixture", path=project, observer_read=True
+                project_id="fixture", path=project
             )
         },
     )
-    return ProjectService(config, Principal.for_name("observer")), project, linked
+    return ProjectService(config, Principal.for_name("operator")), project, linked
 
 
 def test_project_checkouts_are_git_derived_and_explicit(tmp_path: Path) -> None:
@@ -201,7 +201,7 @@ def test_gateway_temporary_artifacts_are_excluded_from_project_apis(
     tmp_path: Path,
 ) -> None:
     _observer, project, _linked = project_service(tmp_path)
-    observer = ProjectService(_observer.config, Principal.for_name("observer"))
+    observer = ProjectService(_observer.config, Principal.for_name("operator"))
     temporary = project / ".tracked.gateway-tmp-fixture"
     temporary.write_text("private temporary\n")
 

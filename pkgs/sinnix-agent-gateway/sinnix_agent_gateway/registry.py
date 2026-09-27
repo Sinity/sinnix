@@ -172,7 +172,7 @@ def build_registry() -> ResourceRegistry:
             "desktop",
             ("summary",),
             True,
-            principals=frozenset({"observer", "operator"}),
+            principals=frozenset({"operator"}),
         ),
         ResourceSpec(
             "host_file",
@@ -180,7 +180,7 @@ def build_registry() -> ResourceRegistry:
             "files",
             ("summary",),
             True,
-            principals=frozenset({"observer", "operator"}),
+            principals=frozenset({"operator"}),
         ),
         ResourceSpec(
             "mcp_tool",
@@ -188,7 +188,7 @@ def build_registry() -> ResourceRegistry:
             "mcp-broker",
             ("summary",),
             True,
-            principals=frozenset({"observer", "operator"}),
+            principals=frozenset({"operator"}),
         ),
         ResourceSpec(
             "capture_lane",

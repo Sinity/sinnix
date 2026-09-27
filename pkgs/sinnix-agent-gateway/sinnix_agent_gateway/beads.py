@@ -93,8 +93,6 @@ class BeadsService:
             project = self.config.projects[self._string(project_id, "project_id", 128)]
         except KeyError as exc:
             raise BeadsError(f"unknown project: {project_id}") from exc
-        if self.principal.name == "observer" and not project.observer_read:
-            raise BeadsError(f"project is unavailable to {self.principal.name}")
         if not project.path.is_dir():
             raise BeadsError(f"project checkout is unavailable: {project_id}")
         return project

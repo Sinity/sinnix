@@ -16,7 +16,6 @@ from sinnix_lib.atomic import atomic_publish
 
 from .. import files as host_files
 from ..action import (
-    OBSERVER_OPERATOR,
     OPERATOR_ONLY,
     Action,
     ActionResult,
@@ -68,7 +67,7 @@ def _authorized(runtime: Runtime, locator: FileLocator, *, existing: bool) -> Pa
 
 
 def _secret_descendant_globs(runtime: Runtime, roots: list[Path]) -> list[str]:
-    """Return ripgrep exclusions for observer-visible roots where possible."""
+    """Return ripgrep exclusions for configured roots where possible."""
     if runtime.principal.name == "operator":
         return []
     globs: list[str] = []
@@ -424,7 +423,7 @@ ACTIONS: tuple[Action, ...] = (
         Input=StatInput,
         Output=FileStat,
         handler=_stat,
-        principals=OBSERVER_OPERATOR,
+        principals=OPERATOR_ONLY,
         resource_kinds=("host_file",),
         affordances=("files.read", "files.list", "files.change"),
         aliases=("file info", "metadata", "size", "permissions"),
@@ -440,7 +439,7 @@ ACTIONS: tuple[Action, ...] = (
         Input=ListInput,
         Output=DirectoryListing,
         handler=_list,
-        principals=OBSERVER_OPERATOR,
+        principals=OPERATOR_ONLY,
         resource_kinds=("host_file",),
         affordances=("files.stat", "files.read", "files.search"),
         aliases=("ls", "directory", "folder", "browse"),
@@ -456,7 +455,7 @@ ACTIONS: tuple[Action, ...] = (
         Input=ReadInput,
         Output=FileContent,
         handler=_read,
-        principals=OBSERVER_OPERATOR,
+        principals=OPERATOR_ONLY,
         resource_kinds=("host_file",),
         affordances=("files.patch", "files.change", "files.stat"),
         aliases=("cat", "open", "view", "image", "picture", "screenshot file"),
@@ -1280,7 +1279,7 @@ ACTIONS = ACTIONS + (
         Input=SearchInput,
         Output=SearchResult,
         handler=_search,
-        principals=OBSERVER_OPERATOR,
+        principals=OPERATOR_ONLY,
         resource_kinds=("host_file",),
         affordances=("files.read", "files.stat", "files.list"),
         aliases=("find", "grep", "locate", "rg", "fd", "search files", "recent files"),

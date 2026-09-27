@@ -67,7 +67,7 @@ def test_verify_and_receipt(tmp_path: Path) -> None:
     )
     assert missing["error"]["code"] == "not_found"
     foreign = call(
-        Runtime.create(rt.config, "observer"),
+        Runtime.create(rt.config, "agent-control"),
         "audit.receipt",
         {"receipt_id": receipt_id},
         BY_NAME,
@@ -82,7 +82,7 @@ def test_results_get(tmp_path: Path) -> None:
 
 
 def test_capabilities_search_and_describe(tmp_path: Path) -> None:
-    rt = runtime(tmp_path, "observer")
+    rt = runtime(tmp_path, "operator")
     found = call(
         rt,
         "capabilities.query",

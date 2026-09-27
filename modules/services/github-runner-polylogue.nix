@@ -133,7 +133,7 @@ mkServiceModule {
             # manager, so it inherits neither place's TMPDIR. Without this the
             # workflow's `nix develop` puts its scratch tree, and the seeded
             # archives of every xdist worker, on the 6 GiB /tmp tmpfs.
-            TMPDIR = "/realm/tmp/${userName}";
+            TMPDIR = "/realm/tmp/work";
             SSL_CERT_FILE = "/etc/ssl/certs/ca-certificates.crt";
             NIX_SSL_CERT_FILE = "/etc/ssl/certs/ca-certificates.crt";
           };

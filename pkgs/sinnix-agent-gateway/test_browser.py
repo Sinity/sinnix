@@ -11,7 +11,7 @@ from sinnix_agent_gateway.browser import (
     BrowserError,
     BrowserService,
 )
-from sinnix_agent_gateway.capabilities import PolicyError, Principal
+from sinnix_agent_gateway.capabilities import Principal
 from sinnix_agent_gateway.config import GatewayConfig
 from sinnix_agent_gateway.owner_execution import ExecutionResult
 
@@ -48,15 +48,6 @@ def commands(path: Path) -> list[list[str]]:
     return [json.loads(line) for line in path.read_text().splitlines()]
 
 
-def test_observer_can_read_browser_tabs_without_action_registration(
-    tmp_path: Path,
-) -> None:
-    browser, captured = browser_service(tmp_path, "observer")
-
-    result = browser.read("list_tabs")
-
-    assert result == {"operation": "list_tabs", "result": {"ok": True}}
-    assert commands(captured) == [["list-tabs"]]
 
 
 def test_operator_actions_require_gateway_created_agent_target(tmp_path: Path) -> None:
@@ -98,7 +89,7 @@ def test_canonical_browser_target_read_requires_registered_agent_window(
 def test_direct_browser_target_reads_require_registered_agent_window(
     tmp_path: Path, operation: str
 ) -> None:
-    browser, captured = browser_service(tmp_path, "observer")
+    browser, captured = browser_service(tmp_path, "operator")
 
     with pytest.raises(BrowserError, match="gateway-created agent window"):
         browser.read(operation, "operator-page")
@@ -109,7 +100,7 @@ def test_direct_browser_target_reads_require_registered_agent_window(
 def test_browser_owner_failure_is_attested_as_a_diagnostic(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    browser, _ = browser_service(tmp_path, "observer")
+    browser, _ = browser_service(tmp_path, "operator")
     monkeypatch.setattr(
         browser.execution,
         "run",
@@ -159,11 +150,6 @@ def test_operator_cannot_act_on_existing_browser_page(tmp_path: Path) -> None:
         )
 
 
-def test_observer_cannot_create_or_operate_browser_window(tmp_path: Path) -> None:
-    browser, _ = browser_service(tmp_path, "observer")
-
-    with pytest.raises(PolicyError, match="browser.action"):
-        browser.action("agent_window", {})
 
 
 def test_browser_capture_registers_only_owned_target_as_artifact(
