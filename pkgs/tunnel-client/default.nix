@@ -6,11 +6,11 @@
 }:
 stdenvNoCC.mkDerivation (finalAttrs: {
   pname = "tunnel-client";
-  version = "0.0.10";
+  version = "0.0.15";
 
   src = fetchurl {
     url = "https://persistent.oaistatic.com/tunnel-client/v${finalAttrs.version}/tunnel-client-v${finalAttrs.version}-linux-amd64.zip";
-    hash = "sha256-ueA4ijQ/LXre/zmS9BGgvT2RamS8VlNKrF/RWsGyDNU=";
+    hash = "sha256-jINtxdaNaLZj2aXFso/5+ngNn3o//7HDBogLjzL6tfE=";
   };
 
   nativeBuildInputs = [ unzip ];
