@@ -67,10 +67,16 @@ class McpBrokerService:
             raise McpBrokerError(f"{name} must be a bounded non-empty string")
         return value
 
-    async def catalog(self) -> dict[str, Any]:
+    async def catalog(
+        self, *, server_names: set[str] | None = None, bounded: bool = True
+    ) -> dict[str, Any]:
         """Return admitted upstream tool contracts from bounded handshakes."""
         self.principal.require(Capability.MCP_READ)
-        rows = sorted(self.config.mcp_broker_servers.items())
+        rows = sorted(
+            (name, row)
+            for name, row in self.config.mcp_broker_servers.items()
+            if server_names is None or name in server_names
+        )
         probes = await asyncio.gather(
             *(
                 self._catalog_server(name, row)
@@ -96,6 +102,13 @@ class McpBrokerService:
             )
         else:
             catalog_artifact = None
+        if not bounded:
+            return {
+                "servers": servers,
+                "truncated": catalog_artifact is not None
+                or any(server.get("coverage_complete") is False for server in servers),
+                "catalog_artifact": catalog_artifact,
+            }
         while True:
             response = {"servers": servers}
             if catalog_artifact is not None:

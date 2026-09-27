@@ -168,17 +168,30 @@ class Tools(GatewayModel):
         default_factory=dict,
         description="Server name to reason for servers that disclosed no tools.",
     )
+    coverage_incomplete: dict[str, str] = Field(
+        default_factory=dict,
+        description="Server name to reason when upstream tools/list did not finish.",
+    )
     catalog_artifact: dict[str, Any] | None = None
     affordances: list[str] = Field(default_factory=list)
 
 
 async def _tools(runtime: Runtime, inp: ToolsInput) -> Tools:
+    configured = runtime.config.mcp_broker_servers
+    if inp.server is not None and inp.server not in configured:
+        raise ProtocolError(
+            "not_found", "MCP server is not configured", details={"unknown": [inp.server]}
+        )
     try:
-        catalog = await runtime.mcp_broker.catalog()
+        catalog = await runtime.mcp_broker.catalog(
+            server_names={inp.server} if inp.server is not None else None,
+            bounded=False,
+        )
     except McpBrokerError as exc:
         raise ProtocolError("unavailable", str(exc)) from exc
     rows: list[dict[str, Any]] = []
     unavailable: dict[str, str] = {}
+    incomplete: dict[str, str] = {}
     for server in catalog.get("servers", []):
         if inp.server is not None and server.get("name") != inp.server:
             continue
@@ -187,6 +200,8 @@ async def _tools(runtime: Runtime, inp: ToolsInput) -> Tools:
                 server.get("reason") or server.get("failure_class") or "unavailable"
             )
             continue
+        if server.get("coverage_complete") is False:
+            incomplete[server["name"]] = server.get("reason") or "incomplete tools/list"
         for tool in server.get("tools", []):
             rows.append({**tool, "server": server["name"]})
     if inp.effect != "any":
@@ -203,8 +218,9 @@ async def _tools(runtime: Runtime, inp: ToolsInput) -> Tools:
     return Tools(
         tools=typed,
         total=len(rows),
-        truncated=len(rows) > inp.limit or bool(catalog.get("truncated")),
+        truncated=len(rows) > inp.limit or bool(incomplete),
         servers_unavailable=unavailable,
+        coverage_incomplete=incomplete,
         catalog_artifact=catalog.get("catalog_artifact"),
         affordances=["mcp.call", "mcp.change", "mcp.servers"],
     )

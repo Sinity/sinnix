@@ -45,6 +45,7 @@ def runtime(
     principal: str,
     monkeypatch: pytest.MonkeyPatch,
     session=WriteSession,
+    max_result_bytes: int = 262_144,
 ) -> Runtime:
     monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")
     monkeypatch.setenv("XDG_RUNTIME_DIR", "/run/user/1000")
@@ -55,6 +56,7 @@ def runtime(
     cfg = GatewayConfig(
         state_dir=tmp_path / "state",
         projects={},
+        max_result_bytes=max_result_bytes,
         ops_socket_path=tmp_path / "ops.sock",
         mcp_broker_servers={
             "fixture": {
@@ -165,6 +167,56 @@ def test_servers_tools_call_change(
         BY_NAME,
     )
     assert write["result"]["outcome"] == "ok" and write["data"]["mode"] == "write"
+
+
+def test_tools_filters_complete_server_catalog_before_page_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class LargeCatalogSession(FakeSession):
+        async def list_tools(self, *, params: object | None = None) -> object:
+            tools = [
+                SimpleNamespace(
+                    name=f"tool_{index:04d}",
+                    description="Fixture catalog entry " + ("x" * 120),
+                    inputSchema={"type": "object", "properties": {}},
+                    annotations=SimpleNamespace(read_only_hint=True),
+                )
+                for index in range(120)
+            ]
+            return SimpleNamespace(tools=tools, next_cursor=None)
+
+    rt = runtime(
+        tmp_path, "operator", monkeypatch, LargeCatalogSession, max_result_bytes=4_096
+    )
+
+    result = call(
+        rt,
+        "mcp.tools",
+        {"server": "fixture", "text": "tool_0119"},
+        BY_NAME,
+    )
+
+    assert result["data"]["total"] == 1
+    assert [row["name"] for row in result["data"]["tools"]] == ["tool_0119"]
+    assert result["data"]["truncated"] is False
+
+
+def test_tools_reports_incomplete_upstream_coverage_for_no_match(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from test_mcp_broker import RepeatingCursorSession
+
+    rt = runtime(tmp_path, "operator", monkeypatch, RepeatingCursorSession)
+    result = call(
+        rt,
+        "mcp.tools",
+        {"server": "fixture", "text": "absent"},
+        BY_NAME,
+    )
+
+    assert result["data"]["tools"] == []
+    assert result["data"]["truncated"] is True
+    assert "fixture" in result["data"]["coverage_incomplete"]
 
 
 
