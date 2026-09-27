@@ -74,6 +74,58 @@ def test_apply_is_idempotent(fake_systemd: dict[str, Any], config: Config) -> No
     assert again["started"] == [] and again["stopped"] == []
 
 
+def test_incomplete_catalog_defers_retirement_until_recovery(
+    fake_systemd: dict[str, Any], config: Config, project_root: Path, tmp_path: Path
+) -> None:
+    """A malformed descriptor must not erase timers while discovery is partial."""
+    from dataclasses import replace
+
+    unavailable_root = tmp_path / "temporarily-unavailable"
+    descriptor = unavailable_root / ".agentctl" / "project.toml"
+    descriptor.parent.mkdir(parents=True)
+    descriptor.write_text("not valid TOML = [")
+    previous = "agentctl-schedule-111111111111111111111111"
+    fake_systemd["units"].add(previous)
+    partial_config = replace(
+        config, project_roots=(project_root, unavailable_root)
+    )
+
+    partial = schedule.apply(partial_config)
+
+    assert partial["status"] == "incomplete"
+    assert partial["unavailable"]
+    assert partial["stopped"] == []
+    assert previous in fake_systemd["units"]
+    assert partial["started"] == [
+        schedule.unit_for(
+            "fixture",
+            "nightly",
+            "*-*-* 03:17:00",
+            config.agentctl_executable,
+        )
+    ]
+
+    (unavailable_root / "marker").write_text("")
+    (unavailable_root / "contract.md").write_text("# Recovered\n")
+    (unavailable_root / "atlas").mkdir()
+    (unavailable_root / "atlas" / "core.md").write_text("# Recovered\n")
+    recovered = project_root.joinpath(".agentctl", "project.toml").read_text()
+    recovered = recovered.replace('id = "fixture"', 'id = "recovered"').replace(
+        'display_name = "Fixture"', 'display_name = "Recovered"'
+    )
+    recovered = "\n".join(
+        line for line in recovered.splitlines() if line != 'schedule = "*-*-* 03:17:00"'
+    )
+    descriptor.write_text(recovered)
+
+    reconciled = schedule.apply(partial_config)
+
+    assert reconciled["status"] == "complete"
+    assert reconciled["unavailable"] == []
+    assert reconciled["stopped"] == [previous]
+    assert previous not in fake_systemd["units"]
+
+
 def test_custom_config_is_forwarded_and_a_path_change_replaces_the_timer(
     fake_systemd: dict[str, Any], config: Config
 ) -> None:

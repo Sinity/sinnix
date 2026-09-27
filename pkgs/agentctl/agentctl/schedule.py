@@ -99,7 +99,11 @@ def apply(config: Config) -> dict[str, Any]:
             "schedule": operation.schedule,
         }
     present = existing_units()
-    stopped = sorted(present - set(desired))
+    # A partially read catalog cannot prove that an existing timer was
+    # deliberately removed. Register known schedules, but defer retirement
+    # until every configured descriptor can be inspected.
+    incomplete = bool(catalog.unavailable)
+    stopped = [] if incomplete else sorted(present - set(desired))
     for unit in stopped:
         # A transient timer's service unit exists only while it is running;
         # stopping the timer alone is the whole retirement when it is not.
@@ -131,6 +135,7 @@ def apply(config: Config) -> dict[str, Any]:
         )
         started.append(unit)
     return {
+        "status": "incomplete" if incomplete else "complete",
         "timers": [{"unit": unit, **entry} for unit, entry in sorted(desired.items())],
         "started": started,
         "stopped": stopped,
