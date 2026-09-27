@@ -335,6 +335,7 @@ class Harness:
     # Whether the fake integration agent merges every worker branch.
     integration_merges: bool = True
     execution_head_override: str | None = None
+    execution_head_sequence: list[str] = field(default_factory=list)
 
     def start(self, *seeds: str, **kwargs: Any) -> dict[str, Any]:
         return batch.start(
@@ -527,7 +528,11 @@ def harness(
                 "head": git.heads.get(task.path, SHA),
                 "tree": BASE,
             }
-            executed_head = built.execution_head_override or requested["head"]
+            executed_head = (
+                built.execution_head_sequence.pop(0)
+                if built.execution_head_sequence
+                else built.execution_head_override or requested["head"]
+            )
             executed_tree = (
                 requested["tree"]
                 if executed_head == requested["head"]
@@ -1408,6 +1413,38 @@ def test_landing_rejects_successful_check_bound_to_another_execution_tree(
     assert harness.pueue.task(verify_tasks[0].task_id).succeeded
     stored = manifest.load(harness.config, run["run_id"])
     assert stored.acceptance is None
+
+
+def test_landing_retries_an_active_reused_check_after_execution_tree_mismatch(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Breaks if a mismatched reused task is trusted or removed from queue history."""
+    run = prepared_run(harness, "fx-solo")
+    harness.execution_head_sequence = [MOVED, SHA]
+    start_operation = launch.start_operation
+    calls = 0
+
+    def mark_first_request_reused(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        nonlocal calls
+        result = start_operation(*args, **kwargs)
+        if calls == 0:
+            result["reused"] = True
+        calls += 1
+        return result
+
+    monkeypatch.setattr(launch, "start_operation", mark_first_request_reused)
+
+    landed = harness.land(run["run_id"])
+
+    verify = landed["landing"]["verify_run"]
+    verify_tasks = [
+        task for task in harness.pueue.tasks().values() if task.label == "fixture:check"
+    ]
+    assert len(verify_tasks) == 2
+    assert verify_tasks[0].succeeded and verify_tasks[1].succeeded
+    assert verify["job_id"] == verify_tasks[1].task_id
+    assert verify["tested_sha"] == SHA
+    assert verify["executed_attempt"] == 1
 
 
 def test_landing_removes_every_worktree_whose_work_the_candidate_carries(
