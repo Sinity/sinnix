@@ -79,7 +79,11 @@ from elapsed time, queue slots, or labels.
 ## Escalation and cost
 
 On an unresolved attempt, inspect the concrete residual before changing models.
-Resolve missing authority, infrastructure or evidence through their owners.
+When attempts fail alike, compare the prompt snapshot, role, and recorded launch
+metadata before changing allocation; source configuration does not prove what
+the runner loaded. Keep related fixes with one owner while they share diagnosis
+or verification. Resolve missing authority, infrastructure or evidence through
+their owners.
 Reopen a design judgment when implementation exposes a missing decision; use a
 bounded architecture task or design-critical implementation assignment. For a
 concrete implementation miss against settled requirements, consider Sol with

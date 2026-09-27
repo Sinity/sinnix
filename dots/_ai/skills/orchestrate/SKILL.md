@@ -23,6 +23,11 @@ packet expresses intent; check execution against owning launch/session metadata.
 Give a native implementation worker one coherent ownership group and authority
 to fix in-scope defects. Name the candidate base, assigned Beads, relevant
 source seam, excluded scope, shared focused selection, and completion evidence.
+Define ownership by the accepted outcome, not by a file list: connected callers,
+tests, docs, schemas and generated sources needed to meet its criteria are in
+scope without another permission round. Keep `write_scope` advisory for conflict
+planning. Escalate changed criteria, real cross-owner conflicts, and live or
+destructive actions.
 Ask it to inspect its final diff against the base, trace affected production
 callers and any predecessor path, fix what that inspection finds, then report
 each unmet criterion with its actual blocker. Do not turn implementation,
@@ -79,8 +84,9 @@ that prior evidence.
   task behind them.
 - A worker is one ownership group: a seed bead plus its open
   `dispatch_group` members, or `--worker a,b` named explicitly. Beads that
-  share files, evidence, or a verification boundary go in one worker; write
-  scopes must be disjoint across workers.
+  share a reproduced failure family, invariant, files, evidence, or a
+  verification boundary go in one worker even when their initial file lists
+  differ. Keep write scopes disjoint across workers.
 - External workers use `batch start … --workers external`; the manifest names
   their worktrees and packets. File each result with `batch result`; the last
   result enqueues landing. Confirm each result is bound to the manifest's
