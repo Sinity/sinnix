@@ -113,6 +113,8 @@ running agents in parallel.
   (required statuses, conversation resolution), merge with
   `gh pr merge --auto --squash --match-head-commit <sha>` and let it gate.
   Findings that arrive after a merge become a follow-up commit or Bead.
+  For Codex, review state is the Code Review row of its summary comment; its
+  separate security-review usage-limit notice is unrelated.
 - A partial delivery leaves its unmet acceptance criteria open.
 
 ## Desktop and host changes
