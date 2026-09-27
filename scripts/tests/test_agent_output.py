@@ -338,6 +338,9 @@ class NativeOutputTest(unittest.TestCase):
         # Pi carries no session reference this adapter can hand back, so a
         # resume request must refuse instead of quietly starting fresh. Red when
         # --resume-session-id is parsed and then ignored.
+        # The installed skill script must also work without agentctl on this
+        # interpreter's import path.
+        self.env.pop("PYTHONPATH", None)
         outcome = self.run_pi(
             self.pi_line(self.pi_agent_end('{"answer":"fresh-session"}')),
             extra_args=["--resume-session-id", "fixture-session"],

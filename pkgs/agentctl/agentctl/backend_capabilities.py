@@ -14,16 +14,11 @@ from dataclasses import dataclass
 class BackendCapabilities:
     model_prefix: str
     structured_results: bool = False
-    native_session_resume: bool = False
 
 
 BACKEND_CAPABILITIES: dict[str, BackendCapabilities] = {
-    "codex": BackendCapabilities(
-        "gpt-", structured_results=True, native_session_resume=True
-    ),
-    "claude": BackendCapabilities(
-        "claude-", structured_results=True, native_session_resume=True
-    ),
+    "codex": BackendCapabilities("gpt-", structured_results=True),
+    "claude": BackendCapabilities("claude-", structured_results=True),
     "gemini": BackendCapabilities("gemini-"),
     "antigravity": BackendCapabilities("gemini-"),
     "grok": BackendCapabilities("grok-"),
