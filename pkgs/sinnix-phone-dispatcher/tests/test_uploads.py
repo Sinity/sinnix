@@ -24,6 +24,8 @@ def _lanes(tmp_path):
 
 def test_sha_mismatch_does_not_land_the_file(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(uploads_mod, "UPLOAD_LANES", _lanes(tmp_path))
+    progress = tmp_path / "ambient-progress"
+    monkeypatch.setattr(uploads_mod, "AMBIENT_PROGRESS_MARKER", progress)
     body = b"chunk bytes"
 
     status, payload = uploads_mod.store_upload("ambient", "clip.m4a", body, "0" * 64)
@@ -31,10 +33,13 @@ def test_sha_mismatch_does_not_land_the_file(monkeypatch, tmp_path) -> None:
     assert status == HTTPStatus.UNPROCESSABLE_ENTITY
     assert payload["ok"] is False
     assert not (tmp_path / "ambient" / "clip.m4a").exists()
+    assert not progress.exists()
 
 
 def test_correct_sha_lands_the_file(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(uploads_mod, "UPLOAD_LANES", _lanes(tmp_path))
+    progress = tmp_path / "ambient-progress"
+    monkeypatch.setattr(uploads_mod, "AMBIENT_PROGRESS_MARKER", progress)
     body = b"chunk bytes"
     digest = hashlib.sha256(body).hexdigest()
 
@@ -47,20 +52,45 @@ def test_correct_sha_lands_the_file(monkeypatch, tmp_path) -> None:
     assert target.read_bytes() == body
     assert target.stat().st_mode & 0o777 == 0o660
     assert not list(target.parent.glob(".*.atomic-tmp-*"))
+    assert progress.is_file()
+
+
+def test_progress_marker_failure_does_not_acknowledge_a_landed_chunk(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setattr(uploads_mod, "UPLOAD_LANES", _lanes(tmp_path))
+    monkeypatch.setattr(
+        uploads_mod,
+        "AMBIENT_PROGRESS_MARKER",
+        tmp_path / "missing" / "ambient-progress",
+    )
+    body = b"chunk bytes"
+
+    status, payload = uploads_mod.store_upload(
+        "ambient", "clip.m4a", body, hashlib.sha256(body).hexdigest()
+    )
+
+    assert status == HTTPStatus.INTERNAL_SERVER_ERROR
+    assert payload["ok"] is False
+    assert (tmp_path / "ambient" / "clip.m4a").read_bytes() == body
 
 
 def test_reuploading_the_identical_chunk_is_a_success_duplicate(
     monkeypatch, tmp_path
 ) -> None:
     monkeypatch.setattr(uploads_mod, "UPLOAD_LANES", _lanes(tmp_path))
+    progress = tmp_path / "ambient-progress"
+    monkeypatch.setattr(uploads_mod, "AMBIENT_PROGRESS_MARKER", progress)
     body = b"chunk bytes"
     digest = hashlib.sha256(body).hexdigest()
     uploads_mod.store_upload("ambient", "clip.m4a", body, digest)
+    marked_at = progress.stat().st_mtime
 
     status, payload = uploads_mod.store_upload("ambient", "clip.m4a", body, digest)
 
     assert status == HTTPStatus.OK
     assert payload["duplicate"] is True
+    assert progress.stat().st_mtime == marked_at
 
 
 def test_unknown_lane_is_rejected(tmp_path) -> None:

@@ -46,9 +46,11 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 import subprocess
 import time
 from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -228,6 +230,13 @@ def describe(
         return (
             f"{unit} lane has gone quiet",
             body + "\nPath: " + evidence_field(evidence, "path"),
+        )
+    if key == "capture_stale:unknown":
+        return (
+            f"Cannot tell whether {unit} lane is fresh",
+            "The bounded scan did not find enough evidence to decide. This is "
+            "neither a healthy result nor proof that the lane is empty or stale.\n"
+            "Path: " + evidence_field(evidence, "path"),
         )
     if key == "capture_payload:degenerate":
         return (
@@ -430,9 +439,10 @@ class Emitter:
             if confirmed:
                 self.notifier("normal", title, body)
             return
-        self.notifier(
-            "critical" if status not in CALM_STATUSES else "normal", title, body
+        calm = status in CALM_STATUSES or (
+            type_ == "capture_stale" and status == "unknown"
         )
+        self.notifier("normal" if calm else "critical", title, body)
 
     def prune(self) -> None:
         """Drop any state key this run did not emit.
@@ -456,32 +466,52 @@ class Emitter:
 PROBE_STAT_BUDGET = 512
 
 
-def newest_mtime(path: Path, budget: int = PROBE_STAT_BUDGET) -> float | None:
-    """Newest write under *path*, found by descending newest-entry-first and
-    stopping after *budget* stats.
+@dataclass(frozen=True)
+class MtimeObservation:
+    """What a bounded newest-file probe witnessed, including what it missed."""
+
+    newest_mtime: float | None
+    complete: bool
+    reason: str | None = None
+    directory_mtime: float | None = None
+
+
+def newest_mtime(path: Path, budget: int = PROBE_STAT_BUDGET) -> MtimeObservation:
+    """Probe newest file evidence without turning an unfinished scan into absence.
 
     Lane roots are time-partitioned trees with hundreds of thousands of
     files; an exhaustive walk ran past the service watchdog. Visiting the
     most recently modified entry of each directory first reaches the newest
     file within a handful of stats, and the budget bounds the cost when a
     tree is not partitioned that way. *path* may be a single file: marker
-    and ledger lanes point at files.
+    and ledger lanes point at files. The result distinguishes a complete
+    empty scan from an unreadable or budget-limited prefix.
     """
+    if budget <= 0:
+        return MtimeObservation(None, False, "budget")
     try:
-        if path.is_file():
-            return path.stat().st_mtime
+        root = path.stat()
+    except FileNotFoundError:
+        return MtimeObservation(None, True, "missing")
     except OSError:
-        return None
+        return MtimeObservation(None, False, "stat-error")
+    if stat.S_ISREG(root.st_mode):
+        return MtimeObservation(root.st_mtime, True)
+    if not stat.S_ISDIR(root.st_mode):
+        return MtimeObservation(None, False, "not-file-or-directory")
+
     newest: float | None = None
-    remaining = budget
+    remaining = budget - 1  # The root stat is part of the caller's total bound.
     stack = [path]
-    while stack and remaining > 0:
+    reason: str | None = None
+    while stack:
         directory = stack.pop()
         entries: list[tuple[float, os.DirEntry[str]]] = []
         try:
             with os.scandir(directory) as it:
                 for entry in it:
                     if remaining <= 0:
+                        reason = "budget"
                         break
                     remaining -= 1
                     try:
@@ -489,8 +519,10 @@ def newest_mtime(path: Path, budget: int = PROBE_STAT_BUDGET) -> float | None:
                             (entry.stat(follow_symlinks=False).st_mtime, entry)
                         )
                     except OSError:
+                        reason = reason or "entry-stat-error"
                         continue
         except OSError:
+            reason = reason or "read-error"
             continue
         entries.sort(key=lambda item: item[0])
         for stamp, entry in entries:
@@ -502,7 +534,37 @@ def newest_mtime(path: Path, budget: int = PROBE_STAT_BUDGET) -> float | None:
         for _stamp, entry in entries:
             if entry.is_dir(follow_symlinks=False):
                 stack.append(Path(entry.path))
-    return newest
+        if reason is not None:
+            # A permission or stat error makes the negative result unknown,
+            # even if the remaining work would fit the budget.
+            break
+    return MtimeObservation(
+        newest,
+        reason is None,
+        reason,
+        directory_mtime=root.st_mtime,
+    )
+
+
+def progress_mtime(path: object) -> tuple[float | None, str | None]:
+    """Read one producer-owned progress marker without following directories."""
+    if not isinstance(path, str) or not path:
+        return None, "marker-not-declared"
+    try:
+        value = Path(path).lstat()
+    except FileNotFoundError:
+        return None, "marker-missing"
+    except OSError:
+        return None, "marker-stat-error"
+    if not stat.S_ISREG(value.st_mode):
+        return None, "marker-not-file"
+    return value.st_mtime, None
+
+
+def _capture_is_fresh(stamp: float | None, now: float, limits: Sequence[float]) -> bool:
+    return stamp is not None and not any(
+        int(now) - int(stamp) > limit for limit in limits
+    )
 
 
 def sweep_captures(
@@ -516,8 +578,8 @@ def sweep_captures(
     2026-08-16, four with a path that did not exist at all. An age-based verdict
     still needs a budget; "has this lane ever produced anything" needs none.
 
-    Three outcomes, not two, because a lane's silence has three causes and only
-    one of them is a fault:
+    Four outcomes, because a lane's silence can have four causes and only one
+    of them is a fault:
 
       * `unproduced` -- the path holds no file. The lane has never produced, so
         there is no age to judge and no budget that could have been exceeded.
@@ -526,6 +588,8 @@ def sweep_captures(
         than an outage.
       * `stale` -- it produced before and has now been idle past its budget.
         This is the fault case: something that was working stopped.
+      * `unknown` -- the bounded scan stopped before it could establish whether
+        the lane is empty or stale. It is not evidence for either claim.
       * `healthy` -- it produced recently enough, or it is an event-driven lane
         inside a generous budget with nothing to say. Indistinguishable from
         `unproduced` before this split, which is why a correctly-wired
@@ -537,32 +601,77 @@ def sweep_captures(
         name = str(lane.get("name") or "")
         if not path:
             continue
-        newest = newest_mtime(Path(path))
-        if newest is None:
+        marker_path = lane.get("producerProgressPath")
+        scan_budget = PROBE_STAT_BUDGET - int(
+            isinstance(marker_path, str) and bool(marker_path)
+        )
+        observation = newest_mtime(Path(path), budget=scan_budget)
+        newest = observation.newest_mtime
+        if newest is None and observation.complete:
             emitter.emit(
                 f"capture:{name}",
                 "capture_stale",
                 name,
                 "unproduced",
                 f"path={path};reason=no-file;"
-                f"path_exists={'true' if Path(path).exists() else 'false'}",
+                f"path_exists={'false' if observation.reason == 'missing' else 'true'}",
             )
             continue
-        age = int(now) - int(newest)
         cadence = lane.get("expectedCadenceSeconds")
         stale_after = lane.get("expectedStaleAfterSeconds")
-        stale = False
-        # Cadence-driven lanes: stale once idle past twice their cadence.
-        if isinstance(cadence, (int, float)) and age > cadence * 2:
-            stale = True
-        # Event-driven (or cadence + explicit budget) lanes: stale once idle
-        # past their absolute budget, independent of any cadence check.
-        if isinstance(stale_after, (int, float)) and age > stale_after:
-            stale = True
+        limits = [
+            value
+            for value in (
+                cadence * 2 if isinstance(cadence, (int, float)) else None,
+                stale_after if isinstance(stale_after, (int, float)) else None,
+            )
+            if value is not None
+        ]
+
+        marker_stamp: float | None = None
+        marker_reason: str | None = None
+        if isinstance(marker_path, str) and marker_path:
+            marker_stamp, marker_reason = progress_mtime(marker_path)
+        marker_consistent = (
+            marker_stamp is not None
+            and observation.directory_mtime is not None
+            and observation.directory_mtime <= marker_stamp
+            and observation.reason in {None, "budget"}
+        )
+        progress_stamp = marker_stamp if marker_consistent else None
+
+        if (
+            not observation.complete
+            and not _capture_is_fresh(newest, now, limits)
+            and progress_stamp is None
+        ):
+            if marker_stamp is None:
+                marker_state = marker_reason or "marker-not-declared"
+            else:
+                marker_state = "directory-changed-after-marker"
+            emitter.emit(
+                f"capture:{name}",
+                "capture_stale",
+                name,
+                "unknown",
+                f"path={path};scan_complete=false;reason={observation.reason or 'incomplete'};"
+                f"newest_age_seconds={'' if newest is None else int(now) - int(newest)};"
+                f"progress={marker_state}",
+            )
+            continue
+
+        freshness_stamp = max(
+            stamp for stamp in (newest, progress_stamp) if stamp is not None
+        )
+        age = int(now) - int(freshness_stamp) if freshness_stamp is not None else 0
+        stale = not _capture_is_fresh(freshness_stamp, now, limits)
         evidence = (
             f"path={path};age_seconds={age};"
             f"cadence_seconds={'null' if cadence is None else cadence};"
-            f"stale_after_seconds={'null' if stale_after is None else stale_after}"
+            f"stale_after_seconds={'null' if stale_after is None else stale_after};"
+            f"scan_complete={'true' if observation.complete else 'false'};"
+            f"reason={observation.reason or 'none'};"
+            f"freshness_witness={'producer-marker' if progress_stamp is not None and progress_stamp >= (newest or 0) else 'file'}"
         )
         emitter.emit(
             f"capture:{name}",

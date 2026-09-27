@@ -54,6 +54,7 @@
   captureName ? name,
   cadenceSeconds ? null,
   staleAfterSeconds ? null,
+  producerProgressPath ? null,
   eventDriven ? false,
   requiredPayloadFields ? null,
   livenessProbe ? null,
@@ -128,6 +129,9 @@ let
     {
       name = captureName;
       path = laneDir;
+    }
+    // lib.optionalAttrs (producerProgressPath != null) {
+      inherit producerProgressPath;
     }
     // lib.optionalAttrs (cadenceSeconds != null) { inherit cadenceSeconds; }
     // lib.optionalAttrs eventDriven { eventDriven = true; }

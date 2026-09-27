@@ -88,6 +88,9 @@ let
           backup = "inherited";
         };
     }
+    // lib.optionalAttrs ((capture.producerProgressPath or null) != null) {
+      inherit (capture) producerProgressPath;
+    }
     // lib.optionalAttrs ((capture.cadenceSeconds or null) != null) {
       expectedCadenceSeconds = capture.cadenceSeconds;
     }

@@ -118,6 +118,14 @@ class Recorder:
         self.notifications.append((urgency, title, body))
 
 
+class CaptureRecorder:
+    def __init__(self) -> None:
+        self.events: list[tuple[str, str, str]] = []
+
+    def emit(self, key: str, type_: str, unit: str, status: str, evidence: str) -> None:
+        self.events.append((key, status, evidence))
+
+
 @pytest.fixture
 def world(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(health, "mount_usage_percent", lambda path: 96)
@@ -486,6 +494,36 @@ def test_an_unproduced_lane_is_told_once_and_calmly(world) -> None:
     ]
 
 
+def test_unknown_capture_freshness_is_calm_without_demoting_other_unknowns(
+    tmp_path,
+):
+    recorder = Recorder()
+    emitter = health.Emitter(
+        tmp_path / "state.json", tmp_path / "ledger.jsonl", recorder
+    )
+    emitter.emit(
+        "capture:unknown",
+        "capture_stale",
+        "unknown",
+        "unknown",
+        "path=/fixture;scan_complete=false;reason=budget",
+        force_confirm=True,
+    )
+    emitter.emit(
+        "socket:unknown",
+        "socket_failure",
+        "unknown.socket",
+        "unknown",
+        "manager=system;active_state=unknown",
+        force_confirm=True,
+    )
+
+    assert [urgency for urgency, _title, _body in recorder.notifications] == [
+        "normal",
+        "critical",
+    ]
+
+
 def test_first_production_clears_unproduced_without_claiming_a_recovery(world) -> None:
     """unproduced -> healthy is a first write, not a comeback, and must not be
     announced as one. Mutation: dropping the `previous` argument from describe()
@@ -723,8 +761,161 @@ def test_newest_mtime_handles_file_lane_paths(tmp_path):
 
     lane_file = tmp_path / "persist.last-success"
     lane_file.write_text("ok\n")
-    assert newest_mtime(lane_file) == lane_file.stat().st_mtime
-    assert newest_mtime(tmp_path / "absent.jsonl") is None
+    file_result = newest_mtime(lane_file)
+    assert file_result.newest_mtime == lane_file.stat().st_mtime
+    assert file_result.complete and file_result.reason is None
+    missing = newest_mtime(tmp_path / "absent.jsonl")
+    assert missing.newest_mtime is None
+    assert missing.complete and missing.reason == "missing"
+
+
+def test_newest_mtime_marks_populated_directory_fanout_incomplete(tmp_path):
+    """Mutation: treating a 512-entry prefix as exhaustion invents no-file."""
+    from sinnix_ops_reducer import health
+
+    for index in range(512):
+        child = tmp_path / f"dir-{index:03}"
+        child.mkdir()
+        (child / "capture.bin").write_bytes(b"x")
+
+    result = health.newest_mtime(tmp_path)
+    assert result.newest_mtime is None
+    assert not result.complete
+    assert result.reason == "budget"
+
+    emitter = CaptureRecorder()
+    health.sweep_captures(
+        [{"name": "fanout", "path": str(tmp_path)}], emitter, now=10_000
+    )
+    assert emitter.events == [
+        (
+            "capture:fanout",
+            "unknown",
+            f"path={tmp_path};scan_complete=false;reason=budget;newest_age_seconds=;"
+            "progress=marker-not-declared",
+        )
+    ]
+
+
+def test_capped_flat_scan_uses_declared_append_only_directory_progress(
+    tmp_path, monkeypatch
+):
+    """A fresh file after the prefix proves output without raising the stat cap."""
+    import os
+
+    from sinnix_ops_reducer import health
+
+    for index in range(512):
+        entry = tmp_path / f"capture-{index:03}.bin"
+        entry.write_bytes(b"old")
+        os.utime(entry, (1_000, 1_000))
+    os.utime(tmp_path, (1_000, 1_000))
+    fresh = tmp_path / "zzzz-fresh.bin"
+    fresh.write_bytes(b"new")
+    now = fresh.stat().st_mtime + 1
+    progress = tmp_path.parent / f"{tmp_path.name}-progress"
+    progress.touch()
+
+    real_scandir = os.scandir
+
+    class OrderedScandir:
+        def __init__(self, directory):
+            with real_scandir(directory) as entries:
+                self._entries = sorted(entries, key=lambda entry: entry.name)
+
+        def __enter__(self):
+            return iter(self._entries)
+
+        def __exit__(self, *_):
+            return None
+
+    monkeypatch.setattr(health.os, "scandir", OrderedScandir)
+    result = health.newest_mtime(tmp_path)
+    assert not result.complete and result.reason == "budget"
+    assert result.newest_mtime == 1_000
+    assert result.directory_mtime == tmp_path.stat().st_mtime
+
+    emitter = CaptureRecorder()
+    health.sweep_captures(
+        [
+            {
+                "name": "flat",
+                "path": str(tmp_path),
+                "expectedStaleAfterSeconds": 600,
+                "producerProgressPath": str(progress),
+            }
+        ],
+        emitter,
+        now=now,
+    )
+    key, status, evidence = emitter.events[0]
+    assert key == "capture:flat" and status == "healthy"
+    assert "scan_complete=false;reason=budget" in evidence
+    assert "freshness_witness=producer-marker" in evidence
+
+
+def test_unreadable_capture_scan_is_unknown_not_empty_or_healthy(tmp_path, monkeypatch):
+    """Mutation: swallowing a read error as an empty or healthy tree fails."""
+    from sinnix_ops_reducer import health
+
+    (tmp_path / "old.bin").write_bytes(b"old")
+    monkeypatch.setattr(
+        health.os,
+        "scandir",
+        lambda _path: (_ for _ in ()).throw(PermissionError("denied")),
+    )
+    result = health.newest_mtime(tmp_path)
+    assert result.newest_mtime is None
+    assert not result.complete and result.reason == "read-error"
+
+    emitter = CaptureRecorder()
+    health.sweep_captures(
+        [
+            {
+                "name": "unreadable",
+                "path": str(tmp_path),
+                "producerProgressPath": str(tmp_path / "missing-progress"),
+            }
+        ],
+        emitter,
+        now=10_000,
+    )
+    assert emitter.events[0][0:2] == ("capture:unreadable", "unknown")
+    assert "reason=read-error" in emitter.events[0][2]
+
+
+def test_persisted_progress_marker_supports_stale_verdict_after_budget(tmp_path):
+    """An old marker plus no post-marker directory change proves real silence."""
+    import os
+
+    from sinnix_ops_reducer import health
+
+    for index in range(512):
+        child = tmp_path / f"dir-{index:03}"
+        child.mkdir()
+        (child / "capture.bin").write_bytes(b"x")
+    os.utime(tmp_path, (1_000, 1_000))
+    progress = tmp_path.parent / f"{tmp_path.name}-progress"
+    progress.write_text("last successful producer output\n")
+    os.utime(progress, (1_000, 1_000))
+
+    emitter = CaptureRecorder()
+    health.sweep_captures(
+        [
+            {
+                "name": "stale-fanout",
+                "path": str(tmp_path),
+                "expectedStaleAfterSeconds": 600,
+                "producerProgressPath": str(progress),
+            }
+        ],
+        emitter,
+        now=10_000,
+    )
+    key, status, evidence = emitter.events[0]
+    assert key == "capture:stale-fanout" and status == "stale"
+    assert "scan_complete=false;reason=budget" in evidence
+    assert "freshness_witness=producer-marker" in evidence
 
 
 def test_newest_mtime_is_bounded_and_finds_newest_partition_first(tmp_path):
@@ -774,8 +965,10 @@ def test_newest_mtime_is_bounded_and_finds_newest_partition_first(tmp_path):
 
     health.os.scandir = CountingScandir
     try:
-        assert health.newest_mtime(tmp_path, budget=200) == newest_file.stat().st_mtime
+        result = health.newest_mtime(tmp_path, budget=200)
+        assert result.newest_mtime == newest_file.stat().st_mtime
     finally:
         health.os.scandir = real_scandir
-    assert len(stats) <= 200
+    assert not result.complete and result.reason == "budget"
+    assert len(stats) <= 199  # The root directory stat uses the remaining slot.
     assert len(stats) < 2000  # 50 dirs * 40 files: an exhaustive walk stats them all

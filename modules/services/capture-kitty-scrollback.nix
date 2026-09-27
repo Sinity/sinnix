@@ -17,6 +17,8 @@ let
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   lakeRoot = config.sinnix.paths.activityRoot;
   scrollbackDir = "${lakeRoot}/kitty-scrollback";
+  progressDir = "${config.sinnix.paths.stateRoot}/sinnix-ops/capture-progress";
+  progressPath = "${progressDir}/kitty-scrollback";
   cfg = config.sinnix.services.capture-kitty-scrollback;
 in
 mkServiceModule (mkCaptureLane {
@@ -38,11 +40,19 @@ mkServiceModule (mkCaptureLane {
   # No kitty windows open for a full day is itself a real signal (host
   # idle/away), not just a quiet capture lane.
   staleAfterSeconds = 86400;
+  producerProgressPath = progressPath;
   # Not restartable: this is a oneshot triggered by the timer, not a
   # long-running daemon a restart could bring back.
   restartable = false;
   execStart = "${scriptPkgs.kitty-scrollback-capture}/bin/kitty-scrollback-capture";
-  environment = [ "KITTY_SCROLLBACK_DIR=${scrollbackDir}" ];
+  environment = [
+    "KITTY_SCROLLBACK_DIR=${scrollbackDir}"
+    "KITTY_SCROLLBACK_PROGRESS_MARKER=${progressPath}"
+  ];
+  writablePaths = [ scrollbackDir progressDir ];
+  extraConfig = _: {
+    systemd.tmpfiles.rules = [ "d ${progressDir} 0700 ${username} users -" ];
+  };
   pollAfter = [ "graphical-session.target" ];
   timer = {
     onUnitActiveSec = "${toString cfg.intervalMinutes}min";

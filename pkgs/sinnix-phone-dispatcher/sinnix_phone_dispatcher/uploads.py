@@ -17,6 +17,7 @@ import os
 import sys
 from http import HTTPStatus
 from pathlib import Path
+from threading import Lock
 
 from sinnix_lib.atomic import atomic_publish
 from sinnix_lib.ledger import utc_ts
@@ -29,6 +30,21 @@ from .state import (
     UPLOAD_LANES,
     UPLOAD_NAME_RE,
 )
+
+AMBIENT_PROGRESS_MARKER = Path(
+    os.environ.get(
+        "SINNIX_PHONE_AMBIENT_PROGRESS_MARKER",
+        "/realm/state/sinnix-phone/ambient-progress",
+    )
+)
+_AMBIENT_PROGRESS_LOCK = Lock()
+
+
+def _record_ambient_progress(target: Path) -> None:
+    """Refresh the marker after a newly landed chunk, never on a retry."""
+    with _AMBIENT_PROGRESS_LOCK:
+        AMBIENT_PROGRESS_MARKER.touch()
+
 
 #: How deep a lane path may go. `DCIM/Camera/IMG_0001.jpg` arrives as
 #: `Camera/IMG_0001.jpg`; nothing on this phone nests further, and a cap means
@@ -146,6 +162,18 @@ def store_upload(
         atomic_publish(target, body, fsync=True, mode=0o660)
     except OSError as exc:
         return HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "detail": str(exc)}
+
+    if lane == "ambient":
+        try:
+            # The file is already durably visible. If this one-path marker
+            # cannot be updated, refuse the ack so the phone retains its copy;
+            # the retry is idempotent and the next new chunk can recover too.
+            _record_ambient_progress(target)
+        except OSError as exc:
+            return HTTPStatus.INTERNAL_SERVER_ERROR, {
+                "ok": False,
+                "detail": f"ambient progress marker could not be written: {exc}",
+            }
 
     return HTTPStatus.OK, {
         "ok": True,

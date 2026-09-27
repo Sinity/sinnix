@@ -89,6 +89,7 @@ let
   # device telemetry's subject root, not this module's own reportsDir/
   # feedbackDir -- see modules/foundation.nix.
   phoneLaneRoot = config.sinnix.paths.machineRoot;
+  phoneAmbientProgressPath = "${config.sinnix.paths.stateRoot}/sinnix-phone/ambient-progress";
   phoneStreamPort = helpers.data.ports.phoneStream;
 in
 mkServiceModule {
@@ -464,7 +465,7 @@ mkServiceModule {
         # no-op. On the NVMe volume rather than the wear-limited root, and
         # under /realm/state because losing the token set would let an
         # already-executed intent run a second time after a reboot.
-        "d /realm/state/sinnix-phone 0755 ${userName} users -"
+        "d ${config.sinnix.paths.stateRoot}/sinnix-phone 0755 ${userName} users -"
         "d /realm/state/sinnix-phone/inbox 0755 ${userName} users -"
         "d /realm/state/sinnix-phone/inbox/receipts 0755 ${userName} users -"
         "d /realm/state/sinnix-phone/inbox/notify 0755 ${userName} users -"
@@ -512,6 +513,7 @@ mkServiceModule {
               path = "/realm/machine/phone/ambient";
               cadenceSeconds = 300;
               staleAfterSeconds = 7200;
+              producerProgressPath = phoneAmbientProgressPath;
             }
             {
               # eventDriven with no staleness budget: the phone pushes when
@@ -604,7 +606,10 @@ mkServiceModule {
             # writeShellApplication runtimeInputs wrapper for that mechanism.
             # Kept as the baseline PATH anything else this process shells out
             # to inherits.
-            Environment = [ "PATH=/run/wrappers/bin:/run/current-system/sw/bin" ];
+            Environment = [
+              "PATH=/run/wrappers/bin:/run/current-system/sw/bin"
+              "SINNIX_PHONE_AMBIENT_PROGRESS_MARKER=${phoneAmbientProgressPath}"
+            ];
             # Resolves the tailnet bind address for the embedded telemetry
             # receiver (SINNIX_PHONE_STREAM_HOST), same pattern as the hub's
             # own resolveBind above and the earlier standalone receiver

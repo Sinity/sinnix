@@ -208,6 +208,15 @@ let
     options = {
       name = lib.mkOption { type = lib.types.str; };
       path = lib.mkOption { type = lib.types.str; };
+      producerProgressPath = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = ''
+          Optional producer-owned marker updated only after real output is
+          committed. The health sweep can stat this one path when its bounded
+          file scan cannot determine freshness.
+        '';
+      };
       cadenceSeconds = lib.mkOption {
         type = lib.types.nullOr lib.types.int;
         default = null;
