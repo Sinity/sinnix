@@ -414,17 +414,27 @@ chroot_module_source() {
   printf '%s\n' "$sinnix_dir/devices/android/magisk/sinnix-debian-chroot"
 }
 
-chroot_build() {
+chroot_build() (
   local output="${1:-/realm/tmp/work/sinnix-debian-chroot.zip}"
   local work source
   work=$(mktemp -d /realm/tmp/work/sinnix-debian-chroot.XXXXXX)
+  cleanup_chroot_build() {
+    if ! sudo rm -rf -- "$work"; then
+      printf 'chroot-build: could not remove temporary workspace %s\n' "$work" >&2
+    fi
+  }
+  trap cleanup_chroot_build EXIT
+  trap 'exit 129' HUP
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+
   source=$(chroot_module_source)
   [ -f "$source/module.prop" ] || {
     echo "missing module source: $source" >&2
     return 1
   }
   mkdir -p "$work/rootfs" "$work/module"
-  sudo debootstrap --foreign --arch=arm64 --variant=minbase +    trixie "$work/rootfs" http://deb.debian.org/debian
+  sudo debootstrap --foreign --arch=arm64 --variant=minbase trixie "$work/rootfs" http://deb.debian.org/debian
   sudo tar --numeric-owner -C "$work/rootfs" -czf "$work/rootfs.tar.gz" .
   cp -a "$source/." "$work/module/"
   cp "$work/rootfs.tar.gz" "$work/module/rootfs.tar.gz"
@@ -432,8 +442,7 @@ chroot_build() {
   mkdir -p "$(dirname "$output")"
   (cd "$work/module" && zip -q -r "$output" .)
   sha256sum "$output"
-  echo "build workspace: $work"
-}
+)
 
 chroot_root() {
   adb_any shell su -c "$1"
