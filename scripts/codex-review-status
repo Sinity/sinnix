@@ -1,0 +1,161 @@
+#!/usr/bin/env python3
+# @sinnix-package
+# description: Post the codex-review commit status on open PR heads from the Codex review summary
+# runtimeInputs: python3 gh
+
+"""Publish a `codex-review` commit status that branch protection can require.
+
+The hosted Codex reviewer posts a summary comment whose Code Review row names
+the reviewed commit and its state; it publishes no status of its own. One pass
+reads every open PR of each repository and sets the head's status:
+
+  success  the summary shows a completed Code Review of this exact head, or
+           the PR carries the `codex-review-waived` label;
+  pending  anything else (running, not started, a draft, no summary).
+
+A status is written only when it differs from the head's current one. Nothing
+here ever passes a head it cannot read, so an outage leaves merges blocked.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+
+CONTEXT = "codex-review"
+WAIVER_LABEL = "codex-review-waived"
+SUMMARY_MARKER = "<!-- codex-pull-request-review-summary -->"
+GH_TIMEOUT_S = 60
+
+QUERY = """
+query($owner: String!, $name: String!) {
+  repository(owner: $owner, name: $name) {
+    pullRequests(states: OPEN, first: 100) {
+      nodes {
+        number
+        url
+        isDraft
+        headRefOid
+        labels(first: 50) { nodes { name } }
+        comments(first: 100) { nodes { url body author { login } } }
+        commits(last: 1) {
+          nodes { commit { status { context(name: "codex-review") { state description } } } }
+        }
+      }
+    }
+  }
+}
+"""
+
+
+class GhError(RuntimeError):
+    pass
+
+
+def gh(*args: str) -> str:
+    try:
+        done = subprocess.run(
+            ["gh", *args], capture_output=True, text=True, timeout=GH_TIMEOUT_S, check=False
+        )
+    except subprocess.TimeoutExpired as error:
+        raise GhError(f"gh {args[0]} timed out after {GH_TIMEOUT_S}s") from error
+    if done.returncode != 0:
+        raise GhError(f"gh {' '.join(args[:2])} failed: {done.stderr.strip()[:300]}")
+    return done.stdout
+
+
+def summary_row(comments: list[dict]) -> tuple[str, bool, str | None]:
+    """Return (reviewed short sha, completed, summary url) from the Codex summary."""
+    summaries = [
+        c
+        for c in comments
+        if SUMMARY_MARKER in (c.get("body") or "")
+        and "codex" in ((c.get("author") or {}).get("login") or "")
+    ]
+    if not summaries:
+        return "", False, None
+    summary = summaries[-1]
+    for line in summary["body"].splitlines():
+        if "**Code Review**" in line:
+            cells = [cell.strip() for cell in line.split("|")]
+            reviewed = cells[3].replace("`", "") if len(cells) > 3 else ""
+            completed = "**Completed**" in (cells[2] if len(cells) > 2 else "")
+            return reviewed, completed, summary.get("url")
+    return "", False, summary.get("url")
+
+
+def desired(pr: dict) -> tuple[str, str, str]:
+    head = pr["headRefOid"]
+    labels = {node["name"] for node in pr["labels"]["nodes"]}
+    reviewed, completed, url = summary_row(pr["comments"]["nodes"])
+    for_head = len(reviewed) >= 7 and head.startswith(reviewed)
+    target = url or pr["url"]
+    if WAIVER_LABEL in labels:
+        return "SUCCESS", f"waived by the {WAIVER_LABEL} label", target
+    if pr["isDraft"]:
+        return "PENDING", "draft: Codex reviews once marked ready", target
+    if for_head and completed:
+        return "SUCCESS", f"Codex review completed on {reviewed}", target
+    if for_head:
+        return "PENDING", f"Codex review of {reviewed} not completed yet", target
+    return "PENDING", "waiting for Codex to review this head", target
+
+
+def sync_repository(repository: str, *, dry_run: bool) -> int:
+    owner, name = repository.split("/", 1)
+    data = json.loads(
+        gh("api", "graphql", "-f", f"query={QUERY}", "-F", f"owner={owner}", "-F", f"name={name}")
+    )
+    changed = 0
+    for pr in data["data"]["repository"]["pullRequests"]["nodes"]:
+        state, description, target = desired(pr)
+        commits = pr["commits"]["nodes"]
+        status = commits[0]["commit"]["status"] if commits else None
+        current = (status or {}).get("context") or {}
+        if current.get("state") == state and current.get("description") == description:
+            continue
+        print(f"{repository}#{pr['number']} {pr['headRefOid'][:9]}: {state.lower()} ({description})")
+        changed += 1
+        if dry_run:
+            continue
+        gh(
+            "api",
+            "-X",
+            "POST",
+            f"repos/{repository}/statuses/{pr['headRefOid']}",
+            "-f",
+            f"state={state.lower()}",
+            "-f",
+            f"context={CONTEXT}",
+            "-f",
+            f"description={description[:140]}",
+            "-f",
+            f"target_url={target}",
+        )
+    return changed
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("repositories", nargs="+", metavar="OWNER/NAME")
+    parser.add_argument("--dry-run", action="store_true", help="print changes without posting")
+    args = parser.parse_args()
+    broken = False
+    for repository in args.repositories:
+        try:
+            sync_repository(repository, dry_run=args.dry_run)
+        except GhError as error:
+            # Transient (network, rate limit): the next pass retries. A missed
+            # pass never passes a head, so merges stay blocked meanwhile.
+            print(f"{repository}: {error}", file=sys.stderr)
+        except (KeyError, TypeError, json.JSONDecodeError) as error:
+            # The API or summary shape changed: fail the unit so it is noticed.
+            print(f"{repository}: unexpected response shape: {error!r}", file=sys.stderr)
+            broken = True
+    return 1 if broken else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
