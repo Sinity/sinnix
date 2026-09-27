@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # @sinnix-package
-# description: Bounded Borg verification drill across each Borg repo
+# description: Advance partial Borg repository integrity checks
 # runtimeInputs: bash coreutils borgbackup jq util-linux
 
 # Runs a bounded partial repository check for each repo, logging timing and
@@ -8,9 +8,11 @@
 # across runs, so this avoids surprise multi-hour archive data verification
 # while still advancing repository integrity coverage over time.
 #
-# Scheduled invocation now happens inside borgbackup-verify.service (weekly,
-# after its own repository integrity checks) rather than a standalone timer.
-# This script remains both that callee and the manual verb:
+# Scheduled invocation happens inside borgbackup-verify.service after its main
+# repository checks. The default mode below advances repository-only partial
+# CRC checks; despite the historical command name, it does not restore data.
+# The optional --verify-data mode checks archive data cryptographically but
+# also does not extract or restore a file. The manual verb remains
 # `sinnix borg-drill [--verify-data]`.
 #
 # Required environment:
@@ -23,8 +25,8 @@
 #                          for explicit --verify-data mode
 #   --max-duration N       seconds per repository for default partial checks
 #                          (default 1800)
-#   --verify-data          explicit full archive-data verification mode; this
-#                          can take many hours and is not used by the timer
+#   --verify-data          explicit full archive-data integrity mode; this can
+#                          take many hours and is not used by the timer
 
 set -euo pipefail
 

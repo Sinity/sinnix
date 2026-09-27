@@ -41,25 +41,29 @@
       ];
   }
 
-  # Weekly integrity check — verify repo metadata and detect bit rot on the
-  # HDD, then run the bounded restore drill in the same window. Merged into
-  # one unit (was borgbackup-check.service + sinnix-borg-drill.service,
-  # sinnix-borg-drill.timer Wed 04:00 retired) so the two weekly borg-heavy
-  # jobs no longer contend for the HDD on separate schedules.
+  # Weekly integrity checks verify repository segment CRCs, then advance
+  # another partial check on persist and realm. The latter script retains its
+  # historical "drill" name, but its scheduled default does not restore data.
+  # These checks were merged into one unit from borgbackup-check.service and
+  # sinnix-borg-drill.service (the separate Wed 04:00 timer was retired).
   (mkBackupJob "borgbackup-verify" {
-    description = "Borg backup integrity check and bounded restore drill";
+    description = "Borg repository integrity checks with bounded partial passes";
     serviceConfig = {
       TimeoutStopSec = "15s";
-      # Leave the next six-hour archive window free. Repository checks have
-      # a 3h internal budget, with the remaining time for the restore drill.
-      TimeoutStartSec = "5h";
+      # The main checks total 3h; the no-argument partial-check script adds
+      # 1h on persist and realm. Leave 30m for command and segment-boundary
+      # overhead while ending before the next six-hour archive window.
+      TimeoutStartSec = "4h30m";
     };
     environment = {
       BORG_PASSCOMMAND = "${pkgs.coreutils}/bin/cat ${borgPassphrasePath}";
       BORG_CACHE_DIR = borgCacheDir;
     };
     timer = {
-      onCalendar = "Sun 06:30:00";
+      # This is after the morning audit and hook timer slots. Any operation
+      # still running holds the shared lock, so this job skips instead of
+      # blocking it. The 4h30m deadline ends before the 18:00 archive window.
+      onCalendar = "Sun 13:00:00";
       persistent = false;
     };
     path = with pkgs; [
@@ -125,10 +129,12 @@
       trap - EXIT
       write_integrity_receipt completed
 
-      # Bounded restore drill (was sinnix-borg-drill.service, its own
-      # weekly timer). Runs the same packaged script the manual
-      # `sinnix borg-drill [--verify-data]` verb uses, so borg_drill.jsonl
-      # receipts land exactly as before. The repository checks above
+      # Additional partial repository checks (the historical
+      # sinnix-borg-drill.service, with its own weekly timer, was merged here).
+      # The no-argument default runs repository-only checks for persist and
+      # realm; it does not restore or pass --verify-data. It shares the same
+      # receipt path as the manual `sinnix borg-drill [--verify-data]` verb.
+      # The repository checks above
       # release the global Borg lock here (by closing fd 9) before
       # invoking it: the drill script does its own `exec 9>...; flock -n`
       # in a fresh process against the same lock file, which would

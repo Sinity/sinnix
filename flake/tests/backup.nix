@@ -514,6 +514,30 @@ in
           ];
 
       backupBorgHookRuntime =
+        assert lib.assertMsg (
+          let
+            verify = backupRuntimeEval.config.systemd.services.borgbackup-verify;
+            timer = backupRuntimeEval.config.systemd.timers.borgbackup-verify;
+            script = verify.script;
+            drillScript = builtins.readFile ../../scripts/sinnix-borg-drill;
+            audit = backupRuntimeEval.config.systemd.services.borgbackup-coverage-audit-realm;
+            auditTimer = backupRuntimeEval.config.systemd.timers.borgbackup-coverage-audit-realm;
+          in
+          verify.description == "Borg repository integrity checks with bounded partial passes"
+          && verify.serviceConfig.TimeoutStartSec == "4h30m"
+          && timer.timerConfig.OnCalendar == "Sun 13:00:00"
+          && lib.hasInfix "--max-duration 1800 file:///outer-realm/backup/borg-persist-v1" script
+          && lib.hasInfix "--max-duration 7200 file:///outer-realm/backup/borg-realm-v2" script
+          && lib.hasInfix "--max-duration 1800 file:///outer-realm/backup/borg-sinex-blobs-v1" script
+          && lib.hasInfix "/bin/sinnix-borg-drill\n" script
+          && lib.hasInfix "MAX_DURATION=1800" drillScript
+          && lib.hasInfix "VERIFY_DATA=0" drillScript
+          && lib.hasInfix "file:///outer-realm/backup/borg-persist-v1" drillScript
+          && lib.hasInfix "file:///outer-realm/backup/borg-realm-v2" drillScript
+          && lib.hasInfix "borg check --repository-only --max-duration \"$MAX_DURATION\" \"$repo\"" drillScript
+          && audit.serviceConfig.TimeoutStartSec == "5h"
+          && auditTimer.timerConfig.OnCalendar == "*-*-* 06:35:00"
+        ) "Weekly Borg verification must keep its CRC budgets and drill semantics while ending before the next archive window";
         assert lib.assertMsg (lib.all
           (name: backupRuntimeEval.config.systemd.services.${name}.serviceConfig.TimeoutStartSec == "4h")
           [
