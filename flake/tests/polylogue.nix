@@ -116,8 +116,7 @@ in
             ''
               jq -e --arg root "$sentinelDataDir" '
                 index("d \($root)/inbox 0755 sinity users -") != null and
-                index("L+ \($root)/inbox/chatgpt - - - - /realm/accounts/chatgpt") != null and
-                index("L+ \($root)/inbox/claude - - - - /realm/accounts/claude") != null
+                (map(select(startswith("L+ \($root)/inbox/"))) | length) == 0
               ' <<<"$actualTmpfiles" >/dev/null
               touch "$out"
             '';

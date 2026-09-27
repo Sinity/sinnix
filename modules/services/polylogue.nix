@@ -107,7 +107,9 @@ mkServiceModule {
 
       model = lib.mkOption {
         type = lib.types.str;
-        default = "voyage-4-lite";
+        # Matches the model of the preserved embedding vectors, so restoring
+        # them makes existing text reusable without provider calls.
+        default = "voyage-4";
         description = "Voyage embedding model for Polylogue.";
       };
 
@@ -134,17 +136,6 @@ mkServiceModule {
     }:
     let
       polyloguePkg = pkgs.polylogue;
-      defaultSourceNames = [
-        "claude-code"
-        "claude-code-todos"
-        "claude-code-history"
-        "codex"
-        "codex-state"
-        "codex-memories"
-        "gemini-cli"
-        "hermes"
-        "antigravity"
-      ];
       # One source of truth for the daemon's memory ceiling, derived from a
       # single budget knob and used both for upstream's own service.memory*
       # options and for the runtime surface declaration, so the inventory
@@ -163,13 +154,13 @@ mkServiceModule {
         }
       ];
 
-      # These are Polylogue archive inputs, so their destination must follow
-      # the same archive-root option as the daemon and hook spool.
+      # The inbox is where `polylogue import` stages exports. The account
+      # export roots are acquired directly through `sources.roots` below, so
+      # no inbox links point at them: a link escaping the inbox root is refused
+      # by discovery, and would otherwise name the same bytes twice.
       systemd.tmpfiles.rules = [
         "d ${cfg.dataDir} 0755 ${userName} users -"
         "d ${cfg.dataDir}/inbox 0755 ${userName} users -"
-        "L+ ${cfg.dataDir}/inbox/chatgpt - - - - /realm/accounts/chatgpt"
-        "L+ ${cfg.dataDir}/inbox/claude - - - - /realm/accounts/claude"
       ];
 
       sinnix.runtime.dataStores = {
@@ -247,9 +238,11 @@ mkServiceModule {
             archive.root = cfg.dataDir;
 
             daemon = {
+              # Coalesce bursts from actively written transcripts instead of
+              # re-reading a growing file every two seconds.
               debounce-s = 30;
-              # The archive inbox links point at these external export roots.
-              # Watch the real roots so a fresh archive can acquire exports.
+              # Provider account exports live outside every built-in source
+              # root; all built-in sources come from Polylogue's own defaults.
               watch = [
                 "/realm/accounts/chatgpt"
                 "/realm/accounts/claude"
@@ -282,7 +275,6 @@ mkServiceModule {
             manager = "user";
           })
           // {
-            ExecStart = lib.mkForce "${polyloguePkg}/bin/polylogued run ${lib.concatMapStringsSep " " (name: "--default-source ${name}") defaultSourceNames}";
             # The upstream unit does not pass its rendered TOML path to the
             # daemon process. Keep the service's startup-bound archive root
             # aligned with the generated user configuration.

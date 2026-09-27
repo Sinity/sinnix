@@ -166,9 +166,10 @@
       # The promoted archive lives on the realm NVMe volume, not in the
       # impermanent home-directory default.
       dataDir = "/realm/state/polylogue";
-      # Embedding stays off until the content-hash rescue lands: the rebuilt
-      # embeddings tier is empty, so daemon catch-up would re-embed the whole
-      # corpus through the paid Voyage API.
+      # Embedding stays off until the operator enables it: the fresh archive's
+      # embeddings tier starts empty, so daemon catch-up would otherwise embed
+      # the whole corpus through the paid Voyage API before the preserved
+      # voyage-4 vectors are restored.
       embedding.enable = false;
       # Every launch dies on DurableChangeTrainError (archive identity vs
       # historical train), and Restart=on-failure turns that into a restart
