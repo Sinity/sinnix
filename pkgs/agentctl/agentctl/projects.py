@@ -49,8 +49,11 @@ _TABLES = frozenset(
     {"schema", "project", "environment", "workspace", "packets", "operations"}
 )
 _ENVIRONMENT_FIELDS = frozenset(
-    {"kind", "command", "inherit", "unset", "values", "require"}
+    {"kind", "command", "inherit", "unset", "values", "require", "cache_inputs"}
 )
+# The one environment kind whose realization agentctl-devenv can cache.
+NIX_DEVELOP_KIND = "nix-develop"
+DEVENV_COMMAND = "agentctl-devenv"
 _WORKSPACE_FIELDS = frozenset(
     {
         "root",
@@ -145,6 +148,10 @@ class ProjectEnvironment:
     unset: tuple[str, ...]
     declared: tuple[tuple[str, str], ...] = ()
     require: tuple[str, ...] = ()
+    # Repository-relative files and directories the devShell evaluation reads.
+    # When declared, jobs enter a cached `nix print-dev-env` realization keyed
+    # on them instead of re-evaluating (and re-copying a dirty tree) per job.
+    cache_inputs: tuple[str, ...] = ()
 
     def values(self) -> dict[str, str]:
         """Resolve the launch environment; a missing required variable fails loudly.
@@ -170,6 +177,9 @@ class ProjectEnvironment:
 
     def command_for(self, payload: Sequence[str]) -> tuple[str, ...]:
         """Enter the project environment around ``payload``."""
+        if self.cache_inputs:
+            inputs = (f"--input={item}" for item in self.cache_inputs)
+            return (DEVENV_COMMAND, *inputs, "--", *payload)
         return (*self.command, *payload)
 
     def catalog_row(self) -> dict[str, Any]:
@@ -178,6 +188,7 @@ class ProjectEnvironment:
             "command": list(self.command),
             "declared": sorted(name for name, _value in self.declared),
             "require": list(self.require),
+            "cache_inputs": list(self.cache_inputs),
         }
 
 
@@ -376,6 +387,19 @@ def _environment(raw: Mapping[str, Any], descriptor: Path) -> ProjectEnvironment
         raise ProjectConfigError(
             f"{descriptor} environment.require must name uppercase non-SINNIX variables"
         )
+    cache_inputs = _optional_string_list(
+        environment.get("cache_inputs"), "environment.cache_inputs"
+    )
+    if cache_inputs and kind != NIX_DEVELOP_KIND:
+        raise ProjectConfigError(
+            f"{descriptor} environment.cache_inputs applies only to kind {NIX_DEVELOP_KIND!r}"
+        )
+    if any(
+        Path(item).is_absolute() or ".." in Path(item).parts for item in cache_inputs
+    ):
+        raise ProjectConfigError(
+            f"{descriptor} environment.cache_inputs must be repository-relative paths"
+        )
     return ProjectEnvironment(
         kind=kind,
         command=_string_list(environment.get("command"), "environment.command"),
@@ -385,6 +409,7 @@ def _environment(raw: Mapping[str, Any], descriptor: Path) -> ProjectEnvironment
         unset=_optional_string_list(environment.get("unset"), "environment.unset"),
         declared=tuple(sorted(declared_values.items())),
         require=required,
+        cache_inputs=cache_inputs,
     )
 
 

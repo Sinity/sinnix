@@ -573,3 +573,56 @@ def test_a_focused_profile_cannot_name_an_operation_that_picks_its_own_tree(
     )
     with pytest.raises(ProjectConfigError, match='checkout = "candidate"'):
         load_project_adapter(root)
+
+
+def test_nix_develop_cache_inputs_route_jobs_through_the_cached_realization(
+    tmp_path: Path,
+) -> None:
+    """Anti-vacuity: drop the cache_inputs branch in command_for and the job
+    argv falls back to the declared `nix develop` command."""
+    root = write_project(tmp_path / "p")
+    descriptor = root / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text().replace(
+            'kind = "plain"\ncommand = ["env"]',
+            'kind = "nix-develop"\ncommand = ["nix", "develop", "--command"]\n'
+            'cache_inputs = ["flake.nix", "flake.lock", "nix"]',
+        )
+    )
+
+    project = load_project_adapter(root)
+
+    assert project.environment.command_for(("pytest", "-q")) == (
+        "agentctl-devenv",
+        "--input=flake.nix",
+        "--input=flake.lock",
+        "--input=nix",
+        "--",
+        "pytest",
+        "-q",
+    )
+    assert project.environment.catalog_row()["cache_inputs"] == [
+        "flake.nix",
+        "flake.lock",
+        "nix",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("replacement", "match"),
+    [
+        ('kind = "plain"\ncommand = ["env"]\ncache_inputs = ["flake.nix"]', "only to kind"),
+        (
+            'kind = "nix-develop"\ncommand = ["env"]\ncache_inputs = ["../flake.nix"]',
+            "repository-relative",
+        ),
+    ],
+)
+def test_cache_inputs_are_validated(tmp_path: Path, replacement: str, match: str) -> None:
+    root = write_project(tmp_path / "p")
+    descriptor = root / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text().replace('kind = "plain"\ncommand = ["env"]', replacement)
+    )
+    with pytest.raises(ProjectConfigError, match=match):
+        load_project_adapter(root)

@@ -129,6 +129,7 @@ def _environment_receipt(
         "descriptor": project.digest,
         "kind": project.environment.kind,
         "command": list(project.environment.command),
+        "cache_inputs": list(project.environment.cache_inputs),
         "operation": operation.name,
         "argv": [*operation.command, *extra_argv],
         "environment": sorted(environment.items()),
