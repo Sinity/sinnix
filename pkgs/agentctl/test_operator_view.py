@@ -234,6 +234,65 @@ def test_run_view_indexes_task_references_once_for_many_workers(
     assert parsed == task_count
 
 
+@pytest.mark.timeout(15)
+def test_many_run_snapshot_indexes_tasks_once_and_preserves_reference_resolution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Anti-vacuity: each of 160 runs names a moved task among 1,200 tasks."""
+
+    class CountedTasks(list[Task]):
+        iterations = 0
+
+        def __iter__(self):  # type: ignore[override]
+            self.iterations += 1
+            return super().__iter__()
+
+    tasks = CountedTasks(
+        replace(task(index, "other:long-command"), command="/bin/echo " + "x" * 128)
+        for index in range(1_200)
+    )
+    runs = []
+    for offset in range(160):
+        task_id = 1_000 + offset
+        reference = f"run-ref-{offset}"
+        tasks[task_id] = replace(
+            tasks[task_id], command=f"agentctl-run /s/inputs/{reference}.json"
+        )
+        entry = worker(f"fx-{offset}", task_id=offset)
+        entry["task_reference"] = reference
+        runs.append(run(f"many-{offset}", [entry]))
+
+    tasks[10] = replace(tasks[10], command="agentctl-run /s/inputs/duplicate.json")
+    tasks[20] = replace(tasks[20], command="agentctl-run /s/inputs/duplicate.json")
+    duplicate = run("duplicate", [worker("duplicate", task_id=20)], landing_task=20)
+    duplicate.workers[0]["task_reference"] = "duplicate"
+    duplicate.landing["task_reference"] = "duplicate"
+    runs.append(duplicate)
+    missing = run("missing", [worker("missing", task_id=1_150)])
+    missing.workers[0]["task_reference"] = "unknown"
+    runs.append(missing)
+    runs.append(run("id-fallback", [worker("fallback", task_id=1_150)]))
+
+    parsed = 0
+    original = operator_view.launch.launch_reference
+
+    def count_parses(value: Task) -> str | None:
+        nonlocal parsed
+        parsed += 1
+        return original(value)
+
+    monkeypatch.setattr(operator_view.launch, "launch_reference", count_parses)
+    rows = snapshot(tasks=tasks, runs=tuple(runs), groups={}).to_dict()["runs"]
+
+    assert [row["workers"][0]["job"] for row in rows[:160]] == list(range(1_000, 1_160))
+    assert rows[160]["workers"][0]["job"] == 10
+    assert rows[160]["landing"]["job"] == 10
+    assert rows[161]["workers"][0]["job"] is None
+    assert rows[162]["workers"][0]["job"] == 1_150
+    assert parsed == len(tasks)
+    assert tasks.iterations <= 3, "run lookup traversed the task collection again"
+
+
 def test_an_active_worker_or_landing_task_is_never_landed() -> None:
     """jcub: a run whose worker or landing task is queued or running is that task."""
     accepted = run(
