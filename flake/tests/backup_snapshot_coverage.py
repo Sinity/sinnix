@@ -957,7 +957,7 @@ elif command=='btrfs':
                 (root / "mock-bin" / name).write_text(mock)
                 (root / "mock-bin" / name).chmod(0o755)
             (root / "mock-bin/dolt").write_text(
-                """#!/usr/bin/env python3
+                """#!PYTHON
 import json, pathlib, sys
 args = sys.argv[1:]
 repo = pathlib.Path(args[args.index('--data-dir') + 1]) / 'sinex'
@@ -971,7 +971,7 @@ if 'FROM dolt_log' in args[args.index('-q') + 1]:
 elif 'FROM issues' in args[args.index('-q') + 1]:
     print(json.dumps({'rows': [json.loads(issue.read_text())]}))
 else: sys.exit(1)
-"""
+""".replace("PYTHON", sys.executable)
             )
             for name in ("dolt",):
                 (root / "mock-bin" / name).chmod(0o755)
