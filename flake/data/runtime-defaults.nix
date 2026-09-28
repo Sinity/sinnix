@@ -527,8 +527,11 @@ rec {
         IOAccounting = true;
         CPUWeight = 50;
         IOWeight = 50;
-        MemoryHigh = "5G";
-        MemoryMax = "6G";
+        # Three concurrent Polylogue verify_quick jobs (parallel gates, ~2-2.6G
+        # each) held the old 5G line on 2026-09-28 at 88% full memory
+        # pressure, so each ran slower than two unthrottled ones would.
+        MemoryHigh = "9G";
+        MemoryMax = "10G";
         MemorySwapMax = "0";
       };
       agentctl-interactive = {
