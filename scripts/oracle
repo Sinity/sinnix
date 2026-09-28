@@ -48,8 +48,12 @@ PACK_DIR=/realm/project/sinity-lynchpin/.agent/scratch/current-state-packs
 GH_REPOS=(Sinity/sinnix Sinity/sinex Sinity/polylogue Sinity/knowledgebase Sinity/scribe-tap Sinity/intercept-bounce)
 GIT_REPOS=(/realm/project/sinex /realm/project/polylogue /realm/project/sinity-lynchpin /realm/project/sinnix)
 
-SUBSTRATE="$(mktemp -t oracle-substrate.XXXXXX.md)"
-trap 'rm -f "$SUBSTRATE"' EXIT
+scratch="$(mktemp -d "${TMPDIR:-/tmp}/oracle.XXXXXXXX")"
+trap 'rm -rf -- "$scratch"' EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+SUBSTRATE="$scratch/substrate.md"
 
 {
   echo "# Substrate for ${DATE}"
@@ -110,7 +114,7 @@ trap 'rm -f "$SUBSTRATE"' EXIT
 SUBSTRATE_BYTES=$(wc -c < "$SUBSTRATE")
 MAX_BYTES=$((110 * 1024))
 if [[ "$SUBSTRATE_BYTES" -gt "$MAX_BYTES" ]]; then
-  TRUNC="$(mktemp -t oracle-substrate-trunc.XXXXXX.md)"
+  TRUNC="$scratch/truncated.md"
   head -c "$MAX_BYTES" "$SUBSTRATE" > "$TRUNC"
   printf '\n\n[substrate truncated at %d bytes; original was %d]\n' "$MAX_BYTES" "$SUBSTRATE_BYTES" >> "$TRUNC"
   mv "$TRUNC" "$SUBSTRATE"
