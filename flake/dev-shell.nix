@@ -157,6 +157,14 @@
         ++ builtins.attrValues devCommands;
 
         shellHook = ''
+          # Preserve the checkout selected when entering this shell. Commands
+          # may change directory before switch runs; NH_FLAKE is only a host
+          # default and can point at another checkout.
+          unset SINNIX_DEV_SHELL_FLAKE
+          _sinnix_shell_root="$(${pkgs.git}/bin/git rev-parse --show-toplevel 2>/dev/null || true)"
+          if [ -n "$_sinnix_shell_root" ] && [ -f "$_sinnix_shell_root/flake.nix" ]; then
+            export SINNIX_DEV_SHELL_FLAKE="$_sinnix_shell_root"
+          fi
           echo ""
           echo "NixOS Configuration Development Environment"
           echo ""

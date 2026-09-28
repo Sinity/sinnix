@@ -176,6 +176,27 @@ let
       exit 64
     fi
   '';
+  switchSourceGuard = ''
+    # Activation must have a real, current Git revision. Fetch failure is a
+    # refusal: a cached tracking ref cannot establish remote currency.
+    if ! ${pkgs.git}/bin/git -C "$_flake_dir" rev-parse --show-toplevel >/dev/null 2>&1; then
+      echo "sinnix switch: flake source is not a Git checkout: $_flake_dir" >&2
+      exit 64
+    fi
+    if [ "''${SINNIX_ALLOW_DIRTY:-0}" != 1 ] \
+      && [ -n "$(${pkgs.git}/bin/git -C "$_flake_dir" status --porcelain --untracked-files=normal)" ]; then
+      echo "sinnix switch: source is dirty; set SINNIX_ALLOW_DIRTY=1 to allow it" >&2
+      exit 64
+    fi
+    if ! ${pkgs.git}/bin/git -C "$_flake_dir" fetch --quiet origin master; then
+      echo "sinnix switch: cannot verify origin/master" >&2
+      exit 69
+    fi
+    if ! ${pkgs.git}/bin/git -C "$_flake_dir" merge-base --is-ancestor refs/remotes/origin/master HEAD; then
+      echo "sinnix switch: HEAD is behind or diverged from origin/master" >&2
+      exit 64
+    fi
+  '';
   activationCommands = {
     test-vm = {
       description = "Build a QEMU VM from the current configuration (nixos-rebuild build-vm)";
@@ -253,16 +274,30 @@ let
       description = "Apply configuration changes to the system (nh os switch)";
       script = ''
         ${activationGuard "switch"}
+        if [ -n "''${SINNIX_DEV_SHELL_FLAKE:-}" ]; then
+          export SINNIX_FLAKE_DIR="$SINNIX_DEV_SHELL_FLAKE"
+        fi
         ${resolveFlakeDir}
+        ${switchSourceGuard}
         ${rebuildLock "switch"}
         ${avoidRepoCwdForActivation}
         ${localInputOverrideArgs}
         ${rebuildDefaultArgs}
         ${scriptPkgs.sinnix-preflight}/bin/sinnix-preflight switch
         _rebuild_status=0
+        _rebuild_unit="sinnix-switch-$$"
+        _rebuild_complete=0
+        cleanup_rebuild() {
+          if [ "$_rebuild_complete" -eq 0 ]; then
+            ${pkgs.systemd}/bin/systemctl --user stop "$_rebuild_unit.service" >&2 || true
+          fi
+        }
+        trap cleanup_rebuild EXIT
+        trap 'exit 130' INT
+        trap 'exit 143' TERM
         ${pkgs.systemd}/bin/systemd-run \
           --user \
-          --quiet --collect --pipe --service-type=exec --wait \
+          --quiet --collect --pipe --service-type=exec --wait --unit="$_rebuild_unit" \
           --setenv=PATH="${rebuildServicePath}:$PATH" \
           ${rebuildContainmentFlags}
           ${pkgs.coreutils}/bin/env -u FLAKE NH_FLAKE="$_invoke_flake_dir" \
@@ -270,7 +305,13 @@ let
             "''${_invoke_flake_dir}#sinnix-prime" \
             --no-nom \
             "''${rebuild_args[@]}" \
-            "''${nh_extra_args[@]}" || _rebuild_status=$?
+            "''${nh_extra_args[@]}" &
+        _rebuild_runner=$!
+        wait "$_rebuild_runner" || _rebuild_status=$?
+        if [ "$_rebuild_status" -eq 0 ]; then
+          _rebuild_complete=1
+          trap - EXIT INT TERM
+        fi
         ${sinexCachePush}
         exit "$_rebuild_status"
       '';

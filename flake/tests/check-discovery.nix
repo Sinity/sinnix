@@ -36,10 +36,21 @@
       activationRegistry = import ../command-registry.nix {
         inherit inputs system;
         pkgs = pkgs // {
-          systemd = pkgs.writeShellScriptBin "systemd-run" ''
-            printf '%s\n' "$*" >> "$ACTIVATION_LOG"
-            exit "$ACTIVATION_STATUS"
-          '';
+          systemd = pkgs.symlinkJoin {
+            name = "fake-systemd-activation";
+            paths = [
+              (pkgs.writeShellScriptBin "systemd-run" ''
+                printf '%s\n' "$*" >> "$ACTIVATION_LOG"
+                if [ "''${ACTIVATION_HANG:-0}" = 1 ]; then
+                  while [ ! -e "$ACTIVATION_RELEASE" ]; do sleep 0.1; done
+                fi
+                exit "$ACTIVATION_STATUS"
+              '')
+              (pkgs.writeShellScriptBin "systemctl" ''
+                printf 'stop %s\n' "$*" >> "$ACTIVATION_LOG"
+              '')
+            ];
+          };
           nix = pkgs.writeShellScriptBin "nix" ''
             echo unexpected-nix >> "$ACTIVATION_LOG"
             exit 99
@@ -121,6 +132,14 @@
         DISCOVERY_JSON="$good" ${builtins.head commands} --no-build
         test ! -s "$BUILD_LOG"
         export SUDO_HOME="$TMPDIR" ACTIVATION_LOG="$TMPDIR/activation"
+        ${pkgs.git}/bin/git init -q --bare "$TMPDIR/remote.git"
+        ${pkgs.git}/bin/git init -q -b master "$TMPDIR/source"
+        printf '{ }\n' > "$TMPDIR/source/flake.nix"
+        ${pkgs.git}/bin/git -C "$TMPDIR/source" add flake.nix
+        ${pkgs.git}/bin/git -C "$TMPDIR/source" -c user.name=Fixture -c user.email=fixture@example.test commit -qm initial
+        ${pkgs.git}/bin/git -C "$TMPDIR/source" remote add origin "$TMPDIR/remote.git"
+        ${pkgs.git}/bin/git -C "$TMPDIR/source" push -q -u origin master
+        export SINNIX_FLAKE_DIR="$TMPDIR/source"
         printf '{ }\n' > "$TMPDIR/secret-declarations.nix"
         export SINNIX_SECRET_DECLARATIONS="$TMPDIR/secret-declarations.nix"
         export PATH="${fakeSudo}/bin:$PATH"
@@ -145,7 +164,9 @@
             status=0
             SINNIX_SINEX_OVERRIDE=/tmp/sinex ACTIVATION_STATUS="$expected" "$command" || status=$?
             test "$status" = "$expected"
-            test "$(wc -l < "$ACTIVATION_LOG")" = 1
+            expected_lines=1
+            if [ "$name" = switch ]; then expected_lines=2; fi
+            test "$(wc -l < "$ACTIVATION_LOG")" = "$expected_lines"
             grep -Fq "$expected_argv" "$ACTIVATION_LOG"
             grep -Fq -- '--override-input sinex /tmp/sinex' "$ACTIVATION_LOG"
             grep -Fq -- '--slice=nix-build.slice' "$ACTIVATION_LOG"
@@ -166,6 +187,36 @@
           grep -Fq -- '--setenv=NIX_CONFIG=eval-cache = true' "$ACTIVATION_LOG"
         }
         ${activationCases}
+        printf 'dirty\n' > "$TMPDIR/source/untracked"
+        : > "$ACTIVATION_LOG"
+        status=0
+        ACTIVATION_STATUS=0 "${activationExecutables.switch}" || status=$?
+        test "$status" = 64
+        test ! -s "$ACTIVATION_LOG"
+        SINNIX_ALLOW_DIRTY=1 ACTIVATION_STATUS=7 "${activationExecutables.switch}" || test "$?" = 7
+        ${pkgs.coreutils}/bin/rm "$TMPDIR/source/untracked"
+        ${pkgs.git}/bin/git -C "$TMPDIR/source" -c user.name=Fixture -c user.email=fixture@example.test commit -q --allow-empty -m newer
+        ${pkgs.git}/bin/git -C "$TMPDIR/source" push -q origin master
+        ${pkgs.git}/bin/git -C "$TMPDIR/source" reset -q --hard HEAD~1
+        : > "$ACTIVATION_LOG"
+        status=0
+        ACTIVATION_STATUS=0 "${activationExecutables.switch}" || status=$?
+        test "$status" = 64
+        test ! -s "$ACTIVATION_LOG"
+        ${pkgs.git}/bin/git -C "$TMPDIR/source" reset -q --hard origin/master
+        : > "$ACTIVATION_LOG"
+        NH_FLAKE="$TMPDIR/other" SINNIX_DEV_SHELL_FLAKE="$TMPDIR/source" ACTIVATION_STATUS=7 "${activationExecutables.switch}" || test "$?" = 7
+        grep -Fq "$TMPDIR/source#sinnix-prime" "$ACTIVATION_LOG"
+        : > "$ACTIVATION_LOG"
+        ACTIVATION_RELEASE="$TMPDIR/release" ACTIVATION_HANG=1 ACTIVATION_STATUS=0 "${activationExecutables.switch}" &
+        wrapper=$!
+        while [ ! -s "$ACTIVATION_LOG" ]; do sleep 0.1; done
+        kill -TERM "$wrapper"
+        status=0
+        wait "$wrapper" || status=$?
+        test "$status" = 143
+        grep -Eq '^stop --user stop sinnix-switch-[0-9]+.service$' "$ACTIVATION_LOG"
+        touch "$TMPDIR/release"
         test -x "${activationExecutables.test-system}"
         test ! -e "${activationRegistry.activationPackages.test-system}/bin/test"
 

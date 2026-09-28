@@ -185,6 +185,6 @@ The reranker is the llama.cpp endpoint at `127.0.0.1:8081` and answers `/v1/rera
 - Do not run `ollama pull muse-glimmer`. This deployment is intentionally not in the Ollama pull roster.
 - If a request returns `finish_reason: "length"` with no visible content, raise `max_tokens`; the reasoning trace consumed the budget.
 - If VRAM is tight, inspect `sinnix ai status` and stop the current GPU occupant before starting another. The services are designed to be mutually exclusive.
-- After configuration changes, run `nix develop --command switch`, then verify `nixos-version --configuration-revision`. A successful switch is only confirmed when the live revision matches the repository commit.
+- After configuration changes, run `nix develop --command switch` from the intended Sinnix checkout, then verify `nixos-version --configuration-revision`. The wrapper uses the checkout captured when the devshell starts, fetches `origin/master`, and refuses a dirty or stale source. `SINNIX_ALLOW_DIRTY=1` explicitly permits uncommitted files; it does not permit a stale revision. A successful switch is confirmed when the live revision matches the repository commit.
 
 The runtime inventory at `/etc/sinnix/runtime-inventory.json` records the declared endpoints, activation modes, resource class, idle windows, and GPU admission relationships for these services.
