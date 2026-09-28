@@ -19,6 +19,8 @@ next, not on supervising progress.
   - In Claude Code, prefer forks (`subagent_type: "fork"`) for
     implementation: they inherit the conversation and the parent model. A
     fork that hits its 200-turn cap is resumed with a short continue message.
+    A usage-limit stop also ends workers silently: once the quota resets,
+    list the agents and resume every one whose work was unfinished.
   - Dispatch every editing agent with `isolation: "worktree"`. An agent's
     shell working directory resets to the session's project directory
     between calls, so a worktree named only in the prompt lets checks
