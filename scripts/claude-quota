@@ -1,0 +1,262 @@
+#!/usr/bin/env python3
+# @sinnix-package
+# description: Show Claude subscription usage and wake a session after a usage-limit reset
+# runtimeInputs: coreutils
+"""Claude subscription usage: meter, history, and usage-limit recovery.
+
+The meter is the account's own usage endpoint, the one Claude Code's /usage
+screen reads, authenticated with the OAuth token Claude Code keeps in
+`.credentials.json`. The token is read in memory and never written or
+logged. When the token has expired, Claude Code refreshes it on its next
+request; this tool never refreshes it itself, because a refresh rotates the
+credential Claude Code owns.
+
+Readings are appended to $XDG_STATE_HOME/claude-quota/samples.jsonl, by this
+tool and by the managed statusline (which receives the same percentages from
+Claude Code on every render). The burn rate is computed from that history.
+
+`wait-reset` is the StopFailure hook body: after a rate_limit stop it waits
+until the 5-hour window resets, then exits 2 so Claude Code's asyncRewake
+wakes the session with the resume instruction.
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import fcntl
+import json
+import os
+import sys
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+ENDPOINT = "https://api.anthropic.com/api/oauth/usage"
+STATE = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "claude-quota"
+SAMPLES = STATE / "samples.jsonl"
+RATE_SPAN = 60 * 60  # use the last hour of readings for the burn rate
+MIN_RATE_SPAN = 10 * 60
+# A 5-hour window resets within 5 hours; a still-exhausted weekly window just
+# stops the next turn again and restarts the wait.
+WAIT_CAP = 5 * 60 * 60 + 5 * 60
+POLL = 10 * 60
+
+RESUME = (
+    "Claude usage is available again (5-hour window {five}, weekly {week}). The "
+    "usage limit ended this session's last turn and stopped any background agents "
+    "mid-task. Continue the interrupted work. If you coordinate agents, run "
+    "`claude-agents`, resume every agent whose work was unfinished with "
+    "SendMessage, and check queued runtime work you own."
+)
+
+
+def credentials_path() -> Path:
+    root = os.environ.get("CLAUDE_CONFIG_DIR")
+    return Path(root) / ".credentials.json" if root else Path.home() / ".claude/.credentials.json"
+
+
+def epoch(value) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    return dt.datetime.fromisoformat(value).timestamp()
+
+
+def fetch() -> dict:
+    """Return {'five_hour': pct, 'five_hour_resets_at': epoch, 'seven_day': ..., ...}."""
+    oauth = json.loads(credentials_path().read_text())["claudeAiOauth"]
+    request = urllib.request.Request(
+        ENDPOINT,
+        headers={
+            "Authorization": "Bearer " + oauth["accessToken"],
+            "anthropic-beta": "oauth-2025-04-20",
+            "User-Agent": "claude-quota",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            body = json.load(response)
+    except urllib.error.HTTPError as error:
+        if error.code == 401:
+            raise RuntimeError(
+                "the Claude Code OAuth token is expired; any claude request refreshes it"
+            ) from None
+        raise
+    sample = {"ts": time.time(), "source": "endpoint"}
+    for window in ("five_hour", "seven_day"):
+        data = body.get(window) or {}
+        sample[window] = data.get("utilization")
+        sample[window + "_resets_at"] = epoch(data.get("resets_at"))
+    return sample
+
+
+def record(sample: dict) -> None:
+    STATE.mkdir(parents=True, exist_ok=True)
+    with SAMPLES.open("a") as handle:
+        handle.write(json.dumps(sample) + "\n")
+
+
+def history() -> list[dict]:
+    try:
+        lines = SAMPLES.read_text().splitlines()[-2000:]
+    except FileNotFoundError:
+        return []
+    rows = []
+    for line in lines:
+        try:
+            rows.append(json.loads(line))
+        except ValueError:
+            continue
+    return rows
+
+
+def burn_rate(current: dict) -> float | None:
+    """Percentage points per hour over the last hour of the current window."""
+    reset = current.get("five_hour_resets_at")
+    now = current["ts"]
+    window = [
+        row
+        for row in history()
+        if row.get("five_hour") is not None
+        and now - RATE_SPAN <= row["ts"] <= now
+        and abs((row.get("five_hour_resets_at") or 0) - (reset or 0)) < 120
+    ]
+    if not window:
+        return None
+    oldest = min(window, key=lambda row: row["ts"])
+    span = now - oldest["ts"]
+    if span < MIN_RATE_SPAN:
+        return None
+    return (current["five_hour"] - oldest["five_hour"]) / span * 3600
+
+
+def clock(ts: float | None) -> str:
+    if ts is None:
+        return "?"
+    moment = dt.datetime.fromtimestamp(round(ts / 60) * 60)
+    if moment.date() == dt.date.today():
+        return moment.strftime("%H:%M")
+    return moment.strftime("%a %H:%M")
+
+
+def duration(seconds: float) -> str:
+    minutes = max(0, int(seconds // 60))
+    return f"{minutes // 60}h{minutes % 60:02d}m"
+
+
+def cmd_status(args) -> int:
+    try:
+        current = fetch()
+        record(current)
+    except (OSError, RuntimeError, KeyError, ValueError) as error:
+        rows = [row for row in history() if row.get("five_hour") is not None]
+        if not rows:
+            print(f"claude-quota: {error}", file=sys.stderr)
+            return 1
+        current = rows[-1]
+        print(f"claude-quota: live read failed ({error}); showing last reading", file=sys.stderr)
+    rate = burn_rate(current)
+    reset = current.get("five_hour_resets_at")
+    projection = None
+    if rate and rate > 0 and current["five_hour"] is not None:
+        projection = current["ts"] + (100 - current["five_hour"]) / rate * 3600
+    if args.json:
+        print(json.dumps({**current, "burn_pct_per_hour": rate, "exhausted_at": projection}))
+        return 0
+    now = time.time()
+    age = "" if now - current["ts"] < 90 else f" (reading {duration(now - current['ts'])} old)"
+    print(
+        f"5h  {current['five_hour']:.0f}%  resets {clock(reset)}"
+        f" (in {duration((reset or now) - now)}){age}"
+    )
+    print(f"7d  {current['seven_day']:.0f}%  resets {clock(current.get('seven_day_resets_at'))}")
+    if rate is None:
+        print("burn: needs readings spanning 10+ minutes of this window")
+    elif projection and reset and projection < reset:
+        print(
+            f"burn {rate:.1f}%/h: limit at {clock(projection)},"
+            f" {duration(reset - projection)} before the reset"
+        )
+    else:
+        print(f"burn {rate:.1f}%/h: lasts until the reset")
+    return 0
+
+
+def interactive_session() -> bool:
+    # asyncRewake only runs in the background of an interactive session; a
+    # headless run would block its exit on this wait instead.
+    return os.environ.get("CLAUDE_CODE_ENTRYPOINT", "cli") == "cli"
+
+
+def cmd_wait_reset(args) -> int:
+    try:
+        payload = json.load(sys.stdin)
+    except ValueError:
+        payload = {}
+    if payload.get("error", "rate_limit") != "rate_limit" or not interactive_session():
+        return 0
+    STATE.mkdir(parents=True, exist_ok=True)
+    session = payload.get("session_id") or "unknown"
+    lock = (STATE / f"wait-{session}.lock").open("w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return 0  # an earlier stop in this session is already waiting
+    deadline = time.time() + WAIT_CAP
+    current: dict = {}
+    first = True
+    while time.time() < deadline:
+        try:
+            current = fetch()
+            record(current)
+            live = True
+        except (OSError, RuntimeError, KeyError, ValueError):
+            rows = [row for row in history() if row.get("five_hour_resets_at")]
+            current = rows[-1] if rows else {}
+            live = False
+        blocked = [
+            current.get(window + "_resets_at") or time.time() + POLL
+            for window in ("five_hour", "seven_day")
+            if (current.get(window) or 0) >= 100
+        ]
+        if not live:
+            # Without a live reading, trust the last known reset time.
+            reset = current.get("five_hour_resets_at")
+            if reset is not None and time.time() > reset + 60:
+                break
+            blocked = [reset] if reset else [time.time() + POLL]
+        elif not blocked:
+            if not first:
+                break
+            # Stopped by a transient rate limit, not an exhausted window.
+            time.sleep(5 * 60)
+            break
+        first = False
+        time.sleep(min(POLL, max(30, max(blocked) + 60 - time.time())))
+    def pct(window: str) -> str:
+        value = current.get(window)
+        return "unknown" if value is None else f"{value:.0f}%"
+
+    print(RESUME.format(five=pct("five_hour"), week=pct("seven_day")), file=sys.stderr)
+    return 2
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(prog="claude-quota", description=__doc__.split("\n\n")[0])
+    sub = parser.add_subparsers(dest="command")
+    status = sub.add_parser("status", help="current 5-hour and weekly usage, burn rate (default)")
+    status.add_argument("--json", action="store_true")
+    sub.add_parser("wait-reset", help="StopFailure hook: wait for the 5-hour reset, then exit 2")
+    args = parser.parse_args()
+    if args.command == "wait-reset":
+        return cmd_wait_reset(args)
+    if args.command is None:
+        args.json = False
+    return cmd_status(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

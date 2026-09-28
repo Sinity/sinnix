@@ -19,8 +19,7 @@ next, not on supervising progress.
   - In Claude Code, prefer forks (`subagent_type: "fork"`) for
     implementation: they inherit the conversation and the parent model. A
     fork that hits its 200-turn cap is resumed with a short continue message.
-    A usage-limit stop also ends workers silently: once the quota resets,
-    list the agents and resume every one whose work was unfinished.
+    Keeping workers alive and paced is covered under "Run the fleet" below.
   - Dispatch every editing agent with `isolation: "worktree"`. An agent's
     shell working directory resets to the session's project directory
     between calls, so a worktree named only in the prompt lets checks
@@ -78,6 +77,25 @@ default. `scripts/probe_agent_runtime.sh` checks a backend's availability and
 quota before a large dispatch. [model-landscape.md](references/model-landscape.md)
 covers verifying the model that actually ran, attributing outcomes, and
 running allocation trials.
+
+## Run the fleet (Claude Code)
+
+- `claude-quota` reads the account's 5-hour and weekly usage, their resets,
+  and the burn rate; the statusline shows the 5-hour figure. Size new
+  dispatches against what is left before the reset.
+- A usage limit ends the coordinator's turn and stops background agents
+  mid-task. A managed `StopFailure` hook waits for the reset and then wakes
+  the coordinator. When woken, run `claude-agents --state quota`
+  and resume each unfinished agent with a short continue message.
+- `claude-agents` lists this session's subagents: idle minutes, state,
+  context size, cache expiry, and their last message. An `ended` agent
+  costs nothing; leave it. Stop one that is hung with TaskStop.
+- Subagent prompt caches last an hour; waking an agent after that rewrites
+  its whole context. While agents wait on long work, schedule a 20-minute
+  recurring CronCreate job that runs `claude-agents --idle 38-60 --state ended`
+  and sends each agent still waiting on something the message "Cache
+  keep-alive. If what you are waiting for has not arrived, reply only
+  'waiting'." Delete the job when no agent is waiting.
 
 ## Integrate
 

@@ -1,0 +1,158 @@
+#!/usr/bin/env python3
+# @sinnix-package
+# description: List a Claude Code session's subagents with idle age, state and cache expiry
+# runtimeInputs: coreutils
+"""List a Claude Code session's subagents from their transcripts.
+
+Each row shows the agent id (what SendMessage takes), idle minutes since its
+transcript last changed, its state, context size, when its prompt cache
+expires, and the start of its last message:
+
+  working  the last record is a tool call or result: a tool or the model is busy
+  ended    the last turn ended normally; its last message says whether work is pending
+  quota    a usage limit ended its turn; resume it after the reset
+  error    another API error ended its turn
+
+The default session is the most recently written transcript of the current
+directory's project, which is the caller's own session when a coordinator
+runs this from its project directory.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+import time
+from pathlib import Path
+
+TAIL_BYTES = 512 * 1024
+
+
+def config_dir() -> Path:
+    root = os.environ.get("CLAUDE_CONFIG_DIR")
+    return Path(root) if root else Path.home() / ".claude"
+
+
+def project_dir(cwd: str) -> Path:
+    slug = "".join(ch if ch.isalnum() else "-" for ch in cwd)
+    return config_dir() / "projects" / slug
+
+
+def resolve_session(value: str | None) -> Path:
+    if value and value.endswith(".jsonl"):
+        return Path(value)
+    if value:
+        matches = list((config_dir() / "projects").glob(f"*/{value}.jsonl"))
+        if not matches:
+            sys.exit(f"claude-agents: no transcript for session {value}")
+        return matches[0]
+    candidates = list(project_dir(os.getcwd()).glob("*.jsonl"))
+    if not candidates:
+        sys.exit(f"claude-agents: no sessions under {project_dir(os.getcwd())}; pass --session")
+    return max(candidates, key=lambda path: path.stat().st_mtime)
+
+
+def tail_records(path: Path) -> list[dict]:
+    with path.open("rb") as handle:
+        size = handle.seek(0, os.SEEK_END)
+        handle.seek(max(0, size - TAIL_BYTES))
+        chunk = handle.read()
+    lines = chunk.split(b"\n")
+    if size > TAIL_BYTES:
+        lines = lines[1:]  # the first line is probably cut
+    records = []
+    for line in lines:
+        try:
+            records.append(json.loads(line))
+        except ValueError:
+            continue
+    return records
+
+
+def text_of(message: dict) -> str:
+    content = message.get("content")
+    if isinstance(content, str):
+        return content
+    parts = [part.get("text", "") for part in content or [] if part.get("type") == "text"]
+    return " ".join(parts)
+
+
+def describe(path: Path, now: float) -> dict:
+    meta_path = path.with_suffix(".meta.json")
+    meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
+    records = [
+        record for record in tail_records(path) if record.get("type") in ("user", "assistant")
+    ]
+    idle = (now - path.stat().st_mtime) / 60
+    state, context, cache_ttl, last_text = "working", None, None, ""
+    for record in reversed(records):
+        message = record.get("message") or {}
+        usage = message.get("usage")
+        if record.get("type") == "assistant" and usage and context is None:
+            context = (
+                usage.get("input_tokens", 0)
+                + usage.get("cache_read_input_tokens", 0)
+                + usage.get("cache_creation_input_tokens", 0)
+            )
+            written = usage.get("cache_creation") or {}
+            cache_ttl = 5 if written.get("ephemeral_5m_input_tokens") else 60
+        if record.get("type") == "assistant" and not last_text:
+            last_text = text_of(message)
+        if context is not None and last_text:
+            break
+    if records:
+        last = records[-1]
+        message = last.get("message") or {}
+        if last.get("type") == "assistant":
+            if last.get("isApiErrorMessage"):
+                state = "quota" if last.get("error") == "rate_limit" else "error"
+            elif message.get("stop_reason") == "end_turn":
+                state = "ended"
+    return {
+        "id": path.stem.removeprefix("agent-"),
+        "description": meta.get("description", ""),
+        "type": meta.get("agentType", ""),
+        "idle_min": round(idle, 1),
+        "state": state,
+        "context_tokens": context,
+        "cache_left_min": None if cache_ttl is None else round(cache_ttl - idle, 1),
+        "last": " ".join(last_text.split())[:160],
+    }
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(prog="claude-agents", description=__doc__.split("\n\n")[0])
+    parser.add_argument("--session", help="session id or transcript path")
+    parser.add_argument("--idle", help="idle-minute range MIN-MAX, e.g. 38-60 for keep-alive")
+    parser.add_argument("--state", help="comma-separated states to show, e.g. ended,quota")
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args()
+
+    session = resolve_session(args.session)
+    now = time.time()
+    rows = [describe(path, now) for path in (session.parent / session.stem / "subagents").glob("agent-*.jsonl")]
+    if args.idle:
+        low, high = (float(bound) for bound in args.idle.split("-"))
+        rows = [row for row in rows if low <= row["idle_min"] < high]
+    if args.state:
+        wanted = set(args.state.split(","))
+        rows = [row for row in rows if row["state"] in wanted]
+    rows.sort(key=lambda row: row["idle_min"])
+    if args.json:
+        print(json.dumps(rows, indent=1))
+        return 0
+    print(f"session {session.stem}")
+    for row in rows:
+        cache = "cold" if (row["cache_left_min"] or 0) <= 0 else f"{row['cache_left_min']:.0f}m"
+        context = f"{(row['context_tokens'] or 0) / 1000:.0f}k"
+        print(
+            f"{row['id']}  {row['idle_min']:6.0f}m  {row['state']:<7} {context:>5}  cache {cache:>4}"
+            f"  {row['description'][:40]}\n      {row['last'][:110]}"
+        )
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

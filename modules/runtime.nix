@@ -668,6 +668,24 @@ in
     (lib.sinnix.mkScheduledJob
       {
         inherit config;
+        unitName = "sinnix-user-manager-watchdog";
+        description = "Re-execute the operator's user manager when its job queue wedges";
+        surface = config.sinnix.runtime.surfaces.user-manager-watchdog;
+      }
+      {
+        # System manager on purpose: a wedged user manager never dispatches
+        # its own timers' start jobs.
+        execStart = "${scriptPkgs.sinnix-user-manager-watchdog}/bin/sinnix-user-manager-watchdog ${cfg.user.name}";
+        serviceConfig.TimeoutStartSec = "120s";
+        timer = {
+          onBootSec = "10min";
+          onUnitActiveSec = "5min";
+        };
+      }
+    )
+    (lib.sinnix.mkScheduledJob
+      {
+        inherit config;
         unitName = "sinnix-config-drift";
         description = "Compare live state with the evaluated Sinnix configuration";
         surface = config.sinnix.runtime.surfaces.config-drift;
@@ -839,6 +857,11 @@ in
       };
 
       sinnix.runtime.surfaces = runtimeDefaults.baseSurfaces // {
+        user-manager-watchdog = {
+          unit = "sinnix-user-manager-watchdog.service";
+          resourceClass = "background";
+          observe.enable = true;
+        };
         # The drift probe itself is governed like everything else it audits:
         # classed, observed, and its output watched as a lane, so a silently
         # dead probe is a health verdict rather than a quiet absence.

@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Re-execute a user systemd manager whose job queue stopped dispatching
+# runtimeInputs: coreutils gawk systemd util-linux
+#
+# The user manager can wedge so that status queries still answer but no start
+# job is ever dispatched: timers pile up "waiting" jobs, `systemd-run --user`
+# times out, and everything that starts a transient unit (agentctl jobs, the
+# switch wrapper) fails with "Connection timed out". `daemon-reexec` clears it
+# without stopping running services.
+#
+# Runs from the system manager, which stays healthy when the user manager
+# wedges. A manager is wedged when start jobs that were already waiting at the
+# previous run are still waiting, no job is running, and a trivial transient
+# unit cannot start. Only then is it re-executed.
+set -euo pipefail
+
+user="${1:?usage: sinnix-user-manager-watchdog <user>}"
+state_dir=/run/sinnix/user-manager-watchdog
+state="$state_dir/$user.waiting"
+install -d -m 0755 "$state_dir"
+
+jobs=$(timeout 30 systemctl --user --machine="$user@" list-jobs --no-legend --plain 2>/dev/null || true)
+running=$(awk '$4 == "running"' <<<"$jobs" | wc -l)
+waiting=$(awk '$4 == "waiting" { print $1 }' <<<"$jobs" | sort)
+previous=$(cat "$state" 2>/dev/null || true)
+printf '%s\n' "$waiting" > "$state"
+
+if [ "$running" -gt 0 ] || [ -z "$waiting" ] || [ -z "$previous" ]; then
+  exit 0
+fi
+stuck=$(comm -12 <(printf '%s\n' "$previous") <(printf '%s\n' "$waiting"))
+[ -n "$stuck" ] || exit 0
+
+probe() {
+  timeout 30 systemd-run --user --machine="$user@" --wait --quiet --collect true >/dev/null 2>&1
+}
+if probe; then
+  exit 0
+fi
+
+echo "user manager for $user: $(wc -l <<<"$stuck") start job(s) waiting since the last run, none running, and a transient unit cannot start; re-executing"
+systemctl --user --machine="$user@" daemon-reexec
+sleep 5
+if probe; then
+  echo "user manager for $user dispatches jobs again"
+  : > "$state"
+else
+  echo "user manager for $user is still not dispatching jobs after re-exec" >&2
+  exit 1
+fi

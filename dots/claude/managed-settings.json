@@ -88,6 +88,19 @@
         ]
       }
     ],
+    "StopFailure": [
+      {
+        "matcher": "rate_limit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "claude-quota wait-reset",
+            "asyncRewake": true,
+            "timeout": 21600
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [
@@ -155,7 +168,7 @@
   },
   "statusLine": {
     "type": "command",
-    "command": "bash /home/sinity/.claude/statusline-command.sh"
+    "command": "bash /realm/project/sinnix/dots/claude/statusline-command.sh"
   },
   "skipDangerousModePermissionPrompt": true,
   "skipWorkflowUsageWarning": true,
