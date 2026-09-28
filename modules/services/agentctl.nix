@@ -84,11 +84,8 @@ mkServiceModule {
       };
       # Bounded selections stay admissible beside a wave: a worker runs its own
       # focused tests here while its own task occupies the agent pool.
-      # Focused jobs run one pytest process. 106 slot receipts (2026-09-27)
-      # peaked at p99 553 MiB and max 988 MiB, so eight fit under the quick
-      # slice's 9G MemoryHigh even at the observed maximum (six running jobs
-      # measured 5.2 GiB together). The width is an interim static bound;
-      # sinnix-tisc makes admission follow live headroom.
+      # The startup ceiling is eight. Backpressure adjusts the live width
+      # between one and eight using the quick slice's memory headroom and PSI.
       pytest-quick.parallel = 8;
       bulk.parallel = 2;
       # Three Polylogue verify_quick runs fit the 9G normal slice now that one
@@ -157,7 +154,7 @@ mkServiceModule {
         {
           manager = "user";
           resourceClass = "background";
-          # The pass pauses and resumes pueue groups through the pueue client.
+          # The pass pauses groups and adjusts quick admission through pueue.
           path = [ pkgs.pueue ];
           execStart = "${scriptPkgs.agentctl}/bin/agentctl backpressure tick";
           serviceConfig = {
@@ -166,7 +163,7 @@ mkServiceModule {
           };
           timer = {
             # Full-stall averages are 60-second means, so sampling faster reads
-            # the same number twice. One group is paused or resumed per tick,
+            # the same number twice. One group is paused per tick,
             # with the signal-specific order defined by `agentctl backpressure tick`.
             onUnitActiveSec = 60;
             onBootSec = 60;

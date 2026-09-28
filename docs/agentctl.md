@@ -192,12 +192,9 @@ corpus. Agentctl records only those holds in the launch input and releases
 them after the partner pool drains; operator stashes and dependencies remain
 untouched. Bounded affected verification uses the nonexclusive `pytest` pool.
 
-At the first backpressure pass after this upgrade, agentctl may retire an old
-cross-pool stash only when the task is non-terminal and still stashed _and_
-its latest matching spool event is an unresolved `held`. A stale launch
-marker, missing/conflicting history, or a terminal task is reported and left
-alone; this never revives a cancelled job or releases an operator/external
-stash.
+The recurring pass releases only current cross-pool holds with a matching
+launch reference and pool after their blockers drain. It leaves legacy stashes
+for explicit operator inspection and recovery.
 
 `job cancel` drops a queued task out of the queue (`removed`); for a running
 task it writes the cancel marker, runs `systemctl --user stop <unit>`, then
@@ -219,19 +216,25 @@ pressure; they do not choose capacity from instantaneous free RAM.
 
 `agentctl-backpressure.timer` runs `agentctl backpressure tick`: it pauses one
 eligible group per minute while known host `full` IO or memory stall stays
-above threshold and resumes only an agentctl-owned pause once its closing
-signal is known to have cleared. Unavailable or malformed PSI never reads as
-zero and cannot reopen a pause. The spool projection uses an inode/offset
-checkpoint, rebuilding from current history after checkpoint loss and
-retaining ownership across spool rotation or truncation.
+above threshold. Native pueue state cannot reveal an operator pause repeated
+while already paused, so the tick never resumes a group automatically. Its
+`manual_recovery` list names paused groups whose pressure has cleared; the
+operator can use `pueue start --group <group>` after checking current intent.
+Unavailable or malformed PSI never reads as zero. The spool projection uses
+an inode/offset checkpoint and retains observations across spool rotation.
 The heavy pool closes before other test and bulk pools under IO or memory
 pressure. The bounded `pytest` and `pytest-quick` pools remain admissible
 under IO pressure; memory pressure can still close them. Pausing admission
 leaves running tasks active.
-Every pause event carries `"owner": "agentctl"` and
-the group, and a group is resumed only when its most recent pause event in
-the spool is agentctl's own: an operator's `pueue pause -g <group>` stays
-paused.
+Every pause event carries `"owner": "agentctl"` and the group. For
+`pytest-quick`, the tick also adjusts pueue parallelism by one per tick between
+one and eight. A rise requires memory PSI below the resume threshold and at
+least 1 GiB of headroom in the quick cgroup and each bounded ancestor. Rising
+pressure or insufficient headroom reduces the width toward one. The 1 GiB
+budget exceeds the observed maximum 988 MiB among 106 focused slot receipts
+(2026-09-27). Unknown cgroup readings never increase admission. Each width
+change is written to the backpressure event spool; pueue owns the current
+width.
 
 ## Worktrees
 
