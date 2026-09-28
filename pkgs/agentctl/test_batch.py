@@ -683,6 +683,8 @@ def test_start_claims_creates_worktrees_and_queues_workers_then_the_landing(
         "land",
         run["run_id"],
     ]
+
+
     stored = json.loads(
         manifest.manifest_path(harness.config, run["run_id"]).read_text()
     )
@@ -700,6 +702,18 @@ def test_start_claims_creates_worktrees_and_queues_workers_then_the_landing(
         "attempt": 1,
         "requested": {key: lead[key] for key in ("backend", "model", "effort")},
     }
+
+
+def test_batch_mcp_opt_in_is_persisted_for_workers(harness: Harness) -> None:
+    run = harness.start("fx-solo", mcp_servers=("context7",))
+    worker = run["workers"][0]
+    assert worker["mcp_servers"] == ["context7"]
+    task = harness.pueue.task(worker["task_id"])
+    assert task is not None
+    argv = read_launch(harness.config, task)["argv"]
+    assert argv[-2:] == ["--mcp-server", "context7"]
+    with pytest.raises(BatchRefusal, match="different MCP selection"):
+        harness.start("fx-solo", mcp_servers=("polylogue",))
 
 
 def test_result_read_projection_separates_dispatch_from_worker_claims(

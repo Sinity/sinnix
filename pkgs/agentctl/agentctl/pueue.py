@@ -261,6 +261,31 @@ def tasks() -> dict[int, Task]:
     return status().tasks
 
 
+def running_tasks(group: str) -> dict[int, Task]:
+    """Only live tasks in one pool; the daemon's retained history is unbounded."""
+    return _selected_tasks(group, "status=running")
+
+
+def _selected_tasks(group: str, query: str) -> dict[int, Task]:
+    document = _decode(
+        _run(["status", "--json", "--group", group, query]),
+        "status",
+    )
+    entries = document.get("tasks") if isinstance(document, Mapping) else None
+    if not isinstance(entries, Mapping):
+        raise PueueError("pueue status published no tasks")
+    parsed = (Task.from_entry(entry) for entry in entries.values())
+    return {task.task_id: task for task in parsed}
+
+
+def task_from_log(task_id: int) -> Task | None:
+    """Find one terminal task without loading the daemon's task history."""
+    document = _decode(_run(["log", "--json", "--lines", "0", str(task_id)]), "log")
+    row = document.get(str(task_id)) if isinstance(document, Mapping) else None
+    entry = row.get("task") if isinstance(row, Mapping) else None
+    return Task.from_entry(entry) if isinstance(entry, Mapping) else None
+
+
 def task(task_id: int) -> Task | None:
     return tasks().get(task_id)
 

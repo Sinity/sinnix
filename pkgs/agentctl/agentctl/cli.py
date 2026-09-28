@@ -29,6 +29,8 @@ Exit status, the one table for the package:
 from __future__ import annotations
 
 import argparse
+import fcntl
+import hashlib
 import json
 import os
 import sys
@@ -80,6 +82,7 @@ EXIT_JOB_NOT_SUCCEEDED = 4
 DEFAULT_WAIT_SECONDS = 3_600
 DEFAULT_EVENT_LINES = 40
 FOLLOW_POLL_SECONDS = 1.0
+MAX_EVENT_LINE_BYTES = 1024 * 1024
 
 _REFUSALS = (
     BatchRefusal,
@@ -285,6 +288,10 @@ def parser() -> argparse.ArgumentParser:
         default="queued",
         dest="harness",
         help="queued: agentctl runs the workers; external: another harness does",
+    )
+    batch_start.add_argument(
+        "--mcp-server", action="append", default=[], metavar="NAME",
+        help="enable one named MCP server for each queued worker",
     )
     _agent_arguments(batch_start)
     _output_arguments(batch_start)
@@ -650,6 +657,7 @@ def _batch(arguments: argparse.Namespace, config: Config, out: Output) -> int:
             backend=arguments.backend,
             model=arguments.model,
             effort=arguments.effort,
+            mcp_servers=arguments.mcp_server,
         )
         note = (
             "already prepared; nothing launched"
@@ -863,6 +871,7 @@ def _last_matching_lines(
     position = handle.tell()
     found: list[str] = []
     carry = b""
+    oversized = False
     while position > 0 and len(found) < count:
         step = min(_TAIL_BLOCK_BYTES, position)
         position -= step
@@ -873,8 +882,14 @@ def _last_matching_lines(
         # the next (earlier) block unless the file start was reached.
         carry = parts[0] if position > 0 else b""
         complete = parts[1:] if position > 0 else parts
+        if oversized and len(parts) > 1:
+            complete = complete[:-1]
+            oversized = False
+        if len(carry) > MAX_EVENT_LINE_BYTES:
+            carry = b""
+            oversized = True
         for raw in reversed(complete):
-            if not raw:
+            if not raw or len(raw) > MAX_EVENT_LINE_BYTES:
                 continue
             line = raw.decode("utf-8", errors="replace")
             if wanted(line):
@@ -888,6 +903,23 @@ def _last_matching_lines(
 def _events(arguments: argparse.Namespace, config: Config, out: Output) -> int:
     spool = config.event_spool
     project = arguments.project
+    follow_lock: int | None = None
+    if arguments.follow:
+        config.state_dir.mkdir(parents=True, exist_ok=True)
+        identity = hashlib.sha256((project or "all").encode()).hexdigest()[:16]
+        follow_lock = os.open(
+            config.state_dir / f"events-follow-{identity}.lock",
+            os.O_CREAT | os.O_RDWR, 0o600,
+        )
+        try:
+            fcntl.flock(follow_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            os.close(follow_lock)
+            print(
+                "agentctl: an event follow for this project is already running",
+                file=sys.stderr,
+            )
+            return EXIT_REFUSED
 
     def wanted(line: str) -> bool:
         return (
@@ -918,23 +950,35 @@ def _events(arguments: argparse.Namespace, config: Config, out: Output) -> int:
                 return EXIT_OK
             handle.seek(0, os.SEEK_END)
             pending = b""
+            oversized = False
             while True:
-                chunk = handle.readline()
+                chunk = handle.read(64 * 1024)
                 if not chunk:
                     time.sleep(FOLLOW_POLL_SECONDS)
                     continue
-                pending += chunk
-                if not pending.endswith(b"\n"):
-                    continue
-                line = pending.decode("utf-8", errors="replace")
-                pending = b""
-                if wanted(line):
-                    show(line)
+                for part in chunk.splitlines(keepends=True):
+                    if oversized:
+                        if part.endswith(b"\n"):
+                            oversized = False
+                        continue
+                    if len(pending) + len(part) > MAX_EVENT_LINE_BYTES:
+                        pending = b""
+                        oversized = not part.endswith(b"\n")
+                        continue
+                    pending += part
+                    if pending.endswith(b"\n"):
+                        line = pending.decode("utf-8", errors="replace")
+                        pending = b""
+                        if wanted(line):
+                            show(line)
     except FileNotFoundError:
         print(f"agentctl: no event spool at {spool}", file=sys.stderr)
         return EXIT_REFUSED
     except KeyboardInterrupt:
         return EXIT_OK
+    finally:
+        if follow_lock is not None:
+            os.close(follow_lock)
 
 
 def _project(arguments: argparse.Namespace, config: Config, out: Output) -> int:

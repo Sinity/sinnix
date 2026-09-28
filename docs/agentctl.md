@@ -332,6 +332,17 @@ The environment carries `BEADS_ACTOR` set to the task label with `:`
 replaced by `-`; an agent runs until it finishes (the unit watchdog is a
 week), and a coordinator cancels it by hand.
 
+Queued Codex and Claude agents start with no MCP servers. The
+`batch start --mcp-server NAME` option selects a named server from the generated client profile
+for every worker in that run; repeat the flag for more servers. The selection
+is retained for worker retries. The private runner also accepts
+`--mcp-server NAME` for a declared agent operation. Unknown names fail before
+the backend starts. Claude uses a strict config containing only those servers;
+Codex ignores the user config, disables system and project servers, and adds
+only the selected server definitions.
+`events tail --follow` permits one reader per project for the current user;
+workers wait on their own job id with `job wait`.
+
 The integration and review agents a landing owns queue in the `land-agent`
 pool, not in `agent`: pausing `agent` holds back new worker dispatch without
 stranding a landing already in flight, and the landing task's own

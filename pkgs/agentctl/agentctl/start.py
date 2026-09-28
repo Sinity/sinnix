@@ -410,6 +410,7 @@ def _prepare(
     backend: str | None,
     model: str | None,
     effort: str | None,
+    mcp_servers: Sequence[str] = (),
 ) -> Run:
     """Claim, create, enqueue — each step skipped where the manifest records it done."""
     worker_id = None
@@ -576,6 +577,7 @@ def _prepare(
                         backend=worker["backend"],
                         model=worker["model"],
                         effort=worker["effort"],
+                        mcp_servers=worker.get("mcp_servers", ()),
                         schema="worker",
                         then=worker_then(
                             config, run.run_id, worker_id, result_path(path)
@@ -699,6 +701,7 @@ def start(
     backend: str | None = None,
     model: str | None = None,
     effort: str | None = None,
+    mcp_servers: Sequence[str] = (),
     reader: Beads | None = None,
 ) -> dict[str, Any]:
     """Validate the members, write the manifest, claim, create worktrees, enqueue.
@@ -708,6 +711,11 @@ def start(
     """
     if harness not in HARNESSES:
         raise BatchRefusal("harness", f"harness must be one of {HARNESSES}")
+    if len(set(mcp_servers)) != len(mcp_servers) or any(
+        not server or not server.replace("-", "").replace("_", "").isalnum()
+        for server in mcp_servers
+    ):
+        raise BatchRefusal("mcp_servers", "MCP server names must be unique identifiers")
     workspace = workspace_of(project)
     beads = reader or SubprocessBeads(project.root)
     member_sets = _member_sets(beads, seeds, workers)
@@ -715,6 +723,13 @@ def start(
     claimed: set[str] = set()
     for live in _live_runs(config, project.project_id):
         if set(live.beads) == requested:
+            if mcp_servers and any(
+                worker.get("mcp_servers", []) != list(mcp_servers)
+                for worker in live.workers
+            ):
+                raise BatchRefusal(
+                    "mcp_servers", "an existing run has a different MCP selection"
+                )
             if live.prepared:
                 return {**live.to_dict(), "resumed": False, "existing": True}
             with project_locked(config, project.project_id):
@@ -733,6 +748,7 @@ def start(
                     backend=backend,
                     model=model,
                     effort=effort,
+                    mcp_servers=mcp_servers,
                 )
             return {
                 **completed.to_dict(),
@@ -774,6 +790,7 @@ def start(
                 "prompt_path": None,
                 "result_path": None,
                 "result": None,
+                "mcp_servers": list(mcp_servers),
             }
             for leader, members in member_sets
         ),
@@ -794,7 +811,8 @@ def start(
     create(config, run)
     with project_locked(config, project.project_id):
         prepared = _prepare(
-            config, project, run, beads, backend=backend, model=model, effort=effort
+            config, project, run, beads, backend=backend, model=model, effort=effort,
+            mcp_servers=mcp_servers,
         )
     return {
         **prepared.to_dict(),
@@ -1275,6 +1293,7 @@ def _resume_locked(
             backend=effective_backend,
             model=effective_model,
             effort=effective_effort,
+            mcp_servers=worker.get("mcp_servers", ()),
             schema="worker",
             then=worker_then(config, run_id, worker_id, resume_result),
             binding={

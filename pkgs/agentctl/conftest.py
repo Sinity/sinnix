@@ -125,6 +125,15 @@ class FakePueue:
             raise PueueError("fixture pueue status failed")
         return dict(self._tasks)
 
+    def running_tasks(self, group: str) -> dict[int, Task]:
+        return {
+            task_id: task for task_id, task in self.tasks().items()
+            if task.group == group and task.status == "Running"
+        }
+
+    def task_from_log(self, task_id: int) -> Task | None:
+        return self.task(task_id)
+
     def task(self, task_id: int) -> Task | None:
         return self._tasks.get(task_id)
 
@@ -326,6 +335,8 @@ def fake_pueue(monkeypatch: pytest.MonkeyPatch) -> FakePueue:
     for name in (
         "add",
         "tasks",
+        "running_tasks",
+        "task_from_log",
         "task",
         "kill",
         "restart",

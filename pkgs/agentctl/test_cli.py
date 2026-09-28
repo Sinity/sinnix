@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
+import time
 from pathlib import Path
 from typing import Callable
 
@@ -469,6 +473,48 @@ def test_events_tail_memory_is_bounded_by_the_requested_lines(tmp_path: Path) ->
     tracemalloc.stop()
     assert len(got) == 40
     assert peak < size // 10, (peak, size)
+
+
+def test_tail_skips_an_oversized_record_without_retaining_it(tmp_path: Path) -> None:
+    spool = tmp_path / "events.jsonl"
+    spool.write_bytes(b"a\n" + b"x" * (2 * cli.MAX_EVENT_LINE_BYTES) + b"\nb\n")
+    with spool.open("rb") as handle:
+        assert cli._last_matching_lines(handle, 2, lambda line: True) == ["a", "b"]
+
+
+def test_follow_tail_process_rss_stays_bounded_on_large_spool(
+    cli_config: Config,
+) -> None:
+    record = (
+        b'{"kind":"queue-task","label":"fixture:check","pad":"'
+        + b"x" * 400 + b'"}\n'
+    )
+    with cli_config.event_spool.open("wb") as spool:
+        for _ in range(50_000):
+            spool.write(record)
+    child = subprocess.Popen(
+        [sys.executable, "-m", "agentctl.cli", "events", "tail", "--follow", "--lines", "1"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        env=os.environ.copy(),
+    )
+    try:
+        time.sleep(0.5)
+        assert child.poll() is None, child.stderr.read().decode()
+        status = Path(f"/proc/{child.pid}/status").read_text()
+        rss = int(status.split("VmRSS:")[1].splitlines()[0].split()[0])
+        assert rss < 80_000
+        duplicate = subprocess.run(
+            [sys.executable, "-m", "agentctl.cli", "events", "tail", "--follow", "--lines", "1"],
+            capture_output=True,
+            env=os.environ.copy(),
+            timeout=5,
+        )
+        assert duplicate.returncode == cli.EXIT_REFUSED
+        assert b"already running" in duplicate.stderr
+    finally:
+        child.terminate()
+        child.wait(timeout=5)
 
 
 def test_a_missing_spool_is_reported(

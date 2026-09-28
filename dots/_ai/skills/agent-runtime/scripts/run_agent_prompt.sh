@@ -12,6 +12,7 @@ reasoning_effort=""
 credential_profile="subscription"
 resume_session_id=""
 output_schema=""
+mcp_servers=()
 
 usage() {
   cat <<'EOF'
@@ -62,6 +63,10 @@ while [[ $# -gt 0 ]]; do
     ;;
   --output-schema)
     output_schema="${2:?missing schema file}"
+    shift 2
+    ;;
+  --mcp-server)
+    mcp_servers+=("${2:?missing MCP server name}")
     shift 2
     ;;
   -h | --help)
@@ -326,12 +331,50 @@ pipeline_status() {
 case "$agent" in
 codex)
   codex_args=(exec -C "$workdir" --model "$model" --output-last-message "$last_file")
-  # A queued worker starts no MCP servers or plugins: the user config's
-  # servers cost ~200 MB of node/npm per worker and a code task needs none.
-  # AGENTCTL_AGENT_USER_CONFIG=1 opts one launch back into the user config.
-  if [[ ${AGENTCTL_AGENT_USER_CONFIG:-} != 1 ]]; then
-    codex_args+=(--ignore-user-config)
-  fi
+  codex_args+=(--ignore-user-config)
+  # `--ignore-user-config` still loads the system MCP table. Disable every
+  # declared system or project server, then enable only opt-ins.
+  selected_mcp_file="$(mktemp "${last_file}.mcp-args.XXXXXX")" || exit 1
+  trap 'rm -f -- "$selected_mcp_file"' EXIT
+  python3 -c '
+import json, os, pathlib, re, subprocess, sys, tomllib
+source = pathlib.Path.home() / ".codex/local.config.toml"
+servers = tomllib.loads(source.read_text()).get("mcp_servers", {}) if len(sys.argv) > 1 else {}
+system = pathlib.Path(os.environ.get("AGENTCTL_CODEX_SYSTEM_CONFIG", "/etc/codex/config.toml"))
+inherited = set()
+project_paths = [parent / ".codex/config.toml" for parent in (pathlib.Path.cwd(), *pathlib.Path.cwd().parents)]
+for path in (system, *project_paths):
+    if path.is_file():
+        inherited.update(tomllib.loads(path.read_text()).get("mcp_servers", {}))
+listed = json.loads(subprocess.check_output(["codex", "mcp", "list", "--json"]))
+if not isinstance(listed, list):
+    sys.exit("Codex MCP list is not an array")
+configured = {row.get("name") for row in listed if isinstance(row, dict)}
+def toml(value):
+    if isinstance(value, dict):
+        return "{" + ",".join(json.dumps(k) + "=" + toml(v) for k,v in value.items()) + "}"
+    if isinstance(value, list):
+        return "[" + ",".join(map(toml, value)) + "]"
+    return json.dumps(value)
+def emit(*args):
+    for arg in args:
+        sys.stdout.buffer.write(arg.encode() + b"\0")
+all_names = inherited | configured
+if any(not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", name) for name in all_names):
+    sys.exit("Codex MCP config has an invalid server name")
+for name in sorted(all_names):
+    if name in inherited:
+        emit("-c", "mcp_servers." + name + ".enabled=false")
+    else:
+        emit("-c", "mcp_servers." + name + "=" + toml({"command": "false", "enabled": False}))
+for name in sys.argv[1:]:
+    if name not in servers:
+        sys.exit("unknown Codex MCP server: " + name)
+    emit("-c", "mcp_servers." + name + "=" + toml({**servers[name], "enabled": True}))
+' "${mcp_servers[@]}" >"$selected_mcp_file" || exit 1
+  mapfile -d '' -t selected_mcp <"$selected_mcp_file"
+  rm -f -- "$selected_mcp_file"
+  codex_args+=("${selected_mcp[@]}")
   if [[ -n $output_schema ]]; then
     codex_args+=(--output-schema "$output_schema")
   fi
@@ -351,6 +394,20 @@ claude)
   # The prompt goes in on stdin: one argv string is capped at 128 KiB by the
   # kernel and a resume packet with the bead bodies exceeds it.
   claude_args=("${resume_args[@]}" --print --model "$model" --effort "$reasoning_effort")
+  mcp_config="$(mktemp "${last_file}.mcp.XXXXXX")" || exit 1
+  python3 -c '
+import json, pathlib, sys
+source = pathlib.Path.home() / ".config/claude/mcp.json"
+servers = json.loads(source.read_text()).get("mcpServers", {}) if len(sys.argv) > 2 else {}
+selected = {}
+for name in sys.argv[2:]:
+    if name not in servers:
+        sys.exit("unknown Claude MCP server: " + name)
+    selected[name] = servers[name]
+pathlib.Path(sys.argv[1]).write_text(json.dumps({"mcpServers": selected}))
+' "$mcp_config" "${mcp_servers[@]}"
+  claude_args+=(--strict-mcp-config --mcp-config "$mcp_config")
+  trap 'rm -f -- "$mcp_config"' EXIT
   if [[ -n $output_schema ]]; then
     # --json-schema takes the schema text, not a path.
     claude_args+=(--output-format json --json-schema "$(<"$output_schema")")
@@ -363,7 +420,7 @@ claude)
   set +e
   if [[ -n $output_schema ]]; then
     structured_file="$(mktemp "${last_file}.XXXXXX")" || exit 1
-    trap 'rm -f -- "$structured_file"' EXIT
+    trap 'rm -f -- "$structured_file" "${mcp_config:-}"' EXIT
     "${claude_cmd[@]}" "${claude_args[@]}" <"$prompt_file" | unwrap_claude_json
   else
     "${claude_cmd[@]}" "${claude_args[@]}" <"$prompt_file" | tee "$last_file"

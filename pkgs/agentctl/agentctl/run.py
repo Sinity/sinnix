@@ -46,7 +46,6 @@ from typing import Any, Mapping, Sequence
 from sinnix_lib.atomic import atomic_publish
 
 from . import artifacts, pueue, worktrunk
-from .checkout import CANDIDATE_BRANCH_PREFIX, CheckoutError, release_candidate_checkout
 from .launch_input import QueueInputError, read_input
 from .limits import SYSTEMCTL_TIMEOUT_SECONDS
 from .pueue import PueueError
@@ -426,7 +425,7 @@ def _wait_for_unit(unit: str, timeout_seconds: int) -> dict[str, str] | None:
     return None
 
 
-def active_units(daemon: str, pool: str) -> list[str]:
+def active_units(daemon: str, pool: str) -> dict[str, int | None]:
     """Every unit of this daemon's pool still running, whichever run created it.
 
     The name glob is a prefilter; the Description decides, so a pool whose
@@ -441,11 +440,12 @@ def active_units(daemon: str, pool: str) -> list[str]:
         f"{POOL_SLICE_PREFIX}-{pool}-*",
     )
     prefix = unit_description(daemon, pool, "")
-    units = []
+    units: dict[str, int | None] = {}
     for line in (listed or "").splitlines():
         columns = line.split(None, 4)
         if len(columns) == 5 and columns[4].strip().startswith(prefix):
-            units.append(columns[0])
+            identity = columns[4].strip()[len(prefix):]
+            units[columns[0]] = int(identity) if identity.isdecimal() else None
     return units
 
 
@@ -461,7 +461,14 @@ def _occupancy(
     """
     try:
         parallel = pueue.groups().get(pool)
-        tasks = pueue.tasks()
+        tasks = pueue.running_tasks(pool)
+        units = active_units(daemon, pool) if parallel == 1 else {}
+        if units:
+            for task_id in units.values():
+                if task_id is not None and task_id not in tasks:
+                    owner = pueue.task_from_log(task_id)
+                    if owner is not None:
+                        tasks[task_id] = owner
     except PueueError:
         return "", None
     owners = {}
@@ -472,7 +479,7 @@ def _occupancy(
     own = owners.get(unit)
     if parallel != 1:
         return "", own
-    for other in active_units(daemon, pool):
+    for other in units:
         owner = owners.get(other)
         if other != unit and (owner is None or not owner.terminal):
             log.write(f"pool {pool} is occupied by {other}\n".encode())
@@ -598,6 +605,7 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
     def candidate_parts() -> tuple[Path, str, Path, str] | None:
         if not isinstance(checkout, Mapping) or checkout.get("kind") != "candidate":
             return None
+        from .checkout import CANDIDATE_BRANCH_PREFIX
         root, branch, commit = (
             checkout.get(key) for key in ("root", "branch", "commit")
         )
@@ -611,6 +619,9 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
         return Path(root), branch, path, commit
 
     def release_candidate() -> None:
+        if not isinstance(checkout, Mapping) or checkout.get("kind") != "candidate":
+            return
+        from .checkout import CheckoutError, release_candidate_checkout
         try:
             release_candidate_checkout(checkout, launch["working_directory"])
         except (CheckoutError, worktrunk.WorktrunkError) as error:
