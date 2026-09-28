@@ -87,7 +87,10 @@ mkServiceModule {
       # sinnix-tisc makes admission follow live headroom.
       pytest-quick.parallel = 8;
       bulk.parallel = 2;
-      normal.parallel = 3;
+      # Polylogue verify_quick runs its gates in parallel and peaks near
+      # 3.3 GiB; three of them held the 9G normal slice at ~70% full memory
+      # pressure (2026-09-28), so two unthrottled finish sooner.
+      normal.parallel = 2;
       # Long-lived development dependencies must not occupy short-job capacity.
       service.parallel = 2;
       interactive.parallel = 4;
