@@ -8,7 +8,7 @@
 # Provably fails when: a `polylogue-hook <Event>` lane present in Claude's
 # settings is dropped from the generated Codex hooks, when a writer bakes a
 # sidecar path, when generated archive.root stops following dataDir, when a
-# hook invocation stops leaving a pending envelope naming its provider and
+# hook invocation stops appending a carrier envelope naming its provider and
 # event, or when either client loses the pre-compaction handoff or shared
 # hook coverage.
 { inputs, ... }:
@@ -245,11 +245,12 @@ in
                 strace -f -e trace=file -o "$smoke_root/claude.trace" \
                 "$polylogueHook/bin/polylogue-hook" Stop \
                   --provider claude-code
-            # The hook's observable output is the day-sharded pending spool
+            # The hook's observable output is the carrier spool
+            # (`carriers/<provider>/<UTC day>/<pid>.ndjson`)
             # under the configured root: one envelope per invocation, carrying
             # the provider and event it was invoked with. Assert the envelope
             # bodies rather than file names, which encode neither.
-            envelopes="$(find "$primary/pending" -type f -name '*.json' 2>/dev/null)"
+            envelopes="$(find "$primary/carriers" -type f -name '*.ndjson' 2>/dev/null)"
             require_envelope() {
               provider="$1"
               event="$2"
@@ -258,7 +259,7 @@ in
                 --arg p "$provider" --arg e "$event" --arg s "$session" \
                 'any(.[]; .provider == $p and .event_type == $e and .session_id == $s)' \
                 $envelopes >/dev/null; then
-                echo "no pending hook envelope for $provider/$event/$session under $primary/pending" >&2
+                echo "no carrier hook envelope for $provider/$event/$session under $primary/carriers" >&2
                 find "$primary" -type f -print -exec cat {} \; >&2
                 exit 1
               fi
