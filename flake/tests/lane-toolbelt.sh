@@ -114,7 +114,10 @@ set -euo pipefail
 printf '%s\n' "$*" >> "${AGENTCTL_CALLS:?}"
 case "$1 $2" in
   job\ start)
-    printf '{"job_id": 7, "phase": "succeeded", "terminal": true}\n'
+    printf '{"job_id": 7, "phase": "queued", "terminal": false}\n'
+    ;;
+  job\ wait)
+    printf 'job 7 fixture:verify_quick succeeded\n'
     ;;
   *)
     exit 2
@@ -125,7 +128,8 @@ chmod +x "$bin/agentctl"
 export AGENTCTL_CALLS=$root/agentctl.calls
 verify_output=$(cd "$repo" && PATH="$bin:$PATH" AGENTCTL_TIMEOUT_SECONDS=60 "$lane" verify)
 grep -Fq 'succeeded' <<<"$verify_output"
-grep -Fq "job start fixture verify_quick --workspace $repo --wait --timeout-seconds 60" "$AGENTCTL_CALLS"
+grep -Fxq "job start fixture verify_quick --workspace $repo" "$AGENTCTL_CALLS"
+grep -Fxq "job wait 7 --timeout-seconds 60" "$AGENTCTL_CALLS"
 
 printf 'launch snapshot\n' >"$repo/.agentctl/prompt.md"
 task_output=$(cd "$repo" && "$lane" task)
