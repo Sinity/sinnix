@@ -820,7 +820,7 @@ assert lib.assertMsg (
         } ''
           mkdir -p "$TMPDIR/mock-bin" "$TMPDIR/images"
           cat > "$TMPDIR/mock-bin/btrfs-image" <<'EOF_IMAGE'
-          #!/usr/bin/env bash
+          #!${pkgs.bash}/bin/bash
           set -eu
           device="$5"
           output="$6"
