@@ -88,6 +88,7 @@
             mkdir -p "$TMPDIR/bin" "$TMPDIR/worktree"
             cat > "$TMPDIR/bin/codex" <<EOF
             #!${pkgs.bash}/bin/bash
+            if [ "\$1 \$2" = "mcp list" ]; then echo '[]'; exit 0; fi
             printf '%s\\n' "\$@" > "\$CODEX_ARGS"
             EOF
             chmod +x "$TMPDIR/bin/codex"
