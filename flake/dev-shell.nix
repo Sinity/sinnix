@@ -158,9 +158,9 @@
         ++ builtins.attrValues devCommands;
 
         shellHook = ''
-          # Preserve the checkout selected when entering this shell. Commands
-          # may change directory before switch runs; NH_FLAKE is only a host
-          # default and can point at another checkout.
+          # Keep the evaluated source and revision when the caller changes
+          # directory. A matching checkout is only a Git reference for the
+          # switch guard; the rebuild uses SINNIX_DEV_SHELL_SOURCE.
           unset SINNIX_DEV_SHELL_FLAKE
           export SINNIX_DEV_SHELL_REV="${sourceRevision}"
           # The evaluated source is immutable and identifies the flake even

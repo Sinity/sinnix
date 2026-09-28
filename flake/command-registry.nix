@@ -315,9 +315,12 @@ let
         _rebuild_status=0
         _rebuild_unit="sinnix-switch-$$"
         _rebuild_complete=0
-        _rebuild_marker="$(${pkgs.coreutils}/bin/mktemp "''${XDG_RUNTIME_DIR:-''${TMPDIR:-/tmp}}/sinnix-switch.XXXXXXXX")"
+        # The start condition disappears even if the wrapper is killed before
+        # systemd-run registers its unit. Keep fd 9 for the activation lock.
+        exec 8</dev/null
+        _rebuild_condition="/proc/$$/fd/8"
         cleanup_rebuild() {
-          ${pkgs.coreutils}/bin/rm -f "$_rebuild_marker"
+          exec 8<&-
           if [ "$_rebuild_complete" -eq 0 ]; then
             ${pkgs.systemd}/bin/systemctl --user stop "$_rebuild_unit.service" >&2 || true
           fi
@@ -328,7 +331,7 @@ let
         ${pkgs.systemd}/bin/systemd-run \
           --user \
           --quiet --collect --pipe --service-type=exec --wait --unit="$_rebuild_unit" \
-          --property="ConditionPathExists=$_rebuild_marker" \
+          --property="ConditionPathExists=$_rebuild_condition" \
           --setenv="SINNIX_ACTIVATION_SOURCE_REV=''${SINNIX_DEV_SHELL_REV:-}" \
           --setenv=PATH="${rebuildServicePath}:$PATH" \
           ${rebuildContainmentFlags}
@@ -342,7 +345,7 @@ let
         wait "$_rebuild_runner" || _rebuild_status=$?
         if [ "$_rebuild_status" -eq 0 ]; then
           _rebuild_complete=1
-          ${pkgs.coreutils}/bin/rm -f "$_rebuild_marker"
+          exec 8<&-
           trap - EXIT INT TERM
         fi
         ${sinexCachePush}

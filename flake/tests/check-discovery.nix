@@ -44,6 +44,10 @@
                   for arg in "$@"; do
                     case "$arg" in --property=ConditionPathExists=*) marker="''${arg#*=}"; marker="''${marker#*=}" ;; esac
                   done
+                  if [ ! -e "$marker" ]; then
+                    echo 'start condition missing before interruption' >&2
+                    exit 88
+                  fi
                   touch "$ACTIVATION_ENTERED"
                   while [ ! -e "$ACTIVATION_RELEASE" ]; do sleep 0.1; done
                   if [ ! -e "$marker" ]; then
