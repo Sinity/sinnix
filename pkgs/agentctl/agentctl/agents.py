@@ -129,6 +129,7 @@ def _agent_argv(
     model: str,
     effort: str,
     schema_path: Path | None,
+    mcp_servers: Sequence[str] = (),
 ) -> tuple[str, ...]:
     """The runner's argv. Its containment is the queued task's own scope."""
     if not config.agent_runner.is_file() or not os.access(config.agent_runner, os.X_OK):
@@ -158,6 +159,8 @@ def _agent_argv(
     ]
     if schema_path is not None:
         argv.extend(["--output-schema", str(schema_path)])
+    for server in mcp_servers:
+        argv.extend(["--mcp-server", server])
     return tuple(argv)
 
 
@@ -180,6 +183,7 @@ def queue_agent(
     inaccessible: Sequence[Path] = (),
     group: str = AGENT_GROUP,
     before_enqueue: Callable[[str], None] | None = None,
+    mcp_servers: Sequence[str] = (),
 ) -> dict[str, Any]:
     """Queue one agent in ``group``; ``then`` runs after a successful agent.
 
@@ -212,6 +216,7 @@ def queue_agent(
         model=model,
         effort=effort,
         schema_path=schema_path,
+        mcp_servers=mcp_servers,
     )
     if then:
         # One shell word list so the result is filed only after the agent

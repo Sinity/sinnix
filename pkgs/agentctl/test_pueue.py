@@ -70,6 +70,17 @@ LIVE_STATUS = {
     },
 }
 
+
+def test_running_tasks_requests_only_one_groups_live_tasks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def response(arguments: list[str]) -> str:
+        assert arguments == ["status", "--json", "--group", "agent", "status=running"]
+        return json.dumps({"tasks": {"1": LIVE_STATUS["tasks"]["1"]}, "groups": {}})
+
+    monkeypatch.setattr(pueue, "_run", response)
+    assert list(pueue.running_tasks("agent")) == [1]
+
 LIVE_LOG = {
     "0": {
         "task": {"id": 0, "label": "probe:schema"},

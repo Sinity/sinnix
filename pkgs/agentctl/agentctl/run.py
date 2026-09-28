@@ -46,7 +46,6 @@ from typing import Any, Mapping, Sequence
 from sinnix_lib.atomic import atomic_publish
 
 from . import artifacts, pueue, worktrunk
-from .checkout import CANDIDATE_BRANCH_PREFIX, CheckoutError, release_candidate_checkout
 from .launch_input import QueueInputError, read_input
 from .limits import SYSTEMCTL_TIMEOUT_SECONDS
 from .pueue import PueueError
@@ -461,7 +460,7 @@ def _occupancy(
     """
     try:
         parallel = pueue.groups().get(pool)
-        tasks = pueue.tasks()
+        tasks = pueue.running_tasks(pool)
     except PueueError:
         return "", None
     owners = {}
@@ -598,6 +597,7 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
     def candidate_parts() -> tuple[Path, str, Path, str] | None:
         if not isinstance(checkout, Mapping) or checkout.get("kind") != "candidate":
             return None
+        from .checkout import CANDIDATE_BRANCH_PREFIX
         root, branch, commit = (
             checkout.get(key) for key in ("root", "branch", "commit")
         )
@@ -611,6 +611,9 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
         return Path(root), branch, path, commit
 
     def release_candidate() -> None:
+        if not isinstance(checkout, Mapping) or checkout.get("kind") != "candidate":
+            return
+        from .checkout import CheckoutError, release_candidate_checkout
         try:
             release_candidate_checkout(checkout, launch["working_directory"])
         except (CheckoutError, worktrunk.WorktrunkError) as error:

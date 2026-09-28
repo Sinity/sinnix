@@ -261,6 +261,19 @@ def tasks() -> dict[int, Task]:
     return status().tasks
 
 
+def running_tasks(group: str) -> dict[int, Task]:
+    """Only live tasks in one pool; the daemon's retained history is unbounded."""
+    document = _decode(
+        _run(["status", "--json", "--group", group, "status=running"]),
+        "status",
+    )
+    entries = document.get("tasks") if isinstance(document, Mapping) else None
+    if not isinstance(entries, Mapping):
+        raise PueueError("pueue status published no tasks")
+    parsed = (Task.from_entry(entry) for entry in entries.values())
+    return {task.task_id: task for task in parsed}
+
+
 def task(task_id: int) -> Task | None:
     return tasks().get(task_id)
 

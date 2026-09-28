@@ -36,6 +36,16 @@ def user_manager() -> None:
         pytest.skip("no user systemd bus is available")
 
 
+def test_supervisor_import_rss_stays_small() -> None:
+    # A queued job keeps this interpreter resident until its unit exits.
+    child = subprocess.run(
+        [sys.executable, "-c", "import agentctl.run; "
+         "print(open('/proc/self/status').read().split('VmRSS:')[1].splitlines()[0].split()[0])"],
+        check=True, capture_output=True, text=True,
+    )
+    assert int(child.stdout.strip()) < 50_000
+
+
 def write_launch(tmp_path: Path, name: str = "launch.json", **overrides: Any) -> Path:
     launch: dict[str, Any] = {
         "job_id": "job-a",

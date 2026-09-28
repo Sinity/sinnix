@@ -58,18 +58,20 @@ focused_operation() {
 }
 
 lane_verify() {
-  local operation output
+  local operation output job_id
   command -v agentctl >/dev/null 2>&1 || die "agentctl is unavailable for managed verification"
   operation=$(focused_operation "$(project_file)")
   if [[ -z $operation ]]; then
     printf 'lane verify: no focused verification declared in %s\n' "$(project_file)"
     return 0
   fi
-  if ! output=$(agentctl job start "$(project_id)" "$operation" --workspace "$(repo_root)" --wait --timeout-seconds "${AGENTCTL_TIMEOUT_SECONDS:-3600}"); then
+  if ! output=$(agentctl job start "$(project_id)" "$operation" --workspace "$(repo_root)"); then
     printf '%s\n' "$output" >&2
-    die "managed verification did not succeed"
+    die "managed verification could not start"
   fi
   printf '%s\n' "$output"
+  job_id=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["job_id"])' <<<"$output") || die "managed verification returned no job id"
+  agentctl job wait "$job_id" --timeout-seconds "${AGENTCTL_TIMEOUT_SECONDS:-3600}" || die "managed verification did not succeed"
 }
 
 git_offenders() {

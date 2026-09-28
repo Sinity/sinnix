@@ -46,6 +46,49 @@ class NativeOutputTest(unittest.TestCase):
         path.write_text(f"#!{shutil.which('bash')}\nset -eu\n" + body)
         path.chmod(0o755)
 
+    def test_queued_mcp_selection_is_exact(self):
+        home = self.root / "home"
+        (home / ".codex").mkdir(parents=True)
+        (home / ".config/claude").mkdir(parents=True)
+        (home / ".codex/config.toml").write_text(
+            '[mcp_servers.context7]\nurl = "https://example.test/mcp"\n'
+            '[mcp_servers.polylogue]\ncommand = "mcp-polylogue"\n'
+        )
+        (home / ".config/claude/mcp.json").write_text(json.dumps({"mcpServers": {
+            "context7": {"type": "http", "url": "https://example.test/mcp"},
+            "polylogue": {"command": "mcp-polylogue"},
+        }}))
+        self.executable("codex", 'printf "%s\\n" "$@" > "$CAPTURE_ARGS"\n')
+        self.executable("claude", 'printf "%s\\n" "$@" > "$CAPTURE_ARGS"\n'
+                        'previous=""; for arg in "$@"; do '
+                        'if [[ $previous == --mcp-config ]]; then cp "$arg" "$CAPTURE_CONFIG"; fi; '
+                        'previous=$arg; done\n')
+        prompt = self.root / "prompt.md"
+        prompt.write_text("fixture")
+        for backend in ("codex", "claude"):
+            for names in ((), ("context7",)):
+                capture = self.root / "args"
+                command = ["bash", str(RUNNER), "--agent", backend, "--workdir",
+                           str(self.root), "--prompt-file", str(prompt), "--last-file",
+                           str(self.result), "--model", "fixture", "--reasoning-effort", "high"]
+                for name in names:
+                    command.extend(("--mcp-server", name))
+                result = subprocess.run(command, env={**self.env, "HOME": str(home),
+                                        "CAPTURE_ARGS": str(capture),
+                                        "CAPTURE_CONFIG": str(self.root / "selected.json")}, capture_output=True,
+                                        text=True, timeout=10)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                args = capture.read_text()
+                if backend == "codex":
+                    self.assertIn("--ignore-user-config", args)
+                    self.assertEqual("mcp_servers." in args, bool(names))
+                    self.assertNotIn("polylogue", args)
+                else:
+                    self.assertIn("--strict-mcp-config", args)
+                    config_path = args.split("--mcp-config\n", 1)[1].splitlines()[0]
+                    self.assertFalse(Path(config_path).exists())
+                    self.assertEqual(set(json.loads((self.root / "selected.json").read_text())["mcpServers"]), set(names))
+
     def run_claude(self, output, exit_code=0):
         self.executable(
             "claude", 'printf "%s" "$FIXTURE_STDOUT"\nexit "$FIXTURE_EXIT"\n'
