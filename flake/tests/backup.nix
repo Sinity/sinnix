@@ -426,6 +426,10 @@ assert lib.assertMsg (
 
       polylogueStateBorgScript = rewriteBackupHook polylogueStateBorgScriptChecked [
         {
+          from = "/realm/state/cache/polylogue-backup-hooks";
+          to = "$TMPDIR/realm-data/state/cache/polylogue-backup-hooks";
+        }
+        {
           from = "/outer-realm/backup/borg-polylogue-state-v1";
           to = "$TMPDIR/repos/borg-polylogue-state-v1";
         }
@@ -453,12 +457,16 @@ assert lib.assertMsg (
           to = "install -d -m 0755";
         }
         {
+          from = "--exclude '/tmp/sentinel-polylogue-root/hooks/**'";
+          to = "--exclude \"$TMPDIR/live-polylogue/hooks/**\"";
+        }
+        {
           from = "/tmp/sentinel-polylogue-root";
           to = "$TMPDIR/live-polylogue";
         }
         {
           from = "tmp/sentinel-polylogue-root";
-          to = "$TMPDIR/live-polylogue";
+          to = "realm/state/polylogue";
         }
       ];
 
@@ -792,12 +800,77 @@ assert lib.assertMsg (
           <(printf '%s\n' '{"event":"captured"}' '{"event":"appended-after-seal"}')
         touch "$out"
       '';
+      metadataImageRuntime =
+        let
+          unit = backupRuntimeEval.config.systemd.services.btrfs-metadata-image-backup;
+          script = builtins.replaceStrings
+            [ "/outer-realm/backup/btrfs-images" "sleep \"$delay\"" "install -d -m 0700 -o root -g root" ]
+            [ "$TMPDIR/images" "sleep 0" "install -d -m 0700" ] unit.script;
+        in
+        assert lib.assertMsg (
+          unit.serviceConfig.TimeoutStartSec == "85min"
+          && unit.serviceConfig.MemoryHigh == "3G"
+          && unit.serviceConfig.MemoryMax == "5G"
+          && unit.serviceConfig.MemorySwapMax == 0
+          && lib.hasInfix "deadline=$(( $(date +%s) + 40 * 60 ))" script
+          && lib.hasInfix "timeout --signal=TERM --kill-after=15s" script
+        ) "Metadata image capture must bound each label and memory pressure";
+        pkgs.runCommand "backup-metadata-image-runtime-check" {
+          nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.findutils pkgs.gnugrep ];
+        } ''
+          mkdir -p "$TMPDIR/mock-bin" "$TMPDIR/images"
+          cat > "$TMPDIR/mock-bin/btrfs-image" <<'EOF_IMAGE'
+          #!/usr/bin/env bash
+          set -eu
+          device="$5"
+          output="$6"
+          printf '%s\n' "$device" >> "$IMAGE_CALLS"
+          if [ -f "$FAIL_PERSIST" ] && [[ "$device" == *f4782d9f* ]]; then
+            if [ -f "$HANG_PERSIST" ]; then sleep 10; fi
+            exit 1
+          fi
+          printf 'image for %s\n' "$device" > "$output"
+          truncate -s 70M "$output"
+          EOF_IMAGE
+          chmod +x "$TMPDIR/mock-bin/btrfs-image"
+          export PATH="$TMPDIR/mock-bin:$PATH"
+          export IMAGE_CALLS="$TMPDIR/calls" FAIL_PERSIST="$TMPDIR/fail-persist" HANG_PERSIST="$TMPDIR/hang-persist"
+          bash ${pkgs.writeText "metadata-image-script" script} > "$TMPDIR/success.log" 2>&1
+          test "$(find "$TMPDIR/images" -name '*.btrfs-image' | wc -l)" -eq 2
+          grep -q 'persist captured' "$TMPDIR/success.log"
+          grep -q 'realm captured' "$TMPDIR/success.log"
+          test "$(wc -l < "$IMAGE_CALLS")" -eq 2
+          persist_image=$(find "$TMPDIR/images" -name 'persist-*.btrfs-image' -print -quit)
+          previous_size=$(stat -c %s "$persist_image")
+          previous_header=$(head -c 64 "$persist_image")
+          touch "$FAIL_PERSIST"
+          if bash ${pkgs.writeText "metadata-image-script" script} > "$TMPDIR/failure.log" 2>&1; then
+            echo 'persist failure unexpectedly succeeded' >&2
+            exit 1
+          fi
+          grep -q 'persist failed after 3 attempts' "$TMPDIR/failure.log"
+          grep -q 'realm captured' "$TMPDIR/failure.log"
+          test "$(stat -c %s "$persist_image")" -eq "$previous_size"
+          test "$(head -c 64 "$persist_image")" = "$previous_header"
+          test "$(wc -l < "$IMAGE_CALLS")" -eq 6
+          touch "$HANG_PERSIST"
+          if bash ${pkgs.writeText "metadata-image-timeout-script" (builtins.replaceStrings [ "40 * 60" ] [ "2" ] script)} > "$TMPDIR/timeout.log" 2>&1; then
+            echo 'timed-out persist capture unexpectedly succeeded' >&2
+            exit 1
+          fi
+          grep -q 'persist attempt 1 exited 124' "$TMPDIR/timeout.log"
+          grep -q 'realm captured' "$TMPDIR/timeout.log"
+          test "$(stat -c %s "$persist_image")" -eq "$previous_size"
+          test "$(head -c 64 "$persist_image")" = "$previous_header"
+          touch "$out"
+        '';
     in
     {
       checks = {
         backup-borg-hook-runtime = backupBorgHookRuntime;
         backup-health-lanes-runtime = borgHealthLanesRuntime;
         backup-polylogue-hook-seal = polylogueHookSealRuntime;
+        backup-metadata-image-runtime = metadataImageRuntime;
         backup-headless-default =
           assert headlessBackupUnits == [ ];
           pkgs.runCommand "backup-headless-default-check" { } ''
