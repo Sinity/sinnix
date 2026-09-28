@@ -40,6 +40,18 @@
             name = "fake-systemd-activation";
             paths = [
               (pkgs.writeShellScriptBin "systemd-run" ''
+                if [ "''${ACTIVATION_BEFORE_REGISTER:-0}" = 1 ]; then
+                  for arg in "$@"; do
+                    case "$arg" in --property=ConditionPathExists=*) marker="''${arg#*=}"; marker="''${marker#*=}" ;; esac
+                  done
+                  touch "$ACTIVATION_ENTERED"
+                  while [ ! -e "$ACTIVATION_RELEASE" ]; do sleep 0.1; done
+                  if [ ! -e "$marker" ]; then
+                    echo skipped-registration >> "$ACTIVATION_LOG"
+                    touch "$ACTIVATION_REGISTER_RESULT"
+                    exit 143
+                  fi
+                fi
                 printf '%s\n' "$*" >> "$ACTIVATION_LOG"
                 if [ "''${ACTIVATION_HANG:-0}" = 1 ]; then
                   while [ ! -e "$ACTIVATION_RELEASE" ]; do sleep 0.1; done
@@ -208,6 +220,16 @@
         source_revision="$(${pkgs.git}/bin/git -C "$TMPDIR/source" rev-parse HEAD)"
         SINNIX_FLAKE_DIR= NH_FLAKE="$TMPDIR/other" SINNIX_DEV_SHELL_REV="$source_revision" SINNIX_DEV_SHELL_FLAKE="$TMPDIR/source" ACTIVATION_STATUS=7 "${activationExecutables.switch}" || test "$?" = 7
         grep -Fq "$TMPDIR/source#sinnix-prime" "$ACTIVATION_LOG"
+        ${pkgs.git}/bin/git clone -q "$TMPDIR/source" "$TMPDIR/other"
+        : > "$ACTIVATION_LOG"
+        SINNIX_FLAKE_DIR= NH_FLAKE="$TMPDIR/other" SINNIX_DEV_SHELL_REV="$source_revision" \
+          SINNIX_DEV_SHELL_FLAKE="$TMPDIR/other" SINNIX_DEV_SHELL_SOURCE="$TMPDIR/source" \
+          ACTIVATION_STATUS=7 "${activationExecutables.switch}" || test "$?" = 7
+        grep -Fq "$TMPDIR/source#sinnix-prime" "$ACTIVATION_LOG"
+        if grep -Fq "$TMPDIR/other#sinnix-prime" "$ACTIVATION_LOG"; then
+          echo 'devshell rebuilt the caller checkout' >&2
+          exit 1
+        fi
         : > "$ACTIVATION_LOG"
         status=0
         SINNIX_DEV_SHELL_REV=0000000000000000000000000000000000000000 SINNIX_DEV_SHELL_FLAKE="$TMPDIR/source" ACTIVATION_STATUS=0 "${activationExecutables.switch}" || status=$?
@@ -227,6 +249,23 @@
         test "$status" = 143
         grep -Eq '^stop --user stop sinnix-switch-[0-9]+.service$' "$ACTIVATION_LOG"
         touch "$TMPDIR/release"
+        : > "$ACTIVATION_LOG"
+        ACTIVATION_BEFORE_REGISTER=1 ACTIVATION_ENTERED="$TMPDIR/entered" \
+          ACTIVATION_RELEASE="$TMPDIR/register-release" ACTIVATION_REGISTER_RESULT="$TMPDIR/register-result" ACTIVATION_STATUS=0 \
+          "${activationExecutables.switch}" &
+        wrapper=$!
+        while [ ! -e "$TMPDIR/entered" ]; do sleep 0.1; done
+        kill -TERM "$wrapper"
+        status=0
+        wait "$wrapper" || status=$?
+        test "$status" = 143
+        touch "$TMPDIR/register-release"
+        while [ ! -e "$TMPDIR/register-result" ]; do sleep 0.1; done
+        grep -Fq skipped-registration "$ACTIVATION_LOG"
+        if grep -Fq 'nh os switch' "$ACTIVATION_LOG"; then
+          echo 'rebuild registered after wrapper exit' >&2
+          exit 1
+        fi
         test -x "${activationExecutables.test-system}"
         test ! -e "${activationRegistry.activationPackages.test-system}/bin/test"
 
