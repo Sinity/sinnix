@@ -423,9 +423,19 @@ mkServiceModule {
             ) config.sinnix.runtime.inventory.classes.backup.serviceConfig.IOReadBandwidthMax;
           };
           unit = {
-            after = [ "realm.mount" "persist.mount" ];
-            requires = [ "realm.mount" "persist.mount" ];
-            unitConfig.RequiresMountsFor = [ dbRoot backupRoot backupSnapshotRoot ];
+            after = [
+              "realm.mount"
+              "persist.mount"
+            ];
+            requires = [
+              "realm.mount"
+              "persist.mount"
+            ];
+            unitConfig.RequiresMountsFor = [
+              dbRoot
+              backupRoot
+              backupSnapshotRoot
+            ];
             restartIfChanged = false;
           };
           timer = {

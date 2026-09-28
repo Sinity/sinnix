@@ -318,7 +318,14 @@ def test_independent_check_reports_corruption_without_changing_daily_artifact(
         database.seek(2 * 512)
         database.write((3).to_bytes(4, byteorder="big"))
     daily = subprocess.run(
-        [str(SCRIPT), "--immutable-source", "--check-mode", "header", str(source), str(output)],
+        [
+            str(SCRIPT),
+            "--immutable-source",
+            "--check-mode",
+            "header",
+            str(source),
+            str(output),
+        ],
         capture_output=True,
         text=True,
         timeout=120,
@@ -327,7 +334,14 @@ def test_independent_check_reports_corruption_without_changing_daily_artifact(
     original = output.read_bytes()
 
     verification = subprocess.run(
-        [str(SCRIPT), "--immutable-source", "--verify-only", "--check-budget-seconds", "60", str(source)],
+        [
+            str(SCRIPT),
+            "--immutable-source",
+            "--verify-only",
+            "--check-budget-seconds",
+            "60",
+            str(source),
+        ],
         capture_output=True,
         text=True,
         timeout=120,
@@ -347,7 +361,14 @@ def test_independent_check_emits_structural_receipt_without_new_backup(
         connection.execute("CREATE TABLE samples (value INTEGER)")
         connection.execute("INSERT INTO samples VALUES (1)")
     result = subprocess.run(
-        [str(SCRIPT), "--immutable-source", "--verify-only", "--check-budget-seconds", "60", str(source)],
+        [
+            str(SCRIPT),
+            "--immutable-source",
+            "--verify-only",
+            "--check-budget-seconds",
+            "60",
+            str(source),
+        ],
         capture_output=True,
         text=True,
         timeout=30,
