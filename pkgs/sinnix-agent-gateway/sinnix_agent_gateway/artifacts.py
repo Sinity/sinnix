@@ -313,7 +313,9 @@ class ArtifactService:
             source.stat().st_size != metadata["bytes"]
             or _sha256(source) != metadata["sha256"]
         ):
-            raise ArtifactError("artifact content no longer matches its registered identity")
+            raise ArtifactError(
+                "artifact content no longer matches its registered identity"
+            )
         with source.open("rb") as handle:
             handle.seek(offset)
             data = handle.read(max_bytes + 1)

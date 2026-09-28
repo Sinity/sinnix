@@ -144,7 +144,9 @@ def test_binary_chunks_reassemble_registered_artifact(tmp_path: Path) -> None:
     assert b"".join(parts) == original
 
 
-def test_registered_artifact_is_bound_to_snapshot_not_mutable_source(tmp_path: Path) -> None:
+def test_registered_artifact_is_bound_to_snapshot_not_mutable_source(
+    tmp_path: Path,
+) -> None:
     """Fails if a source edit silently changes bytes returned by an existing ref."""
     rt = runtime(tmp_path)
     artifact_id = register(rt, "mutable.txt", b"registered", "note")
