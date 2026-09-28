@@ -193,8 +193,16 @@ let
       echo "sinnix switch: cannot verify origin/master" >&2
       exit 69
     fi
-    if ! ${pkgs.git}/bin/git -C "$_flake_dir" merge-base --is-ancestor refs/remotes/origin/master HEAD; then
-      echo "sinnix switch: HEAD is behind or diverged from origin/master" >&2
+    _switch_commit=HEAD
+    if [ -n "''${SINNIX_DEV_SHELL_SOURCE:-}" ]; then
+      _switch_commit="''${SINNIX_DEV_SHELL_REV%-dirty}"
+      if ! ${pkgs.git}/bin/git -C "$_flake_dir" cat-file -e "$_switch_commit^{commit}" 2>/dev/null; then
+        echo "sinnix switch: devshell source revision is unavailable in $_flake_dir" >&2
+        exit 64
+      fi
+    fi
+    if ! ${pkgs.git}/bin/git -C "$_flake_dir" merge-base --is-ancestor refs/remotes/origin/master "$_switch_commit"; then
+      echo "sinnix switch: source revision is behind or diverged from origin/master" >&2
       exit 64
     fi
   '';
@@ -278,8 +286,8 @@ let
         if [ -n "''${SINNIX_DEV_SHELL_FLAKE:-}" ]; then
           export SINNIX_FLAKE_DIR="$SINNIX_DEV_SHELL_FLAKE"
         fi
-        if [ -n "''${SINNIX_DEV_SHELL_REV:-}" ] && [ -z "''${SINNIX_DEV_SHELL_FLAKE:-}" ]; then
-          echo "sinnix switch: cannot identify the checkout that provided this devshell" >&2
+        if [ -n "''${SINNIX_DEV_SHELL_REV:-}" ] && [ -z "''${SINNIX_DEV_SHELL_SOURCE:-}" ]; then
+          echo "sinnix switch: devshell source path is unavailable" >&2
           exit 64
         fi
         ${resolveFlakeDir}
@@ -291,9 +299,8 @@ let
           echo "sinnix switch: devshell source is dirty; set SINNIX_ALLOW_DIRTY=1 to allow it" >&2
           exit 64
         fi
-        if [ -n "''${SINNIX_DEV_SHELL_REV:-}" ] \
-          && [ "$(${pkgs.git}/bin/git -C "$_flake_dir" rev-parse HEAD 2>/dev/null || true)" != "''${SINNIX_DEV_SHELL_REV%-dirty}" ]; then
-          echo "sinnix switch: devshell source revision differs from $_flake_dir" >&2
+        if [ -n "''${SINNIX_DEV_SHELL_SOURCE:-}" ] && [ -z "''${SINNIX_DEV_SHELL_REV:-}" ]; then
+          echo "sinnix switch: devshell source has no revision" >&2
           exit 64
         fi
         ${switchSourceGuard}

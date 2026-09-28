@@ -218,12 +218,13 @@
         ${pkgs.git}/bin/git -C "$TMPDIR/source" reset -q --hard origin/master
         : > "$ACTIVATION_LOG"
         source_revision="$(${pkgs.git}/bin/git -C "$TMPDIR/source" rev-parse HEAD)"
-        SINNIX_FLAKE_DIR= NH_FLAKE="$TMPDIR/other" SINNIX_DEV_SHELL_REV="$source_revision" SINNIX_DEV_SHELL_FLAKE="$TMPDIR/source" ACTIVATION_STATUS=7 "${activationExecutables.switch}" || test "$?" = 7
+        SINNIX_FLAKE_DIR= NH_FLAKE="$TMPDIR/other" SINNIX_DEV_SHELL_REV="$source_revision" SINNIX_DEV_SHELL_FLAKE="$TMPDIR/source" SINNIX_DEV_SHELL_SOURCE="$TMPDIR/source" ACTIVATION_STATUS=7 "${activationExecutables.switch}" || test "$?" = 7
         grep -Fq "$TMPDIR/source#sinnix-prime" "$ACTIVATION_LOG"
         ${pkgs.git}/bin/git clone -q "$TMPDIR/source" "$TMPDIR/other"
+        ${pkgs.git}/bin/git -C "$TMPDIR/other" -c user.name=Fixture -c user.email=fixture@example.test commit -q --allow-empty -m caller-ahead
         : > "$ACTIVATION_LOG"
         SINNIX_FLAKE_DIR= NH_FLAKE="$TMPDIR/other" SINNIX_DEV_SHELL_REV="$source_revision" \
-          SINNIX_DEV_SHELL_FLAKE="$TMPDIR/other" SINNIX_DEV_SHELL_SOURCE="$TMPDIR/source" \
+          SINNIX_DEV_SHELL_FLAKE= SINNIX_DEV_SHELL_SOURCE="$TMPDIR/source" \
           ACTIVATION_STATUS=7 "${activationExecutables.switch}" || test "$?" = 7
         grep -Fq "$TMPDIR/source#sinnix-prime" "$ACTIVATION_LOG"
         if grep -Fq "$TMPDIR/other#sinnix-prime" "$ACTIVATION_LOG"; then
