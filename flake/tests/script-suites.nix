@@ -77,6 +77,12 @@
     in
     {
       checks = {
+        audio-mic-suite = mkScriptSuite {
+          name = "audio-mic";
+          suiteDir = ../../scripts/tests/audio-mic;
+          scripts = [ "audio" ];
+          nativeBuildInputs = [ pkgs.jq ];
+        };
         # The per-checkout dev-service reaper must use the assigned PostgreSQL
         # port and collect NATS-only orphans without crossing checkout scope.
         sinex-dev-db-reaper-suite = mkScriptSuite {

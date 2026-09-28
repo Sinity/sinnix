@@ -66,9 +66,8 @@ get_current_sink_json() {
 }
 
 get_mic_json() {
-    status=$(wpctl get-volume @DEFAULT_AUDIO_SOURCE@ 2>/dev/null || true)
-    if [[ -z "$status" ]]; then
-        jq -n '{text:"󰍭", tooltip:"No mic", class:"missing"}'
+    if ! status=$(get_active_mic_status); then
+        jq -n '{text:"󰍭", tooltip:"No active microphone (input unplugged)", class:"unavailable", state:"unavailable"}'
         return
     fi
 
@@ -77,6 +76,15 @@ get_mic_json() {
     class=$([[ "$muted" == "true" ]] && echo "muted" || echo "active")
 
     jq -n --arg text "$icon" --arg class "$class" '{text:$text, class:$class}'
+}
+
+# Resolve only the active alias. The configured default may refer to a source
+# whose physical input routes are unavailable, so never fall back to it.
+get_active_mic_status() {
+    local inspect
+    inspect=$(wpctl inspect @DEFAULT_AUDIO_SOURCE@ 2>/dev/null) || return 1
+    [[ -n "$inspect" ]] || return 1
+    wpctl get-volume @DEFAULT_AUDIO_SOURCE@ 2>/dev/null
 }
 
 case "${1:-status}" in
@@ -107,6 +115,14 @@ case "${1:-status}" in
         get_current_sink_json
         ;;
     mic-toggle)
+        if ! get_active_mic_status >/dev/null; then
+            message="No active microphone (input unplugged)"
+            if command -v notify-send >/dev/null 2>&1; then
+                notify-send "Microphone unavailable" "$message" || true
+            fi
+            printf '%s\n' "$message" >&2
+            exit 1
+        fi
         wpctl set-mute @DEFAULT_AUDIO_SOURCE@ toggle
         refresh_waybar
         ;;
