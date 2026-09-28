@@ -425,7 +425,7 @@ def _wait_for_unit(unit: str, timeout_seconds: int) -> dict[str, str] | None:
     return None
 
 
-def active_units(daemon: str, pool: str) -> list[str]:
+def active_units(daemon: str, pool: str) -> dict[str, int | None]:
     """Every unit of this daemon's pool still running, whichever run created it.
 
     The name glob is a prefilter; the Description decides, so a pool whose
@@ -440,11 +440,12 @@ def active_units(daemon: str, pool: str) -> list[str]:
         f"{POOL_SLICE_PREFIX}-{pool}-*",
     )
     prefix = unit_description(daemon, pool, "")
-    units = []
+    units: dict[str, int | None] = {}
     for line in (listed or "").splitlines():
         columns = line.split(None, 4)
         if len(columns) == 5 and columns[4].strip().startswith(prefix):
-            units.append(columns[0])
+            identity = columns[4].strip()[len(prefix):]
+            units[columns[0]] = int(identity) if identity.isdecimal() else None
     return units
 
 
@@ -461,11 +462,13 @@ def _occupancy(
     try:
         parallel = pueue.groups().get(pool)
         tasks = pueue.running_tasks(pool)
-        units = active_units(daemon, pool) if parallel == 1 else []
+        units = active_units(daemon, pool) if parallel == 1 else {}
         if units:
-            # Only a possible orphan needs terminal history. Keep that query
-            # bounded; routine supervisors read running tasks alone.
-            tasks.update(pueue.recent_tasks(pool))
+            for task_id in units.values():
+                if task_id is not None and task_id not in tasks:
+                    owner = pueue.task_from_log(task_id)
+                    if owner is not None:
+                        tasks[task_id] = owner
     except PueueError:
         return "", None
     owners = {}
