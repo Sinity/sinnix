@@ -72,7 +72,7 @@ in
             exit 1
           fi
 
-          grep -q '^AGENTS.md$' "$HOME/.config/git/ignore_global"
+          grep -qx 'result' "$HOME/.config/git/ignore_global"
           delta --version >/dev/null
         '';
       };
