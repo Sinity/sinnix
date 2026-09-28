@@ -97,9 +97,11 @@ mkServiceModule {
       ];
 
       systemd.services.transmission = {
-        # Start with the normal boot target; RequiresMountsFor below is the
-        # actual storage gate, while PartOf stops it on unmount.
-        wantedBy = lib.mkForce (lib.optionals cfg.autoStart [ "multi-user.target" ]);
+        # Start at boot without gating login: READY=1 waits on the payload
+        # scan below, which took 70s on a cold boot and held the desktop
+        # back while this sat under multi-user.target. RequiresMountsFor
+        # below is the actual storage gate, while PartOf stops it on unmount.
+        wantedBy = lib.mkForce (lib.optionals cfg.autoStart [ "sinnix-background.target" ]);
         unitConfig.RequiresMountsFor = lib.unique [
           torrentInbox
           neoOuterRealm

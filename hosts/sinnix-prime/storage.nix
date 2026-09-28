@@ -519,10 +519,9 @@ in
       "d ${polylogueDbRoot} 0700 ${username} ${primaryGroupName} -"
       "d /home/${username}/.local/share 0700 ${username} ${primaryGroupName} -"
       "d ${polylogueShareMount} 0700 ${username} ${primaryGroupName} -"
-      # NVMe-backed regenerable-cache root (bind-mount source for
-      # /var/cache/sinex; nix-build/sccache siblings live here too).
-      # Excluded from btrbk→borg — never persist-grade data.
-      "d ${realmRoot}/state/cache 0755 root root -"
+      # Bind-mount source for /var/cache/sinex, under the operator-owned
+      # regenerable-cache root that modules/core.nix declares. Excluded from
+      # btrbk→borg — never persist-grade data.
       "d ${realmRoot}/state/cache/sinex 0775 ${username} users -"
       # NATS JetStream state, backed up with the realm volume.
       "d ${realmRoot}/state/nats 0755 nats nats -"

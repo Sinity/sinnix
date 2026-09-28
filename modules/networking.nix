@@ -41,10 +41,17 @@ in
       };
     };
 
-    # nm-online -s waits for every autoconnect profile to settle or time out
-    # (60s); a cold-boot WPA handshake or DHCP renewal regularly trips that,
-    # leaving a failed unit. Nothing on a desktop depends on it.
-    systemd.services.NetworkManager-wait-online.enable = false;
+    # network-online.target must mean a working connection: Transmission and
+    # the GitHub runner order on it, and with this unit disabled both started
+    # before DNS answered. Upstream's `nm-online -s` waits for every
+    # autoconnect profile to settle, so one slow profile failed the unit;
+    # plain `nm-online` returns once any connection is up. Units that need
+    # the network start from sinnix-background.target, so this wait never
+    # delays the desktop.
+    systemd.services.NetworkManager-wait-online.serviceConfig.ExecStart = [
+      ""
+      "${config.networking.networkmanager.package}/bin/nm-online -q"
+    ];
 
     services = {
       # Local stub resolver and .lan handling only; the router stays the DNS

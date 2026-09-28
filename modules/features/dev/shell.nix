@@ -331,6 +331,9 @@ mkFeatureModule {
                 yq
                 xh
                 neovim
+                # nvim-treesitter's main branch builds every parser with the
+                # tree-sitter CLI; without it parser installs fail silently.
+                tree-sitter
                 yazi
                 glow
                 man-pages

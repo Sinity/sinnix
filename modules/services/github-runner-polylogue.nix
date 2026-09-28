@@ -87,6 +87,12 @@ mkServiceModule {
           };
         };
 
+        # Registration needs the network, and network-online.target must not
+        # hold back login.
+        systemd.services.github-runner-polylogue.wantedBy = lib.mkForce [
+          "sinnix-background.target"
+        ];
+
         systemd.tmpfiles.rules = [
           "d ${builtins.dirOf cfg.workDir} 0755 ${userName} users -"
           "d ${cfg.workDir} 0755 ${userName} users -"

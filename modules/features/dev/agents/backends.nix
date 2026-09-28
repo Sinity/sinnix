@@ -199,6 +199,13 @@ let
     else
       claude_args+=(--add-dir=/home/${user})
     fi
+    # One debug log per launch: a frozen session leaves a transcript that
+    # simply stops, and this log shows what the process did last (hooks,
+    # messaging, file writes). It lives in the scratch tree, whose tmpfiles
+    # age limit bounds it; `claude-hang-capture` collects it.
+    claude_debug_dir="$CLAUDE_CODE_TMPDIR/claude-debug"
+    ${pkgs.coreutils}/bin/install -d -m 0700 "$claude_debug_dir"
+    claude_args+=(--debug-file="$claude_debug_dir/$(${pkgs.coreutils}/bin/date +%Y%m%dT%H%M%S)-$$.log")
   '';
 
   mkClodexRoutingPrelude = ''

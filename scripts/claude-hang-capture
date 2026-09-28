@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Capture evidence from a frozen Claude Code session before it is killed
+# runtimeInputs: coreutils procps gdb iproute2 systemd jq findutils gnugrep gawk
+#
+# A frozen session keeps its memory and child processes (pueue waiters, dolt,
+# test runs) in its own scope and leaves a transcript that simply stops. Run
+# this before closing it: it records whether the process is spinning or
+# blocked and where, then prints the command that stops the whole scope.
+#
+# usage: claude-hang-capture [PID...]   (default: every running claude.exe)
+set -euo pipefail
+
+out_root="${TMPDIR:-/realm/tmp/work}/claude-hang"
+stamp=$(date +%Y%m%dT%H%M%S)
+
+pids=("$@")
+if [ ${#pids[@]} -eq 0 ]; then
+  for p in $(pgrep -u "$(id -u)" -f claude || true); do
+    case "$(readlink "/proc/$p/exe" 2>/dev/null)" in
+      */claude-code/bin/claude.exe) pids+=("$p") ;;
+    esac
+  done
+fi
+if [ ${#pids[@]} -eq 0 ]; then
+  echo "claude-hang-capture: no running Claude Code process" >&2
+  exit 1
+fi
+
+# Root reads kernel stacks and attaches gdb when ptrace is restricted; the
+# capture still records everything else without it.
+root=()
+if sudo -n true 2>/dev/null; then
+  root=(sudo -n)
+fi
+
+capture() {
+  local pid=$1 dir scope cwd project cmdline debug_log transcript
+  [ -d "/proc/$pid" ] || { echo "pid $pid: gone" >&2; return; }
+  dir="$out_root/$stamp-$pid"
+  mkdir -p "$dir"
+
+  cmdline=$(tr '\0' ' ' <"/proc/$pid/cmdline")
+  cwd=$(readlink "/proc/$pid/cwd" || true)
+  scope=$(awk -F/ '{print $NF}' "/proc/$pid/cgroup")
+  {
+    echo "pid: $pid"
+    echo "captured: $(date --iso-8601=seconds)"
+    echo "cwd: $cwd"
+    echo "cmdline: $cmdline"
+    echo "scope: $scope"
+    ps -o pid,stat,etime,time,rss,vsz,nlwp,wchan:32 -p "$pid"
+  } >"$dir/summary.txt"
+  cp "/proc/$pid/status" "$dir/status.txt"
+
+  # Spinning or blocked: per-thread state and CPU ticks, sampled twice.
+  thread_sample() {
+    for t in /proc/"$pid"/task/*; do
+      awk -v tid="${t##*/}" '{print tid, $3, $14 + $15}' "$t/stat" 2>/dev/null
+    done | sort -k1,1
+  }
+  thread_sample >"$dir/threads.before"
+  sleep 3
+  thread_sample >"$dir/threads.after"
+  join "$dir/threads.before" "$dir/threads.after" |
+    awk 'BEGIN {print "tid state_before state_after cpu_ticks_in_3s wchan"}
+         {cmd = "cat /proc/'"$pid"'/task/" $1 "/wchan 2>/dev/null"; cmd | getline w; close(cmd)
+          print $1, $2, $4, $5 - $3, w; w = ""}' >"$dir/threads.txt"
+  rm -f "$dir/threads.before" "$dir/threads.after"
+
+  "${root[@]}" cat "/proc/$pid/stack" >"$dir/kernel-stack.txt" 2>&1 || true
+  timeout 60 "${root[@]}" gdb -p "$pid" -batch -nx \
+    -ex 'set pagination off' -ex 'thread apply all bt 20' \
+    >"$dir/native-stacks.txt" 2>&1 || true
+
+  ls -l "/proc/$pid/fd" >"$dir/fds.txt" 2>&1 || true
+  ss -xp 2>/dev/null | grep -E "pid=${pid}[,)]" >"$dir/unix-sockets.txt" || true
+  ss -tp 2>/dev/null | grep -E "pid=${pid}[,)]" >"$dir/tcp-sockets.txt" || true
+
+  if [ -n "$scope" ] && [ "$scope" != "/" ]; then
+    systemctl --user status "$scope" --no-pager -l >"$dir/scope.txt" 2>&1 || true
+    systemctl --user show "$scope" -p MemoryCurrent -p MemoryPeak -p CPUUsageNSec \
+      >>"$dir/scope.txt" 2>&1 || true
+  fi
+  ps -o pid,ppid,stat,etime,time,rss,args --forest -g "$(ps -o sid= -p "$pid" | tr -d ' ')" \
+    >"$dir/process-tree.txt" 2>&1 || true
+
+  debug_log=$(sed -n 's/.*--debug-file=\([^ ]*\).*/\1/p' <<<"$cmdline")
+  if [ -n "$debug_log" ] && [ -r "$debug_log" ]; then
+    tail -n 2000 "$debug_log" >"$dir/debug-tail.log"
+    echo "debug log: $debug_log" >>"$dir/summary.txt"
+  fi
+
+  # The newest transcript for the session's directory is the one it was
+  # writing; a hung session's queue records show what arrived unanswered.
+  project="$HOME/.claude/projects/$(sed 's#[^A-Za-z0-9]#-#g' <<<"$cwd")"
+  transcript=$(find "$project" -maxdepth 1 -name '*.jsonl' -printf '%T@ %p\n' 2>/dev/null |
+    sort -n | tail -1 | cut -d' ' -f2-)
+  if [ -n "$transcript" ]; then
+    echo "transcript: $transcript" >>"$dir/summary.txt"
+    tail -n 200 "$transcript" | jq -c '{t: .timestamp, type, op: .operation, sub: .subtype}' \
+      >"$dir/transcript-tail.jsonl" 2>/dev/null || true
+  fi
+
+  echo "pid $pid: captured to $dir"
+  if [ -n "$scope" ] && [[ "$scope" == *.scope ]]; then
+    echo "  stop it and its children: systemctl --user stop $scope"
+  fi
+}
+
+for pid in "${pids[@]}"; do
+  capture "$pid"
+done

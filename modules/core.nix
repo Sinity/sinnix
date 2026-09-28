@@ -55,6 +55,18 @@ in
     };
 
     systemd = {
+      # Boot-started services the desktop does not wait for. A target orders
+      # itself after every unit it wants, so a daemon wanted by
+      # multi-user.target holds back graphical.target, which the uwsm login
+      # gate waits on. This target sets DefaultDependencies=no so it drops
+      # that implicit ordering: it activates immediately and its units finish
+      # starting in the background.
+      targets.sinnix-background = {
+        description = "Background services started at boot without gating login";
+        wantedBy = [ "multi-user.target" ];
+        unitConfig.DefaultDependencies = false;
+      };
+
       tmpfiles.rules = lib.mkAfter [
         "d ${paths.outerRealm} 0755 root root -"
         "d ${paths.outerRealm}/inbox 0755 ${username} users -"
@@ -76,16 +88,22 @@ in
         # re-sprinkled root ownership across /realm, /realm/state,
         # /realm/library, /realm/tmp/work, and five recut subject
         # roots; repaired by one-shot chown, and the roots are declared below
-        # so new hosts start correct. Service-state dirs root daemons own
-        # (state/journal, state/containers, backup targets, swap, .btrfs)
-        # stay root on purpose.
+        # so new hosts start correct. Service-state leaves root daemons own
+        # (state/journal, state/containers, backup targets, swap, the
+        # snapshots under .btrfs) stay root on purpose.
+        #
+        # A container directory that only holds such leaves is still the
+        # operator's: tmpfiles refuses (as an unsafe path transition) every
+        # rule whose parent chain steps from a user-owned directory into a
+        # root-owned one, so a root-owned container silently disables every
+        # rule beneath it.
         "d ${paths.realmRoot} 0755 ${username} users -"
         "f+ ${paths.realmRoot}/.hidden 0644 ${username} users - state\\ntmp\\nworktrees\\n"
+        "d ${paths.realmRoot}/.btrfs 0755 ${username} users -"
         "d /realm/state 0755 ${username} users -"
-        # User caches (browser, sinex, uv). A root-owned directory here under
-        # the user-owned /realm/state is an unsafe path transition, so
-        # systemd-tmpfiles refused to create anything beneath it.
         "d /realm/state/cache 0755 ${username} users -"
+        "d /realm/state/cursors 0755 ${username} users -"
+        "d /realm/state/db-dumps 0755 ${username} users -"
         "d /realm/tmp/work 0700 ${username} users 30d"
         "d ${paths.realmRoot}/accounts 0755 ${username} users -"
         "d ${paths.realmRoot}/notes 0755 ${username} users -"

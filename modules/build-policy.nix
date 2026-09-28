@@ -105,13 +105,20 @@ in
     # own transaction threads rather than this cgroup, so it escapes weight
     # accounting. The absolute ceiling is what keeps the root device
     # answering while the walk runs; / and /nix share one SATA SSD.
+    #
+    # Best-effort rather than the background class's idle IO: idle requests
+    # are served only when nothing else is queued, and agent work keeps the
+    # SSD busy around the clock. On 2026-09-28 deletion fell from ~9000 to
+    # ~900 paths/hour under agent load; the run was still going after four
+    # hours and no weekly run had finished in the journal's window. The low
+    # IOWeight and the ceilings below still keep it behind interactive work.
     systemd.services.nix-gc.serviceConfig =
       (lib.sinnix.mkRuntimeServiceConfig {
         runtimeInventory = config.sinnix.runtime.inventory;
         unit = "nix-gc.service";
       })
       // {
-        IOSchedulingClass = "idle";
+        IOSchedulingClass = "best-effort";
         IOReadBandwidthMax = "/nix 24M";
         IOWriteBandwidthMax = "/nix 16M";
       };
