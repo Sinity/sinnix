@@ -398,6 +398,7 @@ def test_resume_prompt_names_the_worktree_branch_and_base(project_root: Path) ->
         branch="feature/packet/fx-solo",
         base="origin/master",
         worktree=Path("/realm/worktrees/fixture-feature-packet-fx-solo"),
+        contract={"schema_version": 1, "attempt": 2},
     )
 
     assert "feature/packet/fx-solo" in prompt
@@ -410,6 +411,7 @@ def test_resume_prompt_names_the_worktree_branch_and_base(project_root: Path) ->
         branch="feature/packet/fx-solo",
         base="origin/master",
         worktree=Path("/w"),
+        contract={"schema_version": 1, "attempt": 2},
         packet="# Dispatch packet\n\noriginal",
     )
     assert "## Original dispatch packet" in with_packet and "original" in with_packet
@@ -428,6 +430,7 @@ def test_resume_prompt_over_budget_keeps_a_digest_and_local_packet_pointer(
         branch="feature/packet/fx-solo",
         base="origin/master",
         worktree=Path("/w"),
+        contract={"schema_version": 1, "attempt": 3},
         packet="# Dispatch packet\n\n" + "y" * MAX_PROMPT_BYTES,
     )
 
@@ -435,6 +438,7 @@ def test_resume_prompt_over_budget_keeps_a_digest_and_local_packet_pointer(
     assert "bead_bodies" in prompt and '"digest"' in prompt
     assert ".agentctl/prompt.md" in prompt
     assert "sha256=" in prompt
+    assert "## Result contract for attempt 3" in prompt
 
 
 def test_a_missing_worker_contract_is_a_typed_refusal(project_root: Path) -> None:

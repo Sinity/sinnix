@@ -68,6 +68,7 @@ from .projects import (
 from .prompts import PromptError
 from .pueue import PueueError
 from .schedule import TimerError
+from .start import check_result_contract
 from .worktrunk import WorktrunkError
 
 EXIT_OK = 0
@@ -159,6 +160,17 @@ def parser() -> argparse.ArgumentParser:
         "validate-worker", help="validate one worker result with the batch contract"
     )
     validate_worker.add_argument("path", type=Path)
+    validate_worker.add_argument(
+        "--run",
+        default=os.environ.get("AGENTCTL_RUN_ID"),
+        help="the batch run whose current attempt must file this result "
+        "(default: $AGENTCTL_RUN_ID, set for queued batch workers)",
+    )
+    validate_worker.add_argument(
+        "--worker",
+        default=os.environ.get("AGENTCTL_WORKER_ID"),
+        help="the worker within --run (default: $AGENTCTL_WORKER_ID)",
+    )
     _output_arguments(validate_worker)
 
     job = verbs.add_parser("job", help="declared operations as pueue tasks")
@@ -967,13 +979,20 @@ def _project(arguments: argparse.Namespace, config: Config, out: Output) -> int:
     return EXIT_OK
 
 
-def _result(arguments: argparse.Namespace, out: Output) -> int:
+def _result(arguments: argparse.Namespace, config: Config, out: Output) -> int:
     if arguments.result_verb == "validate-worker":
-        _value, errors = results.load_result(arguments.path, kind="worker")
+        value, errors = results.load_result(arguments.path, kind="worker")
         if errors:
             raise BatchRefusal(
                 "invalid_result", "; ".join(errors[:6]), errors=errors
             )
+        if bool(arguments.run) != bool(arguments.worker):
+            parser().error("--run and --worker name one batch worker together")
+        if arguments.run:
+            # The filing contract, so `lane done` refuses what `batch result`
+            # would refuse for this attempt.
+            run = load(config, resolve_run_id(config, arguments.run))
+            check_result_contract(run, run.worker(arguments.worker), value)
         out.read({"valid": True}, "worker result is valid")
         return EXIT_OK
     raise AssertionError(arguments.result_verb)
@@ -984,7 +1003,7 @@ def _dispatch(arguments: argparse.Namespace, config: Config, out: Output) -> int
     if verb == "project":
         return _project(arguments, config, out)
     if verb == "result":
-        return _result(arguments, out)
+        return _result(arguments, config, out)
     if verb == "job":
         return _job(arguments, config, out)
     if verb == "batch":

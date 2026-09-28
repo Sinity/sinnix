@@ -755,36 +755,58 @@ def evidence_binding(bead: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def result_contract(
+    bindings: Sequence[Mapping[str, Any]],
+    *,
+    planned_model: str | None,
+    execution: str | None,
+    attempt: int = 1,
+) -> dict[str, Any]:
+    """The result shape one dispatch attempt must file.
+
+    ``bindings`` are the dispatch-time evidence bindings, each with its bead
+    ``id``. The initial packet and every resume packet render this from the
+    same records, so a resumed worker files exactly what filing accepts.
+    """
+    rows = [dict(row) for row in bindings]
+    available = bool(rows) and all(row.get("v2_available") is True for row in rows)
+    if not available:
+        return {
+            "schema_version": 1,
+            "evidence": "unknown",
+            "attempt": attempt,
+            "reason": (
+                "One or more dispatched beads lack Beads-authored stable AC IDs "
+                "or a row revision. File the legacy shape: no schema_version, "
+                "acceptance_digest or ac_id, and this attempt number."
+            ),
+        }
+    return {
+        "schema_version": 2,
+        "execution": execution if execution in {"queued", "external"} else "native",
+        "attempt": attempt,
+        "planned_model": planned_model,
+        "model_segments": [
+            {"attempt": attempt, "planned_model": planned_model, "measured_usage": None}
+        ],
+        "measured_usage": None,
+        "beads": rows,
+    }
+
+
 def _result_contract(
     beads: Sequence[Mapping[str, Any]],
     dimensions: PromptDimensions,
     batch: Mapping[str, Any],
 ) -> dict[str, Any]:
-    bindings = [
-        {"id": bead.get("id"), **dict(bead.get("evidence_binding") or {})}
-        for bead in beads
-    ]
-    available = bool(bindings) and all(
-        item.get("v2_available") is True for item in bindings
-    )
-    if not available:
-        return {
-            "schema_version": 1,
-            "evidence": "unknown",
-            "reason": "One or more dispatched beads lack Beads-authored stable AC IDs or a row revision",
-        }
-    execution = batch.get("harness")
-    return {
-        "schema_version": 2,
-        "execution": execution if execution in {"queued", "external"} else "native",
-        "attempt": 1,
-        "planned_model": dimensions.model,
-        "model_segments": [
-            {"attempt": 1, "planned_model": dimensions.model, "measured_usage": None}
+    return result_contract(
+        [
+            {"id": bead.get("id"), **dict(bead.get("evidence_binding") or {})}
+            for bead in beads
         ],
-        "measured_usage": None,
-        "beads": bindings,
-    }
+        planned_model=dimensions.model,
+        execution=batch.get("harness"),
+    )
 
 
 def _project_relationships(bead: Mapping[str, Any], reader: BdReader) -> dict[str, Any]:
@@ -932,14 +954,20 @@ def resume_prompt(
     branch: str,
     base: str,
     worktree: Path,
+    contract: Mapping[str, Any],
     packet: str | None = None,
 ) -> str:
     """The prompt for a fresh agent resuming an existing worker's worktree.
 
-    ``packet`` is the worker's original dispatch prompt; the rules and result
-    contract it carries apply unchanged.
+    ``packet`` is the worker's original dispatch prompt; its rules apply
+    unchanged. ``contract`` is this attempt's result contract, rendered from
+    the dispatch-time bindings by `result_contract`: it replaces the original
+    packet's, which names attempt 1, and it survives when the original packet
+    is too large to embed.
     """
     template, contract_path = _template(config)
+    contract_document = json.dumps(contract, indent=2, sort_keys=True)
+    attempt = contract.get("attempt")
 
     def render(resume_bead: Mapping[str, Any], original: str) -> str:
         snapshot = json.dumps(
@@ -962,6 +990,12 @@ def resume_prompt(
             "cannot resolve honestly is reported, never forced to green.\n\n"
             f"{UNTRUSTED_JSON_PREAMBLE}\n\n"
             f"```json\n{snapshot}\n```\n\n"
+            f"## Result contract for attempt {attempt}\n\n"
+            "This replaces the original packet's `result_contract`. File the "
+            f"result for attempt {attempt}, with every dispatched bead, in the "
+            "shape below; copy each binding exactly. An earlier attempt's result "
+            "file in `.agentctl/` is not this attempt's result.\n\n"
+            f"```json\n{contract_document}\n```\n\n"
             f"## Operating rules (`{contract_path}`)\n\n"
             f"{template}\n"
             f"{original}"
@@ -976,11 +1010,8 @@ def resume_prompt(
     # packet have grown beyond the current prompt budget.  The complete packet
     # is already retained beside the worker; bind the fresh worker to the
     # current Bead body by digest and point it at that durable local evidence.
-    digested = {
-        **digest_bead(bead),
-        "evidence_binding": evidence_binding(bead),
-        "bead_bodies": "digest",
-    }
+    # The acceptance bindings stay in the contract above, as dispatched.
+    digested = {**digest_bead(bead), "bead_bodies": "digest"}
     compact_original = (
         "\n\n## Original dispatch packet\n\n"
         "The complete original packet remains at `.agentctl/prompt.md` in this "

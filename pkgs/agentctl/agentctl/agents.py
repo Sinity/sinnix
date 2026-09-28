@@ -229,6 +229,10 @@ def queue_agent(
     environment.setdefault("BEADS_ACTOR", label.replace(":", "-"))
     environment["AGENTCTL_PRINCIPAL"] = "agent-control"
     environment["AGENTCTL_PROJECT_ID"] = project.project_id
+    if binding and binding.get("run_id") and binding.get("worker"):
+        # `lane done` validates against this worker's filing contract.
+        environment["AGENTCTL_RUN_ID"] = str(binding["run_id"])
+        environment["AGENTCTL_WORKER_ID"] = str(binding["worker"])
     operation = label.split(":", 1)[1]
     if operation.split(":", 1)[0] in RESTRICTED_KINDS:
         restrict_environment(config, environment)

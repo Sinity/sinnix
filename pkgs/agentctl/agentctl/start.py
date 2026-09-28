@@ -52,6 +52,7 @@ from .prompts import (
     PromptError,
     compile_worker_prompt,
     resolve_group,
+    result_contract,
     resume_prompt,
     scope_authority,
     scope_violations,
@@ -274,6 +275,67 @@ def _v2_binding_errors(
         if actual_criteria != expected_criteria:
             errors.append(f"v2 result {bead_id} criteria differ from dispatch")
     return errors
+
+
+def worker_contract(run: Run, worker: Mapping[str, Any], attempt: int) -> dict[str, Any]:
+    """The result contract of ``worker``'s ``attempt``, from its dispatch bindings."""
+    records = worker.get("evidence_binding")
+    by_id = {
+        row.get("id"): row
+        for row in (records if isinstance(records, list) else ())
+        if isinstance(row, Mapping)
+    }
+    bindings = [
+        dict(by_id.get(bead_id) or {"id": bead_id, "v2_available": False})
+        for bead_id in worker.get("beads") or ()
+    ]
+    return result_contract(
+        bindings,
+        planned_model=worker.get("model"),
+        execution=run.harness,
+        attempt=attempt,
+    )
+
+
+def check_result_contract(
+    run: Run, worker: Mapping[str, Any], value: Mapping[str, Any]
+) -> None:
+    """Refuse a schema-valid result that this worker's current attempt cannot file.
+
+    The one authority for the document-level contract: `batch result` applies
+    it before binding the result to the worktree, and `result validate-worker`
+    applies it inside a batch worker, so `lane done` refuses exactly what
+    filing refuses.
+    """
+    attempts = worker.get("attempts") or []
+    latest = attempts[-1] if attempts else None
+    if isinstance(latest, Mapping):
+        number = latest.get("number")
+        if (
+            value.get("schema_version") == results.RESULT_SCHEMA_VERSION
+            or isinstance(number, int)
+            and number > 1
+        ) and value.get("attempt") != number:
+            raise BatchRefusal(
+                "result_attempt",
+                f"result attempt {value.get('attempt')} differs from current attempt {number}",
+            )
+    binding_errors = _v2_binding_errors(worker, value)
+    if binding_errors:
+        raise BatchRefusal(
+            "result_evidence_binding",
+            "; ".join(binding_errors),
+            errors=binding_errors,
+        )
+    unknown = {
+        entry.get("id") for entry in value.get("beads") or () if isinstance(entry, Mapping)
+    } - set(worker.get("beads") or ())
+    if unknown:
+        raise BatchRefusal(
+            "foreign_beads",
+            "result covers beads outside the worker: "
+            + ", ".join(sorted(str(item) for item in unknown)),
+        )
 
 
 def result_provenance(
@@ -930,15 +992,6 @@ def _result_locked(
     latest = attempts[-1] if attempts else None
     if isinstance(latest, Mapping):
         number = latest.get("number")
-        if (
-            value.get("schema_version") == results.RESULT_SCHEMA_VERSION
-            or isinstance(number, int)
-            and number > 1
-        ) and value.get("attempt") != number:
-            raise BatchRefusal(
-                "result_attempt",
-                f"result attempt {value.get('attempt')} differs from current attempt {number}",
-            )
         expected_path = latest.get("result_path")
         bindings = worker.get("evidence_binding")
         strict_dispatch = (
@@ -959,13 +1012,7 @@ def _result_locked(
                 "result_attempt",
                 f"result path {path} differs from current attempt path {expected_path}",
             )
-    binding_errors = _v2_binding_errors(worker, value)
-    if binding_errors:
-        raise BatchRefusal(
-            "result_evidence_binding",
-            "; ".join(binding_errors),
-            errors=binding_errors,
-        )
+    check_result_contract(run, worker, value)
     worktree = worker.get("worktree")
     if worktree:
         head = gitcmd.git(Path(worktree), "rev-parse", "HEAD", error=BatchError)
@@ -1008,12 +1055,6 @@ def _result_locked(
                 f"result names {value['candidate_sha'][:12]}, which does not "
                 f"descend from the run's base {run.base_commit[:12]}",
             ) from error
-    unknown = {entry["id"] for entry in value["beads"]} - set(worker["beads"])
-    if unknown:
-        raise BatchRefusal(
-            "foreign_beads",
-            "result covers beads outside the worker: " + ", ".join(sorted(unknown)),
-        )
     if reader is None:
         if project is None:
             raise BatchError("batch result needs the project to read write scopes")
@@ -1173,18 +1214,19 @@ def _resume_locked(
     beads = SubprocessBeads(project.root)
     path = Path(worktree)
     packet_path = path / WORKTREE_STATE_DIR / "prompt.md"
-    prompt = resume_prompt(
-        config=packets,
-        bead=beads.show(worker_id),
-        branch=worker["branch"],
-        base=run.base_commit,
-        worktree=path,
-        packet=packet_path.read_text() if packet_path.is_file() else None,
-    )
-    # Each resume keeps its own packet and result beside the original.
-    attempt = len(worker.get("task_ids") or []) + 1
-    while (path / WORKTREE_STATE_DIR / f"resume-{attempt}.md").exists():
-        attempt += 1
+    pending = worker.get("pending_launch")
+    recovered = pending_task(config, pending, tasks) if pending else None
+    pending_attempt = worker.get("pending_attempt")
+    if recovered is not None and isinstance(pending_attempt, int):
+        # The enqueued task already runs this attempt's packet and writes its
+        # result path; numbering past its packet would record an attempt the
+        # task can never file for.
+        attempt = pending_attempt
+    else:
+        # Each resume keeps its own packet and result beside the original.
+        attempt = len(worker.get("task_ids") or []) + 1
+        while (path / WORKTREE_STATE_DIR / f"resume-{attempt}.md").exists():
+            attempt += 1
     resume_result = path / WORKTREE_STATE_DIR / f"resume-{attempt}.result.json"
     prompt_name = f"resume-{attempt}.md"
     effective_backend, effective_model, effective_effort = _effective_selection(
@@ -1194,8 +1236,17 @@ def _resume_locked(
         model=model,
         effort=effort,
     )
-    pending = worker.get("pending_launch")
-    recovered = pending_task(config, pending, tasks) if pending else None
+    prompt = resume_prompt(
+        config=packets,
+        bead=beads.show(worker_id),
+        branch=worker["branch"],
+        base=run.base_commit,
+        worktree=path,
+        contract=worker_contract(
+            run, {**worker, "model": effective_model}, attempt
+        ),
+        packet=packet_path.read_text() if packet_path.is_file() else None,
+    )
     if recovered is not None:
         job = {
             "job_id": recovered.task_id,

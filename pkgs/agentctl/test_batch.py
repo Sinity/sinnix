@@ -19,6 +19,7 @@ import pytest
 from agentctl import (
     artifacts,
     batch,
+    cli,
     gitcmd,
     github,
     launch,
@@ -2278,6 +2279,176 @@ def test_old_attempt_result_cannot_be_filed_after_resume(
         harness.file_result(run, "fx-solo")
 
 
+def resume_contract(prompt_path: str) -> dict[str, Any]:
+    """The result contract a resume packet hands its fresh agent."""
+    text = Path(prompt_path).read_text()
+    section = text.split("## Result contract for attempt ", 1)[1]
+    return json.loads(section.split("```json\n", 1)[1].split("\n```", 1)[0])
+
+
+def validate_as_lane(
+    harness: Harness,
+    monkeypatch: pytest.MonkeyPatch,
+    run_id: str,
+    worker_id: str,
+    path: Path,
+) -> int:
+    """`lane done`'s check: `agentctl result validate-worker` in the worker's env."""
+    location = harness.config.state_dir / "agentctl.json"
+    location.write_text(
+        json.dumps(
+            {
+                "project_roots": [str(root) for root in harness.config.project_roots],
+                "agent_runner": str(harness.config.agent_runner),
+                "event_spool": str(harness.config.event_spool),
+                "state_dir": str(harness.config.state_dir),
+                "agentctl": harness.config.agentctl_executable,
+            }
+        )
+    )
+    monkeypatch.setenv("AGENTCTL_CONFIG", str(location))
+    monkeypatch.setenv("AGENTCTL_RUN_ID", run_id)
+    monkeypatch.setenv("AGENTCTL_WORKER_ID", worker_id)
+    return cli.main(["result", "validate-worker", str(path)])
+
+
+def test_resumed_multi_bead_worker_files_its_attempt_under_one_contract(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A resumed worker whose group mixes bound and unbound beads.
+
+    Before the fix the resume packet repeated the original packet's attempt 1
+    and a strict Codex schema forced `schema_version: 2`, so a result that
+    `lane done` accepted as legacy was refused at filing.
+    """
+    harness.beads.beads["fx-member"]["acceptance_criteria"] = ""
+    run = harness.start("fx-lead")
+    monkeypatch.setattr(start, "SubprocessBeads", lambda root: harness.beads)
+    harness.pueue.fail(run["workers"][0]["task_id"], exit_code=1)
+    resumed = batch.resume(harness.config, harness.project, run["run_id"], "fx-lead")
+    worker = resumed["workers"][0]
+    task = harness.pueue.task(worker["task_id"])
+    environment = read_launch(harness.config, task)["environment"]
+    assert environment["AGENTCTL_RUN_ID"] == run["run_id"]
+    assert environment["AGENTCTL_WORKER_ID"] == "fx-lead"
+
+    contract = resume_contract(worker["prompt_path"])
+    assert contract["schema_version"] == 1 and contract["attempt"] == 2
+
+    result_path = Path(worker["result_path"])
+    # What strict decoding used to emit: v2 stamped onto a legacy dispatch.
+    lead = worker["evidence_binding"][0]
+    stamped = worker_result(
+        ["fx-lead", "fx-member"],
+        schema_version=2,
+        execution="queued",
+        attempt=2,
+        model_segments=[{"attempt": 2}],
+        measured_usage=None,
+    )
+    stamped["beads"][0].update(
+        bead_revision=lead["bead_revision"],
+        acceptance_digest=lead["acceptance_digest"],
+    )
+    stamped["beads"][1]["bead_revision"] = "102"
+    for path_document, code in (
+        (stamped, "invalid_result"),
+        (worker_result(["fx-lead", "fx-member"], attempt=1), "result_attempt"),
+        (worker_result(["fx-lead", "fx-member", "fx-solo"], attempt=2), "foreign_beads"),
+    ):
+        result_path.write_text(json.dumps(path_document))
+        assert (
+            validate_as_lane(harness, monkeypatch, run["run_id"], "fx-lead", result_path)
+            == cli.EXIT_REFUSED
+        )
+        with pytest.raises(BatchRefusal, match=code):
+            batch.result(
+                harness.config, run["run_id"], "fx-lead", result_path, reader=harness.beads
+            )
+
+    legacy = worker_result(["fx-lead", "fx-member"], attempt=contract["attempt"])
+    result_path.write_text(json.dumps(legacy))
+    assert (
+        validate_as_lane(harness, monkeypatch, run["run_id"], "fx-lead", result_path)
+        == cli.EXIT_OK
+    )
+    filed = batch.result(
+        harness.config, run["run_id"], "fx-lead", result_path, reader=harness.beads
+    )
+    assert filed["result"]["attempt"] == 2
+
+
+def test_resumed_strict_worker_contract_binds_every_bead_over_budget(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = harness.start("fx-lead")
+    monkeypatch.setattr(start, "SubprocessBeads", lambda root: harness.beads)
+    harness.pueue.fail(run["workers"][0]["task_id"], exit_code=1)
+    # Notes grown past the prompt budget force the compact resume packet,
+    # which omits the original packet and its result contract.
+    harness.beads.beads["fx-lead"]["notes"] = "x" * prompts.MAX_PROMPT_BYTES
+    resumed = batch.resume(harness.config, harness.project, run["run_id"], "fx-lead")
+    worker = resumed["workers"][0]
+    assert '"bead_bodies": "digest"' in Path(worker["prompt_path"]).read_text()
+
+    contract = resume_contract(worker["prompt_path"])
+    assert contract["schema_version"] == 2 and contract["attempt"] == 2
+    assert contract["model_segments"][0]["attempt"] == 2
+    assert [row["id"] for row in contract["beads"]] == ["fx-lead", "fx-member"]
+    assert contract["beads"] == worker["evidence_binding"]
+
+    document = worker_result(
+        ["fx-lead", "fx-member"],
+        **{
+            key: contract[key]
+            for key in (
+                "schema_version",
+                "execution",
+                "attempt",
+                "planned_model",
+                "model_segments",
+                "measured_usage",
+            )
+        },
+    )
+    document["beads"] = [
+        {
+            "id": row["id"],
+            "bead_revision": row["bead_revision"],
+            "acceptance_digest": row["acceptance_digest"],
+            "criteria": [
+                {**item, "status": "satisfied", "evidence": "pytest -q: 3 passed"}
+                for item in row["criteria"]
+            ],
+        }
+        for row in contract["beads"]
+    ]
+    document["verification"] = [
+        {
+            "command": "pytest -q",
+            "receipt": "3 passed",
+            "tested_sha": SHA,
+            "status": "passed",
+            "coverage": {
+                "ac_ids": [
+                    item["ac_id"] for row in contract["beads"] for item in row["criteria"]
+                ],
+                "scope": "fixture",
+            },
+        }
+    ]
+    result_path = Path(worker["result_path"])
+    result_path.write_text(json.dumps(document))
+    assert (
+        validate_as_lane(harness, monkeypatch, run["run_id"], "fx-lead", result_path)
+        == cli.EXIT_OK
+    )
+    filed = batch.result(
+        harness.config, run["run_id"], "fx-lead", result_path, reader=harness.beads
+    )
+    assert filed["result"]["attempt"] == 2
+
+
 def test_concurrent_resumes_admit_one_worker(
     harness: Harness, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2328,8 +2499,14 @@ def test_resume_recovers_enqueued_attempt_after_lost_response(
     assert pending["pending_launch"]
     monkeypatch.setattr(start, "queue_agent", original)
     resumed = batch.resume(harness.config, harness.project, run["run_id"], "fx-solo")
-    assert resumed["workers"][0]["pending_launch"] is None
+    worker = resumed["workers"][0]
+    assert worker["pending_launch"] is None
     assert len([row for row in harness.pueue.added if ":resume:" in row["label"]]) == 1
+    # The recovered task runs resume-2.md and writes resume-2.result.json; the
+    # manifest must expect exactly that attempt, not the next free number.
+    assert worker["attempts"][-1]["number"] == 2
+    assert worker["result_path"].endswith("/.agentctl/resume-2.result.json")
+    assert not (Path(worker["worktree"]) / ".agentctl" / "resume-3.md").exists()
 
 
 def test_resume_replaces_a_queued_landing_so_it_waits_on_the_current_workers(

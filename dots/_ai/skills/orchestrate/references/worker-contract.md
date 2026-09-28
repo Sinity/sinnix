@@ -68,7 +68,9 @@ names, and exits with one result document.
 
 Validated against `dots/claude/agents/schemas/worker.schema.json`:
 
-When every dispatched bead's `evidence_binding.v2_available` is `true`, use
+The snapshot's `result_contract` names the shape and the attempt; a resume
+packet's contract replaces the original packet's. When its `schema_version` is
+2 (every dispatched bead's `evidence_binding.v2_available` is `true`), use
 this v2 shape. Copy each stable `ac_id`, criterion text, `bead_revision`, and
 `acceptance_digest` exactly from that snapshot. A dispatch identity may bind
 one owner-authored whole acceptance field. In that case, write one result row
@@ -85,10 +87,10 @@ failed commands must name their tested SHA.
   "schema_version": 2,
   "planned_model": "<snapshot result_contract.planned_model>",
   "execution": "queued | external | native",
-  "attempt": 1,
+  "attempt": "<result_contract.attempt>",
   "model_segments": [
     {
-      "attempt": 1,
+      "attempt": "<result_contract.attempt>",
       "planned_model": "<requested model>",
       "measured_usage": null
     }
@@ -126,8 +128,9 @@ failed commands must name their tested SHA.
 }
 ```
 
-When a historical dispatch has no binding, file the legacy result shape
-(without `schema_version`) and leave evidence identity unknown. It remains
+When the contract's `schema_version` is 1, file the legacy result shape
+(without `schema_version`, `acceptance_digest`, or `ac_id`, but with the
+contract's `attempt`) and leave evidence identity unknown. It remains
 readable and may publish, but it cannot automatically close a Bead. New
 dispatches bind either Beads' structured criteria or its exact authoritative
 acceptance field and row revision; do not replace that snapshot with worker

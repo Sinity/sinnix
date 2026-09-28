@@ -327,6 +327,52 @@ def test_codex_schema_requires_nullable_transport_placeholders(tmp_path: Path) -
     }
 
 
+def test_codex_schema_lets_every_optional_enum_be_null(tmp_path: Path) -> None:
+    """Strict decoding must be able to write a legacy result: without null in
+    its enum, `schema_version` could only be 2."""
+    schema = results.codex_output_schema("worker")
+
+    assert schema["properties"]["schema_version"]["enum"] == [2, None]
+    observed_by = schema["properties"]["actual_executor_observed_by"]["enum"]
+    assert None in observed_by
+
+    legacy = tmp_path / "legacy.json"
+    transported = {key: None for key in schema["properties"]}
+    transported.update(
+        candidate_sha=SHA,
+        attempt=2,
+        unresolved=[],
+        verification=[
+            {
+                "command": "pytest -q",
+                "receipt": "3 passed",
+                "tested_sha": None,
+                "status": None,
+                "coverage": None,
+            }
+        ],
+        beads=[
+            {
+                "id": "fx-1",
+                "bead_revision": None,
+                "acceptance_digest": None,
+                "criteria": [
+                    {
+                        "ac_id": None,
+                        "text": "tests pass",
+                        "status": "satisfied",
+                        "evidence": "pytest -q",
+                    }
+                ],
+            }
+        ],
+    )
+    legacy.write_text(json.dumps(transported))
+    value, errors = results.load_result(legacy, kind="worker")
+    assert errors == []
+    assert "schema_version" not in value and value["attempt"] == 2
+
+
 def test_load_result_drops_codex_only_null_placeholders(tmp_path: Path) -> None:
     value = worker_result(
         schema_version=2,

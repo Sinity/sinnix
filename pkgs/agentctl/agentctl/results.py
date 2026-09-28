@@ -193,6 +193,11 @@ def codex_output_schema(kind: str) -> dict[str, Any]:
             node["type"] = [value_type, "null"]
         elif isinstance(value_type, list) and "null" not in value_type:
             node["type"] = [*value_type, "null"]
+        # An enum without null would still force a value: strict decoding
+        # then stamps `schema_version: 2` onto a legacy-contract result.
+        enum = node.get("enum")
+        if isinstance(enum, list) and None not in enum:
+            node["enum"] = [*enum, None]
 
     def visit(node: dict[str, Any]) -> None:
         properties = node.get("properties")
