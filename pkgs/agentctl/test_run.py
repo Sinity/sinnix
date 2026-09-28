@@ -736,6 +736,37 @@ def test_persistent_unit_observation_failure_is_bounded_and_unresolved(
     )
 
 
+def test_unit_wait_backs_off_to_a_bounded_poll_rate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A long job must not poll the shared user manager at 20 Hz for its whole
+    run: two dozen such waiters starve the manager's job dispatch."""
+    clock = [0.0]
+    delays: list[float] = []
+    observations = [0]
+
+    def sleep(delay: float) -> None:
+        delays.append(delay)
+        clock[0] += delay
+
+    def snapshot(_unit: str) -> dict[str, str]:
+        observations[0] += 1
+        state = "inactive" if clock[0] >= 600 else "active"
+        return {"LoadState": "loaded", "ActiveState": state}
+
+    monkeypatch.setattr(run_module, "_unit_snapshot", snapshot)
+    monkeypatch.setattr(run_module.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(run_module.time, "sleep", sleep)
+
+    properties = run_module._wait_for_unit("fixture.service", timeout_seconds=3600)
+
+    assert properties == {"LoadState": "loaded", "ActiveState": "inactive"}
+    assert delays[0] == run_module.UNIT_POLL_INITIAL_SECONDS
+    assert max(delays) == run_module.UNIT_POLL_MAX_SECONDS
+    # Ten minutes of running cost a few hundred observations, not 12,000.
+    assert observations[0] < 600 / run_module.UNIT_POLL_MAX_SECONDS + 20
+
+
 def test_retry_discards_predecessor_cancel_but_keeps_new_attempt_cancel(
     tmp_path: Path,
     fake_systemd: FakeSystemd,

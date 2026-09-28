@@ -64,6 +64,12 @@ CANCELLED_EXIT_CODE = 130
 VANISHED_EXIT_CODE = 126
 SLOT_OCCUPIED_EXIT_CODE = 75
 UNIT_OBSERVATION_GRACE_SECONDS = 10
+# Every running job's wrapper polls its unit through the user manager. A fixed
+# 50 ms poll is 20 `systemctl show` calls a second per job; with two dozen jobs
+# that saturates the manager, which then never dispatches queued unit starts.
+# Start fast for short jobs, then back off to a bounded completion latency.
+UNIT_POLL_INITIAL_SECONDS = 0.05
+UNIT_POLL_MAX_SECONDS = 2.0
 
 
 class Outcome(str, Enum):
@@ -405,6 +411,7 @@ def _wait_for_unit(unit: str, timeout_seconds: int) -> dict[str, str] | None:
     broken systemd connection cannot strand the pueue wrapper indefinitely.
     """
     deadline = time.monotonic() + timeout_seconds + UNIT_OBSERVATION_GRACE_SECONDS
+    delay = UNIT_POLL_INITIAL_SECONDS
     while time.monotonic() < deadline:
         properties = _unit_snapshot(unit)
         if properties is not None:
@@ -414,7 +421,8 @@ def _wait_for_unit(unit: str, timeout_seconds: int) -> dict[str, str] | None:
                 return {}
             if load_state == "loaded" and active_state in {"inactive", "failed"}:
                 return properties
-        time.sleep(0.05)
+        time.sleep(delay)
+        delay = min(delay * 2, UNIT_POLL_MAX_SECONDS)
     return None
 
 
