@@ -281,6 +281,8 @@ class FakeGit:
                 self.ancestry.append((ancestor, descendant))
                 if descendant in self.off_base:
                     raise error("git merge-base: exit status 1")
+                if ancestor.startswith("refs/heads/"):
+                    ancestor = ancestor.removeprefix("refs/heads/")
                 if ancestor in self.branches:
                     ancestor = self.branch_head(ancestor)
                 if descendant == "HEAD":
@@ -288,6 +290,9 @@ class FakeGit:
                 if descendant in self.parents or ancestor in self.parents:
                     if not self.is_ancestor(ancestor, descendant):
                         raise error("git merge-base: exit status 1")
+            return ""
+        if verb == "update-ref" and arguments[1] == "-d":
+            self.branches.pop(arguments[2].removeprefix("refs/heads/"), None)
             return ""
         if verb == "push":
             if self.push_rejects:
@@ -2889,6 +2894,30 @@ def test_clean_drops_the_worktrees_of_finished_runs_and_leaves_the_others(
             "feature/operator-lane",
         ]
     )
+    assert all(branch not in harness.git.branches for branch in over_branches)
+
+
+def test_clean_deletes_only_abandoned_branches_reachable_from_default(
+    harness: Harness,
+) -> None:
+    safe = prepared_run(harness, "fx-solo")
+    safe_branch = safe["workers"][0]["branch"]
+    harness.git.branches[safe_branch] = BASE
+    harness.git.heads[safe["workers"][0]["worktree"]] = BASE
+    harness.abandon(safe["run_id"])
+
+    unsafe = prepared_run(harness, "fx-lead")
+    unsafe_branch = unsafe["workers"][0]["branch"]
+    harness.git.branches[unsafe_branch] = OTHER
+    harness.git.heads[unsafe["workers"][0]["worktree"]] = OTHER
+    harness.git.off_base.add(OTHER)
+    harness.abandon(unsafe["run_id"])
+
+    cleaned = batch.clean(harness.config, harness.project)
+
+    assert safe_branch not in harness.git.branches, cleaned
+    assert unsafe_branch in harness.git.branches
+    assert {item["branch"] for item in cleaned["kept"]} >= {unsafe_branch}
 
 
 def test_cleanup_leaves_a_branch_without_a_checkout_alone(
