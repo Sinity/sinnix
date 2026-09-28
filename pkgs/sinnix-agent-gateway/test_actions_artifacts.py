@@ -177,18 +177,30 @@ def test_text_read_serves_snapshot_after_source_edit(tmp_path: Path) -> None:
     assert result["data"]["bytes"] == len(b"registered")
 
 
-def test_artifact_without_snapshot_is_refused(tmp_path: Path) -> None:
-    """Fails if a reference with no retained snapshot falls back to its source."""
+def test_artifact_without_snapshot_is_retained_from_matching_source(
+    tmp_path: Path,
+) -> None:
+    """Fails if a pre-snapshot ref breaks, or is served from a changed source."""
     rt = runtime(tmp_path)
-    artifact_id = register(rt, "legacy.txt", b"registered", "note")
-    (rt.artifacts.root / artifact_id / "content").unlink()
+    kept = register(rt, "kept.txt", b"registered", "note")
+    changed = register(rt, "changed.txt", b"registered", "note")
+    for artifact_id in (kept, changed):
+        (rt.artifacts.root / artifact_id / "content").unlink()
+    captures = rt.config.state_dir / "captures"
+    (captures / "changed.txt" / "changed.txt").write_bytes(b"edited later")
+    request = {"representation": "text"}
+
     result = call(
-        rt,
-        "artifacts.read",
-        {"target": {"artifact_id": artifact_id}, "representation": "text"},
-        BY_NAME,
+        rt, "artifacts.read", {"target": {"artifact_id": kept}, **request}, BY_NAME
+    )
+    assert result["data"]["text"] == "registered"
+    assert (rt.artifacts.root / kept / "content").read_bytes() == b"registered"
+
+    result = call(
+        rt, "artifacts.read", {"target": {"artifact_id": changed}, **request}, BY_NAME
     )
     assert result["error"]["code"] == "not_found"
+    assert not (rt.artifacts.root / changed / "content").exists()
 
 
 def test_mutated_artifact_snapshot_is_refused(tmp_path: Path) -> None:

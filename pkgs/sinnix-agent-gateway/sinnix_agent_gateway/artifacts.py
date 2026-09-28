@@ -254,9 +254,16 @@ class ArtifactService:
             raise ArtifactError("artifact source is no longer valid")
         content = self.root / str(parsed) / "content"
         if not content.is_file():
-            raise ArtifactError(
-                "artifact no longer has a content snapshot; register it again"
-            )
+            # Registered before snapshots existed: retain the source's bytes
+            # once, and only while they still carry the registered identity.
+            if (
+                source.stat().st_size != metadata["bytes"]
+                or _sha256(source) != metadata["sha256"]
+            ):
+                raise ArtifactError(
+                    "artifact source no longer matches its registered identity"
+                )
+            _snapshot(source, content)
         metadata["_source"] = source
         metadata["_content"] = content
         return metadata
