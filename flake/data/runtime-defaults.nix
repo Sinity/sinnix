@@ -405,7 +405,11 @@ rec {
         IOAccounting = true;
         CPUWeight = 400;
         IOWeight = 300;
-        MemoryHigh = "8G";
+        # Eight Claude workers plus their own focused test runs reached 9.3G;
+        # at 8G the slice stalled at ~95% full pressure, and that pressure
+        # paused every pytest pool through backpressure, so the workers could
+        # not hand their tests to the queue either (2026-09-28).
+        MemoryHigh = "12G";
         MemorySwapMax = "0";
       };
       # The agents a landing owns. Same envelope as the agent pool: they are
