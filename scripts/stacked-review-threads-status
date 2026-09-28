@@ -1,0 +1,452 @@
+#!/usr/bin/env python3
+# @sinnix-package
+# description: Post the stacked-review-threads commit status on open PR heads
+# runtimeInputs: python3 gh
+
+"""Publish a `stacked-review-threads` commit status that branch protection can require.
+
+Conversation resolution is enforced only on PRs into the default branch. A PR
+merged into another PR's head branch is never gated, yet its code reaches the
+default branch through that parent. One pass reads every open PR targeting the
+default branch and sets its head's status:
+
+  failure  a PR stacked into its head branch has an unresolved review thread
+           (the description names the stacked PRs, the link opens a thread);
+  success  no stacked PR has one, or the head lives in a fork;
+  pending  some part of the stack could not be read.
+
+A PR is stacked into a branch when it merged into it. Every PR ever merged
+into the head branch counts, and so, recursively, does every PR merged into a
+stacked PR's head branch before that stacked PR itself merged; a PR merged
+into a child after the child merged never reached the parent. Expansion is
+keyed by PR, not branch name, so each lifetime of a reused branch name is
+walked with its own bound, and a branch cycle terminates. Merge ancestry is
+not consulted: rebases and squash merges erase it, so a PR merged into an
+earlier branch of the same name counts too, and resolving its threads clears
+it.
+
+Reads are batched per stack level and per group of stacked PRs, so a head
+with nothing merged into it costs one aliased lookup shared with every other
+head. A status is written only when it differs from the head's current one.
+Nothing here passes a head whose stack it cannot read.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
+
+CONTEXT = "stacked-review-threads"
+GH_TIMEOUT_S = 60
+ALIAS_BATCH = 50
+PAGE_SIZE = 100
+
+Variables = dict[str, str | int]
+Run = Callable[[str, Variables], dict]
+Post = Callable[[str, str, str, str, str], None]
+Status = tuple[str, str, str]  # (state, description, target url)
+
+
+class GhError(RuntimeError):
+    pass
+
+
+class Unreadable(Exception):
+    """Part of a head's stack could not be read this pass."""
+
+
+def gh(*args: str) -> str:
+    try:
+        done = subprocess.run(
+            ["gh", *args], capture_output=True, text=True, timeout=GH_TIMEOUT_S, check=False
+        )
+    except subprocess.TimeoutExpired as error:
+        raise GhError(f"gh {args[0]} timed out after {GH_TIMEOUT_S}s") from error
+    if done.returncode != 0:
+        raise GhError(f"gh {' '.join(args[:2])} failed: {done.stderr.strip()[:300]}")
+    return done.stdout
+
+
+def gh_graphql(query: str, variables: Variables) -> dict:
+    args = ["api", "graphql", "-f", f"query={query}"]
+    for key, value in variables.items():
+        # -F would coerce a branch named "123" or "true"; strings stay raw.
+        args += ["-F" if isinstance(value, int) else "-f", f"{key}={value}"]
+    return json.loads(gh(*args))["data"]
+
+
+def post_status(repository: str, sha: str, state: str, description: str, target: str) -> None:
+    gh(
+        "api",
+        "-X",
+        "POST",
+        f"repos/{repository}/statuses/{sha}",
+        "-f",
+        f"state={state}",
+        "-f",
+        f"context={CONTEXT}",
+        "-f",
+        f"description={description[:140]}",
+        "-f",
+        f"target_url={target}",
+    )
+
+
+@dataclass(frozen=True)
+class Root:
+    number: int
+    url: str
+    head_ref: str
+    head_oid: str
+    cross_repository: bool
+    current: Status | None
+
+
+@dataclass(frozen=True)
+class Child:
+    number: int
+    url: str
+    head_ref: str
+    merged_at: str
+    cross_repository: bool
+
+
+ROOTS_QUERY = """
+query($owner: String!, $name: String!, $cursor: String) {
+  repository(owner: $owner, name: $name) {
+    defaultBranchRef { name }
+    pullRequests(states: OPEN, first: %d, after: $cursor) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        number url baseRefName headRefName headRefOid isCrossRepository
+        commits(last: 1) {
+          nodes { commit { oid status { context(name: "%s") { state description targetUrl } } } }
+        }
+      }
+    }
+  }
+}
+"""
+
+
+def _chunks(items: list, size: int) -> Iterable[list]:
+    for start in range(0, len(items), size):
+        yield items[start : start + size]
+
+
+class GitHub:
+    """Batched reads of one repository; a failed read leaves its keys absent."""
+
+    def __init__(self, run: Run, repository: str) -> None:
+        self._run = run
+        self.repository = repository
+        self._owner, self._name = repository.split("/", 1)
+        self.broken = False
+
+    def _query(self, query: str, variables: Variables) -> dict:
+        return self._run(query, {"owner": self._owner, "name": self._name, **variables})["repository"]
+
+    def _note(self, what: str, error: Exception) -> None:
+        if isinstance(error, GhError):
+            # Transient (network, rate limit): the next pass retries.
+            print(f"{self.repository}: {what}: {error}", file=sys.stderr)
+        else:
+            # The API shape changed: fail the unit so it is noticed.
+            print(f"{self.repository}: {what}: unexpected response shape: {error!r}", file=sys.stderr)
+            self.broken = True
+
+    def open_roots(self) -> tuple[str, list[Root]]:
+        """The default branch and every open PR targeting it. Raises on failure."""
+        default = ""
+        roots: list[Root] = []
+        cursor: str | None = None
+        while True:
+            variables: Variables = {} if cursor is None else {"cursor": cursor}
+            repo = self._query(ROOTS_QUERY % (PAGE_SIZE, CONTEXT), variables)
+            default = repo["defaultBranchRef"]["name"]
+            page = repo["pullRequests"]
+            for node in page["nodes"]:
+                if node["baseRefName"] == default:
+                    roots.append(_parse_root(node))
+            if not page["pageInfo"]["hasNextPage"]:
+                return default, roots
+            cursor = page["pageInfo"]["endCursor"]
+
+    def merged_into(self, branches: Iterable[str]) -> dict[str, list[Child]]:
+        """PRs merged into each branch; a branch whose read failed is absent."""
+        found: dict[str, list[Child]] = {}
+        failed: set[str] = set()
+        pending: list[tuple[str, str | None]] = [(branch, None) for branch in branches]
+        while pending:
+            following: list[tuple[str, str | None]] = []
+            for chunk in _chunks(pending, ALIAS_BATCH):
+                chunk = [(branch, cursor) for branch, cursor in chunk if branch not in failed]
+                if not chunk:
+                    continue
+                declarations, fields, variables = [], [], {}
+                for index, (branch, cursor) in enumerate(chunk):
+                    declarations += [f"$b{index}: String!", f"$c{index}: String"]
+                    fields.append(
+                        f"b{index}: pullRequests(states: MERGED, baseRefName: $b{index}, "
+                        f"first: {PAGE_SIZE}, after: $c{index}) {{ pageInfo {{ hasNextPage endCursor }} "
+                        "nodes { number url headRefName mergedAt isCrossRepository } }"
+                    )
+                    variables[f"b{index}"] = branch
+                    if cursor is not None:
+                        variables[f"c{index}"] = cursor
+                query = (
+                    f"query($owner: String!, $name: String!, {', '.join(declarations)}) "
+                    f"{{ repository(owner: $owner, name: $name) {{ {' '.join(fields)} }} }}"
+                )
+                try:
+                    repo = self._query(query, variables)
+                    pages = [(branch, repo[f"b{index}"]) for index, (branch, _) in enumerate(chunk)]
+                    parsed = [
+                        (branch, [_parse_child(node) for node in page["nodes"]], page["pageInfo"])
+                        for branch, page in pages
+                    ]
+                except (GhError, KeyError, TypeError, ValueError) as error:
+                    self._note("reading merged PRs", error)
+                    failed.update(branch for branch, _ in chunk)
+                    continue
+                for branch, children, info in parsed:
+                    found.setdefault(branch, []).extend(children)
+                    if info["hasNextPage"]:
+                        following.append((branch, info["endCursor"]))
+            pending = following
+        return {branch: children for branch, children in found.items() if branch not in failed}
+
+    def thread_states(self, numbers: Iterable[int]) -> dict[int, list[tuple[str, bool]]]:
+        """(thread id, resolved) for each PR's review threads; failed PRs are absent."""
+        found: dict[int, list[tuple[str, bool]]] = {}
+        failed: set[int] = set()
+        pending: list[tuple[int, str | None]] = [(number, None) for number in numbers]
+        while pending:
+            following: list[tuple[int, str | None]] = []
+            for chunk in _chunks(pending, ALIAS_BATCH):
+                chunk = [(number, cursor) for number, cursor in chunk if number not in failed]
+                if not chunk:
+                    continue
+                declarations, fields, variables = [], [], {}
+                for index, (number, cursor) in enumerate(chunk):
+                    declarations += [f"$n{index}: Int!", f"$c{index}: String"]
+                    fields.append(
+                        f"p{index}: pullRequest(number: $n{index}) {{ reviewThreads(first: {PAGE_SIZE}, "
+                        f"after: $c{index}) {{ pageInfo {{ hasNextPage endCursor }} nodes {{ id isResolved }} }} }}"
+                    )
+                    variables[f"n{index}"] = number
+                    if cursor is not None:
+                        variables[f"c{index}"] = cursor
+                query = (
+                    f"query($owner: String!, $name: String!, {', '.join(declarations)}) "
+                    f"{{ repository(owner: $owner, name: $name) {{ {' '.join(fields)} }} }}"
+                )
+                try:
+                    repo = self._query(query, variables)
+                    parsed = []
+                    for index, (number, _) in enumerate(chunk):
+                        threads = repo[f"p{index}"]["reviewThreads"]
+                        states = [(node["id"], bool(node["isResolved"])) for node in threads["nodes"]]
+                        parsed.append((number, states, threads["pageInfo"]))
+                except (GhError, KeyError, TypeError, ValueError) as error:
+                    self._note("reading review threads", error)
+                    failed.update(number for number, _ in chunk)
+                    continue
+                for number, states, info in parsed:
+                    found.setdefault(number, []).extend(states)
+                    if info["hasNextPage"]:
+                        following.append((number, info["endCursor"]))
+            pending = following
+        return {number: states for number, states in found.items() if number not in failed}
+
+    def thread_urls(self, thread_ids: Iterable[str]) -> dict[str, str]:
+        """The first comment's URL of each thread; best effort, used only as a link."""
+        urls: dict[str, str] = {}
+        for chunk in _chunks(list(thread_ids), ALIAS_BATCH):
+            declarations = [f"$t{index}: ID!" for index in range(len(chunk))]
+            fields = [
+                f"t{index}: node(id: $t{index}) {{ ... on PullRequestReviewThread "
+                "{ comments(first: 1) { nodes { url } } } }"
+                for index in range(len(chunk))
+            ]
+            query = f"query({', '.join(declarations)}) {{ {' '.join(fields)} }}"
+            try:
+                data = self._run(query, {f"t{index}": thread_id for index, thread_id in enumerate(chunk)})
+                for index, thread_id in enumerate(chunk):
+                    comments = data[f"t{index}"]["comments"]["nodes"]
+                    if comments:
+                        urls[thread_id] = comments[0]["url"]
+            except (GhError, KeyError, TypeError, ValueError) as error:
+                self._note("reading thread links", error)
+        return urls
+
+
+def _parse_root(node: dict) -> Root:
+    commits = node["commits"]["nodes"]
+    commit = commits[0]["commit"] if commits else None
+    current = None
+    if commit is not None and commit["oid"] == node["headRefOid"]:
+        context = (commit["status"] or {}).get("context")
+        if context:
+            current = (context["state"].lower(), context["description"] or "", context["targetUrl"] or "")
+    return Root(
+        number=node["number"],
+        url=node["url"],
+        head_ref=node["headRefName"],
+        head_oid=node["headRefOid"],
+        cross_repository=bool(node["isCrossRepository"]),
+        current=current,
+    )
+
+
+def _parse_child(node: dict) -> Child:
+    return Child(
+        number=node["number"],
+        url=node["url"],
+        head_ref=node["headRefName"],
+        merged_at=node["mergedAt"],
+        cross_repository=bool(node["isCrossRepository"]),
+    )
+
+
+def stacked(root: Root, default: str, merged: dict[str, list[Child]]) -> list[tuple[Child, int]]:
+    """Every PR stacked into the root's head, with the PR it merged into.
+
+    Raises Unreadable when a branch the walk must expand was not read.
+    """
+    found: dict[int, tuple[Child, int]] = {}
+    # (branch, parent PR, parent's merge time or None for the root). Expansion
+    # is keyed by parent PR: a reused branch name is a different lifetime with
+    # its own merge bound.
+    pending: list[tuple[str, int, str | None]] = [(root.head_ref, root.number, None)]
+    expanded: set[int] = set()
+    while pending:
+        branch, parent, bound = pending.pop()
+        if parent in expanded or branch == default:
+            continue
+        expanded.add(parent)
+        if branch not in merged:
+            raise Unreadable(branch)
+        for child in merged[branch]:
+            if child.number in expanded or child.number == root.number:
+                continue
+            if bound is not None and child.merged_at > bound:
+                continue
+            found.setdefault(child.number, (child, parent))
+            # A fork head names a branch in the fork; nothing in this
+            # repository can have merged into it.
+            if not child.cross_repository:
+                pending.append((child.head_ref, child.number, child.merged_at))
+    return sorted(found.values(), key=lambda pair: pair[0].number)
+
+
+def discover(github: GitHub, default: str, roots: list[Root]) -> dict[str, list[Child]]:
+    """Read every branch any root's walk can reach, one aliased batch per level."""
+    merged: dict[str, list[Child]] = {}
+    tried: set[str] = set()
+    frontier = {root.head_ref for root in roots if not root.cross_repository} - {default}
+    while frontier:
+        tried |= frontier
+        level = github.merged_into(sorted(frontier))
+        merged.update(level)
+        frontier = {
+            child.head_ref
+            for children in level.values()
+            for child in children
+            if not child.cross_repository
+        } - tried - {default}
+    return merged
+
+
+def desired_statuses(github: GitHub, default: str, roots: list[Root]) -> dict[int, Status]:
+    merged = discover(github, default, roots)
+    stacks: dict[int, list[tuple[Child, int]] | None] = {}
+    for root in roots:
+        if root.cross_repository:
+            continue
+        try:
+            stacks[root.number] = stacked(root, default, merged)
+        except Unreadable:
+            stacks[root.number] = None
+    needed = sorted({child.number for stack in stacks.values() if stack for child, _ in stack})
+    threads = github.thread_states(needed) if needed else {}
+
+    statuses: dict[int, Status] = {}
+    offenders_by_root: dict[int, list[Child]] = {}
+    for root in roots:
+        if root.cross_repository:
+            statuses[root.number] = ("success", "fork head: no PR here can be stacked into it", root.url)
+            continue
+        stack = stacks[root.number]
+        if stack is None or any(child.number not in threads for child, _ in stack):
+            statuses[root.number] = ("pending", "could not read the PRs stacked into this head; retrying", root.url)
+            continue
+        offenders = [child for child, _ in stack if any(not resolved for _, resolved in threads[child.number])]
+        if offenders:
+            offenders_by_root[root.number] = offenders
+        elif stack:
+            count = len(stack)
+            noun = "PR has" if count == 1 else "PRs have"
+            statuses[root.number] = ("success", f"{count} stacked {noun} no unresolved review threads", root.url)
+        else:
+            statuses[root.number] = ("success", "no PR is stacked into this head", root.url)
+
+    first_threads = {
+        child.number: next(thread_id for thread_id, resolved in threads[child.number] if not resolved)
+        for offenders in offenders_by_root.values()
+        for child in offenders[:1]
+    }
+    urls = github.thread_urls(sorted(set(first_threads.values()))) if first_threads else {}
+    for number, offenders in offenders_by_root.items():
+        first = offenders[0]
+        target = urls.get(first_threads[first.number], first.url)
+        names = ", ".join(f"#{child.number}" for child in offenders)
+        statuses[number] = ("failure", f"unresolved review threads in stacked {names}", target)
+    return statuses
+
+
+def sync_repository(repository: str, *, run: Run = gh_graphql, post: Post | None = None, dry_run: bool = False) -> bool:
+    """Bring every open default-branch head's status up to date; True if the API shape broke."""
+    github = GitHub(run, repository)
+    default, roots = github.open_roots()
+    wanted = desired_statuses(github, default, roots)
+    for root in roots:
+        state, description, target = wanted[root.number]
+        description = description[:140]
+        if root.current == (state, description, target):
+            continue
+        print(f"{repository}#{root.number} {root.head_oid[:9]}: {state} ({description})")
+        if dry_run:
+            continue
+        try:
+            (post or post_status)(repository, root.head_oid, state, description, target)
+        except GhError as error:
+            print(f"{repository}#{root.number}: posting status: {error}", file=sys.stderr)
+    return github.broken
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("repositories", nargs="+", metavar="OWNER/NAME")
+    parser.add_argument("--dry-run", action="store_true", help="print changes without posting")
+    args = parser.parse_args()
+    broken = False
+    for repository in args.repositories:
+        try:
+            broken |= sync_repository(repository, dry_run=args.dry_run)
+        except GhError as error:
+            # The PR listing itself failed: every status stays as it was, and
+            # the next pass retries.
+            print(f"{repository}: {error}", file=sys.stderr)
+        except (KeyError, TypeError, ValueError) as error:
+            print(f"{repository}: unexpected response shape: {error!r}", file=sys.stderr)
+            broken = True
+    return 1 if broken else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
