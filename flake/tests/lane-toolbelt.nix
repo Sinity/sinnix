@@ -9,7 +9,9 @@
       checks.lane-toolbelt =
         pkgs.runCommand "lane-toolbelt-check"
           {
+            # `lane done` validates through `agentctl result validate-worker`.
             nativeBuildInputs = [
+              inputs.self.packages.${system}.agentctl
               pkgs.bash
               pkgs.coreutils
               pkgs.git

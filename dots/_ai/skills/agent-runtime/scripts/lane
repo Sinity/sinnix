@@ -80,7 +80,8 @@ git_offenders() {
 validate_result() {
   local result=$1
   command -v agentctl >/dev/null 2>&1 || die "agentctl is unavailable to validate the result"
-  agentctl result validate-worker "$result" || die "result does not validate"
+  # Its verdict goes to stderr: stdout carries only the result document.
+  agentctl result validate-worker "$result" >&2 || die "result does not validate"
 }
 
 lane_done() {
