@@ -161,6 +161,36 @@ def test_registered_artifact_is_bound_to_snapshot_not_mutable_source(
     assert base64.b64decode(result["data"]["base64"]) == b"registered"
 
 
+def test_text_read_serves_snapshot_after_source_edit(tmp_path: Path) -> None:
+    """Fails if the text representation reads the mutable registered source."""
+    rt = runtime(tmp_path)
+    artifact_id = register(rt, "mutable.txt", b"registered", "note")
+    source = Path(rt.artifacts._metadata(artifact_id)["source"])
+    source.write_bytes(b"changed source")
+    result = call(
+        rt,
+        "artifacts.read",
+        {"target": {"artifact_id": artifact_id}, "representation": "text"},
+        BY_NAME,
+    )
+    assert result["data"]["text"] == "registered"
+    assert result["data"]["bytes"] == len(b"registered")
+
+
+def test_artifact_without_snapshot_is_refused(tmp_path: Path) -> None:
+    """Fails if a reference with no retained snapshot falls back to its source."""
+    rt = runtime(tmp_path)
+    artifact_id = register(rt, "legacy.txt", b"registered", "note")
+    (rt.artifacts.root / artifact_id / "content").unlink()
+    result = call(
+        rt,
+        "artifacts.read",
+        {"target": {"artifact_id": artifact_id}, "representation": "text"},
+        BY_NAME,
+    )
+    assert result["error"]["code"] == "not_found"
+
+
 def test_mutated_artifact_snapshot_is_refused(tmp_path: Path) -> None:
     """Fails if altered retained bytes are served under the registered digest."""
     rt = runtime(tmp_path)

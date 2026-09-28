@@ -252,9 +252,30 @@ class ArtifactService:
         source = Path(metadata["source"]).resolve(strict=True)
         if not source.is_file() or not self._source_is_attested(source):
             raise ArtifactError("artifact source is no longer valid")
+        content = self.root / str(parsed) / "content"
+        if not content.is_file():
+            raise ArtifactError(
+                "artifact no longer has a content snapshot; register it again"
+            )
         metadata["_source"] = source
-        metadata["_content"] = self.root / str(uuid.UUID(artifact_id)) / "content"
+        metadata["_content"] = content
         return metadata
+
+    def verified_content(self, metadata: dict[str, Any]) -> Path:
+        """Return the private snapshot after checking it against its identity.
+
+        A streaming, constant-memory pass; every served representation reads
+        this snapshot, never the mutable source it was registered from.
+        """
+        content: Path = metadata["_content"]
+        if (
+            content.stat().st_size != metadata["bytes"]
+            or _sha256(content) != metadata["sha256"]
+        ):
+            raise ArtifactError(
+                "artifact content no longer matches its registered identity"
+            )
+        return content
 
     def list(
         self,
@@ -304,24 +325,17 @@ class ArtifactService:
             raise ArtifactError("offset must be non-negative")
         max_bytes = max(1, min(max_bytes, self.config.max_result_bytes))
         metadata = self._metadata(artifact_id)
-        metadata.pop("_source")
-        source: Path = metadata.pop("_content")
-        # Verify the private snapshot before serving any page. This is a
-        # streaming, constant-memory pass; page reads remain capped by
-        # max_result_bytes, while identity checking costs one full-file read.
-        if (
-            source.stat().st_size != metadata["bytes"]
-            or _sha256(source) != metadata["sha256"]
-        ):
-            raise ArtifactError(
-                "artifact content no longer matches its registered identity"
-            )
+        source = self.verified_content(metadata)
         with source.open("rb") as handle:
             handle.seek(offset)
             data = handle.read(max_bytes + 1)
         truncated = len(data) > max_bytes
         data = data[:max_bytes]
-        result = {key: value for key, value in metadata.items() if key != "source"}
+        result = {
+            key: value
+            for key, value in metadata.items()
+            if key != "source" and not key.startswith("_")
+        }
         result.update(
             {
                 "offset": offset,
