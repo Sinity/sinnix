@@ -194,7 +194,8 @@ def test_recent_query_skips_a_large_older_prefix(tmp_path: Path) -> None:
         },
     ]
     write_lane(lanes["clipboard"], "clipboard", older + recent)
-    day_file = next(lanes["clipboard"].glob("clipboard-*.jsonl"))
+    day = time.strftime("%Y%m%d", time.gmtime(noon))
+    day_file = lanes["clipboard"] / f"clipboard-{day}.jsonl"
     budget = 65_536
     assert day_file.stat().st_size > 3 * budget
     data = call(
