@@ -6,7 +6,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-
 REPO = Path(__file__).resolve().parents[3]
 AUDIO = REPO / "scripts/audio"
 
@@ -33,7 +32,7 @@ class AudioMicTest(unittest.TestCase):
             '  "get-volume @DEFAULT_AUDIO_SOURCE@") '
             'if [ "${INSPECT_STATUS:-1}" -eq 0 ]; then echo "Volume: 0.50"; else exit 1; fi ;;\n'
             '  "set-mute @DEFAULT_AUDIO_SOURCE@ toggle") exit 0 ;;\n'
-            'esac\n',
+            "esac\n",
         )
         self.executable(
             "jq",
@@ -49,8 +48,11 @@ class AudioMicTest(unittest.TestCase):
 
     def run_audio(self, command, success):
         return subprocess.run(
-            ["bash", str(AUDIO), command], env=self.env, text=True,
-            capture_output=True, check=success,
+            ["bash", str(AUDIO), command],
+            env=self.env,
+            text=True,
+            capture_output=True,
+            check=success,
         )
 
     def test_missing_active_source_status_is_explicit(self):
@@ -59,7 +61,10 @@ class AudioMicTest(unittest.TestCase):
         self.assertEqual(state["state"], "unavailable")
         self.assertIn("input unplugged", state["tooltip"])
         calls = self.log.read_text()
-        self.assertIn("jq -n {text:\"󰍭\", tooltip:\"No active microphone (input unplugged)\", class:\"unavailable\", state:\"unavailable\"}", calls)
+        self.assertIn(
+            'jq -n {text:"󰍭", tooltip:"No active microphone (input unplugged)", class:"unavailable", state:"unavailable"}',
+            calls,
+        )
         self.assertIn("inspect @DEFAULT_AUDIO_SOURCE@", calls)
         self.assertNotIn("set-mute", calls)
 
@@ -72,10 +77,12 @@ class AudioMicTest(unittest.TestCase):
         self.assertNotIn("set-mute", calls)
 
     def test_active_source_toggle_uses_active_alias(self):
-        result = subprocess.run(
+        subprocess.run(
             ["bash", str(AUDIO), "mic-toggle"],
-            env={**self.env, "INSPECT_STATUS": "0"}, text=True,
-            capture_output=True, check=True,
+            env={**self.env, "INSPECT_STATUS": "0"},
+            text=True,
+            capture_output=True,
+            check=True,
         )
         self.assertIn("set-mute @DEFAULT_AUDIO_SOURCE@ toggle", self.log.read_text())
 
