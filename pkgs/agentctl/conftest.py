@@ -127,7 +127,8 @@ class FakePueue:
 
     def running_tasks(self, group: str) -> dict[int, Task]:
         return {
-            task_id: task for task_id, task in self.tasks().items()
+            task_id: task
+            for task_id, task in self.tasks().items()
             if task.group == group and task.status == "Running"
         }
 

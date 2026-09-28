@@ -92,6 +92,7 @@ def test_task_from_log_reads_one_orphan_without_history(
     monkeypatch.setattr(pueue, "_run", response)
     assert pueue.task_from_log(0).task_id == 0
 
+
 LIVE_LOG = {
     "0": {
         "task": {"id": 0, "label": "probe:schema"},

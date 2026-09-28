@@ -290,7 +290,10 @@ def parser() -> argparse.ArgumentParser:
         help="queued: agentctl runs the workers; external: another harness does",
     )
     batch_start.add_argument(
-        "--mcp-server", action="append", default=[], metavar="NAME",
+        "--mcp-server",
+        action="append",
+        default=[],
+        metavar="NAME",
         help="enable one named MCP server for each queued worker",
     )
     _agent_arguments(batch_start)
@@ -909,7 +912,8 @@ def _events(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         identity = hashlib.sha256((project or "all").encode()).hexdigest()[:16]
         follow_lock = os.open(
             config.state_dir / f"events-follow-{identity}.lock",
-            os.O_CREAT | os.O_RDWR, 0o600,
+            os.O_CREAT | os.O_RDWR,
+            0o600,
         )
         try:
             fcntl.flock(follow_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)

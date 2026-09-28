@@ -444,7 +444,7 @@ def active_units(daemon: str, pool: str) -> dict[str, int | None]:
     for line in (listed or "").splitlines():
         columns = line.split(None, 4)
         if len(columns) == 5 and columns[4].strip().startswith(prefix):
-            identity = columns[4].strip()[len(prefix):]
+            identity = columns[4].strip()[len(prefix) :]
             units[columns[0]] = int(identity) if identity.isdecimal() else None
     return units
 
@@ -606,6 +606,7 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
         if not isinstance(checkout, Mapping) or checkout.get("kind") != "candidate":
             return None
         from .checkout import CANDIDATE_BRANCH_PREFIX
+
         root, branch, commit = (
             checkout.get(key) for key in ("root", "branch", "commit")
         )
@@ -622,6 +623,7 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
         if not isinstance(checkout, Mapping) or checkout.get("kind") != "candidate":
             return
         from .checkout import CheckoutError, release_candidate_checkout
+
         try:
             release_candidate_checkout(checkout, launch["working_directory"])
         except (CheckoutError, worktrunk.WorktrunkError) as error:

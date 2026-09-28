@@ -684,7 +684,6 @@ def test_start_claims_creates_worktrees_and_queues_workers_then_the_landing(
         run["run_id"],
     ]
 
-
     stored = json.loads(
         manifest.manifest_path(harness.config, run["run_id"]).read_text()
     )

@@ -811,7 +811,13 @@ def start(
     create(config, run)
     with project_locked(config, project.project_id):
         prepared = _prepare(
-            config, project, run, beads, backend=backend, model=model, effort=effort,
+            config,
+            project,
+            run,
+            beads,
+            backend=backend,
+            model=model,
+            effort=effort,
             mcp_servers=mcp_servers,
         )
     return {

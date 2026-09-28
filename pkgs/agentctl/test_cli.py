@@ -486,14 +486,22 @@ def test_follow_tail_process_rss_stays_bounded_on_large_spool(
     cli_config: Config,
 ) -> None:
     record = (
-        b'{"kind":"queue-task","label":"fixture:check","pad":"'
-        + b"x" * 400 + b'"}\n'
+        b'{"kind":"queue-task","label":"fixture:check","pad":"' + b"x" * 400 + b'"}\n'
     )
     with cli_config.event_spool.open("wb") as spool:
         for _ in range(50_000):
             spool.write(record)
     child = subprocess.Popen(
-        [sys.executable, "-m", "agentctl.cli", "events", "tail", "--follow", "--lines", "1"],
+        [
+            sys.executable,
+            "-m",
+            "agentctl.cli",
+            "events",
+            "tail",
+            "--follow",
+            "--lines",
+            "1",
+        ],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
         env=os.environ.copy(),
@@ -505,7 +513,16 @@ def test_follow_tail_process_rss_stays_bounded_on_large_spool(
         rss = int(status.split("VmRSS:")[1].splitlines()[0].split()[0])
         assert rss < 80_000
         duplicate = subprocess.run(
-            [sys.executable, "-m", "agentctl.cli", "events", "tail", "--follow", "--lines", "1"],
+            [
+                sys.executable,
+                "-m",
+                "agentctl.cli",
+                "events",
+                "tail",
+                "--follow",
+                "--lines",
+                "1",
+            ],
             capture_output=True,
             env=os.environ.copy(),
             timeout=5,
