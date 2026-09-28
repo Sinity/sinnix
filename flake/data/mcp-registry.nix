@@ -165,13 +165,10 @@ let
           antigravity = write;
           default = { };
         };
-      clients = [
-        "codex"
-        "claude"
-        "gemini"
-        "antigravity"
-        "hermes"
-      ];
+      # Not attached to any agent client: during active Polylogue development the
+      # archive is being rebuilt and agents recall history through the CLI when
+      # needed, so a resident server per agent session (~250 MB each) buys nothing.
+      clients = [ ];
     };
 
     sinex = {
