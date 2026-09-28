@@ -224,7 +224,16 @@ class Snapshot:
     queue_read: bool = True
 
     def to_dict(self) -> dict[str, Any]:
-        references = launch.index_task_references(self.tasks)
+        references: dict[str, Task] = {}
+        task_index: dict[int, Task] = {}
+        jobs = []
+        for task in self.tasks:
+            job = job_view(task)
+            jobs.append(job)
+            task_index[task.task_id] = task
+            reference = job["reference"]
+            if reference is not None:
+                references.setdefault(reference, task)
         return {
             "schema": "sinnix.agentctl.view.v3",
             "project": self.project_id,
@@ -236,12 +245,7 @@ class Snapshot:
                 }
                 for name, status in sorted(self.groups.items())
             },
-            "jobs": [
-                {
-                    **job_view(task),
-                }
-                for task in self.tasks
-            ],
+            "jobs": jobs,
             "runs": [
                 run_dict(
                     run,
@@ -249,6 +253,7 @@ class Snapshot:
                     self.now,
                     queue_read=self.queue_read,
                     references=references,
+                    task_index=task_index,
                 )
                 for run in self.runs
             ],
@@ -308,13 +313,16 @@ def run_dict(
     *,
     queue_read: bool = True,
     references: Mapping[str, Task] | None = None,
+    task_index: Mapping[int, Task] | None = None,
 ) -> dict[str, Any]:
     """One run's rows: stage from pueue first, the manifest second."""
     if references is None:
         references = launch.index_task_references(tasks)
     # By launch reference where the manifest has one: an id alone names a
     # queue position, which `pueue switch` and a daemon reset both reassign.
-    index = {task.task_id: task for task in tasks}
+    index = (
+        task_index if task_index is not None else {task.task_id: task for task in tasks}
+    )
     lost = vanished_of(run, index if queue_read else None, references=references)
     worker_tasks = [
         launch.find_task(
@@ -365,7 +373,7 @@ def run_dict(
         "workers": workers,
         "landing": {
             "job": landing_task.task_id if landing_task else None,
-            "phase": job_view(landing_task)["phase"] if landing_task else None,
+            "phase": launch.phase_of(landing_task) if landing_task else None,
             "vanished": lost.landing,
             "candidate_sha": landing.get("candidate_sha"),
             "pr_number": landing.get("pr_number"),
@@ -566,6 +574,7 @@ def _lost_jobs(row: Mapping[str, Any]) -> str:
 def render(snapshot: Snapshot) -> str:
     now = snapshot.now
     references = launch.index_task_references(snapshot.tasks)
+    task_index = {task.task_id: task for task in snapshot.tasks}
     lines = [
         f"== {snapshot.project_id} at {now.astimezone().strftime('%Y-%m-%d %H:%M')}"
     ]
@@ -598,6 +607,7 @@ def render(snapshot: Snapshot) -> str:
             now,
             queue_read=snapshot.queue_read,
             references=references,
+            task_index=task_index,
         )
         for run in snapshot.runs
     ]
@@ -624,7 +634,7 @@ def render(snapshot: Snapshot) -> str:
         for task in failed[:MAX_FAILED_SHOWN]:
             exit_text = f" exit {task.exit_code}" if task.exit_code is not None else ""
             lines.append(
-                f"  ! job {task.task_id} {task.label} {job_view(task)['phase']}{exit_text}"
+                f"  ! job {task.task_id} {task.label} {launch.phase_of(task)}{exit_text}"
                 f" at {local_clock(task.ended_at)} ({age(task.ended_at, now)} ago)"
             )
         for row in attention:
