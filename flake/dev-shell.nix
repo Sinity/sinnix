@@ -28,6 +28,7 @@
         activationPackages
         scriptPkgs
         resolveFlakeDir
+        sourceRevision
         ;
       registryDevCommands = lib.mapAttrs commandRegistry.mkAppCommand (
         lib.filterAttrs (name: _: !builtins.hasAttr name activationPackages) commandRegistry.appCommands
@@ -161,8 +162,10 @@
           # may change directory before switch runs; NH_FLAKE is only a host
           # default and can point at another checkout.
           unset SINNIX_DEV_SHELL_FLAKE
+          export SINNIX_DEV_SHELL_REV="${sourceRevision}"
           _sinnix_shell_root="$(${pkgs.git}/bin/git rev-parse --show-toplevel 2>/dev/null || true)"
-          if [ -n "$_sinnix_shell_root" ] && [ -f "$_sinnix_shell_root/flake.nix" ]; then
+          if [ -n "$_sinnix_shell_root" ] && [ -f "$_sinnix_shell_root/flake.nix" ] \
+            && [ "$(${pkgs.git}/bin/git -C "$_sinnix_shell_root" rev-parse HEAD 2>/dev/null || true)" = "''${SINNIX_DEV_SHELL_REV%-dirty}" ]; then
             export SINNIX_DEV_SHELL_FLAKE="$_sinnix_shell_root"
           fi
           echo ""

@@ -16,6 +16,7 @@ let
       ${spec.script}
     '';
   scriptPkgs = sinnixScriptRegistry.packageSet;
+  sourceRevision = inputs.self.rev or (inputs.self.dirtyRev or "unknown");
   rebuildServicePath = lib.makeBinPath [
     pkgs.coreutils
     pkgs.findutils
@@ -277,7 +278,16 @@ let
         if [ -n "''${SINNIX_DEV_SHELL_FLAKE:-}" ]; then
           export SINNIX_FLAKE_DIR="$SINNIX_DEV_SHELL_FLAKE"
         fi
+        if [ -n "''${SINNIX_DEV_SHELL_REV:-}" ] && [ -z "''${SINNIX_DEV_SHELL_FLAKE:-}" ]; then
+          echo "sinnix switch: cannot identify the checkout that provided this devshell" >&2
+          exit 64
+        fi
         ${resolveFlakeDir}
+        if [ -n "''${SINNIX_DEV_SHELL_REV:-}" ] \
+          && [ "$(${pkgs.git}/bin/git -C "$_flake_dir" rev-parse HEAD 2>/dev/null || true)" != "''${SINNIX_DEV_SHELL_REV%-dirty}" ]; then
+          echo "sinnix switch: devshell source revision differs from $_flake_dir" >&2
+          exit 64
+        fi
         ${switchSourceGuard}
         ${rebuildLock "switch"}
         ${avoidRepoCwdForActivation}
@@ -530,6 +540,7 @@ in
   inherit
     mkAppCommand
     scriptPkgs
+    sourceRevision
     resolveFlakeDir
     loadCheckTargets
     rebuildLock

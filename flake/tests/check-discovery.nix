@@ -205,8 +205,18 @@
         test ! -s "$ACTIVATION_LOG"
         ${pkgs.git}/bin/git -C "$TMPDIR/source" reset -q --hard origin/master
         : > "$ACTIVATION_LOG"
-        SINNIX_FLAKE_DIR= NH_FLAKE="$TMPDIR/other" SINNIX_DEV_SHELL_FLAKE="$TMPDIR/source" ACTIVATION_STATUS=7 "${activationExecutables.switch}" || test "$?" = 7
+        source_revision="$(${pkgs.git}/bin/git -C "$TMPDIR/source" rev-parse HEAD)"
+        SINNIX_FLAKE_DIR= NH_FLAKE="$TMPDIR/other" SINNIX_DEV_SHELL_REV="$source_revision" SINNIX_DEV_SHELL_FLAKE="$TMPDIR/source" ACTIVATION_STATUS=7 "${activationExecutables.switch}" || test "$?" = 7
         grep -Fq "$TMPDIR/source#sinnix-prime" "$ACTIVATION_LOG"
+        : > "$ACTIVATION_LOG"
+        status=0
+        SINNIX_DEV_SHELL_REV=0000000000000000000000000000000000000000 SINNIX_DEV_SHELL_FLAKE="$TMPDIR/source" ACTIVATION_STATUS=0 "${activationExecutables.switch}" || status=$?
+        test "$status" = 64
+        test ! -s "$ACTIVATION_LOG"
+        status=0
+        SINNIX_DEV_SHELL_REV=0000000000000000000000000000000000000000 SINNIX_DEV_SHELL_FLAKE= ACTIVATION_STATUS=0 "${activationExecutables.switch}" || status=$?
+        test "$status" = 64
+        test ! -s "$ACTIVATION_LOG"
         : > "$ACTIVATION_LOG"
         ACTIVATION_RELEASE="$TMPDIR/release" ACTIVATION_HANG=1 ACTIVATION_STATUS=0 "${activationExecutables.switch}" &
         wrapper=$!
