@@ -405,11 +405,10 @@ rec {
         IOAccounting = true;
         CPUWeight = 400;
         IOWeight = 300;
-        # Eight Claude workers plus their own focused test runs reached 9.3G;
-        # at 8G the slice stalled at ~95% full pressure, and that pressure
-        # paused every pytest pool through backpressure, so the workers could
-        # not hand their tests to the queue either (2026-09-28).
-        MemoryHigh = "12G";
+        # Held at 8G: with pytest-heavy's 12G it fills the 20G work plane
+        # (flake/tests/agent-tools.nix). Worker count, not this ceiling, is
+        # the lever: see agent.parallel in modules/services/agentctl.nix.
+        MemoryHigh = "8G";
         MemorySwapMax = "0";
       };
       # The agents a landing owns. Same envelope as the agent pool: they are

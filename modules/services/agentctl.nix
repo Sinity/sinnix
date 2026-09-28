@@ -69,10 +69,11 @@ mkServiceModule {
       }
     );
     default = {
-      # Twelve Claude Opus workers with their tool processes held the 8G
-      # agentctl-agent slice at ~80% full memory pressure (2026-09-28), so
-      # each ran slower than eight unthrottled ones would.
-      agent.parallel = 8;
+      # Claude workers that run focused tests in their own process reach
+      # 2-3 GiB each; twelve, then eight, held the 8G agentctl-agent slice at
+      # 80-95% full memory pressure (2026-09-28), which also paused the pytest
+      # pools through backpressure. Six fit.
+      agent.parallel = 6;
       # The agents a landing owns (integration, review): a pool of their own so
       # a paused `agent` pool holds back new workers without stalling landings.
       land-agent.parallel = 2;
