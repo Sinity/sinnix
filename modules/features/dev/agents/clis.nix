@@ -317,6 +317,7 @@ mkFeatureModule {
               scriptPkgs.sinnix-agent-profile-benchmark
               scriptPkgs.claude-quota
               scriptPkgs.claude-agents
+              scriptPkgs.claude-hang-capture
             ];
 
             xdg.configFile = {

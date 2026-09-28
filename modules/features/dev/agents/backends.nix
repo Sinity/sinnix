@@ -180,6 +180,10 @@ let
       ${pkgs.coreutils}/bin/install -d -m 0700 "$CLAUDE_CODE_TMPDIR"
 
       export SINNIX_CLAUDE_PROFILE=${lib.escapeShellArg profile}
+      # Tool commands and MCP servers get their own memory budget in
+      # agenttool.slice, so a wave of heavy tool runs cannot throttle the
+      # Claude process that supervises them.
+      export CLAUDE_CODE_SHELL_PREFIX=${lib.escapeShellArg "${scriptPkgs.claude-tool-scope}/bin/claude-tool-scope"}
     '';
 
   mkClaudeLaunchArgs = mcpConfigName: ''
