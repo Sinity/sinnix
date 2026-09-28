@@ -5,7 +5,6 @@ afterwards."""
 from __future__ import annotations
 
 import time
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import ConfigDict, Field
@@ -348,7 +347,7 @@ def _screenshot(runtime: Runtime, inp: ScreenshotInput) -> ActionResult:
             "not_found", f"no {inp.variant} capture variant was produced"
         )
     artifact, blocks = attach(
-        Path(preferred["path"]),
+        runtime.artifacts.registered_content(preferred["artifact_id"]),
         ref=f"sinnix://artifacts/{preferred['artifact_id']}",
         media_type=preferred["content_type"],
     )

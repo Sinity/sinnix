@@ -169,7 +169,7 @@ class OrganizationService:
             metadata = self.artifacts._metadata(artifact_id)
             if metadata.get("kind") != "files-plan":
                 raise OrganizationError("artifact is not a filesystem plan")
-            payload = json.loads(Path(metadata["_source"]).read_text())
+            payload = json.loads(self.artifacts.verified_content(metadata).read_text())
         except (ValueError, KeyError, OSError, json.JSONDecodeError) as exc:
             raise OrganizationError(
                 "plan artifact is unavailable or malformed"

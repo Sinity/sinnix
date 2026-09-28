@@ -4,6 +4,8 @@ import base64
 import hashlib
 import json
 import mimetypes
+import os
+import tempfile
 import uuid
 from pathlib import Path
 from typing import Any
@@ -27,6 +29,33 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1_048_576), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _snapshot(source: Path, destination: Path) -> tuple[int, str]:
+    """Copy an attested source into private artifact storage while hashing it."""
+    digest = hashlib.sha256()
+    size = 0
+    fd, temporary = tempfile.mkstemp(prefix=".content-", dir=destination.parent)
+    try:
+        with source.open("rb") as incoming, os.fdopen(fd, "wb") as outgoing:
+            for chunk in iter(lambda: incoming.read(1_048_576), b""):
+                outgoing.write(chunk)
+                digest.update(chunk)
+                size += len(chunk)
+            outgoing.flush()
+            os.fsync(outgoing.fileno())
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, destination)
+        return size, digest.hexdigest()
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+# Snapshots this process has hashed, by (path, inode, size, mtime_ns): a
+# paged read of a large artifact hashes it once, not once per page, and any
+# rewrite of the snapshot changes the key and forces a fresh hash.
+_VERIFIED: dict[tuple[str, int, int, int], str] = {}
 
 
 class ArtifactService:
@@ -159,14 +188,16 @@ class ArtifactService:
         artifact_id = str(uuid.uuid4())
         directory = self.root / artifact_id
         directory.mkdir(mode=0o700)
+        content = directory / "content"
+        size, digest = _snapshot(source, content)
         metadata = {
             "artifact_id": artifact_id,
             "kind": kind,
             "owner_id": owner_id,
             "principal": self.principal.name,
             "source": str(source),
-            "bytes": source.stat().st_size,
-            "sha256": _sha256(source),
+            "bytes": size,
+            "sha256": digest,
             "content_type": mimetypes.guess_type(source.name)[0]
             or "application/octet-stream",
         }
@@ -227,8 +258,46 @@ class ArtifactService:
         source = Path(metadata["source"]).resolve(strict=True)
         if not source.is_file() or not self._source_is_attested(source):
             raise ArtifactError("artifact source is no longer valid")
+        content = self.root / str(parsed) / "content"
+        if not content.is_file():
+            # Registered before snapshots existed: retain the source's bytes
+            # once, and only while they still carry the registered identity.
+            if (
+                source.stat().st_size != metadata["bytes"]
+                or _sha256(source) != metadata["sha256"]
+            ):
+                raise ArtifactError(
+                    "artifact source no longer matches its registered identity"
+                )
+            _snapshot(source, content)
         metadata["_source"] = source
+        metadata["_content"] = content
         return metadata
+
+    def registered_content(self, artifact_id: str) -> Path:
+        """Return an artifact's verified snapshot, the only bytes its ref names."""
+        return self.verified_content(self._metadata(artifact_id))
+
+    def verified_content(self, metadata: dict[str, Any]) -> Path:
+        """Return the private snapshot after checking it against its identity.
+
+        A streaming, constant-memory pass; every served representation reads
+        this snapshot, never the mutable source it was registered from.
+        """
+        content: Path = metadata["_content"]
+        info = content.stat()
+        key = (str(content), info.st_ino, info.st_size, info.st_mtime_ns)
+        if (
+            info.st_size == metadata["bytes"]
+            and _VERIFIED.get(key) == metadata["sha256"]
+        ):
+            return content
+        if info.st_size != metadata["bytes"] or _sha256(content) != metadata["sha256"]:
+            raise ArtifactError(
+                "artifact content no longer matches its registered identity"
+            )
+        _VERIFIED[key] = metadata["sha256"]
+        return content
 
     def list(
         self,
@@ -278,13 +347,17 @@ class ArtifactService:
             raise ArtifactError("offset must be non-negative")
         max_bytes = max(1, min(max_bytes, self.config.max_result_bytes))
         metadata = self._metadata(artifact_id)
-        source: Path = metadata.pop("_source")
+        source = self.verified_content(metadata)
         with source.open("rb") as handle:
             handle.seek(offset)
             data = handle.read(max_bytes + 1)
         truncated = len(data) > max_bytes
         data = data[:max_bytes]
-        result = {key: value for key, value in metadata.items() if key != "source"}
+        result = {
+            key: value
+            for key, value in metadata.items()
+            if key != "source" and not key.startswith("_")
+        }
         result.update(
             {
                 "offset": offset,

@@ -252,6 +252,37 @@ def _normalise(lane: str, envelope: dict[str, Any]) -> ActivityEvent | None:
     )
 
 
+# The capture writer's high-water sidecar line (sinnix_capture.writer.HW_FORMAT):
+# a 20-digit end offset, a space, a 32-wide running maximum ts, a newline.
+_HW_WIDTH = 20 + 1 + 32 + 1
+
+
+def _range_start(path: Path, since: float) -> int:
+    """Offset past every record the high-water sidecar proves is before ``since``.
+
+    Checkpoint ``i`` holds the end offset of record ``i`` and the largest ts of
+    records ``0..i``; both only grow, so the last checkpoint whose high water
+    is below ``since`` bounds a prefix no in-window record can be in. A file
+    without a usable sidecar is read from its start.
+    """
+    sidecar = path.with_name(path.name + ".hw")
+    try:
+        with sidecar.open("rb") as handle:
+            count = handle.seek(0, 2) // _HW_WIDTH
+            lo, hi, start = 0, count, 0
+            while lo < hi:
+                mid = (lo + hi) // 2
+                handle.seek(mid * _HW_WIDTH)
+                offset, high = handle.read(_HW_WIDTH).split()
+                if float(high) < since:
+                    start, lo = int(offset), mid + 1
+                else:
+                    hi = mid
+    except (OSError, ValueError):
+        return 0
+    return start if start <= path.stat().st_size else 0
+
+
 def _lane_files(lane: CaptureLane, since: float, until: float) -> list[Path]:
     assert lane.native_lane is not None
     days = set()
@@ -306,7 +337,9 @@ def _activity(runtime: Runtime, inp: ActivityInput) -> Activity:
         truncated = False
         for path in files:
             try:
+                start = _range_start(path, since)
                 with path.open("rb") as handle:
+                    handle.seek(start)
                     data = handle.read(budget + 1)
             except OSError:
                 continue

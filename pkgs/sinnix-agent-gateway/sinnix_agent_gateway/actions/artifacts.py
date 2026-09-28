@@ -185,9 +185,10 @@ class Content(GatewayModel):
 
 
 def _read(runtime: Runtime, inp: ReadInput) -> ActionResult:
-    raw, source, ref = _metadata(runtime, inp.target)
+    raw, _source, ref = _metadata(runtime, inp.target)
+    content = runtime.artifacts.verified_content(raw)
     media = raw.get("content_type") or "application/octet-stream"
-    size = source.stat().st_size
+    size = content.stat().st_size
     max_bytes = inp.max_bytes
     base = {
         "ref": ref,
@@ -215,7 +216,7 @@ def _read(runtime: Runtime, inp: ReadInput) -> ActionResult:
             )
         )
     if textual:
-        with source.open("rb") as handle:
+        with content.open("rb") as handle:
             handle.seek(inp.offset)
             data = handle.read(max_bytes + 1)
         truncated = len(data) > max_bytes
@@ -236,7 +237,7 @@ def _read(runtime: Runtime, inp: ReadInput) -> ActionResult:
                 truncated=truncated,
             )
         )
-    artifact, blocks = attach(source, ref=ref, media_type=media)
+    artifact, blocks = attach(content, ref=ref, media_type=media)
     return ActionResult(
         Content(**base, artifact=artifact, returned_bytes=0),
         blocks=blocks,

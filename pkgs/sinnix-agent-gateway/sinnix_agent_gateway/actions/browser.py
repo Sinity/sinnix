@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import json
 import uuid
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import Field, model_validator
@@ -302,9 +301,8 @@ def _screenshot(runtime: Runtime, inp: BrowserScreenshotInput) -> ActionResult:
         )
     )
     artifact_id = result["artifact_id"]
-    metadata = runtime.artifacts._metadata(artifact_id)
     artifact, blocks = attach(
-        Path(metadata["source"]),
+        runtime.artifacts.registered_content(artifact_id),
         ref=f"sinnix://artifacts/{artifact_id}",
         media_type=result["artifact"]["content_type"],
     )
@@ -692,7 +690,7 @@ def _operate(runtime: Runtime, inp: BrowserOperateInput) -> ActionResult:
                 else ""
             )
             artifact, blocks = attach(
-                destination,
+                runtime.artifacts.registered_content(artifact_id),
                 ref=f"sinnix://artifacts/{artifact_id}",
                 media_type=media or None,
             )

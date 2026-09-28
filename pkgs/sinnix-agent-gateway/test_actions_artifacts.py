@@ -144,6 +144,80 @@ def test_binary_chunks_reassemble_registered_artifact(tmp_path: Path) -> None:
     assert b"".join(parts) == original
 
 
+def test_registered_artifact_is_bound_to_snapshot_not_mutable_source(
+    tmp_path: Path,
+) -> None:
+    """Fails if a source edit silently changes bytes returned by an existing ref."""
+    rt = runtime(tmp_path)
+    artifact_id = register(rt, "mutable.txt", b"registered", "note")
+    source = Path(rt.artifacts._metadata(artifact_id)["source"])
+    source.write_bytes(b"changed source")
+    result = call(
+        rt,
+        "artifacts.read",
+        {"target": {"artifact_id": artifact_id}, "representation": "binary"},
+        BY_NAME,
+    )
+    assert base64.b64decode(result["data"]["base64"]) == b"registered"
+
+
+def test_text_read_serves_snapshot_after_source_edit(tmp_path: Path) -> None:
+    """Fails if the text representation reads the mutable registered source."""
+    rt = runtime(tmp_path)
+    artifact_id = register(rt, "mutable.txt", b"registered", "note")
+    source = Path(rt.artifacts._metadata(artifact_id)["source"])
+    source.write_bytes(b"changed source")
+    result = call(
+        rt,
+        "artifacts.read",
+        {"target": {"artifact_id": artifact_id}, "representation": "text"},
+        BY_NAME,
+    )
+    assert result["data"]["text"] == "registered"
+    assert result["data"]["bytes"] == len(b"registered")
+
+
+def test_artifact_without_snapshot_is_retained_from_matching_source(
+    tmp_path: Path,
+) -> None:
+    """Fails if a pre-snapshot ref breaks, or is served from a changed source."""
+    rt = runtime(tmp_path)
+    kept = register(rt, "kept.txt", b"registered", "note")
+    changed = register(rt, "changed.txt", b"registered", "note")
+    for artifact_id in (kept, changed):
+        (rt.artifacts.root / artifact_id / "content").unlink()
+    captures = rt.config.state_dir / "captures"
+    (captures / "changed.txt" / "changed.txt").write_bytes(b"edited later")
+    request = {"representation": "text"}
+
+    result = call(
+        rt, "artifacts.read", {"target": {"artifact_id": kept}, **request}, BY_NAME
+    )
+    assert result["data"]["text"] == "registered"
+    assert (rt.artifacts.root / kept / "content").read_bytes() == b"registered"
+
+    result = call(
+        rt, "artifacts.read", {"target": {"artifact_id": changed}, **request}, BY_NAME
+    )
+    assert result["error"]["code"] == "not_found"
+    assert not (rt.artifacts.root / changed / "content").exists()
+
+
+def test_mutated_artifact_snapshot_is_refused(tmp_path: Path) -> None:
+    """Fails if altered retained bytes are served under the registered digest."""
+    rt = runtime(tmp_path)
+    artifact_id = register(rt, "tampered.txt", b"registered", "note")
+    metadata = rt.artifacts._metadata(artifact_id)
+    Path(metadata["_content"]).write_bytes(b"tampered!")
+    result = call(
+        rt,
+        "artifacts.read",
+        {"target": {"artifact_id": artifact_id}, "representation": "binary"},
+        BY_NAME,
+    )
+    assert result["error"]["code"] == "invalid_request"
+
+
 def test_filtered_listing_continues_immutable_snapshot(tmp_path: Path) -> None:
     rt = runtime(tmp_path)
     expected = {register(rt, f"note-{i}.txt", b"note", "note") for i in range(3)}
@@ -163,3 +237,36 @@ def test_filtered_listing_continues_immutable_snapshot(tmp_path: Path) -> None:
         )
         found.update(row["artifact_id"] for row in result["data"]["artifacts"])
     assert found == expected
+
+
+def test_paged_binary_read_hashes_the_snapshot_once(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Fails if each page of a binary read rehashes the whole artifact."""
+    from sinnix_agent_gateway import artifacts as artifact_module
+
+    rt = runtime(tmp_path)
+    artifact_id = register(rt, "paged.bin", bytes(range(256)) * 64, "note")
+    hashed: list[Path] = []
+    real = artifact_module._sha256
+
+    def counting(path: Path) -> str:
+        hashed.append(path)
+        return real(path)
+
+    monkeypatch.setattr(artifact_module, "_sha256", counting)
+    offset = 0
+    while offset is not None:
+        data = call(
+            rt,
+            "artifacts.read",
+            {
+                "target": {"artifact_id": artifact_id},
+                "representation": "binary",
+                "offset": offset,
+                "max_bytes": 4096,
+            },
+            BY_NAME,
+        )["data"]
+        offset = data["next_offset"]
+    assert len(hashed) <= 1
