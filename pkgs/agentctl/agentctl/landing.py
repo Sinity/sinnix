@@ -1834,6 +1834,7 @@ def _drop_branch(
     recorded_path: Path | None = None,
     run_id: str | None = None,
     artifacts: list[dict[str, str]] | None = None,
+    delete_branch: bool = False,
 ) -> str | None:
     """Release one terminal checkout while retaining its Git history.
 
@@ -1860,6 +1861,14 @@ def _drop_branch(
     if path is None:
         if recorded_path is not None and recorded_path.exists():
             return f"worktree kept; checkout path is unregistered: {recorded_path}"
+        if delete_branch and tree is None:
+            gitcmd.git(
+                project.root,
+                "update-ref",
+                "-d",
+                f"refs/heads/{branch}",
+                error=BatchError,
+            )
         return None
     if not path.is_dir():
         if removal_target == branch:
@@ -1948,12 +1957,22 @@ def _drop_branch(
             return f"worktree kept; {error}"
     try:
         worktrunk.worktrunk_remove(
-            project.root, removal_target, keep_branch=True, reap=False
+            project.root, removal_target, keep_branch=not delete_branch, reap=False
         )
     except WorktrunkError as error:
         return str(error)
     if path.exists():
         return f"worktree kept; checkout path remains after removal: {path}"
+    if delete_branch:
+        # The checkout is gone (or was already absent), so this ref can now be
+        # removed without invalidating a registered worktree.
+        gitcmd.git(
+            project.root,
+            "update-ref",
+            "-d",
+            f"refs/heads/{branch}",
+            error=BatchError,
+        )
     return None
 
 
@@ -2076,6 +2095,22 @@ def abandon(
 _BATCH_BRANCH = re.compile(r"^batch/(?P<run>[^/]+)/[^/]+$")
 
 
+def _branch_reachable_from(root: Path, branch: str, base: str) -> bool:
+    """Whether the branch tip is already preserved by the default branch."""
+    try:
+        gitcmd.git(
+            root,
+            "merge-base",
+            "--is-ancestor",
+            f"refs/heads/{branch}",
+            base,
+            error=BatchError,
+        )
+    except BatchError:
+        return False
+    return True
+
+
 def clean(config: Config, project: ProjectAdapter) -> dict[str, Any]:
     """Remove the worktrees of runs that are over. Run state, never age.
 
@@ -2149,8 +2184,33 @@ def clean(config: Config, project: ProjectAdapter) -> dict[str, Any]:
                 )
             if registered is None or registered.path is None:
                 if recorded_path is None or not recorded_path.exists():
-                    absent.append(branch)
-                    continue
+                    # A terminal manifest still owns the branch when its
+                    # checkout has already disappeared.
+                    may_delete = owner is not None and (
+                        owner.acceptance is not None
+                        or (
+                            owner.abandoned is not None
+                            and bool(default_base)
+                            and _branch_reachable_from(
+                                project.root, branch, default_base
+                            )
+                        )
+                    )
+                    if not may_delete:
+                        if owner is not None and owner.abandoned is not None:
+                            kept.append(
+                                {
+                                    "branch": branch,
+                                    "reason": (
+                                        "branch kept; commits are not reachable from default branch"
+                                        if default_base
+                                        else "branch kept; default branch could not be resolved"
+                                    ),
+                                }
+                            )
+                            continue
+                        absent.append(branch)
+                        continue
             copied: list[dict[str, str]] = []
             reason = _drop_branch(
                 config,
@@ -2160,6 +2220,19 @@ def clean(config: Config, project: ProjectAdapter) -> dict[str, Any]:
                 recorded_path=recorded_path,
                 run_id=owner.run_id if owner else None,
                 artifacts=copied,
+                delete_branch=(
+                    owner is not None
+                    and (
+                        owner.acceptance is not None
+                        or (
+                            owner.abandoned is not None
+                            and bool(default_base)
+                            and _branch_reachable_from(
+                                project.root, branch, default_base
+                            )
+                        )
+                    )
+                ),
             )
             if reason:
                 kept.append({"branch": branch, "reason": reason})
