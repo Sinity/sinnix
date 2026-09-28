@@ -330,10 +330,40 @@ def test_blob_store_concurrently_publishes_one_complete_digest(tmp_path: Path) -
     assert [path.name for path in paths[0].parent.iterdir()] == [digest]
 
 
-def test_dedup_state_is_published_privately(tmp_path: Path) -> None:
+def test_dedup_probe_does_not_publish_before_retention(tmp_path: Path) -> None:
     state = tmp_path / "gate" / "last"
 
     assert _is_duplicate(state, "first") is False
-    assert state.read_text() == "first"
+    assert not state.exists()
+
+
+def test_failed_selection_write_does_not_suppress_retry(
+    lane: Lane, tmp_path: Path, monkeypatch
+) -> None:
+    from sinnix_capture.writer import CaptureWriter
+
+    state = tmp_path / "state" / "last-selection"
+
+    def fail_once(self, payload, raw_ref=None, ts=None):
+        raise OSError("synthetic retention failure")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(CaptureWriter, "write", fail_once)
+        with pytest.raises(OSError, match="retention failure"):
+            lane.run("--dedup-state", str(state))
+    assert not state.exists()
+    assert lane.records() == []
+    assert lane.run("--dedup-state", str(state)) == 0
+    assert len(lane.records()) == 1
     assert state.stat().st_mode & 0o777 == 0o600
-    assert _is_duplicate(state, "first") is True
+
+
+def test_unrecognized_non_text_mime_preserves_original_bytes(lane: Lane) -> None:
+    body = b"\xff\x00\x80binary\n"
+    lane.types_file.write_text("application/x-vendor\n")
+    lane.content_file.write_bytes(body)
+    assert lane.run() == 0
+    (record,) = lane.records()
+    assert record["payload"]["category"] == "binary"
+    assert record["payload"]["mime"] == "application/x-vendor"
+    assert Path(record["raw_ref"]).read_bytes() == body

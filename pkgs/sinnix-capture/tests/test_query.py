@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pytest
 from sinnix_capture.query import discover_lanes, lane_delta, query
 from sinnix_capture.writer import CaptureWriter
 
@@ -63,3 +64,22 @@ def test_query_restricted_to_explicit_lanes(tmp_path: Path) -> None:
 
     results = query(tmp_path, since_ts=0.0, lanes=["lane-x"])
     assert [r["lane"] for r in results] == ["lane-x"]
+
+
+def test_query_ignores_only_an_interrupted_final_index_line(tmp_path: Path) -> None:
+    writer = CaptureWriter(tmp_path, "lane-x")
+    writer.write({"n": 1}, ts=100.0)
+    with writer._index_path.open("ab") as handle:
+        handle.write(b'{"ts":')
+    assert lane_delta(tmp_path, "lane-x")["records_since"] == 1
+    writer.write({"n": 2}, ts=200.0)
+    assert lane_delta(tmp_path, "lane-x")["records_since"] == 2
+
+
+def test_query_refuses_a_terminated_malformed_index_line(tmp_path: Path) -> None:
+    writer = CaptureWriter(tmp_path, "lane-x")
+    writer.write({"n": 1}, ts=100.0)
+    with writer._index_path.open("ab") as handle:
+        handle.write(b"not json\n")
+    with pytest.raises(ValueError):
+        lane_delta(tmp_path, "lane-x")

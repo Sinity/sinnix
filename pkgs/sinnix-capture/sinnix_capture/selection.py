@@ -20,9 +20,11 @@ import shlex
 import subprocess
 import sys
 import time
+from contextlib import nullcontext
 from pathlib import Path
 
 from sinnix_lib.atomic import atomic_publish
+from sinnix_lib.lock import flock
 
 from .writer import CaptureWriter
 
@@ -62,7 +64,7 @@ def pick_mime(offered: str) -> str | None:
 
 def is_binary_mime(mime: str) -> bool:
     """Whether content of this type goes to a blob instead of inline text."""
-    return mime.startswith("image/") or mime == "application/octet-stream"
+    return not (mime.startswith("text/") or mime in {"STRING", "UTF8_STRING"})
 
 
 def store_blob(lane_dir: Path, content: bytes, digest: str) -> Path:
@@ -132,10 +134,7 @@ def _is_duplicate(state_path: Path, key: str) -> bool:
         previous: str | None = state_path.read_text()
     except OSError:
         previous = None
-    if previous == key:
-        return True
-    atomic_publish(state_path, key.encode(), fsync=True, mode=0o600)
-    return False
+    return previous == key
 
 
 def _is_superseded(state_path: Path, debounce_ms: int) -> bool:
@@ -191,8 +190,6 @@ def capture_selection(
 
     digest = hashlib.sha256(content).hexdigest()
 
-    if dedup_state is not None and _is_duplicate(dedup_state, f"{mime}:{digest}"):
-        return 0
     if debounce_ms is not None and _is_superseded(debounce_state, debounce_ms):
         return 0
 
@@ -203,27 +200,38 @@ def capture_selection(
         window_json.decode("utf-8", "replace") if window_status == 0 else "null"
     )
 
-    size = len(content)
-    if is_binary_mime(mime):
-        raw_ref: str | None = str(
-            store_blob(Path(capture_root) / lane, content, digest)
-        )
-        payload = {
-            "category": "binary",
-            "mime": mime,
-            "sha256": digest,
-            "size": size,
-            "source_window": window,
-        }
-    else:
-        raw_ref = None
-        payload = {
-            "category": "text",
-            "mime": mime,
-            "text": content.decode("utf-8", "replace"),
-            "size": size,
-            "source_window": window,
-        }
+    key = f"{mime}:{digest}"
+    gate = (
+        flock(dedup_state.with_name(dedup_state.name + ".lock"))
+        if dedup_state
+        else nullcontext()
+    )
+    with gate:
+        if dedup_state is not None and _is_duplicate(dedup_state, key):
+            return 0
+        size = len(content)
+        if is_binary_mime(mime):
+            raw_ref: str | None = str(
+                store_blob(Path(capture_root) / lane, content, digest)
+            )
+            payload = {
+                "category": "binary",
+                "mime": mime,
+                "sha256": digest,
+                "size": size,
+                "source_window": window,
+            }
+        else:
+            raw_ref = None
+            payload = {
+                "category": "text",
+                "mime": mime,
+                "text": content.decode("utf-8", "replace"),
+                "size": size,
+                "source_window": window,
+            }
 
-    CaptureWriter(capture_root, lane).write(payload, raw_ref=raw_ref)
+        CaptureWriter(capture_root, lane).write(payload, raw_ref=raw_ref)
+        if dedup_state is not None:
+            atomic_publish(dedup_state, key.encode(), fsync=True, mode=0o600)
     return 0

@@ -26,12 +26,13 @@ def lane_delta(capture_root: Path | str, lane: str, since_ts: float = 0.0) -> di
     prev_seq: int | None = None
 
     if index_path.exists():
-        with open(index_path) as f:
-            for raw_line in f:
-                raw_line = raw_line.strip()
-                if not raw_line:
-                    continue
-                entry = json.loads(raw_line)
+        with index_path.open("rb") as handle:
+            for line in handle:
+                if not line.endswith(b"\n"):
+                    # An interrupted append can leave only the last line
+                    # incomplete. A terminated malformed line still raises.
+                    break
+                entry = json.loads(line)
                 ts = entry["ts"]
                 seq = entry["seq"]
                 if newest_ts is None or ts > newest_ts:
