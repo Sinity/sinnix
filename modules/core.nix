@@ -78,17 +78,16 @@ in
         # success. Root daemons that write here are unaffected -- root ignores
         # directory permissions.
         #
-        # GOTCHA these rules cannot fix: tmpfiles `d` applies ownership only
-        # when it CREATES the directory; an existing root-owned dir is left
-        # exactly as found (repair semantics belong to `z`, which this list
-        # deliberately avoids -- blanket re-chowning live trees every boot is
-        # its own hazard). A directory that existed before its rule, or was
-        # created root-side (a sudo mkdir, a recut), keeps its wrong owner
-        # until someone chowns it once. 2026-08-17: exactly that had
-        # re-sprinkled root ownership across /realm, /realm/state,
-        # /realm/library, /realm/tmp/work, and five recut subject
-        # roots; repaired by one-shot chown, and the roots are declared below
-        # so new hosts start correct. Service-state leaves root daemons own
+        # tmpfiles `d` also re-owns an existing directory to its declared
+        # owner (2026-09-28: four root-owned /realm containers became the
+        # operator's at activation with no manual chown), but only for
+        # directories with a rule of their own and a safe parent chain.
+        # Undeclared directories created root-side (a sudo mkdir, a recut)
+        # keep their owner; 2026-08-17 that had re-sprinkled root ownership
+        # across /realm, /realm/state, /realm/library, /realm/tmp/work, and
+        # five recut subject roots, so those roots are declared below. The
+        # list avoids `z`/`Z`: re-chowning live trees every boot is its own
+        # hazard. Service-state leaves root daemons own
         # (state/journal, state/containers, backup targets, swap, the
         # snapshots under .btrfs) stay root on purpose.
         #
