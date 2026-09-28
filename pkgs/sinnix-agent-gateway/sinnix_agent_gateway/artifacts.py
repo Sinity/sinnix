@@ -261,6 +261,10 @@ class ArtifactService:
         metadata["_content"] = content
         return metadata
 
+    def registered_content(self, artifact_id: str) -> Path:
+        """Return an artifact's verified snapshot, the only bytes its ref names."""
+        return self.verified_content(self._metadata(artifact_id))
+
     def verified_content(self, metadata: dict[str, Any]) -> Path:
         """Return the private snapshot after checking it against its identity.
 

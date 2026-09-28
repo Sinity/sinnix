@@ -356,7 +356,9 @@ def _export(runtime: Runtime, inp: ExportInput) -> ActionResult:
         archive, kind="project-export", owner_id=resolved.ref
     )
     artifact, blocks = attach(
-        archive, ref=f"sinnix://artifacts/{artifact_id}", media_type="application/zip"
+        runtime.artifacts.registered_content(artifact_id),
+        ref=f"sinnix://artifacts/{artifact_id}",
+        media_type="application/zip",
     )
     output = ProjectExport(
         **_identity(resolved),
