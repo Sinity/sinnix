@@ -1,7 +1,7 @@
 """Pressure admission with an incremental, regenerable spool projection.
 
 Pueue owns dependencies and ordinary stashes. This module pauses a group with
-``pause --wait`` and later resumes pauses it can prove it made.
+``pause --wait`` and reports recovery candidates for an operator to resume.
 """
 
 from __future__ import annotations
@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -30,14 +31,16 @@ CLOSE_ORDER = {
 MANAGED_GROUPS = ("agent", "pytest-heavy", "pytest", "pytest-quick", "normal", "bulk")
 OWNER = "agentctl"
 CHECKPOINT_SCHEMA = 1
+QUICK_GROUP = "pytest-quick"
+QUICK_FLOOR = 1
+QUICK_CEILING = 8
+QUICK_JOB_BUDGET = 1024**3  # Observed maximum: 988 MiB in 106 focused slots.
+CGROUP_ROOT = Path("/sys/fs/cgroup")
 
 
 @dataclass
 class SpoolState:
     pauses: dict[str, dict[str, Any]] = field(default_factory=dict)
-    # The complete last unresolved event, not just its task id: task ids can
-    # move under `pueue switch`, so retirement needs a corroborating identity.
-    legacy_holds: dict[int, dict[str, Any]] = field(default_factory=dict)
     cursor: dict[str, int] | None = None
 
     def apply(self, event: Mapping[str, Any]) -> None:
@@ -53,14 +56,6 @@ class SpoolState:
                 }
             elif action in {"opened", "released"}:
                 self.pauses.pop(group, None)
-        elif event.get("kind") == "pool-hold":
-            task_id, action = event.get("task_id"), event.get("action")
-            if not isinstance(task_id, int):
-                return
-            if action == "held":
-                self.legacy_holds[task_id] = dict(event)
-            elif action in {"released", "retired"}:
-                self.legacy_holds.pop(task_id, None)
 
     def ours(self) -> set[str]:
         return {
@@ -91,14 +86,6 @@ def _load_checkpoint(path: Path | None) -> SpoolState:
             for group, record in raw["pauses"].items()
             if isinstance(group, str) and isinstance(record, dict)
         }
-    if isinstance(raw.get("legacy_holds"), dict):
-        state.legacy_holds = {
-            int(task_id): dict(event)
-            for task_id, event in raw["legacy_holds"].items()
-            if isinstance(task_id, str)
-            and task_id.isdigit()
-            and isinstance(event, dict)
-        }
     cursor = raw.get("cursor")
     if isinstance(cursor, dict) and all(
         isinstance(cursor.get(key), int) for key in ("device", "inode", "offset")
@@ -114,9 +101,6 @@ def _save_checkpoint(path: Path | None, state: SpoolState) -> None:
         "schema_version": CHECKPOINT_SCHEMA,
         "cursor": state.cursor,
         "pauses": state.pauses,
-        "legacy_holds": {
-            str(task_id): event for task_id, event in state.legacy_holds.items()
-        },
     }
     try:
         write_json_atomic(path, payload, fsync=False)
@@ -253,6 +237,92 @@ def _can_reopen(
     )
 
 
+def _quick_headroom() -> int | None:
+    """Read the quick leaf and its parents; the tightest live limit wins."""
+    try:
+        shown = subprocess.run(
+            [
+                "systemctl",
+                "--user",
+                "show",
+                "--value",
+                "--property=ControlGroup",
+                "agentctl-pytest-quick.slice",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=True,
+        ).stdout.strip()
+        if not shown.startswith("/") or ".." in Path(shown).parts:
+            return None
+        leaf = (CGROUP_ROOT / shown.lstrip("/")).resolve()
+        if not leaf.is_relative_to(CGROUP_ROOT.resolve()) or leaf == CGROUP_ROOT:
+            return None
+        available = []
+        for scope in (leaf, *leaf.parents):
+            if scope == CGROUP_ROOT.parent:
+                break
+            current = int((scope / "memory.current").read_text().strip())
+            for name in ("memory.high", "memory.max"):
+                raw = (scope / name).read_text().strip()
+                if raw != "max":
+                    available.append(int(raw) - current)
+            if scope == CGROUP_ROOT:
+                break
+        return min(available) if available else None
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+
+
+def _adjust_quick_width(
+    spool: Path | None, groups: Mapping[str, str], pressure: Mapping[str, float | None]
+) -> dict[str, Any] | None:
+    if groups.get(QUICK_GROUP) not in {"Running", "Paused"}:
+        return None
+    try:
+        width = pueue.groups().get(QUICK_GROUP)
+    except PueueError as error:
+        return {"action": "unavailable", "group": QUICK_GROUP, "error": str(error)}
+    if not isinstance(width, int) or width < QUICK_FLOOR:
+        return {
+            "action": "unavailable",
+            "group": QUICK_GROUP,
+            "error": "invalid quick pool width",
+        }
+    memory = _recovery_pressure(pressure, "memory")
+    headroom = _quick_headroom()
+    if memory is None or headroom is None:
+        return {"action": "unknown-capacity", "group": QUICK_GROUP}
+    if groups[QUICK_GROUP] == "Paused" and memory < RESUME_BELOW:
+        return None
+    if (
+        groups[QUICK_GROUP] == "Paused"
+        or memory >= RESUME_BELOW
+        or headroom < QUICK_JOB_BUDGET
+    ):
+        target = max(QUICK_FLOOR, width - 1)
+    else:
+        target = min(QUICK_CEILING, width + 1)
+    if target == width:
+        return None
+    try:
+        pueue.set_parallel(QUICK_GROUP, target)
+    except PueueError as error:
+        return {"action": "failed", "group": QUICK_GROUP, "error": str(error)}
+    return _append(
+        spool,
+        {
+            "action": "width-changed",
+            "group": QUICK_GROUP,
+            "from": width,
+            "to": target,
+            "memory_headroom": headroom,
+            "memory_full": memory,
+        },
+    )
+
+
 def _append(spool: Path | None, event: Mapping[str, object]) -> dict[str, Any]:
     record = {
         "schema_version": 1,
@@ -273,33 +343,6 @@ def paused_by_us(spool: Path | None, *, checkpoint: Path | None = None) -> set[s
     return event_state(spool, checkpoint=checkpoint).ours()
 
 
-def _vanished_hold_retirements(state: SpoolState) -> list[dict[str, Any]]:
-    """Retire tracked holds whose task pueue no longer knows about.
-
-    A hold leaves the tracked set on its own ``released``/``retired`` event,
-    but a held task removed by ``pueue clean`` emits neither, so its entry
-    would otherwise be carried forever. pueue owns queue membership, so an
-    absent task is authoritative: reconcile against it rather than let this
-    checkpoint grow into a second ledger.
-    """
-    if not state.legacy_holds:
-        return []
-    try:
-        live = pueue.tasks()
-    except PueueError:
-        return []
-    return [
-        {
-            "kind": "pool-hold",
-            "action": "retired",
-            "task_id": task_id,
-            "reason": "task-absent-from-pueue",
-        }
-        for task_id in sorted(state.legacy_holds)
-        if task_id not in live
-    ]
-
-
 def tick(
     *,
     spool: Path | None,
@@ -317,34 +360,18 @@ def tick(
     for name in sorted(state.ours()):
         if groups.get(name) == "Running":
             state.apply(_append(spool, {"action": "released", "group": name}))
-    for event in _vanished_hold_retirements(state):
-        state.apply(_append(spool, event))
     _save_checkpoint(checkpoint_path, state)
     signals = over_threshold(pressure)
     signal = "+".join(signals) or None
     paused = [name for name in MANAGED_GROUPS if groups.get(name) == "Paused"]
-    obsolete = [
+    # Native pause has no generation or owner. An operator may have reasserted
+    # the pause while it was already paused, so an old event cannot authorize
+    # an automatic resume. The operator can explicitly resume with pueue.
+    recovery_needed = [
         name
         for name in paused
         if name in state.ours() and _can_reopen(name, state.pauses[name], pressure)
     ]
-    if obsolete:
-        target = obsolete[0]
-        try:
-            pueue.resume(target)
-        except PueueError as error:
-            return {
-                "action": "failed",
-                "group": target,
-                "error": str(error),
-                "pressure": pressure,
-            }
-        event = _append(
-            spool, {"action": "opened", "group": target, "signal": signal, **pressure}
-        )
-        state.apply(event)
-        _save_checkpoint(checkpoint_path, state)
-        return event
     if signals:
         close_order = tuple(
             dict.fromkeys(group for active in signals for group in CLOSE_ORDER[active])
@@ -367,10 +394,14 @@ def tick(
             )
             state.apply(event)
             _save_checkpoint(checkpoint_path, state)
-            return event
+            return {**event, "manual_recovery": recovery_needed}
+    width_change = _adjust_quick_width(spool, groups, pressure)
+    if width_change is not None:
+        return {**width_change, "manual_recovery": recovery_needed}
     return {
         "action": "hold" if _pressure_complete(pressure) else "unknown-pressure",
         "frozen": paused,
+        "manual_recovery": recovery_needed,
         "signal": signal,
         **pressure,
     }
