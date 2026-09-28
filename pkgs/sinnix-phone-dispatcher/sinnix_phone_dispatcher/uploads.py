@@ -12,9 +12,11 @@ the phone deletes its copy on an ok and retries on anything else.
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import os
 import sys
+from contextlib import contextmanager
 from http import HTTPStatus
 from pathlib import Path
 from threading import Lock
@@ -38,6 +40,30 @@ AMBIENT_PROGRESS_MARKER = Path(
     )
 )
 _AMBIENT_PROGRESS_LOCK = Lock()
+
+
+@contextmanager
+def _file_lock(target: Path):
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(
+        target.with_name(f".{target.name}.lock"), os.O_CREAT | os.O_RDWR, 0o600
+    )
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+
+
+def _retained_digest(target: Path) -> tuple[int, str]:
+    size = 0
+    digest = hashlib.sha256()
+    with target.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1 << 20), b""):
+            size += len(chunk)
+            digest.update(chunk)
+    return size, digest.hexdigest()
 
 
 def _record_ambient_progress(target: Path) -> None:
@@ -145,41 +171,41 @@ def store_upload(
             "bytes": len(body),
         }
 
-    if target.exists() and target.stat().st_size == len(body):
-        return HTTPStatus.OK, {
-            "ok": True,
-            "duplicate": True,
-            "bytes": len(body),
-            "sha256": digest,
-            "path": str(target),
-        }
-
     try:
-        # The lane's own subdirectory, when the name carried one: the camera
-        # mirror keeps `Camera/`, `Screenshots/` and `Pictures/` because the
-        # rsync that filled it did.
-        target.parent.mkdir(parents=True, exist_ok=True)
-        atomic_publish(target, body, fsync=True, mode=0o660)
+        with _file_lock(target):
+            if target.exists():
+                size, retained_sha = _retained_digest(target)
+                if size != len(body) or retained_sha != digest:
+                    return HTTPStatus.CONFLICT, {
+                        "ok": False,
+                        "detail": "retained upload differs",
+                        "bytes": size,
+                        "sha256": retained_sha,
+                    }
+                return HTTPStatus.OK, {
+                    "ok": True,
+                    "duplicate": True,
+                    "bytes": size,
+                    "sha256": retained_sha,
+                    "path": str(target),
+                }
+            atomic_publish(target, body, fsync=True, mode=0o660)
+            size, retained_sha = _retained_digest(target)
+            if size != len(body) or retained_sha != digest:
+                return HTTPStatus.INTERNAL_SERVER_ERROR, {
+                    "ok": False,
+                    "detail": "retained upload failed verification",
+                }
+            if lane == "ambient":
+                _record_ambient_progress(target)
     except OSError as exc:
         return HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "detail": str(exc)}
-
-    if lane == "ambient":
-        try:
-            # The file is already durably visible. If this one-path marker
-            # cannot be updated, refuse the ack so the phone retains its copy;
-            # the retry is idempotent and the next new chunk can recover too.
-            _record_ambient_progress(target)
-        except OSError as exc:
-            return HTTPStatus.INTERNAL_SERVER_ERROR, {
-                "ok": False,
-                "detail": f"ambient progress marker could not be written: {exc}",
-            }
 
     return HTTPStatus.OK, {
         "ok": True,
         "duplicate": False,
-        "bytes": len(body),
-        "sha256": digest,
+        "bytes": size,
+        "sha256": retained_sha,
         "path": str(target),
         "at": utc_ts(),
     }
@@ -255,28 +281,53 @@ def append_events(
     target = _day_file(day)
     try:
         EVENTS_DIR.mkdir(parents=True, exist_ok=True)
-        size = target.stat().st_size if target.is_file() else 0
-        if offset > size:
-            return HTTPStatus.CONFLICT, {
-                "ok": False,
-                "detail": "prime is missing the bytes before this batch",
-                "expected_offset": size,
-                "day": day,
-            }
-        if offset + len(body) <= size:
-            return HTTPStatus.OK, {
-                "ok": True,
-                "duplicate": True,
-                "day": day,
-                "bytes": len(body),
-                "cursor": size,
-            }
-        fd = os.open(target, os.O_WRONLY | os.O_CREAT, 0o660)
-        try:
-            os.pwrite(fd, body, offset)
-            os.fsync(fd)
-        finally:
-            os.close(fd)
+        with _file_lock(target):
+            size = target.stat().st_size if target.is_file() else 0
+            if offset > size:
+                return HTTPStatus.CONFLICT, {
+                    "ok": False,
+                    "detail": "prime is missing the bytes before this batch",
+                    "expected_offset": size,
+                    "day": day,
+                }
+            overlap = min(len(body), size - offset)
+            if overlap:
+                with target.open("rb") as stream:
+                    stream.seek(offset)
+                    if stream.read(overlap) != body[:overlap]:
+                        return HTTPStatus.CONFLICT, {
+                            "ok": False,
+                            "detail": "retained range differs",
+                            "expected_offset": size,
+                            "day": day,
+                        }
+            if offset + len(body) <= size:
+                return HTTPStatus.OK, {
+                    "ok": True,
+                    "duplicate": True,
+                    "day": day,
+                    "bytes": len(body),
+                    "cursor": size,
+                    "sha256": digest,
+                }
+            fd = os.open(target, os.O_WRONLY | os.O_CREAT, 0o660)
+            try:
+                written = overlap
+                while written < len(body):
+                    count = os.pwrite(fd, body[written:], offset + written)
+                    if count <= 0:
+                        raise OSError("short pwrite made no progress")
+                    written += count
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+            with target.open("rb") as stream:
+                stream.seek(offset)
+                if stream.read(len(body)) != body:
+                    return HTTPStatus.INTERNAL_SERVER_ERROR, {
+                        "ok": False,
+                        "detail": "retained range failed verification",
+                    }
         # O_CREAT does not apply the mode to a file that already exists, and
         # the day files the drain landed are 0660: a lane where half the files
         # are group-readable and half are not is a bug waiting for its first

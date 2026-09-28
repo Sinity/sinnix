@@ -150,13 +150,19 @@ Reachability is **measured, not assumed**: the app pings, renders the
 round-trip and its age ("live · 34 ms"), and every action reports the path it
 actually took — `sent · live` or `queued · retrying`.
 
-Idempotency is the `send_token` for intents and the sha256 for bytes. An
-intent that went out live and was queued anyway executes once, because prime
-records every executed token and answers a repeat with the same receipt. A
-chunk prime already holds answers ok rather than 409, because a phone that
-retried after losing an acknowledgement must be able to let go of the file.
-An event batch declares the offset it starts at and is written there, so
-re-sending one changes nothing.
+An intent's `send_token` is bound to its full request content. Prime records
+in-flight, completed, failed, and indeterminate outcomes. A matching completed
+retry receives its prior result; a definitive failure can be retried; a
+changed request or uncertain prior effect is refused. This serializes the
+HTTP and file routes but cannot guarantee exactly-once effects in external
+targets. For `steering_ritual`, an omitted forecast defaults to 0.5 and an
+explicit zero remains zero. A partially applied ritual is reported as
+indeterminate, so its successful actions are not blindly repeated.
+
+A chunk prime already holds answers ok only when its retained bytes match the
+upload. A conflicting file or overlapping event range is refused. An event
+batch declares its offset, so an identical retry preserves the file and can
+recover from a lost acknowledgement.
 
 Speech regions are metadata derived on prime from uploaded ambient chunks.
 The phone records one canonical audio stream; it does not run another recorder
