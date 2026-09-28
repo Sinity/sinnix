@@ -69,7 +69,10 @@ mkServiceModule {
       }
     );
     default = {
-      agent.parallel = 12;
+      # Twelve Claude Opus workers with their tool processes held the 8G
+      # agentctl-agent slice at ~80% full memory pressure (2026-09-28), so
+      # each ran slower than eight unthrottled ones would.
+      agent.parallel = 8;
       # The agents a landing owns (integration, review): a pool of their own so
       # a paused `agent` pool holds back new workers without stalling landings.
       land-agent.parallel = 2;
@@ -87,10 +90,10 @@ mkServiceModule {
       # sinnix-tisc makes admission follow live headroom.
       pytest-quick.parallel = 8;
       bulk.parallel = 2;
-      # Polylogue verify_quick runs its gates in parallel and peaks near
-      # 3.3 GiB; three of them held the 9G normal slice at ~70% full memory
-      # pressure (2026-09-28), so two unthrottled finish sooner.
-      normal.parallel = 2;
+      # Three Polylogue verify_quick runs fit the 9G normal slice now that one
+      # peaks under 1 GiB (polylogue #5754); at 3.3 GiB each they had held it
+      # at ~70% full memory pressure.
+      normal.parallel = 3;
       # Long-lived development dependencies must not occupy short-job capacity.
       service.parallel = 2;
       interactive.parallel = 4;
