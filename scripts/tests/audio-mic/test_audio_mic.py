@@ -35,7 +35,11 @@ class AudioMicTest(unittest.TestCase):
             '  "set-mute @DEFAULT_AUDIO_SOURCE@ toggle") exit 0 ;;\n'
             'esac\n',
         )
-        self.executable("jq", 'while [ "$#" -gt 0 ]; do shift; done\nprintf \'{"state":"unavailable","tooltip":"No active microphone (input unplugged)"}\\n\'\n')
+        self.executable(
+            "jq",
+            'printf "jq %s\\n" "$*" >> "$CALL_LOG"\n'
+            'printf \'{"state":"unavailable","tooltip":"No active microphone (input unplugged)"}\\n\'\n',
+        )
         self.executable("notify-send", 'printf "notify %s\\n" "$*" >> "$CALL_LOG"\n')
 
     def executable(self, name, body):
@@ -50,13 +54,14 @@ class AudioMicTest(unittest.TestCase):
         )
 
     def test_missing_active_source_status_is_explicit(self):
-        # The fake jq captures its input so this tests the produced JSON.
-        self.executable("jq", 'while [ "$#" -gt 0 ]; do shift; done\nprintf \'{"state":"unavailable","tooltip":"No active microphone (input unplugged)"}\\n\'\n')
         result = self.run_audio("mic-status", True)
         state = json.loads(result.stdout)
         self.assertEqual(state["state"], "unavailable")
         self.assertIn("input unplugged", state["tooltip"])
-        self.assertNotIn("set-mute", self.log.read_text())
+        calls = self.log.read_text()
+        self.assertIn("jq -n {text:\"󰍭\", tooltip:\"No active microphone (input unplugged)\", class:\"unavailable\", state:\"unavailable\"}", calls)
+        self.assertIn("inspect @DEFAULT_AUDIO_SOURCE@", calls)
+        self.assertNotIn("set-mute", calls)
 
     def test_missing_active_source_toggle_notifies_and_does_not_change_mute(self):
         result = self.run_audio("mic-toggle", False)
