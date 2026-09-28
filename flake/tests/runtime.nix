@@ -470,10 +470,10 @@ in
           [
             {
               assertion =
-                lib.hasInfix "/bin/agentctl job start lynchpin converge --wait" service.ExecStart
+                lib.hasInfix "/bin/agentctl job fire lynchpin converge --wait" service.ExecStart
                 && service.TimeoutStartSec == "4h"
                 && surface.resourceClass == "ordinary";
-              message = "the Lynchpin timer must start the bounded convergence operation";
+              message = "the Lynchpin timer must fire (coalesce) the bounded convergence operation";
             }
             {
               assertion =
