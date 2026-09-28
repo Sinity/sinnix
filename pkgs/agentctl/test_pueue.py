@@ -81,6 +81,17 @@ def test_running_tasks_requests_only_one_groups_live_tasks(
     monkeypatch.setattr(pueue, "_run", response)
     assert list(pueue.running_tasks("agent")) == [1]
 
+
+def test_recent_tasks_limits_orphan_recovery_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def response(arguments: list[str]) -> str:
+        assert arguments == ["status", "--json", "--group", "agent", "last 256"]
+        return json.dumps({"tasks": {"1": LIVE_STATUS["tasks"]["1"]}, "groups": {}})
+
+    monkeypatch.setattr(pueue, "_run", response)
+    assert list(pueue.recent_tasks("agent")) == [1]
+
 LIVE_LOG = {
     "0": {
         "task": {"id": 0, "label": "probe:schema"},

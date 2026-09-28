@@ -461,6 +461,11 @@ def _occupancy(
     try:
         parallel = pueue.groups().get(pool)
         tasks = pueue.running_tasks(pool)
+        units = active_units(daemon, pool) if parallel == 1 else []
+        if units:
+            # Only a possible orphan needs terminal history. Keep that query
+            # bounded; routine supervisors read running tasks alone.
+            tasks.update(pueue.recent_tasks(pool))
     except PueueError:
         return "", None
     owners = {}
@@ -471,7 +476,7 @@ def _occupancy(
     own = owners.get(unit)
     if parallel != 1:
         return "", own
-    for other in active_units(daemon, pool):
+    for other in units:
         owner = owners.get(other)
         if other != unit and (owner is None or not owner.terminal):
             log.write(f"pool {pool} is occupied by {other}\n".encode())

@@ -263,8 +263,17 @@ def tasks() -> dict[int, Task]:
 
 def running_tasks(group: str) -> dict[int, Task]:
     """Only live tasks in one pool; the daemon's retained history is unbounded."""
+    return _selected_tasks(group, "status=running")
+
+
+def recent_tasks(group: str, limit: int = 256) -> dict[int, Task]:
+    """A bounded recovery window for a unit left behind by a dead wrapper."""
+    return _selected_tasks(group, f"last {limit}")
+
+
+def _selected_tasks(group: str, query: str) -> dict[int, Task]:
     document = _decode(
-        _run(["status", "--json", "--group", group, "status=running"]),
+        _run(["status", "--json", "--group", group, query]),
         "status",
     )
     entries = document.get("tasks") if isinstance(document, Mapping) else None
