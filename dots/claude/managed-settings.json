@@ -39,7 +39,9 @@
       "mcp__claude_ai_SimpleScraper__*",
       "mcp__claude_ai_Mermaid_Chart__*"
     ],
-    "deny": ["Bash(rm -rf /:*)"],
+    "deny": [
+      "Bash(rm -rf /:*)"
+    ],
     "ask": [],
     "defaultMode": "bypassPermissions"
   },
@@ -158,5 +160,6 @@
   "skipDangerousModePermissionPrompt": true,
   "skipWorkflowUsageWarning": true,
   "switchModelsOnFlag": false,
-  "skipAutoPermissionPrompt": true
+  "skipAutoPermissionPrompt": true,
+  "subagentPromptCacheTtl": "1h"
 }
