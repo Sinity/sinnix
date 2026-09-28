@@ -167,3 +167,46 @@ def test_activity_normalises_envelopes_and_reports_coverage(tmp_path: Path) -> N
         rt, "activity.query", {"since": now - 100_000, "until": now - 50_000}, BY_NAME
     )["data"]
     assert [e["seq"] for e in window["events"]] == [0]
+
+
+def test_recent_query_skips_a_large_older_prefix(tmp_path: Path) -> None:
+    """Fails if a recent window spends its lane budget on the day's older prefix."""
+    rt, lanes = runtime(tmp_path)
+    noon = 1_800_000_000 - 1_800_000_000 % 86_400 + 43_200
+    older = [
+        {
+            "ts": noon - 40_000 + i,
+            "seq": i,
+            "payload": {"category": "text", "text": "x" * 100},
+        }
+        for i in range(2_000)
+    ]
+    recent = [
+        {
+            "ts": noon - 60,
+            "seq": 5_000,
+            "payload": {"category": "text", "text": "recent a"},
+        },
+        {
+            "ts": noon - 30,
+            "seq": 5_001,
+            "payload": {"category": "text", "text": "recent b"},
+        },
+    ]
+    write_lane(lanes["clipboard"], "clipboard", older + recent)
+    day_file = next(lanes["clipboard"].glob("clipboard-*.jsonl"))
+    budget = 65_536
+    assert day_file.stat().st_size > 3 * budget
+    data = call(
+        rt,
+        "activity.query",
+        {
+            "since": noon - 120,
+            "until": noon,
+            "kinds": ["clipboard"],
+            "max_bytes_per_lane": budget,
+        },
+        BY_NAME,
+    )["data"]
+    assert [e["seq"] for e in data["events"]] == [5_001, 5_000]
+    assert data["truncated"] is False

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -252,6 +253,52 @@ def _normalise(lane: str, envelope: dict[str, Any]) -> ActivityEvent | None:
     )
 
 
+# Capture writers append in capture order, but independent producers can
+# interleave slightly; start the range read this far before ``since``.
+_SINCE_SLACK_SECONDS = 300.0
+_SEARCH_WINDOW_BYTES = 4096
+
+
+def _line_ts(raw: bytes) -> float | None:
+    try:
+        envelope = json.loads(raw)
+    except ValueError:
+        return None
+    ts = envelope.get("ts") if isinstance(envelope, dict) else None
+    if isinstance(ts, bool) or not isinstance(ts, (int, float)):
+        return None
+    return float(ts)
+
+
+def _range_start(handle: Any, since: float) -> int:
+    """Return a line start at or before the first line with ``ts >= since``.
+
+    A binary search over line starts, so a recent query on a large daily file
+    reads O(log n) probe lines instead of the file's older prefix.
+    """
+    lo, hi = 0, handle.seek(0, os.SEEK_END)
+    while hi - lo > _SEARCH_WINDOW_BYTES:
+        mid = (lo + hi) // 2
+        handle.seek(mid)
+        handle.readline()
+        pos = handle.tell()
+        ts = None
+        while ts is None and pos < hi:
+            line = handle.readline()
+            if not line:
+                break
+            ts = _line_ts(line)
+            if ts is None:
+                pos = handle.tell()
+        if ts is None or pos >= hi:
+            hi = mid
+        elif ts < since:
+            lo = pos
+        else:
+            hi = pos
+    return lo
+
+
 def _lane_files(lane: CaptureLane, since: float, until: float) -> list[Path]:
     assert lane.native_lane is not None
     days = set()
@@ -307,6 +354,7 @@ def _activity(runtime: Runtime, inp: ActivityInput) -> Activity:
         for path in files:
             try:
                 with path.open("rb") as handle:
+                    handle.seek(_range_start(handle, since - _SINCE_SLACK_SECONDS))
                     data = handle.read(budget + 1)
             except OSError:
                 continue
