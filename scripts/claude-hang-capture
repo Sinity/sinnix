@@ -82,6 +82,22 @@ capture() {
     systemctl --user show "$scope" -p MemoryCurrent -p MemoryPeak -p CPUUsageNSec \
       >>"$dir/scope.txt" 2>&1 || true
   fi
+  # A limit on an ancestor slice throttles every process below it while the
+  # scope's own memory.high is unlimited and its events stay at zero; on
+  # 2026-09-28 the binding MemoryHigh was agent.slice's. Record the chain.
+  local cg
+  cg="/sys/fs/cgroup$(cut -d: -f3 "/proc/$pid/cgroup")"
+  while [ "$cg" != /sys/fs/cgroup ] && [ -d "$cg" ]; do
+    {
+      echo "== ${cg#/sys/fs/cgroup}"
+      for f in memory.current memory.high memory.max memory.swap.current memory.swap.max; do
+        [ -r "$cg/$f" ] && echo "$f $(<"$cg/$f")"
+      done
+      [ -r "$cg/memory.events" ] && sed 's/^/events /' "$cg/memory.events"
+      [ -r "$cg/memory.pressure" ] && sed 's/^/pressure /' "$cg/memory.pressure"
+    } >>"$dir/cgroup-ancestors.txt" 2>/dev/null
+    cg=${cg%/*}
+  done
   ps -o pid,ppid,stat,etime,time,rss,args --forest -g "$(ps -o sid= -p "$pid" | tr -d ' ')" \
     >"$dir/process-tree.txt" 2>&1 || true
 

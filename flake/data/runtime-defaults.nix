@@ -264,9 +264,9 @@ rec {
       };
     };
     user = {
-      # Interactive agent CLIs and everything they run directly: in-process
-      # subagents, their Bash tools, ad-hoc builds and probes. Heavy declared
-      # work belongs to agentctl.slice and keeps its own budget there.
+      # Interactive agent CLIs and their in-process subagents. Claude's Bash
+      # tools, MCP servers and ad-hoc builds run in agenttool.slice; heavy
+      # declared work belongs to agentctl.slice and keeps its own budget.
       # 2026-09-27 an agent's `uv sync` source-built a C++ wheel here with ~25
       # parallel cc1plus at ~800 MB each; with no ceiling and CPUWeight 400
       # this slice outranked the desktop and took the host to load 74, RAM
@@ -294,6 +294,28 @@ rec {
         # a runaway build is the build, not a ~1 GB agent process.
         MemoryMax = "14G";
         MemorySwapMax = "2G";
+        TasksMax = 8192;
+      };
+      # What interactive agents run: Bash tool commands, stdio MCP servers
+      # and their subprocesses, moved here by claude-tool-scope (Claude
+      # Code's CLAUDE_CODE_SHELL_PREFIX). A sibling of agent.slice, not a
+      # child, so tool memory never counts toward the agent processes'
+      # MemoryHigh: on 2026-09-28 a dozen parallel verification gates held
+      # agent.slice at its MemoryHigh and the kernel throttled the
+      # coordinator itself for hours (sinnix-6to8). Here the tools throttle
+      # each other and the supervising process stays responsive.
+      agenttool = {
+        IOAccounting = true;
+        # Just below agent.slice, so the coordinator wins CPU contention
+        # against its own tools.
+        CPUWeight = 90;
+        CPUQuota = "1600%";
+        IOWeight = 90;
+        # Throttle, never kill: a killed tool is a failed command the agent
+        # can retry, but MemoryMax is the backstop against a runaway build.
+        MemoryHigh = "12G";
+        MemoryMax = "16G";
+        MemorySwapMax = "4G";
         TasksMax = 8192;
       };
       app = {
