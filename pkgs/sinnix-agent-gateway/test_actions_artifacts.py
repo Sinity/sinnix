@@ -237,3 +237,36 @@ def test_filtered_listing_continues_immutable_snapshot(tmp_path: Path) -> None:
         )
         found.update(row["artifact_id"] for row in result["data"]["artifacts"])
     assert found == expected
+
+
+def test_paged_binary_read_hashes_the_snapshot_once(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Fails if each page of a binary read rehashes the whole artifact."""
+    from sinnix_agent_gateway import artifacts as artifact_module
+
+    rt = runtime(tmp_path)
+    artifact_id = register(rt, "paged.bin", bytes(range(256)) * 64, "note")
+    hashed: list[Path] = []
+    real = artifact_module._sha256
+
+    def counting(path: Path) -> str:
+        hashed.append(path)
+        return real(path)
+
+    monkeypatch.setattr(artifact_module, "_sha256", counting)
+    offset = 0
+    while offset is not None:
+        data = call(
+            rt,
+            "artifacts.read",
+            {
+                "target": {"artifact_id": artifact_id},
+                "representation": "binary",
+                "offset": offset,
+                "max_bytes": 4096,
+            },
+            BY_NAME,
+        )["data"]
+        offset = data["next_offset"]
+    assert len(hashed) <= 1

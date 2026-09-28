@@ -52,6 +52,12 @@ def _snapshot(source: Path, destination: Path) -> tuple[int, str]:
             os.unlink(temporary)
 
 
+# Snapshots this process has hashed, by (path, inode, size, mtime_ns): a
+# paged read of a large artifact hashes it once, not once per page, and any
+# rewrite of the snapshot changes the key and forces a fresh hash.
+_VERIFIED: dict[tuple[str, int, int, int], str] = {}
+
+
 class ArtifactService:
     def __init__(self, config: GatewayConfig, principal: Principal):
         self.config = config
@@ -279,13 +285,18 @@ class ArtifactService:
         this snapshot, never the mutable source it was registered from.
         """
         content: Path = metadata["_content"]
+        info = content.stat()
+        key = (str(content), info.st_ino, info.st_size, info.st_mtime_ns)
         if (
-            content.stat().st_size != metadata["bytes"]
-            or _sha256(content) != metadata["sha256"]
+            info.st_size == metadata["bytes"]
+            and _VERIFIED.get(key) == metadata["sha256"]
         ):
+            return content
+        if info.st_size != metadata["bytes"] or _sha256(content) != metadata["sha256"]:
             raise ArtifactError(
                 "artifact content no longer matches its registered identity"
             )
+        _VERIFIED[key] = metadata["sha256"]
         return content
 
     def list(
