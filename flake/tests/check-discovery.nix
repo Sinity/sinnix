@@ -221,16 +221,22 @@
         SINNIX_FLAKE_DIR= NH_FLAKE="$TMPDIR/other" SINNIX_DEV_SHELL_REV="$source_revision" SINNIX_DEV_SHELL_FLAKE="$TMPDIR/source" SINNIX_DEV_SHELL_SOURCE="$TMPDIR/source" ACTIVATION_STATUS=7 "${activationExecutables.switch}" || test "$?" = 7
         grep -Fq "$TMPDIR/source#sinnix-prime" "$ACTIVATION_LOG"
         ${pkgs.git}/bin/git clone -q "$TMPDIR/source" "$TMPDIR/other"
-        ${pkgs.git}/bin/git -C "$TMPDIR/other" -c user.name=Fixture -c user.email=fixture@example.test commit -q --allow-empty -m caller-ahead
-        : > "$ACTIVATION_LOG"
-        SINNIX_FLAKE_DIR= NH_FLAKE="$TMPDIR/other" SINNIX_DEV_SHELL_REV="$source_revision" \
-          SINNIX_DEV_SHELL_FLAKE= SINNIX_DEV_SHELL_SOURCE="$TMPDIR/source" \
-          ACTIVATION_STATUS=7 "${activationExecutables.switch}" || test "$?" = 7
-        grep -Fq "$TMPDIR/source#sinnix-prime" "$ACTIVATION_LOG"
-        if grep -Fq "$TMPDIR/other#sinnix-prime" "$ACTIVATION_LOG"; then
-          echo 'devshell rebuilt the caller checkout' >&2
-          exit 1
-        fi
+        for caller_revision in same ahead; do
+          shell_checkout="$TMPDIR/other"
+          if [ "$caller_revision" = ahead ]; then
+            ${pkgs.git}/bin/git -C "$TMPDIR/other" -c user.name=Fixture -c user.email=fixture@example.test commit -q --allow-empty -m caller-ahead
+            shell_checkout=
+          fi
+          : > "$ACTIVATION_LOG"
+          SINNIX_FLAKE_DIR= NH_FLAKE="$TMPDIR/other" SINNIX_DEV_SHELL_REV="$source_revision" \
+            SINNIX_DEV_SHELL_FLAKE="$shell_checkout" SINNIX_DEV_SHELL_SOURCE="$TMPDIR/source" \
+            ACTIVATION_STATUS=7 "${activationExecutables.switch}" || test "$?" = 7
+          grep -Fq "$TMPDIR/source#sinnix-prime" "$ACTIVATION_LOG"
+          if grep -Fq "$TMPDIR/other#sinnix-prime" "$ACTIVATION_LOG"; then
+            echo 'devshell rebuilt the caller checkout' >&2
+            exit 1
+          fi
+        done
         : > "$ACTIVATION_LOG"
         status=0
         SINNIX_DEV_SHELL_REV=0000000000000000000000000000000000000000 SINNIX_DEV_SHELL_FLAKE="$TMPDIR/source" ACTIVATION_STATUS=0 "${activationExecutables.switch}" || status=$?
