@@ -234,6 +234,7 @@ def test_run_view_indexes_task_references_once_for_many_workers(
     assert parsed == task_count
 
 
+@pytest.mark.timeout(15)
 def test_many_run_snapshot_indexes_tasks_once_and_preserves_reference_resolution(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
