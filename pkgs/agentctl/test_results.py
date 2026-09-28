@@ -42,17 +42,20 @@ def test_a_conforming_worker_result_has_no_errors() -> None:
 
 
 def test_scope_expansion_is_an_optional_declared_list() -> None:
-    assert results.validate_worker_result(
-        worker_result(
-            scope_expansion=[
-                {
-                    "paths": ["docs/x.md"],
-                    "bead": "fx-1",
-                    "reason": "the bead names this document",
-                }
-            ]
+    assert (
+        results.validate_worker_result(
+            worker_result(
+                scope_expansion=[
+                    {
+                        "paths": ["docs/x.md"],
+                        "bead": "fx-1",
+                        "reason": "the bead names this document",
+                    }
+                ]
+            )
         )
-    ) == []
+        == []
+    )
     errors = results.validate_worker_result(
         worker_result(scope_expansion=[{"paths": ["docs/x.md"]}])
     )
@@ -337,7 +340,7 @@ def test_codex_schema_lets_every_optional_enum_be_null(tmp_path: Path) -> None:
     assert None in observed_by
 
     legacy = tmp_path / "legacy.json"
-    transported = {key: None for key in schema["properties"]}
+    transported = dict.fromkeys(schema["properties"])
     transported.update(
         candidate_sha=SHA,
         attempt=2,

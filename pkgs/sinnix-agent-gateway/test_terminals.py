@@ -53,8 +53,6 @@ def commands(path: Path) -> list[list[str]]:
     return [json.loads(line) for line in path.read_text().splitlines()]
 
 
-
-
 def test_operator_sends_exact_terminal_text_vector(tmp_path: Path) -> None:
     terminals, captured = terminal_service(tmp_path, "operator")
 
@@ -66,8 +64,6 @@ def test_operator_sends_exact_terminal_text_vector(tmp_path: Path) -> None:
     assert commands(captured) == [
         ["send", "--match", "id:7", "--text", "printf fixture", "--enter"]
     ]
-
-
 
 
 def test_terminal_requires_runtime_directory_before_launch(tmp_path: Path) -> None:

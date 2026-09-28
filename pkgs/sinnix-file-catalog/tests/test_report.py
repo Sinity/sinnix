@@ -105,18 +105,41 @@ def test_cli_publishes_private_report(tmp_path):
 
 def test_collection_facets_coverage_and_proposals_are_visible(tmp_path):
     asset = {
-        "id": "collection", "kind": "collection", "current_path": str(tmp_path),
-        "title": "Field notes", "description": "Observations from expeditions",
-        "inspections": [{"method": "collection_survey", "scope": "Two notes", "basis": "Read pages"}],
+        "id": "collection",
+        "kind": "collection",
+        "current_path": str(tmp_path),
+        "title": "Field notes",
+        "description": "Observations from expeditions",
+        "inspections": [
+            {"method": "collection_survey", "scope": "Two notes", "basis": "Read pages"}
+        ],
         "facets": {"topic": "geology"},
-        "coverage": {"status": "sampled", "scope": "Two of five notes", "unit": "files",
-                     "discovered_count": 5, "inspected_count": 2},
-        "organization": {"action": "navigate", "rationale": "Connect to the research index"},
+        "coverage": {
+            "status": "sampled",
+            "scope": "Two of five notes",
+            "unit": "files",
+            "discovered_count": 5,
+            "inspected_count": 2,
+        },
+        "organization": {
+            "action": "navigate",
+            "rationale": "Connect to the research index",
+        },
         "utility": ["Which sites were observed?"],
-        "related_paths": [{"path": str(tmp_path / "index.md"), "type": "index", "basis": "Explicit link"}],
+        "related_paths": [
+            {
+                "path": str(tmp_path / "index.md"),
+                "type": "index",
+                "basis": "Explicit link",
+            }
+        ],
     }
-    page = MODULE["render"]({"schema_version": 1, "updated_at": "2026-01-01", "assets": [asset]},
-                            tmp_path / "catalog.json", TEMPLATE, "render")
+    page = MODULE["render"](
+        {"schema_version": 1, "updated_at": "2026-01-01", "assets": [asset]},
+        tmp_path / "catalog.json",
+        TEMPLATE,
+        "render",
+    )
     assert 'data-kind="collection"' in page
     assert 'data-coverage="sampled"' in page
     assert "2 / 5 files" in page

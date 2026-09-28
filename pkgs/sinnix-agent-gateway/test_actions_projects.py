@@ -391,19 +391,24 @@ def test_bare_repository_lists_store_and_explicit_default_checkout(
         "default_ref": "refs/heads/main",
         "default_checkout_path": str(primary.resolve()),
     }
-    default = next(row for row in catalog["checkouts"] if row["checkout_id"] == "default")
+    default = next(
+        row for row in catalog["checkouts"] if row["checkout_id"] == "default"
+    )
     assert default["path"] == str(primary.resolve())
     assert all(row["path"] != str(store.resolve()) for row in catalog["checkouts"])
     assert runtime.projects.read("fixture", "README.md")["content"] == (
         "bare repository fixture\n"
     )
-    assert runtime.projects.read(
-        "fixture",
-        "README.md",
-        checkout_id=projects_module.ProjectService._checkout_id(
-            secondary.resolve(), store.resolve()
-        ),
-    )["content"] == "bare repository fixture\n"
+    assert (
+        runtime.projects.read(
+            "fixture",
+            "README.md",
+            checkout_id=projects_module.ProjectService._checkout_id(
+                secondary.resolve(), store.resolve()
+            ),
+        )["content"]
+        == "bare repository fixture\n"
+    )
     public_view = ok(
         create_server(config, "operator"),
         "projects.get",
@@ -431,9 +436,12 @@ def test_bare_repository_without_default_requires_explicit_checkout(
     with pytest.raises(ProjectError, match="no configured default checkout"):
         runtime.projects.read("fixture", "README.md")
     selected = listed["checkouts"][0]
-    assert runtime.projects.read(
-        "fixture", "README.md", checkout_id=selected["checkout_id"]
-    )["content"] == "bare repository fixture\n"
+    assert (
+        runtime.projects.read(
+            "fixture", "README.md", checkout_id=selected["checkout_id"]
+        )["content"]
+        == "bare repository fixture\n"
+    )
     server = create_server(config, "operator")
     assert (
         error(
@@ -462,7 +470,9 @@ def test_bare_checkout_discovery_omits_missing_and_prunable_records(
     def with_missing_record(command: list[str], cwd: Path, timeout: int = 15) -> str:
         output = original(command, cwd, timeout)
         if command[1:4] == ["worktree", "list", "--porcelain"]:
-            output += f"\nworktree {missing}\nHEAD {git(store, 'rev-parse', 'HEAD')}\n\n"
+            output += (
+                f"\nworktree {missing}\nHEAD {git(store, 'rev-parse', 'HEAD')}\n\n"
+            )
         return output
 
     monkeypatch.setattr(service, "_run_spooled", with_missing_record)

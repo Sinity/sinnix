@@ -168,8 +168,6 @@ def test_machine_action_returns_owner_rejection(tmp_path: Path) -> None:
         )
 
 
-
-
 def test_prepare_reads_target_without_mutation_authority(tmp_path: Path) -> None:
     payload = {
         "action": "restart",

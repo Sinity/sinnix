@@ -611,14 +611,19 @@ def test_nix_develop_cache_inputs_route_jobs_through_the_cached_realization(
 @pytest.mark.parametrize(
     ("replacement", "match"),
     [
-        ('kind = "plain"\ncommand = ["env"]\ncache_inputs = ["flake.nix"]', "only to kind"),
+        (
+            'kind = "plain"\ncommand = ["env"]\ncache_inputs = ["flake.nix"]',
+            "only to kind",
+        ),
         (
             'kind = "nix-develop"\ncommand = ["env"]\ncache_inputs = ["../flake.nix"]',
             "repository-relative",
         ),
     ],
 )
-def test_cache_inputs_are_validated(tmp_path: Path, replacement: str, match: str) -> None:
+def test_cache_inputs_are_validated(
+    tmp_path: Path, replacement: str, match: str
+) -> None:
     root = write_project(tmp_path / "p")
     descriptor = root / ".agentctl" / "project.toml"
     descriptor.write_text(

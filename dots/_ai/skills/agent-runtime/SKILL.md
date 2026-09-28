@@ -64,16 +64,16 @@ candidate checks and review policy, publishes per the descriptor's
 `bug` → `fix:`, `feature` → `feat:`, otherwise `chore:`; `master`: a
 fast-forward), and closes the tasks its acceptance record satisfies.
 
-| Stage                       | Next                                                          |
-| --------------------------- | ------------------------------------------------------------- |
-| `working`, `landing`        | wait for the event                                            |
-| `stashed`                   | file `batch result` for each external worker                  |
-| `awaiting workers`          | read worker tasks and results; file or recover, then resume   |
-| `ready to land`             | `batch land <run>`                                            |
-| `landing dependency-failed` | fix the failed worker, then `batch resume --worker <w>`       |
-| `failed: <code>`            | read landing logs and `landing.review_verdict`; fix, re-land  |
-| `unprepared`                | read the refusal and correct it before starting again         |
-| `landed`, `abandoned`       | nothing                                                       |
+| Stage                       | Next                                                         |
+| --------------------------- | ------------------------------------------------------------ |
+| `working`, `landing`        | wait for the event                                           |
+| `stashed`                   | file `batch result` for each external worker                 |
+| `awaiting workers`          | read worker tasks and results; file or recover, then resume  |
+| `ready to land`             | `batch land <run>`                                           |
+| `landing dependency-failed` | fix the failed worker, then `batch resume --worker <w>`      |
+| `failed: <code>`            | read landing logs and `landing.review_verdict`; fix, re-land |
+| `unprepared`                | read the refusal and correct it before starting again        |
+| `landed`, `abandoned`       | nothing                                                      |
 
 - A finding confined to one worker goes back to it with `batch resume`.
   Cross-worker findings are fixed on the integration branch, then

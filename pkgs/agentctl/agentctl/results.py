@@ -363,7 +363,10 @@ def validate_worker_result(obj: Any) -> list[str]:
                 errors.append(
                     f"$.verification[{verification_index}]: version {RESULT_SCHEMA_VERSION} missing {field}"
                 )
-        if verification.get("status") != "skipped" and verification.get("tested_sha") is None:
+        if (
+            verification.get("status") != "skipped"
+            and verification.get("tested_sha") is None
+        ):
             errors.append(
                 f"$.verification[{verification_index}]: executed verification requires tested_sha"
             )
@@ -418,7 +421,10 @@ def _combine_repeated_criteria(value: Any) -> Any:
     all of those rows make the same positive claim. The original file remains
     available for audit; distinct texts still fail binding validation.
     """
-    if not isinstance(value, dict) or value.get("schema_version") != RESULT_SCHEMA_VERSION:
+    if (
+        not isinstance(value, dict)
+        or value.get("schema_version") != RESULT_SCHEMA_VERSION
+    ):
         return value
     for bead in value.get("beads") or ():
         if not isinstance(bead, dict) or not isinstance(bead.get("criteria"), list):

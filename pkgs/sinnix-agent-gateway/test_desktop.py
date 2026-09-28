@@ -57,8 +57,6 @@ def commands(path: Path) -> list[list[str]]:
     return [json.loads(line) for line in path.read_text().splitlines()]
 
 
-
-
 def test_operator_focus_uses_wrapper_and_verifies_active_window(tmp_path: Path) -> None:
     desktop, captured = desktop_service(tmp_path, "operator")
 
@@ -81,8 +79,6 @@ def test_operator_dispatch_uses_exact_argument_vector(tmp_path: Path) -> None:
     )
 
     assert commands(captured) == [["dispatch", "workspace", "name:agentbrowser"]]
-
-
 
 
 def test_desktop_requires_wayland_environment_before_launch(tmp_path: Path) -> None:

@@ -23,12 +23,12 @@ import argparse
 import datetime as dt
 import html as html_mod
 import json
-import stat
-import tempfile
-from html.parser import HTMLParser
 import os
 import re
+import stat
 import sys
+import tempfile
+from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import quote
 
@@ -41,7 +41,6 @@ GENERATED_RE = re.compile(r'generated</dt>\s*<dd>\s*<time[^>]*datetime="([^"]+)"
 ANY_TIME_RE = re.compile(r'<time[^>]*class="age"[^>]*datetime="([^"]+)"')
 ACCENT_RE = re.compile(r'<html[^>]*data-accent="([a-z]+)"')
 DATE_IN_NAME_RE = re.compile(r"(\d{4}-\d{2}-\d{2})")
-
 
 
 def atomic_text(path: Path, text: str) -> None:
@@ -62,13 +61,16 @@ def atomic_text(path: Path, text: str) -> None:
 
 def explicitly_superseded(text: str) -> bool:
     """A mention in prose is not a declaration about the report itself."""
+
     class Metadata(HTMLParser):
         found = False
 
         def handle_starttag(self, tag, attrs):
             data = dict(attrs)
             if tag == "meta" and data.get("name", "").lower() in (
-                "superseded-by", "report-superseded-by", "report:superseded-by"
+                "superseded-by",
+                "report-superseded-by",
+                "report:superseded-by",
             ):
                 self.found |= bool((data.get("content") or "").strip())
             if tag == "html":
@@ -79,9 +81,25 @@ def explicitly_superseded(text: str) -> bool:
     parser = Metadata()
     parser.feed(text)
     # The existing report template also permits a metadata definition list.
-    match = re.search(r"<dt\b[^>]*>\s*superseded[- ]by\s*</dt>\s*<dd\b[^>]*>(.*?)</dd>", text, re.I | re.S)
-    target = html_mod.unescape(re.sub(r"<[^>]+>", "", match.group(1))).strip() if match else ""
-    return parser.found or target.casefold() not in ("", "—", "-", "none", "n/a", "unknown", "not applicable")
+    match = re.search(
+        r"<dt\b[^>]*>\s*superseded[- ]by\s*</dt>\s*<dd\b[^>]*>(.*?)</dd>",
+        text,
+        re.I | re.S,
+    )
+    target = (
+        html_mod.unescape(re.sub(r"<[^>]+>", "", match.group(1))).strip()
+        if match
+        else ""
+    )
+    return parser.found or target.casefold() not in (
+        "",
+        "—",
+        "-",
+        "none",
+        "n/a",
+        "unknown",
+        "not applicable",
+    )
 
 
 def render_navigation(reports_dir: Path, out: Path) -> tuple[str, list[dict]]:
@@ -104,18 +122,34 @@ def render_navigation(reports_dir: Path, out: Path) -> tuple[str, list[dict]]:
     total = 0
     esc = html_mod.escape
     for group in data["groups"]:
-        if not isinstance(group, dict) or not isinstance(group.get("title"), str) or not isinstance(group.get("items"), list):
+        if (
+            not isinstance(group, dict)
+            or not isinstance(group.get("title"), str)
+            or not isinstance(group.get("items"), list)
+        ):
             raise ValueError("navigation groups require a title and items")
         total += len(group["items"])
         if total > 512:
             raise ValueError("navigation.json has too many destinations")
         items, rendered = [], []
         for item in group["items"]:
-            if not isinstance(item, dict) or not isinstance(item.get("title"), str) or not isinstance(item.get("path"), str):
-                raise ValueError("navigation items require title and absolute filesystem path")
+            if (
+                not isinstance(item, dict)
+                or not isinstance(item.get("title"), str)
+                or not isinstance(item.get("path"), str)
+            ):
+                raise ValueError(
+                    "navigation items require title and absolute filesystem path"
+                )
             raw_path = item["path"]
-            if any(ord(ch) < 32 for ch in raw_path) or not Path(raw_path).is_absolute() or ".." in Path(raw_path).parts:
-                raise ValueError("navigation paths must be absolute, normalized filesystem paths")
+            if (
+                any(ord(ch) < 32 for ch in raw_path)
+                or not Path(raw_path).is_absolute()
+                or ".." in Path(raw_path).parts
+            ):
+                raise ValueError(
+                    "navigation paths must be absolute, normalized filesystem paths"
+                )
             target = Path(raw_path)
             status = "not-probed"
             if item.get("probe", True):
@@ -139,31 +173,47 @@ def render_navigation(reports_dir: Path, out: Path) -> tuple[str, list[dict]]:
                 f'<span class="nav-role">{esc(role)}</span>'
                 f'<button type="button" class="copy-path" data-path="{esc(raw_path, quote=True)}" aria-label="Copy path: {esc(item["title"], quote=True)}">Copy path</button>'
                 f'<div class="nav-path">{esc(raw_path)}</div>'
-                + (f'<div class="nav-note">{esc(note)}</div>' if note else '')
-                + (f'<span class="nav-availability">{esc(status)} at generation</span>' if status != "available" else '')
-                + '</li>'
+                + (f'<div class="nav-note">{esc(note)}</div>' if note else "")
+                + (
+                    f'<span class="nav-availability">{esc(status)} at generation</span>'
+                    if status != "available"
+                    else ""
+                )
+                + "</li>"
             )
         groups.append({"title": group["title"], "items": items})
-        sections.append(f'<details class="nav-group"><summary>{esc(group["title"])} <small>{len(items)}</small></summary><ul>{"".join(rendered)}</ul></details>')
+        sections.append(
+            f'<details class="nav-group"><summary>{esc(group["title"])} <small>{len(items)}</small></summary><ul>{"".join(rendered)}</ul></details>'
+        )
     if not sections:
         return "", groups
     return (
         '<section aria-label="Subject navigation"><h2>Start with a subject</h2>'
         '<p class="nav-help">These are links to existing owners, not copied task or source records. '
-        'In the web viewer, use Copy path for files outside reports. Open this index locally for direct file links. '
-        'Availability is checked when generated; external disks marked not-probed are not touched.</p>'
-        '<div class="nav-grid">' + ''.join(sections) + '</div><p id="copy-result" role="status" aria-live="polite"></p></section>', groups
+        "In the web viewer, use Copy path for files outside reports. Open this index locally for direct file links. "
+        "Availability is checked when generated; external disks marked not-probed are not touched.</p>"
+        '<div class="nav-grid">'
+        + "".join(sections)
+        + '</div><p id="copy-result" role="status" aria-live="polite"></p></section>',
+        groups,
     )
 
 
 def navigation_markdown(groups: list[dict], destination: Path) -> str:
-    lines = ["# Subject navigation", "", "Generated from the private navigation manifest. Links select existing material; they do not replace its owning application or prove a historical plan was executed.", ""]
+    lines = [
+        "# Subject navigation",
+        "",
+        "Generated from the private navigation manifest. Links select existing material; they do not replace its owning application or prove a historical plan was executed.",
+        "",
+    ]
     for group in groups:
         lines += ["## " + group["title"], ""]
         for item in group["items"]:
             label = item["title"].replace("[", "\\[").replace("]", "\\]")
             href = quote(os.path.relpath(item["path"], destination.parent))
-            lines.append(f'- [{label}]({href}) — {item.get("role", "resource")}. {item.get("note", "")}')
+            lines.append(
+                f"- [{label}]({href}) — {item.get('role', 'resource')}. {item.get('note', '')}"
+            )
         lines.append("")
     return "\n".join(lines) + "\n"
 
@@ -313,7 +363,12 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("reports_dir", type=Path)
     ap.add_argument("--out", type=Path, default=None)
-    ap.add_argument("--navigation-markdown", type=Path, default=None, help="Also publish a Markdown projection of navigation.json")
+    ap.add_argument(
+        "--navigation-markdown",
+        type=Path,
+        default=None,
+        help="Also publish a Markdown projection of navigation.json",
+    )
     args = ap.parse_args()
     out = args.out or (args.reports_dir / "index.html")
     return build(args.reports_dir, out, args.navigation_markdown)

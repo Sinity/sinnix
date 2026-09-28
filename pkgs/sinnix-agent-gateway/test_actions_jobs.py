@@ -51,11 +51,7 @@ def make_server(
         )
     config = GatewayConfig(
         state_dir=tmp_path / "state",
-        projects={
-            "fixture": ProjectConfig(
-                project_id="fixture", path=project
-            )
-        },
+        projects={"fixture": ProjectConfig(project_id="fixture", path=project)},
     )
     runtime = Runtime.create(config, principal)
     fake = FakeJobs()
@@ -418,8 +414,6 @@ def test_cancel_checks_the_phase_and_surfaces_reap_survivors(
         retried["state"]["phase"] == "queued"
         and fake.calls[-1].operation == "job.retry"
     )
-
-
 
 
 def test_operations_run_targets_the_root_or_a_linked_worktree(

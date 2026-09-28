@@ -66,11 +66,11 @@ next, not on supervising progress.
 
 ## Models
 
-| Work                                                        | Codex                   | Claude          |
-| ----------------------------------------------------------- | ----------------------- | --------------- |
-| Evidence collection, supervision, settled implementation    | `gpt-6-luna`, medium    | `sonnet`        |
-| Substantial implementation, investigation, candidate review | `gpt-6-sol`, medium     | `opus`          |
-| Unresolved architecture, design-critical implementation     | `gpt-6-astra`, high     | `opus`          |
+| Work                                                        | Codex                | Claude   |
+| ----------------------------------------------------------- | -------------------- | -------- |
+| Evidence collection, supervision, settled implementation    | `gpt-6-luna`, medium | `sonnet` |
+| Substantial implementation, investigation, candidate review | `gpt-6-sol`, medium  | `opus`   |
+| Unresolved architecture, design-critical implementation     | `gpt-6-astra`, high  | `opus`   |
 
 These are starting points. Raise effort or tier for a named problem, not by
 default. `scripts/probe_agent_runtime.sh` checks a backend's availability and

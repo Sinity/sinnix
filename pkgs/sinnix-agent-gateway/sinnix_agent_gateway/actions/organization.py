@@ -10,8 +10,8 @@ from pydantic import Field
 from ..action import OPERATOR_ONLY, Action, Example, MutationControls, RequestControls
 from ..capabilities import Capability
 from ..contracts import VerbFamily
-from ..locators import FileLocator, encode_file_ref
 from ..files import move_source_refusal
+from ..locators import FileLocator, encode_file_ref
 from ..organization import (
     OrganizationError,
     OrganizationService,
@@ -211,9 +211,13 @@ def _plan_move(
     access_refusal = move_source_refusal(source, Path(raw_destination).expanduser())
     if access_refusal is not None:
         return PlannedMove(
-            index=index, source=str(source), source_ref=encode_file_ref(str(source)),
-            destination=raw_destination, destination_ref=destination_ref,
-            ready=False, refusal=access_refusal,
+            index=index,
+            source=str(source),
+            source_ref=encode_file_ref(str(source)),
+            destination=raw_destination,
+            destination_ref=destination_ref,
+            ready=False,
+            refusal=access_refusal,
         )
     if source.is_dir():
         boundary_refusal = _directory_boundary_refusal(runtime, source)

@@ -55,6 +55,10 @@ _: {
         "pkgs/sinnix-agent-gateway/fixtures/*.json"
         "pkgs/sinnix-agent-gateway/sinnix_agent_gateway/generated_*"
         "docs/generated/*"
+        # Rendered by `sinnix-agent-environment-doc`; its renderer owns the form.
+        "docs/agent-environment.md"
+        # LazyVim rewrites its state file at runtime, without a final newline.
+        "dots/nvim/lazyvim.json"
       ];
     };
   };

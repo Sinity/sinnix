@@ -24,9 +24,9 @@ if [ -n "${q5:-}" ]; then
   quota_key="$q5 $q5_reset $q7"
   if [ "$(cat "$quota_state/last-statusline" 2>/dev/null)" != "$quota_key" ]; then
     mkdir -p "$quota_state"
-    printf '%s' "$quota_key" > "$quota_state/last-statusline"
+    printf '%s' "$quota_key" >"$quota_state/last-statusline"
     printf '{"ts":%s,"source":"statusline","five_hour":%s,"five_hour_resets_at":%s,"seven_day":%s,"seven_day_resets_at":%s}\n' \
-      "$(date +%s)" "$q5" "$q5_reset" "$q7" "$q7_reset" >> "$quota_state/samples.jsonl"
+      "$(date +%s)" "$q5" "$q5_reset" "$q7" "$q7_reset" >>"$quota_state/samples.jsonl"
   fi
 fi
 
@@ -43,8 +43,8 @@ if [ -n "$git_branch" ]; then
     has_staged=$(echo "$git_flags" | grep -c '^[MADRC]' || true)
     has_modified=$(echo "$git_flags" | grep -c '^.[MD]' || true)
     has_untracked=$(echo "$git_flags" | grep -c '^??' || true)
-    [ "$has_staged" -gt 0 ]    && git_status_flags="${git_status_flags}+"
-    [ "$has_modified" -gt 0 ]  && git_status_flags="${git_status_flags}*"
+    [ "$has_staged" -gt 0 ] && git_status_flags="${git_status_flags}+"
+    [ "$has_modified" -gt 0 ] && git_status_flags="${git_status_flags}*"
     [ "$has_untracked" -gt 0 ] && git_status_flags="${git_status_flags}?"
   fi
 fi
@@ -54,8 +54,8 @@ if [ -n "$cwd" ]; then
   home_dir="$HOME"
   display_cwd="${cwd/#$home_dir/\~}"
   # Fish-style: shorten each non-final component to first char
-  IFS='/' read -ra parts <<< "$display_cwd"
-  last_idx=$(( ${#parts[@]} - 1 ))
+  IFS='/' read -ra parts <<<"$display_cwd"
+  last_idx=$((${#parts[@]} - 1))
   short_path=""
   for i in "${!parts[@]}"; do
     part="${parts[$i]}"

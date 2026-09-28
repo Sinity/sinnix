@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING, Any, Literal, Mapping
 from pydantic import Field, model_validator
 
 from ..action import ALL_PRINCIPALS, Action, Example, RequestControls
-from ..contracts import VerbFamily
 from ..contexts import canonical_bytes
+from ..contracts import VerbFamily
 from ..locators import JobLocator, ProjectLocator, project_ref
 from ..results import ProtocolError
 from ..schemas import GatewayModel

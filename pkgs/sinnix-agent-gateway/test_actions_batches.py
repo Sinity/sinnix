@@ -72,11 +72,7 @@ def make_server(
     project.mkdir(exist_ok=True)
     config = GatewayConfig(
         state_dir=tmp_path / "state",
-        projects={
-            "fixture": ProjectConfig(
-                project_id="fixture", path=project
-            )
-        },
+        projects={"fixture": ProjectConfig(project_id="fixture", path=project)},
     )
     runtime = Runtime.create(config, principal)
     fake = FakeJobs(default=RUN)

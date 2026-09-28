@@ -192,7 +192,7 @@ def _sync_once(
 ) -> dict[str, dict[str, object]]:
     source_manifest = _manifest(source)
     for relative, record in sorted(source_manifest.items()):
-        src, dst = source / relative, destination / relative
+        dst = destination / relative
         _ensure_parent_directories(destination, dst.parent)
         if record["kind"] == "directory":
             if dst.is_symlink() or (dst.exists() and not dst.is_dir()):

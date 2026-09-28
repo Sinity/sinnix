@@ -2354,16 +2354,25 @@ def test_resumed_multi_bead_worker_files_its_attempt_under_one_contract(
     for path_document, code in (
         (stamped, "invalid_result"),
         (worker_result(["fx-lead", "fx-member"], attempt=1), "result_attempt"),
-        (worker_result(["fx-lead", "fx-member", "fx-solo"], attempt=2), "foreign_beads"),
+        (
+            worker_result(["fx-lead", "fx-member", "fx-solo"], attempt=2),
+            "foreign_beads",
+        ),
     ):
         result_path.write_text(json.dumps(path_document))
         assert (
-            validate_as_lane(harness, monkeypatch, run["run_id"], "fx-lead", result_path)
+            validate_as_lane(
+                harness, monkeypatch, run["run_id"], "fx-lead", result_path
+            )
             == cli.EXIT_REFUSED
         )
         with pytest.raises(BatchRefusal, match=code):
             batch.result(
-                harness.config, run["run_id"], "fx-lead", result_path, reader=harness.beads
+                harness.config,
+                run["run_id"],
+                "fx-lead",
+                result_path,
+                reader=harness.beads,
             )
 
     legacy = worker_result(["fx-lead", "fx-member"], attempt=contract["attempt"])
@@ -2431,7 +2440,9 @@ def test_resumed_strict_worker_contract_binds_every_bead_over_budget(
             "status": "passed",
             "coverage": {
                 "ac_ids": [
-                    item["ac_id"] for row in contract["beads"] for item in row["criteria"]
+                    item["ac_id"]
+                    for row in contract["beads"]
+                    for item in row["criteria"]
                 ],
                 "scope": "fixture",
             },

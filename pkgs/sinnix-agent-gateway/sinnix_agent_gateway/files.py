@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import errno
 import ctypes
-import stat
+import errno
 import hashlib
 import os
 import shutil
+import stat
 from pathlib import Path
 from typing import Any
 
@@ -48,10 +48,17 @@ def move_source_refusal(source: Path, destination: Path) -> str | None:
         uid = os.geteuid()
         if not os.access(source.parent, os.W_OK | os.X_OK, effective_ids=True):
             return "source parent is not writable/searchable"
-        if parent.st_mode & stat.S_ISVTX and uid not in (0, parent.st_uid, current.st_uid):
+        if parent.st_mode & stat.S_ISVTX and uid not in (
+            0,
+            parent.st_uid,
+            current.st_uid,
+        ):
             return "source parent sticky-bit ownership forbids removal"
-        if (stat.S_ISDIR(current.st_mode) and source.parent != destination.parent
-                and not os.access(source, os.W_OK, effective_ids=True)):
+        if (
+            stat.S_ISDIR(current.st_mode)
+            and source.parent != destination.parent
+            and not os.access(source, os.W_OK, effective_ids=True)
+        ):
             return "source directory is not writable for a cross-parent rename"
     except OSError as exc:
         return f"source move access cannot be established: {exc}"
@@ -63,9 +70,16 @@ def rename_noreplace(source: Path, destination: Path) -> None:
     try:
         function = ctypes.CDLL(None, use_errno=True).renameat2
     except AttributeError as exc:
-        raise FileError("atomic no-replace rename unavailable; no transfer attempted") from exc
-    function.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int,
-                         ctypes.c_char_p, ctypes.c_uint]
+        raise FileError(
+            "atomic no-replace rename unavailable; no transfer attempted"
+        ) from exc
+    function.argtypes = [
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_uint,
+    ]
     function.restype = ctypes.c_int
     if function(-100, os.fsencode(source), -100, os.fsencode(destination), 1) != 0:
         code = ctypes.get_errno()
@@ -202,18 +216,27 @@ class HostFileService:
                     raise FileError("destination already exists") from exc
                 except OSError as exc:
                     if exc.errno != errno.EXDEV:
-                        raise FileError(f"atomic move failed without overwriting destination: {exc}") from exc
+                        raise FileError(
+                            f"atomic move failed without overwriting destination: {exc}"
+                        ) from exc
                     # Cross-filesystem transfer cannot be globally atomic.
                     # Preserve both objects and report it if source removal
                     # fails; do not blindly remove the only complete copy.
                     _copy_exclusive(target, destination_path)
                     shutil.copystat(target, destination_path, follow_symlinks=False)
-                    if _sha256(destination_path) != before_hash or _sha256(target) != before_hash:
-                        raise FileError("source changed during cross-filesystem copy; source and destination retained for reconciliation")
+                    if (
+                        _sha256(destination_path) != before_hash
+                        or _sha256(target) != before_hash
+                    ):
+                        raise FileError(
+                            "source changed during cross-filesystem copy; source and destination retained for reconciliation"
+                        ) from None
                     try:
                         target.unlink()
                     except OSError as unlink_error:
-                        raise FileError("cross-filesystem copy exists but source removal failed; both paths retained for reconciliation") from unlink_error
+                        raise FileError(
+                            "cross-filesystem copy exists but source removal failed; both paths retained for reconciliation"
+                        ) from unlink_error
             return {
                 "operation": operation,
                 "path": str(target),

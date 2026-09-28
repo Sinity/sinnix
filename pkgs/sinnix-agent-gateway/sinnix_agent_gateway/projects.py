@@ -446,7 +446,9 @@ class ProjectService:
         candidates: list[dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
-        selected = candidates if candidates is not None else self._checkout_candidates(project)
+        selected = (
+            candidates if candidates is not None else self._checkout_candidates(project)
+        )
         for candidate in selected:
             path = Path(candidate["path"])
             status = self._run_spooled(

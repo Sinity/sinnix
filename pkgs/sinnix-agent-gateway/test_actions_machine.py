@@ -385,10 +385,6 @@ def test_operate_and_units_operate_go_through_reducer(tmp_path: Path) -> None:
     assert no_revision["error"]["code"] == "precondition_failed"
 
 
-
-
-
-
 def test_operator_can_prepare_exact_target_precondition(tmp_path: Path) -> None:
     runtime = make_runtime(tmp_path, "operator")
     result = call(
@@ -400,7 +396,10 @@ def test_operator_can_prepare_exact_target_precondition(tmp_path: Path) -> None:
         },
     )
     assert result["result"]["outcome"] == "ok", result
-    assert result["data"]["expected_target"]["properties"]["InvocationID"] == "fixture-invocation"
+    assert (
+        result["data"]["expected_target"]["properties"]["InvocationID"]
+        == "fixture-invocation"
+    )
     assert result["data"]["ref"] == "sinnix://machine/units/user/alpha.service"
     assert runtime._fake_connection.requests[-1][:2] == ("POST", "/v1/actions/prepare")
 

@@ -983,9 +983,7 @@ def _result(arguments: argparse.Namespace, config: Config, out: Output) -> int:
     if arguments.result_verb == "validate-worker":
         value, errors = results.load_result(arguments.path, kind="worker")
         if errors:
-            raise BatchRefusal(
-                "invalid_result", "; ".join(errors[:6]), errors=errors
-            )
+            raise BatchRefusal("invalid_result", "; ".join(errors[:6]), errors=errors)
         if bool(arguments.run) != bool(arguments.worker):
             parser().error("--run and --worker name one batch worker together")
         if arguments.run:

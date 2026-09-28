@@ -187,7 +187,10 @@
           suiteDir = ../../pkgs/sinnix-fs/tests;
           scripts = [ "sinnix-fs" ];
           extraPythonPackages = [ sinnix-lib ];
-          nativeBuildInputs = [ pkgs.duckdb pkgs.file ];
+          nativeBuildInputs = [
+            pkgs.duckdb
+            pkgs.file
+          ];
         };
         quest-player-suite = mkScriptSuite {
           name = "sinnix-quest-player";

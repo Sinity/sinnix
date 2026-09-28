@@ -30,7 +30,7 @@ craft is in `writing-for-agents`; this skill covers the package.
    the skill selected, and why.
 6. Regenerate the environment reference after any change to the skill set or a
    description: from the Sinnix root, `nix run .#sinnix-agent-environment-doc
-   -- --output docs/agent-environment.md`. An executable
+-- --output docs/agent-environment.md`. An executable
    added or removed under a skill also updates
    `docs/agent-skill-executables.md`.
 

@@ -151,8 +151,14 @@
   (mkBackupJob "borgbackup-coverage-audit-realm" {
     description = "Independently compare one acknowledged realm snapshot with Borg";
     unit = {
-      after = [ "realm.mount" outerRealmMountUnit ];
-      requires = [ "realm.mount" outerRealmMountUnit ];
+      after = [
+        "realm.mount"
+        outerRealmMountUnit
+      ];
+      requires = [
+        "realm.mount"
+        outerRealmMountUnit
+      ];
     };
     serviceConfig = {
       # The independent comparison yields before the next archive window.
@@ -165,7 +171,12 @@
       onCalendar = "*-*-* 06:35:00";
       persistent = false;
     };
-    path = with pkgs; [ borgbackup btrfs-progs coreutils util-linux ];
+    path = with pkgs; [
+      borgbackup
+      btrfs-progs
+      coreutils
+      util-linux
+    ];
     script = ''
       set -euo pipefail
       ${mkBorgCommonScript borgRepoRealm}

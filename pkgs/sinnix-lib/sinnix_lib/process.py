@@ -257,7 +257,9 @@ def run_bounded(
                     stream_limit = (
                         stdout_limit
                         if kind == "stdout" and capture_stdout
-                        else stderr_limit if kind == "stderr" else None
+                        else stderr_limit
+                        if kind == "stderr"
+                        else None
                     )
                     total_size_before = total_output_size
                     total_output_size += len(chunk)
@@ -265,7 +267,9 @@ def run_bounded(
                     if stream_limit is not None:
                         allowed = min(allowed, max(stream_limit - stream_size, 0))
                     if combined_limit is not None:
-                        allowed = min(allowed, max(combined_limit - total_size_before, 0))
+                        allowed = min(
+                            allowed, max(combined_limit - total_size_before, 0)
+                        )
                     retained = chunk[:allowed]
                     if capture_combined and retained:
                         combined_chunks.append(retained)
@@ -275,7 +279,9 @@ def run_bounded(
                             stdout_size += len(retained)
                         if on_stdout_chunk is not None and not stopped_early:
                             try:
-                                callback_chunk = chunk if not capture_stdout else retained
+                                callback_chunk = (
+                                    chunk if not capture_stdout else retained
+                                )
                                 if on_stdout_chunk(callback_chunk) is False:
                                     stopped_early = True
                                     _kill_group(process)

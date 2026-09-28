@@ -84,7 +84,9 @@ def _job_cgroup(root: Path, *, available_mib: int, current_mib: int = 0) -> Cgro
 
 
 def _bind_resize(meminfo: Path, paths: CgroupPaths):
-    def bound(argv: list[str], **_kwargs: object) -> tuple[list[str], dict[str, Any] | None]:
+    def bound(
+        argv: list[str], **_kwargs: object
+    ) -> tuple[list[str], dict[str, Any] | None]:
         return resize_worker_argument(
             argv,
             meminfo=meminfo,
@@ -144,7 +146,9 @@ class PytestAdmissionTests(unittest.TestCase):
         original_popen = slot.subprocess.Popen
 
         def boom(*_args: object, **_kwargs: object) -> None:
-            raise AssertionError("held path restored unconditional one-worker admission")
+            raise AssertionError(
+                "held path restored unconditional one-worker admission"
+            )
 
         slot.resize_worker_argument = _bind_resize(meminfo, paths)
         slot.subprocess.Popen = boom
@@ -186,7 +190,9 @@ class PytestAdmissionTests(unittest.TestCase):
         original_popen = slot.subprocess.Popen
 
         def boom(*_args: object, **_kwargs: object) -> None:
-            raise AssertionError("queued path restored unconditional one-worker admission")
+            raise AssertionError(
+                "queued path restored unconditional one-worker admission"
+            )
 
         slot.resize_worker_argument = _bind_resize(meminfo, paths)
         slot.subprocess.Popen = boom

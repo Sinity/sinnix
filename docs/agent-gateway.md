@@ -137,7 +137,7 @@ existing receipts and output contracts.
 The installed package and live operator manifest can agree while ChatGPT still
 holds an older tool snapshot. In that case, refresh the connector's tool
 metadata in ChatGPT, review its discovered actions, and start a new conversation.
-`gateway.status` compares against the last *recorded* ChatGPT observation;
+`gateway.status` compares against the last _recorded_ ChatGPT observation;
 that file does not query ChatGPT's current conversation or settings. A missing
 action should first be checked against the live operator manifest and the
 connector's current discovered-tool list. Tool-call errors in the tunnel log
@@ -291,6 +291,7 @@ The full schemas and examples are in [the generated gateway reference](generated
 | `capabilities.query`         | `catalog` | `capability-index` | `operator` | Search the generated machine capability index or describe one capability exactly.                                                                                                                                                                                                                                                                |
 
 <!-- END GENERATED GATEWAY V2 REFERENCE -->
+
 ## Filesystem move failure boundaries
 
 Explicit move plans check whether the source parent can remove an entry, including sticky-directory ownership constraints. A cross-parent directory rename additionally checks write access to the source directory because the kernel must update its parent relationship. These checks are repeated before the first planned mutation; they are readiness observations, not permission grants, and the kernel remains the authority at execution.

@@ -41,9 +41,7 @@ in
                   rules = (settings.window_rule or [ ]) ++ (settings.config.window_rule or [ ]);
                 in
                 lib.any (
-                  rule:
-                  (rule.name or "") == "agent-terminal-no-focus"
-                  && (rule.no_initial_focus or false)
+                  rule: (rule.name or "") == "agent-terminal-no-focus" && (rule.no_initial_focus or false)
                 ) rules;
               message =
                 let

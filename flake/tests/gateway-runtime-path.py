@@ -4,21 +4,28 @@ No live services, credentials, projects or queue are accessed. The stdio server
 is launched in an empty temporary home; only executable version/help probes and
 an in-process pyatspi import run.
 """
+
 from __future__ import annotations
 
 import json
 import re
-from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tempfile
 import time
+from pathlib import Path
 
 COMMANDS = {
-    "bash": "--version", "pueue": "--version", "agentctl-run": "--help",
-    "git": "--version", "gh": "--version", "bd": "--version",
-    "wt": "--version", "nix": "--version", "systemd-run": "--version",
+    "bash": "--version",
+    "pueue": "--version",
+    "agentctl-run": "--help",
+    "git": "--version",
+    "gh": "--version",
+    "bd": "--version",
+    "wt": "--version",
+    "nix": "--version",
+    "systemd-run": "--version",
     "systemctl": "--version",
 }
 
@@ -31,9 +38,19 @@ def main(executable: str) -> None:
         config.write_text(json.dumps({"stateDir": str(root / "state"), "projects": {}}))
         with (root / "stdout").open("wb") as out, (root / "stderr").open("wb") as err:
             proc = subprocess.Popen(
-                [executable, "--config", str(config), "--principal", "operator", "serve"],
+                [
+                    executable,
+                    "--config",
+                    str(config),
+                    "--principal",
+                    "operator",
+                    "serve",
+                ],
                 env={"HOME": tmp, "PATH": "/no-inherited-tools", "LANG": "C.UTF-8"},
-                cwd=tmp, stdin=subprocess.PIPE, stdout=out, stderr=err,
+                cwd=tmp,
+                stdin=subprocess.PIPE,
+                stdout=out,
+                stderr=err,
             )
             child_env: dict[str, str] = {}
             child_exe = ""
@@ -48,25 +65,58 @@ def main(executable: str) -> None:
                     try:
                         exe = proc_root.joinpath("exe").resolve()
                         if "python" in exe.name:
-                            fields = proc_root.joinpath("environ").read_bytes().split(b"\0")
-                            child_env = {k.decode(): v.decode() for entry in fields if b"=" in entry for k, v in [entry.split(b"=", 1)]}
+                            fields = (
+                                proc_root.joinpath("environ").read_bytes().split(b"\0")
+                            )
+                            child_env = {
+                                k.decode(): v.decode()
+                                for entry in fields
+                                if b"=" in entry
+                                for k, v in [entry.split(b"=", 1)]
+                            }
                             child_exe = str(exe)
-                            argv = [part.decode() for part in proc_root.joinpath("cmdline").read_bytes().split(b"\0") if part]
-                            wrapped = next((part for part in argv if part.endswith(".sinnix-agent-gateway-wrapped")), "")
+                            argv = [
+                                part.decode()
+                                for part in proc_root.joinpath("cmdline")
+                                .read_bytes()
+                                .split(b"\0")
+                                if part
+                            ]
+                            wrapped = next(
+                                (
+                                    part
+                                    for part in argv
+                                    if part.endswith(".sinnix-agent-gateway-wrapped")
+                                ),
+                                "",
+                            )
                             break
                     except FileNotFoundError:
                         pass
                     time.sleep(0.025)
                 assert child_env, "could not observe installed gateway interpreter"
-                assert child_env.get("GI_TYPELIB_PATH"), "installed gateway misses GI_TYPELIB_PATH"
+                assert child_env.get("GI_TYPELIB_PATH"), (
+                    "installed gateway misses GI_TYPELIB_PATH"
+                )
                 assert wrapped, "could not observe the wrapped gateway interpreter"
-                paths = {name: shutil.which(name, path=child_env.get("PATH", "")) for name in COMMANDS}
+                paths = {
+                    name: shutil.which(name, path=child_env.get("PATH", ""))
+                    for name in COMMANDS
+                }
                 missing = [name for name, path in paths.items() if path is None]
                 assert not missing, f"installed gateway misses runtime tools: {missing}"
                 for name, arg in COMMANDS.items():
-                    probe = subprocess.run([paths[name], arg], env=child_env, cwd=tmp,
-                                           capture_output=True, text=True, timeout=15)
-                    assert probe.returncode == 0, f"{name}: {probe.returncode}: {probe.stderr}"
+                    probe = subprocess.run(
+                        [paths[name], arg],
+                        env=child_env,
+                        cwd=tmp,
+                        capture_output=True,
+                        text=True,
+                        timeout=15,
+                    )
+                    assert probe.returncode == 0, (
+                        f"{name}: {probe.returncode}: {probe.stderr}"
+                    )
                 site_dirs = re.findall(
                     r"'(/nix/store/[^']+/site-packages)'", Path(wrapped).read_text()
                 )
@@ -82,7 +132,12 @@ def main(executable: str) -> None:
                     timeout=15,
                 )
                 assert atspi.returncode == 0, f"pyatspi: {atspi.stderr}"
-                print(json.dumps({"result": "pass", "tools": paths, "interpreter": child_exe}, sort_keys=True))
+                print(
+                    json.dumps(
+                        {"result": "pass", "tools": paths, "interpreter": child_exe},
+                        sort_keys=True,
+                    )
+                )
             finally:
                 proc.terminate()
                 try:

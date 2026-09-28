@@ -421,7 +421,8 @@ class NormalizedEventService:
                 owner = payload.get("owner") if isinstance(payload, Mapping) else None
                 kind = (
                     "ops_receipt"
-                    if owner == "ops-reducer" or row.get("operation") == "machine.operate"
+                    if owner == "ops-reducer"
+                    or row.get("operation") == "machine.operate"
                     else "gateway_receipt"
                 )
                 event = self._event(
@@ -536,7 +537,9 @@ class NormalizedEventService:
                         ]
                     }
                     observed_revision = _digest(observation)
-                    coverage = page.get("coverage") if isinstance(page, Mapping) else None
+                    coverage = (
+                        page.get("coverage") if isinstance(page, Mapping) else None
+                    )
                     omitted = page.get("omitted") if isinstance(page, Mapping) else None
                     incomplete = bool(
                         (isinstance(page, Mapping) and page.get("next_cursor"))

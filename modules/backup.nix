@@ -204,8 +204,9 @@ let
 
   mkBorgExcludeArgs =
     root: exclude:
-    lib.concatMapStringsSep " " (pattern: "--exclude ${lib.escapeShellArg pattern}")
-      (borgExcludePatterns root exclude);
+    lib.concatMapStringsSep " " (pattern: "--exclude ${lib.escapeShellArg pattern}") (
+      borgExcludePatterns root exclude
+    );
 
   # Borg records every holder of an exclusive lock as an empty file inside the
   # lock directory, named "<hostid>.<pid>-<threadid>" (borg/locking.py,
@@ -352,17 +353,24 @@ let
   snapshotCoverage = "${pkgs.python3}/bin/python3 ${./lib/backup/snapshot-coverage.py}";
 
   mkCoveragePolicy =
-    { label, bindTarget, exclude, noncanonical }:
-    pkgs.writeText "${label}-snapshot-coverage.json" (builtins.toJSON (
-      {
-        inherit noncanonical;
-        chrome_extension_caches = label == "persist";
-        borg_excludes = borgExcludePatterns bindTarget exclude;
-      }
-      // lib.optionalAttrs (label == "realm") {
-        producer_contract = "realm-borg-create-v2";
-      }
-    ));
+    {
+      label,
+      bindTarget,
+      exclude,
+      noncanonical,
+    }:
+    pkgs.writeText "${label}-snapshot-coverage.json" (
+      builtins.toJSON (
+        {
+          inherit noncanonical;
+          chrome_extension_caches = label == "persist";
+          borg_excludes = borgExcludePatterns bindTarget exclude;
+        }
+        // lib.optionalAttrs (label == "realm") {
+          producer_contract = "realm-borg-create-v2";
+        }
+      )
+    );
 
   realmCoveragePolicy = mkCoveragePolicy {
     label = "realm";
@@ -385,7 +393,14 @@ let
       noncanonical,
     }:
     let
-      coveragePolicy = mkCoveragePolicy { inherit label bindTarget exclude noncanonical; };
+      coveragePolicy = mkCoveragePolicy {
+        inherit
+          label
+          bindTarget
+          exclude
+          noncanonical
+          ;
+      };
     in
     ''
       set -euo pipefail
@@ -646,7 +661,9 @@ let
     "var/lib/systemd/coredump"
     # Sinex runtime state is backed up through structured service tooling.
     "var/lib/sinex"
-  ] ++ chromeCacheRoots ++ chromeExtensionCacheExcludes;
+  ]
+  ++ chromeCacheRoots
+  ++ chromeExtensionCacheExcludes;
 
   realmExcludes = [
     # Re-acquirable media: Steam, model weights, and private project caches
@@ -724,32 +741,35 @@ let
   # state are also not excused by a cache classification.
   # Intersect an explicit classification with the real creation exclusions:
   # adding another exclusion never silently authorizes snapshot deletion.
-  persistNoncanonical = lib.intersectLists persistExcludes ([
-    "home/sinity/.cache/huggingface"
-    "home/sinity/.cache/spotify"
-    "root/.cache/borg"
-    "home/sinity/.cache"
-    # Cargo tags both of these with CACHEDIR.TAG, so --exclude-caches already
-    # kept them out of every archive while nothing classified them. The lane
-    # could not prove coverage and retained every snapshot (96853 entries under
-    # .cargo/git alone). Classified here explicitly, as the policy above
-    # requires: the tag is not the authorization, this line is. Both are
-    # re-fetched by cargo from the network on demand.
-    "home/sinity/.cargo/registry"
-    "home/sinity/.cargo/git"
-    "home/sinity/.npm/_cacache"
-    # Python virtualenvs and tool stores, CACHEDIR.TAG'd by their own tooling
-    # and therefore already absent from every archive. Measured shares of the
-    # persist coverage gap on 2026-09-14: venv 13651, .venv 4441, uv 13151,
-    # the nested cargo registry 10366 -- together 41609 of 43057.
-    "home/sinity/.hermes/hermes-agent/venv"
-    "home/sinity/.hermes/hermes-agent/.venv"
-    "home/sinity/.local/share/uv"
-    "home/sinity/.local/state/claude-code/npm/.cargo/registry"
-    "home/sinity/.local/share/nvim/mason"
-    "home/sinity/.local/share/hyprland/logs"
-    "var/lib/systemd/coredump"
-  ] ++ chromeCacheRoots);
+  persistNoncanonical = lib.intersectLists persistExcludes (
+    [
+      "home/sinity/.cache/huggingface"
+      "home/sinity/.cache/spotify"
+      "root/.cache/borg"
+      "home/sinity/.cache"
+      # Cargo tags both of these with CACHEDIR.TAG, so --exclude-caches already
+      # kept them out of every archive while nothing classified them. The lane
+      # could not prove coverage and retained every snapshot (96853 entries under
+      # .cargo/git alone). Classified here explicitly, as the policy above
+      # requires: the tag is not the authorization, this line is. Both are
+      # re-fetched by cargo from the network on demand.
+      "home/sinity/.cargo/registry"
+      "home/sinity/.cargo/git"
+      "home/sinity/.npm/_cacache"
+      # Python virtualenvs and tool stores, CACHEDIR.TAG'd by their own tooling
+      # and therefore already absent from every archive. Measured shares of the
+      # persist coverage gap on 2026-09-14: venv 13651, .venv 4441, uv 13151,
+      # the nested cargo registry 10366 -- together 41609 of 43057.
+      "home/sinity/.hermes/hermes-agent/venv"
+      "home/sinity/.hermes/hermes-agent/.venv"
+      "home/sinity/.local/share/uv"
+      "home/sinity/.local/state/claude-code/npm/.cargo/registry"
+      "home/sinity/.local/share/nvim/mason"
+      "home/sinity/.local/share/hyprland/logs"
+      "var/lib/systemd/coredump"
+    ]
+    ++ chromeCacheRoots
+  );
   realmNoncanonical = lib.intersectLists realmExcludes [
     "library/games/steam/steamapps"
     "library/models"

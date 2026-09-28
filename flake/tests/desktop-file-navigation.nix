@@ -106,22 +106,25 @@ in
           in
           [
             {
-              assertion = hm.xdg.userDirs.documents == expectedCorpusEntrances.Documents
+              assertion =
+                hm.xdg.userDirs.documents == expectedCorpusEntrances.Documents
                 && hm.xdg.userDirs.pictures == expectedCorpusEntrances.Pictures
                 && hm.xdg.userDirs.projects == expectedCorpusEntrances.Projects
                 && hm.xdg.userDirs.videos == expectedCorpusEntrances.Videos;
               message = "XDG corpus entrances diverge from the canonical subject collections.";
             }
             {
-              assertion = builtins.all (name:
+              assertion = builtins.all (
+                name:
                 toString hm.home.file.${name}.source
-                  == toString (hm.lib.file.mkOutOfStoreSymlink expectedCorpusEntrances.${name})
+                == toString (hm.lib.file.mkOutOfStoreSymlink expectedCorpusEntrances.${name})
                 && !(hm.home.file.${name}.force or false)
               ) (builtins.attrNames expectedCorpusEntrances);
               message = "Home aliases must share XDG's declared targets without overwriting populated paths.";
             }
             {
-              assertion = hm.xdg.userDirs.publicShare == "${hm.home.homeDirectory}/Public"
+              assertion =
+                hm.xdg.userDirs.publicShare == "${hm.home.homeDirectory}/Public"
                 && hm.xdg.userDirs.desktop == "${hm.home.homeDirectory}/Desktop";
               message = "Private corpus consolidation must not repurpose Public or Desktop.";
             }

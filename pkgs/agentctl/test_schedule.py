@@ -86,9 +86,7 @@ def test_incomplete_catalog_defers_retirement_until_recovery(
     descriptor.write_text("not valid TOML = [")
     previous = "agentctl-schedule-111111111111111111111111"
     fake_systemd["units"].add(previous)
-    partial_config = replace(
-        config, project_roots=(project_root, unavailable_root)
-    )
+    partial_config = replace(config, project_roots=(project_root, unavailable_root))
 
     partial = schedule.apply(partial_config)
 
@@ -145,7 +143,9 @@ def test_custom_config_is_forwarded_and_a_path_change_replaces_the_timer(
     ]
     assert schedule.apply(first_config)["started"] == []
 
-    second_config = replace(config, config_path=Path("/realm/state/agentctl/second.json"))
+    second_config = replace(
+        config, config_path=Path("/realm/state/agentctl/second.json")
+    )
     second = schedule.apply(second_config)
     assert second["stopped"] == first["started"]
     assert second["started"] == [

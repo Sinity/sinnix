@@ -67,7 +67,9 @@ def test_private_http_transport_serves_operator_tools(tmp_path: Path) -> None:
             self.sock.connect(str(self.path))
 
     config_path = tmp_path / "config.json"
-    config_path.write_text(json.dumps({"stateDir": str(tmp_path / "state"), "projects": {}}))
+    config_path.write_text(
+        json.dumps({"stateDir": str(tmp_path / "state"), "projects": {}})
+    )
     socket_path = tmp_path / "mcp.sock"
     command = [
         sys.executable,
@@ -79,7 +81,9 @@ def test_private_http_transport_serves_operator_tools(tmp_path: Path) -> None:
         "--socket",
         str(socket_path),
     ]
-    with subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE) as process:
+    with subprocess.Popen(
+        command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE
+    ) as process:
         try:
             deadline = time.monotonic() + 10
             while not socket_path.exists():
@@ -103,20 +107,42 @@ def test_private_http_transport_serves_operator_tools(tmp_path: Path) -> None:
                 finally:
                     connection.close()
 
-            status, headers, body = request({
-                "jsonrpc": "2.0", "id": 1, "method": "initialize",
-                "params": {"protocolVersion": "2025-06-18", "capabilities": {},
-                           "clientInfo": {"name": "transport-test", "version": "1"}},
-            })
+            status, headers, body = request(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2025-06-18",
+                        "capabilities": {},
+                        "clientInfo": {"name": "transport-test", "version": "1"},
+                    },
+                }
+            )
             assert status == 200 and "result" in json.loads(body)
             session = headers["mcp-session-id"]
-            assert request({"jsonrpc": "2.0", "method": "notifications/initialized"}, session)[0] == 202
-            status, _, body = request({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}, session)
+            assert (
+                request(
+                    {"jsonrpc": "2.0", "method": "notifications/initialized"}, session
+                )[0]
+                == 202
+            )
+            status, _, body = request(
+                {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+                session,
+            )
             assert status == 200
             names = {tool["name"] for tool in json.loads(body)["result"]["tools"]}
             assert names == {action.name for action in action_set.visible("operator")}
-            status, _, body = request({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
-                                       "params": {"name": "gateway.catalog", "arguments": {"limit": 1}}}, session)
+            status, _, body = request(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "method": "tools/call",
+                    "params": {"name": "gateway.catalog", "arguments": {"limit": 1}},
+                },
+                session,
+            )
             assert status == 200 and "result" in json.loads(body)
             assert stat.S_IMODE(tmp_path.stat().st_mode) & 0o077 == 0
         finally:

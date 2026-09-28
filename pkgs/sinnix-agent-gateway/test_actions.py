@@ -389,8 +389,6 @@ def test_unknown_input_field_is_typed_before_file_mutation(tmp_path: Path) -> No
     assert target.read_text() == "before\n"
 
 
-
-
 def test_files_search_paths_and_content(tmp_path: Path) -> None:
     server = create_server(config(tmp_path), "operator")
     root = tmp_path / "corpus"
@@ -579,8 +577,6 @@ def test_files_image_and_pdf_afford_document_inspection(tmp_path: Path) -> None:
         )["data"]
         assert "files.read" in stat["affordances"]
         assert "files.change" in read["affordances"]
-
-
 
 
 def test_files_stat_reports_hash_coverage(tmp_path: Path) -> None:

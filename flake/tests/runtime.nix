@@ -521,18 +521,20 @@ in
         EOF_INVENTORY
       '';
       checks.runtime-mount-capacity =
-        pkgs.runCommand "runtime-mount-capacity-check" {
-          nativeBuildInputs = [ pkgs.jq ];
-          mountPath = evaluated.config.sinnix.paths.outerRealm;
-        } ''
-          cat > inventory.json <<'EOF_INVENTORY'
-          ${inventoryJson}
-          EOF_INVENTORY
-          jq -e --arg path "$mountPath" '
-            .mounts | any(.path == $path and .warnPct == 80 and .failPct == 90)
-          ' inventory.json >/dev/null
-          touch "$out"
-        '';
+        pkgs.runCommand "runtime-mount-capacity-check"
+          {
+            nativeBuildInputs = [ pkgs.jq ];
+            mountPath = evaluated.config.sinnix.paths.outerRealm;
+          }
+          ''
+            cat > inventory.json <<'EOF_INVENTORY'
+            ${inventoryJson}
+            EOF_INVENTORY
+            jq -e --arg path "$mountPath" '
+              .mounts | any(.path == $path and .warnPct == 80 and .failPct == 90)
+            ' inventory.json >/dev/null
+            touch "$out"
+          '';
       # Red twin for the preservation seam: canonical data cannot be made
       # ephemeral by an owning module.
       checks.runtime-data-policy =

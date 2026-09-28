@@ -91,7 +91,7 @@ class NativeOutputTest(unittest.TestCase):
             body
             or (
                 'printf "%s\\n" "$@" > "$PI_ARGS"\n'
-                'for last_arg do :; done\n'
+                "for last_arg do :; done\n"
                 'cat "${last_arg#@}" > "$PI_INPUT"\n'
                 'cat "$FIXTURE_STREAM"\n'
                 'exit "$FIXTURE_EXIT"\n'
@@ -252,9 +252,7 @@ class NativeOutputTest(unittest.TestCase):
         # Red when the extractor splits on anything but b"\n".
         fresh = {"answer": "fresh\u2028tail\u2029and\u0085more"}
         stream = self.pi_line(self.pi_agent_end('{"answer":"stale"}'))
-        stream += self.pi_line(
-            self.pi_agent_end(json.dumps(fresh, ensure_ascii=False))
-        )
+        stream += self.pi_line(self.pi_agent_end(json.dumps(fresh, ensure_ascii=False)))
         self.assertIn("\u2028", stream)
         outcome = self.run_pi(stream)
         self.assertEqual(outcome.returncode, 0, outcome.stderr)

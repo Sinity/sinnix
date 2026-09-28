@@ -49,9 +49,10 @@ def test_beads_public_snapshot_and_frozen_paging_after_restart(tmp_path: Path) -
         == "stale_cursor"
     )
     other = create_server(config, "operator")
-    assert ok(other, "beads.query", {**query, "cursor": cursor})["items"] == second[
-        "items"
-    ]
+    assert (
+        ok(other, "beads.query", {**query, "cursor": cursor})["items"]
+        == second["items"]
+    )
     assert ok(other, "results.get", {"ref": reference})["envelope"] == stored
 
 

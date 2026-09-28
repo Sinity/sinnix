@@ -30,11 +30,7 @@ def project_service(tmp_path: Path) -> tuple[ProjectService, Path, Path]:
     git(project, "worktree", "add", "--quiet", "-b", "fixture-linked", str(linked))
     config = GatewayConfig(
         state_dir=tmp_path / "state",
-        projects={
-            "fixture": ProjectConfig(
-                project_id="fixture", path=project
-            )
-        },
+        projects={"fixture": ProjectConfig(project_id="fixture", path=project)},
     )
     return ProjectService(config, Principal.for_name("operator")), project, linked
 

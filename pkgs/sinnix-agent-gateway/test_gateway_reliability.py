@@ -66,11 +66,7 @@ def test_project_search_and_diff_expose_owner_output_bounds(tmp_path: Path) -> N
     config = GatewayConfig(
         state_dir=tmp_path / "state",
         max_result_bytes=1_024,
-        projects={
-            "fixture": ProjectConfig(
-                project_id="fixture", path=project
-            )
-        },
+        projects={"fixture": ProjectConfig(project_id="fixture", path=project)},
     )
     server = create_server(config, "operator")
 

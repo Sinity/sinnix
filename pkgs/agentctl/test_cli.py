@@ -433,7 +433,10 @@ def test_last_matching_lines_match_a_full_scan_across_block_boundaries(
     # Lines of varied length straddle the 64 KiB read blocks; the backward
     # reader must agree exactly with a forward scan, including the file's
     # first line and a missing trailing newline.
-    lines = [f'{{"n":{i},"project":"{"a" if i % 3 else "b"}","pad":"{"x" * (i % 997)}"}}' for i in range(4000)]
+    lines = [
+        f'{{"n":{i},"project":"{"a" if i % 3 else "b"}","pad":"{"x" * (i % 997)}"}}'
+        for i in range(4000)
+    ]
     spool = tmp_path / "events.jsonl"
     spool.write_text("\n".join(lines))
     for count in (1, 7, 1500, 5000):
@@ -450,7 +453,11 @@ def test_events_tail_memory_is_bounded_by_the_requested_lines(tmp_path: Path) ->
     import tracemalloc
 
     spool = tmp_path / "events.jsonl"
-    record = '{"kind":"queue-task","label":"fixture:check","phase":"finished","pad":"' + "x" * 400 + '"}\n'
+    record = (
+        '{"kind":"queue-task","label":"fixture:check","phase":"finished","pad":"'
+        + "x" * 400
+        + '"}\n'
+    )
     with spool.open("w") as handle:
         for _ in range(50_000):
             handle.write(record)

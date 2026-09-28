@@ -277,7 +277,9 @@ def _v2_binding_errors(
     return errors
 
 
-def worker_contract(run: Run, worker: Mapping[str, Any], attempt: int) -> dict[str, Any]:
+def worker_contract(
+    run: Run, worker: Mapping[str, Any], attempt: int
+) -> dict[str, Any]:
     """The result contract of ``worker``'s ``attempt``, from its dispatch bindings."""
     records = worker.get("evidence_binding")
     by_id = {
@@ -328,7 +330,9 @@ def check_result_contract(
             errors=binding_errors,
         )
     unknown = {
-        entry.get("id") for entry in value.get("beads") or () if isinstance(entry, Mapping)
+        entry.get("id")
+        for entry in value.get("beads") or ()
+        if isinstance(entry, Mapping)
     } - set(worker.get("beads") or ())
     if unknown:
         raise BatchRefusal(
@@ -1242,9 +1246,7 @@ def _resume_locked(
         branch=worker["branch"],
         base=run.base_commit,
         worktree=path,
-        contract=worker_contract(
-            run, {**worker, "model": effective_model}, attempt
-        ),
+        contract=worker_contract(run, {**worker, "model": effective_model}, attempt),
         packet=packet_path.read_text() if packet_path.is_file() else None,
     )
     if recovered is not None:

@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import signal
 import subprocess
 import sys
-
+from pathlib import Path
 
 SCRIPT = next(
     parent / "scripts" / "sinnix-sinex-dev-db"

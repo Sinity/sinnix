@@ -7,8 +7,34 @@ let
       withGlobStarPlaceholder = lib.replaceStrings [ "**" ] [ globStarPlaceholder ] pattern;
       escaped =
         lib.replaceStrings
-          [ "\\" "." "+" "(" ")" "[" "]" "{" "}" "^" "$" "|" ]
-          [ "\\\\" "\\." "\\+" "\\(" "\\)" "\\[" "\\]" "\\{" "\\}" "\\^" "\\$" "\\|" ]
+          [
+            "\\"
+            "."
+            "+"
+            "("
+            ")"
+            "["
+            "]"
+            "{"
+            "}"
+            "^"
+            "$"
+            "|"
+          ]
+          [
+            "\\\\"
+            "\\."
+            "\\+"
+            "\\("
+            "\\)"
+            "\\["
+            "\\]"
+            "\\{"
+            "\\}"
+            "\\^"
+            "\\$"
+            "\\|"
+          ]
           withGlobStarPlaceholder;
       withSingleStar = lib.replaceStrings [ "*" ] [ "[^/]*" ] escaped;
       withQuestion = lib.replaceStrings [ "?" ] [ "[^/]" ] withSingleStar;
@@ -23,5 +49,8 @@ let
 in
 exclude:
 lib.any (
-  path: lib.any (candidate: builtins.match (borgGlobToRegex exclude) candidate != null) (pathAndAncestors path)
+  path:
+  lib.any (candidate: builtins.match (borgGlobToRegex exclude) candidate != null) (
+    pathAndAncestors path
+  )
 ) paths

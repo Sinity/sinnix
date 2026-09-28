@@ -225,8 +225,16 @@ def test_receipt_on_every_read_cannot_starve_other_event_sources(
         assert len(page["events"]) <= limit
         seen.update(row["kind"] for row in page["events"])
         cursor = page["next_cursor"]
-        audit.append("events.tail", "ok", {"target_refs": ["sinnix://projects/fixture"]})
-    assert {"gateway_receipt", "git_revision", "owner_revision", "job_state", "runtime_transition"} <= seen
+        audit.append(
+            "events.tail", "ok", {"target_refs": ["sinnix://projects/fixture"]}
+        )
+    assert {
+        "gateway_receipt",
+        "git_revision",
+        "owner_revision",
+        "job_state",
+        "runtime_transition",
+    } <= seen
 
 
 def test_continuation_rotates_across_selected_project_owners(tmp_path: Path) -> None:
@@ -266,7 +274,10 @@ def test_changing_git_does_not_hide_beads_revision(tmp_path: Path) -> None:
                 seen[row["kind"]].add(row["data"]["project_id"])
         cursor = page["next_cursor"]
         audit.append("events.tail", "ok", {})
-    assert all(projects_seen == set(projects.config.projects) for projects_seen in seen.values())
+    assert all(
+        projects_seen == set(projects.config.projects)
+        for projects_seen in seen.values()
+    )
 
 
 def test_v2_cursor_continues_with_v3_source_rotation(tmp_path: Path) -> None:
@@ -275,9 +286,13 @@ def test_v2_cursor_continues_with_v3_source_rotation(tmp_path: Path) -> None:
     state.pop("source_turn")
     state.pop("project_offset")
     body = {"v": 2, "scope": events.cursor._scope(["fixture"]), "state": state}
-    payload = base64.urlsafe_b64encode(
-        json.dumps(body, sort_keys=True, separators=(",", ":")).encode()
-    ).decode().rstrip("=")
+    payload = (
+        base64.urlsafe_b64encode(
+            json.dumps(body, sort_keys=True, separators=(",", ":")).encode()
+        )
+        .decode()
+        .rstrip("=")
+    )
     mac = hmac.new(events.cursor._key, payload.encode(), hashlib.sha256).hexdigest()
     page = events.read(limit=1, cursor=f"{payload}.{mac}")
     assert page["events"]

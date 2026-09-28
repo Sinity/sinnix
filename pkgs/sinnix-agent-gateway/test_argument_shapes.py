@@ -36,11 +36,7 @@ def server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
     project.mkdir()
     config = GatewayConfig(
         state_dir=tmp_path / "state",
-        projects={
-            "fixture": ProjectConfig(
-                project_id="fixture", path=project
-            )
-        },
+        projects={"fixture": ProjectConfig(project_id="fixture", path=project)},
     )
     runtime = Runtime.create(config, "operator")
     runtime.jobs = FakeJobs(default={**JOB, "timed_out": False})  # type: ignore[assignment]

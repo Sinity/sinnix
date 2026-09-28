@@ -857,9 +857,7 @@ def sweep_mounts(mounts: Iterable[dict[str, Any]], emitter: Emitter) -> None:
                 status = "warning"
             if usage >= fail:
                 status = "failed"
-            evidence = (
-                f"usage_percent={usage};warn_percent={warn};fail_percent={fail}"
-            )
+            evidence = f"usage_percent={usage};warn_percent={warn};fail_percent={fail}"
         emitter.emit(
             f"mount:{path}",
             "mount_capacity",
