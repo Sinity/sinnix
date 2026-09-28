@@ -351,6 +351,15 @@ claude)
   # The prompt goes in on stdin: one argv string is capped at 128 KiB by the
   # kernel and a resume packet with the bead bodies exceeds it.
   claude_args=("${resume_args[@]}" --print --model "$model" --effort "$reasoning_effort")
+  # A queued worker has no MCP servers unless its operation explicitly opts
+  # into the user's MCP configuration. `--strict-mcp-config` prevents Claude
+  # from merging servers from user or project settings.
+  if [[ ${AGENTCTL_AGENT_USER_CONFIG:-} != 1 ]]; then
+    mcp_config="$(mktemp "${last_file}.mcp.XXXXXX")" || exit 1
+    printf '{}\n' >"$mcp_config"
+    claude_args+=(--strict-mcp-config --mcp-config "$mcp_config")
+    trap 'rm -f -- "$mcp_config"' EXIT
+  fi
   if [[ -n $output_schema ]]; then
     # --json-schema takes the schema text, not a path.
     claude_args+=(--output-format json --json-schema "$(<"$output_schema")")
@@ -363,7 +372,7 @@ claude)
   set +e
   if [[ -n $output_schema ]]; then
     structured_file="$(mktemp "${last_file}.XXXXXX")" || exit 1
-    trap 'rm -f -- "$structured_file"' EXIT
+    trap 'rm -f -- "$structured_file" "${mcp_config:-}"' EXIT
     "${claude_cmd[@]}" "${claude_args[@]}" <"$prompt_file" | unwrap_claude_json
   else
     "${claude_cmd[@]}" "${claude_args[@]}" <"$prompt_file" | tee "$last_file"

@@ -80,6 +80,7 @@ EXIT_JOB_NOT_SUCCEEDED = 4
 DEFAULT_WAIT_SECONDS = 3_600
 DEFAULT_EVENT_LINES = 40
 FOLLOW_POLL_SECONDS = 1.0
+MAX_EVENT_LINE_BYTES = 1024 * 1024
 
 _REFUSALS = (
     BatchRefusal,
@@ -918,18 +919,27 @@ def _events(arguments: argparse.Namespace, config: Config, out: Output) -> int:
                 return EXIT_OK
             handle.seek(0, os.SEEK_END)
             pending = b""
+            oversized = False
             while True:
-                chunk = handle.readline()
+                chunk = handle.read(64 * 1024)
                 if not chunk:
                     time.sleep(FOLLOW_POLL_SECONDS)
                     continue
-                pending += chunk
-                if not pending.endswith(b"\n"):
-                    continue
-                line = pending.decode("utf-8", errors="replace")
-                pending = b""
-                if wanted(line):
-                    show(line)
+                for part in chunk.splitlines(keepends=True):
+                    if oversized:
+                        if part.endswith(b"\n"):
+                            oversized = False
+                        continue
+                    if len(pending) + len(part) > MAX_EVENT_LINE_BYTES:
+                        pending = b""
+                        oversized = not part.endswith(b"\n")
+                        continue
+                    pending += part
+                    if pending.endswith(b"\n"):
+                        line = pending.decode("utf-8", errors="replace")
+                        pending = b""
+                        if wanted(line):
+                            show(line)
     except FileNotFoundError:
         print(f"agentctl: no event spool at {spool}", file=sys.stderr)
         return EXIT_REFUSED
