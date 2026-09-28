@@ -147,7 +147,7 @@ mkServiceModule {
         {
           manager = "user";
           resourceClass = "background";
-          # The pass pauses and resumes pueue groups through the pueue client.
+          # The pass pauses groups and adjusts quick admission through pueue.
           path = [ pkgs.pueue ];
           execStart = "${scriptPkgs.agentctl}/bin/agentctl backpressure tick";
           serviceConfig = {
@@ -156,7 +156,7 @@ mkServiceModule {
           };
           timer = {
             # Full-stall averages are 60-second means, so sampling faster reads
-            # the same number twice. One group is paused or resumed per tick,
+            # the same number twice. One group is paused per tick,
             # with the signal-specific order defined by `agentctl backpressure tick`.
             onUnitActiveSec = 60;
             onBootSec = 60;

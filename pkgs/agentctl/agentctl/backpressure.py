@@ -57,7 +57,7 @@ class SpoolState:
             elif action in {"opened", "released"}:
                 self.pauses.pop(group, None)
 
-    def ours(self) -> set[str]:
+    def recorded_by_automation(self) -> set[str]:
         return {
             group
             for group, record in self.pauses.items()
@@ -339,10 +339,6 @@ def _append(spool: Path | None, event: Mapping[str, object]) -> dict[str, Any]:
     return record
 
 
-def paused_by_us(spool: Path | None, *, checkpoint: Path | None = None) -> set[str]:
-    return event_state(spool, checkpoint=checkpoint).ours()
-
-
 def tick(
     *,
     spool: Path | None,
@@ -357,7 +353,7 @@ def tick(
         groups = pueue.groups_status()
     except PueueError as error:
         return {"action": "unavailable", "error": str(error), "pressure": pressure}
-    for name in sorted(state.ours()):
+    for name in sorted(state.recorded_by_automation()):
         if groups.get(name) == "Running":
             state.apply(_append(spool, {"action": "released", "group": name}))
     _save_checkpoint(checkpoint_path, state)
@@ -370,7 +366,8 @@ def tick(
     recovery_needed = [
         name
         for name in paused
-        if name in state.ours() and _can_reopen(name, state.pauses[name], pressure)
+        if name in state.recorded_by_automation()
+        and _can_reopen(name, state.pauses[name], pressure)
     ]
     if signals:
         close_order = tuple(

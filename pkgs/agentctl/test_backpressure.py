@@ -322,6 +322,36 @@ def test_an_operator_pause_is_not_resumed(monkeypatch, tmp_path) -> None:
     assert result["action"] == "hold"
 
 
+def test_operator_pause_before_automation_is_never_claimed_or_resumed(
+    monkeypatch, tmp_path
+) -> None:
+    """An already paused group gives automation no new pause to own."""
+    spool = _spool(tmp_path)
+    result, calls = _tick(
+        monkeypatch,
+        {"io_full_avg60": 30.0, "memory_full_avg60": 0.0},
+        {
+            "pytest-heavy": "Paused",
+            "pytest": "Paused",
+            "bulk": "Paused",
+        },
+        spool=spool,
+    )
+    assert calls == []
+    assert result["manual_recovery"] == []
+    assert spool.read_text() == ""
+
+    result, calls = _tick(
+        monkeypatch,
+        {"io_full_avg60": 0.0, "memory_full_avg60": 0.0},
+        {"pytest-heavy": "Paused", "pytest": "Paused", "bulk": "Paused"},
+        spool=spool,
+    )
+    assert calls == []
+    assert result["manual_recovery"] == []
+    assert backpressure.event_state(spool).recorded_by_automation() == set()
+
+
 def test_operator_reassertion_while_automation_paused_requires_manual_recovery(
     monkeypatch, tmp_path
 ) -> None:
@@ -469,7 +499,7 @@ def test_a_group_seen_running_after_our_pause_is_released_and_an_operator_repaus
         ("closed", "pytest"),
         ("released", "pytest"),
     ]
-    assert backpressure.paused_by_us(spool) == set()
+    assert backpressure.event_state(spool).recorded_by_automation() == set()
 
     result, calls = _tick(
         monkeypatch,
@@ -496,10 +526,10 @@ def test_io_pressure_keeps_focused_tests_admissible(monkeypatch) -> None:
     assert result["action"] == "hold"
 
 
-def test_old_io_pause_reopens_focused_tests_during_io_pressure(
+def test_old_io_pause_keeps_focused_tests_paused_during_io_pressure(
     monkeypatch, tmp_path
 ) -> None:
-    """The policy upgrade releases its own existing I/O-only closure."""
+    """A remembered I/O-only closure does not authorize an automatic resume."""
     result, calls = _tick(
         monkeypatch,
         {"io_full_avg60": 60.0, "memory_full_avg60": 1.0},
