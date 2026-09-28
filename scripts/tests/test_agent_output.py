@@ -54,6 +54,11 @@ class NativeOutputTest(unittest.TestCase):
             '[mcp_servers.context7]\nurl = "https://example.test/mcp"\n'
             '[mcp_servers.polylogue]\ncommand = "mcp-polylogue"\n'
         )
+        system_config = self.root / "system-config.toml"
+        system_config.write_text(
+            '[mcp_servers.context7]\nurl = "https://example.test/mcp"\n'
+            '[mcp_servers.polylogue]\ncommand = "mcp-polylogue"\n'
+        )
         (home / ".config/claude/mcp.json").write_text(json.dumps({"mcpServers": {
             "context7": {"type": "http", "url": "https://example.test/mcp"},
             "polylogue": {"command": "mcp-polylogue"},
@@ -74,6 +79,7 @@ class NativeOutputTest(unittest.TestCase):
                 for name in names:
                     command.extend(("--mcp-server", name))
                 result = subprocess.run(command, env={**self.env, "HOME": str(home),
+                                        "AGENTCTL_CODEX_SYSTEM_CONFIG": str(system_config),
                                         "CAPTURE_ARGS": str(capture),
                                         "CAPTURE_CONFIG": str(self.root / "selected.json")}, capture_output=True,
                                         text=True, timeout=10)
@@ -81,8 +87,9 @@ class NativeOutputTest(unittest.TestCase):
                 args = capture.read_text()
                 if backend == "codex":
                     self.assertIn("--ignore-user-config", args)
-                    self.assertEqual("mcp_servers." in args, bool(names))
-                    self.assertNotIn("polylogue", args)
+                    self.assertIn('mcp_servers.polylogue.enabled=false', args)
+                    self.assertIn('mcp_servers.context7.enabled=false', args)
+                    self.assertEqual('"enabled"=true' in args, bool(names))
                 else:
                     self.assertIn("--strict-mcp-config", args)
                     config_path = args.split("--mcp-config\n", 1)[1].splitlines()[0]
@@ -94,7 +101,9 @@ class NativeOutputTest(unittest.TestCase):
              "--prompt-file", str(prompt), "--last-file", str(self.result),
              "--model", "fixture", "--reasoning-effort", "high",
              "--mcp-server", "unknown"],
-            env={**self.env, "HOME": str(home), "CAPTURE_ARGS": str(capture)},
+            env={**self.env, "HOME": str(home),
+                 "AGENTCTL_CODEX_SYSTEM_CONFIG": str(system_config),
+                 "CAPTURE_ARGS": str(capture)},
             capture_output=True, text=True, timeout=10,
         )
         self.assertNotEqual(unknown.returncode, 0)

@@ -338,7 +338,8 @@ for every worker in that run; repeat the flag for more servers. The selection
 is retained for worker retries. The private runner also accepts
 `--mcp-server NAME` for a declared agent operation. Unknown names fail before
 the backend starts. Claude uses a strict config containing only those servers;
-Codex ignores the user config and adds only the selected server definitions.
+Codex ignores the user config, disables system and project servers, and adds
+only the selected server definitions.
 `events tail --follow` permits one reader per project for the current user;
 workers wait on their own job id with `job wait`.
 

@@ -332,29 +332,41 @@ case "$agent" in
 codex)
   codex_args=(exec -C "$workdir" --model "$model" --output-last-message "$last_file")
   codex_args+=(--ignore-user-config)
-  if ((${#mcp_servers[@]})); then
-    selected_mcp_file="$(mktemp "${last_file}.mcp-args.XXXXXX")" || exit 1
-    trap 'rm -f -- "$selected_mcp_file"' EXIT
-    python3 -c '
-import json, pathlib, sys, tomllib
+  # `--ignore-user-config` still loads the system MCP table. Disable every
+  # declared system or project server, then enable only opt-ins.
+  selected_mcp_file="$(mktemp "${last_file}.mcp-args.XXXXXX")" || exit 1
+  trap 'rm -f -- "$selected_mcp_file"' EXIT
+  python3 -c '
+import json, os, pathlib, re, sys, tomllib
 source = pathlib.Path.home() / ".codex/local.config.toml"
-servers = tomllib.loads(source.read_text()).get("mcp_servers", {})
+servers = tomllib.loads(source.read_text()).get("mcp_servers", {}) if len(sys.argv) > 1 else {}
+system = pathlib.Path(os.environ.get("AGENTCTL_CODEX_SYSTEM_CONFIG", "/etc/codex/config.toml"))
+inherited = set()
+project_paths = [parent / ".codex/config.toml" for parent in (pathlib.Path.cwd(), *pathlib.Path.cwd().parents)]
+for path in (system, *project_paths):
+    if path.is_file():
+        inherited.update(tomllib.loads(path.read_text()).get("mcp_servers", {}))
 def toml(value):
     if isinstance(value, dict):
         return "{" + ",".join(json.dumps(k) + "=" + toml(v) for k,v in value.items()) + "}"
     if isinstance(value, list):
         return "[" + ",".join(map(toml, value)) + "]"
     return json.dumps(value)
+def emit(*args):
+    for arg in args:
+        sys.stdout.buffer.write(arg.encode() + b"\0")
+for name in sorted(inherited):
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", name):
+        sys.exit("Codex MCP config has an invalid server name")
+    emit("-c", "mcp_servers." + name + ".enabled=false")
 for name in sys.argv[1:]:
     if name not in servers:
         sys.exit("unknown Codex MCP server: " + name)
-    for arg in ("-c", "mcp_servers." + json.dumps(name) + "=" + toml(servers[name])):
-        sys.stdout.buffer.write(arg.encode() + b"\0")
+    emit("-c", "mcp_servers." + name + "=" + toml({**servers[name], "enabled": True}))
 ' "${mcp_servers[@]}" >"$selected_mcp_file" || exit 1
-    mapfile -d '' -t selected_mcp <"$selected_mcp_file"
-    rm -f -- "$selected_mcp_file"
-    codex_args+=("${selected_mcp[@]}")
-  fi
+  mapfile -d '' -t selected_mcp <"$selected_mcp_file"
+  rm -f -- "$selected_mcp_file"
+  codex_args+=("${selected_mcp[@]}")
   if [[ -n $output_schema ]]; then
     codex_args+=(--output-schema "$output_schema")
   fi
