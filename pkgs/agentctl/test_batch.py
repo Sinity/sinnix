@@ -707,6 +707,8 @@ def test_batch_mcp_opt_in_is_persisted_for_workers(harness: Harness) -> None:
     assert task is not None
     argv = read_launch(harness.config, task)["argv"]
     assert argv[-2:] == ["--mcp-server", "context7"]
+    with pytest.raises(BatchRefusal, match="different MCP selection"):
+        harness.start("fx-solo", mcp_servers=("polylogue",))
 
 
 def test_result_read_projection_separates_dispatch_from_worker_claims(

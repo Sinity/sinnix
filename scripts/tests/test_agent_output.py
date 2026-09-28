@@ -50,7 +50,7 @@ class NativeOutputTest(unittest.TestCase):
         home = self.root / "home"
         (home / ".codex").mkdir(parents=True)
         (home / ".config/claude").mkdir(parents=True)
-        (home / ".codex/config.toml").write_text(
+        (home / ".codex/local.config.toml").write_text(
             '[mcp_servers.context7]\nurl = "https://example.test/mcp"\n'
             '[mcp_servers.polylogue]\ncommand = "mcp-polylogue"\n'
         )
@@ -88,6 +88,17 @@ class NativeOutputTest(unittest.TestCase):
                     config_path = args.split("--mcp-config\n", 1)[1].splitlines()[0]
                     self.assertFalse(Path(config_path).exists())
                     self.assertEqual(set(json.loads((self.root / "selected.json").read_text())["mcpServers"]), set(names))
+        capture.unlink()
+        unknown = subprocess.run(
+            ["bash", str(RUNNER), "--agent", "codex", "--workdir", str(self.root),
+             "--prompt-file", str(prompt), "--last-file", str(self.result),
+             "--model", "fixture", "--reasoning-effort", "high",
+             "--mcp-server", "unknown"],
+            env={**self.env, "HOME": str(home), "CAPTURE_ARGS": str(capture)},
+            capture_output=True, text=True, timeout=10,
+        )
+        self.assertNotEqual(unknown.returncode, 0)
+        self.assertFalse(capture.exists())
 
     def run_claude(self, output, exit_code=0):
         self.executable(

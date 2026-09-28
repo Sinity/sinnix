@@ -337,7 +337,7 @@ codex)
     trap 'rm -f -- "$selected_mcp_file"' EXIT
     python3 -c '
 import json, pathlib, sys, tomllib
-source = pathlib.Path.home() / ".codex/config.toml"
+source = pathlib.Path.home() / ".codex/local.config.toml"
 servers = tomllib.loads(source.read_text()).get("mcp_servers", {})
 def toml(value):
     if isinstance(value, dict):

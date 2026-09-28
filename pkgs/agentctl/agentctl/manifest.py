@@ -50,6 +50,7 @@ REFUSALS: dict[str, str] = {
     "invalid_result": "the worker result does not validate against its schema",
     "landing_in_progress": "another landing of this run holds the landing lock or its task is running",
     "manifest": "the run manifest is unreadable or not this contract",
+    "mcp_servers": "the requested MCP server selection is invalid or differs from the run",
     "members": "a bead cannot join the batch (`refusals` names each reason)",
     "no_candidate_profile": "the descriptor declares no [workspace].verify.candidate",
     "project": "the run belongs to another project",

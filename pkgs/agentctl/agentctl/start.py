@@ -723,6 +723,13 @@ def start(
     claimed: set[str] = set()
     for live in _live_runs(config, project.project_id):
         if set(live.beads) == requested:
+            if mcp_servers and any(
+                worker.get("mcp_servers", []) != list(mcp_servers)
+                for worker in live.workers
+            ):
+                raise BatchRefusal(
+                    "mcp_servers", "an existing run has a different MCP selection"
+                )
             if live.prepared:
                 return {**live.to_dict(), "resumed": False, "existing": True}
             with project_locked(config, project.project_id):
