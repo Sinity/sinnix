@@ -211,20 +211,16 @@
         outerRealmMountUnit
       ];
     };
-    # The backup class sizes MemoryHigh=2G around borg, but a btrfs-image
-    # walk of the root filesystem peaked at 2.2G on a run that SUCCEEDED
-    # (measured 2026-08-18), so the class default sits below this job's
-    # working set and every attempt spends its whole length in cgroup
-    # reclaim. Right-sized on the unit rather than in the class, which no
-    # other backup job needs raised. Deliberately NOT claimed as the cause
-    # of the persist failures: seven controlled captures that day produced
-    # both successes and failures with and against the cap, so the transid
-    # race below is genuinely probabilistic. This removes one pressure
-    # source that is otherwise present on every single run.
+    # Each filesystem gets its own 40-minute window. A hung first capture
+    # cannot consume the other label's window or an interactive morning.
+    # The backup class already applies idle I/O scheduling and bandwidth
+    # limits. A successful image peaked at 2.2G in 2026-08 measurements.
     serviceConfig = {
+      TimeoutStartSec = "85min";
       TimeoutStopSec = "15s";
-      MemoryHigh = "6G";
-      MemoryMax = "8G";
+      MemoryHigh = "3G";
+      MemoryMax = "5G";
+      MemorySwapMax = 0;
     };
     path = with pkgs; [
       btrfs-progs
@@ -277,17 +273,23 @@
       # FIRST (while the window is freshest, before realm's variable-length
       # capture pushes persist's attempts toward the next btrbk :00/:30
       # snapshot-creation boundary -- a bigger single generation-bump than
-      # steady small-file writes), and widen the retry budget.
+      # steady small-file writes). Retry short failures within a fixed window.
       capture_image() {
         label="$1"
         device="$2"
         out="${btrfsImageRoot}/$label-$stamp.btrfs-image"
         tmp="$out.tmp"
         attempt=1
+        deadline=$(( $(date +%s) + 40 * 60 ))
 
-        while [ "$attempt" -le 5 ]; do
+        while [ "$attempt" -le 3 ]; do
+          remaining=$(( deadline - $(date +%s) ))
+          if [ "$remaining" -le 0 ]; then
+            break
+          fi
           rm -f "$tmp"
-          if btrfs-image -c 9 "$device" "$tmp"; then
+          echo "btrfs-metadata-image-backup: $label attempt $attempt started (budget ''${remaining}s)"
+          if timeout --signal=TERM --kill-after=15s "''${remaining}s" btrfs-image -c 9 -t 1 "$device" "$tmp"; then
             # errexit is disabled inside a function whose caller is an `if`
             # condition, so nothing from here to the rename is covered by
             # `set -e`: a chmod or mv that failed (full or read-only
@@ -295,32 +297,37 @@
             # reported a capture that was not on disk. Every step is checked
             # by hand, and the image is only "captured" once it is readable
             # at its final name.
-            if chmod 0600 "$tmp" && mv -- "$tmp" "$out"; then
-              size="$(stat -c %s "$out" 2>/dev/null || echo 0)"
-              if [ "$size" -ge ${toString btrfsImageMinBytes} ]; then
+            size="$(stat -c %s "$tmp" 2>/dev/null || echo 0)"
+            if [ "$size" -ge ${toString btrfsImageMinBytes} ]; then
+              if chmod 0600 "$tmp" && mv -- "$tmp" "$out"; then
                 echo "btrfs-metadata-image-backup: $label captured $label-$stamp.btrfs-image ($size bytes)"
                 return 0
               fi
-              echo "btrfs-metadata-image-backup: $label produced a degenerate image ($size bytes, floor ${toString btrfsImageMinBytes})" >&2
-              rm -f -- "$out"
-            else
               echo "btrfs-metadata-image-backup: $label could not be published to $out" >&2
+            else
+              echo "btrfs-metadata-image-backup: $label produced a degenerate image ($size bytes, floor ${toString btrfsImageMinBytes})" >&2
             fi
+          else
+            status="$?"
+            echo "btrfs-metadata-image-backup: $label attempt $attempt exited $status (124 means deadline exceeded)" >&2
           fi
-          echo "btrfs-metadata-image-backup: $label attempt $attempt failed (live-filesystem race or real error)" >&2
           attempt=$((attempt + 1))
-          if [ "$attempt" -gt 5 ]; then
+          if [ "$attempt" -gt 3 ]; then
             break
           fi
-          # Deliberately not a fixed interval: a constant 60s could
-          # resonate with another periodic writer on the same cadence.
-          # 45/90/135/180s spreads retries across a wider span of the
-          # window instead.
-          sleep $((45 * (attempt - 1)))
+          remaining=$(( deadline - $(date +%s) ))
+          if [ "$remaining" -le 0 ]; then
+            break
+          fi
+          delay=$((45 * (attempt - 1)))
+          if [ "$delay" -gt "$remaining" ]; then
+            delay="$remaining"
+          fi
+          sleep "$delay"
         done
 
         rm -f "$tmp"
-        echo "btrfs-metadata-image-backup: $label failed after 5 attempts" >&2
+        echo "btrfs-metadata-image-backup: $label failed after $((attempt - 1)) attempts within its 40-minute window; previous images retained" >&2
         return 1
       }
 

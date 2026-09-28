@@ -7,6 +7,7 @@ import io
 import json
 import os
 import re
+import resource
 import shutil
 import subprocess
 import sys
@@ -911,7 +912,7 @@ root=pathlib.Path(os.environ['TMPDIR']); command=pathlib.Path(sys.argv[0]).name;
 with (root/'logs/commands').open('a') as log: log.write(json.dumps([command,*args])+'\\n')
 if command=='borg':
     if args[0]=='create' and (root/'fail-create').exists(): sys.exit(2)
-    if args[0]=='create' and any(arg.startswith('::polylogue-state-') for arg in args):
+    if args[0]=='create' and (root/'logs/append-hooks').exists() and any(arg.startswith('::polylogue-state-') for arg in args):
         if (root/'live-polylogue/hooks').is_dir():
             for relative in ('hooks/codex-session-live.jsonl', 'hooks/carriers/codex/2026-09-27/4242.ndjson'):
                 with (root/'live-polylogue'/relative).open('a') as stream:
@@ -1238,7 +1239,9 @@ else: sys.exit(1)
                 file.parent.mkdir(parents=True, exist_ok=True)
                 file.write_text(data)
             run("sinex")
+            (root / "logs/append-hooks").touch()
             run("polylogue")
+            (root / "logs/append-hooks").unlink()
             for repo, source, excluded in (
                 ("borg-sinex-blobs-v1", "live-cas/objects/ab/cdef", None),
                 (
@@ -1302,7 +1305,7 @@ else: sys.exit(1)
                     ).splitlines()
                     if path.endswith("/" + relative)
                 ]
-                self.assertEqual(len(members), 1)
+                self.assertEqual(members, [f"realm/state/polylogue/{relative}"])
                 archived = subprocess.check_output(
                     [
                         "borg",
@@ -1319,12 +1322,33 @@ else: sys.exit(1)
                     (root / "live-polylogue" / relative).read_text(),
                     original + '{"event":"written-during-borg-create"}\n',
                 )
+            # The first create deliberately races a live append. Seal that
+            # append, then compare two archives with an unchanged stage.
+            hook = next(
+                (root / "realm-data/state/cache/polylogue-backup-hooks").rglob(
+                    "codex-session-live.jsonl"
+                )
+            )
+            time.sleep(1.1)
+            run("polylogue")
+            stable_inode = hook.stat().st_ino
+            time.sleep(1.1)
+            before_io = resource.getrusage(resource.RUSAGE_CHILDREN).ru_inblock
+            started = time.monotonic()
+            run("polylogue")
+            print(
+                "unchanged Polylogue hook archive: "
+                f"elapsed_seconds={time.monotonic() - started:.3f} "
+                f"child_input_blocks={resource.getrusage(resource.RUSAGE_CHILDREN).ru_inblock - before_io}"
+            )
+            self.assertEqual(hook.stat().st_ino, stable_inode)
             shutil.rmtree(root / "live-polylogue/hooks")
+            time.sleep(1.1)
             run("polylogue")
             archive_names = subprocess.check_output(
                 ["borg", "list", "--short", polylogue_repo], env=env, text=True
             ).splitlines()
-            self.assertEqual(len(archive_names), 2)
+            self.assertEqual(len(archive_names), 4)
             empty_hooks_archive = archive_names[-1]
             empty_hook_members = [
                 path
