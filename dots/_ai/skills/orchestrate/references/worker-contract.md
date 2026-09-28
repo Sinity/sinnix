@@ -55,7 +55,10 @@ names, and exits with one result document.
 7. **Use the declared execution route.** Short focused checks may run in the
    foreground when the project permits them. Shared, resource-heavy or
    durable commands run through the project's declared AgentCTL operation;
-   do not reconstruct a host execution recipe in the worker.
+   do not reconstruct a host execution recipe in the worker. To wait for a job
+   you started, use `agentctl job wait <id>`; never run
+   `agentctl events tail` or any other watch of the shared event stream.
+   Supervision of other work belongs to the coordinator.
 
 8. **Exit with a clean tree and the result document.** The final message is
    the JSON below and nothing else; a worker whose result does not validate

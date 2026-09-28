@@ -21,7 +21,8 @@ extension point is a declared operation in the project's
 - `agentctl events tail --follow --project <project>`: every task start and
   finish and every backpressure change. Keep one watch per concern; on
   takeover, inspect the existing watches' argv before adding one, and stop a
-  watch you own when its purpose ends.
+  watch you own when its purpose ends. Coordinators only: a batch worker
+  waits on its own job with `agentctl job wait <id>`.
 - `agentctl job get|logs|result <id>`: one job (the ID is the pueue task ID).
 - `agentctl batch status <run>`: one run, joining its manifest
   (`~/.local/state/agentctl/runs/<run>.json`) with pueue state and the landing

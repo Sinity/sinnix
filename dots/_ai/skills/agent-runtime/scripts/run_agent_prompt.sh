@@ -326,6 +326,12 @@ pipeline_status() {
 case "$agent" in
 codex)
   codex_args=(exec -C "$workdir" --model "$model" --output-last-message "$last_file")
+  # A queued worker starts no MCP servers or plugins: the user config's
+  # servers cost ~200 MB of node/npm per worker and a code task needs none.
+  # AGENTCTL_AGENT_USER_CONFIG=1 opts one launch back into the user config.
+  if [[ ${AGENTCTL_AGENT_USER_CONFIG:-} != 1 ]]; then
+    codex_args+=(--ignore-user-config)
+  fi
   if [[ -n $output_schema ]]; then
     codex_args+=(--output-schema "$output_schema")
   fi

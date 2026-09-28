@@ -30,10 +30,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from . import (
     backpressure,
@@ -833,6 +834,45 @@ def _event_line(event: Mapping[str, Any]) -> str:
     return f"{stamp} {kind} {detail}"
 
 
+_TAIL_BLOCK_BYTES = 64 * 1024
+
+
+def _last_matching_lines(
+    handle: Any, count: int, wanted: Callable[[str], bool]
+) -> list[str]:
+    """The last ``count`` complete lines accepted by ``wanted``, oldest first.
+
+    Reads the file backwards in fixed blocks, so memory is bounded by
+    ``count`` lines plus one block regardless of the file's size.
+    """
+    if count <= 0:
+        return []
+    handle.seek(0, os.SEEK_END)
+    position = handle.tell()
+    found: list[str] = []
+    carry = b""
+    while position > 0 and len(found) < count:
+        step = min(_TAIL_BLOCK_BYTES, position)
+        position -= step
+        handle.seek(position)
+        block = handle.read(step) + carry
+        parts = block.split(b"\n")
+        # The first part may be a line cut by the block boundary; keep it for
+        # the next (earlier) block unless the file start was reached.
+        carry = parts[0] if position > 0 else b""
+        complete = parts[1:] if position > 0 else parts
+        for raw in reversed(complete):
+            if not raw:
+                continue
+            line = raw.decode("utf-8", errors="replace")
+            if wanted(line):
+                found.append(line)
+                if len(found) == count:
+                    break
+    found.reverse()
+    return found
+
+
 def _events(arguments: argparse.Namespace, config: Config, out: Output) -> int:
     spool = config.event_spool
     project = arguments.project
@@ -857,17 +897,25 @@ def _events(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         print(_event_line(event) if isinstance(event, Mapping) else line, flush=True)
 
     try:
-        with spool.open("r", encoding="utf-8", errors="replace") as handle:
-            lines = [line for line in handle if wanted(line)]
-            for line in lines[-arguments.lines :]:
+        with spool.open("rb") as handle:
+            # The spool is append-only and unbounded; memory stays at the
+            # requested line count however large it grows.
+            for line in _last_matching_lines(handle, arguments.lines, wanted):
                 show(line)
             if not arguments.follow:
                 return EXIT_OK
+            handle.seek(0, os.SEEK_END)
+            pending = b""
             while True:
-                line = handle.readline()
-                if not line:
+                chunk = handle.readline()
+                if not chunk:
                     time.sleep(FOLLOW_POLL_SECONDS)
                     continue
+                pending += chunk
+                if not pending.endswith(b"\n"):
+                    continue
+                line = pending.decode("utf-8", errors="replace")
+                pending = b""
                 if wanted(line):
                     show(line)
     except FileNotFoundError:

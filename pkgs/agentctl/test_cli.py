@@ -427,6 +427,43 @@ def test_events_tail_prints_the_last_lines_filtered_by_project(
     assert capsys.readouterr().out.strip().startswith('{"kind":"backpressure"')
 
 
+def test_last_matching_lines_match_a_full_scan_across_block_boundaries(
+    tmp_path: Path,
+) -> None:
+    # Lines of varied length straddle the 64 KiB read blocks; the backward
+    # reader must agree exactly with a forward scan, including the file's
+    # first line and a missing trailing newline.
+    lines = [f'{{"n":{i},"project":"{"a" if i % 3 else "b"}","pad":"{"x" * (i % 997)}"}}' for i in range(4000)]
+    spool = tmp_path / "events.jsonl"
+    spool.write_text("\n".join(lines))
+    for count in (1, 7, 1500, 5000):
+        for wanted in (lambda line: True, lambda line: '"project":"b"' in line):
+            with spool.open("rb") as handle:
+                got = cli._last_matching_lines(handle, count, wanted)
+            expected = [line for line in lines if wanted(line)][-count:]
+            assert got == expected
+
+
+def test_events_tail_memory_is_bounded_by_the_requested_lines(tmp_path: Path) -> None:
+    # Anti-vacuity: reading the whole spool (the former list comprehension)
+    # holds the file's size in memory; the bound below is ~1/10 of it.
+    import tracemalloc
+
+    spool = tmp_path / "events.jsonl"
+    record = '{"kind":"queue-task","label":"fixture:check","phase":"finished","pad":"' + "x" * 400 + '"}\n'
+    with spool.open("w") as handle:
+        for _ in range(50_000):
+            handle.write(record)
+    size = spool.stat().st_size
+    tracemalloc.start()
+    with spool.open("rb") as handle:
+        got = cli._last_matching_lines(handle, 40, lambda line: True)
+    _, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+    assert len(got) == 40
+    assert peak < size // 10, (peak, size)
+
+
 def test_a_missing_spool_is_reported(
     cli_config: Config, capsys: pytest.CaptureFixture[str]
 ) -> None:
