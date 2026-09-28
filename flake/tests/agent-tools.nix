@@ -724,7 +724,7 @@ in
             assert 'provider: openai-codex' in config
             assert 'provider: gemini' in config
             assert 'mcp_servers:' in config
-            for name in ('context7', 'github', 'polylogue', 'lynchpin', 'sinex'):
+            for name in ('context7', 'github', 'lynchpin', 'sinex'):
                 assert f'{name}:' in config, name
             assert 'external_dirs:' in config
             assert 'observability/nemo_relay' in config
@@ -812,7 +812,6 @@ in
             import json
             expected = json.loads('${expectedCodexProfileServersJson}')
             assert default == set(expected['default'])
-            assert 'POLYLOGUE_MCP_WRITE_ENABLED' not in system_config['mcp_servers']['polylogue'].get('env', {})
 
             # Alternate-backend profiles must layer a provider override while
             # retaining the full MCP surface; model names remain ordinary config.
@@ -829,10 +828,6 @@ in
             assert local['model'] == 'private-test-model'
             assert local['hooks']['state']['test-hook']['trusted_hash'] == 'sha256:test-private-trust'
             assert 'unmanaged' not in local['mcp_servers']
-            for data in (local, deepseek):
-                polylogue = data['mcp_servers']['polylogue']
-                assert 'args' not in polylogue
-                assert polylogue.get('env', {}).get('POLYLOGUE_MCP_WRITE_ENABLED') == '1'
             PYCODE
 
             # Same registry-derived contract as the claude configs above:
