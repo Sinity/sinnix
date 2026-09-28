@@ -144,6 +144,36 @@ def test_binary_chunks_reassemble_registered_artifact(tmp_path: Path) -> None:
     assert b"".join(parts) == original
 
 
+def test_registered_artifact_is_bound_to_snapshot_not_mutable_source(tmp_path: Path) -> None:
+    """Fails if a source edit silently changes bytes returned by an existing ref."""
+    rt = runtime(tmp_path)
+    artifact_id = register(rt, "mutable.txt", b"registered", "note")
+    source = Path(rt.artifacts._metadata(artifact_id)["source"])
+    source.write_bytes(b"changed source")
+    result = call(
+        rt,
+        "artifacts.read",
+        {"target": {"artifact_id": artifact_id}, "representation": "binary"},
+        BY_NAME,
+    )
+    assert base64.b64decode(result["data"]["base64"]) == b"registered"
+
+
+def test_mutated_artifact_snapshot_is_refused(tmp_path: Path) -> None:
+    """Fails if altered retained bytes are served under the registered digest."""
+    rt = runtime(tmp_path)
+    artifact_id = register(rt, "tampered.txt", b"registered", "note")
+    metadata = rt.artifacts._metadata(artifact_id)
+    Path(metadata["_content"]).write_bytes(b"tampered!")
+    result = call(
+        rt,
+        "artifacts.read",
+        {"target": {"artifact_id": artifact_id}, "representation": "binary"},
+        BY_NAME,
+    )
+    assert result["error"]["code"] == "invalid_request"
+
+
 def test_filtered_listing_continues_immutable_snapshot(tmp_path: Path) -> None:
     rt = runtime(tmp_path)
     expected = {register(rt, f"note-{i}.txt", b"note", "note") for i in range(3)}
