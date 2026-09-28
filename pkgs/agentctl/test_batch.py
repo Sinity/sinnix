@@ -294,6 +294,10 @@ class FakeGit:
         if verb == "update-ref" and arguments[1] == "-d":
             self.branches.pop(arguments[2].removeprefix("refs/heads/"), None)
             return ""
+        if verb == "symbolic-ref":
+            # The project root is not a checkout of the base branch here, so a
+            # landing's main-checkout fast-forward is skipped.
+            return ""
         if verb == "push":
             if self.push_rejects:
                 self.push_rejects -= 1
