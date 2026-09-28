@@ -63,7 +63,12 @@ class NativeOutputTest(unittest.TestCase):
             "context7": {"type": "http", "url": "https://example.test/mcp"},
             "polylogue": {"command": "mcp-polylogue"},
         }}))
-        self.executable("codex", 'printf "%s\\n" "$@" > "$CAPTURE_ARGS"\n')
+        self.executable(
+            "codex",
+            'if [[ $1 == mcp ]]; then '
+            'printf \'[{"name":"context7"},{"name":"polylogue"},{"name":"node_repl"}]\\n\'; '
+            'exit 0; fi\nprintf "%s\\n" "$@" > "$CAPTURE_ARGS"\n',
+        )
         self.executable("claude", 'printf "%s\\n" "$@" > "$CAPTURE_ARGS"\n'
                         'previous=""; for arg in "$@"; do '
                         'if [[ $previous == --mcp-config ]]; then cp "$arg" "$CAPTURE_CONFIG"; fi; '
@@ -89,6 +94,7 @@ class NativeOutputTest(unittest.TestCase):
                     self.assertIn("--ignore-user-config", args)
                     self.assertIn('mcp_servers.polylogue.enabled=false', args)
                     self.assertIn('mcp_servers.context7.enabled=false', args)
+                    self.assertIn('mcp_servers.node_repl={"command"="false","enabled"=false}', args)
                     self.assertEqual('"enabled"=true' in args, bool(names))
                 else:
                     self.assertIn("--strict-mcp-config", args)

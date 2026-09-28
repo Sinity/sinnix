@@ -337,7 +337,7 @@ codex)
   selected_mcp_file="$(mktemp "${last_file}.mcp-args.XXXXXX")" || exit 1
   trap 'rm -f -- "$selected_mcp_file"' EXIT
   python3 -c '
-import json, os, pathlib, re, sys, tomllib
+import json, os, pathlib, re, subprocess, sys, tomllib
 source = pathlib.Path.home() / ".codex/local.config.toml"
 servers = tomllib.loads(source.read_text()).get("mcp_servers", {}) if len(sys.argv) > 1 else {}
 system = pathlib.Path(os.environ.get("AGENTCTL_CODEX_SYSTEM_CONFIG", "/etc/codex/config.toml"))
@@ -346,6 +346,10 @@ project_paths = [parent / ".codex/config.toml" for parent in (pathlib.Path.cwd()
 for path in (system, *project_paths):
     if path.is_file():
         inherited.update(tomllib.loads(path.read_text()).get("mcp_servers", {}))
+listed = json.loads(subprocess.check_output(["codex", "mcp", "list", "--json"]))
+if not isinstance(listed, list):
+    sys.exit("Codex MCP list is not an array")
+configured = {row.get("name") for row in listed if isinstance(row, dict)}
 def toml(value):
     if isinstance(value, dict):
         return "{" + ",".join(json.dumps(k) + "=" + toml(v) for k,v in value.items()) + "}"
@@ -355,10 +359,14 @@ def toml(value):
 def emit(*args):
     for arg in args:
         sys.stdout.buffer.write(arg.encode() + b"\0")
-for name in sorted(inherited):
-    if not re.fullmatch(r"[A-Za-z0-9_-]+", name):
-        sys.exit("Codex MCP config has an invalid server name")
-    emit("-c", "mcp_servers." + name + ".enabled=false")
+all_names = inherited | configured
+if any(not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", name) for name in all_names):
+    sys.exit("Codex MCP config has an invalid server name")
+for name in sorted(all_names):
+    if name in inherited:
+        emit("-c", "mcp_servers." + name + ".enabled=false")
+    else:
+        emit("-c", "mcp_servers." + name + "=" + toml({"command": "false", "enabled": False}))
 for name in sys.argv[1:]:
     if name not in servers:
         sys.exit("unknown Codex MCP server: " + name)
