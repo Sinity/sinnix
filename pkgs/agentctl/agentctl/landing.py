@@ -136,91 +136,138 @@ def _worker_results(run: Run) -> list[dict[str, Any]]:
     return [dict(worker["result"]) for worker in run.workers if worker.get("result")]
 
 
-def _closure_verdicts(run: Run, beads: Beads) -> tuple[dict[str, bool], dict[str, str]]:
+class ClosureRefusal(BatchError):
+    """A typed reason a bead stays open after its batch landed.
+
+    ``reason`` separates the three things closure depends on: the executed
+    evidence (``no_binding``, ``unsatisfied``), the semantic task contract
+    (``acceptance_changed``, ``contract_changed``) and the owner row at close
+    time (``unobservable``, ``claim_moved``, ``revision_unusable``).  A row
+    revision that only moved for notes, status or claims is none of these: it
+    is re-read and becomes the close precondition.
+    """
+
+    def __init__(self, reason: str, message: str) -> None:
+        super().__init__(message)
+        self.reason = reason
+
+
+def _dispatch_binding(
+    worker: Mapping[str, Any], bead_id: str
+) -> Mapping[str, Any] | None:
+    for row in worker.get("evidence_binding") or ():
+        if isinstance(row, Mapping) and row.get("id") == bead_id:
+            return row
+    return None
+
+
+def _contract_drift(
+    binding: Mapping[str, Any], current: Mapping[str, Any]
+) -> ClosureRefusal | None:
+    """The semantic contract comparison; the row revision is deliberately absent."""
+    if any(
+        current.get(key) != binding.get(key)
+        for key in ("acceptance_digest", "criteria")
+    ):
+        return ClosureRefusal("acceptance_changed", "acceptance changed after dispatch")
+    if not isinstance(binding.get("semantic_digest"), str) or current.get(
+        "semantic_digest"
+    ) != binding.get("semantic_digest"):
+        return ClosureRefusal(
+            "contract_changed", "task contract changed after dispatch"
+        )
+    return None
+
+
+def _closure_verdicts(
+    run: Run, beads: Beads
+) -> tuple[dict[str, bool], dict[str, ClosureRefusal]]:
     """Closure eligibility from the immutable dispatch snapshot.
 
     Publication may preserve a legacy worker result, but it cannot turn that
     worker's free-form criteria into task completion.  A new strict dispatch
-    records a v2 binding; its exact criterion snapshot must still be current
-    when landing decides whether to close the Bead.
+    records a v2 binding; its semantic contract must still be current when
+    landing decides whether to close the Bead.  The owner row revision is not
+    compared here: ``_close_revision`` re-reads it as the close precondition.
     """
     claimed = results.satisfied_beads(_worker_results(run))
     verdicts: dict[str, bool] = {}
-    residuals: dict[str, str] = {}
+    residuals: dict[str, ClosureRefusal] = {}
     for worker in run.workers:
         result = worker.get("result")
-        rows = worker.get("evidence_binding")
-        bindings = {
-            row.get("id"): row
-            for row in rows or ()
-            if isinstance(row, Mapping) and isinstance(row.get("id"), str)
-        }
         for bead_id in worker["beads"]:
-            binding = bindings.get(bead_id)
+            binding = _dispatch_binding(worker, bead_id)
+            verdicts[bead_id] = False
             if (
                 not isinstance(result, Mapping)
-                or not isinstance(binding, Mapping)
+                or binding is None
                 or binding.get("v2_available") is not True
                 or result.get("schema_version") != results.RESULT_SCHEMA_VERSION
             ):
-                verdicts[bead_id] = False
-                residuals[bead_id] = "no closure-eligible dispatch acceptance binding"
+                residuals[bead_id] = ClosureRefusal(
+                    "no_binding", "no closure-eligible dispatch acceptance binding"
+                )
                 continue
             try:
                 current = prompts.evidence_binding(beads.show(bead_id))
             except (BatchError, PromptError) as error:
-                verdicts[bead_id] = False
-                residuals[bead_id] = (
-                    f"current acceptance could not be observed: {error}"
+                residuals[bead_id] = ClosureRefusal(
+                    "unobservable", f"current acceptance could not be observed: {error}"
                 )
                 continue
-            if any(
-                current.get(key) != binding.get(key)
-                for key in ("acceptance_digest", "criteria")
-            ):
-                verdicts[bead_id] = False
-                residuals[bead_id] = "acceptance changed after dispatch"
-                continue
-            if not isinstance(binding.get("semantic_digest"), str) or current.get(
-                "semantic_digest"
-            ) != binding.get("semantic_digest"):
-                verdicts[bead_id] = False
-                residuals[bead_id] = "task contract changed after dispatch"
-                continue
-            if claimed.get(bead_id):
-                verdicts[bead_id] = True
+            drift = _contract_drift(binding, current)
+            if drift is not None:
+                residuals[bead_id] = drift
+            elif not claimed.get(bead_id):
+                residuals[bead_id] = ClosureRefusal(
+                    "unsatisfied", "dispatch acceptance was not fully satisfied"
+                )
             else:
-                verdicts[bead_id] = False
-                residuals[bead_id] = "dispatch acceptance was not fully satisfied"
+                verdicts[bead_id] = True
     return verdicts, residuals
 
 
 def _close_revision(run: Run, beads: Beads, bead_id: str) -> int:
-    """Re-observe semantic eligibility and return the exact owner CAS token."""
+    """Re-observe the row and return the exact owner CAS token.
+
+    The row may have moved since dispatch for notes or status; that is
+    re-observation, not invalidation.  Closing still requires the semantic
+    contract to be unchanged and the run to hold the claim it took at start.
+    """
     worker = next(worker for worker in run.workers if bead_id in worker["beads"])
-    bindings = worker.get("evidence_binding") or ()
-    binding = next(
-        (
-            row
-            for row in bindings
-            if isinstance(row, Mapping) and row.get("id") == bead_id
-        ),
-        None,
-    )
-    if not isinstance(binding, Mapping):
-        raise BatchError("no closure-eligible dispatch acceptance binding")
-    current = prompts.evidence_binding(beads.show(bead_id))
-    if any(
-        current.get(key) != binding.get(key)
-        for key in ("acceptance_digest", "criteria", "semantic_digest")
-    ):
-        raise BatchError("task contract changed before close")
+    binding = _dispatch_binding(worker, bead_id)
+    if binding is None:
+        raise ClosureRefusal(
+            "no_binding", "no closure-eligible dispatch acceptance binding"
+        )
+    try:
+        bead = beads.show(bead_id)
+        current = prompts.evidence_binding(bead)
+    except (BatchError, PromptError) as error:
+        raise ClosureRefusal(
+            "unobservable", f"current task could not be observed: {error}"
+        ) from error
+    drift = _contract_drift(binding, current)
+    if drift is not None:
+        raise ClosureRefusal(drift.reason, f"{drift} before close")
+    assignee = bead.get("assignee")
+    if assignee != run.actor:
+        raise ClosureRefusal(
+            "claim_moved",
+            f"task is assigned to {assignee or 'nobody'}, not the run actor {run.actor}",
+        )
     revision = current.get("bead_revision")
     if not isinstance(revision, str) or not revision.isdecimal():
-        raise BatchError("current owner revision is not an exact decimal integer")
+        raise ClosureRefusal(
+            "revision_unusable",
+            "current owner revision is not an exact decimal integer",
+        )
     expected_version = int(revision, 10)
     if not 0 <= expected_version < 2**64:
-        raise BatchError("current owner revision is outside the unsigned 64-bit range")
+        raise ClosureRefusal(
+            "revision_unusable",
+            "current owner revision is outside the unsigned 64-bit range",
+        )
     return expected_version
 
 
@@ -1449,6 +1496,9 @@ def _accept(
     # policy, the candidate itself under the master policy.
     landed = str(published.get("merge_commit") or candidate)
     for bead_id in run.beads:
+        refusal = closure_residuals.get(bead_id) or ClosureRefusal(
+            "no_binding", "no closure evidence"
+        )
         if verdicts.get(bead_id):
             try:
                 expected_version = _close_revision(run, beads, bead_id)
@@ -1462,27 +1512,33 @@ def _accept(
                     "state": "closed",
                     "evidence": f"batch {run.run_id} {landed}",
                 }
+                continue
+            except ClosureRefusal as error:
+                refusal = error
             except BatchError as error:
                 beads_state[bead_id] = {
                     "state": "open",
+                    "reason": "close_failed",
                     "evidence": f"close failed: {error}",
                 }
-        else:
-            residual = (
-                f"batch {run.run_id} landed {landed}; "
-                f"{closure_residuals.get(bead_id, 'no closure evidence')}"
-            )
-            try:
-                beads.comment(bead_id, residual, actor=run.actor)
-            except BatchError as error:
-                residual += f" (comment failed: {error})"
-            # The batch is over; a claim it leaves behind only hides the bead
-            # from the next dispatch.
+                continue
+        residual = f"batch {run.run_id} landed {landed}; {refusal}"
+        try:
+            beads.comment(bead_id, residual, actor=run.actor)
+        except BatchError as error:
+            residual += f" (comment failed: {error})"
+        # The batch is over; a claim it leaves behind only hides the bead
+        # from the next dispatch.  A claim another actor took is theirs.
+        if refusal.reason != "claim_moved":
             try:
                 beads.unclaim(bead_id, actor=run.actor)
             except BatchError as error:
                 residual += f" (unclaim failed: {error})"
-            beads_state[bead_id] = {"state": "open", "evidence": residual}
+        beads_state[bead_id] = {
+            "state": "open",
+            "reason": refusal.reason,
+            "evidence": residual,
+        }
     acceptance = {
         "candidate_sha": candidate,
         "verify_run": dict(verify_run),

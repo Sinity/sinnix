@@ -990,13 +990,27 @@ def test_landing_keeps_a_bead_open_when_its_acceptance_changes(
     landed = harness.land(run["run_id"])
     state = landed["acceptance"]["beads"]["fx-solo"]
     assert state["state"] == "open"
+    assert state["reason"] == "acceptance_changed"
     assert "acceptance changed after dispatch" in state["evidence"]
+    assert not harness.beads.closed
 
 
-def test_landing_closes_after_administrative_revision_drift(harness: Harness) -> None:
+@pytest.mark.parametrize(
+    "edit",
+    [
+        {"notes": "coordinator progress note"},
+        {"status": "blocked"},
+        {"priority": 0, "labels": ["triaged"]},
+    ],
+)
+def test_landing_closes_after_administrative_revision_drift(
+    harness: Harness, edit: dict[str, Any]
+) -> None:
+    """Breaks if the row revision rejoins the contract comparison: an edit that
+    moves only the row must be re-read as the close precondition, not refused."""
     run = prepared_run(harness, "fx-solo")
     harness.beads.beads["fx-solo"]["revision"] = 7773497739344011640
-    harness.beads.beads["fx-solo"]["notes"] = "coordinator progress note"
+    harness.beads.beads["fx-solo"].update(edit)
 
     landed = harness.land(run["run_id"])
 
@@ -1016,6 +1030,7 @@ def test_landing_refuses_scope_drift_as_a_task_contract_change(
 
     state = landed["acceptance"]["beads"]["fx-solo"]
     assert state["state"] == "open"
+    assert state["reason"] == "contract_changed"
     assert "task contract changed after dispatch" in state["evidence"]
     assert "acceptance changed after dispatch" not in state["evidence"]
 
@@ -1038,6 +1053,24 @@ def test_landing_refuses_design_and_dependency_drift(
     state = landed["acceptance"]["beads"]["fx-solo"]
     assert state["state"] == "open"
     assert "task contract changed after dispatch" in state["evidence"]
+
+
+@pytest.mark.parametrize("holder", ["other-agent", None])
+def test_landing_refuses_to_close_a_bead_the_run_no_longer_holds(
+    harness: Harness, holder: str | None
+) -> None:
+    """Breaks if closure stops checking assignee == run actor: a bead another
+    actor claimed (or that was released) mid-run is not the run's to close."""
+    run = prepared_run(harness, "fx-solo")
+    harness.beads.beads["fx-solo"]["assignee"] = holder
+
+    landed = harness.land(run["run_id"])
+
+    state = landed["acceptance"]["beads"]["fx-solo"]
+    assert state["state"] == "open"
+    assert state["reason"] == "claim_moved"
+    assert not harness.beads.closed
+    assert harness.beads.beads["fx-solo"]["assignee"] == holder
 
 
 def test_owner_close_cas_refuses_a_revision_move_after_verdict(
