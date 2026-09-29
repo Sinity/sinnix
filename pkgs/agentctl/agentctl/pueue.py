@@ -278,16 +278,76 @@ def _selected_tasks(group: str, query: str) -> dict[int, Task]:
     return {task.task_id: task for task in parsed}
 
 
-def task_from_log(task_id: int) -> Task | None:
-    """Find one terminal task without loading the daemon's task history."""
+def task(task_id: int) -> Task | None:
+    """One task by id, without loading the daemon's task history.
+
+    `pueue log` publishes the same task record `status` does for any task,
+    queued, running or done, and an empty object for an id it does not hold.
+    """
     document = _decode(_run(["log", "--json", "--lines", "0", str(task_id)]), "log")
     row = document.get(str(task_id)) if isinstance(document, Mapping) else None
     entry = row.get("task") if isinstance(row, Mapping) else None
     return Task.from_entry(entry) if isinstance(entry, Mapping) else None
 
 
-def task(task_id: int) -> Task | None:
-    return tasks().get(task_id)
+def tasks_by_command(fragment: str) -> dict[int, Task]:
+    """Tasks whose command contains ``fragment``: a filter pueue applies itself.
+
+    Only the matching rows cross the socket, so looking a launch up by its
+    reference costs one small response, not the full history.
+    """
+    document = _decode(_run(["status", "--json", f"command%={fragment}"]), "status")
+    entries = document.get("tasks") if isinstance(document, Mapping) else None
+    if not isinstance(entries, Mapping):
+        raise PueueError("pueue status published no tasks")
+    parsed = (Task.from_entry(entry) for entry in entries.values())
+    return {task.task_id: task for task in parsed}
+
+
+# The unfinished states `pueue status` filters by; `Done` is everything else.
+# Read in the order tasks move through them (a stash is enqueued, a queued
+# task starts), so a task that moves between two reads is seen in its later
+# state rather than missed.
+LIVE_STATUSES = ("stashed", "paused", "queued", "running")
+
+
+def live() -> Status:
+    """Every unfinished task and every group, without the terminal history.
+
+    One filtered status request per unfinished state; a later read of a task
+    replaces an earlier one. Each answer carries the groups too; the last one
+    read is returned with the tasks.
+    """
+    found: dict[int, Task] = {}
+    groups: dict[str, dict[str, Any]] = {}
+    for state in LIVE_STATUSES:
+        document = _decode(_run(["status", "--json", f"status={state}"]), "status")
+        if not isinstance(document, Mapping):
+            raise PueueError("pueue status did not print an object")
+        entries = document.get("tasks")
+        raw_groups = document.get("groups")
+        if not isinstance(entries, Mapping) or not isinstance(raw_groups, Mapping):
+            raise PueueError("pueue status published no tasks or groups")
+        for entry in entries.values():
+            parsed = Task.from_entry(entry)
+            found[parsed.task_id] = parsed
+        groups = {
+            str(name): dict(detail)
+            for name, detail in raw_groups.items()
+            if isinstance(detail, Mapping)
+        }
+    return Status(found, groups)
+
+
+def start(task_id: int) -> None:
+    """Start one queued task now, whatever its group's width.
+
+    The one admission pueue lets a client force; promotion uses it so a pool
+    whose slots are held by long-running tasks still admits new ones. pueue
+    refuses a task that is no longer queued, including one its own scheduler
+    started a moment earlier.
+    """
+    _run(["start", str(task_id)])
 
 
 def enqueue(task_id: int) -> None:

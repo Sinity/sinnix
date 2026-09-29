@@ -502,6 +502,7 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
                 started["job_id"],
                 timeout_seconds=arguments.timeout_seconds,
                 reference=started.get("reference"),
+                config=config,
             )
         out.write(started, out.job_line(started))
         if started.get("terminal"):
@@ -521,6 +522,7 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
                 fired["job_id"],
                 timeout_seconds=arguments.timeout_seconds,
                 reference=fired.get("reference"),
+                config=config,
             )
             fired = {**fired, **waited}
         text = (
@@ -618,6 +620,7 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
             arguments.job_id,
             timeout_seconds=arguments.timeout_seconds,
             reference=arguments.reference,
+            config=config,
         )
         out.read(
             waited,

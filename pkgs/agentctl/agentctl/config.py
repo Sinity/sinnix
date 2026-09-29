@@ -39,6 +39,10 @@ class PoolPolicy:
 
     parallel: int
     exclusive_with: tuple[str, ...] = ()
+    # A running task older than this stops counting against the width: when
+    # every slot is held by such tasks, a queued task is started anyway
+    # (`launch.promote_overdue`). None keeps the width absolute.
+    promote_after_seconds: int | None = None
 
 
 @dataclass(frozen=True)
@@ -131,7 +135,11 @@ def _pools(value: Any) -> dict[str, PoolPolicy]:
         if not isinstance(name, str) or POOL_NAME.fullmatch(name) is None:
             raise ConfigError(f"pools has an invalid pueue group name: {name!r}")
         if isinstance(declaration, Mapping):
-            unknown = set(declaration) - {"parallel", "exclusive_with"}
+            unknown = set(declaration) - {
+                "parallel",
+                "exclusive_with",
+                "promote_after_seconds",
+            }
             if unknown:
                 raise ConfigError(
                     f"pools.{name} declares unknown field(s): "
@@ -143,9 +151,17 @@ def _pools(value: Any) -> dict[str, PoolPolicy]:
                 for pool in excluded
             ):
                 raise ConfigError(f"pools.{name}.exclusive_with must name valid pools")
+            promote = declaration.get("promote_after_seconds")
+            if promote is not None and (
+                not isinstance(promote, int) or isinstance(promote, bool) or promote < 1
+            ):
+                raise ConfigError(
+                    f"pools.{name}.promote_after_seconds must be a positive integer"
+                )
             parsed[name] = PoolPolicy(
                 parallel=_parallel(name, declaration.get("parallel")),
                 exclusive_with=tuple(excluded),
+                promote_after_seconds=promote,
             )
         else:
             parsed[name] = PoolPolicy(parallel=_parallel(name, declaration))

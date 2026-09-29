@@ -20,6 +20,7 @@ import subprocess
 import time
 import uuid
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Iterator, Mapping, Sequence
 
@@ -34,7 +35,7 @@ from .checkout import (
     release_candidate_checkout,
     remove_candidate_tree,
 )
-from .config import Config
+from .config import Config, PoolPolicy
 from .launch_input import scratch_path, secret_environment, write_input
 from .limits import CALL_TIMEOUT_SECONDS, SHORT_ID, SYSTEMCTL_TIMEOUT_SECONDS
 from .manifest import BatchRefusal
@@ -418,12 +419,239 @@ def enqueue(
                 config.event_spool,
                 {"kind": "pool-hold", "action": "held", "task_id": task_id, **hold},
             )
+    promote_overdue(config, group)
     task = pueue.task(task_id)
     return (
         job_view(task)
         if task is not None
         else {"job_id": task_id, "label": label, "reference": reference}
     )
+
+
+def _age_seconds(stamp: str | None, now: datetime) -> float | None:
+    if not stamp:
+        return None
+    try:
+        moment = datetime.fromisoformat(stamp)
+    except ValueError:
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    return max(0.0, (now - moment).total_seconds())
+
+
+def _overdue(task: Task, horizon: int | None, now: datetime) -> bool:
+    """Whether a running task has outlived its pool's promotion horizon."""
+    if horizon is None or task.status != "Running":
+        return False
+    age = _age_seconds(task.started_at, now)
+    return age is not None and age >= horizon
+
+
+def promote_overdue(
+    config: Config, group: str, *, now: datetime | None = None
+) -> list[int]:
+    """Start queued tasks whose only obstacle is long-running work in the pool.
+
+    A pool declaring ``promote_after_seconds`` counts only the running tasks
+    younger than that against its width; older ones have shown they are long
+    work, and they keep running untouched. When every slot is held by such
+    tasks, the oldest queued tasks without dependencies are force-started
+    until the young ones fill the width again. Every start is an event in the
+    spool. Returns the started task ids.
+    """
+    policy = config.pools.get(group)
+    horizon = policy.promote_after_seconds if policy is not None else None
+    if policy is None or horizon is None:
+        return []
+    try:
+        started, overdue = _promote(config, group, policy, horizon, now)
+    except (PueueError, JobError) as error:
+        # Promotion only shortens a wait, so its failure fails no launch or
+        # read: the task stays queued, its queue state says what holds it,
+        # and the spool records why it was not admitted.
+        append_event(
+            config.event_spool,
+            {
+                "kind": "pool-promotion",
+                "action": "failed",
+                "pool": group,
+                "error": str(error),
+                "at": manifest.now(),
+            },
+        )
+        return []
+    if started:
+        append_event(
+            config.event_spool,
+            {
+                "kind": "pool-promotion",
+                "action": "started",
+                "pool": group,
+                "started": started,
+                "overdue": overdue,
+                "promote_after_seconds": horizon,
+                "at": manifest.now(),
+            },
+        )
+    return started
+
+
+def _promote(
+    config: Config,
+    group: str,
+    policy: PoolPolicy,
+    horizon: int,
+    now: datetime | None,
+) -> tuple[list[int], list[int]]:
+    with admission_lock(config):
+        live = pueue.live()
+        if str((live.groups.get(group) or {}).get("status") or "") != "Running":
+            # A paused pool stays closed; promotion never reopens it.
+            return [], []
+        moment = now or datetime.now(UTC)
+        members = [task for task in live.tasks.values() if task.group == group]
+        running = [task for task in members if task.status == "Running"]
+        if len(running) < policy.parallel:
+            # pueue itself still has a free slot and will start the next task.
+            return [], []
+        young = [task for task in running if not _overdue(task, horizon, moment)]
+        queued = sorted(
+            (
+                task
+                for task in members
+                if task.status == "Queued" and not task.dependencies
+            ),
+            key=lambda task: task.task_id,
+        )
+        admitted = queued[: max(0, policy.parallel - len(young))]
+        started: list[int] = []
+        for candidate in admitted:
+            try:
+                pueue.start(candidate.task_id)
+            except PueueError:
+                # pueue refuses a task that already left the queue: its own
+                # scheduler started it, or it was removed. Anything else is
+                # a failure of the daemon, raised to the caller's handler.
+                current = pueue.task(candidate.task_id)
+                if current is not None and current.status == "Queued":
+                    raise
+                continue
+            started.append(candidate.task_id)
+        if not started:
+            return [], []
+    overdue = sorted(
+        task.task_id for task in running if _overdue(task, horizon, moment)
+    )
+    return started, overdue
+
+
+def queue_state(
+    config: Config,
+    groups: Sequence[str] | None = None,
+    *,
+    now: datetime | None = None,
+    live: pueue.Status | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Each group's occupancy from the unfinished tasks alone.
+
+    What a caller needs to tell "queued behind X" from "hung": the width,
+    who holds each slot and for how long, what is waiting and since when.
+    Running tasks past a promoting pool's horizon are marked ``promoted``:
+    they no longer hold a slot against new work.
+    """
+    live = live or pueue.live()
+    moment = now or datetime.now(UTC)
+    selected = sorted(live.groups) if groups is None else list(groups)
+    states: dict[str, dict[str, Any]] = {}
+    for name in selected:
+        detail = live.groups.get(name) or {}
+        policy = config.pools.get(name)
+        horizon = policy.promote_after_seconds if policy is not None else None
+        members = sorted(
+            (task for task in live.tasks.values() if task.group == name),
+            key=lambda task: task.task_id,
+        )
+
+        def row(task: Task, since: str | None) -> dict[str, Any]:
+            age = _age_seconds(since, moment)
+            document = _launch_input(config, task) or {}
+            argv = document.get("argv")
+            return {
+                "job_id": task.task_id,
+                "label": task.label,
+                "reference": launch_reference(task),
+                # What the slot is doing, from the launch input the job owns.
+                "argv": [str(word) for word in argv]
+                if isinstance(argv, list)
+                else None,
+                "since": since,
+                "seconds": int(age) if age is not None else None,
+            }
+
+        running = [
+            {**row(task, task.started_at), "promoted": _overdue(task, horizon, moment)}
+            for task in members
+            if task.status == "Running"
+        ]
+        queued = [
+            {**row(task, task.enqueued_at), "dependencies": list(task.dependencies)}
+            for task in members
+            if task.status == "Queued"
+        ]
+        waits = [entry["seconds"] for entry in queued if entry["seconds"] is not None]
+        states[name] = {
+            "group": name,
+            "known": name in live.groups,
+            "status": str(detail.get("status") or "") or None,
+            "parallel": int(detail.get("parallel_tasks") or 0) or None,
+            "promote_after_seconds": horizon,
+            "running": running,
+            "running_count": len(running),
+            "holding_count": sum(1 for entry in running if not entry["promoted"]),
+            "queued": queued,
+            "queued_count": len(queued),
+            "held_count": sum(
+                1 for task in members if task.status in {"Stashed", "Paused"}
+            ),
+            "oldest_queued_seconds": max(waits) if waits else None,
+        }
+    return states
+
+
+def job_queue(
+    config: Config, job: Mapping[str, Any], *, now: datetime | None = None
+) -> dict[str, Any] | None:
+    """Where one unfinished job stands: its group's occupancy and its place.
+
+    ``job`` is a job view. A terminal job has no queue. A queued job names the
+    jobs ahead of it, the dependencies it waits for, and the running jobs that
+    hold the slots it needs; a running job is reported with its group only.
+    """
+    group = job.get("group")
+    if job.get("terminal") or not isinstance(group, str) or not group:
+        return None
+    state = queue_state(config, [group], now=now)[group]
+    queued = job.get("phase") == "queued"
+    job_id = job.get("job_id")
+    ahead = (
+        [
+            entry["job_id"]
+            for entry in state["queued"]
+            if isinstance(job_id, int) and entry["job_id"] < job_id
+        ]
+        if queued
+        else []
+    )
+    return {
+        **state,
+        "position": len(ahead) + 1 if queued else None,
+        "ahead": ahead,
+        "waiting_for": list(job.get("dependencies") or []) if queued else [],
+        "occupied_by": [entry for entry in state["running"] if not entry["promoted"]]
+        if queued
+        else [],
+    }
 
 
 @contextmanager
@@ -1205,8 +1433,22 @@ def _task(task_id: int) -> Task:
     return task
 
 
+def locate(task_id: int, reference: str | None = None) -> Task | None:
+    """The task carrying this job, read without the queue's whole history.
+
+    The id is tried first, since a queue is rarely reordered; a reference
+    that does not match it is looked up by the one command that names its
+    launch input.
+    """
+    task = pueue.task(task_id) if isinstance(task_id, int) and task_id >= 0 else None
+    if reference is None or (task is not None and launch_reference(task) == reference):
+        return task
+    matches = pueue.tasks_by_command(f"{reference}.json")
+    return find_task(matches, task_id, reference)
+
+
 def _read_task(config: Config, task_id: int, reference: str | None) -> Task:
-    task = find_task(pueue.tasks(), task_id, reference)
+    task = locate(task_id, reference)
     if task is not None:
         return task
     if reference is None or not REFERENCE.fullmatch(reference):
@@ -1289,6 +1531,8 @@ def get_job(
     )
     if config is None:
         return job_view(task)
+    if task.status == "Queued" and promote_overdue(config, task.group):
+        task = locate(task.task_id, launch_reference(task)) or task
     return _job_detail(config, task, attempt, attempt_offset, attempt_limit)
 
 
@@ -2161,7 +2405,7 @@ def addressed(task_id: int, reference: str | None = None) -> Task:
     """
     if reference is None:
         return _task(task_id)
-    task = find_task(pueue.tasks(), task_id, reference)
+    task = locate(task_id, reference)
     if task is None:
         raise JobError(f"pueue has no task for job {reference}")
     return task
@@ -2184,6 +2428,7 @@ def wait(
     *,
     timeout_seconds: float,
     reference: str | None = None,
+    config: Config | None = None,
 ) -> dict[str, Any]:
     """Block until the job is terminal, following it across queue task ids.
 
@@ -2204,6 +2449,15 @@ def wait(
         if remaining <= 0 or detail is not None:
             view = {**job_view(task), "wait_timed_out": True}
             return view if detail is None else {**view, "detail": detail}
+        if (
+            task.status == "Queued"
+            and config is not None
+            and promote_overdue(config, task.group)
+        ):
+            # Something started; this job may be among it. Re-read before
+            # blocking so the slice and the answer follow its real state.
+            task = addressed(task_id, reference)
+            continue
         blocking = _wait_slice(task, remaining)
         try:
             pueue.wait(task.task_id, timeout_seconds=blocking)

@@ -545,6 +545,35 @@ rec {
         MemoryMax = "4G";
         MemorySwapMax = "0";
       };
+      # The gateway's shell lanes share this parent by slice-name hierarchy.
+      # It hosts no pool; it measures both lanes and stays above the wider
+      # child so it never binds either alone.
+      agentctl-shell = {
+        IOAccounting = true;
+        CPUWeight = 100;
+        IOWeight = 100;
+        MemoryHigh = "12G";
+        MemorySwapMax = "0";
+      };
+      # Quick reads (rg, sed, git status) come first for CPU and IO; a runaway
+      # one is killed at its own ceiling, never paging the desktop.
+      agentctl-shell-quick = {
+        IOAccounting = true;
+        CPUWeight = 200;
+        IOWeight = 200;
+        MemoryHigh = "3G";
+        MemoryMax = "4G";
+        MemorySwapMax = "0";
+      };
+      # Agent CLIs launched from ChatGPT: 2-3 GiB each, like agentctl-agent
+      # workers, and like them throttled rather than killed.
+      agentctl-shell-long = {
+        IOAccounting = true;
+        CPUWeight = 100;
+        IOWeight = 100;
+        MemoryHigh = "10G";
+        MemorySwapMax = "0";
+      };
       build = buildSlicePolicy;
       nix-build = buildSlicePolicy;
     };

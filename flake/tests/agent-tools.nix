@@ -387,6 +387,9 @@ in
             "agentctl-bulk"
             "agentctl-normal"
             "agentctl-interactive"
+            "agentctl-shell"
+            "agentctl-shell-quick"
+            "agentctl-shell-long"
           ] (name: userSlices.${name});
           forbiddenAvoidTokens = [
             "bash"
@@ -400,7 +403,19 @@ in
             "python"
             "zsh"
           ];
+          declaredPools = agentToolsRuntimeConfig.sinnix.services.agentctl.pools;
         in
+        # The gateway's shell.run lanes (sinnix_agent_gateway/shell_lanes.py)
+        # are declared pools with their own slices, and only the quick lane
+        # promotes: long work there must never hold a slot a read needs.
+        assert lib.assertMsg (
+          declaredPools ? shell-quick
+          && declaredPools ? shell-long
+          && declaredPools.shell-quick.promoteAfterSeconds != null
+          && declaredPools.shell-long.promoteAfterSeconds == null
+          && poolSlices ? agentctl-shell-quick
+          && poolSlices ? agentctl-shell-long
+        ) "the gateway shell lanes must be declared agentctl pools with slices; only shell-quick promotes";
         assert lib.assertMsg (lib.all (token: !(lib.hasInfix token avoidPattern))
           forbiddenAvoidTokens
         ) "the earlyoom fallback must not exempt agents, browsers, runtimes, or generic shells";
@@ -449,6 +464,13 @@ in
             &&
               sliceBytes poolSlices.agentctl-land.MemoryHigh
               >= sliceBytes poolSlices.agentctl-land-agent.MemoryHigh
+            # The shell lanes' parent must not bind below either lane.
+            &&
+              sliceBytes poolSlices.agentctl-shell.MemoryHigh
+              >= sliceBytes poolSlices.agentctl-shell-long.MemoryHigh
+            &&
+              sliceBytes poolSlices.agentctl-shell.MemoryHigh
+              >= sliceBytes poolSlices.agentctl-shell-quick.MemoryHigh
             # The corpus at its sized width (four 2263 MiB workers plus the
             # master, ~10.05 GiB) must fit beside a saturated agent pool inside
             # the plane's own ceiling.

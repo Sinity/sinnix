@@ -82,7 +82,7 @@ def test_running_tasks_requests_only_one_groups_live_tasks(
     assert list(pueue.running_tasks("agent")) == [1]
 
 
-def test_task_from_log_reads_one_orphan_without_history(
+def test_task_reads_one_task_without_history(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def response(arguments: list[str]) -> str:
@@ -90,7 +90,14 @@ def test_task_from_log_reads_one_orphan_without_history(
         return json.dumps({"0": {"task": LIVE_STATUS["tasks"]["0"], "output": {}}})
 
     monkeypatch.setattr(pueue, "_run", response)
-    assert pueue.task_from_log(0).task_id == 0
+    assert pueue.task(0).task_id == 0
+
+
+def test_task_is_none_for_an_id_the_daemon_does_not_hold(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pueue, "_run", lambda arguments: "{}")
+    assert pueue.task(999) is None
 
 
 LIVE_LOG = {

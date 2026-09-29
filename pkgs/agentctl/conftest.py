@@ -23,7 +23,7 @@ from agentctl import launch as launch_module
 from agentctl import pueue as pueue_module
 from agentctl.config import Config
 from agentctl.prompts import PromptError
-from agentctl.pueue import PueueError, PueueGroupError, PueueTimeout, Task
+from agentctl.pueue import PueueError, PueueGroupError, PueueTimeout, Status, Task
 
 # A worker result's required self-review narration (see results.SELF_REVIEW_SCHEMA).
 SELF_REVIEW: dict[str, Any] = {
@@ -52,6 +52,7 @@ class FakePueue:
     resized: list[tuple[str, int, int]] = field(default_factory=list)
     waited: list[int] = field(default_factory=list)
     enqueued: list[int] = field(default_factory=list)
+    started: list[int] = field(default_factory=list)
     _logs: dict[int, str] = field(default_factory=dict)
     _on_wait: dict[int, Callable[["FakePueue"], None]] = field(default_factory=dict)
     groups: dict[str, int] = field(
@@ -145,11 +146,38 @@ class FakePueue:
             if task.group == group and task.status == "Running"
         }
 
-    def task_from_log(self, task_id: int) -> Task | None:
-        return self.task(task_id)
-
     def task(self, task_id: int) -> Task | None:
         return self._tasks.get(task_id)
+
+    def tasks_by_command(self, fragment: str) -> dict[int, Task]:
+        return {
+            task_id: task
+            for task_id, task in self.tasks().items()
+            if fragment in task.command
+        }
+
+    def live(self) -> Status:
+        return Status(
+            {
+                task_id: task
+                for task_id, task in self.tasks().items()
+                if not task.terminal
+            },
+            {
+                name: {
+                    "status": "Paused" if name in self.paused else "Running",
+                    "parallel_tasks": width,
+                }
+                for name, width in self.groups.items()
+            },
+        )
+
+    def start(self, task_id: int) -> None:
+        task = self._tasks.get(task_id)
+        if task is None or task.status != "Queued":
+            raise PueueError(f"The command failed for tasks: {task_id}")
+        self.started.append(task_id)
+        self._set(task_id, status="Running", started_at="2026-09-03T08:10:00+00:00")
 
     def kill(self, task_id: int) -> None:
         task = self._tasks.get(task_id)
@@ -350,8 +378,10 @@ def fake_pueue(monkeypatch: pytest.MonkeyPatch) -> FakePueue:
         "add",
         "tasks",
         "running_tasks",
-        "task_from_log",
         "task",
+        "tasks_by_command",
+        "live",
+        "start",
         "kill",
         "restart",
         "remove",

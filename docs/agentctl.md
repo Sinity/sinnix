@@ -173,8 +173,9 @@ real one, plus `AGENTCTL_CONFIG` set to the configuration file this process
 read, so the agentctl calls inside a task (`batch result`, `batch land`) see
 the same projects, state directory and event spool.
 
-Groups admit work: `agent:12 land-agent:2 pytest:2 pytest-heavy:1
-pytest-quick:8 bulk:2 normal:3 interactive:4`, plus `<project>-land` of parallelism 1 per
+Groups admit work: `agent:6 land-agent:2 pytest:2 pytest-heavy:1
+pytest-quick:8 bulk:2 normal:3 service:2 interactive:4 shell-quick:8
+shell-long:4`, plus `<project>-land` of parallelism 1 per
 configured project (`polylogue-land:3`), declared by
 `sinnix.services.agentctl.pools` and carried in `/etc/sinnix/agentctl.json`.
 pueued keeps its groups in its own state, so `agentctl pools apply` writes
@@ -191,6 +192,28 @@ job waits behind an implementation wave and a later agent waits behind the
 corpus. Agentctl records only those holds in the launch input and releases
 them after the partner pool drains; operator stashes and dependencies remain
 untouched. Bounded affected verification uses the nonexclusive `pytest` pool.
+
+A pool may also declare `promote_after_seconds` (`promoteAfterSeconds` in the
+module; `shell-quick` uses 20). Its width then counts only the running tasks
+younger than that horizon. When every slot is held by older tasks, which have
+shown they are long work, `launch.promote_overdue` force-starts the oldest
+queued tasks without dependencies (`pueue start <id>`) until the young ones
+fill the width again. The long tasks keep running untouched, a paused pool
+stays closed, and each start (`action: started`) or refusal by the daemon
+(`action: failed`, which leaves the task queued) is a `pool-promotion` event
+in the spool. The
+check runs under the admission lock on every enqueue into the pool and on
+every `job wait` and `job get` of a queued task in it.
+
+`launch.queue_state` reports a group's occupancy from the unfinished tasks
+alone (filtered `pueue status` requests, never the full history): its width
+and state, each running task with its age and whether it is `promoted`, the
+queued tasks with their wait, and the held count. `launch.job_queue` adds one
+job's position, the jobs ahead of it, and the running jobs that hold the
+slots it needs. A single-task read (`pueue.task`) uses `pueue log --json
+--lines 0 <id>`, and a launch reference is found through a `command%=`
+filter, so a job read costs one small response however long the queue's
+history grows.
 
 At the first backpressure pass after this upgrade, agentctl may retire an old
 cross-pool stash only when the task is non-terminal and still stashed _and_

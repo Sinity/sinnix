@@ -65,6 +65,11 @@ mkServiceModule {
             default = [ ];
             description = "Pools whose live work holds new launches in this pool until they drain.";
           };
+          promoteAfterSeconds = lib.mkOption {
+            type = lib.types.nullOr lib.types.ints.positive;
+            default = null;
+            description = "A running task older than this stops counting against the width: when every slot is held by such tasks, agentctl starts the oldest queued task anyway. Null keeps the width absolute.";
+          };
         };
       }
     );
@@ -98,6 +103,16 @@ mkServiceModule {
       # Long-lived development dependencies must not occupy short-job capacity.
       service.parallel = 2;
       interactive.parallel = 4;
+      # The gateway's shell lanes. A quick command never waits behind long
+      # work: agent CLIs and commands declared long go to shell-long, and a
+      # quick-lane command still running after 20 s stops holding its slot.
+      shell-quick = {
+        parallel = 8;
+        promoteAfterSeconds = 20;
+      };
+      # ChatGPT sessions launch 10-60 min `claude -p` workers here
+      # (2026-09-29); four at once is what the old shared pool held.
+      shell-long.parallel = 4;
     }
     // landPools
     // {
@@ -124,10 +139,16 @@ mkServiceModule {
           worker_contract = cfg.workerContract;
           event_spool = eventSpool;
           agentctl = "${scriptPkgs.agentctl}/bin/agentctl";
-          pools = lib.mapAttrs (_name: pool: {
-            inherit (pool) parallel;
-            exclusive_with = pool.exclusiveWith;
-          }) cfg.pools;
+          pools = lib.mapAttrs (
+            _name: pool:
+            {
+              inherit (pool) parallel;
+              exclusive_with = pool.exclusiveWith;
+            }
+            // lib.optionalAttrs (pool.promoteAfterSeconds != null) {
+              promote_after_seconds = pool.promoteAfterSeconds;
+            }
+          ) cfg.pools;
         }
       );
     in

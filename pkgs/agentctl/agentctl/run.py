@@ -97,6 +97,8 @@ POLICY_POOLS = frozenset(
         "bulk",
         "normal",
         "interactive",
+        "shell-quick",
+        "shell-long",
     }
 )
 DEFAULT_SLICE_POOL = "normal"
@@ -488,7 +490,7 @@ def _occupancy(
         if units:
             for task_id in units.values():
                 if task_id is not None and task_id not in tasks:
-                    owner = pueue.task_from_log(task_id)
+                    owner = pueue.task(task_id)
                     if owner is not None:
                         tasks[task_id] = owner
     except PueueError:
