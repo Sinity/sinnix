@@ -761,17 +761,21 @@ def result_contract(
     planned_model: str | None,
     execution: str | None,
     attempt: int = 1,
+    self_review_required: bool,
 ) -> dict[str, Any]:
     """The result shape one dispatch attempt must file.
 
     ``bindings`` are the dispatch-time evidence bindings, each with its bead
     ``id``. The initial packet and every resume packet render this from the
-    same records, so a resumed worker files exactly what filing accepts.
+    same records, so a resumed worker files exactly what filing accepts;
+    ``self_review_required`` is the worker record's dispatch-time flag.
     """
     rows = [dict(row) for row in bindings]
     available = bool(rows) and all(row.get("v2_available") is True for row in rows)
+    review = {"self_review": "required"} if self_review_required else {}
     if not available:
         return {
+            **review,
             "schema_version": 1,
             "evidence": "unknown",
             "attempt": attempt,
@@ -782,6 +786,7 @@ def result_contract(
             ),
         }
     return {
+        **review,
         "schema_version": 2,
         "execution": execution if execution in {"queued", "external"} else "native",
         "attempt": attempt,
@@ -806,6 +811,8 @@ def _result_contract(
         ],
         planned_model=dimensions.model,
         execution=batch.get("harness"),
+        # A new dispatch; `start` records the matching flag with its prompt.
+        self_review_required=True,
     )
 
 

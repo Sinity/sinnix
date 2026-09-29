@@ -389,6 +389,9 @@ def file(config: Config, project: ProjectAdapter, path: Path) -> dict[str, Any]:
     """File native work's claim and AgentCTL's contemporaneous observations."""
     claim = _read_input(path)
     errors = results.validate_worker_result(claim)
+    if "self_review" not in claim:
+        # Native work has no dispatch record; every new filing narrates it.
+        errors.append("$: native evidence requires self_review")
     if errors:
         raise JobError("invalid native evidence: " + "; ".join(errors[:6]))
     candidate_sha = claim["candidate_sha"]

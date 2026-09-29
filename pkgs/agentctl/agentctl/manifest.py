@@ -60,6 +60,7 @@ REFUSALS: dict[str, str] = {
     "review_rejected": "the verdict is not `pass`",
     "result_evidence_binding": "a v2 worker result differs from its dispatch-time stable acceptance binding",
     "result_attempt": "the result does not belong to the worker's current dispatch attempt",
+    "result_self_review": "the dispatch requires a narrated self_review and the result has none",
     "result_already_filed": "the worker already has an accepted result for this attempt",
     "runner": "the agent runner is missing or not executable",
     "target_moved_twice": "the default branch moved again after one refresh",

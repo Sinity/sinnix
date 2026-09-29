@@ -508,8 +508,9 @@ def worker_result(
     }
 
 
-def test_pr_self_review_section_marks_inapplicable_items_and_skips_unfiled_workers() -> None:
-    """Breaks if an N/A item renders as applied, or an unfiled worker adds a heading."""
+def test_pr_self_review_section_marks_inapplicable_items_and_skips_unreviewed_workers() -> None:
+    """Breaks if an N/A item renders as applied, or a worker with no filed
+    result or a result without self_review adds a heading."""
     review = {
         "checklists": ["docs/review/guide.md", "worker-contract"],
         "passes": 2,
@@ -522,6 +523,7 @@ def test_pr_self_review_section_marks_inapplicable_items_and_skips_unfiled_worke
         workers=[
             {"id": "w1", "result": {"self_review": review}},
             {"id": "w2", "result": None},
+            {"id": "w3", "result": {"candidate_sha": SHA}},
         ]
     )
     assert landing_module._self_review_lines(run) == [
@@ -829,6 +831,8 @@ def test_launch_binds_beads_authored_v2_criteria_into_the_worker_result(
     }
     assert packet["beads"][0]["evidence_binding"] == binding
     assert packet["result_contract"]["schema_version"] == 2
+    assert packet["result_contract"]["self_review"] == "required"
+    assert worker["self_review_required"] is True
     assert packet["result_contract"]["beads"] == [{"id": "fx-solo", **binding}]
     assert worker["evidence_binding"] == [{"id": "fx-solo", **binding}]
     assert worker["bead_revisions"] == {"fx-solo": str(revision)}
@@ -2449,6 +2453,35 @@ def test_accepted_result_cannot_be_replaced(harness: Harness) -> None:
     harness.land(run["run_id"])
     with pytest.raises(BatchRefusal, match="already_accepted"):
         harness.file_result(run, "fx-solo")
+
+
+def test_a_new_dispatch_refuses_a_result_without_self_review(
+    harness: Harness,
+) -> None:
+    """Breaks if filing stops enforcing the self-review the prompt demanded."""
+    run = harness.start("fx-solo")
+    assert run["workers"][0]["self_review_required"] is True
+    # A null is a transport placeholder: loading drops it, leaving no review.
+    with pytest.raises(BatchRefusal, match="result_self_review"):
+        harness.file_result(run, "fx-solo", self_review=None)
+    filed = harness.file_result(run, "fx-solo")
+    assert filed["result"]["self_review"]["passes"] == 1
+
+
+def test_a_worker_dispatched_before_the_requirement_files_without_self_review(
+    harness: Harness,
+) -> None:
+    """Breaks if a worker whose record lacks the flag (an older dispatch) is
+    held to a contract its prompt never stated."""
+    run = harness.start("fx-solo")
+    manifest.update(
+        harness.config,
+        run["run_id"],
+        lambda document: document["workers"][0].pop("self_review_required"),
+    )
+    run = manifest.load(harness.config, run["run_id"]).to_dict()
+    filed = harness.file_result(run, "fx-solo", self_review=None)
+    assert "self_review" not in filed["result"]
 
 
 def test_old_attempt_result_cannot_be_filed_after_resume(

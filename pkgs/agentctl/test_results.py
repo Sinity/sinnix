@@ -44,16 +44,14 @@ def test_a_conforming_worker_result_has_no_errors() -> None:
     assert results.validate_worker_result(worker_result()) == []
 
 
-@pytest.mark.parametrize("schema_version", [None, results.RESULT_SCHEMA_VERSION])
-def test_every_result_version_requires_the_self_review(
-    schema_version: int | None,
-) -> None:
-    """Breaks if the narrated self-review becomes optional for any contract."""
+def test_the_document_schema_leaves_self_review_to_the_dispatch() -> None:
+    """Breaks if the schema itself requires self_review: workers dispatched
+    before the dispatch-bound requirement must still file (see
+    `start.check_result_contract`)."""
     result = worker_result()
     del result["self_review"]
-    if schema_version is not None:
-        result["schema_version"] = schema_version
-    assert "$: missing self_review" in results.validate_worker_result(result)
+    assert results.validate_worker_result(result) == []
+    assert "self_review" not in results.WORKER_SCHEMA["required"]
 
 
 def test_scope_expansion_is_an_optional_declared_list() -> None:

@@ -214,6 +214,26 @@ def test_receipt_requires_the_immutable_launch_reference(
         evidence.file(config, project, path)
 
 
+def test_native_evidence_requires_a_narrated_self_review(
+    config: Config,
+    fake_pueue: FakePueue,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Breaks if native filing accepts a claim with no self_review: native
+    work has no dispatch record to carry the requirement."""
+    project = resolve_project(config, "fixture")
+    job_id, reference = _receipt_job(config, fake_pueue, project)
+    monkeypatch.setattr(evidence, "SubprocessBdReader", lambda root: _beads())
+    path = tmp_path / "native.json"
+    claim = _claim(receipt=f"agentctl://jobs/{job_id}/{reference}")
+    del claim["self_review"]
+    path.write_text(json.dumps(claim))
+
+    with pytest.raises(launch.JobError, match="requires self_review"):
+        evidence.file(config, project, path)
+
+
 def test_v2_native_route_rejects_a_queued_execution_claim(
     config: Config,
     fake_pueue: FakePueue,

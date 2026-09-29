@@ -1,13 +1,7 @@
 {
   "type": "object",
   "additionalProperties": false,
-  "required": [
-    "candidate_sha",
-    "beads",
-    "unresolved",
-    "verification",
-    "self_review"
-  ],
+  "required": ["candidate_sha", "beads", "unresolved", "verification"],
   "properties": {
     "schema_version": {
       "type": "integer",

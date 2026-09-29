@@ -615,6 +615,7 @@ outcome. The codes:
 | `project`                      | the run belongs to another project                                                  |
 | `publish_rejected`             | the push was rejected for a reason a refresh cannot fix                             |
 | `result_evidence_binding`      | a v2 worker result differs from its dispatch-time stable acceptance binding         |
+| `result_self_review`           | the dispatch requires a narrated `self_review` and the result has none              |
 | `result_attempt`               | the result does not belong to the worker's current dispatch attempt                 |
 | `result_already_filed`         | the worker already has an accepted result for this attempt                          |
 | `review_failed`                | the review task did not succeed                                                     |
@@ -640,9 +641,13 @@ criterion marked `satisfied`, `unsatisfied` or `superseded` with evidence,
 `unresolved` findings, `verification` receipts, and `self_review`: the
 checklist sources the worker re-read, the number of review passes it ran
 (the last one clean), and one narrated row per checklist item, with
-`applies: false` marking an item that did not apply and why. Landing copies
-each worker's `self_review` into the PR body's Self-review section, so it is
-public text. A worktree head that
+`applies: false` marking an item that did not apply and why. The dispatch,
+not the document, requires it: `batch start` records
+`self_review_required: true` on the worker with its prompt, whose
+`result_contract` then says `"self_review": "required"`, and filing a result
+without one is `result_self_review`. A worker dispatched before that flag
+existed files without it. Landing copies each worker's `self_review` into the
+PR body's Self-review section, so it is public text. A worktree head that
 descends from the filed `candidate_sha` with a clean tree is recorded separately
 as `integration_head`; the submitted claim and its verification remain bound
 to the filed SHA. Its additional paths enter the integration scope. A dirty

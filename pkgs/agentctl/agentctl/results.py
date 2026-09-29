@@ -34,7 +34,9 @@ USAGE_SCHEMA: dict[str, Any] = {
 # The worker's own review of its final diff, narrated per checklist item: the
 # checklist sources it re-read, how many passes it ran (the last one clean),
 # and for each item whether it applied and how. Landing copies it into the PR
-# body, so it is public text.
+# body, so it is public text. It is required by the dispatch, not by the
+# document: a worker whose record carries `self_review_required` must file it
+# (`start.check_result_contract`), and native evidence always must.
 SELF_REVIEW_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
@@ -66,13 +68,7 @@ SELF_REVIEW_SCHEMA: dict[str, Any] = {
 WORKER_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
-    "required": [
-        "candidate_sha",
-        "beads",
-        "unresolved",
-        "verification",
-        "self_review",
-    ],
+    "required": ["candidate_sha", "beads", "unresolved", "verification"],
     "properties": {
         # Version one is intentionally still accepted: old results carry
         # unknown provenance rather than invented evidence. Version two makes

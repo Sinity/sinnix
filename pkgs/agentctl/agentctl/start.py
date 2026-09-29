@@ -296,6 +296,7 @@ def worker_contract(
         planned_model=worker.get("model"),
         execution=run.harness,
         attempt=attempt,
+        self_review_required=worker.get("self_review_required") is True,
     )
 
 
@@ -322,6 +323,12 @@ def check_result_contract(
                 "result_attempt",
                 f"result attempt {value.get('attempt')} differs from current attempt {number}",
             )
+    if worker.get("self_review_required") is True and "self_review" not in value:
+        raise BatchRefusal(
+            "result_self_review",
+            "this dispatch requires self_review: the checklists re-read, the "
+            "review passes run, and one narrated row per checklist item",
+        )
     binding_errors = _v2_binding_errors(worker, value)
     if binding_errors:
         raise BatchRefusal(
@@ -545,6 +552,9 @@ def _prepare(
                     scope_authority=list(scope_authority(snapshot.beads)),
                     bead_revisions=_bead_revisions(snapshot.beads),
                     evidence_binding=_evidence_binding(snapshot.beads),
+                    # The prompt written above demands a narrated self-review;
+                    # recorded with it so filing enforces what was dispatched.
+                    self_review_required=True,
                 )
                 worker = run.workers[index]
             stage = "enqueue"
