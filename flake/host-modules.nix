@@ -20,10 +20,14 @@ let
   # `nixos-version --configuration-revision` supports the live-drift
   # tripwire (AGENTS.md). Without this it falls back to the NIXPKGS
   # revision, which reads like a plausible sinnix commit and invites a wrong
-  # drift diagnosis. Builds from a dirty tree get the `<rev>-dirty` marker;
-  # treat that as "commits since <rev> may or may not be live".
+  # drift diagnosis. A devshell switch builds its immutable evaluated source,
+  # which lacks Git metadata, and passes that source's evaluated revision.
+  # Builds from a dirty tree get the `<rev>-dirty` marker; treat that as
+  # "commits since <rev> may or may not be live".
   revisionModule = {
-    system.configurationRevision = inputs.self.rev or inputs.self.dirtyRev or "unknown";
+    system.configurationRevision =
+      let shellRevision = builtins.getEnv "SINNIX_ACTIVATION_SOURCE_REV";
+      in if shellRevision != "" then shellRevision else inputs.self.rev or inputs.self.dirtyRev or "unknown";
   };
 in
 {

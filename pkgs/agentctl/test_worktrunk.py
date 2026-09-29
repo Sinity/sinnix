@@ -77,6 +77,43 @@ def _spy(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
     return calls
 
 
+def test_main_checkout_advances_only_when_clean(tmp_path: Path) -> None:
+    root = _repository(tmp_path / "repo")
+    write_project(root)
+    subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+    _commit(root, "fixture descriptor")
+    candidate_tree = tmp_path / "candidate"
+    _worktree(root, "candidate", candidate_tree)
+    (candidate_tree / "dots").write_text("new instructions\n")
+    subprocess.run(["git", "-C", str(candidate_tree), "add", "dots"], check=True)
+    _commit(candidate_tree, "update dots")
+    candidate = subprocess.check_output(
+        ["git", "-C", str(candidate_tree), "rev-parse", "HEAD"], text=True
+    ).strip()
+    project = load_project_adapter(root)
+    assert (
+        landing._advance_main_checkout(project, candidate)
+        == f"fast-forwarded to {candidate}"
+    )
+    assert (root / "dots").read_text() == "new instructions\n"
+
+    (root / "local-note").write_text("operator edit\n")
+    _commit(candidate_tree, "later", allow_empty=True)
+    later = subprocess.check_output(
+        ["git", "-C", str(candidate_tree), "rev-parse", "HEAD"], text=True
+    ).strip()
+    assert (
+        landing._advance_main_checkout(project, later)
+        == "skipped: main checkout has local changes"
+    )
+    assert (
+        subprocess.check_output(
+            ["git", "-C", str(root), "rev-parse", "HEAD"], text=True
+        ).strip()
+        == candidate
+    )
+
+
 def test_create_places_the_worktree_at_the_requested_path_and_remove_reverses_it(
     tmp_path: Path,
 ) -> None:

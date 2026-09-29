@@ -488,7 +488,11 @@ still running, and creates the landing groups the daemon lacks.
    leader worker's.
 5. Publish, after re-reading the remote default branch equals the run's
    base. `publish = "master"`: push `candidate_sha` to the default branch
-   with `--force-with-lease=<branch>:<base>`. `publish = "pr"`: create or
+   with `--force-with-lease=<branch>:<base>`. After that push, a clean main
+   checkout on the default branch fast-forwards to the candidate so live dots
+   links read the published files. A dirty or divergent main checkout stays
+   untouched; `published.main_checkout` records why it was skipped.
+   `publish = "pr"`: create or
    reuse the PR by stored number (title: the leader bead's subject; body:
    each bead's title and one checkbox line per criterion from the worker
    results), wait on exactly `candidate_sha` for the check the descriptor

@@ -16,6 +16,7 @@ let
       ${spec.script}
     '';
   scriptPkgs = sinnixScriptRegistry.packageSet;
+  sourceRevision = inputs.self.rev or (inputs.self.dirtyRev or "unknown");
   rebuildServicePath = lib.makeBinPath [
     pkgs.coreutils
     pkgs.findutils
@@ -176,6 +177,35 @@ let
       exit 64
     fi
   '';
+  switchSourceGuard = ''
+    # Activation must have a real, current Git revision. Fetch failure is a
+    # refusal: a cached tracking ref cannot establish remote currency.
+    if ! ${pkgs.git}/bin/git -C "$_flake_dir" rev-parse --show-toplevel >/dev/null 2>&1; then
+      echo "sinnix switch: flake source is not a Git checkout: $_flake_dir" >&2
+      exit 64
+    fi
+    if [ -z "''${SINNIX_DEV_SHELL_SOURCE:-}" ] && [ "''${SINNIX_ALLOW_DIRTY:-0}" != 1 ] \
+      && [ -n "$(${pkgs.git}/bin/git -C "$_flake_dir" status --porcelain --untracked-files=normal)" ]; then
+      echo "sinnix switch: source is dirty; set SINNIX_ALLOW_DIRTY=1 to allow it" >&2
+      exit 64
+    fi
+    if ! ${pkgs.git}/bin/git -C "$_flake_dir" fetch --quiet origin master; then
+      echo "sinnix switch: cannot verify origin/master" >&2
+      exit 69
+    fi
+    _switch_commit=HEAD
+    if [ -n "''${SINNIX_DEV_SHELL_SOURCE:-}" ]; then
+      _switch_commit="''${SINNIX_DEV_SHELL_REV%-dirty}"
+      if ! ${pkgs.git}/bin/git -C "$_flake_dir" cat-file -e "$_switch_commit^{commit}" 2>/dev/null; then
+        echo "sinnix switch: devshell source revision is unavailable in $_flake_dir" >&2
+        exit 64
+      fi
+    fi
+    if ! ${pkgs.git}/bin/git -C "$_flake_dir" merge-base --is-ancestor refs/remotes/origin/master "$_switch_commit"; then
+      echo "sinnix switch: source revision is behind or diverged from origin/master" >&2
+      exit 64
+    fi
+  '';
   activationCommands = {
     test-vm = {
       description = "Build a QEMU VM from the current configuration (nixos-rebuild build-vm)";
@@ -253,16 +283,56 @@ let
       description = "Apply configuration changes to the system (nh os switch)";
       script = ''
         ${activationGuard "switch"}
+        if [ -n "''${SINNIX_DEV_SHELL_FLAKE:-}" ]; then
+          export SINNIX_FLAKE_DIR="$SINNIX_DEV_SHELL_FLAKE"
+        fi
+        if [ -n "''${SINNIX_DEV_SHELL_REV:-}" ] && [ -z "''${SINNIX_DEV_SHELL_SOURCE:-}" ]; then
+          echo "sinnix switch: devshell source path is unavailable" >&2
+          exit 64
+        fi
         ${resolveFlakeDir}
+        if [ -n "''${SINNIX_DEV_SHELL_SOURCE:-}" ] && [ ! -f "$SINNIX_DEV_SHELL_SOURCE/flake.nix" ]; then
+          echo "sinnix switch: devshell source is unavailable: $SINNIX_DEV_SHELL_SOURCE" >&2
+          exit 64
+        fi
+        if [[ "''${SINNIX_DEV_SHELL_REV:-}" == *-dirty ]] && [ "''${SINNIX_ALLOW_DIRTY:-0}" != 1 ]; then
+          echo "sinnix switch: devshell source is dirty; set SINNIX_ALLOW_DIRTY=1 to allow it" >&2
+          exit 64
+        fi
+        if [ -n "''${SINNIX_DEV_SHELL_SOURCE:-}" ] && [ -z "''${SINNIX_DEV_SHELL_REV:-}" ]; then
+          echo "sinnix switch: devshell source has no revision" >&2
+          exit 64
+        fi
+        ${switchSourceGuard}
         ${rebuildLock "switch"}
         ${avoidRepoCwdForActivation}
+        if [ -n "''${SINNIX_DEV_SHELL_SOURCE:-}" ]; then
+          _invoke_flake_dir="$SINNIX_DEV_SHELL_SOURCE"
+        fi
         ${localInputOverrideArgs}
         ${rebuildDefaultArgs}
         ${scriptPkgs.sinnix-preflight}/bin/sinnix-preflight switch
         _rebuild_status=0
+        _rebuild_unit="sinnix-switch-$$"
+        _rebuild_complete=0
+        # The start condition disappears even if the wrapper is killed before
+        # systemd-run registers its unit. Keep fd 9 for the activation lock.
+        exec 8</dev/null
+        _rebuild_condition="/proc/$$/fd/8"
+        cleanup_rebuild() {
+          exec 8<&-
+          if [ "$_rebuild_complete" -eq 0 ]; then
+            ${pkgs.systemd}/bin/systemctl --user stop "$_rebuild_unit.service" >&2 || true
+          fi
+        }
+        trap cleanup_rebuild EXIT
+        trap 'exit 130' INT
+        trap 'exit 143' TERM
         ${pkgs.systemd}/bin/systemd-run \
           --user \
-          --quiet --collect --pipe --service-type=exec --wait \
+          --quiet --collect --pipe --service-type=exec --wait --unit="$_rebuild_unit" \
+          --property="ConditionPathExists=$_rebuild_condition" \
+          --setenv="SINNIX_ACTIVATION_SOURCE_REV=''${SINNIX_DEV_SHELL_REV:-}" \
           --setenv=PATH="${rebuildServicePath}:$PATH" \
           ${rebuildContainmentFlags}
           ${pkgs.coreutils}/bin/env -u FLAKE NH_FLAKE="$_invoke_flake_dir" \
@@ -270,7 +340,14 @@ let
             "''${_invoke_flake_dir}#sinnix-prime" \
             --no-nom \
             "''${rebuild_args[@]}" \
-            "''${nh_extra_args[@]}" || _rebuild_status=$?
+            "''${nh_extra_args[@]}" &
+        _rebuild_runner=$!
+        wait "$_rebuild_runner" || _rebuild_status=$?
+        if [ "$_rebuild_status" -eq 0 ]; then
+          _rebuild_complete=1
+          exec 8<&-
+          trap - EXIT INT TERM
+        fi
         ${sinexCachePush}
         exit "$_rebuild_status"
       '';
@@ -489,6 +566,7 @@ in
   inherit
     mkAppCommand
     scriptPkgs
+    sourceRevision
     resolveFlakeDir
     loadCheckTargets
     rebuildLock

@@ -4,7 +4,7 @@
 # - Development tools and Nix helpers
 # - Helper scripts for common operations
 
-{ ... }:
+{ inputs, ... }:
 {
   perSystem =
     {
@@ -28,6 +28,7 @@
         activationPackages
         scriptPkgs
         resolveFlakeDir
+        sourceRevision
         ;
       registryDevCommands = lib.mapAttrs commandRegistry.mkAppCommand (
         lib.filterAttrs (name: _: !builtins.hasAttr name activationPackages) commandRegistry.appCommands
@@ -157,6 +158,20 @@
         ++ builtins.attrValues devCommands;
 
         shellHook = ''
+          # Keep the evaluated source and revision when the caller changes
+          # directory. A matching checkout is only a Git reference for the
+          # switch guard; the rebuild uses SINNIX_DEV_SHELL_SOURCE.
+          unset SINNIX_DEV_SHELL_FLAKE
+          export SINNIX_DEV_SHELL_REV="${sourceRevision}"
+          # The evaluated source is immutable and identifies the flake even
+          # when the caller entered this shell from a different checkout at
+          # the same revision.
+          export SINNIX_DEV_SHELL_SOURCE="${inputs.self.outPath}"
+          _sinnix_shell_root="$(${pkgs.git}/bin/git rev-parse --show-toplevel 2>/dev/null || true)"
+          if [ -n "$_sinnix_shell_root" ] && [ -f "$_sinnix_shell_root/flake.nix" ] \
+            && [ "$(${pkgs.git}/bin/git -C "$_sinnix_shell_root" rev-parse HEAD 2>/dev/null || true)" = "''${SINNIX_DEV_SHELL_REV%-dirty}" ]; then
+            export SINNIX_DEV_SHELL_FLAKE="$_sinnix_shell_root"
+          fi
           echo ""
           echo "NixOS Configuration Development Environment"
           echo ""

@@ -1144,6 +1144,26 @@ def _remote_base(project: ProjectAdapter) -> str:
     )
 
 
+def _advance_main_checkout(project: ProjectAdapter, candidate: str) -> str:
+    """Move the clean main checkout after a master push so live dots follow it."""
+    root = project.root
+    branch = workspace_of(project).base_branch
+    try:
+        if _git(root, "symbolic-ref", "--quiet", "--short", "HEAD") != branch:
+            return "skipped: main checkout is on another branch"
+        if _git(root, "status", "--porcelain", "--untracked-files=normal"):
+            return "skipped: main checkout has local changes"
+        head = _git(root, "rev-parse", "HEAD")
+        if head == candidate:
+            return "already current"
+        if _git(root, "merge-base", head, candidate) != head:
+            return "skipped: main checkout cannot fast-forward to published commit"
+        _git(root, "merge", "--ff-only", candidate)
+    except BatchError as error:
+        return f"failed: {error}"
+    return f"fast-forwarded to {candidate}"
+
+
 def _publish(
     config: Config,
     project: ProjectAdapter,
@@ -1182,7 +1202,12 @@ def _publish(
             if "rejected" in message:
                 raise BatchRefusal("publish_rejected", message) from error
             raise
-        return {"policy": "master", "candidate_sha": candidate, "base_commit": base}
+        return {
+            "policy": "master",
+            "candidate_sha": candidate,
+            "base_commit": base,
+            "main_checkout": _advance_main_checkout(project, candidate),
+        }
     number = _ensure_pr(project, run, path, candidate, beads, sleep)
     run = land_update(config, run.run_id, pr_number=number)
     required = _required_checks(project, run)
