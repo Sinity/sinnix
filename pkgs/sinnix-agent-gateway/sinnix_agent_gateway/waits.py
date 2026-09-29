@@ -82,53 +82,61 @@ class BoundedWaitService:
             ).encode()
         ).hexdigest()
 
+    @staticmethod
+    def _answer(
+        request: WaitRequest,
+        outcome: str,
+        polls: int,
+        current: WaitEvidence,
+        *,
+        late: bool = False,
+    ) -> dict[str, Any]:
+        evidence = dict(current.evidence)
+        if late:
+            # The observation finished after the deadline. It is current
+            # evidence, but it cannot satisfy a wait that had already ended.
+            evidence["observed_after_deadline"] = True
+            evidence["observed_satisfied"] = current.satisfied
+        return {
+            "schema": "sinnix.gateway-wait.v1",
+            "outcome": outcome,
+            "target": request.target.value,
+            "ref": request.reference,
+            "polls": polls,
+            "evidence": evidence,
+            "source_revision": current.source_revision,
+            "continuation": None
+            if outcome == "satisfied"
+            else BoundedWaitService._continuation(request, current),
+        }
+
     def wait(
         self,
         request: WaitRequest,
         *,
         cancelled: Callable[[], bool] | None = None,
     ) -> dict[str, Any]:
+        """Poll until satisfied or the deadline passes.
+
+        The deadline applies to each observation, not only between polls: an
+        observation that completes after it is reported as evidence of a
+        timeout, never as satisfaction.
+        """
         deadline = self.clock() + request.timeout_seconds
         polls = 0
-        current = self.resolver(request)
         while True:
+            current = self.resolver(request)
+            if self.clock() > deadline:
+                return self._answer(request, "timeout", polls, current, late=True)
             if current.satisfied:
-                return {
-                    "schema": "sinnix.gateway-wait.v1",
-                    "outcome": "satisfied",
-                    "target": request.target.value,
-                    "ref": request.reference,
-                    "polls": polls,
-                    "evidence": dict(current.evidence),
-                    "source_revision": current.source_revision,
-                    "continuation": None,
-                }
+                return self._answer(request, "satisfied", polls, current)
             if cancelled is not None and cancelled():
-                return {
-                    "schema": "sinnix.gateway-wait.v1",
-                    "outcome": "cancelled",
-                    "target": request.target.value,
-                    "ref": request.reference,
-                    "polls": polls,
-                    "evidence": dict(current.evidence),
-                    "source_revision": current.source_revision,
-                    "continuation": self._continuation(request, current),
-                }
+                return self._answer(request, "cancelled", polls, current)
             remaining = deadline - self.clock()
             if remaining <= 0:
-                return {
-                    "schema": "sinnix.gateway-wait.v1",
-                    "outcome": "timeout",
-                    "target": request.target.value,
-                    "ref": request.reference,
-                    "polls": polls,
-                    "evidence": dict(current.evidence),
-                    "source_revision": current.source_revision,
-                    "continuation": self._continuation(request, current),
-                }
+                return self._answer(request, "timeout", polls, current)
             self.sleeper(min(request.poll_seconds, remaining))
             polls += 1
-            current = self.resolver(request)
 
     async def wait_async(
         self,
@@ -136,64 +144,36 @@ class BoundedWaitService:
         *,
         cancelled: Callable[[], bool] | None = None,
     ) -> dict[str, Any]:
-        """Poll through the MCP request task and observe its cancellation event."""
+        """Poll through the MCP request task and observe its cancellation event.
+
+        Each observation runs under the remaining budget; one still running at
+        the deadline is abandoned and the wait times out on the last evidence.
+        """
         deadline = self.clock() + request.timeout_seconds
         polls = 0
-
-        async def resolve() -> WaitEvidence:
-            return await anyio.to_thread.run_sync(
-                self.resolver, request, abandon_on_cancel=True
-            )
-
+        pending = WaitEvidence(False, {}, "unobserved")
         if cancelled is not None and cancelled():
-            return {
-                "schema": "sinnix.gateway-wait.v1",
-                "outcome": "cancelled",
-                "target": request.target.value,
-                "ref": request.reference,
-                "polls": 0,
-                "evidence": {},
-                "source_revision": "cancelled",
-                "continuation": self._continuation(
-                    request, WaitEvidence(False, {}, "cancelled")
-                ),
-            }
-        current = await resolve()
+            return self._answer(
+                request, "cancelled", 0, WaitEvidence(False, {}, "cancelled")
+            )
+        current = pending
         while True:
+            observed: WaitEvidence | None = None
+            with anyio.move_on_after(max(0.0, deadline - self.clock())):
+                observed = await anyio.to_thread.run_sync(
+                    self.resolver, request, abandon_on_cancel=True
+                )
+            if observed is None:
+                return self._answer(request, "timeout", polls, current)
+            current = observed
+            if self.clock() > deadline:
+                return self._answer(request, "timeout", polls, current, late=True)
             if current.satisfied:
-                return {
-                    "schema": "sinnix.gateway-wait.v1",
-                    "outcome": "satisfied",
-                    "target": request.target.value,
-                    "ref": request.reference,
-                    "polls": polls,
-                    "evidence": dict(current.evidence),
-                    "source_revision": current.source_revision,
-                    "continuation": None,
-                }
+                return self._answer(request, "satisfied", polls, current)
             if cancelled is not None and cancelled():
-                return {
-                    "schema": "sinnix.gateway-wait.v1",
-                    "outcome": "cancelled",
-                    "target": request.target.value,
-                    "ref": request.reference,
-                    "polls": polls,
-                    "evidence": dict(current.evidence),
-                    "source_revision": current.source_revision,
-                    "continuation": self._continuation(request, current),
-                }
+                return self._answer(request, "cancelled", polls, current)
             remaining = deadline - self.clock()
             if remaining <= 0:
-                return {
-                    "schema": "sinnix.gateway-wait.v1",
-                    "outcome": "timeout",
-                    "target": request.target.value,
-                    "ref": request.reference,
-                    "polls": polls,
-                    "evidence": dict(current.evidence),
-                    "source_revision": current.source_revision,
-                    "continuation": self._continuation(request, current),
-                }
+                return self._answer(request, "timeout", polls, current)
             await anyio.sleep(min(request.poll_seconds, remaining))
             polls += 1
-            current = await resolve()

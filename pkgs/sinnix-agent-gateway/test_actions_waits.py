@@ -200,3 +200,35 @@ def test_events_tail_pages_with_a_scope_bound_cursor(
         {"cursor": tampered, "projects": [{"project": "fixture"}]},
     )
     assert stale["error"]["code"] == "stale_cursor"
+
+
+def test_wait_for_terminal_output_matches_captured_text_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fails if an empty capture satisfies "capture" from the owner metadata.
+
+    The terminal owner answers {"operation": "capture", "result": <text>}; the
+    pattern must be searched in the text alone.
+    """
+    server, runtime, _ = make_server(tmp_path, "operator", monkeypatch)
+    screens = {"text": ""}
+
+    class Terminals:
+        def read(self, operation: str, arguments: dict) -> dict:
+            assert operation == "capture"
+            return {"operation": "capture", "result": screens["text"]}
+
+    monkeypatch.setattr(runtime, "terminals", Terminals())
+    request = {
+        "condition": {"kind": "terminal_output", "match": "id:3", "pattern": "capture"},
+        "timeout_seconds": 1,
+        "poll_seconds": 0.05,
+    }
+
+    empty = call(server, "wait.for", request)["data"]
+    assert empty["outcome"] == "timeout"
+    assert empty["evidence"]["matched"] is False
+
+    screens["text"] = "screen capture finished"
+    present = call(server, "wait.for", request)["data"]
+    assert present["outcome"] == "satisfied"

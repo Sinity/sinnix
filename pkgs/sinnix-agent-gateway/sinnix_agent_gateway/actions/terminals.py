@@ -565,9 +565,15 @@ def _wait(runtime: Runtime, inp: WaitInput) -> WaitResult:
                     if proc.pid != shell_pid
                 }
                 satisfied = condition.pid not in pids if condition.pid else not pids
-            if satisfied or time.monotonic() - started >= inp.timeout_seconds:
+            elapsed = time.monotonic() - started
+            if elapsed > inp.timeout_seconds:
+                # This observation ended after the deadline; it cannot
+                # satisfy a wait that was already over.
+                satisfied, matched = False, None
                 break
-            time.sleep(0.3)
+            if satisfied or elapsed >= inp.timeout_seconds:
+                break
+            time.sleep(min(0.3, inp.timeout_seconds - elapsed))
     return WaitResult(
         ref=ref,
         kitty_id=kitty_id,

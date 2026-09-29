@@ -100,3 +100,76 @@ def test_async_wait_observes_request_cancellation_between_owner_polls() -> None:
         assert result["evidence"] == {"poll": 2}
 
     anyio.run(scenario)
+
+
+def test_an_observation_finishing_after_the_deadline_cannot_satisfy() -> None:
+    """Fails if a 1.15 s observation satisfies a 1 s wait.
+
+    The deadline used to be checked only between polls, so a resolver that
+    returned satisfied after the deadline still reported "satisfied".
+    """
+    clock = Clock()
+
+    def slow(_request: WaitRequest) -> WaitEvidence:
+        clock.value += 1.15
+        return WaitEvidence(True, {"status": "closed"}, "rev-closed")
+
+    service = BoundedWaitService(slow, clock=clock.now, sleeper=clock.sleep)
+    result = service.wait(
+        WaitRequest(
+            WaitTarget.BEAD_STATUS, "sinnix://projects/p/beads/b", timeout_seconds=1
+        )
+    )
+
+    assert result["outcome"] == "timeout"
+    assert result["evidence"]["observed_after_deadline"] is True
+    assert result["evidence"]["observed_satisfied"] is True
+    assert result["continuation"]
+
+
+def test_an_observation_inside_the_deadline_still_satisfies() -> None:
+    clock = Clock()
+
+    def quick(_request: WaitRequest) -> WaitEvidence:
+        clock.value += 0.9
+        return WaitEvidence(True, {"status": "closed"}, "rev-closed")
+
+    service = BoundedWaitService(quick, clock=clock.now, sleeper=clock.sleep)
+    result = service.wait(
+        WaitRequest(
+            WaitTarget.BEAD_STATUS, "sinnix://projects/p/beads/b", timeout_seconds=1
+        )
+    )
+
+    assert result["outcome"] == "satisfied"
+    assert result["continuation"] is None
+
+
+def test_async_wait_bounds_the_observation_itself() -> None:
+    """Fails if the async wait waits out a slow observation past its deadline.
+
+    The resolver would answer "satisfied" after 1.15 s; a 1 s wait must time
+    out at about 1 s instead of returning that late answer.
+    """
+    import time
+
+    def slow(_request: WaitRequest) -> WaitEvidence:
+        time.sleep(1.15)
+        return WaitEvidence(True, {"status": "closed"}, "rev-closed")
+
+    service = BoundedWaitService(slow)
+
+    async def scenario() -> tuple[dict, float]:
+        started = time.monotonic()
+        result = await service.wait_async(
+            WaitRequest(
+                WaitTarget.BEAD_STATUS,
+                "sinnix://projects/p/beads/b",
+                timeout_seconds=1,
+            )
+        )
+        return result, time.monotonic() - started
+
+    result, elapsed = anyio.run(scenario)
+    assert result["outcome"] == "timeout"
+    assert elapsed < 1.1

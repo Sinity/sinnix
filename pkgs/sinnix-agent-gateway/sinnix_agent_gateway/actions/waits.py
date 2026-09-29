@@ -172,14 +172,19 @@ def _legacy_target(
     return f"sinnix://receipts/{condition.receipt_id}", {}
 
 
-def _strings(value: Any) -> list[str]:
-    if isinstance(value, str):
-        return [value]
-    if isinstance(value, dict):
-        return [text for item in value.values() for text in _strings(item)]
-    if isinstance(value, list):
-        return [text for item in value for text in _strings(item)]
-    return []
+def _capture_text(capture: Any) -> str:
+    """The captured terminal text alone, never the wrapper's metadata.
+
+    The owner answers ``{"operation": "capture", "result": <text>}``; matching
+    over every string in that object let an empty capture satisfy a pattern
+    such as ``capture`` from the operation name.
+    """
+    text = capture.get("result") if isinstance(capture, dict) else None
+    if not isinstance(text, str):
+        raise ProtocolError(
+            "owner_failed", "terminal capture returned no text", details={}
+        )
+    return text
 
 
 def _probe(
@@ -194,10 +199,11 @@ def _probe(
             {"path": path, "exists": present},
             source_revision({"path": path, "exists": present}),
         )
-    capture = runtime.terminals.read(
-        "capture", {"match": condition.match, "extent": condition.extent}
+    text = _capture_text(
+        runtime.terminals.read(
+            "capture", {"match": condition.match, "extent": condition.extent}
+        )
     )
-    text = "\n".join(_strings(capture))
     found = re.search(condition.pattern, text)
     evidence = {
         "matched": found is not None,
@@ -209,15 +215,44 @@ def _probe(
 
 
 async def _poll(runtime: Runtime, inp: WaitInput, ref: str) -> WaitResult:
-    """A local bounded poll for conditions the runtime's resolver does not cover."""
+    """A local bounded poll for conditions the runtime's resolver does not cover.
+
+    Each probe runs under the remaining budget, and a probe that completes
+    after the deadline is evidence of the timeout, never satisfaction.
+    """
     condition = inp.condition
     assert isinstance(condition, (FileExists, TerminalOutput))
     deadline = time.monotonic() + inp.timeout_seconds
     polls = 0
-    while True:
-        satisfied, evidence, revision = await anyio.to_thread.run_sync(
-            lambda: _probe(runtime, condition), abandon_on_cancel=True
+    evidence: dict[str, Any] = {}
+    revision = "unobserved"
+
+    def timeout(late: bool = False) -> WaitResult:
+        return WaitResult(
+            kind=condition.kind,
+            ref=ref,
+            outcome="timeout",
+            timed_out=True,
+            polls=polls,
+            evidence={**evidence, "observed_after_deadline": True}
+            if late
+            else evidence,
+            source_revision=revision,
+            continuation=source_revision({"ref": ref, "revision": revision}),
+            affordances=["wait.for"],
         )
+
+    while True:
+        observed = None
+        with anyio.move_on_after(max(0.0, deadline - time.monotonic())):
+            observed = await anyio.to_thread.run_sync(
+                lambda: _probe(runtime, condition), abandon_on_cancel=True
+            )
+        if observed is None:
+            return timeout()
+        satisfied, evidence, revision = observed
+        if time.monotonic() > deadline:
+            return timeout(late=True)
         if satisfied:
             return WaitResult(
                 kind=condition.kind,
@@ -230,17 +265,7 @@ async def _poll(runtime: Runtime, inp: WaitInput, ref: str) -> WaitResult:
             )
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            return WaitResult(
-                kind=condition.kind,
-                ref=ref,
-                outcome="timeout",
-                timed_out=True,
-                polls=polls,
-                evidence=evidence,
-                source_revision=revision,
-                continuation=source_revision({"ref": ref, "revision": revision}),
-                affordances=["wait.for"],
-            )
+            return timeout()
         await anyio.sleep(min(inp.poll_seconds, remaining))
         polls += 1
 
