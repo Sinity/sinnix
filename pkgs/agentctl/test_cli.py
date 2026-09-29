@@ -565,7 +565,7 @@ def test_view_json_is_the_snapshot(
 def test_backpressure_tick_reports_the_decision(
     cli_config: Config, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
-    from agentctl import backpressure
+    from agentctl import backpressure, launch
 
     monkeypatch.setattr(
         backpressure,
@@ -575,29 +575,16 @@ def test_backpressure_tick_reports_the_decision(
     monkeypatch.setattr(
         backpressure.pueue, "groups_status", lambda: {"agent": "Running"}
     )
-    assert cli.main(["backpressure", "tick"]) == 0
-    assert json.loads(capsys.readouterr().out)["action"] == "hold"
-
-
-def test_backpressure_width_change_still_reconciles_cross_pool_holds(
-    cli_config: Config, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
-) -> None:
-    """Continuous quick resizing must not starve a ready held launch."""
-    from agentctl import backpressure, launch
-
-    calls = []
-    monkeypatch.setattr(
-        backpressure, "tick", lambda **_kwargs: {"action": "width-changed", "to": 4}
-    )
     monkeypatch.setattr(
         launch,
-        "release_holds",
-        lambda _config: calls.append("release") or {"released": [], "waiting": []},
+        "retire_legacy_holds",
+        lambda *_args: pytest.fail(
+            "recurring backpressure must not retire legacy holds"
+        ),
     )
 
     assert cli.main(["backpressure", "tick"]) == 0
-    assert calls == ["release"]
-    assert json.loads(capsys.readouterr().out)["action"] == "width-changed"
+    assert json.loads(capsys.readouterr().out)["action"] == "hold"
 
 
 def test_default_state_dir_moves_the_previous_directory_once(
