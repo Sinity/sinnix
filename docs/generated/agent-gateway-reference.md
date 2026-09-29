@@ -1,11 +1,11 @@
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: dd692e2c15d63bbd68dc191baba53a9b29fc398ec96b1f386388724132f6ccae -->
+<!-- gateway-catalog-sha256: 22d9e4ad5e2a32be131be4ba0dc348d949b857bc459689783402633a4cd78cd1 -->
 # Sinnix Agent Gateway reference
 
 Generated from `sinnix_agent_gateway.actions`. Every action is one MCP tool whose `tools/list` input schema is the one below; the catalog hash changes when any principal-visible action catalog row changes, including its schema, principal set, example or affordance.
 
-Revision: `v3-typed-actions`. Catalog SHA-256: `dd692e2c15d63bbd68dc191baba53a9b29fc398ec96b1f386388724132f6ccae`.
+Revision: `v3-typed-actions`. Catalog SHA-256: `22d9e4ad5e2a32be131be4ba0dc348d949b857bc459689783402633a4cd78cd1`.
 
 ## Invocation
 
@@ -23993,7 +23993,7 @@ Input schema:
           "default": null
         },
         "limit": {
-          "default": 50,
+          "default": 20,
           "maximum": 1000,
           "minimum": 1,
           "type": "integer"
@@ -24139,7 +24139,7 @@ Input schema:
         },
         "limit": {
           "default": 50,
-          "maximum": 1000,
+          "maximum": 2000,
           "minimum": 1,
           "type": "integer"
         },
@@ -24228,7 +24228,7 @@ Input schema:
           "default": null
         },
         "limit": {
-          "default": 50,
+          "default": 20,
           "maximum": 1000,
           "minimum": 1,
           "type": "integer"
@@ -24494,16 +24494,24 @@ Input schema:
           "type": "string"
         },
         "origins": {
-          "items": {
-            "enum": [
-              "claude-code-session",
-              "codex-session"
-            ],
-            "type": "string"
-          },
-          "maxItems": 2,
-          "minItems": 1,
-          "type": "array"
+          "anyOf": [
+            {
+              "items": {
+                "enum": [
+                  "claude-code-session",
+                  "codex-session"
+                ],
+                "type": "string"
+              },
+              "maxItems": 2,
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "query": {
           "maxLength": 1000,
@@ -24945,7 +24953,7 @@ Input schema:
       "default": null
     },
     "limit": {
-      "default": 50,
+      "default": 20,
       "maximum": 1000,
       "minimum": 1,
       "type": "integer"
@@ -25201,7 +25209,7 @@ Input schema:
       "default": null
     },
     "limit": {
-      "default": 50,
+      "default": 20,
       "maximum": 1000,
       "minimum": 1,
       "type": "integer"
@@ -25452,7 +25460,7 @@ Input schema:
     },
     "limit": {
       "default": 50,
-      "maximum": 1000,
+      "maximum": 2000,
       "minimum": 1,
       "type": "integer"
     },
@@ -25986,16 +25994,24 @@ Input schema:
       "type": "string"
     },
     "origins": {
-      "items": {
-        "enum": [
-          "claude-code-session",
-          "codex-session"
-        ],
-        "type": "string"
-      },
-      "maxItems": 2,
-      "minItems": 1,
-      "type": "array"
+      "anyOf": [
+        {
+          "items": {
+            "enum": [
+              "claude-code-session",
+              "codex-session"
+            ],
+            "type": "string"
+          },
+          "maxItems": 2,
+          "minItems": 1,
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "query": {
       "anyOf": [
@@ -26246,16 +26262,24 @@ Input schema:
       "type": "string"
     },
     "origins": {
-      "items": {
-        "enum": [
-          "claude-code-session",
-          "codex-session"
-        ],
-        "type": "string"
-      },
-      "maxItems": 2,
-      "minItems": 1,
-      "type": "array"
+      "anyOf": [
+        {
+          "items": {
+            "enum": [
+              "claude-code-session",
+              "codex-session"
+            ],
+            "type": "string"
+          },
+          "maxItems": 2,
+          "minItems": 1,
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "query": {
       "maxLength": 1000,

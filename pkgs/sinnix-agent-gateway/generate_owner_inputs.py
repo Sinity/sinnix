@@ -81,6 +81,16 @@ def main() -> None:
             and isinstance(node.target, ast.Name)
             and node.target.id == "ROLE_SYNONYMS"
         )
+        # The contracts import their default page size from the query spec;
+        # copy that one owner constant rather than restating its value.
+        spec = (args.polylogue / "polylogue/archive/query/spec.py").read_text()
+        list_limit = next(
+            ast.get_source_segment(spec, node)
+            for node in ast.parse(spec).body
+            if isinstance(node, ast.Assign)
+            and isinstance(node.targets[0], ast.Name)
+            and node.targets[0].id == "DEFAULT_SESSION_LIST_LIMIT"
+        )
         identities = "\n\n".join(
             [
                 classes["PolylogueStrEnum"],
@@ -88,6 +98,7 @@ def main() -> None:
                 role_synonyms,
                 classes["Role"],
                 classes["MaterialOrigin"],
+                list_limit,
             ]
         )
         content = (

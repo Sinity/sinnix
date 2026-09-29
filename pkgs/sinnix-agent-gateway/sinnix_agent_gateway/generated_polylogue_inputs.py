@@ -114,6 +114,8 @@ class MaterialOrigin(PolylogueStrEnum):
         msg = f"Unknown material origin {str(value)!r}. Valid material origins: {valid}"
         raise ValueError(msg)
 
+DEFAULT_SESSION_LIST_LIMIT = 20
+
 Bound = Annotated[int, Field(ge=1, le=1000)]
 
 Offset = Annotated[int, Field(ge=0)]
@@ -141,7 +143,7 @@ class SessionList(Request):
     min_messages: Offset | None = None
     max_messages: Offset | None = None
     min_words: Offset | None = None
-    limit: Bound = 50
+    limit: Bound = DEFAULT_SESSION_LIST_LIMIT
     offset: Offset = 0
     continuation: Continuation | None = None
 
@@ -165,7 +167,7 @@ class SessionRead(Request):
     message_role: tuple[Role, ...] = ()
     message_type: MessageTypeFilter | None = None
     material_origin: tuple[MaterialOrigin, ...] = ()
-    limit: Bound = 50
+    limit: int = Field(default=50, ge=1, le=2000)
     offset: Offset = 0
     continuation: Continuation | None = None
 
@@ -214,9 +216,7 @@ class RawRead(Request):
 
 class RawTimeline(Request):
     operation: Literal["sessions.raw.timeline"] = "sessions.raw.timeline"
-    origins: list[RawOrigin] = Field(
-        default_factory=lambda: list[RawOrigin](["claude-code-session", "codex-session"]), min_length=1, max_length=2
-    )
+    origins: list[RawOrigin] | None = Field(default=None, min_length=1, max_length=2)
     since: str | None = None
     until: str | None = None
     query: Annotated[str, Field(min_length=1, max_length=1000)] | None = None
@@ -227,9 +227,7 @@ class RawTimeline(Request):
 class RawMemorySearch(Request):
     operation: Literal["memory.raw.search"] = "memory.raw.search"
     query: Annotated[str, Field(min_length=1, max_length=1000)]
-    origins: list[RawOrigin] = Field(
-        default_factory=lambda: list[RawOrigin](["claude-code-session", "codex-session"]), min_length=1, max_length=2
-    )
+    origins: list[RawOrigin] | None = Field(default=None, min_length=1, max_length=2)
     limit: Bound = 100
     scan_bytes: Annotated[int, Field(ge=1, le=8_388_608)] = 8_388_608
     source_cursors: dict[RawOrigin, str | None] | None = None
