@@ -76,3 +76,7 @@ bd.db
 last_pull
 proxieddb/
 proxied_server_client_info.json
+
+# Task exports: the task database is external (/realm/state/tasks) and
+# this repository is public. Never track Beads exports here.
+*.jsonl
