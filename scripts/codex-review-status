@@ -7,7 +7,8 @@
 
 The hosted Codex reviewer posts a summary comment whose Code Review row names
 the reviewed commit and its state; it publishes no status of its own. One pass
-reads every open PR of each repository and sets the head's status:
+reads every open PR of each repository, with all of its comments, and sets the
+head's status:
 
   success  the summary shows a completed Code Review of this exact head, or
            the PR carries the `codex-review-waived` label;
@@ -15,6 +16,12 @@ reads every open PR of each repository and sets the head's status:
 
 A status is written only when it differs from the head's current one. Nothing
 here ever passes a head it cannot read, so an outage leaves merges blocked.
+
+Codex sometimes never starts on a pushed head. When a ready, unwaived head has
+carried the "waiting for Codex" status for STALL_SECONDS with no review of it
+in the summary, the pass posts one `@codex review` comment carrying a hidden
+marker with the full head SHA. The marker lives on GitHub, so no later pass or
+restart posts again for that head; a new head gets its own single request.
 """
 
 from __future__ import annotations
@@ -23,26 +30,54 @@ import argparse
 import json
 import subprocess
 import sys
+from datetime import datetime, timezone
 
 CONTEXT = "codex-review"
 WAIVER_LABEL = "codex-review-waived"
 SUMMARY_MARKER = "<!-- codex-pull-request-review-summary -->"
 GH_TIMEOUT_S = 60
+# Codex normally starts within minutes of a push; a head it never picks up
+# would otherwise wait indefinitely.
+STALL_SECONDS = 20 * 60
+WAITING = "waiting for Codex to review this head"
+REREQUESTED = "waiting for Codex; review re-requested for this head"
+RETRIGGER_MARKER = "<!-- codex-review-retrigger: {sha} -->"
 
 QUERY = """
-query($owner: String!, $name: String!) {
+query($owner: String!, $name: String!, $cursor: String) {
   repository(owner: $owner, name: $name) {
-    pullRequests(states: OPEN, first: 100) {
+    pullRequests(states: OPEN, first: 100, after: $cursor) {
+      pageInfo { hasNextPage endCursor }
       nodes {
         number
         url
         isDraft
         headRefOid
-        labels(first: 50) { nodes { name } }
-        comments(first: 100) { nodes { url body author { login } } }
-        commits(last: 1) {
-          nodes { commit { status { context(name: "codex-review") { state description } } } }
+        labels(first: 100) { nodes { name } }
+        comments(first: 100) {
+          pageInfo { hasNextPage endCursor }
+          nodes { url body author { login } }
         }
+        commits(last: 1) {
+          nodes {
+            commit {
+              status { context(name: "codex-review") { state description createdAt } }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
+COMMENTS_QUERY = """
+query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      comments(first: 100, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes { url body author { login } }
       }
     }
   }
@@ -86,10 +121,53 @@ def summary_row(comments: list[dict]) -> tuple[str, bool, str | None]:
     return "", False, summary.get("url")
 
 
-def desired(pr: dict) -> tuple[str, str, str]:
+def graphql(query: str, **variables: object) -> dict:
+    args = ["api", "graphql", "-f", f"query={query}"]
+    for key, value in variables.items():
+        if value is None:
+            continue
+        # -F types integers; -f keeps cursors and names as strings.
+        flag = "-F" if isinstance(value, int) else "-f"
+        args += [flag, f"{key}={value}"]
+    return json.loads(gh(*args))
+
+
+def open_pull_requests(owner: str, name: str) -> list[dict]:
+    """Every open PR, following the listing past its first page."""
+    prs: list[dict] = []
+    cursor = None
+    while True:
+        page = graphql(QUERY, owner=owner, name=name, cursor=cursor)
+        connection = page["data"]["repository"]["pullRequests"]
+        prs.extend(connection["nodes"])
+        if not connection["pageInfo"]["hasNextPage"]:
+            return prs
+        cursor = connection["pageInfo"]["endCursor"]
+
+
+def all_comments(owner: str, name: str, pr: dict) -> list[dict]:
+    """The PR's comments, paging past the first 100 the listing carries."""
+    comments = list(pr["comments"]["nodes"])
+    info = pr["comments"]["pageInfo"]
+    while info["hasNextPage"]:
+        page = graphql(
+            COMMENTS_QUERY, owner=owner, name=name, number=pr["number"], cursor=info["endCursor"]
+        )
+        connection = page["data"]["repository"]["pullRequest"]["comments"]
+        comments.extend(connection["nodes"])
+        info = connection["pageInfo"]
+    return comments
+
+
+def retriggered(comments: list[dict], head: str) -> bool:
+    marker = RETRIGGER_MARKER.format(sha=head)
+    return any(marker in (c.get("body") or "") for c in comments)
+
+
+def desired(pr: dict, comments: list[dict]) -> tuple[str, str, str]:
     head = pr["headRefOid"]
     labels = {node["name"] for node in pr["labels"]["nodes"]}
-    reviewed, completed, url = summary_row(pr["comments"]["nodes"])
+    reviewed, completed, url = summary_row(comments)
     for_head = len(reviewed) >= 7 and head.startswith(reviewed)
     target = url or pr["url"]
     if WAIVER_LABEL in labels:
@@ -100,23 +178,66 @@ def desired(pr: dict) -> tuple[str, str, str]:
         return "SUCCESS", f"Codex review completed on {reviewed}", target
     if for_head:
         return "PENDING", f"Codex review of {reviewed} not completed yet", target
-    return "PENDING", "waiting for Codex to review this head", target
+    if retriggered(comments, head):
+        return "PENDING", REREQUESTED, target
+    return "PENDING", WAITING, target
 
 
-def sync_repository(repository: str, *, dry_run: bool) -> int:
+def stalled(description: str, current: dict, now: datetime) -> bool:
+    """The head has waited unreviewed for STALL_SECONDS under WAITING.
+
+    The pass writes WAITING when it first sees a ready head, so that status's
+    creation time is the clock; any other current status (none yet, a draft,
+    a review in progress) does not count as waiting.
+    """
+    if description != WAITING or current.get("description") != WAITING:
+        return False
+    created = current.get("createdAt")
+    if not created:
+        return False
+    since = datetime.fromisoformat(created.replace("Z", "+00:00"))
+    return (now - since).total_seconds() >= STALL_SECONDS
+
+
+def sync_repository(repository: str, *, dry_run: bool, now: datetime | None = None) -> int:
     owner, name = repository.split("/", 1)
-    data = json.loads(
-        gh("api", "graphql", "-f", f"query={QUERY}", "-F", f"owner={owner}", "-F", f"name={name}")
-    )
+    now = now or datetime.now(timezone.utc)
     changed = 0
-    for pr in data["data"]["repository"]["pullRequests"]["nodes"]:
-        state, description, target = desired(pr)
+    for pr in open_pull_requests(owner, name):
+        head = pr["headRefOid"]
+        try:
+            comments = all_comments(owner, name, pr)
+        except GhError as error:
+            # Without every comment the summary or the marker may be missing:
+            # leave this PR untouched and let the next pass retry.
+            print(f"{repository}#{pr['number']}: {error}", file=sys.stderr)
+            continue
+        state, description, target = desired(pr, comments)
         commits = pr["commits"]["nodes"]
         status = commits[0]["commit"]["status"] if commits else None
         current = (status or {}).get("context") or {}
+        if stalled(description, current, now):
+            if dry_run:
+                print(f"would request Codex review on {repository}#{pr['number']} {head[:9]}")
+            else:
+                try:
+                    gh(
+                        "api",
+                        "-X",
+                        "POST",
+                        f"repos/{repository}/issues/{pr['number']}/comments",
+                        "-f",
+                        f"body=@codex review\n\n{RETRIGGER_MARKER.format(sha=head)}",
+                    )
+                except GhError as error:
+                    # A request that landed despite the error leaves its marker,
+                    # so the retry on the next pass cannot post twice.
+                    print(f"{repository}#{pr['number']}: {error}", file=sys.stderr)
+                    continue
+                description = REREQUESTED
         if current.get("state") == state and current.get("description") == description:
             continue
-        print(f"{repository}#{pr['number']} {pr['headRefOid'][:9]}: {state.lower()} ({description})")
+        print(f"{repository}#{pr['number']} {head[:9]}: {state.lower()} ({description})")
         changed += 1
         if dry_run:
             continue
@@ -124,7 +245,7 @@ def sync_repository(repository: str, *, dry_run: bool) -> int:
             "api",
             "-X",
             "POST",
-            f"repos/{repository}/statuses/{pr['headRefOid']}",
+            f"repos/{repository}/statuses/{head}",
             "-f",
             f"state={state.lower()}",
             "-f",
@@ -150,7 +271,7 @@ def main() -> int:
             # Transient (network, rate limit): the next pass retries. A missed
             # pass never passes a head, so merges stay blocked meanwhile.
             print(f"{repository}: {error}", file=sys.stderr)
-        except (KeyError, TypeError, json.JSONDecodeError) as error:
+        except (KeyError, TypeError, ValueError) as error:
             # The API or summary shape changed: fail the unit so it is noticed.
             print(f"{repository}: unexpected response shape: {error!r}", file=sys.stderr)
             broken = True

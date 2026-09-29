@@ -92,6 +92,18 @@
           suiteDir = ../../scripts/tests/stacked-review-threads-status;
           scripts = [ "stacked-review-threads-status" ];
         };
+        # Provably fails when: the stall re-trigger fires before its
+        # threshold, on a draft, waived or already-reviewed head, twice for one
+        # head (marker on a later comments page included), never for a new
+        # head, in a dry run, or after a failed comment read; or when a second
+        # page of open PRs or comments goes unread. Verified by deleting the
+        # marker check (fails the later-page marker test) and the age check
+        # (fails the below-threshold test).
+        codex-review-status-suite = mkScriptSuite {
+          name = "codex-review-status";
+          suiteDir = ../../scripts/tests/codex-review-status;
+          scripts = [ "codex-review-status" ];
+        };
         # The per-checkout dev-service reaper must use the assigned PostgreSQL
         # port and collect NATS-only orphans without crossing checkout scope.
         sinex-dev-db-reaper-suite = mkScriptSuite {
