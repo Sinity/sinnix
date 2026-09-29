@@ -260,16 +260,16 @@ def _quick_headroom() -> int | None:
         if not leaf.is_relative_to(CGROUP_ROOT.resolve()) or leaf == CGROUP_ROOT:
             return None
         available = []
+        # The cgroup v2 root has no memory.current and carries no limit, so
+        # the walk stops below it.
         for scope in (leaf, *leaf.parents):
-            if scope == CGROUP_ROOT.parent:
+            if scope == CGROUP_ROOT.resolve():
                 break
             current = int((scope / "memory.current").read_text().strip())
             for name in ("memory.high", "memory.max"):
                 raw = (scope / name).read_text().strip()
                 if raw != "max":
                     available.append(int(raw) - current)
-            if scope == CGROUP_ROOT:
-                break
         return min(available) if available else None
     except (OSError, ValueError, subprocess.SubprocessError):
         return None

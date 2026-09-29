@@ -433,8 +433,8 @@ def test_quick_headroom_includes_shared_parent_with_mixed_test_load(
     parent = root / "agentctl-pytest.slice"
     quick = parent / "agentctl-pytest-quick.slice"
     quick.mkdir(parents=True)
+    # Like cgroup v2's real root, the fixture root has no memory files.
     for scope, current, high, maximum in (
-        (root, 0, "max", "max"),
         (parent, 11 * 1024**3 + 512 * 1024**2, str(12 * 1024**3), str(14 * 1024**3)),
         (quick, 1024**3, str(9 * 1024**3), str(10 * 1024**3)),
     ):
