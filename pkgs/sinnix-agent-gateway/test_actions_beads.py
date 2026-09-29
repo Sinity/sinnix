@@ -144,7 +144,7 @@ def test_row_revisions_round_trip_exactly_as_strings(tmp_path):
             for item in node:
                 yield from revisions(item)
 
-    seen = [item for item in revisions(listed["data"]["items"])]
+    seen = list(revisions(listed["data"]["items"]))
     assert str(negative) in seen and str(positive) in seen
     assert not any(isinstance(item, int) for item in seen)
 

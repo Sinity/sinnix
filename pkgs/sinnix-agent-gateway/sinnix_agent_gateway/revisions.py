@@ -80,4 +80,3 @@ def token_input_schema(schema: Any) -> Any:
                 "description": f"{_TOKEN_NOTE} {description}".strip(),
             }
     return result
-
