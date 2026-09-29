@@ -4,6 +4,7 @@ import json
 import os
 import socket
 import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from sinnix_lib.atomic_json import modify_json, read_json, write_json_atomic
@@ -72,6 +73,37 @@ def test_ledger_append_and_torn_tail(tmp_path):
     with p.open("a") as fh:
         fh.write('{"torn": ')
     assert [r["n"] for r in iter_jsonl(p)] == [1, 2]
+
+
+def test_ledger_short_writes_from_two_writers_keep_records_separate(
+    tmp_path, monkeypatch
+):
+    p = tmp_path / "l.jsonl"
+    real_write = os.write
+    calls = []
+
+    def short_write(fd, data):
+        calls.append(len(data))
+        threading.Event().wait(0.0001)
+        return real_write(fd, data[:7])
+
+    monkeypatch.setattr(os, "write", short_write)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        list(pool.map(lambda n: append_jsonl(p, {"n": n, "body": "x" * 80}), range(2)))
+    assert len(calls) > 2  # The forced short-write path ran.
+    assert {row["n"] for row in iter_jsonl(p)} == {0, 1}
+    assert len(p.read_text().splitlines()) == 2
+
+
+def test_ledger_restart_discards_only_unterminated_tail(tmp_path):
+    p = tmp_path / "l.jsonl"
+    append_jsonl(p, {"n": 1})
+    append_jsonl(p, {"n": 2})
+    with p.open("ab") as fh:
+        fh.write(b'{"n":3')
+    append_jsonl(p, {"n": 4})
+    assert list(iter_jsonl(p)) == [{"n": 1}, {"n": 2}, {"n": 4}]
+    assert len(p.read_bytes().splitlines()) == 3
 
 
 def test_receipt_shape(monkeypatch):

@@ -270,6 +270,9 @@ def backup_database(
                 f" archive={output_path}"
                 f" archive_bytes={archive_bytes}"
                 " archive_check=zstd-t:ok"
+                " restore_check=zstd-t:ok"
+                f" source_open={check}:{verdict}"
+                f" structural_check={'ok' if verdict == 'ok' else 'not_run'}"
                 f" compress_seconds={compress_seconds:.1f}"
             )
             return
@@ -324,6 +327,9 @@ def backup_database(
             f" archive={output_path}"
             f" archive_bytes={archive_bytes}"
             " archive_check=zstd-t:ok"
+            " restore_check=zstd-t:ok"
+            f" source_open={check}:{verdict}"
+            " structural_check=ok"
             f" compress_seconds={compress_seconds:.1f}"
         )
     finally:
@@ -334,10 +340,41 @@ def backup_database(
         cleanup()
 
 
+def verify_immutable_source(source_path: Path, check_budget_seconds: float) -> None:
+    wal_path = Path(f"{source_path}-wal")
+    if wal_path.exists() and wal_path.stat().st_size > 0:
+        raise RuntimeError("immutable SQLite source must not have a WAL")
+    source_bytes = source_path.stat().st_size
+    source = sqlite3.connect(
+        f"file:{source_path}?mode=ro&immutable=1", uri=True, timeout=5.0
+    )
+    try:
+        source.execute(f"PRAGMA mmap_size={source_bytes}")
+        started = time.monotonic()
+        check, verdict = check_immutable_snapshot(
+            source, started + check_budget_seconds, mode="structural"
+        )
+        print(
+            "sqlite-backup verification receipt:"
+            f" source={source_path} source_bytes={source_bytes}"
+            f" check={check} verdict={verdict}"
+            f" check_seconds={time.monotonic() - started:.1f}"
+            " structural_check=ok",
+            flush=True,
+        )
+    finally:
+        source.close()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("source", type=Path)
-    parser.add_argument("output", type=Path)
+    parser.add_argument("output", type=Path, nargs="?")
+    parser.add_argument(
+        "--verify-only",
+        action="store_true",
+        help="check a frozen WAL-free source without publishing a backup",
+    )
     parser.add_argument(
         "--immutable-source",
         action="store_true",
@@ -359,6 +396,13 @@ def main() -> int:
         help="structural page walk or a qualified, bounded schema/header check",
     )
     args = parser.parse_args()
+    if args.verify_only:
+        if not args.immutable_source or args.output is not None:
+            parser.error("--verify-only requires --immutable-source and no output")
+        if args.check_mode != "structural" or args.check_budget_seconds <= 0:
+            parser.error("--verify-only requires structural mode and a positive check budget")
+    elif args.output is None:
+        parser.error("output is required unless --verify-only is used")
     if args.check_mode == "header" and not args.immutable_source:
         parser.error("--check-mode header requires --immutable-source")
     if args.check_mode == "header" and args.check_budget_seconds:
@@ -367,13 +411,16 @@ def main() -> int:
     signal.signal(signal.SIGINT, request_cancel)
     try:
         with cancellation_wakeup():
-            backup_database(
-                args.source,
-                args.output,
-                immutable_source=args.immutable_source,
-                check_budget_seconds=args.check_budget_seconds,
-                check_mode=args.check_mode,
-            )
+            if args.verify_only:
+                verify_immutable_source(args.source, args.check_budget_seconds)
+            else:
+                backup_database(
+                    args.source,
+                    args.output,
+                    immutable_source=args.immutable_source,
+                    check_budget_seconds=args.check_budget_seconds,
+                    check_mode=args.check_mode,
+                )
     except BackupCancelled:
         print("SQLite backup cancelled", file=sys.stderr)
         return 143

@@ -1,8 +1,7 @@
 """JSONL ledgers and the sinnix receipt schema.
 
-A ledger line's atomicity requirement is one line, not read-modify-write:
-a single ``write(2)`` on an ``O_APPEND`` fd does not interleave for sane
-line sizes, so appends need no lock. Nine-plus scripts each carried their
+A ledger line's atomicity requirement is one line, not read-modify-write.
+Short writes require a destination lock through the complete append. Nine-plus scripts carried their
 own version of this; the receipt shape (``run_id``/``operation_kind``/
 ``state``/``ts``) existed in at least three dialects (borg integrity
 receipts, drill records, drain receipts) — this is the one schema new
@@ -19,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from .atomic import atomic_publish
+from .lock import flock
 
 
 def utc_ts() -> str:
@@ -48,19 +48,35 @@ def append_jsonl(
         )
         + "\n"
     )
-    fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_APPEND, mode)
-    try:
-        payload = line.encode("utf-8")
-        offset = 0
-        while offset < len(payload):
-            written = os.write(fd, payload[offset:])
-            if written <= 0:
-                raise OSError("append_jsonl wrote no bytes")
-            offset += written
-        if fsync:
-            os.fsync(fd)
-    finally:
-        os.close(fd)
+    with flock(p.with_name(p.name + ".lock")):
+        fd = os.open(p, os.O_RDWR | os.O_CREAT | os.O_APPEND, mode)
+        try:
+            # Only a final, unterminated line can be an interrupted append.
+            # Search backwards in chunks so recovery never reads the ledger.
+            end = os.lseek(fd, 0, os.SEEK_END)
+            if end and os.pread(fd, 1, end - 1) != b"\n":
+                cursor = end
+                while cursor:
+                    start = max(0, cursor - 65536)
+                    chunk = os.pread(fd, cursor - start, start)
+                    newline = chunk.rfind(b"\n")
+                    if newline >= 0:
+                        os.ftruncate(fd, start + newline + 1)
+                        break
+                    cursor = start
+                else:
+                    os.ftruncate(fd, 0)
+            payload = line.encode("utf-8")
+            offset = 0
+            while offset < len(payload):
+                written = os.write(fd, payload[offset:])
+                if written <= 0:
+                    raise OSError("append_jsonl wrote no bytes")
+                offset += written
+            if fsync:
+                os.fsync(fd)
+        finally:
+            os.close(fd)
 
 
 def iter_jsonl(path: Path | str) -> Iterator[Any]:

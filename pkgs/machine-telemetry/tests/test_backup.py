@@ -203,6 +203,9 @@ def test_immutable_snapshot_source_is_compressed_without_copy(tmp_path: Path) ->
     assert receipt["check"] == "integrity_check"
     assert receipt["verdict"] == "ok"
     assert receipt["archive_check"] == "zstd-t:ok"
+    assert receipt["restore_check"] == "zstd-t:ok"
+    assert receipt["source_open"] == "integrity_check:ok"
+    assert receipt["structural_check"] == "ok"
     assert receipt["archive"] == str(output)
     assert int(receipt["archive_bytes"]) == output.stat().st_size
     assert not list(tmp_path.glob("*.tmp*"))
@@ -298,7 +301,82 @@ def test_header_mode_publishes_a_qualified_backup_without_a_page_walk(
     assert receipt["check"] == "schema_header"
     assert receipt["verdict"] == "limited"
     assert receipt["archive_check"] == "zstd-t:ok"
+    assert receipt["restore_check"] == "zstd-t:ok"
+    assert receipt["source_open"] == "schema_header:limited"
+    assert receipt["structural_check"] == "not_run"
     assert output.is_file()
+
+
+def test_independent_check_reports_corruption_without_changing_daily_artifact(
+    tmp_path: Path,
+) -> None:
+    """The independent walk must fail on damage a daily header check accepts."""
+    source = tmp_path / "telemetry.sqlite"
+    seed_large_database(source)
+    output = tmp_path / "daily.zst"
+    with source.open("r+b") as database:
+        database.seek(2 * 512)
+        database.write((3).to_bytes(4, byteorder="big"))
+    daily = subprocess.run(
+        [
+            str(SCRIPT),
+            "--immutable-source",
+            "--check-mode",
+            "header",
+            str(source),
+            str(output),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert daily.returncode == 0, daily.stderr
+    original = output.read_bytes()
+
+    verification = subprocess.run(
+        [
+            str(SCRIPT),
+            "--immutable-source",
+            "--verify-only",
+            "--check-budget-seconds",
+            "60",
+            str(source),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert verification.returncode == 1
+    assert "quick_check(1) failed" in verification.stderr
+    assert output.read_bytes() == original
+    assert not list(tmp_path.glob("*.tmp*"))
+
+
+def test_independent_check_emits_structural_receipt_without_new_backup(
+    tmp_path: Path,
+) -> None:
+    """A valid frozen source exercises the verification-only success path."""
+    source = tmp_path / "telemetry.sqlite"
+    with sqlite3.connect(source) as connection:
+        connection.execute("CREATE TABLE samples (value INTEGER)")
+        connection.execute("INSERT INTO samples VALUES (1)")
+    result = subprocess.run(
+        [
+            str(SCRIPT),
+            "--immutable-source",
+            "--verify-only",
+            "--check-budget-seconds",
+            "60",
+            str(source),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "check=integrity_check verdict=ok" in result.stdout
+    assert "structural_check=ok" in result.stdout
+    assert sorted(tmp_path.iterdir()) == [source]
 
 
 def test_copied_large_database_rejects_corruption(tmp_path: Path) -> None:

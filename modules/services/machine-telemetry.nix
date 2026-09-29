@@ -324,7 +324,7 @@ mkServiceModule {
           serviceConfig = {
             Group = "users";
             TimeoutStartSec = "${toString backupTimeoutMinutes}min";
-            # The integrity walk must finish within its fixed time budget.
+            # Compression must finish within the fixed unit budget.
             IOReadBandwidthMax = map (
               limit: if lib.hasPrefix "${realmRoot} " limit then "${realmRoot} 100M" else limit
             ) config.sinnix.runtime.inventory.classes.backup.serviceConfig.IOReadBandwidthMax;
@@ -347,6 +347,99 @@ mkServiceModule {
           };
           timer = {
             onCalendar = "*-*-* 03:42:00";
+            randomizedDelaySec = "30min";
+            persistent = false;
+          };
+        }
+      )
+      (lib.sinnix.mkScheduledJob
+        {
+          inherit config;
+          unitName = "machine-telemetry-sqlite-verify";
+          description = "Independently check machine telemetry SQLite structure";
+          surface = config.sinnix.runtime.surfaces.machine-telemetry-sqlite-verify;
+        }
+        {
+          script = ''
+            set -euo pipefail
+            umask 077
+            install -d -m 0700 -o ${lib.escapeShellArg username} -g users ${lib.escapeShellArg backupRoot}
+            stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+            snapshot="${backupSnapshotRoot}/verify-$stamp"
+            receipt=${lib.escapeShellArg backupRoot}/structural-verification.status
+            writer_was_active=0
+            write_state() {
+              printf 'time=%s state=%s check=structural source=immutable_snapshot\n' "$stamp" "$1" > "$receipt.tmp"
+              chown ${lib.escapeShellArg username}:users "$receipt.tmp"
+              mv -f "$receipt.tmp" "$receipt"
+            }
+            resume_writer() {
+              if [ "$writer_was_active" -eq 1 ]; then
+                systemctl start machine-telemetry.service
+                writer_was_active=0
+              fi
+            }
+            cleanup() {
+              rc="$?"
+              trap - EXIT
+              resume_writer || rc=1
+              if [ -d "$snapshot" ]; then
+                btrfs subvolume delete "$snapshot" >/dev/null || rc=1
+              fi
+              if [ "$rc" -ne 0 ]; then write_state failed; fi
+              exit "$rc"
+            }
+            trap cleanup EXIT
+            trap 'exit 143' INT TERM
+            write_state running
+            if systemctl is-active --quiet machine-telemetry.service; then
+              writer_was_active=1
+              systemctl stop machine-telemetry.service
+            fi
+            sqlite3 ${lib.escapeShellArg dbPath} 'PRAGMA wal_checkpoint(TRUNCATE);'
+            if [ -s ${lib.escapeShellArg "${dbPath}-wal"} ]; then
+              echo "machine telemetry WAL remained after checkpoint" >&2
+              exit 1
+            fi
+            btrfs subvolume snapshot -r ${lib.escapeShellArg dbRoot} "$snapshot"
+            resume_writer
+            sinnix-sqlite-backup --immutable-source --verify-only \
+              --check-budget-seconds 5400 "$snapshot/telemetry.sqlite"
+            btrfs subvolume delete "$snapshot" >/dev/null
+            write_state ok
+          '';
+          path = [
+            pkgs.coreutils
+            pkgs.btrfs-progs
+            pkgs.sqlite
+            scriptPkgs.sinnix-sqlite-backup
+          ];
+          user = "root";
+          serviceConfig = {
+            Group = "users";
+            TimeoutStartSec = "100min";
+            IOReadBandwidthMax = map (
+              limit: if lib.hasPrefix "${realmRoot} " limit then "${realmRoot} 25M" else limit
+            ) config.sinnix.runtime.inventory.classes.backup.serviceConfig.IOReadBandwidthMax;
+          };
+          unit = {
+            after = [
+              "realm.mount"
+              "persist.mount"
+            ];
+            requires = [
+              "realm.mount"
+              "persist.mount"
+            ];
+            unitConfig.RequiresMountsFor = [
+              dbRoot
+              backupRoot
+              backupSnapshotRoot
+            ];
+            restartIfChanged = false;
+          };
+          timer = {
+            onCalendar = "Sun *-*-* 07:00:00";
             randomizedDelaySec = "30min";
             persistent = false;
           };
@@ -466,6 +559,31 @@ mkServiceModule {
           };
           machine-telemetry-sqlite-backup-timer = {
             unit = "machine-telemetry-sqlite-backup.timer";
+            kind = "timer";
+          };
+          machine-telemetry-sqlite-verify = {
+            unit = "machine-telemetry-sqlite-verify.service";
+            resourceClass = "backup";
+            observe.enable = true;
+            captures = [
+              {
+                name = "machine-telemetry-sqlite-structural-verification";
+                path = "${backupRoot}/structural-verification.status";
+                eventDriven = true;
+                staleAfterSeconds = 691200;
+                livenessProbe = {
+                  command = "${pkgs.gnugrep}/bin/grep -q ' state=ok ' ${lib.escapeShellArg "${backupRoot}/structural-verification.status"}";
+                  timeoutSeconds = 10;
+                };
+                data = {
+                  class = "derived";
+                  inputs = [ "machine-telemetry" ];
+                };
+              }
+            ];
+          };
+          machine-telemetry-sqlite-verify-timer = {
+            unit = "machine-telemetry-sqlite-verify.timer";
             kind = "timer";
           };
         };
