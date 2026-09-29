@@ -1046,3 +1046,90 @@ def test_catalog_search_reports_incomplete_upstream_without_matches(
     }
     assert response["data"]["mcp_catalog_truncated"] is True
     assert response["data"]["truncated"] is True
+
+
+def test_files_search_keeps_a_bounded_page_of_one_huge_file_and_spills_the_rest(
+    tmp_path: Path,
+) -> None:
+    """Fails if one file's 10,000 matches are all held in the response.
+
+    limit bounds files, not lines, so a single file used to materialize every
+    matching line. The in-band page keeps INBAND_LINES_PER_FILE lines and the
+    rest, the last match included, is in the overflow artifact. Real rg also
+    emits begin/end/summary events, which must not produce warnings.
+    """
+    server = create_server(config(tmp_path), "operator")
+    runtime = server._sinnix_revision_publisher.runtime
+    root = tmp_path / "huge-corpus"
+    root.mkdir()
+    (root / "huge.txt").write_text(
+        "".join(f"needle {number}\n" for number in range(1, 10_001))
+    )
+
+    result = files._search(
+        runtime,
+        files.SearchInput(roots=[{"path": str(root)}], content_regex="needle", limit=1),
+    )
+
+    assert result.warnings == []
+    (match,) = result.matches
+    assert match.match_count == 10_000
+    assert len(match.lines) == files.INBAND_LINES_PER_FILE
+    assert match.overflow_lines == 10_000 - files.INBAND_LINES_PER_FILE
+    assert result.overflow is not None
+    assert result.overflow.lines == match.overflow_lines
+    page = runtime.artifacts.read(
+        result.overflow.artifact_id, offset=result.overflow.bytes - 200, max_bytes=200
+    )
+    tail = base64.b64decode(page["base64"]).decode().splitlines()[-1]
+    assert json.loads(tail)["text"] == "needle 10000"
+    assert json.loads(tail)["line_number"] == 10_000
+
+
+def test_files_search_reports_malformed_records_but_not_valid_summaries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fails if a summary event warns, or a match without a path passes silently."""
+    server = create_server(config(tmp_path), "operator")
+    runtime = server._sinnix_revision_publisher.runtime
+    root = tmp_path / "records"
+    root.mkdir()
+    events = [
+        {"type": "begin", "data": {"path": {"text": str(root / "a.txt")}}},
+        {"type": "summary", "data": {"elapsed_total": {"secs": 0, "nanos": 1}}},
+    ]
+
+    def run(argv, timeout, *, max_stderr_bytes, on_stdout):
+        for event in events:
+            on_stdout(json.dumps(event).encode() + b"\n")
+        return ExecutionResult(
+            command=tuple(argv), exit_status=1, stdout=b"", stderr=b""
+        )
+
+    monkeypatch.setattr(files, "_run", run)
+    search = files.SearchInput(roots=[{"path": str(root)}], content_regex="x")
+
+    clean = files._search(runtime, search)
+    assert clean.warnings == [] and clean.matches == []
+
+    events[:] = [
+        {"type": "match", "data": {"lines": {"text": "x\n"}, "line_number": 1}},
+        ["not", "an", "event"],
+    ]
+    broken = files._search(runtime, search)
+    assert "ripgrep emitted malformed path data" in broken.warnings
+    assert "ripgrep emitted a malformed record" in broken.warnings
+
+
+def test_files_search_no_match_is_an_empty_result(tmp_path: Path) -> None:
+    server = create_server(config(tmp_path), "operator")
+    runtime = server._sinnix_revision_publisher.runtime
+    root = tmp_path / "empty-corpus"
+    root.mkdir()
+    (root / "a.txt").write_text("nothing here\n")
+
+    result = files._search(
+        runtime,
+        files.SearchInput(roots=[{"path": str(root)}], content_regex="absent-needle"),
+    )
+    assert result.matches == [] and result.warnings == [] and result.overflow is None

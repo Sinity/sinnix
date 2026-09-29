@@ -5,11 +5,13 @@ from __future__ import annotations
 import base64
 import binascii
 import os
+import shutil
 import stat as stat_module
+import uuid
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import Field
 from sinnix_lib.atomic import atomic_publish
@@ -546,9 +548,30 @@ class MatchLine(GatewayModel):
     is_match: bool = True
 
 
+# Lines of one file kept in the response. The rest of a file's lines go to
+# the search's overflow artifact as they arrive, so a file with ten thousand
+# matching lines costs this many in memory, not ten thousand.
+INBAND_LINES_PER_FILE = 200
+
+
 class FileMatch(FileEntry):
     lines: list[MatchLine] = Field(default_factory=list)
     match_count: int | None = None
+    overflow_lines: int = Field(
+        default=0,
+        description="Lines of this file beyond `lines`, in the search's overflow artifact.",
+    )
+
+
+class SearchOverflow(GatewayModel):
+    ref: str
+    artifact_id: str
+    lines: int
+    bytes: int
+    format: str = (
+        "One JSON object per line, in ripgrep order: path, line_number, text, "
+        "is_match. Read it with artifacts.read and next_offset."
+    )
 
 
 class SearchResult(GatewayModel):
@@ -559,6 +582,10 @@ class SearchResult(GatewayModel):
     engine: Literal["fd", "rg"]
     timed_out: bool = False
     warnings: list[str] = Field(default_factory=list)
+    overflow: SearchOverflow | None = Field(
+        default=None,
+        description="Every matching or context line not returned in band.",
+    )
 
 
 def _run(
@@ -652,6 +679,26 @@ def _search(runtime: Runtime, inp: SearchInput) -> SearchResult:
         by_path: dict[str, FileMatch] = {}
         limit_reached = False
         pending = bytearray()
+        spill_path: Path | None = None
+        spill: Any = None
+        spilled = 0
+
+        def overflow(path_text: str, line: MatchLine) -> None:
+            nonlocal spill_path, spill, spilled
+            if spill is None:
+                directory = runtime.config.state_dir / "captures" / uuid.uuid4().hex
+                directory.mkdir(mode=0o700, parents=True)
+                spill_path = directory / "search-overflow.txt"
+                spill = spill_path.open("w", encoding="utf-8")
+            spill.write(
+                json_module.dumps(
+                    {"path": path_text, **line.model_dump()},
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                )
+                + "\n"
+            )
+            spilled += 1
 
         def warn_once(message: str) -> None:
             if message not in warnings:
@@ -693,13 +740,20 @@ def _search(runtime: Runtime, inp: SearchInput) -> SearchResult:
                 event = json_module.loads(raw)
             except ValueError:
                 return
+            if not isinstance(event, dict):
+                warn_once("ripgrep emitted a malformed record")
+                return
             kind = event.get("type")
+            # begin, end and summary are valid events that carry no line;
+            # only match and context records must name a path.
+            if kind not in {"match", "context"}:
+                return
             data = event.get("data", {})
             if not isinstance(data, dict):
                 warn_once("ripgrep emitted malformed match data")
                 return
             path_text = rg_text(data.get("path"), field="path", path=True)
-            if not path_text or kind not in {"match", "context"}:
+            if not path_text:
                 return
             candidate = Path(path_text)
             try:
@@ -737,13 +791,16 @@ def _search(runtime: Runtime, inp: SearchInput) -> SearchResult:
             line = rg_text(data.get("lines"), field="line")
             if line is None:
                 return
-            entry.lines.append(
-                MatchLine(
-                    line_number=int(data.get("line_number") or 0),
-                    text=line.rstrip("\n"),
-                    is_match=kind == "match",
-                )
+            row = MatchLine(
+                line_number=int(data.get("line_number") or 0),
+                text=line.rstrip("\n"),
+                is_match=kind == "match",
             )
+            if len(entry.lines) < INBAND_LINES_PER_FILE:
+                entry.lines.append(row)
+            else:
+                overflow(path_text, row)
+                entry.overflow_lines += 1
             if kind == "match":
                 entry.match_count = (entry.match_count or 0) + 1
 
@@ -754,18 +811,44 @@ def _search(runtime: Runtime, inp: SearchInput) -> SearchResult:
                 del pending[: newline + 1]
                 consume_record(raw)
 
-        result = _run(
-            argv,
-            inp.timeout_seconds,
-            max_stderr_bytes=runtime.config.max_result_bytes,
-            on_stdout=consume,
-        )
-        # A killed command can leave one partial JSON record.  It does not
-        # describe a complete match, so only consume a final unterminated row
-        # after normal completion.
-        if pending and not result.timed_out:
-            consume_record(bytes(pending))
-        _raise_search_failure(argv, result)
+        try:
+            result = _run(
+                argv,
+                inp.timeout_seconds,
+                max_stderr_bytes=runtime.config.max_result_bytes,
+                on_stdout=consume,
+            )
+            # A killed command can leave one partial JSON record.  It does not
+            # describe a complete match, so only consume a final unterminated
+            # row after normal completion.
+            if pending and not result.timed_out:
+                consume_record(bytes(pending))
+        finally:
+            if spill is not None:
+                spill.close()
+        try:
+            _raise_search_failure(argv, result)
+        except ProtocolError:
+            if spill_path is not None:
+                shutil.rmtree(spill_path.parent, ignore_errors=True)
+            raise
+        overflow_artifact = None
+        if spill_path is not None:
+            runtime.artifacts.attest_capture(
+                spill_path.parent,
+                source="files.search",
+                target={"roots": root_refs, "content_regex": inp.content_regex},
+                files=[spill_path],
+            )
+            artifact_id = runtime.artifacts.register(
+                spill_path, kind="search-overflow", owner_id="files.search"
+            )
+            overflow_artifact = SearchOverflow(
+                ref=f"sinnix://artifacts/{artifact_id}",
+                artifact_id=artifact_id,
+                lines=spilled,
+                bytes=spill_path.stat().st_size,
+            )
         matches = list(by_path.values())
         return SearchResult(
             roots=root_refs,
@@ -775,6 +858,7 @@ def _search(runtime: Runtime, inp: SearchInput) -> SearchResult:
             engine="rg",
             timed_out=result.timed_out,
             warnings=warnings,
+            overflow=overflow_artifact,
         )
     argv = ["fd", "--print0", "--absolute-path", f"--max-results={inp.limit + 1}"]
     if inp.include_hidden:
