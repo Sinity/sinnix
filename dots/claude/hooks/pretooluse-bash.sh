@@ -15,6 +15,7 @@ bd_guard_script=$(
   cat <<'PY'
 import json
 import os
+import re
 import shlex
 import sys
 
@@ -147,14 +148,16 @@ CMD_NO_HEREDOC=$(printf '%s' "$CMD" | awk '
   }')
 # Block hook bypass and checkout-wide stashes.
 #
-# `--no-verify` skips the repository's commit and push gates; the answer to a
-# failing hook is fixing what it reports. A `git stash` without a pathspec
+# `--no-verify`, `commit -n`, and `-c core.hooksPath=...` skip the
+# repository's commit and push gates; the answer to a failing hook is fixing
+# what it reports. A `git stash` without a pathspec
 # sweeps every uncommitted change in the checkout, including other agents' and
 # the operator's, into one entry. Commit work on a branch, or stash only named
 # paths. Heredoc bodies are already stripped, so a message may name either.
 git_guard_script=$(
   cat <<'PY'
 import os
+import re
 import shlex
 import sys
 
@@ -181,13 +184,33 @@ for segment in segments:
     if index >= len(segment) or os.path.basename(segment[index]) != "git":
         continue
     index += 1
+    hooks_moved = False
     while index < len(segment) and segment[index].startswith("-"):
-        index += 2 if segment[index] in valued else 1
+        option = segment[index]
+        value = segment[index + 1] if index + 1 < len(segment) else ""
+        if option == "-c" and value.lower().startswith("core.hookspath"):
+            hooks_moved = True
+        index += 2 if option in valued else 1
     if index >= len(segment):
         continue
     subcommand, rest = segment[index], segment[index + 1 :]
-    if subcommand in hooked and "--no-verify" in rest:
-        print("git --no-verify blocked: it skips the repository's hooks. Fix what the hook reports and run it again.")
+    # `commit -n` is --no-verify; in a short cluster it counts only before a
+    # letter that takes a value (`-nm msg` bypasses, `-mn` is the message "n").
+    short_n = False
+    if subcommand == "commit":
+        # A value-taking letter ends the cluster; a detached value is skipped.
+        values_follow = False
+        for token in rest:
+            if values_follow:
+                values_follow = False
+            elif token == "--":
+                break
+            elif re.match(r"-[^-mFcCtSu]*n", token):
+                short_n = True
+            elif re.fullmatch(r"-[a-zA-Z]*[mFcCt]", token):
+                values_follow = True
+    if (subcommand in hooked and "--no-verify" in rest) or short_n or hooks_moved:
+        print("git hook bypass blocked (--no-verify, commit -n, or -c core.hooksPath): it skips the repository's hooks. Fix what the hook reports and run it again.")
         sys.exit(0)
     if subcommand == "stash":
         action = rest[0] if rest and not rest[0].startswith("-") else "push"
