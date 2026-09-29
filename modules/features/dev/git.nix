@@ -33,6 +33,9 @@ mkFeatureModule {
       # Codex reviews PRs but publishes no status, so branch protection cannot
       # wait for it. This pass turns its review summary into a `codex-review`
       # status on each open head (gh's persistent login authenticates it).
+      # It re-requests a stalled head once; a Codex usage-limit notice on any
+      # open PR holds every request for three hours, then one probe request
+      # tests the quota (rule in the script's docstring).
       (lib.sinnix.mkScheduledJob
         {
           inherit config;

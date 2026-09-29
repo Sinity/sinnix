@@ -22,6 +22,26 @@ carried the "waiting for Codex" status for STALL_SECONDS with no review of it
 in the summary, the pass posts one `@codex review` comment carrying a hidden
 marker with the full head SHA. The marker lives on GitHub, so no later pass or
 restart posts again for that head; a new head gets its own single request.
+
+Codex answers a request it cannot serve with a usage-limit notice ("You have
+reached your Codex usage limits for code reviews"). The limit belongs to the
+account, so one notice on any open PR of the repository holds back requests
+on every PR, and a request made before the newest notice no longer counts as
+made. While held back, a waiting head's status reads "Codex usage limit
+reached (<notice time>); not re-requesting". Recovery is probed, not assumed:
+
+  - for QUOTA_RETRY_SECONDS after the newest notice, no request is posted;
+  - then one pass posts a single request for the whole repository (the probe);
+  - a notice answering the probe restarts the wait; a probe left unanswered
+    for PROBE_GRACE_SECONDS means Codex is serving again, and every stalled
+    head gets its one request again.
+
+So a spent quota costs one request per repository per QUOTA_RETRY_SECONDS.
+Notices on closed PRs are not read; a missed one costs one extra request,
+which Codex answers with a fresh notice. The security-review notice
+("... usage limits for security reviews") is a separate quota and is ignored.
+A pass that could not read every PR's comments posts no request at all, since
+the unread comments may hold the newest notice.
 """
 
 from __future__ import annotations
@@ -30,6 +50,7 @@ import argparse
 import json
 import subprocess
 import sys
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 CONTEXT = "codex-review"
@@ -42,6 +63,16 @@ STALL_SECONDS = 20 * 60
 WAITING = "waiting for Codex to review this head"
 REREQUESTED = "waiting for Codex; review re-requested for this head"
 RETRIGGER_MARKER = "<!-- codex-review-retrigger: {sha} -->"
+RETRIGGER_PREFIX = "<!-- codex-review-retrigger:"
+QUOTA_NOTICE = "reached your Codex usage limits for code reviews"
+LIMITED = "Codex usage limit reached ({since}); not re-requesting"
+LIMITED_PREFIX = "Codex usage limit reached ("
+# Codex's review allowance refills over hours; one probe per interval notices
+# the refill without posting a request that can only draw another notice.
+QUOTA_RETRY_SECONDS = 3 * 60 * 60
+# Codex answers an unservable request within seconds; a probe it has left
+# unanswered this long was accepted.
+PROBE_GRACE_SECONDS = 10 * 60
 
 QUERY = """
 query($owner: String!, $name: String!, $cursor: String) {
@@ -56,7 +87,7 @@ query($owner: String!, $name: String!, $cursor: String) {
         labels(first: 100) { nodes { name } }
         comments(first: 100) {
           pageInfo { hasNextPage endCursor }
-          nodes { url body author { login } }
+          nodes { url body createdAt author { login } }
         }
         commits(last: 1) {
           nodes {
@@ -77,7 +108,7 @@ query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
     pullRequest(number: $number) {
       comments(first: 100, after: $cursor) {
         pageInfo { hasNextPage endCursor }
-        nodes { url body author { login } }
+        nodes { url body createdAt author { login } }
       }
     }
   }
@@ -159,12 +190,82 @@ def all_comments(owner: str, name: str, pr: dict) -> list[dict]:
     return comments
 
 
-def retriggered(comments: list[dict], head: str) -> bool:
+def _time(stamp: str) -> datetime:
+    return datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+
+
+def _stamp(moment: datetime) -> str:
+    return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _by_codex(comment: dict) -> bool:
+    return "codex" in ((comment.get("author") or {}).get("login") or "")
+
+
+@dataclass(frozen=True)
+class Quota:
+    """The repository's Codex review quota as its open PRs' comments show it.
+
+    `notice` is the newest code-review usage-limit notice; `probe` is the
+    newest re-trigger request posted after it.
+    """
+
+    notice: datetime | None = None
+    probe: datetime | None = None
+
+    @classmethod
+    def read(cls, threads: list[list[dict]]) -> Quota:
+        comments = [comment for thread in threads for comment in thread]
+        notices = [
+            _time(c["createdAt"])
+            for c in comments
+            if _by_codex(c) and QUOTA_NOTICE in (c.get("body") or "")
+        ]
+        if not notices:
+            return cls()
+        notice = max(notices)
+        probes = [
+            _time(c["createdAt"])
+            for c in comments
+            if RETRIGGER_PREFIX in (c.get("body") or "") and _time(c["createdAt"]) > notice
+        ]
+        return cls(notice, max(probes, default=None))
+
+    def held(self, now: datetime) -> bool:
+        """Requests wait: the notice is recent, or a probe awaits its answer."""
+        if self.notice is None:
+            return False
+        if self.probe is None:
+            return (now - self.notice).total_seconds() < QUOTA_RETRY_SECONDS
+        return (now - self.probe).total_seconds() < PROBE_GRACE_SECONDS
+
+    def budget(self, now: datetime) -> int | None:
+        """Requests this pass may post: none, one probe, or unlimited (None)."""
+        if self.held(now):
+            return 0
+        if self.notice is not None and self.probe is None:
+            return 1
+        return None
+
+    def description(self, now: datetime) -> str | None:
+        """The waiting-head status while requests are held back."""
+        if self.notice is None or self.budget(now) is None:
+            return None
+        return LIMITED.format(since=_stamp(self.notice))
+
+
+def retriggered(comments: list[dict], head: str, since: datetime | None = None) -> bool:
+    """A request for this head exists, posted after the newest quota notice."""
     marker = RETRIGGER_MARKER.format(sha=head)
-    return any(marker in (c.get("body") or "") for c in comments)
+    return any(
+        marker in (c.get("body") or "") and (since is None or _time(c["createdAt"]) > since)
+        for c in comments
+    )
 
 
-def desired(pr: dict, comments: list[dict]) -> tuple[str, str, str]:
+def desired(
+    pr: dict, comments: list[dict], quota: Quota, now: datetime
+) -> tuple[str, str, str]:
     head = pr["headRefOid"]
     labels = {node["name"] for node in pr["labels"]["nodes"]}
     reviewed, completed, url = summary_row(comments)
@@ -178,45 +279,58 @@ def desired(pr: dict, comments: list[dict]) -> tuple[str, str, str]:
         return "SUCCESS", f"Codex review completed on {reviewed}", target
     if for_head:
         return "PENDING", f"Codex review of {reviewed} not completed yet", target
-    if retriggered(comments, head):
+    if retriggered(comments, head, quota.notice):
         return "PENDING", REREQUESTED, target
-    return "PENDING", WAITING, target
+    return "PENDING", quota.description(now) or WAITING, target
+
+
+def _waiting(description: str) -> bool:
+    return description == WAITING or description.startswith(LIMITED_PREFIX)
 
 
 def stalled(description: str, current: dict, now: datetime) -> bool:
-    """The head has waited unreviewed for STALL_SECONDS under WAITING.
+    """The head has waited unreviewed for STALL_SECONDS.
 
-    The pass writes WAITING when it first sees a ready head, so that status's
+    The pass writes WAITING (or, while the quota holds requests back, the
+    usage-limit description) when it first sees a ready head, so that status's
     creation time is the clock; any other current status (none yet, a draft,
     a review in progress) does not count as waiting.
     """
-    if description != WAITING or current.get("description") != WAITING:
+    if not _waiting(description) or not _waiting(current.get("description") or ""):
         return False
     created = current.get("createdAt")
     if not created:
         return False
-    since = datetime.fromisoformat(created.replace("Z", "+00:00"))
-    return (now - since).total_seconds() >= STALL_SECONDS
+    return (now - _time(created)).total_seconds() >= STALL_SECONDS
 
 
 def sync_repository(repository: str, *, dry_run: bool, now: datetime | None = None) -> int:
     owner, name = repository.split("/", 1)
     now = now or datetime.now(timezone.utc)
     changed = 0
+    read: list[tuple[dict, list[dict]]] = []
+    complete = True
     for pr in open_pull_requests(owner, name):
-        head = pr["headRefOid"]
         try:
-            comments = all_comments(owner, name, pr)
+            read.append((pr, all_comments(owner, name, pr)))
         except GhError as error:
             # Without every comment the summary or the marker may be missing:
             # leave this PR untouched and let the next pass retry.
             print(f"{repository}#{pr['number']}: {error}", file=sys.stderr)
-            continue
-        state, description, target = desired(pr, comments)
+            complete = False
+    quota = Quota.read([comments for _, comments in read])
+    # An unread PR may hold the newest quota notice, so requests wait for a
+    # pass that read them all.
+    budget = quota.budget(now) if complete else 0
+    for pr, comments in read:
+        head = pr["headRefOid"]
+        state, description, target = desired(pr, comments, quota, now)
         commits = pr["commits"]["nodes"]
         status = commits[0]["commit"]["status"] if commits else None
         current = (status or {}).get("context") or {}
-        if stalled(description, current, now):
+        if budget != 0 and stalled(description, current, now):
+            if budget is not None:
+                budget -= 1
             if dry_run:
                 print(f"would request Codex review on {repository}#{pr['number']} {head[:9]}")
             else:

@@ -6,7 +6,10 @@ comments two per page and records every write. A pass that re-requested a
 review before STALL_SECONDS, re-requested on a draft, a waived PR or a head
 Codex already reviewed, lost the per-head marker (including one on a later
 comments page), refused a new head its own request, posted in a dry run, or
-posted after a failed comment read would fail here.
+posted after a failed comment read would fail here. So would one that
+re-requested while a code-review usage-limit notice on any open PR was younger
+than QUOTA_RETRY_SECONDS, probed with more than one request, sent further
+requests while the probe awaited its answer, or never resumed after it.
 """
 
 from __future__ import annotations
@@ -42,6 +45,25 @@ def _iso(moment: datetime) -> str:
     return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+QUOTA_BODY = (
+    "You have reached your Codex usage limits for code reviews. You can see your "
+    "limits in the [Codex usage dashboard](https://chatgpt.com/codex/cloud/settings/usage)."
+)
+
+
+def _quota(at: datetime, body: str = QUOTA_BODY) -> dict:
+    return {
+        "url": "https://example.test/quota",
+        "body": body,
+        "createdAt": _iso(at),
+        "author": {"login": "chatgpt-codex-connector"},
+    }
+
+
+def _marker(sha: str) -> str:
+    return f"@codex review\n\n<!-- codex-review-retrigger: {sha} -->"
+
+
 def _summary(sha: str, state: str) -> dict:
     body = (
         "<!-- codex-pull-request-review-summary -->\n"
@@ -51,14 +73,16 @@ def _summary(sha: str, state: str) -> dict:
     return {
         "url": "https://example.test/summary",
         "body": body,
+        "createdAt": _iso(NOW - timedelta(days=1)),
         "author": {"login": "chatgpt-codex-connector"},
     }
 
 
-def _note(text: str) -> dict:
+def _note(text: str, at: datetime = NOW - timedelta(days=1)) -> dict:
     return {
         "url": "https://example.test/c",
         "body": text,
+        "createdAt": _iso(at),
         "author": {"login": "someone"},
     }
 
@@ -67,6 +91,8 @@ class FakeGitHub:
     def __init__(self, prs: list[dict], *, fail_comment_pages: bool = False) -> None:
         self.prs = {pr["number"]: pr for pr in prs}
         self.fail_comment_pages = fail_comment_pages
+        self.fail_comments_of: set[int] = set()
+        self.now = NOW
         self.requests: list[tuple[int, str]] = []
         self.statuses: list[tuple[str, str]] = []
 
@@ -150,7 +176,7 @@ class FakeGitHub:
                     }
                 )
             if "pullRequest(number:" in query:
-                if self.fail_comment_pages:
+                if self.fail_comment_pages or int(fields["number"]) in self.fail_comments_of:
                     raise status.GhError("simulated outage")
                 pr = self.prs[int(fields["number"])]
                 page = self._comments(pr, fields.get("cursor"))
@@ -163,7 +189,7 @@ class FakeGitHub:
             number = int(path.split("/")[-2])
             body = fields["body"]
             self.requests.append((number, body))
-            self.prs[number]["_comments"].append(_note(body))
+            self.prs[number]["_comments"].append(_note(body, self.now))
             return "{}"
         if "/statuses/" in path:
             sha = path.rsplit("/", 1)[1]
@@ -173,12 +199,13 @@ class FakeGitHub:
                     pr["_context"] = {
                         "state": fields["state"].upper(),
                         "description": fields["description"],
-                        "createdAt": _iso(NOW),
+                        "createdAt": _iso(self.now),
                     }
             return "{}"
         raise AssertionError(f"unexpected gh call: {args}")
 
     def sync(self, *, now: datetime = NOW, dry_run: bool = False) -> int:
+        self.now = now
         return status.sync_repository(REPO, dry_run=dry_run, now=now)
 
 
@@ -285,3 +312,95 @@ def test_failed_comment_read_posts_nothing(fake: FakeGitHub) -> None:
     fake.pr(1, comments=[_note("one"), _note("two"), _note("three")])
     fake.sync()
     assert fake.requests == [] and fake.statuses == []
+
+
+def test_quota_notice_after_the_request_holds_the_head_back(fake: FakeGitHub) -> None:
+    requested = NOW - timedelta(minutes=30)
+    notice = requested + timedelta(seconds=8)
+    fake.pr(
+        1,
+        comments=[_note(_marker(HEAD_A), requested), _quota(notice)],
+        current=status.REREQUESTED,
+        age=timedelta(minutes=30),
+    )
+    fake.sync()
+    limited = status.LIMITED.format(since=_iso(notice))
+    assert fake.requests == []
+    assert fake.statuses == [(HEAD_A, limited)]
+    # A new head during the wait draws no request either.
+    fake.pr(1, head=HEAD_B, comments=fake.prs[1]["_comments"], current=None)
+    fake.sync(now=NOW + timedelta(hours=1))
+    fake.sync(now=NOW + timedelta(hours=2))
+    assert fake.requests == []
+    assert fake.statuses[-1] == (HEAD_B, limited)
+
+
+def test_quota_notice_on_one_pr_holds_every_pr(fake: FakeGitHub) -> None:
+    notice = NOW - timedelta(minutes=5)
+    fake.pr(1, comments=[_quota(notice)], current=status.REREQUESTED)
+    fake.pr(2, head=HEAD_B)
+    fake.sync()
+    assert fake.requests == []
+    limited = status.LIMITED.format(since=_iso(notice))
+    assert sorted(fake.statuses) == [(HEAD_A, limited), (HEAD_B, limited)]
+
+
+def test_security_review_notice_does_not_hold_requests(fake: FakeGitHub) -> None:
+    security = QUOTA_BODY.replace("code reviews", "security reviews")
+    fake.pr(1, comments=[_quota(NOW - timedelta(minutes=5), security)])
+    fake.sync()
+    assert [number for number, _ in fake.requests] == [1]
+
+
+def test_requests_resume_through_a_single_probe(fake: FakeGitHub) -> None:
+    notice = NOW - timedelta(seconds=status.QUOTA_RETRY_SECONDS + 60)
+    limited = status.LIMITED.format(since=_iso(notice))
+    fake.pr(
+        1,
+        comments=[_note(_marker(HEAD_A), notice - timedelta(seconds=8)), _quota(notice)],
+        current=limited,
+        age=timedelta(hours=3),
+    )
+    fake.pr(2, head=HEAD_B, current=limited, age=timedelta(hours=3))
+    fake.pr(3, head="c" * 40, current=limited, age=timedelta(hours=3))
+    fake.sync()
+    # One probe for the repository, not one per PR.
+    assert [number for number, _ in fake.requests] == [1]
+    # While the probe awaits Codex's answer, the other PRs keep waiting.
+    fake.sync(now=NOW + timedelta(minutes=5))
+    assert len(fake.requests) == 1
+    # Unanswered past the grace period, the probe was accepted: every stalled
+    # head gets its request once, and the probed head gets no second one.
+    later = NOW + timedelta(seconds=status.PROBE_GRACE_SECONDS + 60)
+    fake.sync(now=later)
+    fake.sync(now=later + timedelta(minutes=5))
+    assert sorted(number for number, _ in fake.requests) == [1, 2, 3]
+
+
+def test_a_probe_answered_by_another_notice_restarts_the_wait(
+    fake: FakeGitHub,
+) -> None:
+    notice = NOW - timedelta(seconds=status.QUOTA_RETRY_SECONDS + 60)
+    limited = status.LIMITED.format(since=_iso(notice))
+    fake.pr(1, comments=[_quota(notice)], current=limited, age=timedelta(hours=3))
+    fake.pr(2, head=HEAD_B, current=limited, age=timedelta(hours=3))
+    fake.sync()
+    assert [number for number, _ in fake.requests] == [1]
+    answer = NOW + timedelta(seconds=10)
+    fake.prs[1]["_comments"].append(_quota(answer))
+    fake.sync(now=NOW + timedelta(minutes=15))
+    fake.sync(now=answer + timedelta(seconds=status.QUOTA_RETRY_SECONDS - 60))
+    assert len(fake.requests) == 1
+    assert fake.statuses[-1][1] == status.LIMITED.format(since=_iso(answer))
+    fake.sync(now=answer + timedelta(seconds=status.QUOTA_RETRY_SECONDS + 60))
+    assert len(fake.requests) == 2
+
+
+def test_an_unread_pr_holds_requests_on_every_pr(fake: FakeGitHub) -> None:
+    # PR 1's second comments page (which may hold a quota notice) fails.
+    fake.pr(1, comments=[_note("one"), _note("two"), _note("three")])
+    fake.pr(2, head=HEAD_B)
+    fake.fail_comments_of = {1}
+    fake.sync()
+    assert fake.requests == []
+    assert fake.statuses == []
