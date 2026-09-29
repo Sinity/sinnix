@@ -231,7 +231,7 @@ in
           ];
       };
       agentToolsFixture = {
-        spec = devAgentToolsRuntimeSpec;
+        evaluated = agentToolsRuntimeEvaluated;
         nativeBuildInputs = [
           pkgs.coreutils
           pkgs.expect
@@ -322,7 +322,8 @@ in
           export ZDOTDIR="$HOME"
         '';
       };
-      agentToolsRuntimeConfig = (evalTestSpec system devAgentToolsRuntimeSpec).config;
+      agentToolsRuntimeEvaluated = evalTestSpec system devAgentToolsRuntimeSpec;
+      agentToolsRuntimeConfig = agentToolsRuntimeEvaluated.config;
       clodexPatchCheck =
         agentToolsRuntimeConfig.home-manager.users.${agentToolsRuntimeConfig.sinnix.user.name}.systemd.user.services.sinnix-clodex.Service.ExecCondition;
       agentToolsCodexConfigSource =

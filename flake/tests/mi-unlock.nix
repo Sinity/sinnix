@@ -48,6 +48,15 @@ in
       evaluated = testLib.evalTestSpec system spec;
     in
     {
-      checks.mi-unlock-scheduled = evaluated.config.system.build.toplevel;
+      # The spec's assertions are forced by evalTestSpec; the check builds the
+      # unit's runner rather than the fixture's whole system toplevel.
+      checks.mi-unlock-scheduled =
+        inputs.nixpkgs.legacyPackages.${system}.runCommand "sinnix-mi-unlock-scheduled"
+          {
+            runner = evaluated.config.systemd.user.services.sinnix-mi-unlock.serviceConfig.ExecStart;
+          }
+          ''
+            touch "$out"
+          '';
     };
 }

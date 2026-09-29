@@ -502,7 +502,9 @@ let
     system:
     {
       name,
-      spec,
+      # An `evalTestSpec` result, so a check that also inspects the fixture
+      # shares one evaluation with it instead of instantiating the spec twice.
+      evaluated,
       nativeBuildInputs ? [ ],
       homeFiles ? [ ],
       xdgConfigFiles ? [ ],
@@ -519,7 +521,6 @@ let
       extraAttrs ? { },
     }:
     let
-      evaluated = evalTestSpec system spec;
       inherit (evaluated) config;
       userName = config.sinnix.user.name;
       hm = config.home-manager.users.${userName};

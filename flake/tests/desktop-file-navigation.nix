@@ -240,7 +240,7 @@ in
       # one Home Manager renders, and every entry resolves through GIO.
       checks.desktop-file-navigation-places = mkHmRuntimeCheck system {
         name = "desktop-file-navigation-places";
-        inherit spec;
+        inherit evaluated;
         includeHomePath = false;
         nativeBuildInputs = [
           pkgs.python3
@@ -260,7 +260,7 @@ in
       # that claim the same types.
       checks.desktop-file-navigation-mime = mkHmRuntimeCheck system {
         name = "desktop-file-navigation-mime";
-        inherit spec;
+        inherit evaluated;
         includeHomePath = false;
         nativeBuildInputs = [
           pkgs.glib.bin

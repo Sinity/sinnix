@@ -68,7 +68,7 @@ in
 
       checks.hyprland-lua-config = mkHmRuntimeCheck system {
         name = "hyprland-lua-config";
-        inherit spec;
+        inherit evaluated;
         nativeBuildInputs = [ hyprland ];
         xdgConfigFiles = [
           "hypr/hyprland.lua"

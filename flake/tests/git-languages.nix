@@ -16,6 +16,7 @@ in
       pkgs = inputs.nixpkgs.legacyPackages.${system};
       testLib = import ../test-lib.nix { inherit inputs lib; };
       inherit (testLib)
+        evalTestSpec
         mkFeatureTest
         mkHmRuntimeCheck
         ;
@@ -37,7 +38,7 @@ in
 
       devGitRuntime = mkHmRuntimeCheck system {
         name = "dev-git-runtime-check";
-        spec = devGitRuntimeSpec;
+        evaluated = evalTestSpec system devGitRuntimeSpec;
         nativeBuildInputs = [
           pkgs.delta
           pkgs.gh
@@ -78,7 +79,7 @@ in
       };
       devLanguagesRuntime = mkHmRuntimeCheck system {
         name = "dev-languages-runtime-check";
-        spec = devLanguagesRuntimeSpec;
+        evaluated = evalTestSpec system devLanguagesRuntimeSpec;
         nativeBuildInputs = [
           pkgs.coreutils
           pkgs.gnugrep

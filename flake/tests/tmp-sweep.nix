@@ -62,7 +62,17 @@ in
       evaluated = evalTestSpec system spec;
     in
     {
-      checks.tmp-sweep-placement = evaluated.config.system.build.toplevel;
+      # The spec's assertions are forced by evalTestSpec; the check builds the
+      # sweeper unit's program. The fixture's toplevel would instantiate a
+      # whole desktop system, which the host build already covers.
+      checks.tmp-sweep-placement =
+        inputs.nixpkgs.legacyPackages.${system}.runCommand "sinnix-tmp-sweep-placement"
+          {
+            sweeper = evaluated.config.systemd.user.services.sinnix-tmp-sweep.serviceConfig.ExecStart;
+          }
+          ''
+            touch "$out"
+          '';
 
       # Anti-vacuity: a sweeper that removed nothing, or one that ignored a
       # live holder, both fail here. The two holders exercise the two ways a

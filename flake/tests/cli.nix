@@ -15,6 +15,7 @@ in
       pkgs = inputs.nixpkgs.legacyPackages.${system};
       testLib = import ../test-lib.nix { inherit inputs lib; };
       inherit (testLib)
+        evalTestSpec
         mkFeatureTest
         mkHmRuntimeCheck
         ;
@@ -54,7 +55,7 @@ in
       # a documented subcommand stops being reachable.
       cliPolylogueRuntime = mkHmRuntimeCheck system {
         name = "cli-polylogue-runtime-check";
-        spec = cliPolylogueRuntimeSpec;
+        evaluated = evalTestSpec system cliPolylogueRuntimeSpec;
         nativeBuildInputs = [
           pkgs.coreutils
           pkgs.gnugrep
@@ -75,7 +76,7 @@ in
       # setting AddKeysToAgent=false.
       cliCoreRuntime = mkHmRuntimeCheck system {
         name = "cli-core-runtime-check";
-        spec = cliCoreRuntimeSpec;
+        evaluated = evalTestSpec system cliCoreRuntimeSpec;
         nativeBuildInputs = [ pkgs.openssh.out ];
         homeFiles = [ ".ssh/config" ];
         script = ''
@@ -97,7 +98,7 @@ in
       # resolving the deployed rc, hooks, data and extension directories.
       cliTaskTrackingRuntime = mkHmRuntimeCheck system {
         name = "cli-task-tracking-runtime-check";
-        spec = cliTaskTrackingRuntimeSpec;
+        evaluated = evalTestSpec system cliTaskTrackingRuntimeSpec;
         nativeBuildInputs = [
           pkgs.coreutils
           pkgs.gnugrep

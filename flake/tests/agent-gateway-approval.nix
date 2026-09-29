@@ -8,25 +8,13 @@ in
     { system, ... }:
     let
       pkgs = inputs.nixpkgs.legacyPackages.${system};
-      testLib = import ../test-lib.nix { inherit inputs lib; };
-      libContext = import ../lib-context.nix { inherit inputs; };
-      # Read endpoint approval data from the host declaration under the public
-      # test fixture, rather than evaluating the production host output. The
-      # production output has an explicitly private secret-declaration input;
-      # this approval contract does not need ciphertext to evaluate its source.
-      evaluated = libContext.extendedLib.nixosSystem {
-        inherit system;
-        modules = testLib.baseModules ++ [
-          testLib.baseTestConfig
-          ../../hosts/sinnix-prime/default.nix
-        ];
-        specialArgs = testLib.sharedSpecialArgs // {
-          lib = libContext.extendedLib;
-        };
-      };
-      endpoints = lib.filterAttrs (_: endpoint: endpoint.enable) (
-        evaluated.config.sinnix.services.agent-gateway.endpoints
-      );
+      # The machine's own configuration, shared with every other check that
+      # inspects it. A flake check evaluates purely, so the host receives no
+      # private secret declarations; the endpoint table needs none.
+      host = inputs.self.nixosConfigurations.sinnix-prime.config;
+      endpoints = lib.filterAttrs (
+        _: endpoint: endpoint.enable
+      ) host.sinnix.services.agent-gateway.endpoints;
       expected = pkgs.writeText "agent-gateway-approvals.json" (
         builtins.toJSON (
           lib.mapAttrs (_: endpoint: {
