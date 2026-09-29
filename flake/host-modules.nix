@@ -26,8 +26,10 @@ let
   # "commits since <rev> may or may not be live".
   revisionModule = {
     system.configurationRevision =
-      let shellRevision = builtins.getEnv "SINNIX_ACTIVATION_SOURCE_REV";
-      in if shellRevision != "" then shellRevision else inputs.self.rev or inputs.self.dirtyRev or "unknown";
+      let
+        shellRevision = builtins.getEnv "SINNIX_ACTIVATION_SOURCE_REV";
+      in
+      if shellRevision != "" then shellRevision else inputs.self.rev or inputs.self.dirtyRev or "unknown";
   };
 in
 {
