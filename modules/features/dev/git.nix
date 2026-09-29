@@ -35,7 +35,9 @@ mkFeatureModule {
       # status on each open head (gh's persistent login authenticates it).
       # It re-requests a stalled head once; a Codex usage-limit notice on any
       # open PR holds every request for three hours, then one probe request
-      # tests the quota (rule in the script's docstring).
+      # tests the quota. While `codex-review` is not a required context of the
+      # default branch, every head passes and nothing is requested (rules in
+      # the script's docstring).
       (lib.sinnix.mkScheduledJob
         {
           inherit config;

@@ -11,11 +11,20 @@ reads every open PR of each repository, with all of its comments, and sets the
 head's status:
 
   success  the summary shows a completed Code Review of this exact head, or
-           the PR carries the `codex-review-waived` label;
+           the PR carries the `codex-review-waived` label, or the gate is off;
   pending  anything else (running, not started, a draft, no summary).
 
 A status is written only when it differs from the head's current one. Nothing
 here ever passes a head it cannot read, so an outage leaves merges blocked.
+
+The gate is on while `codex-review` is a required status context of the
+default branch's protection, read on every pass. While it is off (the operator
+removes it when Codex cannot review, for instance out of quota), every unwaived
+head gets success "not required: Codex review gate is off" and the pass posts
+no `@codex review` at all, the quota probe below included. Restoring the
+required context restores everything below on the next pass. A pass that
+cannot read the protection (an outage, or a branch with no required status
+checks, which GitHub answers with 404) writes nothing for that repository.
 
 Codex sometimes never starts on a pushed head. When a ready, unwaived head has
 carried the "waiting for Codex" status for STALL_SECONDS with no review of it
@@ -64,6 +73,7 @@ WAITING = "waiting for Codex to review this head"
 REREQUESTED = "waiting for Codex; review re-requested for this head"
 RETRIGGER_MARKER = "<!-- codex-review-retrigger: {sha} -->"
 RETRIGGER_PREFIX = "<!-- codex-review-retrigger:"
+GATE_OFF = "not required: Codex review gate is off"
 QUOTA_NOTICE = "reached your Codex usage limits for code reviews"
 LIMITED = "Codex usage limit reached ({since}); not re-requesting"
 LIMITED_PREFIX = "Codex usage limit reached ("
@@ -176,6 +186,17 @@ def open_pull_requests(owner: str, name: str) -> list[dict]:
         cursor = connection["pageInfo"]["endCursor"]
 
 
+def gate_required(repository: str) -> bool:
+    """`codex-review` is a required status context of the default branch."""
+    branch = json.loads(gh("api", f"repos/{repository}"))["default_branch"]
+    checks = json.loads(
+        gh("api", f"repos/{repository}/branches/{branch}/protection/required_status_checks")
+    )
+    contexts = set(checks.get("contexts") or [])
+    contexts |= {check["context"] for check in checks.get("checks") or []}
+    return CONTEXT in contexts
+
+
 def all_comments(owner: str, name: str, pr: dict) -> list[dict]:
     """The PR's comments, paging past the first 100 the listing carries."""
     comments = list(pr["comments"]["nodes"])
@@ -264,7 +285,7 @@ def retriggered(comments: list[dict], head: str, since: datetime | None = None) 
 
 
 def desired(
-    pr: dict, comments: list[dict], quota: Quota, now: datetime
+    pr: dict, comments: list[dict], quota: Quota, now: datetime, *, required: bool
 ) -> tuple[str, str, str]:
     head = pr["headRefOid"]
     labels = {node["name"] for node in pr["labels"]["nodes"]}
@@ -273,6 +294,8 @@ def desired(
     target = url or pr["url"]
     if WAIVER_LABEL in labels:
         return "SUCCESS", f"waived by the {WAIVER_LABEL} label", target
+    if not required:
+        return "SUCCESS", GATE_OFF, target
     if pr["isDraft"]:
         return "PENDING", "draft: Codex reviews once marked ready", target
     if for_head and completed:
@@ -308,6 +331,8 @@ def sync_repository(repository: str, *, dry_run: bool, now: datetime | None = No
     owner, name = repository.split("/", 1)
     now = now or datetime.now(timezone.utc)
     changed = 0
+    # Unreadable protection raises: the repository is left untouched this pass.
+    required = gate_required(repository)
     read: list[tuple[dict, list[dict]]] = []
     complete = True
     for pr in open_pull_requests(owner, name):
@@ -321,10 +346,11 @@ def sync_repository(repository: str, *, dry_run: bool, now: datetime | None = No
     quota = Quota.read([comments for _, comments in read])
     # An unread PR may hold the newest quota notice, so requests wait for a
     # pass that read them all.
-    budget = quota.budget(now) if complete else 0
+    # With the gate off nothing waits on Codex, so nothing asks it to review.
+    budget = quota.budget(now) if complete and required else 0
     for pr, comments in read:
         head = pr["headRefOid"]
-        state, description, target = desired(pr, comments, quota, now)
+        state, description, target = desired(pr, comments, quota, now, required=required)
         commits = pr["commits"]["nodes"]
         status = commits[0]["commit"]["status"] if commits else None
         current = (status or {}).get("context") or {}

@@ -9,7 +9,10 @@ comments page), refused a new head its own request, posted in a dry run, or
 posted after a failed comment read would fail here. So would one that
 re-requested while a code-review usage-limit notice on any open PR was younger
 than QUOTA_RETRY_SECONDS, probed with more than one request, sent further
-requests while the probe awaited its answer, or never resumed after it.
+requests while the probe awaited its answer, or never resumed after it; that
+requested anything or left a head pending while `codex-review` was not a
+required context of the default branch; or that wrote anything after failing
+to read the branch protection.
 """
 
 from __future__ import annotations
@@ -92,6 +95,8 @@ class FakeGitHub:
         self.prs = {pr["number"]: pr for pr in prs}
         self.fail_comment_pages = fail_comment_pages
         self.fail_comments_of: set[int] = set()
+        self.required = ["ci/quick-gate", "codex-review"]
+        self.protection_error = False
         self.now = NOW
         self.requests: list[tuple[int, str]] = []
         self.statuses: list[tuple[str, str]] = []
@@ -184,6 +189,20 @@ class FakeGitHub:
                     {"data": {"repository": {"pullRequest": {"comments": page}}}}
                 )
             raise AssertionError(f"unexpected query: {query}")
+        if args[:2] == ("api", f"repos/{REPO}"):
+            return json.dumps({"default_branch": "master"})
+        if args[:2] == (
+            "api",
+            f"repos/{REPO}/branches/master/protection/required_status_checks",
+        ):
+            if self.protection_error:
+                raise status.GhError("gh api failed: Not Found (HTTP 404)")
+            return json.dumps(
+                {
+                    "contexts": self.required,
+                    "checks": [{"context": c, "app_id": None} for c in self.required],
+                }
+            )
         path = args[3]
         if path.endswith("/comments"):
             number = int(path.split("/")[-2])
@@ -404,3 +423,44 @@ def test_an_unread_pr_holds_requests_on_every_pr(fake: FakeGitHub) -> None:
     fake.sync()
     assert fake.requests == []
     assert fake.statuses == []
+
+
+def test_gate_off_requests_nothing_and_passes_every_head(fake: FakeGitHub) -> None:
+    fake.required = ["ci/quick-gate"]
+    notice = NOW - timedelta(seconds=status.QUOTA_RETRY_SECONDS + 60)
+    limited = status.LIMITED.format(since=_iso(notice))
+    # A probe would be due here, and PR 2 has stalled past the threshold.
+    fake.pr(1, comments=[_quota(notice)], current=limited, age=timedelta(hours=3))
+    fake.pr(2, head=HEAD_B)
+    fake.pr(3, head="c" * 40, labels=("codex-review-waived",))
+    fake.sync()
+    assert fake.requests == []
+    assert sorted(fake.statuses) == [
+        (HEAD_A, status.GATE_OFF),
+        (HEAD_B, status.GATE_OFF),
+        ("c" * 40, "waived by the codex-review-waived label"),
+    ]
+    assert {pr["_context"]["state"] for pr in fake.prs.values()} == {"SUCCESS"}
+
+
+def test_restoring_the_gate_restores_waiting_and_requests(fake: FakeGitHub) -> None:
+    fake.required = []
+    fake.pr(1)
+    fake.sync()
+    assert fake.statuses == [(HEAD_A, status.GATE_OFF)]
+    fake.required = ["codex-review"]
+    later = NOW + timedelta(hours=1)
+    fake.sync(now=later)
+    assert fake.statuses[-1] == (HEAD_A, status.WAITING)
+    assert fake.requests == []
+    fake.sync(now=later + timedelta(seconds=status.STALL_SECONDS + 60))
+    assert [number for number, _ in fake.requests] == [1]
+
+
+def test_unreadable_protection_writes_nothing(fake: FakeGitHub) -> None:
+    fake.protection_error = True
+    fake.pr(1, current=None)
+    fake.pr(2, head=HEAD_B)
+    with pytest.raises(status.GhError):
+        fake.sync()
+    assert fake.requests == [] and fake.statuses == []

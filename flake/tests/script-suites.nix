@@ -97,10 +97,11 @@
         # head (marker on a later comments page included), never for a new
         # head, in a dry run, or after a failed comment read on any PR; while
         # a code-review usage-limit notice on any open PR is recent; more than
-        # once as the recovery probe, or never after the probe; or when a
-        # second page of open PRs or comments goes unread. Verified by deleting
-        # the marker check (fails the later-page marker test) and the age check
-        # (fails the below-threshold test).
+        # once as the recovery probe, or never after the probe; at all while
+        # `codex-review` is not a required context, or after the protection
+        # read fails; or when a second page of open PRs or comments goes
+        # unread. Verified by deleting the marker check (fails the later-page
+        # marker test) and the age check (fails the below-threshold test).
         codex-review-status-suite = mkScriptSuite {
           name = "codex-review-status";
           suiteDir = ../../scripts/tests/codex-review-status;
