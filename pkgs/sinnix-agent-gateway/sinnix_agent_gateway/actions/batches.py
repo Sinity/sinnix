@@ -56,6 +56,7 @@ _REFUSALS: dict[str, tuple[str, str]] = {
     "abandoned": ("conflict", "batches.list"),
     "landing_in_progress": ("conflict", "jobs.wait"),
     "worker_active": ("conflict", "jobs.wait"),
+    "verify_running": ("conflict", "jobs.wait"),
     "worker_not_done": ("conflict", "jobs.wait"),
     "worker_result_missing": ("conflict", "batches.resume"),
 }

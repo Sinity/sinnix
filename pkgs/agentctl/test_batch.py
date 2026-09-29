@@ -1682,24 +1682,80 @@ def test_a_dirty_pre_existing_integration_worktree_is_preserved(
     assert not any(":review:" in label for label in labels(harness.pueue))
 
 
-def test_a_verification_that_never_finishes_is_verify_failed_after_its_timeout(
+def test_a_verification_running_past_its_timeout_is_verify_running(
     harness: Harness, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Breaks if landing waits past the operation's own timeout, or lands without a verdict."""
+    """Breaks if landing waits past the job's own run limit, invents a timeout
+    for a job still running, or cannot land again once the check finishes."""
+    harness_wait = launch.wait
     monkeypatch.setattr(launch, "wait", REAL_WAIT)
     run = prepared_run(harness, "fx-solo")
     timeout = harness.project.operation("check").timeout_seconds
+    limit = timeout + landing_module.VERIFY_EXIT_GRACE_SECONDS
 
-    with pytest.raises(BatchRefusal, match="verify_failed") as refused:
+    with pytest.raises(BatchRefusal, match="verify_running") as refused:
         harness.land(run["run_id"])
 
-    assert "timeout" in refused.value.detail
-    assert str(timeout) in refused.value.detail
-    assert "running" not in refused.value.detail
-    assert harness.pueue.clock == pytest.approx(timeout, abs=1)
+    detail = refused.value.detail
+    assert "still running" in detail and f"{timeout}s budget" in detail
+    assert "timeout" not in detail and "duration" not in detail
+    assert harness.pueue.clock == pytest.approx(limit, abs=1)
     stored = manifest.load(harness.config, run["run_id"])
-    assert stored.landing["failure"]["code"] == "verify_failed"
+    assert stored.landing["failure"]["code"] == "verify_running"
     assert stored.landing["review_verdict"] is None and stored.acceptance is None
+
+    monkeypatch.setattr(launch, "wait", harness_wait)
+    landed = harness.land(run["run_id"])
+    assert landed["acceptance"]["verify_run"]["phase"] == "succeeded"
+
+
+def test_a_verification_queued_past_its_budget_waits_and_then_succeeds(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Breaks if time a check spends queued behind a paused pool counts
+    against its run budget, failing a landing whose check later succeeds."""
+    run = manifest.Run.from_dict(prepared_run(harness, "fx-solo"))
+    timeout = harness.project.operation("check").timeout_seconds
+    harness_wait = launch.wait
+    started = launch.start_operation
+
+    def start_queued(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        job = started(*args, **kwargs)
+        harness.pueue.queue(job["job_id"])
+        return job
+
+    def wait(job_id: int, *, timeout_seconds: float, reference: str | None = None):
+        # The pool stays paused for three full budgets, then admits the job.
+        if harness.pueue.clock < 3 * timeout:
+            harness.pueue.clock += timeout_seconds
+            return {
+                **launch.job_view(harness.pueue.task(job_id)),
+                "wait_timed_out": True,
+            }
+        harness.pueue.running(job_id)
+        return harness_wait(
+            job_id, timeout_seconds=timeout_seconds, reference=reference
+        )
+
+    monkeypatch.setattr(launch, "start_operation", start_queued)
+    monkeypatch.setattr(launch, "wait", wait)
+    checkout = harness.project.root
+    harness.git.heads[str(checkout)] = SHA
+    harness.git.status[str(checkout)] = ""
+
+    _run, verified = landing_module._verify(
+        harness.config,
+        harness.project,
+        run,
+        checkout,
+        SHA,
+        lambda _seconds: None,
+        harness.beads,
+    )
+
+    assert verified["phase"] == "succeeded" and verified["status"] == "passed"
+    assert harness.pueue.clock >= 3 * timeout
+    assert labels(harness.pueue).count("fixture:check") == 1
 
 
 def test_a_terminal_verification_timeout_reports_outcome_exit_and_duration(

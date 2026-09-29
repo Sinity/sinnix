@@ -1125,7 +1125,9 @@ def test_a_killed_waiter_leaves_its_unit_which_the_next_run_settles_or_yields_to
         env={
             **os.environ,
             "PATH": f"{stub}{os.pathsep}{os.environ['PATH']}",
-            "PYTHONPATH": str(Path(__file__).parent),
+            "PYTHONPATH": os.pathsep.join(
+                filter(None, (str(Path(__file__).parent), os.environ.get("PYTHONPATH")))
+            ),
         },
     )
     try:
@@ -1252,3 +1254,27 @@ def test_a_restarted_task_accounts_its_outcome_again(
         for event in spooled
         if event["phase"] == "finished"
     ] == ["unavailable", "unavailable"]
+
+
+def test_event_append_takes_the_spool_lock_and_repairs_a_torn_tail(
+    tmp_path: Path,
+) -> None:
+    """Breaks if a lifecycle event writes while another spool writer holds
+    the ledger lock, or appends after an interrupted line."""
+    spool = tmp_path / "events.jsonl"
+    spool.write_text('{"kind":"backpressure"}\n{"kind":"torn')
+    lock = os.open(tmp_path / "events.jsonl.lock", os.O_RDWR | os.O_CREAT)
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    writer = threading.Thread(
+        target=run_module.append_event, args=(spool, {"kind": "queue-task"})
+    )
+    writer.start()
+    writer.join(timeout=0.3)
+    assert writer.is_alive()
+    assert spool.read_text().endswith('"torn')
+    fcntl.flock(lock, fcntl.LOCK_UN)
+    os.close(lock)
+    writer.join(timeout=5)
+    assert not writer.is_alive()
+    kinds = [json.loads(line)["kind"] for line in spool.read_text().splitlines()]
+    assert kinds == ["backpressure", "queue-task"]
