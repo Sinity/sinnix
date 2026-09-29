@@ -131,6 +131,22 @@ def _summary_text(arguments: Mapping[str, Any]) -> Any:
     return encoded[:_SUMMARY_LIMIT] + "…"
 
 
+def _call_cwd(arguments: Mapping[str, Any]) -> str | None:
+    """The directory a call names, if any: its cwd, else a locator's path.
+
+    A cwd relative to a checkout is logged as given; the checkout itself is
+    in the arguments.
+    """
+    cwd = arguments.get("cwd")
+    if isinstance(cwd, str):
+        return _bounded(cwd, 512)
+    for name in ("checkout", "target", "root"):
+        locator = arguments.get(name)
+        if isinstance(locator, Mapping) and isinstance(locator.get("path"), str):
+            return _bounded(locator["path"], 512)
+    return None
+
+
 def emit(record: Mapping[str, Any]) -> None:
     sys.stderr.write(json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n")
     sys.stderr.flush()
@@ -179,6 +195,7 @@ class CallRecord:
             "request_id": self.http.request_id if self.http else None,
             "session_id": self.http.session_id if self.http else None,
             "arguments": _summary_text(self.arguments),
+            "cwd": _call_cwd(self.arguments),
             # Time between the HTTP request reaching this server and the tool
             # starting: event-loop or transport queueing inside the gateway.
             "queue_ms": _ms(received, self.started),

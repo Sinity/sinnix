@@ -326,10 +326,14 @@ mkServiceModule {
             # app.slice, and MemoryHigh throttles this unit first. Page cache
             # from checkout reads is what reclaim takes: one night of
             # all-worktree content hashing charged 9.4G here.
+            # MemoryMax is the safety boundary for remote-driven work: memory
+            # that reclaim cannot take past MemoryHigh is a runaway call, and
+            # the kernel ends it here instead of in the operator's session.
             # TimeoutStopSec covers the server's own 8 s drain deadline.
             resources = {
               Slice = "agenttool.slice";
               MemoryHigh = "4G";
+              MemoryMax = "6G";
               TimeoutStopSec = "10s";
             };
             activation = {

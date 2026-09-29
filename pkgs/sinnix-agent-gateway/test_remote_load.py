@@ -302,6 +302,8 @@ def test_each_remote_call_leaves_one_redacted_journal_line(
     assert line["action"] == "shell.run" and line["outcome"] == "ok"
     assert line["effect"] == "run" and line["code"] is None
     assert line["arguments"]["cwd"] == "sub"
+    assert line["cwd"] == "sub"
+    assert line["queue_ms"] is None or isinstance(line["queue_ms"], int)
     assert line["arguments"]["checkout"] == {"project": "fixture"}
     assert calllog.REDACTED in json.dumps(line["arguments"]["argv"])
     assert line["receipt_id"] == started["receipt"]["receipt_id"]
