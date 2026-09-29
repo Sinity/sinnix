@@ -22,7 +22,9 @@ from sinnix_lib.atomic import atomic_publish
 
 STYLE = """
 .catalog-controls{display:flex;flex-wrap:wrap;gap:.6rem;align-items:center}
-.catalog-controls label{display:flex;flex-direction:column;gap:.25rem}
+.catalog-controls label{display:flex;flex-direction:column;gap:.25rem;max-width:100%}
+.catalog-controls select{max-width:min(28rem,100%)}
+.retrieval-aid{padding:.45rem .7rem;border-left:2px solid var(--line);margin:.6rem 0}
 .catalog-controls input,.catalog-controls select{font:inherit;padding:.45rem;
  background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:.35rem}
 .catalog-controls input{min-width:18rem;max-width:100%}
@@ -39,20 +41,21 @@ STYLE = """
 SCRIPT = r"""
 (()=>{
  const rows=[...document.querySelectorAll('.asset')];
+ const indexedRows=rows.map(row=>({row,text:row.textContent.toLocaleLowerCase(),methods:JSON.parse(row.dataset.methods)}));
  const q=document.getElementById('catalog-query');
  const method=document.getElementById('catalog-method');
  const kind=document.getElementById('catalog-kind');
+ const docType=document.getElementById('catalog-document-type');
  const coverage=document.getElementById('catalog-coverage');
  const count=document.getElementById('catalog-count');
  let related=null;
  function filter(){
   const terms=q.value.toLocaleLowerCase().trim().split(/\s+/).filter(Boolean);
   let visible=0;
-  rows.forEach(row=>{
-   const text=row.textContent.toLocaleLowerCase();
-   const methods=JSON.parse(row.dataset.methods);
+  indexedRows.forEach(({row,text,methods})=>{
    const show=terms.every(term=>text.includes(term))&&(!method.value||methods.includes(method.value))
       &&(!kind.value||kind.value===row.dataset.kind)
+      &&(!docType.value||docType.value===row.dataset.documentType)
       &&(!coverage.value||coverage.value===row.dataset.coverage)
       &&(!related||related.has(row.id));
    row.hidden=!show;if(show)visible++;
@@ -60,17 +63,17 @@ SCRIPT = r"""
   count.textContent=visible+' of '+rows.length+' records shown';
  }
  q.addEventListener('input',filter);method.addEventListener('change',filter);
- kind.addEventListener('change',filter);coverage.addEventListener('change',filter);
+ kind.addEventListener('change',filter);coverage.addEventListener('change',filter);docType.addEventListener('change',filter);
  document.getElementById('catalog-reset').addEventListener('click',()=>{
-  q.value='';method.value='';kind.value='';coverage.value='';related=null;filter();
+  q.value='';method.value='';kind.value='';coverage.value='';docType.value='';related=null;filter();
  });
  document.querySelectorAll('[data-related]').forEach(button=>button.addEventListener('click',()=>{
-  related=new Set(JSON.parse(button.dataset.related));q.value='';method.value='';kind.value='';coverage.value='';filter();
+  related=new Set(JSON.parse(button.dataset.related));q.value='';method.value='';kind.value='';coverage.value='';docType.value='';filter();
   document.getElementById('catalog').scrollIntoView();
  }));
  function revealTarget(){
   if(location.hash.startsWith('#asset-')){
-   q.value='';method.value='';kind.value='';coverage.value='';related=null;filter();
+   q.value='';method.value='';kind.value='';coverage.value='';docType.value='';related=null;filter();
    const target=document.getElementById(location.hash.slice(1));
    if(target)target.scrollIntoView();
   }
@@ -90,6 +93,84 @@ def path_link(path: str) -> str:
     return f'<a class="path" href="{esc(Path(path).as_uri())}">{esc(path)}</a>'
 
 
+def document_type(asset: dict) -> str:
+    enrichment = asset.get("enrichment")
+    value = enrichment.get("document_type") if isinstance(enrichment, dict) else None
+    return value if isinstance(value, str) else ""
+
+
+def render_enrichment(asset: dict) -> str:
+    """A readable projection of optional observations; raw fields stay intact.
+
+    Annotation strings are text, never markup. A source locator is not treated
+    as a URL or executed instruction. Rendering never stats or opens payloads.
+    """
+    enrichment = asset.get("enrichment")
+    enrichment = enrichment if isinstance(enrichment, dict) else {}
+    def strings(value):
+        return [x for x in value if isinstance(x, str) and x.strip()] if isinstance(value, list) else []
+    def text(value, missing):
+        # A recorded value is shown as written; an absent or non-text one is
+        # named as missing rather than invented.
+        return value if isinstance(value, str) and value else missing
+    parts = []
+    labels = [("Document type", document_type(asset)), ("Language", enrichment.get("language"))]
+    labels = [(k, v) for k, v in labels if isinstance(v, str) and v]
+    if labels:
+        parts.append('<dl class="meta">' + ''.join(
+            f'<dt>{esc(k)}</dt><dd>{esc(v)}</dd>' for k, v in labels) + '</dl>')
+    summary = enrichment.get("summary")
+    if isinstance(summary, str) and summary and summary != asset.get("description"):
+        parts.append(f'<p><strong>Catalog summary:</strong> {esc(summary)}</p>')
+    topics = strings(enrichment.get("topics"))
+    if topics:
+        parts.append('<p><strong>Topics:</strong> ' + '; '.join(map(esc, topics)) + '</p>')
+    questions = list(dict.fromkeys(strings(asset.get("utility")) + strings(enrichment.get("questions"))))
+    if questions:
+        parts.append('<div class="retrieval-aid"><strong>Useful for finding</strong><ul>' + ''.join(
+            f'<li>{esc(question)}</li>' for question in questions) + '</ul></div>')
+    claims = enrichment.get("claims")
+    claims = [c for c in claims if isinstance(c, dict) and isinstance(c.get("claim"), str)] if isinstance(claims, list) else []
+    if claims:
+        parts.append('<details><summary>Recorded claims and source locators</summary>')
+        parts.append('<p class="scope">Statuses and locators belong to the recorded inspection; this view does not independently verify the claims.</p><ul>')
+        for claim in claims:
+            status = text(claim.get("status"), "status not recorded")
+            locator = text(claim.get("source_locator"), "locator not recorded")
+            parts.append(f'<li><span class="chip">{esc(status)}</span> {esc(claim["claim"])}'
+                         f'<br><code>{esc(locator)}</code></li>')
+        parts.append('</ul></details>')
+    outline = enrichment.get("outline")
+    outline = [x for x in outline if isinstance(x, dict) and isinstance(x.get("heading"), str)] if isinstance(outline, list) else []
+    if outline:
+        parts.append('<details><summary>Inspected document outline</summary><ul>')
+        parts.extend(f'<li>{esc(item["heading"])} <span class="scope">{esc(text(item.get("source_locator"), ""))}</span></li>' for item in outline)
+        parts.append('</ul></details>')
+    extraction = enrichment.get("extraction")
+    if isinstance(extraction, dict):
+        parts.append('<details><summary>Extraction evidence and limits</summary>')
+        path = extraction.get("path")
+        if isinstance(path, str) and path.startswith("/") and not path.startswith("//") and not any(ord(c) < 32 for c in path):
+            parts.append('<p>Evidence: ' + path_link(path) + '</p>')
+        elif path is not None:
+            parts.append(f'<p>Evidence locator: <code>{esc(path)}</code></p>')
+        for key, label in (("source_sha256", "Inspected source SHA-256"), ("recipe", "Inspection recipe")):
+            if isinstance(extraction.get(key), str):
+                parts.append(f'<p><strong>{label}:</strong> {esc(extraction[key])}</p>')
+        if "truncated" in extraction:
+            value = extraction["truncated"]
+            scope = "yes" if value is True else "no (does not imply full review)" if value is False else "not established"
+            parts.append(f'<p>Selection/truncation recorded: {scope}.</p>')
+        limitations = strings(enrichment.get("limitations"))
+        if limitations:
+            parts.append('<ul>' + ''.join(f'<li>{esc(x)}</li>' for x in limitations) + '</ul>')
+        parts.append('</details>')
+    elif strings(enrichment.get("limitations")):
+        parts.append('<details><summary>Enrichment limitations</summary><ul>' + ''.join(
+            f'<li>{esc(x)}</li>' for x in strings(enrichment["limitations"])) + '</ul></details>')
+    return '\n'.join(parts)
+
+
 def render_asset(asset: dict, by_id: dict) -> str:
     asset_id = asset["id"]
     inspections = asset["inspections"]
@@ -98,7 +179,7 @@ def render_asset(asset: dict, by_id: dict) -> str:
     parts = [
         f'<article class="asset" id="asset-{esc(asset_id)}" data-kind="{esc(asset["kind"])}" '
         f'data-coverage="{esc(asset.get("coverage", {}).get("status", "unrecorded"))}" '
-        f'data-methods="{esc(json.dumps(methods))}">',
+        f'data-document-type="{esc(document_type(asset))}" data-methods="{esc(json.dumps(methods))}">',
         f'<h3>{esc(asset["title"])}</h3>',
         f'<p>{esc(asset["description"])}</p>',
         f'<p>{path_link(asset["current_path"])}</p><div class="tags">{tags}</div>',
@@ -112,6 +193,7 @@ def render_asset(asset: dict, by_id: dict) -> str:
         denominator = coverage.get("discovered_count")
         count = f'{coverage["inspected_count"]} / {denominator if denominator is not None else "unknown"} {coverage["unit"]}'
         parts.append(f'<p><strong>Inspection: {esc(coverage["status"])}</strong> · {esc(count)}. {esc(coverage["scope"])}</p>')
+    parts.append(render_enrichment(asset))
     if asset.get("organization"):
         organization = asset["organization"]
         parts.append(f'<p><strong>Organization proposal: {esc(organization["action"])}</strong>. {esc(organization["rationale"])}</p>')
@@ -187,6 +269,10 @@ def render(catalog: dict, source: Path, template: str, command: str) -> str:
     common_script = template.split("<script>", 1)[1].rsplit("</script>", 1)[0]
     generated = dt.datetime.now(dt.timezone.utc).isoformat()
     methods = sorted({item["method"] for asset in assets for item in asset["inspections"]})
+    type_options = '<option value="">All document types</option>' + ''.join(
+        f'<option value="{esc(value)}">{esc(value)}</option>'
+        for value in sorted({document_type(asset) for asset in assets} - {""})
+    )
     options = ''.join(f'<option value="{esc(method)}">{esc(method)}</option>' for method in methods)
     relationship_rows = []
     for asset in assets:
@@ -223,6 +309,7 @@ each record states the inspected surface and its limits. A title-page or filenam
 <input id="catalog-query" type="search" placeholder="certificate, GPU, postcard…"></label>
 <label>Inspection method<select id="catalog-method"><option value="">All methods</option>{options}</select></label>
 <label>Record kind<select id="catalog-kind"><option value="">Files and collections</option><option value="collection">Collections</option><option value="file">Files</option></select></label>
+<label>Document type<select id="catalog-document-type">{type_options}</select></label>
 <label>Inspection coverage<select id="catalog-coverage"><option value="">All coverage</option>{coverage_options}</select></label>
 <button class="fs" id="catalog-reset">Reset filters</button></div>
 <p id="catalog-count" class="catalog-count" aria-live="polite">{len(assets)} records shown</p>

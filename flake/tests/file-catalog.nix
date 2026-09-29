@@ -11,6 +11,8 @@
         pkgs.runCommand "sinnix-file-catalog-suite-check"
           {
             nativeBuildInputs = [
+              # The page-script test runs the report's filter under Node.
+              pkgs.nodejs
               (pkgs.python3.withPackages (ps: [
                 ps.pytest
                 sinnix-lib
