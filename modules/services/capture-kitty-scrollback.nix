@@ -58,7 +58,7 @@ mkServiceModule (mkCaptureLane {
   };
   pollAfter = [ "graphical-session.target" ];
   timer = {
-    onUnitActiveSec = "${toString cfg.intervalMinutes}min";
+    intervalSec = cfg.intervalMinutes * 60;
     onStartupSec = "2min";
     persistent = true;
   };

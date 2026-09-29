@@ -79,7 +79,7 @@ in
         };
         timer = {
           onBootSec = "4min";
-          onUnitActiveSec = "1h";
+          intervalSec = 3600;
           accuracySec = "1min";
           description = "Refresh no-loss boot-metric capture indexes";
         };

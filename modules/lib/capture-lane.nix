@@ -198,11 +198,11 @@ let
   #
   jobServiceConfig = builtins.removeAttrs baseOverrides [ "ExecStart" ] // serviceOverrides;
 
-  # Every poll timer routes through job: the factory expresses both the
-  # computed (intervalSec) and raw (onUnitActiveSec) cadences and both the
-  # boot-relative (onBootSec) and session-relative (onStartupSec) anchors,
-  # so no lane needs a hand-written timer. onBootSec defaults to "2min"
-  # only when the lane gave no anchor of its own.
+  # Every poll timer routes through job, which owns the cadence keys and
+  # their refusals: the lane's timer keys pass through unchanged, so a
+  # cadence the job factory refuses is refused here too rather than
+  # silently dropped. onBootSec defaults to "2min" only when the lane gave
+  # no session-relative (onStartupSec) anchor of its own.
   pollJob = lib.optionalAttrs (mode == "poll") (
     {
       inherit execStart manager resourceClass;
@@ -220,9 +220,11 @@ let
         persistent = timer.persistent or false;
         description = timerDescription;
       }
-      // lib.optionalAttrs (timer ? intervalSec) { inherit (timer) intervalSec; }
-      // lib.optionalAttrs (timer ? onUnitActiveSec) { inherit (timer) onUnitActiveSec; }
-      // lib.optionalAttrs (timer ? onStartupSec) { inherit (timer) onStartupSec; }
+      // builtins.removeAttrs timer [
+        "accuracySec"
+        "persistent"
+        "onBootSec"
+      ]
       // lib.optionalAttrs (!(timer ? onStartupSec)) { onBootSec = timer.onBootSec or "2min"; };
     }
   );

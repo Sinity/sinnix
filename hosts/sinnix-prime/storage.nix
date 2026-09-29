@@ -146,7 +146,7 @@ let
         ];
         timer = {
           onBootSec = "2min";
-          onUnitActiveSec = "5min";
+          intervalSec = 300;
           accuracySec = "30s";
           persistent = false;
         };

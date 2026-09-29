@@ -50,7 +50,7 @@ mkFeatureModule {
           execStart = "${scriptPkgs.codex-review-status}/bin/codex-review-status Sinity/polylogue";
           timer = {
             onBootSec = "2min";
-            onUnitActiveSec = "2min";
+            intervalSec = 120;
             accuracySec = "15s";
             description = "Refresh codex-review statuses every two minutes";
           };
@@ -72,7 +72,7 @@ mkFeatureModule {
           execStart = "${scriptPkgs.stacked-review-threads-status}/bin/stacked-review-threads-status Sinity/polylogue";
           timer = {
             onBootSec = "2min";
-            onUnitActiveSec = "2min";
+            intervalSec = 120;
             accuracySec = "15s";
             description = "Refresh stacked-review-threads statuses every two minutes";
           };

@@ -93,7 +93,7 @@ mkServiceModule {
       environment.POLYLOGUE_ARCHIVE_ROOT = config.sinnix.services.polylogue.dataDir;
       timer = {
         onBootSec = "5min";
-        onUnitActiveSec = "${toString cfg.intervalMinutes}min";
+        intervalSec = cfg.intervalMinutes * 60;
         accuracySec = "1min";
         description = "Periodic trigger for the enrichment loop";
       };

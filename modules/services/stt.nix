@@ -86,7 +86,7 @@ mkAiService {
           };
           timer = {
             onBootSec = "10min";
-            onUnitActiveSec = "${toString cfg.lakeIntervalSec}s";
+            intervalSec = cfg.lakeIntervalSec;
             accuracySec = "5min";
             description = "Periodic transcription of newly landed audio";
           };

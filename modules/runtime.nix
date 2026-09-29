@@ -679,7 +679,7 @@ in
         serviceConfig.TimeoutStartSec = "120s";
         timer = {
           onBootSec = "10min";
-          onUnitActiveSec = "5min";
+          intervalSec = 300;
         };
       }
     )
@@ -708,7 +708,7 @@ in
         };
         timer = {
           onBootSec = "2min";
-          onUnitActiveSec = "5min";
+          intervalSec = 300;
           persistent = true;
         };
       }

@@ -98,7 +98,7 @@ mkServiceModule {
             };
             timer = {
               onBootSec = "10min";
-              onUnitActiveSec = "${toString cfg.intervalMinutes}min";
+              intervalSec = cfg.intervalMinutes * 60;
               accuracySec = "1min";
               description = "Periodic kernel audit drain";
             };

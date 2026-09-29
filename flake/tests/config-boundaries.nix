@@ -239,6 +239,72 @@ in
       unknownRendererRejected = rejected unknownRendererSpec;
       factory = evalTestSpec system factorySpec;
       factoryCollisionRejected = rejected factoryCollisionSpec;
+      # The scheduled-job factory is a plain function of lib, so its cadence
+      # rendering and refusals are exercised without a host evaluation.
+      mkScheduledJob = import ../../modules/lib/scheduled-job.nix { inherit lib; };
+      renderTimer =
+        timer:
+        (mkScheduledJob
+          {
+            config = { };
+            unitName = "sinnix-cadence-fixture";
+            description = "Cadence fixture";
+          }
+          {
+            execStart = "/bin/true";
+            inherit timer;
+          }
+        ).systemd.timers.sinnix-cadence-fixture.content.timerConfig;
+      cadenceRefused = timer: !(builtins.tryEval (builtins.deepSeq (renderTimer timer) true)).success;
+      # Every accepted cadence is wall-clock: no rendered unit is anchored on
+      # its own activation, which a failed start leaves with no next elapse.
+      cadenceAccepted =
+        lib.all
+          (
+            case:
+            let
+              rendered = renderTimer case.timer;
+            in
+            rendered.OnCalendar == case.calendar && !(rendered ? OnUnitActiveSec)
+          )
+          [
+            {
+              timer.intervalSec = 30;
+              calendar = "*:*:0/30";
+            }
+            {
+              timer.intervalSec = 60;
+              calendar = "*:0/1";
+            }
+            {
+              timer.intervalSec = 300;
+              calendar = "*:0/5";
+            }
+            {
+              timer.intervalSec = 7200;
+              calendar = "0/2:00:00";
+            }
+            {
+              timer = {
+                onCalendar = "hourly";
+                onBootSec = "2min";
+              };
+              calendar = "hourly";
+            }
+          ];
+      cadenceRefusals = map cadenceRefused [
+        { onUnitActiveSec = "5min"; }
+        {
+          intervalSec = 300;
+          onCalendar = "hourly";
+        }
+        # 90s, 7min and 5h do not divide their minute, hour or day.
+        { intervalSec = 90; }
+        { intervalSec = 420; }
+        { intervalSec = 18000; }
+        { intervalSec = 0; }
+        { intervalSec = "300"; }
+      ];
     in
     {
       # One check per boundary, each an accepted fixture beside the fixtures
@@ -260,5 +326,12 @@ in
         test ${if factoryCollisionRejected then "1" else "0"} = 1
         touch "$out"
       '';
+      checks.config-boundaries-timer-cadence =
+        pkgs.runCommand "sinnix-config-boundaries-timer-cadence" { }
+          ''
+            test ${if cadenceAccepted then "1" else "0"} = 1
+            test ${if lib.all (refused: refused) cadenceRefusals then "1" else "0"} = 1
+            touch "$out"
+          '';
     };
 }

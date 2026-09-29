@@ -189,7 +189,7 @@ mkServiceModule {
             # Full-stall averages are 60-second means, so sampling faster reads
             # the same number twice. One group is paused or resumed per tick,
             # with the signal-specific order defined by `agentctl backpressure tick`.
-            onUnitActiveSec = 60;
+            intervalSec = 60;
             onBootSec = 60;
             description = "Reconcile queue admission against host stall";
           };
@@ -211,7 +211,7 @@ mkServiceModule {
             TimeoutStartSec = "60s";
           };
           timer = {
-            onUnitActiveSec = 900;
+            intervalSec = 900;
             onBootSec = 120;
             description = "Reconcile the calendar timers declared by project descriptors";
           };

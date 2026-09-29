@@ -21,7 +21,9 @@
 #   script                inline shell body (NixOS `script =` semantics);
 #                         for jobs whose body is a generated script rather
 #                         than a packaged binary
-#   timer                 { onCalendar | intervalSec | onUnitActiveSec,
+#   timer                 { onCalendar | intervalSec (seconds, rendered as a
+#                           calendar step, so it must divide its minute,
+#                           hour or day evenly),
 #                           onBootSec, onStartupSec, persistent,
 #                           randomizedDelaySec, accuracySec, description,
 #                           enable ? true }
@@ -69,16 +71,32 @@ in
 j:
 let
   manager = j.manager or "system";
+  # Every cadence is wall-clock. A unit-relative OnUnitActiveSec anchors on
+  # the service's activation, and a Type=oneshot job that fails to start (a
+  # wedged manager queue, an activation mid-switch) leaves the timer with no
+  # next elapse: it stops for good and nothing reports it. A calendar step is
+  # anchored outside the unit, so no run outcome can end the cadence.
+  intervalCalendar =
+    seconds:
+    assert lib.assertMsg (builtins.isInt seconds && seconds > 0)
+      "mkScheduledJob ${unitName}: intervalSec must be a positive integer of seconds, got ${builtins.toJSON seconds}";
+    if seconds < 60 && lib.mod 60 seconds == 0 then
+      "*:*:0/${toString seconds}"
+    else if seconds < 3600 && lib.mod seconds 60 == 0 && lib.mod 60 (seconds / 60) == 0 then
+      "*:0/${toString (seconds / 60)}"
+    else if seconds <= 86400 && lib.mod seconds 3600 == 0 && lib.mod 24 (seconds / 3600) == 0 then
+      "0/${toString (seconds / 3600)}:00:00"
+    else
+      throw "mkScheduledJob ${unitName}: intervalSec ${toString seconds} does not divide its minute, hour or day evenly; choose a divisor or declare onCalendar";
   timerConfig = lib.optionalAttrs (j ? timer) (
+    assert lib.assertMsg (!(j.timer ? onUnitActiveSec))
+      "mkScheduledJob ${unitName}: onUnitActiveSec is refused (a unit-relative timer stops after one failed start); declare intervalSec or onCalendar";
+    assert lib.assertMsg (
+      !(j.timer ? intervalSec && j.timer ? onCalendar)
+    ) "mkScheduledJob ${unitName}: declare intervalSec or onCalendar, not both";
     lib.filterAttrs (_: v: v != null) {
-      OnCalendar = j.timer.onCalendar or null;
-      # intervalSec computes from seconds; onUnitActiveSec passes a raw
-      # systemd duration through untouched ("30min").
-      OnUnitActiveSec =
-        if j.timer ? intervalSec then
-          "${toString j.timer.intervalSec}s"
-        else
-          j.timer.onUnitActiveSec or null;
+      OnCalendar =
+        if j.timer ? intervalSec then intervalCalendar j.timer.intervalSec else j.timer.onCalendar or null;
       OnBootSec = j.timer.onBootSec or null;
       OnStartupSec = j.timer.onStartupSec or null;
       Persistent = if j.timer.persistent or false then true else null;
