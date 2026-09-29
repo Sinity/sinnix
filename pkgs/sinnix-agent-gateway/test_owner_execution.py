@@ -338,3 +338,26 @@ def test_owner_execution_stream_interrupt_leaves_no_child(tmp_path) -> None:
 
     time.sleep(1.0)
     assert not marker.exists()
+
+
+def test_terminal_profile_carries_the_compositor_instance() -> None:
+    """Fails if the kitty owner runs without the Hyprland instance.
+
+    Without HYPRLAND_INSTANCE_SIGNATURE the owner's hyprctl calls reach no
+    compositor, so agent terminals opened on the operator's workspace.
+    """
+    execution = OwnerExecution(
+        {
+            "PATH": "/fixture/bin",
+            "XDG_RUNTIME_DIR": "/run/user/1000",
+            "HYPRLAND_INSTANCE_SIGNATURE": "fixture-instance",
+            "WAYLAND_DISPLAY": "wayland-1",
+        }
+    )
+    environment, missing = execution.environment_for(
+        OwnerRoute("terminal-kitty", EnvironmentProfile.TERMINAL)
+    )
+
+    assert missing is None
+    assert environment["HYPRLAND_INSTANCE_SIGNATURE"] == "fixture-instance"
+    assert environment["WAYLAND_DISPLAY"] == "wayland-1"

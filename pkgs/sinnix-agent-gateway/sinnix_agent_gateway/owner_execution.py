@@ -152,6 +152,12 @@ class OwnerExecution:
             "WAYLAND_DISPLAY",
             "XDG_RUNTIME_DIR",
         ),
+        # The kitty owner places agent windows through the compositor; without
+        # its instance it cannot keep them off the operator's workspaces.
+        EnvironmentProfile.TERMINAL: (
+            "HYPRLAND_INSTANCE_SIGNATURE",
+            "WAYLAND_DISPLAY",
+        ),
     }
 
     def __init__(self, base_environment: Mapping[str, str] | None = None):
