@@ -52,11 +52,11 @@ pool = "bulk"
 result = "exit"
 cache = "tree+environment"
 timeout_seconds = 7200
-# Checks are evaluated one at a time by a worker replaced past 1 GiB, so the
-# peak is that threshold plus the largest single check (about 1.9 GiB, a
-# desktop Home Manager fixture); a measured run peaked at 2.7 GiB. Admission
-# reserves the bound with margin so a check never lands on an exhausted host.
-admission = { memory_mib = 4096 }
+# Four evaluation workers, each replaced past 512 MiB, so the peak is about
+# four times that threshold plus the largest single check (about 1 GiB); a
+# measured run peaked at 3.6 GiB. Admission reserves that with margin so a
+# check never lands on an exhausted host.
+admission = { memory_mib = 4608 }
 
 [operations.check_focused]
 description = "Build explicitly selected Sinnix flake checks"
