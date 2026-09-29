@@ -642,12 +642,14 @@ def _pr_text(run: Run, beads: Beads) -> tuple[str, str]:
         lines.append(f"**{bead_id}** {bead_title}".rstrip())
         lines.extend(criteria.get(bead_id, []))
         lines.append("")
-    body = "\n".join([*lines, *_self_review_lines(run)]).rstrip() + "\n"
-    if len(body) > GITHUB_BODY_CHARS:
-        # GitHub refuses a longer body. Keep every item's verdict and point to
-        # the stored results, which hold the complete narration.
-        body = "\n".join([*lines, *_self_review_lines(run, narrated=False)])
+    # GitHub refuses a longer body. Past the limit, keep every item's verdict
+    # without its narration, then only the pointer to the stored results,
+    # which always hold the complete narration.
+    for detail in ("narrated", "verdicts", "pointer"):
+        body = "\n".join([*lines, *_self_review_lines(run, detail=detail)])
         body = body.rstrip() + "\n"
+        if len(body) <= GITHUB_BODY_CHARS:
+            break
     return title, body
 
 
@@ -655,11 +657,12 @@ def _pr_text(run: Run, beads: Beads) -> tuple[str, str]:
 GITHUB_BODY_CHARS = 65_536
 
 
-def _self_review_lines(run: Run, *, narrated: bool = True) -> list[str]:
+def _self_review_lines(run: Run, *, detail: str = "narrated") -> list[str]:
     """Each filed worker's self-review, as the PR body's Self-review section.
 
-    ``narrated=False`` renders each item's verdict without its narration, for a
-    body that would otherwise exceed GitHub's limit.
+    ``detail`` is ``narrated`` (every item with its narration), ``verdicts``
+    (each item's verdict only) or ``pointer`` (the pass counts only), the
+    shorter forms for a body that would otherwise exceed GitHub's limit.
     """
     sections: list[str] = []
     for worker in run.workers:
@@ -672,21 +675,23 @@ def _self_review_lines(run: Run, *, narrated: bool = True) -> list[str]:
             f"**{worker['id']}**: {review.get('passes')} pass(es) against {sources}"
         )
         for item in review.get("items") or ():
-            if not isinstance(item, Mapping):
+            if not isinstance(item, Mapping) or detail == "pointer":
                 continue
             mark = "- [x]" if item.get("applies") else "- N/A"
             text = f"{mark} {item.get('item') or ''}"
             sections.append(
-                f"{text}: {item.get('narration') or ''}" if narrated else text
+                f"{text}: {item.get('narration') or ''}"
+                if detail == "narrated"
+                else text
             )
         sections.append("")
     if not sections:
         return []
     note = (
         []
-        if narrated
+        if detail == "narrated"
         else [
-            f"The narration exceeds GitHub's body limit; each worker's filed "
+            f"The self-review exceeds GitHub's body limit; each worker's filed "
             f"result holds it in full (`agentctl batch status {run.run_id}`).",
             "",
         ]

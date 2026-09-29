@@ -542,9 +542,9 @@ def test_pr_self_review_section_marks_inapplicable_items_and_skips_unreviewed_wo
 def test_pr_self_review_keeps_whole_narration_and_compacts_only_past_the_body_limit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Breaks if narration is cut to a fixed length, or if a body over
-    GitHub's limit keeps the narration instead of each item's verdict and a
-    pointer to the stored results."""
+    """Breaks if narration is cut to a fixed length, if a body over GitHub's
+    limit keeps the narration instead of each item's verdict and a pointer to
+    the stored results, or if item verdicts alone may still exceed it."""
     narration = "x" * 5_000
     review = {
         "checklists": ["worker-contract"],
@@ -556,7 +556,7 @@ def test_pr_self_review_keeps_whole_narration_and_compacts_only_past_the_body_li
         workers=[{"id": "w1", "result": {"self_review": review}}],
     )
     assert f"- [x] siblings: {narration}" in landing_module._self_review_lines(run)
-    compact = landing_module._self_review_lines(run, narrated=False)
+    compact = landing_module._self_review_lines(run, detail="verdicts")
     assert "- [x] siblings" in compact
     assert not any(narration in line for line in compact)
     assert any("agentctl batch status run-1" in line for line in compact)
@@ -571,6 +571,11 @@ def test_pr_self_review_keeps_whole_narration_and_compacts_only_past_the_body_li
     monkeypatch.setattr(landing_module, "GITHUB_BODY_CHARS", len(body) - 1)
     _, body = landing_module._pr_text(run, NoBeads())
     assert narration not in body and "- [x] siblings" in body
+    # Items alone can still exceed the limit; then only the pointer remains.
+    monkeypatch.setattr(landing_module, "GITHUB_BODY_CHARS", len(body) - 1)
+    _, body = landing_module._pr_text(run, NoBeads())
+    assert "siblings" not in body and "agentctl batch status run-1" in body
+    assert len(body) <= landing_module.GITHUB_BODY_CHARS
 
 
 def verdict(**overrides: Any) -> dict[str, Any]:

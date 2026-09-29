@@ -648,8 +648,8 @@ not the document, requires it: `batch start` records
 without one is `result_self_review`. A worker dispatched before that flag
 existed files without it. Landing copies each worker's `self_review` whole
 into the PR body's Self-review section, so it is public text; a body past
-GitHub's length limit keeps each item's verdict and points to the stored
-results for the narration. A worktree head that
+GitHub's length limit keeps each item's verdict, or past it only the pass
+counts, and points to the stored results for the rest. A worktree head that
 descends from the filed `candidate_sha` with a clean tree is recorded separately
 as `integration_head`; the submitted claim and its verification remain bound
 to the filed SHA. Its additional paths enter the integration scope. A dirty
