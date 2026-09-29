@@ -63,8 +63,21 @@ _KINDS = ("project", "bead", "task_authority")
 
 
 class Order(GatewayModel):
-    field: OrderField
-    reverse: bool = False
+    """Result order, as Beads applies it to its own reads."""
+
+    field: OrderField = Field(
+        description=(
+            "created, updated and closed sort newest first; the other fields "
+            "sort ascending (priority 0 first)."
+        )
+    )
+    reverse: bool = Field(
+        default=False,
+        description=(
+            "Invert that order. For created, updated or closed, reverse=true "
+            "lists the OLDEST first; omit it for the newest."
+        ),
+    )
 
 
 class GraphQuery(GatewayModel):

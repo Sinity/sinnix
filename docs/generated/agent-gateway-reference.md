@@ -1,11 +1,11 @@
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: 2f2ceeafe8f7ee6cac929be67e697f761d9173140c1717c1b7e47c8ff8c33c31 -->
+<!-- gateway-catalog-sha256: cff2988265e21bd3255fcf6ea6f8fd7d77e89b728e09e22ad8e5715ed619cf2e -->
 # Sinnix Agent Gateway reference
 
 Generated from `sinnix_agent_gateway.actions`. Every action is one MCP tool whose `tools/list` input schema is the one below; the catalog hash changes when any principal-visible action catalog row changes, including its schema, principal set, example or affordance.
 
-Revision: `v3-typed-actions`. Catalog SHA-256: `2f2ceeafe8f7ee6cac929be67e697f761d9173140c1717c1b7e47c8ff8c33c31`.
+Revision: `v3-typed-actions`. Catalog SHA-256: `cff2988265e21bd3255fcf6ea6f8fd7d77e89b728e09e22ad8e5715ed619cf2e`.
 
 ## Invocation
 
@@ -4405,8 +4405,10 @@ Input schema:
     },
     "Order": {
       "additionalProperties": false,
+      "description": "Result order, as Beads applies it to its own reads.",
       "properties": {
         "field": {
+          "description": "created, updated and closed sort newest first; the other fields sort ascending (priority 0 first).",
           "enum": [
             "priority",
             "created",
@@ -4422,6 +4424,7 @@ Input schema:
         },
         "reverse": {
           "default": false,
+          "description": "Invert that order. For created, updated or closed, reverse=true lists the OLDEST first; omit it for the newest.",
           "type": "boolean"
         }
       },
