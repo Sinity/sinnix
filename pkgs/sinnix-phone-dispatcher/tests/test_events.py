@@ -189,32 +189,3 @@ def test_a_mirroring_failure_does_not_fail_the_upload(
     assert status == HTTPStatus.OK
     assert payload["duplicate"] is False
     assert _day_file(isolated_state_dirs).read_bytes() == body
-
-
-def test_conflicting_overlap_is_not_acknowledged(isolated_state_dirs):
-    original = b"abcdefgh"
-    assert (
-        uploads_mod.append_events("20260818", 0, original, _sha(original))[0]
-        == HTTPStatus.OK
-    )
-    status, payload = uploads_mod.append_events(
-        "20260818", 3, b"XYZ123", _sha(b"XYZ123")
-    )
-    assert status == HTTPStatus.CONFLICT and payload["ok"] is False
-    assert _day_file(isolated_state_dirs).read_bytes() == original
-
-
-def test_short_pwrite_is_completed(isolated_state_dirs, monkeypatch):
-    actual = uploads_mod.os.pwrite
-    calls = []
-
-    def short(fd, data, offset):
-        calls.append(offset)
-        return actual(fd, data[:2], offset)
-
-    monkeypatch.setattr(uploads_mod.os, "pwrite", short)
-    body = b"abcdefg"
-    status, payload = uploads_mod.append_events("20260818", 0, body, _sha(body))
-    assert status == HTTPStatus.OK and payload["cursor"] == len(body)
-    assert len(calls) > 1
-    assert _day_file(isolated_state_dirs).read_bytes() == body

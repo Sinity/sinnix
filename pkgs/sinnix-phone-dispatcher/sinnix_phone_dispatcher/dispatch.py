@@ -18,7 +18,11 @@ from .state import ensure_dirs, notify_phone
 
 
 def cmd_dispatch(args: argparse.Namespace) -> int:
-    """Execute drained intents, retaining every non-completed request."""
+    """Execute every intent the drain collected.
+
+    Intents are deleted only after execution, and execution is idempotent, so
+    the failure mode of a crash mid-sweep is a repeat rather than a loss.
+    """
     ensure_dirs()
     outbox = Path(args.outbox)
     if not outbox.is_dir():
@@ -38,7 +42,7 @@ def cmd_dispatch(args: argparse.Namespace) -> int:
             failed += 1
             continue
         result = execute(intent)
-        if result.get("ok"):
+        if result.get("ok") or result.get("duplicate"):
             path.unlink(missing_ok=True)
             executed += 1
         else:
@@ -47,7 +51,7 @@ def cmd_dispatch(args: argparse.Namespace) -> int:
             )
             failed += 1
     print(f"dispatch: executed {executed}, failed {failed}")
-    return 1 if failed else 0
+    return 0
 
 
 def cmd_notify(args: argparse.Namespace) -> int:

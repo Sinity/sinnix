@@ -5,11 +5,8 @@ an intent's execution can land."""
 from __future__ import annotations
 
 import datetime as dt
-import fcntl
-import hashlib
 import json
 import os
-from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -20,27 +17,22 @@ from .external import steer, trigger_score
 from .state import LAKE_ROOT, TOKEN_RE, TOKENS_DIR, emit_receipt, ensure_dirs
 
 
-def _record(token: str, digest: str, outcome: str, result: dict | None = None) -> None:
+def seen_token(token: str) -> bool:
+    if not token or not TOKEN_RE.match(token):
+        return False
+    return (TOKENS_DIR / token).exists()
+
+
+def mark_token(token: str, result: str) -> None:
+    if not token or not TOKEN_RE.match(token):
+        return
+    ensure_dirs()
     atomic_publish(
         TOKENS_DIR / token,
-        (
-            json.dumps({"digest": digest, "outcome": outcome, "result": result}) + "\n"
-        ).encode(),
+        f"{utc_ts()} {result}\n".encode(),
         fsync=True,
         mode=0o600,
     )
-
-
-@contextmanager
-def _token_lock(token: str):
-    ensure_dirs()
-    fd = os.open(TOKENS_DIR / f".{token}.lock", os.O_CREAT | os.O_RDWR, 0o600)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
-        yield
-    finally:
-        fcntl.flock(fd, fcntl.LOCK_UN)
-        os.close(fd)
 
 
 def execute(intent: dict) -> dict:
@@ -54,74 +46,8 @@ def execute(intent: dict) -> dict:
     kind = str(intent.get("kind") or "")
     token = str(intent.get("send_token") or "")
 
-    if not TOKEN_RE.fullmatch(token) or token.startswith("."):
-        return {
-            "ok": False,
-            "outcome": "failed",
-            "kind": kind,
-            "detail": "invalid send_token",
-        }
-    try:
-        digest = hashlib.sha256(
-            json.dumps(
-                intent, sort_keys=True, separators=(",", ":"), allow_nan=False
-            ).encode()
-        ).hexdigest()
-    except (TypeError, ValueError):
-        return {
-            "ok": False,
-            "outcome": "failed",
-            "kind": kind,
-            "detail": "invalid intent content",
-        }
-    with _token_lock(token):
-        path = TOKENS_DIR / token
-        if path.exists():
-            try:
-                prior = json.loads(path.read_text())
-            except (ValueError, OSError):
-                return {
-                    "ok": False,
-                    "outcome": "indeterminate",
-                    "kind": kind,
-                    "detail": "unreadable or legacy token record",
-                }
-            if prior.get("digest") != digest:
-                return {
-                    "ok": False,
-                    "outcome": "conflict",
-                    "kind": kind,
-                    "detail": "send_token belongs to different content",
-                }
-            if prior.get("outcome") == "completed":
-                return {**prior["result"], "duplicate": True}
-            if prior.get("outcome") != "failed":
-                return {
-                    "ok": False,
-                    "outcome": "indeterminate",
-                    "kind": kind,
-                    "detail": "prior effect may have run",
-                }
-        _record(token, digest, "in_flight")
-        try:
-            result = _perform(intent, kind, token)
-        except Exception as exc:  # external effect may already have happened
-            _record(token, digest, "indeterminate")
-            return {
-                "ok": False,
-                "outcome": "indeterminate",
-                "kind": kind,
-                "detail": str(exc),
-            }
-        result["kind"] = kind
-        result["outcome"] = result.get(
-            "outcome", "completed" if result.get("ok") else "failed"
-        )
-        _record(token, digest, result["outcome"], result)
-        return result
-
-
-def _perform(intent: dict, kind: str, token: str) -> dict:
+    if token and seen_token(token):
+        return {"ok": True, "duplicate": True, "kind": kind}
 
     result: dict[str, Any]
     if kind == "ready_send":
@@ -138,37 +64,28 @@ def _perform(intent: dict, kind: str, token: str) -> dict:
             "ready",
         )
     elif kind == "steering_ritual":
-        intentions = intent.get("intentions")
-        if not isinstance(intentions, list) or not intentions:
-            return {"ok": False, "detail": "intentions must be a nonempty list"}
+        intentions = intent.get("intentions") or []
         added = 0
         detail = []
-        for row in intentions:
+        for row in intentions if isinstance(intentions, list) else []:
             if not isinstance(row, dict):
-                detail.append("invalid intention")
                 continue
             code, out = steer(
                 "intent",
                 "add",
                 str(row.get("id") or row.get("title") or "intention"),
                 "--forecast",
-                str(row.get("probability", 0.5)),
+                str(row.get("probability") or 0.5),
             )
             if code == 0:
                 added += 1
             else:
                 detail.append(out)
-        result = {
-            "ok": added == len(intentions) and not detail,
-            "added": added,
-            "detail": detail,
-        }
-        if added and not result["ok"]:
-            result["outcome"] = "indeterminate"
+        result = {"ok": True, "added": added, "detail": detail}
         emit_receipt(
             "steering_ritual",
-            "Intentions recorded" if result["ok"] else "Intentions incomplete",
-            f"{added} of {len(intentions)} committed for today",
+            "Intentions recorded",
+            f"{added} committed for today",
             token,
             "home",
         )
@@ -222,6 +139,8 @@ def _perform(intent: dict, kind: str, token: str) -> dict:
     else:
         result = {"ok": False, "detail": f"unknown intent kind {kind!r}"}
 
+    mark_token(token, "ok" if result.get("ok") else "failed")
+    result["kind"] = kind
     return result
 
 

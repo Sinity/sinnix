@@ -194,26 +194,10 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if route == "/intent":
-            result = execute(payload)
-            self._send(
-                HTTPStatus.OK
-                if result["ok"]
-                else HTTPStatus.CONFLICT
-                if result.get("outcome") in ("conflict", "indeterminate")
-                else HTTPStatus.UNPROCESSABLE_ENTITY,
-                result,
-            )
+            self._send(HTTPStatus.OK, execute(payload))
         elif route == "/job-answer":
             payload.setdefault("kind", "job_answer")
-            result = execute(payload)
-            self._send(
-                HTTPStatus.OK
-                if result["ok"]
-                else HTTPStatus.CONFLICT
-                if result.get("outcome") in ("conflict", "indeterminate")
-                else HTTPStatus.UNPROCESSABLE_ENTITY,
-                result,
-            )
+            self._send(HTTPStatus.OK, execute(payload))
         else:
             self._send(HTTPStatus.NOT_FOUND, {"ok": False, "detail": "no such route"})
 

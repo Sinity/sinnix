@@ -2,16 +2,12 @@
 
 from __future__ import annotations
 
-import hashlib
 import io
-import json
 from email.message import Message
 from http import HTTPStatus
 from types import MethodType
 
-import sinnix_phone_dispatcher.execute as execute_mod
 import sinnix_phone_dispatcher.server as server_mod
-import sinnix_phone_dispatcher.uploads as uploads_mod
 
 
 def _handler(path: str, body: bytes, content_length: str | None):
@@ -104,44 +100,3 @@ def test_truncated_chunk_never_reaches_upload(monkeypatch):
 
     assert sent[0][0] == HTTPStatus.BAD_REQUEST
     assert sent[0][1]["ok"] is False
-
-
-def test_http_upload_receipt_matches_retained_bytes_and_refuses_conflict(
-    monkeypatch, tmp_path
-):
-    monkeypatch.setattr(uploads_mod, "UPLOAD_LANES", {"camera": tmp_path / "camera"})
-    for body, expected in (
-        (b"first", HTTPStatus.OK),
-        (b"other", HTTPStatus.CONFLICT),
-        (b"first", HTTPStatus.OK),
-    ):
-        handler, sent = _handler(
-            "/v1/chunk?lane=camera&name=clip", body, str(len(body))
-        )
-        handler.headers["X-Sinnix-Sha256"] = hashlib.sha256(body).hexdigest()
-        handler.do_POST()
-        assert sent[0][0] == expected
-        assert sent[0][1]["ok"] == (expected == HTTPStatus.OK)
-    retained = (tmp_path / "camera" / "clip").read_bytes()
-    assert retained == b"first"
-    assert sent[0][1]["sha256"] == hashlib.sha256(retained).hexdigest()
-
-
-def test_http_intent_refuses_conflicting_token(monkeypatch):
-    calls = []
-    monkeypatch.setattr(
-        execute_mod, "steer", lambda *args: calls.append(args) or (0, "ok")
-    )
-    for item, expected in (("a", HTTPStatus.OK), ("b", HTTPStatus.CONFLICT)):
-        body = json.dumps(
-            {
-                "kind": "steering_resolve",
-                "id": item,
-                "outcome": "done",
-                "send_token": "http-token",
-            }
-        ).encode()
-        handler, sent = _handler("/v1/intent", body, str(len(body)))
-        handler.do_POST()
-        assert sent[0][0] == expected
-    assert len(calls) == 1

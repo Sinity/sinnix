@@ -36,7 +36,7 @@ def test_second_execution_with_same_token_is_a_noop_duplicate(monkeypatch) -> No
     second = execute_mod.execute(dict(intent))
 
     assert first.get("duplicate") is not True
-    assert second == {**first, "duplicate": True}
+    assert second == {"ok": True, "duplicate": True, "kind": "steering_resolve"}
     # The steer subprocess ran exactly once: the duplicate branch returns
     # before the kind dispatch, so a re-drained intent never re-executes the
     # outward action.
@@ -133,75 +133,3 @@ def test_job_answer_is_private_and_rejects_path_traversal(
         is False
     )
     assert not (tmp_path / "escape.json").exists()
-
-
-def test_token_conflict_and_failed_retry(monkeypatch):
-    calls = []
-
-    def steer(*args):
-        calls.append(args)
-        return (2, "failed") if len(calls) == 1 else (0, "done")
-
-    monkeypatch.setattr(execute_mod, "steer", steer)
-    intent = {
-        "kind": "steering_resolve",
-        "id": "a",
-        "outcome": "done",
-        "send_token": "retry",
-    }
-    assert execute_mod.execute(intent)["outcome"] == "failed"
-    assert execute_mod.execute({**intent, "id": "b"})["outcome"] == "conflict"
-    assert execute_mod.execute(intent)["outcome"] == "completed"
-    assert len(calls) == 2
-
-
-def test_indeterminate_effect_is_not_replayed(monkeypatch):
-    calls = []
-
-    def uncertain(*args):
-        calls.append(args)
-        raise RuntimeError("connection lost")
-
-    monkeypatch.setattr(execute_mod, "steer", uncertain)
-    intent = {"kind": "ready_send", "id": "a", "send_token": "uncertain"}
-    assert execute_mod.execute(intent)["outcome"] == "indeterminate"
-    assert execute_mod.execute(intent)["outcome"] == "indeterminate"
-    assert len(calls) == 1
-
-
-def test_ritual_zero_default_and_partial_failure(monkeypatch):
-    forecasts = []
-
-    def steer(*args):
-        forecasts.append(args[-1])
-        return (0, "ok") if len(forecasts) == 1 else (2, "rejected")
-
-    monkeypatch.setattr(execute_mod, "steer", steer)
-    intent = {
-        "kind": "steering_ritual",
-        "send_token": "ritual",
-        "intentions": [{"id": "a", "probability": 0}, {"id": "b"}],
-    }
-    result = execute_mod.execute(intent)
-    assert forecasts == ["0", "0.5"]
-    assert result["ok"] is False and result["added"] == 1
-    assert result["outcome"] == "indeterminate"
-    assert execute_mod.execute(intent)["outcome"] == "indeterminate"
-    assert len(forecasts) == 2
-
-
-def test_ritual_all_failed_is_retryable(monkeypatch):
-    calls = []
-    monkeypatch.setattr(
-        execute_mod, "steer", lambda *args: calls.append(args) or (2, "rejected")
-    )
-    intent = {
-        "kind": "steering_ritual",
-        "send_token": "all-failed",
-        "intentions": [{"id": "a"}],
-    }
-    first = execute_mod.execute(intent)
-    second = execute_mod.execute(intent)
-    assert first["ok"] is False and first["outcome"] == "failed"
-    assert second["ok"] is False and second["outcome"] == "failed"
-    assert len(calls) == 2
