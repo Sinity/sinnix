@@ -64,11 +64,26 @@ let
       echo "sinnix: WARNING no SINNIX_FLAKE_DIR/NH_FLAKE/FLAKE env var set and \$PWD ($PWD) is not inside a git checkout; falling back to a Nix-store copy of the flake ($_flake_dir). That copy has no git metadata, so system.configurationRevision will stamp \"unknown\" for anything built from this invocation (sinnix-6ru) -- the live-drift tripwire will be non-probative for the resulting generation. Run this from inside the sinnix checkout, or set SINNIX_FLAKE_DIR, to get a real revision stamp." >&2
     fi
   '';
+  # The evaluator never returns memory, so one process evaluating a whole tier
+  # holds every NixOS fixture the tier instantiates at once. A single worker
+  # evaluates the checks one at a time and is replaced once it passes
+  # checkEvalWorkerMiB, which bounds the peak by that threshold plus the
+  # largest single check.
+  checkEvalWorkerMiB = 1024;
   loadCheckTargets = outputName: ''
-    if ! _check_derivations=$(${pkgs.nix}/bin/nix eval "$_flake_dir#${outputName}.${system}" \
-        --apply 'checks: builtins.mapAttrs (_: check: check.drvPath) checks' \
-        --json); then
+    if ! _check_jobs=$(${pkgs.nix-eval-jobs}/bin/nix-eval-jobs \
+        --flake "$_flake_dir#${outputName}.${system}" \
+        --option accept-flake-config true \
+        --workers 1 --max-memory-size ${toString checkEvalWorkerMiB}); then
       echo "sinnix: failed to evaluate ${outputName}" >&2
+      exit 1
+    fi
+    # nix-eval-jobs exits 0 when a single attribute fails; its error is a
+    # field of that attribute's line.
+    if ! _check_derivations=$(printf '%s\n' "$_check_jobs" | ${pkgs.jq}/bin/jq -esc \
+        'if all(.[]; type == "object" and (.attr | type == "string") and (has("error") | not)) then map({ key: .attr, value: .drvPath }) | from_entries else error("check evaluation failed") end'); then
+      printf '%s\n' "$_check_jobs" | ${pkgs.jq}/bin/jq -r 'select(type == "object" and has("error")) | "sinnix: ${outputName}.\(.attr) failed to evaluate"' >&2 || true
+      echo "sinnix: invalid or failed ${outputName} evaluation" >&2
       exit 1
     fi
     if ! _check_targets=$(printf '%s' "$_check_derivations" | ${pkgs.jq}/bin/jq -er \

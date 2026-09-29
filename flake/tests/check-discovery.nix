@@ -4,13 +4,13 @@
   perSystem =
     { pkgs, system, ... }:
     let
+      fakeEvalJobs = pkgs.writeShellScriptBin "nix-eval-jobs" ''
+        echo eval >> "$EVALUATION_LOG"
+        [ "''${DISCOVERY_FAIL:-0}" = 0 ] || exit 7
+        printf '%s\n' "$DISCOVERY_JOBS"
+      '';
       fakeNix = pkgs.writeShellScriptBin "nix" ''
         case "$1" in
-          eval)
-            echo eval >> "$EVALUATION_LOG"
-            [ "''${DISCOVERY_FAIL:-0}" = 0 ] || exit 7
-            printf '%s\n' "$DISCOVERY_JSON"
-            ;;
           build)
             echo build >> "$BUILD_CALLS"
             shift
@@ -24,6 +24,7 @@
         inherit inputs system;
         pkgs = pkgs // {
           nix = fakeNix;
+          nix-eval-jobs = fakeEvalJobs;
         };
         sinnixScriptRegistry.packageSet = { };
       };
@@ -112,19 +113,22 @@
       checks.check-discovery = pkgs.runCommand "check-discovery" { } ''
         export SINNIX_FLAKE_DIR="$TMPDIR" BUILD_LOG="$TMPDIR/builds"
         export BUILD_CALLS="$TMPDIR/build-calls" EVALUATION_LOG="$TMPDIR/evaluations"
-        good='{"one":"/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-one.drv","two":"/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-two.drv"}'
+        one='{"attr":"one","drvPath":"/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-one.drv"}'
+        two='{"attr":"two","drvPath":"/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-two.drv"}'
+        good=$(printf '%s\n%s' "$one" "$two")
+        failed=$(printf '%s\n%s' "$one" '{"attr":"two","error":"boom"}')
         unset AGENTCTL_PRINCIPAL AGENTCTL_OPERATION
         for command in ${pkgs.lib.escapeShellArgs commands}; do
-          for malformed in '[]' '{}' 'null' 'invalid' '[1]' '[""]' '{"one":1}' '{"one":"relative.drv"}' '{"one":"/nix/store/value"}'; do
+          for malformed in "" '[]' '{}' 'null' 'invalid' '[1]' '{"attr":"","drvPath":"/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-one.drv"}' '{"attr":"one"}' '{"attr":"one","drvPath":1}' '{"attr":"one","drvPath":"relative.drv"}' '{"attr":"one","drvPath":"/nix/store/value"}' "$failed"; do
             : > "$BUILD_LOG"
-            if DISCOVERY_JSON="$malformed" "$command"; then
+            if DISCOVERY_JOBS="$malformed" "$command"; then
               echo "invalid discovery succeeded: $malformed" >&2
               exit 1
             fi
             test ! -s "$BUILD_LOG"
           done
           : > "$BUILD_LOG"
-          if DISCOVERY_FAIL=1 DISCOVERY_JSON="$good" "$command"; then
+          if DISCOVERY_FAIL=1 DISCOVERY_JOBS="$good" "$command"; then
             echo "evaluation failure succeeded" >&2
             exit 1
           fi
@@ -132,20 +136,20 @@
           : > "$BUILD_LOG"
           : > "$BUILD_CALLS"
           : > "$EVALUATION_LOG"
-          DISCOVERY_JSON="$good" "$command"
+          DISCOVERY_JOBS="$good" "$command"
           test "$(wc -l < "$BUILD_CALLS")" = 1
           expected_evaluations=1
           case "$command" in */check-all) expected_evaluations=2 ;; esac
           test "$(wc -l < "$EVALUATION_LOG")" = "$expected_evaluations"
           grep -Fxq '/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-one.drv^*' "$BUILD_LOG"
           grep -Fxq '/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-two.drv^*' "$BUILD_LOG"
-          if BUILD_STATUS=9 DISCOVERY_JSON="$good" "$command"; then
+          if BUILD_STATUS=9 DISCOVERY_JOBS="$good" "$command"; then
             echo "build failure succeeded" >&2
             exit 1
           fi
         done
         : > "$BUILD_LOG"
-        DISCOVERY_JSON="$good" ${builtins.head commands} --no-build
+        DISCOVERY_JOBS="$good" ${builtins.head commands} --no-build
         test ! -s "$BUILD_LOG"
         export SUDO_HOME="$TMPDIR" ACTIVATION_LOG="$TMPDIR/activation"
         ${pkgs.git}/bin/git init -q --bare "$TMPDIR/remote.git"
