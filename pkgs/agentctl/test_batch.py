@@ -508,7 +508,9 @@ def worker_result(
     }
 
 
-def test_pr_self_review_section_marks_inapplicable_items_and_skips_unreviewed_workers() -> None:
+def test_pr_self_review_section_marks_inapplicable_items_and_skips_unreviewed_workers() -> (
+    None
+):
     """Breaks if an N/A item renders as applied, or a worker with no filed
     result or a result without self_review adds a heading."""
     review = {
@@ -535,6 +537,40 @@ def test_pr_self_review_section_marks_inapplicable_items_and_skips_unreviewed_wo
         "",
     ]
     assert landing_module._self_review_lines(SimpleNamespace(workers=[])) == []
+
+
+def test_pr_self_review_keeps_whole_narration_and_compacts_only_past_the_body_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Breaks if narration is cut to a fixed length, or if a body over
+    GitHub's limit keeps the narration instead of each item's verdict and a
+    pointer to the stored results."""
+    narration = "x" * 5_000
+    review = {
+        "checklists": ["worker-contract"],
+        "passes": 1,
+        "items": [{"item": "siblings", "applies": True, "narration": narration}],
+    }
+    run = SimpleNamespace(
+        run_id="run-1",
+        workers=[{"id": "w1", "result": {"self_review": review}}],
+    )
+    assert f"- [x] siblings: {narration}" in landing_module._self_review_lines(run)
+    compact = landing_module._self_review_lines(run, narrated=False)
+    assert "- [x] siblings" in compact
+    assert not any(narration in line for line in compact)
+    assert any("agentctl batch status run-1" in line for line in compact)
+
+    class NoBeads:
+        def show(self, bead_id: str) -> dict[str, str]:
+            raise landing_module.prompts.PromptError(bead_id)
+
+    run.beads, run.base_commit = [], SHA
+    _, body = landing_module._pr_text(run, NoBeads())
+    assert narration in body
+    monkeypatch.setattr(landing_module, "GITHUB_BODY_CHARS", len(body) - 1)
+    _, body = landing_module._pr_text(run, NoBeads())
+    assert narration not in body and "- [x] siblings" in body
 
 
 def verdict(**overrides: Any) -> dict[str, Any]:

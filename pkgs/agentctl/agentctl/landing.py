@@ -642,22 +642,32 @@ def _pr_text(run: Run, beads: Beads) -> tuple[str, str]:
         lines.append(f"**{bead_id}** {bead_title}".rstrip())
         lines.extend(criteria.get(bead_id, []))
         lines.append("")
-    lines.extend(_self_review_lines(run))
-    return title, "\n".join(lines).rstrip() + "\n"
+    body = "\n".join([*lines, *_self_review_lines(run)]).rstrip() + "\n"
+    if len(body) > GITHUB_BODY_CHARS:
+        # GitHub refuses a longer body. Keep every item's verdict and point to
+        # the stored results, which hold the complete narration.
+        body = "\n".join([*lines, *_self_review_lines(run, narrated=False)])
+        body = body.rstrip() + "\n"
+    return title, body
 
 
-def _self_review_lines(run: Run) -> list[str]:
-    """Each filed worker's narrated self-review, as the PR body's Self-review section."""
-    limit = prompts.RESULT_TEXT_CHARS
+# GitHub's maximum pull-request body length, in characters.
+GITHUB_BODY_CHARS = 65_536
+
+
+def _self_review_lines(run: Run, *, narrated: bool = True) -> list[str]:
+    """Each filed worker's self-review, as the PR body's Self-review section.
+
+    ``narrated=False`` renders each item's verdict without its narration, for a
+    body that would otherwise exceed GitHub's limit.
+    """
     sections: list[str] = []
     for worker in run.workers:
         result = worker.get("result")
         review = result.get("self_review") if isinstance(result, Mapping) else None
         if not isinstance(review, Mapping):
             continue
-        sources = ", ".join(
-            f"`{str(source)[:limit]}`" for source in review.get("checklists") or ()
-        )
+        sources = ", ".join(f"`{source}`" for source in review.get("checklists") or ())
         sections.append(
             f"**{worker['id']}**: {review.get('passes')} pass(es) against {sources}"
         )
@@ -665,12 +675,23 @@ def _self_review_lines(run: Run) -> list[str]:
             if not isinstance(item, Mapping):
                 continue
             mark = "- [x]" if item.get("applies") else "- N/A"
+            text = f"{mark} {item.get('item') or ''}"
             sections.append(
-                f"{mark} {str(item.get('item') or '')[:limit]}: "
-                f"{str(item.get('narration') or '')[:limit]}"
+                f"{text}: {item.get('narration') or ''}" if narrated else text
             )
         sections.append("")
-    return ["## Self-review", "", *sections] if sections else []
+    if not sections:
+        return []
+    note = (
+        []
+        if narrated
+        else [
+            f"The narration exceeds GitHub's body limit; each worker's filed "
+            f"result holds it in full (`agentctl batch status {run.run_id}`).",
+            "",
+        ]
+    )
+    return ["## Self-review", "", *note, *sections]
 
 
 def _await_candidate_head(
