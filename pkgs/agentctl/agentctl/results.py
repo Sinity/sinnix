@@ -31,10 +31,48 @@ USAGE_SCHEMA: dict[str, Any] = {
     },
 }
 
+# The worker's own review of its final diff, narrated per checklist item: the
+# checklist sources it re-read, how many passes it ran (the last one clean),
+# and for each item whether it applied and how. Landing copies it into the PR
+# body, so it is public text.
+SELF_REVIEW_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["checklists", "passes", "items"],
+    "properties": {
+        "checklists": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"type": "string", "minLength": 1},
+        },
+        "passes": {"type": "integer", "minimum": 1},
+        "items": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["item", "applies", "narration"],
+                "properties": {
+                    "item": {"type": "string", "minLength": 1},
+                    "applies": {"type": "boolean"},
+                    "narration": {"type": "string", "minLength": 1},
+                },
+            },
+        },
+    },
+}
+
 WORKER_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
-    "required": ["candidate_sha", "beads", "unresolved", "verification"],
+    "required": [
+        "candidate_sha",
+        "beads",
+        "unresolved",
+        "verification",
+        "self_review",
+    ],
     "properties": {
         # Version one is intentionally still accepted: old results carry
         # unknown provenance rather than invented evidence. Version two makes
@@ -104,6 +142,7 @@ WORKER_SCHEMA: dict[str, Any] = {
             },
         },
         "unresolved": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "self_review": SELF_REVIEW_SCHEMA,
         "verification": {
             "type": "array",
             "items": {

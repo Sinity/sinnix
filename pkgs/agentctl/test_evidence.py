@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import tracemalloc
+from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,7 +12,7 @@ import pytest
 from agentctl import cli, evidence, launch
 from agentctl.config import Config, resolve_project
 from agentctl.run import outcome_path_for
-from conftest import FakeBd, FakePueue
+from conftest import SELF_REVIEW, FakeBd, FakePueue
 
 SHA = "a" * 40
 
@@ -21,6 +22,7 @@ def _claim(*, receipt: str, schema_version: int | None = None) -> dict:
         "candidate_sha": SHA,
         "beads": [{"id": "fx-1", "criteria": []}],
         "unresolved": [],
+        "self_review": deepcopy(SELF_REVIEW),
         "verification": [
             {
                 "command": "fixture check",

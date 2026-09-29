@@ -7,13 +7,14 @@ import os
 import subprocess
 import sys
 import time
+from copy import deepcopy
 from pathlib import Path
 from typing import Callable
 
 import pytest
 from agentctl import cli, github, manifest, pueue
 from agentctl.config import Config
-from conftest import FakePueue, read_launch
+from conftest import SELF_REVIEW, FakePueue, read_launch
 
 
 @pytest.fixture
@@ -93,6 +94,7 @@ def test_result_validate_worker_uses_owner_contract(
         "verification": [
             {"command": "synthetic check", "receipt": "synthetic receipt"}
         ],
+        "self_review": deepcopy(SELF_REVIEW),
         **overrides,
     }
     path = tmp_path / "worker-result.json"
@@ -128,6 +130,7 @@ def test_result_validate_worker_accepts_a_valid_synthetic_result(
                 "verification": [
                     {"command": "synthetic check", "receipt": "synthetic receipt"}
                 ],
+                "self_review": deepcopy(SELF_REVIEW),
             }
         )
     )
@@ -852,6 +855,7 @@ def _lost_landing(config: Config, run_id: str, *, filed: bool) -> Path:
             "beads": [],
             "unresolved": [],
             "verification": [],
+            "self_review": deepcopy(SELF_REVIEW),
         }
     path.write_text(json.dumps(document))
     return path

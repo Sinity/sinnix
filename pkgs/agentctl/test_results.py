@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
 import pytest
 from agentctl import results
+from conftest import SELF_REVIEW
 
 SHA = "a" * 40
 SCHEMA_DIR = (
@@ -32,6 +34,7 @@ def worker_result(**overrides: Any) -> dict[str, Any]:
         ],
         "unresolved": [],
         "verification": [{"command": "pytest -q", "receipt": "3 passed"}],
+        "self_review": deepcopy(SELF_REVIEW),
     }
     document.update(overrides)
     return document
@@ -39,6 +42,18 @@ def worker_result(**overrides: Any) -> dict[str, Any]:
 
 def test_a_conforming_worker_result_has_no_errors() -> None:
     assert results.validate_worker_result(worker_result()) == []
+
+
+@pytest.mark.parametrize("schema_version", [None, results.RESULT_SCHEMA_VERSION])
+def test_every_result_version_requires_the_self_review(
+    schema_version: int | None,
+) -> None:
+    """Breaks if the narrated self-review becomes optional for any contract."""
+    result = worker_result()
+    del result["self_review"]
+    if schema_version is not None:
+        result["schema_version"] = schema_version
+    assert "$: missing self_review" in results.validate_worker_result(result)
 
 
 def test_scope_expansion_is_an_optional_declared_list() -> None:
@@ -238,6 +253,24 @@ def test_versioned_result_rejects_duplicate_bead_rows() -> None:
             "status: must be one of",
         ),
         ({"beads": [{"id": "fx", "criteria": "none"}]}, "criteria: expected array"),
+        (
+            {
+                "self_review": {
+                    "checklists": ["worker-contract"],
+                    "passes": 1,
+                    "items": [{"item": "scale", "applies": False, "narration": ""}],
+                }
+            },
+            "self_review.items[0].narration: shorter",
+        ),
+        (
+            {"self_review": {"checklists": [], "passes": 1, "items": []}},
+            "self_review.checklists: fewer than 1",
+        ),
+        (
+            {"self_review": {**SELF_REVIEW, "passes": 0}},
+            "self_review.passes: below 1",
+        ),
     ],
 )
 def test_worker_result_violations_are_named(

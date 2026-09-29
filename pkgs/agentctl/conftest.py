@@ -25,6 +25,19 @@ from agentctl.config import Config
 from agentctl.prompts import PromptError
 from agentctl.pueue import PueueError, PueueGroupError, PueueTimeout, Task
 
+# A worker result's required self-review narration (see results.SELF_REVIEW_SCHEMA).
+SELF_REVIEW: dict[str, Any] = {
+    "checklists": ["worker-contract"],
+    "passes": 1,
+    "items": [
+        {
+            "item": "every consumer updated",
+            "applies": True,
+            "narration": "grep found one caller; it is updated",
+        }
+    ],
+}
+
 
 @dataclass
 class FakePueue:

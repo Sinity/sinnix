@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -14,7 +15,7 @@ from agentctl.config import Config
 from agentctl.manifest import Run
 from agentctl.projects import load_project_adapter
 from agentctl.pueue import Task
-from conftest import FakeBd, FakePueue, bead
+from conftest import SELF_REVIEW, FakeBd, FakePueue, bead
 
 NOW = datetime(2026, 9, 3, 9, 0, tzinfo=UTC)
 SHA = "c" * 40
@@ -65,6 +66,7 @@ def worker(
             "beads": [],
             "unresolved": [],
             "verification": [],
+            "self_review": deepcopy(SELF_REVIEW),
         }
         if result
         else None,

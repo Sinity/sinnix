@@ -42,7 +42,14 @@ write_result() {
     }
   ],
   "unresolved": [],
-  "verification": [{ "command": "true", "receipt": "exit 0" }]
+  "verification": [{ "command": "true", "receipt": "exit 0" }],
+  "self_review": {
+    "checklists": ["worker-contract"],
+    "passes": 1,
+    "items": [
+      { "item": "every consumer updated", "applies": true, "narration": "work.txt is the only consumer" }
+    ]
+  }
 }
 EOF
 }

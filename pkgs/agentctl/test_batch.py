@@ -11,8 +11,10 @@ import subprocess
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
+from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Callable
 
 import pytest
@@ -37,7 +39,7 @@ from agentctl.projects import ProjectAdapter, load_project_adapter
 from agentctl.pueue import PueueError
 from agentctl.run import TIMEOUT_EXIT_CODE
 from agentctl.worktrunk import Worktree, WorktrunkError
-from conftest import FakeBd, FakePueue, bead, read_launch
+from conftest import SELF_REVIEW, FakeBd, FakePueue, bead, read_launch
 
 BASE = "b" * 40
 SHA = "c" * 40
@@ -501,8 +503,36 @@ def worker_result(
         ],
         "unresolved": [],
         "verification": [{"command": "pytest -q", "receipt": "3 passed"}],
+        "self_review": deepcopy(SELF_REVIEW),
         **extra,
     }
+
+
+def test_pr_self_review_section_marks_inapplicable_items_and_skips_unfiled_workers() -> None:
+    """Breaks if an N/A item renders as applied, or an unfiled worker adds a heading."""
+    review = {
+        "checklists": ["docs/review/guide.md", "worker-contract"],
+        "passes": 2,
+        "items": [
+            {"item": "paging", "applies": False, "narration": "no reads changed"},
+            {"item": "siblings", "applies": True, "narration": "3 sites, all fixed"},
+        ],
+    }
+    run = SimpleNamespace(
+        workers=[
+            {"id": "w1", "result": {"self_review": review}},
+            {"id": "w2", "result": None},
+        ]
+    )
+    assert landing_module._self_review_lines(run) == [
+        "## Self-review",
+        "",
+        "**w1**: 2 pass(es) against `docs/review/guide.md`, `worker-contract`",
+        "- N/A paging: no reads changed",
+        "- [x] siblings: 3 sites, all fixed",
+        "",
+    ]
+    assert landing_module._self_review_lines(SimpleNamespace(workers=[])) == []
 
 
 def verdict(**overrides: Any) -> dict[str, Any]:
@@ -2061,6 +2091,11 @@ def test_pr_policy_pushes_the_branch_waits_for_required_checks_and_merges_the_he
     assert len(created) == 1 and created[0][1:3] == (branch, "master")
     assert created[0][3] == "fix: Solo"
     assert "**fx-solo** Solo\n- [x] Acceptance for fx-solo" in created[0][4]
+    # The worker's narrated self-review is the PR body's Self-review section.
+    assert (
+        "## Self-review\n\n**fx-solo**: 1 pass(es) against `worker-contract`\n"
+        "- [x] every consumer updated: grep found one caller; it is updated"
+    ) in created[0][4]
     assert landed["landing"]["pr_number"] == 41
     verify = landed["landing"]["verify_run"]
     assert verify == {
@@ -3481,6 +3516,7 @@ def test_landing_agents_get_members_scopes_and_accepted_evidence(
             "beads",
             "verification",
             "unresolved",
+            "self_review",
             "schema_version",
             "execution",
             "attempt",

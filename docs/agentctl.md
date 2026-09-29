@@ -136,7 +136,7 @@ agentctl evidence list <project> --cursor <next_cursor> --json
 agentctl evidence get <evidence_id> --project <project> --json
 ```
 
-The result must name a candidate SHA and its Beads tasks. A version-two result uses `execution = "native"` and must copy the Beads row revision, acceptance digest, and `{ac_id, text}` dispatch snapshot. A legacy result remains retained when a historical dispatch has no binding, but cannot automatically close a Bead. AgentCTL binds the exact owner acceptance field when structured criteria are unavailable; it never substitutes worker prose for that snapshot.
+The result must name a candidate SHA, its Beads tasks, and the author's narrated `self_review`. A version-two result uses `execution = "native"` and must copy the Beads row revision, acceptance digest, and `{ac_id, text}` dispatch snapshot. A legacy result remains retained when a historical dispatch has no binding, but cannot automatically close a Bead. AgentCTL binds the exact owner acceptance field when structured criteria are unavailable; it never substitutes worker prose for that snapshot.
 
 Each native verification claim must use a durable AgentCTL job receipt, `agentctl://jobs/<id>/<launch-reference>`, rather than a pass string. Filing resolves that exact launch reference in the selected project, then records whether the job terminated successfully and its execution checkout receipt had unchanged clean endpoints at the candidate SHA. The submitted result remains a claim. The receipt observation is the checked fact.
 
@@ -637,7 +637,12 @@ outcome. The codes:
 A worker exits with the JSON document `worker.schema.json` describes:
 `candidate_sha` (the submitted commit), `beads` with each acceptance
 criterion marked `satisfied`, `unsatisfied` or `superseded` with evidence,
-`unresolved` findings, and `verification` receipts. A worktree head that
+`unresolved` findings, `verification` receipts, and `self_review`: the
+checklist sources the worker re-read, the number of review passes it ran
+(the last one clean), and one narrated row per checklist item, with
+`applies: false` marking an item that did not apply and why. Landing copies
+each worker's `self_review` into the PR body's Self-review section, so it is
+public text. A worktree head that
 descends from the filed `candidate_sha` with a clean tree is recorded separately
 as `integration_head`; the submitted claim and its verification remain bound
 to the filed SHA. Its additional paths enter the integration scope. A dirty

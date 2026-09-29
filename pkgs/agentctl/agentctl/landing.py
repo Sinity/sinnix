@@ -642,7 +642,35 @@ def _pr_text(run: Run, beads: Beads) -> tuple[str, str]:
         lines.append(f"**{bead_id}** {bead_title}".rstrip())
         lines.extend(criteria.get(bead_id, []))
         lines.append("")
+    lines.extend(_self_review_lines(run))
     return title, "\n".join(lines).rstrip() + "\n"
+
+
+def _self_review_lines(run: Run) -> list[str]:
+    """Each filed worker's narrated self-review, as the PR body's Self-review section."""
+    limit = prompts.RESULT_TEXT_CHARS
+    sections: list[str] = []
+    for worker in run.workers:
+        result = worker.get("result")
+        review = result.get("self_review") if isinstance(result, Mapping) else None
+        if not isinstance(review, Mapping):
+            continue
+        sources = ", ".join(
+            f"`{str(source)[:limit]}`" for source in review.get("checklists") or ()
+        )
+        sections.append(
+            f"**{worker['id']}**: {review.get('passes')} pass(es) against {sources}"
+        )
+        for item in review.get("items") or ():
+            if not isinstance(item, Mapping):
+                continue
+            mark = "- [x]" if item.get("applies") else "- N/A"
+            sections.append(
+                f"{mark} {str(item.get('item') or '')[:limit]}: "
+                f"{str(item.get('narration') or '')[:limit]}"
+            )
+        sections.append("")
+    return ["## Self-review", "", *sections] if sections else []
 
 
 def _await_candidate_head(
