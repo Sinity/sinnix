@@ -85,6 +85,10 @@ in
           let
             hm = hmFor config;
             nav = navOf config;
+            # By name: derivation equality compares output paths, which would
+            # instantiate every package in the profile.
+            installed =
+              package: builtins.any (candidate: candidate.name or null == package.name) hm.home.packages;
             portalDirUnits = lib.filterAttrs (
               _: unit: (unit.environment or { }) ? XDG_DESKTOP_PORTAL_DIR
             ) config.systemd.user.services;
@@ -129,11 +133,11 @@ in
               message = "Private corpus consolidation must not repurpose Public or Desktop.";
             }
             {
-              assertion = builtins.elem nav.manager hm.home.packages;
+              assertion = installed nav.manager;
               message = "The declared file manager is not installed in the Home Manager profile.";
             }
             {
-              assertion = builtins.all (helper: builtins.elem helper hm.home.packages) nav.previewHelpers;
+              assertion = builtins.all installed nav.previewHelpers;
               message = "A declared preview helper is missing from the Home Manager profile; its content type would lose previews.";
             }
             {
@@ -241,7 +245,6 @@ in
       checks.desktop-file-navigation-places = mkHmRuntimeCheck system {
         name = "desktop-file-navigation-places";
         inherit evaluated;
-        includeHomePath = false;
         nativeBuildInputs = [
           pkgs.python3
           pkgs.glib.bin
@@ -261,7 +264,6 @@ in
       checks.desktop-file-navigation-mime = mkHmRuntimeCheck system {
         name = "desktop-file-navigation-mime";
         inherit evaluated;
-        includeHomePath = false;
         nativeBuildInputs = [
           pkgs.glib.bin
           pkgs.shared-mime-info

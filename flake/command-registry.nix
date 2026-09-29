@@ -65,16 +65,17 @@ let
     fi
   '';
   # The evaluator never returns memory, so one process evaluating a whole tier
-  # holds every NixOS fixture the tier instantiates at once. A single worker
-  # evaluates the checks one at a time and is replaced once it passes
-  # checkEvalWorkerMiB, which bounds the peak by that threshold plus the
-  # largest single check.
-  checkEvalWorkerMiB = 1024;
+  # holds every NixOS fixture the tier instantiates at once. Each worker
+  # evaluates one check at a time and is replaced once it passes
+  # checkEvalWorkerMiB, so a worker's peak is that threshold plus the largest
+  # single check (about 1 GiB), and the tier's is that times the workers.
+  checkEvalWorkers = 4;
+  checkEvalWorkerMiB = 512;
   loadCheckTargets = outputName: ''
     if ! _check_jobs=$(${pkgs.nix-eval-jobs}/bin/nix-eval-jobs \
         --flake "$_flake_dir#${outputName}.${system}" \
         --option accept-flake-config true \
-        --workers 1 --max-memory-size ${toString checkEvalWorkerMiB}); then
+        --workers ${toString checkEvalWorkers} --max-memory-size ${toString checkEvalWorkerMiB}); then
       echo "sinnix: failed to evaluate ${outputName}" >&2
       exit 1
     fi

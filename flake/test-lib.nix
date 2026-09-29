@@ -512,7 +512,11 @@ let
       fixtureAssets ? [ ],
       rewriteFiles ? [ ],
       sessionVariables ? [ ],
-      includeHomePath ? true,
+      # Names (lib.getName) of Home Manager packages the script runs from
+      # PATH. Each must be in the fixture's home.packages. Only these are
+      # instantiated: the whole home.path costs about 1 GiB of evaluation per
+      # check, and the host build already builds it.
+      homePackages ? [ ],
       useHmZshrc ? false,
       zshrcPreamble ? "",
       zshrcAppend ? "",
@@ -525,13 +529,18 @@ let
       userName = config.sinnix.user.name;
       hm = config.home-manager.users.${userName};
       homeDir = hm.home.homeDirectory;
-      homePathPrelude =
-        if !includeHomePath then
-          ""
+      selectHomePackage =
+        packageName:
+        let
+          matches = builtins.filter (package: lib.getName package == packageName) hm.home.packages;
+        in
+        if matches == [ ] then
+          throw "${name}: home.packages has no package named ${packageName}"
         else
-          ''
-            export PATH="${hm.home.path}/bin:$PATH"
-          '';
+          builtins.head matches;
+      homePathPrelude = lib.optionalString (homePackages != [ ]) ''
+        export PATH="${lib.makeBinPath (map selectHomePackage homePackages)}:$PATH"
+      '';
       renderHomeFiles = lib.concatMapStrings (
         path:
         renderManagedEntry {

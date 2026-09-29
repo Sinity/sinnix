@@ -241,15 +241,23 @@ in
       factoryCollisionRejected = rejected factoryCollisionSpec;
     in
     {
-      checks.config-boundaries = pkgs.runCommand "sinnix-config-boundaries" { } ''
+      # One check per boundary, each an accepted fixture beside the fixtures
+      # it must refuse, so no single check holds all six evaluations.
+      checks.config-boundaries-dotfiles = pkgs.runCommand "sinnix-config-boundaries-dotfiles" { } ''
         test ${if dotfiles.config ? system then "1" else "0"} = 1
-        test ${if secrets.config ? age then "1" else "0"} = 1
         test ${if duplicateRejected then "1" else "0"} = 1
         test ${if unknownRendererRejected then "1" else "0"} = 1
-        test ${if factory.config ? system then "1" else "0"} = 1
-        test ${if factoryCollisionRejected then "1" else "0"} = 1
+        touch "$out"
+      '';
+      checks.config-boundaries-secrets = pkgs.runCommand "sinnix-config-boundaries-secrets" { } ''
+        test ${if secrets.config ? age then "1" else "0"} = 1
         test ${if emptySecretDeclarations == { } then "1" else "0"} = 1
         test ${if loadedSecretDeclarations.fixture.file == syntheticCiphertext then "1" else "0"} = 1
+        touch "$out"
+      '';
+      checks.config-boundaries-factory = pkgs.runCommand "sinnix-config-boundaries-factory" { } ''
+        test ${if factory.config ? system then "1" else "0"} = 1
+        test ${if factoryCollisionRejected then "1" else "0"} = 1
         touch "$out"
       '';
     };

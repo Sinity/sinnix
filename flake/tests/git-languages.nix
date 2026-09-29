@@ -80,6 +80,12 @@ in
       devLanguagesRuntime = mkHmRuntimeCheck system {
         name = "dev-languages-runtime-check";
         evaluated = evalTestSpec system devLanguagesRuntimeSpec;
+        homePackages = [
+          "python3"
+          "nodejs"
+          "sqlite"
+          "gh"
+        ];
         nativeBuildInputs = [
           pkgs.coreutils
           pkgs.gnugrep

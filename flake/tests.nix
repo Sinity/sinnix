@@ -54,6 +54,7 @@ in
     ./tests/activity.nix
     ./tests/mi-unlock.nix
     ./tests/fstrim.nix
+    ./tests/host-config.nix
     ./tests/hyprland-rules.nix
     ./tests/hyprland-lua-tools.nix
     ./tests/machine-telemetry-cgroups.nix

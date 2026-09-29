@@ -56,6 +56,10 @@ in
       cliPolylogueRuntime = mkHmRuntimeCheck system {
         name = "cli-polylogue-runtime-check";
         evaluated = evalTestSpec system cliPolylogueRuntimeSpec;
+        homePackages = [
+          "polylogue-cli"
+          "polylogue-python"
+        ];
         nativeBuildInputs = [
           pkgs.coreutils
           pkgs.gnugrep
@@ -99,6 +103,8 @@ in
       cliTaskTrackingRuntime = mkHmRuntimeCheck system {
         name = "cli-task-tracking-runtime-check";
         evaluated = evalTestSpec system cliTaskTrackingRuntimeSpec;
+        # The rendered zshrc initialises atuin.
+        homePackages = [ "atuin" ];
         nativeBuildInputs = [
           pkgs.coreutils
           pkgs.gnugrep
