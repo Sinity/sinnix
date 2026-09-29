@@ -46,7 +46,7 @@ from typing import Any, Mapping, Sequence
 from sinnix_lib.atomic import atomic_publish
 from sinnix_lib.ledger import append_jsonl
 
-from . import artifacts, pueue, worktrunk
+from . import artifacts, gitcmd, pueue, worktrunk
 from .launch_input import QueueInputError, read_input
 from .limits import SYSTEMCTL_TIMEOUT_SECONDS
 from .pueue import PueueError
@@ -254,6 +254,26 @@ def git_observation(cwd: Path, *, observed_at: str | None = None) -> dict[str, A
         "status": "observed" if not errors else "unavailable",
         "reason": None if not errors else "git_" + "_".join(errors) + "_unavailable",
     }
+
+
+def stranded_index_locks(cwd: Path, *, since_ns: int) -> list[dict[str, str]]:
+    """Unheld `index.lock` files that appeared in this checkout while the attempt ran.
+
+    A Git write killed with the unit strands its lock. The wrapper cannot tell
+    whose Git that was in a checkout other processes also write, so it names
+    the lock and never removes it. Both the attempt's own worktree and the main
+    checkout that shares its `.git` are checked.
+    """
+    directories = gitcmd.git_directories(cwd)
+    if directories is None:
+        return []
+    locks = {directories.git_dir / "index.lock": directories.main}
+    locks.setdefault(gitcmd.common_git_dir(directories) / "index.lock", True)
+    return [
+        {"lock": str(lock), "checkout": "main" if main else "worktree"}
+        for lock, main in locks.items()
+        if gitcmd.stranded_lock(lock, since_ns=since_ns)
+    ]
 
 
 def execution_receipt(
@@ -713,6 +733,7 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
         return refused()
     # This is execution evidence, not the cache key captured by `job start`.
     # It is therefore collected for every operation, including cache=none.
+    started_ns = time.time_ns()
     start_git = git_observation(Path(launch["working_directory"]))
     scratch = launch.get("scratch")
     scratch_dir = Path(scratch["path"]) if scratch else None
@@ -838,6 +859,16 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
         fcntl.flock(lock, fcntl.LOCK_UN)
 
     end_git = git_observation(Path(launch["working_directory"]))
+    stranded = stranded_index_locks(
+        Path(launch["working_directory"]), since_ns=started_ns
+    )
+    if stranded:
+        with open(log_path, "ab") as log:
+            for entry in stranded:
+                log.write(
+                    f"stranded index lock: {entry['lock']} appeared during this "
+                    "attempt and no process holds it\n".encode()
+                )
 
     record: dict[str, Any] = {
         "attempt": launch["attempt"],
@@ -847,6 +878,7 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
         "pool": pool,
         "systemd_result": properties.get("Result") if properties is not None else None,
         "execution_receipt": execution_receipt(start_git, end_git),
+        "stranded_index_locks": stranded,
         "execution_evidence": {
             "schema_version": 1,
             "selector": list(launch.get("argv") or ()),

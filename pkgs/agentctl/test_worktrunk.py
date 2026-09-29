@@ -67,13 +67,15 @@ def _git_absolute_path(root: Path, *arguments: str) -> Path:
 def _spy(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
     """Every argv this process runs from here on."""
     calls: list[list[str]] = []
-    original = subprocess.run
+    original = subprocess.Popen
 
-    def record(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-        calls.append(list(argv))
-        return original(argv, **kwargs)
+    class Recording(original):  # type: ignore[misc, valid-type]
+        def __init__(self, argv: list[str], *args: object, **kwargs: object) -> None:
+            calls.append(list(argv))
+            super().__init__(argv, *args, **kwargs)
 
-    monkeypatch.setattr(subprocess, "run", record)
+    # `subprocess.run` and `gitcmd` both start their processes through Popen.
+    monkeypatch.setattr(subprocess, "Popen", Recording)
     return calls
 
 

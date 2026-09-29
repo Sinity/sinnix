@@ -166,6 +166,10 @@ class FakeGit:
     # Worktree path -> the branch checked out there.
     checkouts: dict[str, str] = field(default_factory=dict)
     greps: list[tuple[str, ...]] = field(default_factory=list)
+    # Every call as (path, arguments, owned, main_checkout).
+    calls: list[tuple[str, tuple[str, ...], bool, bool]] = field(default_factory=list)
+    # Verb -> the stranded lock its next call reports.
+    strand_on: dict[str, Path] = field(default_factory=dict)
 
     def is_ancestor(self, ancestor: str, sha: str) -> bool:
         frontier = [sha]
@@ -223,9 +227,15 @@ class FakeGit:
         timeout: float = 60,
         error: type[Exception] = BatchError,
         ok_statuses: tuple[int, ...] = (0,),
+        owned: bool = False,
+        main_checkout: bool = False,
     ) -> str:
         verb = arguments[0]
         key = str(path)
+        self.calls.append((key, arguments, owned, main_checkout))
+        if verb in self.strand_on:
+            stranded = gitcmd.StrandedIndexLock(self.strand_on.pop(verb), removed=owned)
+            raise error(f"git {verb}: killed; {stranded}") from stranded
         if verb == "fetch":
             return ""
         if verb == "rev-parse":
@@ -1608,6 +1618,66 @@ def test_a_conflict_runs_one_integration_agent_and_requires_every_branch_merged(
         key: run["workers"][0][key] for key in ("backend", "model", "effort")
     }
     assert landed["acceptance"]["candidate_sha"] == SHA
+
+
+def test_a_landing_writes_the_index_only_in_its_own_integration_worktree(
+    harness: Harness, tmp_path: Path
+) -> None:
+    """Breaks if any landing step runs an index-writing git in the main checkout,
+    writes the integration worktree without owning it (a lock stranded there
+    would then never be released), or leaves the lock a killed earlier landing
+    stranded there."""
+    run = prepared_run(harness, "fx-lead", "fx-solo")
+    integration = f"batch/{run['run_id']}/integration"
+    existing = tmp_path / "integration"
+    existing.mkdir()
+    private = tmp_path / "gitdir"
+    private.mkdir()
+    (existing / ".git").write_text(f"gitdir: {private}\n")
+    stale = private / "index.lock"
+    stale.write_text("")
+    os.utime(stale, ns=(0, 0))
+    harness.wt.trees[integration] = Worktree(branch=integration, path=existing)
+    harness.wt.leave_paths = {integration}
+    harness.git.conflict_on = {f"batch/{run['run_id']}/fx-solo"}
+
+    landed = harness.land(run["run_id"])
+
+    assert landed["acceptance"]["candidate_sha"] == SHA
+    writes = [
+        (path, arguments, owned, main_checkout)
+        for path, arguments, owned, main_checkout in harness.git.calls
+        if arguments[0] in gitcmd.INDEX_WRITING_VERBS
+    ]
+    # Anti-vacuity: the abort, the reset and both merges went through here.
+    assert [arguments[:2] for _, arguments, _, _ in writes] == [
+        ("merge", "--abort"),
+        ("reset", "--hard"),
+        ("merge", "--no-ff"),
+        ("merge", "--no-ff"),
+    ]
+    assert {path for path, _, _, _ in writes} == {str(existing)}
+    assert all(owned and not main for _, _, owned, main in writes)
+    assert landed["landing"]["index_lock_cleared"]["lock"] == str(stale)
+    assert not stale.exists()
+
+
+def test_a_merge_that_strands_the_integration_lock_is_a_typed_failure(
+    harness: Harness,
+) -> None:
+    """Breaks if a killed merge is mistaken for a conflict and handed to an
+    integration agent, or if the failure loses which lock it left."""
+    run = prepared_run(harness, "fx-solo")
+    lock = Path("/fixture/.git/worktrees/integration/index.lock")
+    harness.git.strand_on = {"merge": lock}
+
+    with pytest.raises(BatchError, match="stranded"):
+        harness.land(run["run_id"])
+
+    failure = manifest.load(harness.config, run["run_id"]).landing["failure"]
+    assert failure["code"] == "git_index_lock_stranded"
+    assert failure["lock"] == str(lock) and failure["removed"] is True
+    assert not any(":integrate:" in label for label in labels(harness.pueue))
 
 
 def test_the_landing_stays_queued_until_the_workers_finish_and_land_refuses_meanwhile(

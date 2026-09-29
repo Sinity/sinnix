@@ -556,6 +556,37 @@ def test_a_failing_command_reports_its_own_exit_status(tmp_path: Path) -> None:
     assert outcome["execution_receipt"]["binding"] == "unavailable"
 
 
+def test_a_lock_stranded_during_the_attempt_is_named_and_left_alone(
+    tmp_path: Path,
+) -> None:
+    """Breaks if a lock a killed job left in its checkout goes unreported, is
+    removed by the wrapper, or a lock that was already there is blamed on it."""
+    repo = tmp_path / "repo"
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    lock = repo / ".git" / "index.lock"
+    launch = write_launch(
+        tmp_path,
+        argv=["sh", "-c", f": > {lock}"],
+        working_directory=str(repo),
+    )
+
+    assert main([str(launch)]) == 0
+
+    assert outcome_of(tmp_path)["stranded_index_locks"] == [
+        {"lock": str(lock), "checkout": "main"}
+    ]
+    assert f"stranded index lock: {lock}" in log_of(tmp_path)
+    assert lock.exists()
+
+    # Anti-vacuity for attribution: the same lock, older than the next attempt.
+    os.utime(lock, ns=(0, 0))
+    again = write_launch(
+        tmp_path, name="again.json", argv=["true"], working_directory=str(repo)
+    )
+    assert main([str(again)]) == 0
+    assert outcome_of(tmp_path)["stranded_index_locks"] == []
+
+
 def test_a_failing_service_reports_the_main_process_status(
     tmp_path: Path, fake_systemd: FakeSystemd, fake_pueue: FakePueue
 ) -> None:

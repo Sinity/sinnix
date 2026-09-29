@@ -246,6 +246,27 @@ and runs with `GIT_OPTIONAL_LOCKS=0`. Agentctl's other Git reads and every
 queued project or agent command receive the same setting, so a timeout cannot
 leave a read-created index lock in a shared checkout.
 
+Agentctl's own Git calls (`gitcmd.git`) write the index only in a worktree
+they own. A verb that takes `index.lock` (`add`, `checkout`, `commit`,
+`merge`, `reset`, `stash`, `switch`, `update-index` and the rest of
+`INDEX_WRITING_VERBS`) is refused in a main checkout unless the call declares
+`main_checkout=True`; the one such call is the post-publish fast-forward of a
+clean main checkout under `publish = "master"`. Otherwise a landing runs only
+reads and ref updates in the main checkout, such as `fetch`, `rev-parse`,
+`merge-base`, `ls-remote`, `worktree list` and `update-ref`. A timed-out call
+gets SIGTERM, which Git answers by removing its lock, and SIGKILL only after
+ten seconds. When an index-writing call fails anyway, an `index.lock` that
+appeared while it ran and that no process holds is stranded: the error names it and is caused by
+`StrandedIndexLock`. The lock is removed only from a linked worktree the
+caller owns, such as a landing's integration worktree, and never from a main
+checkout, which stays blocked until someone removes the lock by hand.
+
+The job wrapper checks the same after every attempt. An unheld `index.lock`
+in the attempt's worktree or in the main checkout that shares its `.git`,
+created during the attempt, is written to the job log and to the outcome's
+`stranded_index_locks`. The wrapper cannot tell whose Git left the lock in a
+checkout that others also write, so it only reports the lock.
+
 ## Batches
 
 A batch is several workers on one base commit, landed as one candidate.
@@ -454,7 +475,11 @@ still running, and creates the landing groups the daemon lacks.
    starting with `<<<<<<<`, `=======` or `>>>>>>>`; a hit is
    `integration_conflict_markers`. An existing dirty integration worktree
    is preserved with `integration_dirty`; an unexpected committed HEAD is
-   preserved with `integration_incomplete`. With `--keep-integration` the
+   preserved with `integration_incomplete`. An unheld `index.lock` there
+   older than five seconds, left by a landing killed mid-merge, is removed
+   and recorded as `landing.index_lock_cleared`. A merge or reset that
+   strands the lock fails with `git_index_lock_stranded`, which names the
+   lock. It is never treated as a conflict. With `--keep-integration` the
    integration worktree's current HEAD is the candidate instead: it must be
    clean, contain every worker branch and descend from the base, and a
    moved default branch is `publish_rejected` rather than refreshed.

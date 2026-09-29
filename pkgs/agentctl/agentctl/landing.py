@@ -76,8 +76,21 @@ CONFLICT_MARKER = r"^(<{7,}|>{7,}|\|{7,})([[:space:]].*)?$" r"|^={7,}[[:space:]]
 MAX_REFRESHES = 1
 
 
-def _git(path: Path, *arguments: str, timeout: float = CALL_TIMEOUT_SECONDS) -> str:
-    return gitcmd.git(path, *arguments, timeout=timeout, error=BatchError)
+def _git(
+    path: Path,
+    *arguments: str,
+    timeout: float = CALL_TIMEOUT_SECONDS,
+    owned: bool = False,
+    main_checkout: bool = False,
+) -> str:
+    return gitcmd.git(
+        path,
+        *arguments,
+        timeout=timeout,
+        error=BatchError,
+        owned=owned,
+        main_checkout=main_checkout,
+    )
 
 
 def _refuse_unless_live(run: Run) -> None:
@@ -414,11 +427,13 @@ def _integrate(
                 "integration_incomplete",
                 f"{path} has a different HEAD; inspect it and use --keep-integration to preserve a manual fix",
             )
+        _clear_stranded_lock(config, run, path)
         try:
-            _git(path, "merge", "--abort")
-        except BatchError:
-            pass
-        _git(path, "reset", "--hard", base)
+            _git(path, "merge", "--abort", owned=True)
+        except BatchError as error:
+            if gitcmd.stranded_index_lock(error) is not None:
+                raise
+        _git(path, "reset", "--hard", base, owned=True)
     else:
         created = worktrunk.worktrunk_create(
             project.root, branch, path=worktree_path(project, branch), base=base
@@ -439,9 +454,11 @@ def _integrate(
         zip(branches, targets, strict=True)
     ):
         try:
-            _git(path, "merge", "--no-ff", "--no-edit", target)
+            _git(path, "merge", "--no-ff", "--no-edit", target, owned=True)
             continue
-        except BatchError:
+        except BatchError as error:
+            if gitcmd.stranded_index_lock(error) is not None:
+                raise
             conflicts = _git(path, "diff", "--name-only", "--diff-filter=U")
         prompt = prompts.landing_template("integrate").format(
             run_id=run.run_id,
@@ -490,6 +507,17 @@ def _integrate(
     candidate = _git(path, "rev-parse", "HEAD")
     _refuse_conflict_markers(path, base, candidate)
     return candidate
+
+
+def _clear_stranded_lock(config: Config, run: Run, path: Path) -> None:
+    """Release the run's own integration worktree from a lock a killed landing left."""
+    lock = gitcmd.clear_stranded_lock(path)
+    if lock is not None:
+        land_update(
+            config,
+            run.run_id,
+            index_lock_cleared={"lock": str(lock), "at": now()},
+        )
 
 
 def _dirty_paths(path: Path) -> list[str]:
@@ -1203,7 +1231,9 @@ def _advance_main_checkout(project: ProjectAdapter, candidate: str) -> str:
             return "already current"
         if _git(root, "merge-base", head, candidate) != head:
             return "skipped: main checkout cannot fast-forward to published commit"
-        _git(root, "merge", "--ff-only", candidate)
+        # The one index write agentctl makes in a main checkout: live dots
+        # links read the published files from it.
+        _git(root, "merge", "--ff-only", candidate, main_checkout=True)
     except BatchError as error:
         return f"failed: {error}"
     return f"fast-forwarded to {candidate}"
@@ -1668,7 +1698,16 @@ def _land_locked(
         JobError,
         PromptError,
     ) as error:
-        land_update(config, run_id, failure={"code": "substrate", "detail": str(error)})
+        stranded = gitcmd.stranded_index_lock(error)
+        failure: dict[str, Any] = {"code": "substrate", "detail": str(error)}
+        if stranded is not None:
+            failure = {
+                "code": "git_index_lock_stranded",
+                "detail": str(error),
+                "lock": str(stranded.lock),
+                "removed": stranded.removed,
+            }
+        land_update(config, run_id, failure=failure)
         raise
     return run.to_dict()
 
