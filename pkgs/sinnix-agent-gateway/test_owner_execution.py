@@ -288,3 +288,53 @@ def test_owner_execution_wayland_profile_requires_complete_session_environment()
     assert successful.available is True
     assert successful.stdout == b"wayland-1\n"
     assert unavailable.failure_class == "environment_unavailable:XDG_RUNTIME_DIR"
+
+
+def test_owner_execution_timeout_drain_ends_despite_a_session_escapee() -> None:
+    """Fails if a setsid descendant holding stdout extends the owner deadline."""
+    script = (
+        "import os, time\n"
+        "if os.fork() == 0:\n"
+        "    os.setsid()\n"
+        "    time.sleep(1.5)\n"
+        "    os._exit(0)\n"
+        "time.sleep(30)\n"
+    )
+    started = time.monotonic()
+    result = OwnerExecution().run(
+        [sys.executable, "-c", script],
+        ExecutionProfile(route=OwnerRoute("fixture"), timeout_seconds=0.35),
+    )
+
+    assert result.failure_class == "command_timeout"
+    assert result.output_incomplete is True
+    assert time.monotonic() - started < 1.0
+
+
+def test_owner_execution_stream_interrupt_leaves_no_child(tmp_path) -> None:
+    """Fails if the owner child outlives a callback KeyboardInterrupt."""
+    marker = tmp_path / "marker"
+    script = (
+        "import time\n"
+        "print('READY', flush=True)\n"
+        "time.sleep(0.5)\n"
+        f"open({str(marker)!r}, 'w').write('late')\n"
+    )
+
+    def interrupt(chunk: bytes) -> None:
+        if b"READY" in chunk:
+            raise KeyboardInterrupt
+
+    try:
+        OwnerExecution().run(
+            [sys.executable, "-c", script],
+            ExecutionProfile(route=OwnerRoute("fixture"), timeout_seconds=10),
+            stdout_chunk_callback=interrupt,
+        )
+    except KeyboardInterrupt:
+        pass
+    else:
+        raise AssertionError("the callback's KeyboardInterrupt must propagate")
+
+    time.sleep(1.0)
+    assert not marker.exists()

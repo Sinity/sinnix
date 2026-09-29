@@ -215,3 +215,70 @@ def test_scalar_parsers_return_none_for_unusable_values():
     assert float_or_none("1.5") == 1.5
     assert float_or_none("") is None
     assert float_or_none(None) is None
+
+
+# A descendant that leaves the process group (setsid) survives the group kill
+# and keeps the output pipe open for 1.5 s.
+_SESSION_ESCAPEE = (
+    "import os, time\n"
+    "if os.fork() == 0:\n"
+    "    os.setsid()\n"
+    "    time.sleep(1.5)\n"
+    "    os._exit(0)\n"
+    "time.sleep(30)\n"
+)
+
+
+def test_run_bounded_drain_after_timeout_is_finite_and_reported():
+    """Fails if a pipe held outside the killed group extends the deadline.
+
+    Before the final drain bound, the loop kept selecting in 0.1 s steps
+    until the escaped descendant exited, so a 0.35 s timeout took ~1.5 s.
+    """
+    started = time.monotonic()
+    result = run_bounded([sys.executable, "-c", _SESSION_ESCAPEE], timeout=0.35)
+    elapsed = time.monotonic() - started
+
+    assert result.timed_out is True
+    assert result.output_incomplete is True
+    assert elapsed < 0.35 + process_module.DRAIN_GRACE_SECONDS + 0.4
+
+
+def test_run_bounded_group_kill_reports_complete_output_when_pipes_close():
+    """The incomplete flag is not set when the killed group held every pipe."""
+    result = run_bounded(SLEEP, timeout=0.1)
+
+    assert result.timed_out is True
+    assert result.output_incomplete is False
+
+
+def test_run_bounded_callback_interrupt_kills_and_reaps_the_group(tmp_path):
+    """Fails if a KeyboardInterrupt from the callback leaves the child running.
+
+    The child prints READY, then writes a marker after 0.5 s. Without the
+    BaseException cleanup the interrupt escaped through ``finally`` and the
+    child later wrote the marker.
+    """
+    marker = tmp_path / "marker"
+    script = (
+        "import sys, time\n"
+        "print('READY', flush=True)\n"
+        "time.sleep(0.5)\n"
+        f"open({str(marker)!r}, 'w').write('late')\n"
+    )
+
+    def interrupt(chunk: bytes) -> None:
+        if b"READY" in chunk:
+            raise KeyboardInterrupt
+
+    try:
+        run_bounded(
+            [sys.executable, "-c", script], timeout=10, on_stdout_chunk=interrupt
+        )
+    except KeyboardInterrupt:
+        pass
+    else:
+        raise AssertionError("the callback's KeyboardInterrupt must propagate")
+
+    time.sleep(1.0)
+    assert not marker.exists()

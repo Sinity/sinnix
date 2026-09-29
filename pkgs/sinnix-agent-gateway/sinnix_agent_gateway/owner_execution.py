@@ -68,6 +68,9 @@ class ExecutionResult:
     output_exceeded: bool = False
     stopped_early: bool = False
     failure_class: str | None = None
+    # A process outside the killed group still held a pipe when the drain
+    # ended; output it wrote afterwards is missing and it may still run.
+    output_incomplete: bool = False
 
     @property
     def available(self) -> bool:
@@ -288,6 +291,7 @@ class OwnerExecution:
             output_exceeded=result.limited,
             stopped_early=result.stopped_early,
             failure_class=failure,
+            output_incomplete=result.output_incomplete,
         )
 
     def run_jsonl(

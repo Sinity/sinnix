@@ -31,6 +31,12 @@ from pathlib import Path
 # No process ever reported this: the command produced no exit status at all.
 NO_EXIT_STATUS = -1
 
+# After the group is killed, pipes get this long to reach EOF. A descendant
+# that left the group (setsid) survives the kill and may hold a pipe open for
+# as long as it likes; the drain ends here and the output is reported
+# incomplete instead of extending the caller's deadline.
+DRAIN_GRACE_SECONDS = 0.25
+
 
 def _decoded(value: object) -> str:
     if isinstance(value, bytes):
@@ -67,6 +73,9 @@ class BoundedResult:
     non-zero ``returncode`` is an ordinary process exit and therefore does
     not populate ``error``.  ``timed_out`` and ``limited`` identify the two
     supervisory failures that terminate a running process.
+    ``output_incomplete`` means a pipe was still open when the post-kill
+    drain ended: a process outside the killed group held it, may still run,
+    and whatever it wrote after the drain is not here.
     """
 
     argv: tuple[str, ...]
@@ -80,6 +89,7 @@ class BoundedResult:
     stopped_early: bool = False
     error_type: str | None = None
     exit_status: int | None = None
+    output_incomplete: bool = False
 
     @property
     def ok(self) -> bool:
@@ -122,7 +132,14 @@ def run_bounded(
     ``stdin`` is written as bytes and then closed.  ``env`` follows
     :class:`subprocess.Popen` semantics: ``None`` inherits the current
     environment, while a mapping replaces it.  ``timeout`` is a deadline for
-    the complete operation, including draining pipes after the leader exits.
+    the complete operation, including draining pipes after the leader exits;
+    once it passes, the group is killed and draining ends within
+    ``DRAIN_GRACE_SECONDS``.
+
+    An exception from ``on_stdout_chunk`` that is not an ``Exception``
+    (KeyboardInterrupt, a cancellation) propagates, but only after the group
+    is killed and the leader reaped: nothing this call started keeps running
+    in the group once it returns or raises.
     """
     args = tuple(argv)
     if timeout <= 0:
@@ -158,6 +175,8 @@ def run_bounded(
     total_output_size = 0
     started = time.monotonic()
     killed = False
+    killed_at = 0.0
+    output_incomplete = False
     timed_out = False
     limited = False
     failure: str | None = None
@@ -170,15 +189,20 @@ def run_bounded(
         except OSError:
             pass
 
+    def stop_group() -> None:
+        nonlocal killed, killed_at
+        killed = True
+        killed_at = time.monotonic()
+        _kill_group(process)
+
     def kill(reason: str, *, is_timeout: bool = False, is_limit: bool = False) -> None:
-        nonlocal killed, failure, timed_out, limited
+        nonlocal failure, timed_out, limited
         if killed:
             return
-        killed = True
         failure = reason
         timed_out = is_timeout
         limited = is_limit
-        _kill_group(process)
+        stop_group()
 
     try:
         assert process.stdout is not None
@@ -202,28 +226,30 @@ def run_bounded(
         # deadline in force until it exits, rather than falling through to an
         # unbounded wait below.
         while selector.get_map() or process.poll() is None:
-            remaining = timeout - (time.monotonic() - started)
-            if remaining <= 0:
+            now = time.monotonic()
+            remaining = timeout - (now - started)
+            if remaining <= 0 and not killed:
                 kill(f"timed out after {timeout:g}s", is_timeout=True)
-                # The group is dead; continue draining until EOF without
-                # allowing the post-kill cleanup to become unbounded.
-                remaining = 0.1
+            if killed:
+                # One final bound for the drain, whatever still holds a pipe.
+                remaining = killed_at + DRAIN_GRACE_SECONDS - now
+                if remaining <= 0:
+                    for key in list(selector.get_map().values()):
+                        if key.data != "stdin":
+                            output_incomplete = True
+                        selector.unregister(key.fileobj)
+                        close_stream(key.fileobj)
+                    break
 
             if not selector.get_map():
                 if process.poll() is None:
                     time.sleep(min(remaining, 0.01))
                 continue
 
+            # Before the deadline, a leader that exited while a descendant
+            # still holds a pipe is drained under the same deadline.
             events = selector.select(min(remaining, 0.1))
             if not events:
-                if process.poll() is not None and not killed:
-                    # A descendant may still hold a pipe; the deadline still
-                    # applies while we drain it.
-                    continue
-                if killed:
-                    # select() can report no event briefly after SIGKILL;
-                    # retry while descriptors close, but never indefinitely.
-                    continue
                 continue
 
             for key, _ in events:
@@ -284,8 +310,7 @@ def run_bounded(
                                 )
                                 if on_stdout_chunk(callback_chunk) is False:
                                     stopped_early = True
-                                    _kill_group(process)
-                                    killed = True
+                                    stop_group()
                             except Exception as exc:
                                 kill(f"stdout callback failed: {exc}")
                     else:
@@ -318,6 +343,15 @@ def run_bounded(
                 close_stream(process.stdin)
 
         returncode = process.wait()
+    except BaseException:
+        # KeyboardInterrupt or cancellation from a callback or a signal: the
+        # caller stops waiting, so nothing it started may keep running.
+        _kill_group(process)
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+        raise
     finally:
         selector.close()
         close_stream(process.stdin)
@@ -335,6 +369,7 @@ def run_bounded(
         combined_output=b"".join(combined_chunks),
         stopped_early=stopped_early,
         exit_status=returncode,
+        output_incomplete=output_incomplete,
     )
 
 
