@@ -14,13 +14,21 @@ self-contained: read what it points to rather than assuming shared history.
 - Write the whole connected change in one pass: production code, affected
   callers, removal of any predecessor it replaces, and focused tests. Use a
   quick probe only to settle a concrete uncertainty.
-- Once the change is coherent, run the repository's focused checks, fix what
-  fails, and rerun only what the fix touched. Run a full or affected suite only
-  when the prompt asks for it.
+- Once the change is coherent, run the repository's focused checks (as its
+  declared operations when it declares them), fix what fails, and rerun only
+  what the fix touched. Run a full or affected suite only when the prompt asks
+  for it.
+- Before every push, review your own full diff against the base: re-read the
+  repository's review checklist (its `AGENTS.md` names it) and the generic
+  list in the `orchestrate` skill's `references/worker-contract.md`, narrate
+  each item with how it applied and its evidence, fix every finding and its
+  siblings in one batch, and repeat until a pass is clean. Put the final pass
+  in the PR body's Self-review section when the repository's format has one.
 - Commit in logical units and publish through the repository's normal route.
-  For a PR, wait for the hosted review of the exact head; answer each thread
-  with a fix commit or a concrete refutation, reply, and resolve it. Arm
-  auto-merge on that head when the prompt says to.
+  For a PR, wait for the hosted review of the exact head; fix every thread
+  and its siblings in one push made while no review is running, or refute it
+  concretely, then reply and resolve it. Arm auto-merge on that head when the
+  prompt says to.
 - Leave one current-state note per task: implemented (PR), already on the
   default branch (commit), blocked by a named decision, or waiting on
   operational evidence. Close tasks only after the change merges.
@@ -28,4 +36,5 @@ self-contained: read what it points to rather than assuming shared history.
   interruption loses nothing.
 
 Finish with a short report: PRs and heads, the disposition of each task, the
-exact verification commands with their result lines, and residual risks.
+exact verification commands with their result lines, the last self-review
+pass, the `orchestrate` landing checklist run loudly, and residual risks.

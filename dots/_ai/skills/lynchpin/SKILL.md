@@ -37,7 +37,8 @@ cross-source promotion and analysis over stable products. Never scrape
 Polylogue's disposable `.cache/verify` receipts; consume a declared export or
 mark that source unavailable.
 
-Short checks run in the Nix devshell (`just lint`, `just typecheck`, `pytest`,
-`just check`). Heavy standard work uses AgentCTL. Commit verified work directly
+Lint, type checks, and tests run as Lynchpin's declared operations
+(`agentctl job start lynchpin lint` or `check`), never inside an agent's own
+process; `agentctl project operations lynchpin` lists the rest. Commit verified work directly
 to `master` unless an active workflow says to hold, and keep generated private
 products, databases, receipts, and captures out of Git.

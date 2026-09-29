@@ -50,13 +50,24 @@ commits and never belong on a feature branch.
 
 ## Closing
 
-Close when the acceptance criteria are met, with the evidence: the exact
-commands and their result lines, and the PR and merge SHA where they apply.
-Address each criterion as satisfied, deferred to a named successor, or
-misframed (with the reason). Split unfinished scope into a successor rather
-than stretching the closure. A close refused by an open blocker means close
-the blocker first, or `--force` deliberately with the reason stated. Batch
-housekeeping from one wave into a few commands.
+Close when the acceptance criteria are met. Before closing, run this
+checklist loudly (global rules, Reporting) and put it in the closing note:
+
+1. Each criterion is satisfied with evidence (the exact command and its
+   result line, or the PR and merge SHA), deferred to a named successor, or
+   misframed with the reason.
+2. The change is on the default branch, not only on a feature or stacked
+   branch: `git merge-base --is-ancestor <merge-sha> origin/<default>`.
+3. A claim that the code already does it cites `path:line` at the current
+   head.
+4. An operational criterion without its live evidence stays open.
+5. Review findings on the change were fixed in it, not filed as follow-ups;
+   a successor holds only separate scope.
+
+Split unfinished scope into a successor rather than stretching the closure.
+A close refused by an open blocker means close the blocker first, or
+`--force` deliberately with the reason stated. Batch housekeeping from one
+wave into a few commands.
 
 ## Writing a task
 

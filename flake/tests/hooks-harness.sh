@@ -85,6 +85,17 @@ printf '%s' "$bash_deny" | jq -e '.hookSpecificOutput.permissionDecision == "den
 test -z "$(run_hook "$hooks_dir/pretooluse-bash.sh" '{"tool_input":{"command":"printf \"safe\""}}')"
 test -z "$(run_hook "$hooks_dir/pretooluse-bash.sh" 'not-json' 2>/dev/null)"
 
+# Hook bypass and checkout-wide stashes are denied; named-path stashes, stash
+# inspection, and a heredoc message naming the flag stay allowed.
+for denied in 'git commit --no-verify -m x' 'git -C /tmp/r push --no-verify origin b' 'cd /tmp && git stash' 'git stash -u' 'git stash push -m wip' 'git stash save wip'; do
+  payload=$(jq -cn --arg command "$denied" '{tool_input: {command: $command}}')
+  run_hook "$hooks_dir/pretooluse-bash.sh" "$payload" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+done
+for allowed in 'git stash push -m wip -- a.txt' 'git stash list' 'git stash pop' 'git push origin b' $'git commit -F - <<\'EOF\'\nnever pass --no-verify\nEOF'; do
+  payload=$(jq -cn --arg command "$allowed" '{tool_input: {command: $command}}')
+  test -z "$(run_hook "$hooks_dir/pretooluse-bash.sh" "$payload")"
+done
+
 # A shell glob over /nix/store makes the shell stat ~219k entries before the
 # command runs; it has exhausted host memory twice. Deny the unquoted glob,
 # keep concrete store paths and lazily-expanded quoted patterns working.

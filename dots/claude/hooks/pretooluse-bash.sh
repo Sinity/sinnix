@@ -145,6 +145,63 @@ CMD_NO_HEREDOC=$(printf '%s' "$CMD" | awk '
     }
     print line
   }')
+# Block hook bypass and checkout-wide stashes.
+#
+# `--no-verify` skips the repository's commit and push gates; the answer to a
+# failing hook is fixing what it reports. A `git stash` without a pathspec
+# sweeps every uncommitted change in the checkout, including other agents' and
+# the operator's, into one entry. Commit work on a branch, or stash only named
+# paths. Heredoc bodies are already stripped, so a message may name either.
+git_guard_script=$(
+  cat <<'PY'
+import os
+import shlex
+import sys
+
+command = os.environ.get("SINNIX_HOOK_COMMAND", "")
+try:
+    tokens = list(shlex.shlex(command, posix=True, punctuation_chars=";&|"))
+except ValueError:
+    sys.exit(0)
+separators = {";", "&", "|", "&&", "||"}
+segments, current = [], []
+for token in tokens:
+    if token in separators:
+        segments.append(current)
+        current = []
+    else:
+        current.append(token)
+segments.append(current)
+valued = {"-C", "-c", "--git-dir", "--work-tree", "--namespace"}
+hooked = {"commit", "push", "merge", "rebase", "am", "cherry-pick", "revert"}
+for segment in segments:
+    index = 0
+    while index < len(segment) and "=" in segment[index] and not segment[index].startswith("-"):
+        index += 1
+    if index >= len(segment) or os.path.basename(segment[index]) != "git":
+        continue
+    index += 1
+    while index < len(segment) and segment[index].startswith("-"):
+        index += 2 if segment[index] in valued else 1
+    if index >= len(segment):
+        continue
+    subcommand, rest = segment[index], segment[index + 1 :]
+    if subcommand in hooked and "--no-verify" in rest:
+        print("git --no-verify blocked: it skips the repository's hooks. Fix what the hook reports and run it again.")
+        sys.exit(0)
+    if subcommand == "stash":
+        action = rest[0] if rest and not rest[0].startswith("-") else "push"
+        if action in {"push", "save"} and "--" not in rest:
+            print("git stash without paths blocked: it sweeps every uncommitted change in the checkout, including other agents' and the operator's. Commit your work on a branch, or stash only your own paths: git stash push -m <reason> -- <paths>.")
+            sys.exit(0)
+PY
+)
+git_guard_reason="$(SINNIX_HOOK_COMMAND="$CMD_NO_HEREDOC" python3 -c "$git_guard_script")"
+if [[ -n $git_guard_reason ]]; then
+  emit_deny "$git_guard_reason"
+  exit 0
+fi
+
 if echo "$CMD_NO_HEREDOC" | grep -qE "(^|[^'\"])/nix/store/[^[:space:]'\"]*[*?]"; then
   emit_deny "Shell glob over /nix/store blocked: ~219k entries make the shell stat the whole store before your command runs (this has OOMed the host twice). Use 'find /nix/store -maxdepth 1 -name PATTERN' which streams, or resolve the one store path first (nix eval --raw, readlink, nix-locate) and search under that."
   exit 0

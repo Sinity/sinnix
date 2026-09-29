@@ -22,6 +22,12 @@ named below, not in instructions.
   write the whole connected change (callers, tests, docs, generated files),
   then verify once. A test run after every small edit spends the speed an agent
   has; run a quick probe only to settle a concrete uncertainty.
+- Work exhaustively. When a review, a test, or reading turns up a defect, find
+  every sibling before acting: the same class on other routes, callers, and
+  records, and inside your own earlier fixes. Fix them all in one batch. A
+  review lists everything it can find in one pass instead of stopping at the
+  first defect. Every valid finding against your change is fixed in it; moving
+  one into a follow-up does not reduce the work.
 - When a replacement ships, remove its predecessor together with its callers,
   commands, docs, and tests. Do not keep a compatibility path beside it.
   Unfinished code is not obsolete: deleting it needs a shipped replacement, a
@@ -44,10 +50,15 @@ instructions, skills, and memory.
 - Read exit statuses directly. Capture large output and inspect it on purpose;
   a pipeline's final status says nothing about earlier stages, so never pipe
   verification through `tail` or a summarizing filter.
+- Run a checklist loudly: for each item, a tick (or N/A with its reason), then
+  a sentence or short paragraph on how it applied to this change, with evidence
+  where there is any (a command and its result line, `path:line`, a grep
+  count). Considering each item is the point; a bare tick records nothing.
 - Before compaction or stopping mid-work, leave a handoff: active job IDs and
-  worktrees, Bead IDs and claims, exact Git state, changed files, verification
-  already run, and the single next action. On re-entry, verify those records
-  instead of trusting a summary.
+  worktrees, Bead IDs and claims, exact Git state, open PRs with their head and
+  unresolved-thread count, changed files, verification already run, and the
+  single next action. On re-entry, verify those records instead of trusting a
+  summary.
 
 ## Filesystem and private data
 
@@ -110,13 +121,20 @@ running agents in parallel.
   an explicit operator request. Tests exercise behavior, invariants, and
   reproduced failures, never prose wording or refactoring detail. Fix inherited
   failures forward, and report exactly what ran.
-- Stage explicit paths and review the complete staged diff. Never bypass hooks
-  or branch protection.
+- Before every push, the agent that wrote the change reviews its whole diff
+  against the base in its own context: re-read the checklist (the project's
+  review guide, which its `AGENTS.md` names, and the generic list in the
+  `orchestrate` skill's `references/worker-contract.md`), run it loudly, fix
+  everything it finds, and repeat until a pass is clean. A subagent may give a
+  second opinion on a named question; the author keeps ownership. Stage
+  explicit paths. Never bypass hooks or branch protection.
 - Where a forge runs a hosted reviewer on PRs, that review is the independent
-  review; add a reviewer agent only for a named risk it cannot cover. A PR
-  merges when its required statuses pass, the hosted review has completed on
-  the exact head, and every review thread is answered with a fix commit or a
-  concrete refutation and then resolved. Where the forge enforces these
+  review; add a reviewer agent only for a named risk it cannot cover. Push a
+  fix batch only when no hosted review is running on the current head, and
+  carry every open finding in it. A PR merges when its required statuses
+  pass, the hosted review has completed on the exact head, and every review
+  thread is answered with a fix commit or a concrete refutation and then
+  resolved. Where the forge enforces these
   (required statuses, conversation resolution), merge with
   `gh pr merge --auto --squash --match-head-commit <sha>` and let it gate.
   Findings that arrive after a merge become a follow-up commit or Bead.

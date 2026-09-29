@@ -41,9 +41,10 @@ terminal, then a retry.
 A paused pool is an admission hold. Run `agentctl backpressure tick` and wait
 for the release before dispatching more; running jobs continue.
 
-Agents spawned inside a Claude or Codex session are not pueue jobs. Bound
-their heavy steps yourself (one test run at a time, few workers), or route
-those steps through `agentctl job start`.
+Agents spawned inside a Claude or Codex session are not pueue jobs, and their
+memory scope is small. Their gates, type checks, test runs, and builds go
+through `agentctl job start` (with `--workspace <worktree>`), never inside the
+agent's own process.
 
 In Codex, a `functions.exec` call that returns a `session_id` is still
 running and continues through `write_stdin`; the outer "Script completed"
@@ -92,6 +93,21 @@ verify` runs the descriptor's focused profile through `agentctl job start`
 when one is declared. `lane done <result.json>` requires a clean tree,
 validates the result, checks `candidate_sha` against `HEAD`, and prints it as
 the final message; it never pushes.
+
+## Before reporting work finished
+
+Run this checklist loudly (global rules, Reporting):
+
+1. Each heavy step ran as a declared operation; name its job ID.
+2. Each job you started is terminal and you read its result
+   (`agentctl job result <id>`); quote the exit status or result line.
+3. A batch counts as done only at `landed`, with its merge commit on the
+   default branch (`git merge-base --is-ancestor <sha> origin/<default>`).
+4. A failed or refused step was retried only after its named cause was read
+   and fixed.
+5. The worktrees you own are cleaned by recorded state or named as kept, with
+   the reason.
+6. No watch, timer, or cron job you started outlives its purpose.
 
 ## Failures
 

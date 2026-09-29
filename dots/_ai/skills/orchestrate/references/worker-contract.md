@@ -27,23 +27,55 @@ names, and exits with one result document.
    committed. AgentCTL records paths outside the estimate for review, and
    landing detects conflicts with other workers' branches. You may add
    `scope_expansion` (paths, assigned Bead, reason) to explain extra paths.
+   Work exhaustively and batch greedily: when a test, your review, or reading
+   the code shows a defect, first find every sibling of it (the same class on
+   other routes, callers, and records, and inside your own fixes), then fix
+   them all together. On earlier PRs, most findings after the first review
+   round were bugs inside a fix or the same class at a site the fix missed.
 3. **Verify the change.** Run the snapshot's `verification_commands` when the
-   task names them, using the declared operation or job for any shared/heavy
-   work after the owned source patch is coherent. Run a shared selector once
-   for all assigned Beads that name it. Exact test selectors belong in
-   `verification_commands`; `affected_paths` describes code scope. A quick/static
-   green is not test evidence. Record the actual selection and receipt; a
+   task names them, through the route in step 7, after the owned source patch
+   is coherent. Run a shared selector once for all assigned Beads that name
+   it. Exact test selectors belong in `verification_commands`;
+   `affected_paths` describes code scope. A quick/static green is not test
+   evidence. Record the actual selection and receipt; a
    selected green proves that scope only. Capture the exit status. Broader
    verification is an explicit task or coordinator decision, not an automatic
    worker step. A focused check needed to establish an assigned criterion is
    part of completing that outcome; do not split it into a permission handoff.
-4. **Inspect the final patch.** Read the complete diff against the launch base
-   after implementation and focused verification. For each assigned criterion,
-   confirm the production path, affected callers, and the observation that
-   supports the worker's claim. When replacing a route, account for the old
-   callers, commands, docs, and tests. Fix findings within the assigned scope
-   and rerun only checks affected by the fix. Report a concrete blocker for
-   anything left unmet; a self-check assertion alone is not acceptance evidence.
+4. **Review your own change until a pass is clean.** After implementation
+   and focused verification, you, the author, review the complete diff
+   against the launch base in this context. You may ask a subagent one named
+   question for a second opinion; the review stays yours.
+   - Re-read the checklist now, not from memory: the project's review guide
+     when its `AGENTS.md` names one (Polylogue:
+     `docs/review/codex-review-guide.md`), then the generic list below.
+   - Go through every item and narrate it: a tick or N/A with the reason,
+     then a sentence or short paragraph on how the rule applied to this diff,
+     with evidence where there is any (a command and its result line,
+     `path:line`, a grep count). A tick without that consideration is
+     worthless; considering the item against this change is the point.
+   - List everything wrong before fixing anything. Then fix every finding and
+     every sibling site of its class in one batch, and rerun the checks the
+     fixes touch.
+   - Review the new diff again from the top. Stop only after a pass that finds
+     nothing. Record the items, their narration, and the number of passes in
+     `self_review`; the landing PR body publishes it, so it is public text.
+
+   Generic list:
+   1. Each assigned criterion is met on the production path and the evidence
+      shows that path, not only a helper or a stub; an unmet one names its
+      concrete blocker.
+   2. Each defect class this change fixes or could introduce is handled at
+      every site: say how you searched (grep and its count) and what it found.
+   3. Every consumer of a changed interface, command, schema, or file format
+      is updated, and the predecessor is deleted with its callers, tests, and
+      docs.
+   4. Every failure path is typed and visible: nothing is skipped silently,
+      falls back to a weaker answer, or reports success without the evidence.
+   5. Each new test fails when the behavior it names is removed; say which
+      change turns it red.
+   6. The diff, result, and narration carry no secret, private path, or
+      personal data.
 5. **Do not publish, do not claim beads.** No push, no PR, no merge, no
    rebase onto a newer base, no rebuild of the host. No `bd update`,
    `claim`, `close` or `comment`: `batch start` claimed the beads and
@@ -52,13 +84,17 @@ names, and exits with one result document.
    directly and report any inability to do so.
 6. **Keep the work tied to the assigned Beads.** Put unrelated discoveries in
    `unresolved` for the coordinator.
-7. **Use the declared execution route.** Short focused checks may run in the
-   foreground when the project permits them. Shared, resource-heavy or
-   durable commands run through the project's declared AgentCTL operation;
-   do not reconstruct a host execution recipe in the worker. To wait for a job
-   you started, use `agentctl job wait <id>`; never run
-   `agentctl events tail` or any other watch of the shared event stream.
-   Supervision of other work belongs to the coordinator.
+7. **Run heavy work only as declared operations.** Gates, type checks, test
+   runs, builds, and anything else that loads the project run only through the
+   project's declared AgentCTL operations (Polylogue: `verify_quick`,
+   `pytest_focused`), started with `agentctl job start <project> <operation>
+   --workspace <worktree> [-- <args>]` or `lane verify`, never inside your own
+   process: the worker's memory scope is small, and a type check or test run
+   inside it gets the worker killed. Reading files, Git, and search run
+   directly. Do not reconstruct a host execution recipe in the worker. To wait
+   for a job you started, use `agentctl job wait <id>`; never run `agentctl
+   events tail` or any other watch of the shared event stream. Supervision of
+   other work belongs to the coordinator.
 
 8. **Exit with a clean tree and the result document.** The final message is
    the JSON below and nothing else; a worker whose result does not validate
@@ -97,6 +133,17 @@ failed commands must name their tested SHA.
   ],
   "measured_usage": null,
   "candidate_sha": "<40-hex HEAD of the worker branch>",
+  "self_review": {
+    "checklists": ["<each checklist read, e.g. docs/review/codex-review-guide.md, worker-contract>"],
+    "passes": 2,
+    "items": [
+      {
+        "item": "<checklist item>",
+        "applies": true,
+        "narration": "<how it applied to this diff, with evidence; for N/A (applies false), why>"
+      }
+    ]
+  },
   "beads": [
     {
       "id": "<bead id>",
@@ -130,11 +177,11 @@ failed commands must name their tested SHA.
 
 When the contract's `schema_version` is 1, file the legacy result shape
 (without `schema_version`, `acceptance_digest`, or `ac_id`, but with the
-contract's `attempt`) and leave evidence identity unknown. It remains
-readable and may publish, but it cannot automatically close a Bead. New
-dispatches bind either Beads' structured criteria or its exact authoritative
-acceptance field and row revision; do not replace that snapshot with worker
-prose.
+contract's `attempt` and with `self_review`) and leave evidence identity
+unknown. It remains readable and may publish, but it cannot automatically
+close a Bead. New dispatches bind either Beads' structured criteria or its
+exact authoritative acceptance field and row revision; do not replace that
+snapshot with worker prose.
 
 - `candidate_sha` must equal `git rev-parse HEAD` in the worktree when the
   result is filed.
@@ -142,6 +189,9 @@ prose.
   is closed at landing only when all its criteria are `satisfied` or
   `superseded`; anything else leaves it open with the residual as a comment.
 - Refuting a criterion or a finding needs evidence, not a claim.
+- `self_review` holds the final review loop from step 4: every checklist item
+  with `applies` and its narration, and `passes`, the number of review passes
+  including the last, clean one.
 - When the declared delivery is code-only, mark operational criteria
   `unsatisfied` with the remaining action in `evidence` and `unresolved`.
   Correct partial delivery can publish while those criteria keep the bead open.

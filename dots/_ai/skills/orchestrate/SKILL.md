@@ -57,10 +57,11 @@ next, not on supervising progress.
   worker reads it. Pass
   pointers (task IDs, paths, SHAs), not pasted state.
 - Ask the owner to read every assigned task, write the whole connected change
-  in one pass, run the focused selection once, inspect its final diff against
-  the base and trace the production callers, fix what that finds, and report
-  each unmet criterion with its actual blocker. Implementation, testing, and
-  self-review stay with one owner, never split into handoffs.
+  in one pass, run the focused selection once, run the self-review loop of
+  [worker-contract.md](references/worker-contract.md) step 4 before every push
+  or result, and report each unmet criterion with its actual blocker.
+  Implementation, testing, and self-review stay with one owner, never split
+  into handoffs or a separate reviewer stage.
 - A worker that opens a PR waits for the hosted review of its head and answers
   every thread before it reports.
 
@@ -116,10 +117,11 @@ axes. One passing axis does not excuse another.
 5. **Evidence**: what actually ran, with the command and result line, what did
    not, and whether a green covered everything or only a selection.
 
-Fix or return concrete defects and recheck only the affected evidence. The
-forge's hosted review is the independent reviewer (global rules, Delivery);
-add a reviewer agent only for a named risk it cannot cover, with one question
-and a pinned candidate.
+List every defect on every axis before fixing or returning any, then fix or
+return them in one batch together with their sibling sites, and recheck only
+the affected evidence. The forge's hosted review is the independent reviewer
+(global rules, Delivery); add a reviewer agent only for a named risk it
+cannot cover, with one question and a pinned candidate.
 
 ## Land
 
@@ -127,12 +129,29 @@ and a pinned candidate.
   repository's normal route: one PR per coherent change whose title is the
   permanent squash subject (72 characters or fewer, imperative) and whose body
   has Summary, Problem, Solution, Verification (exact commands and the line
-  that matters), and residuals. Repositories that publish to `master`
-  directly fast-forward instead.
+  that matters), Self-review (the author's last pass), and residuals.
+  Repositories that publish to `master` directly fast-forward instead.
 - Resolve conflicts by intent, traced to each side's commits, PRs, and tasks.
   Preserve both intents where possible, never invent behavior mid-merge, and
   commit after each resolution. Grep for leftover conflict markers after any
   autostash.
+- Before reporting a change landed, run this checklist loudly (global rules,
+  Reporting):
+  1. The exact head passed the repository's quick gate before it was pushed.
+  2. No hosted review was running on the previous head when you pushed, and
+     the push carried every open finding.
+  3. The forge shows zero unresolved review threads (query it, do not recall
+     it); each was answered by a fix commit or a concrete refutation.
+  4. The hosted review completed on the exact head you armed. A head still
+     unreviewed after its automatic re-request is reported, not waited on.
+  5. Auto-merge is armed with `--match-head-commit` on that head.
+  6. A stacked PR merged into its parent only with its threads resolved, and
+     the work counts as landed only when `git merge-base --is-ancestor
+     <merge-sha> origin/<default>` succeeds.
+  7. The worktrees you created are removed, no Git process of yours is left
+     holding an `index.lock`, and `git stash list` is as you found it.
+  8. Every claim in the report carries its evidence: a command and its
+     result line, or a PR and merge SHA.
 - After landing, file native task evidence with `agentctl evidence file`,
   close the tasks whose criteria the evidence meets (with PR and merge SHA),
   carry the rest into named successors, and remove the worktrees you created.
