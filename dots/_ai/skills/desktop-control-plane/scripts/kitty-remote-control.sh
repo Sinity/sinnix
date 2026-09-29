@@ -89,6 +89,25 @@ restore_hyprland_focus() {
   hyprctl eval "hl.dispatch(hl.dsp.focus({ window = ${quoted} }))" >/dev/null 2>&1 || true
 }
 
+# The compositor maps agent OS windows onto the hidden agent workspace. The
+# static rule in the Hyprland config applies only after a config reload, and
+# activation deliberately does not reload, so the same rule is installed at
+# runtime before every agent OS window (once per compositor Lua state).
+ensure_agent_terminal_rule() {
+  local provider
+  command -v hyprctl >/dev/null 2>&1 || return 0
+  command -v jq >/dev/null 2>&1 || return 0
+  provider="$(hyprctl -j status 2>/dev/null | jq -r '.configProvider // empty' || true)"
+  if [[ $provider == "lua" ]]; then
+    hyprctl eval 'if sinnix_agent_terminal_guard == nil then sinnix_agent_terminal_guard = hl.window_rule({name = "sinnix-agent-terminal-guard", match = {initial_class = "^(sinnix-agent-terminal)$"}, workspace = "name:agentbrowser silent", tile = true, no_initial_focus = true, focus_on_activate = false, suppress_event = "activate activatefocus"}) end' >/dev/null 2>&1 || true
+  elif [[ $provider == "hyprlang" ]]; then
+    hyprctl keyword 'windowrule[sinnix-agent-terminal-guard]:match:initial_class' '^(sinnix-agent-terminal)$' >/dev/null 2>&1 || true
+    hyprctl keyword 'windowrule[sinnix-agent-terminal-guard]:workspace' 'name:agentbrowser silent' >/dev/null 2>&1 || true
+    hyprctl keyword 'windowrule[sinnix-agent-terminal-guard]:no_initial_focus' true >/dev/null 2>&1 || true
+    hyprctl keyword 'windowrule[sinnix-agent-terminal-guard]:enable' true >/dev/null 2>&1 || true
+  fi
+}
+
 restore_operator_focus() {
   local focus_before="$1"
   local current
@@ -618,6 +637,7 @@ launch)
   fi
   args=(launch --type "$window_type" --keep-focus)
   if [[ $window_type == os-window ]]; then
+    ensure_agent_terminal_rule
     args+=(--os-window-class sinnix-agent-terminal)
   else
     args+=(--match "window_id:${agent_window}")
