@@ -238,6 +238,8 @@ def queue_agent(
         # `lane done` validates against this worker's filing contract.
         environment["AGENTCTL_RUN_ID"] = str(binding["run_id"])
         environment["AGENTCTL_WORKER_ID"] = str(binding["worker"])
+        if isinstance(binding.get("attempt"), int):
+            environment["AGENTCTL_ATTEMPT"] = str(binding["attempt"])
     operation = label.split(":", 1)[1]
     if operation.split(":", 1)[0] in RESTRICTED_KINDS:
         restrict_environment(config, environment)
@@ -306,12 +308,16 @@ def result_path(worktree: Path) -> Path:
 
 
 def worker_then(
-    config: Config, run_id: str, worker_id: str, result: Path
+    config: Config, run_id: str, worker_id: str, result: Path, *, attempt: int
 ) -> tuple[str, ...]:
+    """The filing command queued behind a worker. It names its own attempt, so
+    the result's dispatch identity never depends on the model copying it."""
     return (
         config.agentctl_executable,
         "batch",
         "result",
+        "--attempt",
+        str(attempt),
         run_id,
         worker_id,
         str(result),

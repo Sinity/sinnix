@@ -70,7 +70,7 @@ from .projects import (
 from .prompts import PromptError
 from .pueue import PueueError
 from .schedule import TimerError
-from .start import check_result_contract
+from .start import check_result_contract, load_dispatched_result
 from .worktrunk import WorktrunkError
 
 EXIT_OK = 0
@@ -173,6 +173,13 @@ def parser() -> argparse.ArgumentParser:
         "--worker",
         default=os.environ.get("AGENTCTL_WORKER_ID"),
         help="the worker within --run (default: $AGENTCTL_WORKER_ID)",
+    )
+    validate_worker.add_argument(
+        "--attempt",
+        type=int,
+        default=os.environ.get("AGENTCTL_ATTEMPT"),
+        help="the dispatch attempt that will file this result (default: "
+        "$AGENTCTL_ATTEMPT, set for queued batch workers)",
     )
     _output_arguments(validate_worker)
 
@@ -356,6 +363,13 @@ def parser() -> argparse.ArgumentParser:
     batch_result.add_argument("run_id", help="a run id or its 8-character suffix")
     batch_result.add_argument("worker_id")
     batch_result.add_argument("path", type=Path)
+    batch_result.add_argument(
+        "--attempt",
+        type=int,
+        help="the dispatch attempt filing this result; the queued filing "
+        "command supplies it, and the result's dispatch identity is then "
+        "taken from the dispatch record",
+    )
     _project_option(batch_result)
     _output_arguments(batch_result)
     batch_scope = batch_verbs.add_parser(
@@ -753,7 +767,12 @@ def _batch(arguments: argparse.Namespace, config: Config, out: Output) -> int:
             config, arguments.project or load(config, run_id).project
         )
         filed = batch.result(
-            config, run_id, arguments.worker_id, arguments.path, project=project
+            config,
+            run_id,
+            arguments.worker_id,
+            arguments.path,
+            project=project,
+            attempt=arguments.attempt,
         )
         out.write(
             filed,
@@ -1032,16 +1051,23 @@ def _project(arguments: argparse.Namespace, config: Config, out: Output) -> int:
 
 def _result(arguments: argparse.Namespace, config: Config, out: Output) -> int:
     if arguments.result_verb == "validate-worker":
-        value, errors = results.load_result(arguments.path, kind="worker")
-        if errors:
-            raise BatchRefusal("invalid_result", "; ".join(errors[:6]), errors=errors)
         if bool(arguments.run) != bool(arguments.worker):
             parser().error("--run and --worker name one batch worker together")
         if arguments.run:
             # The filing contract, so `lane done` refuses what `batch result`
-            # would refuse for this attempt.
+            # would refuse for this attempt, and fills the same identity.
             run = load(config, resolve_run_id(config, arguments.run))
-            check_result_contract(run, run.worker(arguments.worker), value)
+            worker = run.worker(arguments.worker)
+            value = load_dispatched_result(
+                worker, arguments.path, attempt=arguments.attempt
+            )
+            check_result_contract(run, worker, value)
+        else:
+            value, errors = results.load_result(arguments.path, kind="worker")
+            if errors:
+                raise BatchRefusal(
+                    "invalid_result", "; ".join(errors[:6]), errors=errors
+                )
         out.read({"valid": True}, "worker result is valid")
         return EXIT_OK
     raise AssertionError(arguments.result_verb)

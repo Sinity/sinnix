@@ -108,8 +108,11 @@ Validated against `dots/claude/agents/schemas/worker.schema.json`:
 The snapshot's `result_contract` names the shape and the attempt; a resume
 packet's contract replaces the original packet's. When its `schema_version` is
 2 (every dispatched bead's `evidence_binding.v2_available` is `true`), use
-this v2 shape. Copy each stable `ac_id`, criterion text, `bead_revision`, and
-`acceptance_digest` exactly from that snapshot. A dispatch identity may bind
+this v2 shape. Copy each criterion's text exactly from that snapshot. For a
+batch worker, AgentCTL fills the attempt, `bead_revision`,
+`acceptance_digest` and each `ac_id` (by criterion text) from its dispatch
+record when it files the result, so a copying mistake in those fields cannot
+lose the work; still write them from the snapshot. A dispatch identity may bind
 one owner-authored whole acceptance field. In that case, write one result row
 for the whole field, with one overall status and evidence addressing its parts;
 do not repeat its `ac_id` for each numbered paragraph. The identity does not

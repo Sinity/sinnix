@@ -349,6 +349,38 @@ def check_result_contract(
         )
 
 
+def load_dispatched_result(
+    worker: Mapping[str, Any], path: Path, *, attempt: int | None
+) -> dict[str, Any]:
+    """Read ``worker``'s result document with its dispatch identity filled in.
+
+    ``attempt`` is the dispatch attempt that is filing, named by the filing
+    command itself (the one queued behind the worker, or a worker's own
+    ``lane done``). A filing for an earlier attempt is refused here: once the
+    identity comes from the dispatch record, this is what keeps a stale
+    attempt's result from landing under the current one. Without it, the
+    document's own attempt stands and `check_result_contract` compares it.
+    """
+    attempts = worker.get("attempts") or []
+    latest = attempts[-1] if attempts else None
+    current = latest.get("number") if isinstance(latest, Mapping) else None
+    if attempt is not None and attempt != current:
+        raise BatchRefusal(
+            "result_attempt",
+            f"filing for attempt {attempt} but the current attempt is {current}",
+        )
+    bindings = worker.get("evidence_binding")
+    value, errors = results.load_result(
+        path,
+        kind="worker",
+        bindings=bindings if isinstance(bindings, list) else (),
+        attempt=attempt,
+    )
+    if errors:
+        raise BatchRefusal("invalid_result", "; ".join(errors[:6]), errors=errors)
+    return value
+
+
 def result_provenance(
     run: Run, worker: Mapping[str, Any], value: Mapping[str, Any]
 ) -> dict[str, Any]:
@@ -590,7 +622,11 @@ def _prepare(
                         mcp_servers=worker.get("mcp_servers", ()),
                         schema="worker",
                         then=worker_then(
-                            config, run.run_id, worker_id, result_path(path)
+                            config,
+                            run.run_id,
+                            worker_id,
+                            result_path(path),
+                            attempt=1,
                         ),
                         binding=binding(run, worker_id),
                         inaccessible=other_worktrees(project, run, worker_id),
@@ -992,10 +1028,17 @@ def result(
     *,
     project: ProjectAdapter | None = None,
     reader: BdReader | None = None,
+    attempt: int | None = None,
 ) -> dict[str, Any]:
     with transition_locked(config, run_id):
         return _result_locked(
-            config, run_id, worker_id, path, project=project, reader=reader
+            config,
+            run_id,
+            worker_id,
+            path,
+            project=project,
+            reader=reader,
+            attempt=attempt,
         )
 
 
@@ -1007,8 +1050,13 @@ def _result_locked(
     *,
     project: ProjectAdapter | None = None,
     reader: BdReader | None = None,
+    attempt: int | None = None,
 ) -> dict[str, Any]:
-    """File a worker's result after validating it and binding it to the worktree head."""
+    """File a worker's result after validating it and binding it to the worktree head.
+
+    ``attempt`` is the dispatch attempt filing, which the queued filing
+    command names; see `load_dispatched_result`.
+    """
     run = load(config, run_id)
     if run.acceptance is not None:
         raise BatchRefusal("already_accepted", f"run {run_id} has landed")
@@ -1023,9 +1071,7 @@ def _result_locked(
         raise BatchRefusal(
             "result_attempt", f"worker {worker_id} has an unresolved dispatch attempt"
         )
-    value, errors = results.load_result(path, kind="worker")
-    if errors:
-        raise BatchRefusal("invalid_result", "; ".join(errors[:6]), errors=errors)
+    value = load_dispatched_result(worker, path, attempt=attempt)
     attempts = worker.get("attempts") or []
     latest = attempts[-1] if attempts else None
     if isinstance(latest, Mapping):
@@ -1311,7 +1357,7 @@ def _resume_locked(
             effort=effective_effort,
             mcp_servers=worker.get("mcp_servers", ()),
             schema="worker",
-            then=worker_then(config, run_id, worker_id, resume_result),
+            then=worker_then(config, run_id, worker_id, resume_result, attempt=attempt),
             binding={
                 **binding(run, worker_id),
                 "requested": {

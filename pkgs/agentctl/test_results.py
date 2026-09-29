@@ -501,3 +501,47 @@ def test_satisfied_beads_needs_every_criterion_across_every_result() -> None:
         "fx-2": True,
         "fx-3": False,
     }
+
+
+def test_dispatch_identity_fills_only_what_the_dispatch_names_unambiguously() -> None:
+    """Breaks if an ac_id is taken by text when two dispatched criteria share
+    that text (the worker's distinct ids would collapse into one and the
+    filing would be refused), or if a legacy result misses its attempt."""
+    bindings = [
+        {
+            "id": "fx-1",
+            "v2_available": True,
+            "bead_revision": "7",
+            "acceptance_digest": "d" * 64,
+            "criteria": [
+                {"ac_id": "AC-1", "text": "tests pass"},
+                {"ac_id": "AC-2", "text": "repeated"},
+                {"ac_id": "AC-3", "text": "repeated"},
+            ],
+        }
+    ]
+    document = {
+        "schema_version": results.RESULT_SCHEMA_VERSION,
+        "attempt": 9,
+        "beads": [
+            {
+                "id": "fx-1",
+                "bead_revision": "wrong",
+                "criteria": [
+                    {"ac_id": "AC-typo", "text": "tests pass"},
+                    {"ac_id": "AC-2", "text": "repeated"},
+                    {"ac_id": "AC-3", "text": "repeated"},
+                ],
+            }
+        ],
+    }
+    filled = results.complete_dispatch_identity(document, bindings, attempt=2)
+    bead = filled["beads"][0]
+    assert filled["attempt"] == 2
+    assert (bead["bead_revision"], bead["acceptance_digest"]) == ("7", "d" * 64)
+    assert [row["ac_id"] for row in bead["criteria"]] == ["AC-1", "AC-2", "AC-3"]
+
+    legacy = results.complete_dispatch_identity(
+        {"attempt": 1, "beads": []}, bindings, attempt=2
+    )
+    assert legacy == {"attempt": 2, "beads": []}

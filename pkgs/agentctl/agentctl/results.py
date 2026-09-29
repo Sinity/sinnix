@@ -422,13 +422,74 @@ def validate_judge_verdict(obj: Any) -> list[str]:
     return validate(JUDGE_SCHEMA, obj)
 
 
-def load_result(path: Path, *, kind: str) -> tuple[Any, list[str]]:
+def complete_dispatch_identity(
+    value: Any, bindings: Sequence[Mapping[str, Any]], *, attempt: int | None
+) -> Any:
+    """Fill the dispatch-owned identity fields of a worker result.
+
+    The attempt number, and in a v2 result ``bead_revision``,
+    ``acceptance_digest`` and each criterion's ``ac_id``, are facts AgentCTL
+    recorded at dispatch; a model that transcribes a 64-hex digest can garble
+    one character and lose a finished worker's result. They are taken from the
+    dispatch record instead, a criterion's ``ac_id`` by its exact text when
+    that text names one dispatched criterion (two criteria with one text keep
+    the worker's ``ac_id``s). What the worker owns (which beads, the criterion
+    texts, statuses and evidence) is left as written, so the binding check
+    still refuses beads or criterion texts that differ from the dispatch.
+    """
+    if not isinstance(value, dict):
+        return value
+    if attempt is not None:
+        value["attempt"] = attempt
+    if value.get("schema_version") != RESULT_SCHEMA_VERSION:
+        return value
+    expected = {
+        row["id"]: row
+        for row in bindings
+        if isinstance(row, Mapping)
+        and isinstance(row.get("id"), str)
+        and row.get("v2_available") is True
+    }
+    for bead in value.get("beads") or ():
+        if not isinstance(bead, dict):
+            continue
+        binding = expected.get(bead.get("id"))
+        if binding is None:
+            continue
+        bead["bead_revision"] = binding.get("bead_revision")
+        bead["acceptance_digest"] = binding.get("acceptance_digest")
+        ac_ids_by_text: dict[Any, set[Any]] = {}
+        for criterion in binding.get("criteria") or ():
+            if isinstance(criterion, Mapping):
+                ac_ids_by_text.setdefault(criterion.get("text"), set()).add(
+                    criterion.get("ac_id")
+                )
+        for criterion in bead.get("criteria") or ():
+            if not isinstance(criterion, dict):
+                continue
+            candidates = ac_ids_by_text.get(criterion.get("text"), set())
+            if len(candidates) == 1:
+                (criterion["ac_id"],) = candidates
+    return value
+
+
+def load_result(
+    path: Path,
+    *,
+    kind: str,
+    bindings: Sequence[Mapping[str, Any]] | None = None,
+    attempt: int | None = None,
+) -> tuple[Any, list[str]]:
     """The JSON document at ``path`` and its errors against ``kind``'s schema.
 
     A backend that prints a JSON envelope around the structured output
     (`claude --output-format json`) is unwrapped by the runner; here a
     document whose top level is that envelope is still read through its
     ``structured_output`` field so a raw capture validates the same way.
+
+    For a worker result filed against a dispatch, ``bindings`` (the worker's
+    ``evidence_binding``) and the filing ``attempt`` fill the dispatch-owned
+    identity before validation (`complete_dispatch_identity`).
     """
     try:
         raw = path.read_text(encoding="utf-8")
@@ -442,6 +503,9 @@ def load_result(path: Path, *, kind: str) -> tuple[Any, list[str]]:
         value = value["structured_output"]
     value = _drop_transport_nulls(SCHEMAS[kind], value)
     if kind == "worker":
+        if bindings is not None:
+            # Before combining, which keys repeated rows on their ac_id.
+            value = complete_dispatch_identity(value, bindings, attempt=attempt)
         value = _combine_repeated_criteria(value)
         return value, validate_worker_result(value)
     return value, validate(SCHEMAS[kind], value)

@@ -416,7 +416,12 @@ class Harness:
         )
 
     def file_result(
-        self, run: dict[str, Any], worker_id: str, **overrides: Any
+        self,
+        run: dict[str, Any],
+        worker_id: str,
+        *,
+        filing_attempt: int | None = None,
+        **overrides: Any,
     ) -> dict[str, Any]:
         worker = next(item for item in run["workers"] if item["id"] == worker_id)
         document = worker_result(worker["beads"], **overrides)
@@ -481,6 +486,7 @@ class Harness:
             path,
             project=self.project,
             reader=self.beads,
+            attempt=filing_attempt,
         )
 
 
@@ -762,7 +768,7 @@ def test_start_claims_creates_worktrees_and_queues_workers_then_the_landing(
     argv = read_launch(harness.config, worker_task)["argv"]
     assert argv[:3] == ["env", "bash", "-c"]
     assert "--output-schema" in argv and argv[3].endswith(
-        f"batch result {run['run_id']} fx-lead {lead['worktree']}/.agentctl/prompt.result.json"
+        f"batch result --attempt 1 {run['run_id']} fx-lead {lead['worktree']}/.agentctl/prompt.result.json"
     )
     landing = harness.pueue.task(run["landing"]["task_id"])
     assert landing is not None
@@ -853,7 +859,7 @@ def test_result_read_projection_preserves_integer_bead_revision(
 
 
 def test_launch_binds_beads_authored_v2_criteria_into_the_worker_result(
-    harness: Harness,
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     revision = 7773497739344011640
     criteria = [{"id": "AC-solo-1", "text": "the focused check passes"}]
@@ -920,23 +926,39 @@ def test_launch_binds_beads_authored_v2_criteria_into_the_worker_result(
         ],
     )
 
-    for mutate in (
-        lambda document: document["beads"][0].__setitem__("bead_revision", "other"),
-        lambda document: document["beads"][0]["criteria"][0].__setitem__(
-            "ac_id", "AC-other"
-        ),
-        lambda document: document["beads"][0]["criteria"][0].__setitem__(
-            "text", "other criterion"
-        ),
-    ):
-        mismatched = json.loads(json.dumps(claim))
-        mutate(mismatched)
-        with pytest.raises(BatchRefusal, match="result_evidence_binding"):
-            harness.file_result(run, "fx-solo", **mismatched)
+    # What the worker owns stays bound: a criterion text that differs from the
+    # dispatch is refused.
+    mismatched = json.loads(json.dumps(claim))
+    mismatched["beads"][0]["criteria"][0]["text"] = "other criterion"
+    with pytest.raises(BatchRefusal, match="result_evidence_binding"):
+        harness.file_result(run, "fx-solo", **mismatched)
 
-    filed = harness.file_result(run, "fx-solo", **claim)
+    # Dispatch-owned identity comes from the dispatch record. Breaks if the
+    # fill is removed: each of these miscopies used to refuse the filing and
+    # lose the finished work.
+    dispatched = worker["evidence_binding"][0]
+    missing = json.loads(json.dumps(claim))
+    del missing["beads"][0]["bead_revision"]
+    del missing["beads"][0]["criteria"][0]["ac_id"]
+    missing_path = Path(worker["worktree"]) / ".agentctl" / "missing.result.json"
+    missing_path.parent.mkdir(exist_ok=True)
+    missing_path.write_text(json.dumps(missing))
+    assert (
+        validate_as_lane(harness, monkeypatch, run["run_id"], "fx-solo", missing_path)
+        == cli.EXIT_OK
+    )
+
+    garbled = json.loads(json.dumps(claim))
+    garbled["beads"][0]["bead_revision"] = "other"
+    garbled["beads"][0]["acceptance_digest"] = "0" * 64
+    garbled["beads"][0]["criteria"][0]["ac_id"] = "AC-other"
+    filed = harness.file_result(run, "fx-solo", filing_attempt=1, **garbled)
     assert filed["result"]["beads"][0]["bead_revision"] == str(revision)
     assert filed["result"]["beads"][0]["criteria"][0]["ac_id"] == "AC-solo-1"
+    assert (
+        filed["result"]["beads"][0]["acceptance_digest"]
+        == dispatched["acceptance_digest"]
+    )
 
 
 def test_strict_dispatch_refuses_a_satisfied_partial_acceptance_claim(
@@ -2576,6 +2598,30 @@ def test_old_attempt_result_cannot_be_filed_after_resume(
         harness.file_result(run, "fx-solo")
 
 
+def test_a_filing_command_from_an_earlier_attempt_is_refused(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Breaks if the filing command's own attempt is not compared: with the
+    identity filled from the dispatch record, it is the only guard against a
+    stale attempt's result landing under the current one."""
+    run = harness.start("fx-solo")
+    monkeypatch.setattr(start, "SubprocessBeads", lambda root: harness.beads)
+    harness.pueue.fail(run["workers"][0]["task_id"], exit_code=1)
+    resumed = batch.resume(harness.config, harness.project, run["run_id"], "fx-solo")
+    with pytest.raises(
+        BatchRefusal, match="filing for attempt 1 but the current attempt is 2"
+    ):
+        harness.file_result(resumed, "fx-solo", filing_attempt=1)
+    worker = resumed["workers"][0]
+    stale = Path(worker["worktree"]) / ".agentctl" / "prompt.result.json"
+    assert (
+        validate_as_lane(
+            harness, monkeypatch, run["run_id"], "fx-solo", stale, attempt=1
+        )
+        == cli.EXIT_REFUSED
+    )
+
+
 def resume_contract(prompt_path: str) -> dict[str, Any]:
     """The result contract a resume packet hands its fresh agent."""
     text = Path(prompt_path).read_text()
@@ -2589,6 +2635,8 @@ def validate_as_lane(
     run_id: str,
     worker_id: str,
     path: Path,
+    *,
+    attempt: int | None = None,
 ) -> int:
     """`lane done`'s check: `agentctl result validate-worker` in the worker's env."""
     location = harness.config.state_dir / "agentctl.json"
@@ -2606,6 +2654,10 @@ def validate_as_lane(
     monkeypatch.setenv("AGENTCTL_CONFIG", str(location))
     monkeypatch.setenv("AGENTCTL_RUN_ID", run_id)
     monkeypatch.setenv("AGENTCTL_WORKER_ID", worker_id)
+    if attempt is None:
+        monkeypatch.delenv("AGENTCTL_ATTEMPT", raising=False)
+    else:
+        monkeypatch.setenv("AGENTCTL_ATTEMPT", str(attempt))
     return cli.main(["result", "validate-worker", str(path)])
 
 
@@ -2628,6 +2680,10 @@ def test_resumed_multi_bead_worker_files_its_attempt_under_one_contract(
     environment = read_launch(harness.config, task)["environment"]
     assert environment["AGENTCTL_RUN_ID"] == run["run_id"]
     assert environment["AGENTCTL_WORKER_ID"] == "fx-lead"
+    assert environment["AGENTCTL_ATTEMPT"] == "2"
+    assert read_launch(harness.config, task)["argv"][3].endswith(
+        f"batch result --attempt 2 {run['run_id']} fx-lead {worker['result_path']}"
+    )
 
     contract = resume_contract(worker["prompt_path"])
     assert contract["schema_version"] == 1 and contract["attempt"] == 2
