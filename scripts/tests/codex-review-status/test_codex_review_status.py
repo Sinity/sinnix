@@ -181,7 +181,10 @@ class FakeGitHub:
                     }
                 )
             if "pullRequest(number:" in query:
-                if self.fail_comment_pages or int(fields["number"]) in self.fail_comments_of:
+                if (
+                    self.fail_comment_pages
+                    or int(fields["number"]) in self.fail_comments_of
+                ):
                     raise status.GhError("simulated outage")
                 pr = self.prs[int(fields["number"])]
                 page = self._comments(pr, fields.get("cursor"))
@@ -376,7 +379,10 @@ def test_requests_resume_through_a_single_probe(fake: FakeGitHub) -> None:
     limited = status.LIMITED.format(since=_iso(notice))
     fake.pr(
         1,
-        comments=[_note(_marker(HEAD_A), notice - timedelta(seconds=8)), _quota(notice)],
+        comments=[
+            _note(_marker(HEAD_A), notice - timedelta(seconds=8)),
+            _quota(notice),
+        ],
         current=limited,
         age=timedelta(hours=3),
     )
