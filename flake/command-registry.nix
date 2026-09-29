@@ -69,12 +69,15 @@ let
   # evaluates one check at a time and is replaced once it passes
   # checkEvalWorkerMiB, so a worker's peak is that threshold plus the largest
   # single check (about 1 GiB), and the tier's is that times the workers.
+  # The workers run without the flake eval cache: they contend for its one
+  # SQLite file, and AgentCTL already reuses a check run on an unchanged tree.
   checkEvalWorkers = 4;
   checkEvalWorkerMiB = 512;
   loadCheckTargets = outputName: ''
     if ! _check_jobs=$(${pkgs.nix-eval-jobs}/bin/nix-eval-jobs \
         --flake "$_flake_dir#${outputName}.${system}" \
         --option accept-flake-config true \
+        --option eval-cache false \
         --workers ${toString checkEvalWorkers} --max-memory-size ${toString checkEvalWorkerMiB}); then
       echo "sinnix: failed to evaluate ${outputName}" >&2
       exit 1
