@@ -24,6 +24,14 @@ The operator endpoint exposes reads, jobs, and writes to ChatGPT. The runtime
 checks each action's capability before calling its owner. Local agents invoke
 AgentCTL directly for jobs and batches.
 
+The gateway is single-user: its one endpoint serves the operator's own ChatGPT
+and nobody else. It has the operator's full power by design, with no read-only
+mode and no narrowed write set. Remote shells and jobs run in the operator's
+environment, including its API keys and tokens. Those secrets must not leave the
+host: AgentCTL keeps their values out of launch inputs and masks them in job
+logs, the gateway redacts them from audit rows and call logs, job state is
+owner-only (0700), and launch inputs are excluded from backups.
+
 ## Actions
 
 Actions are declared once in `sinnix_agent_gateway/actions/` as an `Action` with an `Input` model, an `Output` model, a handler, a verb family, principals, aliases, affordances and examples. The family (`status`, `catalog`, `query`, `get`, `context`, `events`, `wait`, `change`, `operate`, `run`) drives the MCP annotations and the effect class: read families are audited reads; `change`, `operate` and `run` require an `idempotency_key`, accept `preconditions`, and replay a confirmed response for a repeated key. The durable outcome is pending, confirmed or indeterminate. A concurrent pending call is refused; interruption leaves an indeterminate outcome and never triggers an automatic effect retry. `operations.run` reconciles an interrupted call with agentctl through a durable owner launch identity. Reducer-backed machine actions and process stop recover only exact confirmed owner receipts, including parameters and target identity; other interrupted mutations remain indeterminate. Gateway response replay does not imply owner deduplication or atomic preconditions. Preconditions are best-effort checks unless an owner explicitly guarantees atomic comparison and mutation.
@@ -172,7 +180,7 @@ changing the gateway action family cannot suppress a client-side approval policy
 
 ## Generated reference
 
-This section is generated from the action set. Revision `v3-typed-actions`, catalog SHA-256 `e92e3654e5d865f211a1a1e7fc151b0d75c5f4684d351a97f4713150e06c7399`.
+This section is generated from the action set. Revision `v3-typed-actions`, catalog SHA-256 `2f2ceeafe8f7ee6cac929be67e697f761d9173140c1717c1b7e47c8ff8c33c31`.
 
 The full schemas and examples are in [the generated gateway reference](generated/agent-gateway-reference.md). The matching agent skill is [agent-gateway](../dots/_ai/skills/agent-gateway/SKILL.md).
 

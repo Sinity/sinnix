@@ -615,7 +615,11 @@ class OpenInput(MutationControls):
     title: str | None = Field(default=None, min_length=1, max_length=256)
     placement: Literal["os_window", "window", "tab"] = Field(
         default="os_window",
-        description="New OS window, a split in the active tab, or a new tab.",
+        description=(
+            "New agent OS window, or a split or tab in the newest agent OS "
+            "window. Agent terminals open on the hidden agent workspace, never "
+            "in the operator's windows; reuse one through terminals.run."
+        ),
     )
 
 

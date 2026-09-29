@@ -45,9 +45,10 @@ from typing import Any, Mapping, Sequence
 
 from sinnix_lib.atomic import atomic_publish
 from sinnix_lib.ledger import append_jsonl
+from sinnix_lib.secrets import mask_secret_values, secret_values
 
 from . import artifacts, gitcmd, pueue, worktrunk
-from .launch_input import QueueInputError, read_input
+from .launch_input import QueueInputError, read_input, secret_environment
 from .limits import SYSTEMCTL_TIMEOUT_SECONDS
 from .pueue import PueueError
 
@@ -603,6 +604,23 @@ def _run_bare(
     return (Outcome.SUCCESS, 0) if status == 0 else (Outcome.FAILED, status)
 
 
+def _mask_logs(paths: Sequence[Path], values: tuple[bytes, ...]) -> None:
+    """Replace secret values a command printed, once nothing writes the logs.
+
+    The masks keep each value's length, so recorded byte offsets stay valid.
+    """
+    if not values:
+        return
+    for path in dict.fromkeys(paths):
+        try:
+            data = path.read_bytes()
+        except OSError:
+            continue
+        masked = mask_secret_values(data, values)
+        if masked != data:
+            atomic_publish(path, masked, fsync=True, mode=0o600)
+
+
 def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
     """Run one queued command, retaining complete output for this invocation."""
     marker = cancel_marker_for(launch["log_path"])
@@ -769,6 +787,10 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
     # The queue is the admission boundary. Pass its identity to the child so
     # project-native runners can distinguish a worker from a lane-side request.
     environment = dict(launch["environment"])
+    # Secret values join the child's environment only; the launch input and
+    # every identity computed from it keep their names alone.
+    secrets, lost_secrets = secret_environment(Path(launch_input), launch)
+    environment.update(secrets)
     environment.update(
         {
             "AGENTCTL_JOB_ID": str(launch["job_id"]),
@@ -790,6 +812,12 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
     log_path.write_bytes(b"")
     stdout_path.write_bytes(b"")
     with open(log_path, "ab") as log, open(stdout_path, "ab") as stdout:
+        if lost_secrets:
+            log.write(
+                "secret environment no longer held (runtime directory was "
+                f"reset): {', '.join(lost_secrets)}\n".encode()
+            )
+            log.flush()
         if _marker_targets(marker, launch["attempt"]):
             outcome, status = Outcome.CANCELLED, CANCELLED_EXIT_CODE
         else:
@@ -857,6 +885,7 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
         if _marker_targets(marker, launch["attempt"]):
             marker.unlink(missing_ok=True)
         fcntl.flock(lock, fcntl.LOCK_UN)
+    _mask_logs((log_path, stdout_path), secret_values(secrets))
 
     end_git = git_observation(Path(launch["working_directory"]))
     stranded = stranded_index_locks(

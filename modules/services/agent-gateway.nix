@@ -1,3 +1,8 @@
+# The OpenAI Secure MCP endpoint for the operator's own ChatGPT.
+#
+# Single-user and operator-only: the gateway has the operator's full power by
+# design. Remote shells and jobs run with the operator's environment, API keys
+# included; those secrets stay on this host (docs/agent-gateway.md, Authority).
 {
   mkServiceModule,
   config,

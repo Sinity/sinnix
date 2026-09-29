@@ -317,6 +317,12 @@ def test_list_get_and_locators_resolve_projects_and_checkouts(tmp_path: Path) ->
     assert authority["checkout"]["checkout_id"] == by_path["checkout_id"]
 
     assert error(server, "projects.get", {"target": {"project": "nope"}}) == "not_found"
+    # An owner-prefixed id is answered with the canonical choice to use.
+    prefixed = call(server, "projects.get", {"target": {"project": "sinity-fixture"}})
+    assert prefixed["error"]["code"] == "not_found"
+    assert prefixed["error"]["details"]["suggested"] == ["fixture"]
+    assert prefixed["error"]["details"]["choices"] == ["fixture"]
+    assert "'fixture'" in prefixed["error"]["message"]
     assert (
         error(
             server,

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import difflib
 import os
 import re
 from pathlib import Path
@@ -130,8 +131,34 @@ def run_ref(project_id: str, run_id: str) -> str:
 
 def _configured_project(runtime: Any, project_id: str) -> str:
     if project_id not in runtime.config.projects:
-        raise not_found("project", project_id)
+        raise unknown_project(runtime, project_id)
     return project_id
+
+
+def unknown_project(runtime: Any, project_id: str) -> ProtocolError:
+    """A refusal that names the canonical project ids a caller can use.
+
+    A caller that prefixed an owner (``sinity-lynchpin``) or misspelled an id
+    learns the configured choices instead of guessing again.
+    """
+    choices = sorted(runtime.config.projects)
+    contained = [choice for choice in choices if choice in project_id]
+    suggested = contained or difflib.get_close_matches(
+        project_id, choices, n=3, cutoff=0.5
+    )
+    message = "no project matches the locator"
+    if suggested:
+        message += "; did you mean " + " or ".join(repr(item) for item in suggested)
+    return ProtocolError(
+        "not_found",
+        message,
+        details={
+            "kind": "project",
+            "locator": project_id,
+            "suggested": suggested,
+            "choices": choices,
+        },
+    )
 
 
 def _checkout_by_path(runtime: Any, raw: str) -> tuple[str, str]:

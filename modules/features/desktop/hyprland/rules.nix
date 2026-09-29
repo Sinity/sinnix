@@ -69,10 +69,15 @@ let
       };
     })
     # Agent-opened OS windows use a distinct class so spawning them does not
-    # activate an existing Kitty window. Focus restore in kitty-remote-control
-    # still runs; this rule keeps the new window itself from taking focus.
+    # activate an existing Kitty window. They map straight onto the hidden
+    # agent workspace the agent browser windows share (F7 shows it), never
+    # onto the workspace the operator is using. Focus restore in
+    # kitty-remote-control still runs; this rule keeps the new window itself
+    # from taking focus.
     (mkRule "agent-terminal-no-focus" {
       class = "^(sinnix-agent-terminal)$";
+      workspace = "name:agentbrowser silent";
+      tile = true;
       noInitialFocus = true;
       focusOnActivate = false;
       suppressEvent = "activate activatefocus";

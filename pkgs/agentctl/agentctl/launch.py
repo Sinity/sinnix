@@ -23,6 +23,8 @@ from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Iterator, Mapping, Sequence
 
+from sinnix_lib.secrets import mask_secret_values, masked_window, secret_values
+
 from . import artifacts, gitcmd, manifest, pools, pueue
 from .checkout import (
     CheckoutError,
@@ -33,7 +35,7 @@ from .checkout import (
     remove_candidate_tree,
 )
 from .config import Config
-from .launch_input import scratch_path, write_input
+from .launch_input import scratch_path, secret_environment, write_input
 from .limits import CALL_TIMEOUT_SECONDS, SHORT_ID, SYSTEMCTL_TIMEOUT_SECONDS
 from .manifest import BatchRefusal
 from .projects import AdmissionEnvelope, ProjectAdapter, ProjectOperation
@@ -1435,8 +1437,14 @@ def _read_artifact(
                 if stat.S_ISREG(status.st_mode):
                     size = status.st_size
                     available = True
-                    os.lseek(descriptor, offset, os.SEEK_SET)
-                    raw = os.read(descriptor, limit)
+                    raw = masked_window(
+                        lambda start, length, fd=descriptor: os.pread(
+                            fd, length, start
+                        ),
+                        offset,
+                        limit,
+                        _secret_values(config, task),
+                    )
             finally:
                 os.close(descriptor)
     next_offset = offset + len(raw)
@@ -1456,14 +1464,30 @@ def _read_artifact(
     }
 
 
+def _secret_values(config: Config, task: Task) -> tuple[bytes, ...]:
+    """Values to mask in what a job wrote: its own secrets and the reader's.
+
+    The runner masks a finished job's logs on disk. A running job's logs, and
+    logs written before masking existed, are masked as they are read.
+    """
+    environment = dict(os.environ)
+    path = launch_input_path(task)
+    value = _launch_input(config, task)
+    if path is not None and value is not None:
+        environment.update(secret_environment(path, value)[0])
+    return secret_values(environment)
+
+
 def task_logs(config: Config, task: Task, *, attempt: int | None = None) -> str:
     path = _artifact(config, task, ".log", attempt)
     raw = read_bounded(path, MAX_LOG_BYTES) if path is not None else None
-    text = raw.decode("utf-8", "replace") if raw else ""
+    secrets = _secret_values(config, task)
+    text = mask_secret_values(raw, secrets).decode("utf-8", "replace") if raw else ""
     # Pueue's wrapper capture belongs only to the current queue invocation.
     wrapper = (
         pueue.log(task.task_id) if attempt is None and task.status != "Archived" else ""
     )
+    wrapper = mask_secret_values(wrapper.encode(), secrets).decode("utf-8", "replace")
     if wrapper.strip():
         text = f"{text}\n[wrapper]\n{wrapper}" if text else wrapper
     return text

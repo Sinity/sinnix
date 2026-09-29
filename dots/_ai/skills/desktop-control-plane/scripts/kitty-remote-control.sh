@@ -607,9 +607,20 @@ launch)
       ;;
     esac
   done
+  # An agent never opens into the operator's windows. A tab or split goes
+  # into the newest agent OS window; without one it becomes a new agent OS
+  # window, which the compositor maps onto the hidden agent workspace.
+  agent_window=""
+  if [[ $window_type != os-window ]]; then
+    need_cmd jq
+    agent_window="$(run_kitty ls | jq -r '[.[] | select(.wm_class == "sinnix-agent-terminal") | .tabs[].windows[].id] | last // empty')"
+    [[ -n $agent_window ]] || window_type="os-window"
+  fi
   args=(launch --type "$window_type" --keep-focus)
   if [[ $window_type == os-window ]]; then
     args+=(--os-window-class sinnix-agent-terminal)
+  else
+    args+=(--match "window_id:${agent_window}")
   fi
   [[ -n $cwd ]] && args+=(--cwd "$cwd")
   [[ -n $title ]] && args+=(--title "$title")

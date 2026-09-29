@@ -11,7 +11,7 @@ from typing import Any, Mapping
 
 from .capabilities import Capability, Principal
 from .config import GatewayConfig
-from .redaction import redact
+from .redaction import redact_structure
 
 GENESIS_HASH = "0" * 64
 
@@ -76,7 +76,11 @@ class AuditService:
     ) -> dict[str, Any]:
         event_id = str(uuid.uuid4())
         occurred_at = time.time()
-        clean_payload = json.loads(redact(json.dumps(payload or {}, sort_keys=True)))
+        # Round-trip through JSON first so the stored row is exactly what the
+        # hash covers, then redact values, never serialized delimiters.
+        clean_payload = redact_structure(
+            json.loads(json.dumps(payload or {}, sort_keys=True))
+        )
         correlation_id = clean_payload.get("correlation_id") or clean_payload.get(
             "job_id"
         )

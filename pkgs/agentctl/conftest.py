@@ -370,6 +370,14 @@ def fake_pueue(monkeypatch: pytest.MonkeyPatch) -> FakePueue:
 
 
 @pytest.fixture(autouse=True)
+def secret_env_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Where this test's secret launch environment values are held."""
+    directory = tmp_path / "secret-env"
+    monkeypatch.setenv("AGENTCTL_SECRET_ENV_DIR", str(directory))
+    return directory
+
+
+@pytest.fixture(autouse=True)
 def _no_cancel_settle_wait(monkeypatch: pytest.MonkeyPatch) -> None:
     """A fake task never exits on its own; tests of the wait pass their own."""
     monkeypatch.setattr(launch_module, "CANCEL_SETTLE_SECONDS", 0.0)
@@ -568,3 +576,12 @@ def read_launch(config: Config, task: Task) -> dict[str, Any]:
     """The launch input a fake task's command names."""
     _, _, path = task.command.partition(" ")
     return json.loads(Path(path).read_text())
+
+
+def launched_environment(config: Config, task: Task) -> dict[str, str]:
+    """The environment the task's command receives: the input plus held secrets."""
+    from agentctl.launch_input import secret_environment
+
+    _, _, path = task.command.partition(" ")
+    value = read_launch(config, task)
+    return {**value["environment"], **secret_environment(Path(path), value)[0]}

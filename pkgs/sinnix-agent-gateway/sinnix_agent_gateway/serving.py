@@ -49,18 +49,25 @@ class DrainingServer(uvicorn.Server):
 
     def handle_exit(self, sig: int, frame: FrameType | None) -> None:
         if self._deadline is None:
-            calllog.emit(
-                {
-                    "event": "gateway.shutdown",
-                    "phase": "draining",
-                    "signal": int(sig),
-                    "drain_s": self.config.timeout_graceful_shutdown,
-                    "connections": len(self.server_state.connections),
-                }
-            )
             self._deadline = threading.Timer(self._exit_deadline_seconds, self._expire)
             self._deadline.daemon = True
             self._deadline.start()
+            # This runs as a signal handler on the main thread, which may be
+            # inside a stderr write of its own; writing here would re-enter
+            # that buffer. Another thread just waits for it.
+            threading.Thread(
+                target=calllog.emit,
+                args=(
+                    {
+                        "event": "gateway.shutdown",
+                        "phase": "draining",
+                        "signal": int(sig),
+                        "drain_s": self.config.timeout_graceful_shutdown,
+                        "connections": len(self.server_state.connections),
+                    },
+                ),
+                daemon=True,
+            ).start()
         super().handle_exit(sig, frame)
 
     def _expire(self) -> None:

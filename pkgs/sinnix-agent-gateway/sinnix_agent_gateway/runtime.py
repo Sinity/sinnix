@@ -1552,7 +1552,19 @@ class Runtime:
                 "indeterminate",
                 "Previous invocation ended without a confirmed outcome; reconcile with the owner before any new effect. This key will not execute again.",
             )
-        raise ProtocolError("conflict", "matching idempotency request is pending")
+        # The first call with this key is still running. Its idempotency key is
+        # the handle: once it ends, this same request replays its committed
+        # response (created ids included) instead of running again.
+        raise ProtocolError(
+            "conflict",
+            "matching idempotency request is pending; retry this exact request "
+            "with the same idempotency_key to receive its committed result",
+            details={
+                "idempotency_key": context.idempotency_key,
+                "idempotency_state": "pending",
+                "retry_same_request": True,
+            },
+        )
 
     def _complete_v2_idempotency(
         self, action: Action, context: RequestContext, response: Mapping[str, Any]

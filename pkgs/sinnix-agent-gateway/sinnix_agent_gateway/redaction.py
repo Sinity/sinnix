@@ -1,22 +1,24 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
+from sinnix_lib.secrets import env_name_is_secret
+
+_SECRET_WORDS = r"api[_-]?key|authorization|password|secret|token"
+# An optional auth scheme belongs to the value: "Authorization: Bearer x"
+# must hide x, not the word Bearer. Quotes end a value.
 _SECRET_ASSIGNMENT = re.compile(
-    r"(?i)\b(api[_-]?key|authorization|password|secret|token)\b\s*[:=]\s*([^\s,;]+)"
+    rf"(?i)\b({_SECRET_WORDS})\b\s*[:=]\s*(?:(?:bearer|basic|token)\s+)?([^\s,;\"']+)"
 )
+# A structured field is secret when its name is, or ends in, one of the words:
+# token, client_secret and OPENAI_API_KEY are; idempotency_key is not.
+_SECRET_KEY = re.compile(rf"(?i)(?:.*[_-])?(?:{_SECRET_WORDS})\Z")
 _KEY_SHAPE = re.compile(r"\b(?:sk|ghp|github_pat|xox[baprs])[-_][A-Za-z0-9_-]{12,}\b")
 _SECRET_VALUE = re.compile(
     r"(?i)(-----BEGIN |eyJ[A-Za-z0-9_-]{20,}\.|(?:password|passwd|pwd)=|(?:postgres|mysql|mongodb|redis)://[^:\s/]+:[^@\s/]+@)"
-)
-# Word tokens, not substrings: KEYBOARD must stay visible, KAGGLE_KEY must not.
-_SECRET_NAME = re.compile(
-    r"(?i)(^|_)("
-    r"KEY|KEYS|TOKEN|SECRET|PASSWORD|PASSWD|PASSPHRASE|PASS|PSK|SEED|"
-    r"APIKEY|AUTH|CREDENTIAL|PRIVATE|COOKIE|CERT|CERTIFICATE|BEARER|JWT|"
-    r"DB|DATABASE"
-    r")(_|$)"
 )
 REDACTED = "[REDACTED]"
 
@@ -26,8 +28,28 @@ def redact(value: str) -> str:
     return _KEY_SHAPE.sub(REDACTED, value)
 
 
-def env_name_is_secret(key: str) -> bool:
-    return bool(key) and _SECRET_NAME.search(key) is not None
+def key_is_secret(key: Any) -> bool:
+    return isinstance(key, str) and _SECRET_KEY.match(key) is not None
+
+
+def redact_structure(value: Any) -> Any:
+    """Redact a JSON-shaped value before it is serialized.
+
+    Values under secret-named keys are replaced whole, and free-text redaction
+    runs on each string value. Applied to serialized JSON instead, a pattern
+    such as ``token=abc"`` swallows the closing quote and corrupts the
+    document.
+    """
+    if isinstance(value, Mapping):
+        return {
+            key: REDACTED if key_is_secret(key) else redact_structure(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [redact_structure(item) for item in value]
+    if isinstance(value, str):
+        return redact(value)
+    return value
 
 
 def redact_env(env: dict[str, str], *, value_limit: int = 2_000) -> dict[str, str]:

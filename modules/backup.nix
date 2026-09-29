@@ -661,6 +661,10 @@ let
     "var/lib/systemd/coredump"
     # Sinex runtime state is backed up through structured service tooling.
     "var/lib/sinex"
+    # AgentCTL launch inputs are transient launch documents. Inputs written
+    # before secret values moved to the runtime directory still hold them;
+    # none belongs in an archive.
+    "home/sinity/.local/state/agentctl/inputs"
   ]
   ++ chromeCacheRoots
   ++ chromeExtensionCacheExcludes;
@@ -767,6 +771,9 @@ let
       "home/sinity/.local/share/nvim/mason"
       "home/sinity/.local/share/hyprland/logs"
       "var/lib/systemd/coredump"
+      # Launch documents of queued jobs, rewritten per launch. Results and
+      # logs stay covered under jobs/; an input is not needed to read them.
+      "home/sinity/.local/state/agentctl/inputs"
     ]
     ++ chromeCacheRoots
   );

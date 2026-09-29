@@ -39,7 +39,14 @@ from agentctl.projects import ProjectAdapter, load_project_adapter
 from agentctl.pueue import PueueError
 from agentctl.run import TIMEOUT_EXIT_CODE
 from agentctl.worktrunk import Worktree, WorktrunkError
-from conftest import SELF_REVIEW, FakeBd, FakePueue, bead, read_launch
+from conftest import (
+    SELF_REVIEW,
+    FakeBd,
+    FakePueue,
+    bead,
+    launched_environment,
+    read_launch,
+)
 
 BASE = "b" * 40
 SHA = "c" * 40
@@ -4062,10 +4069,12 @@ def test_worker_and_review_units_cannot_push_or_write_beads(
         label = next(
             name for name in tasks if name.startswith(f"fixture:{kind}:{run['run_id']}")
         )
-        environment = read_launch(harness.config, tasks[label])["environment"]
+        environment = launched_environment(harness.config, tasks[label])
         assert "GIT_CONFIG_COUNT" not in environment
         assert environment.get("SSH_AUTH_SOCK") == "/run/user/1000/ssh-agent"
         assert environment.get("GH_TOKEN") == "ghp_secret"
+        # The token reaches the command but never the persisted input.
+        assert "ghp_secret" not in json.dumps(read_launch(harness.config, tasks[label]))
     bd = shim / "bd"
     assert bd.stat().st_mode & 0o777 == 0o700 and shim.stat().st_mode & 0o777 == 0o700
     assert 'exec bd --readonly "$@"' in bd.read_text()

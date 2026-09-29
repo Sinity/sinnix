@@ -22,7 +22,7 @@ from typing import Any, Callable, Mapping
 
 import anyio
 
-from .redaction import REDACTED, env_name_is_secret, redact
+from .redaction import REDACTED, key_is_secret, redact
 
 # The control plane's response deadline for one command, measured from the
 # tunnel-client's poll: consecutive dropped calls in one ChatGPT run are spaced
@@ -103,7 +103,7 @@ def summarize(value: Any, *, depth: int = 0) -> Any:
         items = list(value.items())
         summary = {
             str(key): REDACTED
-            if env_name_is_secret(str(key))
+            if key_is_secret(key)
             else summarize(item, depth=depth + 1)
             for key, item in items[:32]
         }

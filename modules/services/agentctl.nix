@@ -251,8 +251,14 @@ mkServiceModule {
             ${pkgs.e2fsprogs}/bin/chattr +C ${lib.escapeShellArg path}
           fi
         '') taskAuthorityParents;
-        # Launch inputs, bounded logs and typed results of queued jobs.
-        sinnix.persistence.home.directories = [ ".local/state/agentctl" ];
+        # Launch inputs, bounded logs and typed results of queued jobs. Owner
+        # only: job logs hold whatever a command printed.
+        sinnix.persistence.home.directories = [
+          {
+            directory = ".local/state/agentctl";
+            mode = "0700";
+          }
+        ];
       }
     ];
 } args
