@@ -146,8 +146,8 @@ cannot cover, with one question and a pinned candidate.
      unreviewed after its automatic re-request is reported, not waited on.
   5. Auto-merge is armed with `--match-head-commit` on that head.
   6. A stacked PR merged into its parent only with its threads resolved, and
-     the work counts as landed only when `git merge-base --is-ancestor
-     <merge-sha> origin/<default>` succeeds.
+     the work counts as landed only when
+     `git merge-base --is-ancestor <merge-sha> origin/<default>` succeeds.
   7. The worktrees you created are removed, no Git process of yours is left
      holding an `index.lock`, and `git stash list` is as you found it.
   8. Every claim in the report carries its evidence: a command and its

@@ -76,6 +76,7 @@ names, and exits with one result document.
       change turns it red.
    6. The diff, result, and narration carry no secret, private path, or
       personal data.
+
 5. **Do not publish, do not claim beads.** No push, no PR, no merge, no
    rebase onto a newer base, no rebuild of the host. No `bd update`,
    `claim`, `close` or `comment`: `batch start` claimed the beads and
@@ -87,14 +88,14 @@ names, and exits with one result document.
 7. **Run heavy work only as declared operations.** Gates, type checks, test
    runs, builds, and anything else that loads the project run only through the
    project's declared AgentCTL operations (Polylogue: `verify_quick`,
-   `pytest_focused`), started with `agentctl job start <project> <operation>
-   --workspace <worktree> [-- <args>]` or `lane verify`, never inside your own
-   process: the worker's memory scope is small, and a type check or test run
-   inside it gets the worker killed. Reading files, Git, and search run
-   directly. Do not reconstruct a host execution recipe in the worker. To wait
-   for a job you started, use `agentctl job wait <id>`; never run `agentctl
-   events tail` or any other watch of the shared event stream. Supervision of
-   other work belongs to the coordinator.
+   `pytest_focused`), started with `lane verify` or
+   `agentctl job start <project> <operation> --workspace <worktree> [-- <args>]`,
+   never inside your own process: the worker's memory scope is small, and a
+   type check or test run inside it gets the worker killed. Reading files,
+   Git, and search run directly. Do not reconstruct a host execution recipe
+   in the worker. To wait for a job you started, use `agentctl job wait <id>`; never run
+   `agentctl events tail` or any other watch of the shared event stream.
+   Supervision of other work belongs to the coordinator.
 
 8. **Exit with a clean tree and the result document.** The final message is
    the JSON below and nothing else; a worker whose result does not validate
@@ -134,7 +135,9 @@ failed commands must name their tested SHA.
   "measured_usage": null,
   "candidate_sha": "<40-hex HEAD of the worker branch>",
   "self_review": {
-    "checklists": ["<each checklist read, e.g. docs/review/codex-review-guide.md, worker-contract>"],
+    "checklists": [
+      "<each checklist read, e.g. docs/review/codex-review-guide.md, worker-contract>"
+    ],
     "passes": 2,
     "items": [
       {
