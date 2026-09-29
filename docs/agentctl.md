@@ -552,7 +552,10 @@ operator's own are untouched.
 A batch verb that cannot proceed exits 1 with `<code>: <detail>`; a landing
 records the same document in `landing.failure` (`checks_failed` and
 `verify_failed` carry `timed_out: true` when a deadline passed rather than a
-check failing). The codes:
+check failing). A landing waits for a declared verification job as long as it
+is queued; once the job starts, it waits for the operation's timeout plus the
+wrapper's grace, then refuses with `verify_running` instead of inventing an
+outcome. The codes:
 
 | code                           | meaning                                                                             |
 | ------------------------------ | ----------------------------------------------------------------------------------- |
@@ -577,6 +580,7 @@ check failing). The codes:
 | `invalid_result`               | the worker result does not validate against its schema                              |
 | `landing_in_progress`          | another landing of this run holds the landing lock or its task is running           |
 | `manifest`                     | the run manifest is unreadable or not this contract                                 |
+| `mcp_servers`                  | the requested MCP server selection is invalid or differs from the run               |
 | `members`                      | a bead cannot join the batch (`refusals` names each reason)                         |
 | `no_candidate_profile`         | the descriptor declares no [workspace].verify.candidate                             |
 | `project`                      | the run belongs to another project                                                  |
@@ -591,6 +595,7 @@ check failing). The codes:
 | `target_moved_twice`           | the default branch moved again after one refresh                                    |
 | `unknown_run`                  | no run has this id or suffix                                                        |
 | `verify_failed`                | candidate verification failed, or did not finish (`timed_out`)                      |
+| `verify_running`               | candidate verification is still running; landing again waits for the same task      |
 | `worker_active`                | the worker's task is still queued or running                                        |
 | `worker_missing`               | the run has no such worker, or the worker has no worktree                           |
 | `worker_not_done`              | a worker's task has not finished                                                    |

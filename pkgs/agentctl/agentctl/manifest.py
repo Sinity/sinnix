@@ -65,6 +65,7 @@ REFUSALS: dict[str, str] = {
     "target_moved_twice": "the default branch moved again after one refresh",
     "unknown_run": "no run has this id or suffix",
     "verify_failed": "candidate verification failed, or did not finish (`timed_out`)",
+    "verify_running": "candidate verification is still running; landing again waits for the same task",
     "worker_active": "the worker's task is still queued or running",
     "worker_missing": "the run has no such worker, or the worker has no worktree",
     "worker_not_done": "a worker's task has not finished",

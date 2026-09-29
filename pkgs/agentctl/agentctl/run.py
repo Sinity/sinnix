@@ -44,6 +44,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Mapping, Sequence
 
 from sinnix_lib.atomic import atomic_publish
+from sinnix_lib.ledger import append_jsonl
 
 from . import artifacts, pueue, worktrunk
 from .launch_input import QueueInputError, read_input
@@ -336,22 +337,22 @@ def launch_input_of(command: str) -> str | None:
 
 
 def append_event(spool_path: Path | None, event: Mapping[str, Any]) -> None:
-    """Append one advisory lifecycle event. The spool is never state authority."""
+    """Append one advisory lifecycle event. The spool is never state authority.
+
+    Every spool writer goes through the shared ledger append, whose lock also
+    covers its repair of an interrupted tail line.
+    """
     if spool_path is None:
         return
-    line = json.dumps(
-        {
-            "schema_version": 1,
-            "emitted_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            **dict(event),
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-    )
     try:
-        spool_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(spool_path, "a", encoding="utf-8") as handle:
-            handle.write(line + "\n")
+        append_jsonl(
+            spool_path,
+            {
+                "schema_version": 1,
+                "emitted_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                **dict(event),
+            },
+        )
     except OSError:
         return
 

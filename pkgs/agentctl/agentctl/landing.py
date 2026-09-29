@@ -11,7 +11,7 @@ import shutil
 import stat
 import subprocess
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
@@ -60,6 +60,10 @@ PR_PROPAGATION_TIMEOUT_SECONDS = 30
 # `check_missing`: no runner will pick it up.
 CHECK_MISSING_SECONDS = 600
 POLL_INTERVAL_SECONDS = 15
+# The job wrapper enforces an operation's timeout from the moment the job
+# starts; this margin lets it kill the command and record the outcome before
+# the landing stops waiting for that terminal record.
+VERIFY_EXIT_GRACE_SECONDS = 120
 # Git emits seven marker characters by default, but ``git merge-file`` also
 # supports a larger marker size.  Labels on the opening, base (diff3), and
 # closing markers are separated by whitespace; the separator is important so
@@ -772,18 +776,10 @@ def _job_duration_seconds(job: Mapping[str, Any]) -> int | None:
 def _verification_failure_detail(
     profile: str, job: Mapping[str, Any], timeout_seconds: float
 ) -> str:
-    """Describe the observed terminal outcome, never the stale wait phase."""
+    """Describe a terminal verification outcome from the job's own record."""
     phase = str(job.get("phase") or "vanished")
-    # A wait that consumed the operation budget can return the pre-terminal
-    # queue view.  That is a timeout observation, not evidence that verification
-    # is still running; a later queue read above may replace it with the wrapper
-    # outcome (timeout, failed, cancelled, or vanished).
-    if job.get("wait_timed_out") and not job.get("terminal"):
-        phase = "timeout"
     exit_code = job.get("exit_code")
     duration = _job_duration_seconds(job)
-    if phase == "timeout" and duration is None:
-        duration = int(timeout_seconds)
     detail = f"{profile} task {job.get('job_id')} {phase}"
     facts: list[str] = []
     if exit_code is not None:
@@ -794,6 +790,72 @@ def _verification_failure_detail(
     if phase == "timeout":
         facts.append(f"budget {timeout_seconds:g}s")
     return f"{detail} ({', '.join(facts)})"
+
+
+def _run_seconds(job: Mapping[str, Any], first_seen: float) -> float:
+    """How long a started job has run, from its start time when pueue has one.
+
+    A reused job may have started before this landing did, so the landing's
+    own observation is only the fallback for a missing or unparseable time.
+    """
+    started = job.get("started_at")
+    try:
+        begun = datetime.fromisoformat(str(started).replace("Z", "+00:00"))
+        return max(0.0, (datetime.now(UTC) - begun).total_seconds())
+    except (TypeError, ValueError):
+        return time.monotonic() - first_seen
+
+
+def _await_verification(
+    profile: str, job_id: int, reference: Any, timeout_seconds: float
+) -> dict[str, Any]:
+    """Wait for a verification job to reach a terminal state.
+
+    Time the job spends queued (behind a paused or full pool) does not count:
+    the operation's timeout bounds the command's run, and the wrapper enforces
+    it from the job's start. A job still not terminal once it has run for its
+    timeout plus the wrapper's grace is `verify_running`, a retryable refusal:
+    landing again reuses the same task rather than submitting another check.
+    """
+    limit = timeout_seconds + VERIFY_EXIT_GRACE_SECONDS
+    first_seen: float | None = None
+    wait_for = limit
+    while True:
+        waited = launch.wait(job_id, timeout_seconds=wait_for, reference=reference)
+        # `launch.wait` can return the last non-terminal view at the instant
+        # its deadline passes; pueue's current record decides.
+        try:
+            task = launch.find_task(
+                pueue.tasks(), waited.get("job_id", job_id), reference
+            )
+        except PueueError:
+            task = None
+        if task is not None:
+            waited = {**waited, **launch.job_view(task)}
+        if waited.get("terminal"):
+            return waited
+        job_id = int(waited.get("job_id", job_id))
+        if waited.get("detail"):
+            raise BatchRefusal(
+                "verify_running",
+                f"{profile} task {job_id} is {waited.get('phase')}; "
+                f"the queue could not be read: {waited['detail']}",
+            )
+        if not waited.get("started_at"):
+            first_seen = None
+            wait_for = limit
+            continue
+        if first_seen is None:
+            first_seen = time.monotonic()
+        ran = _run_seconds(waited, first_seen)
+        if ran >= limit:
+            raise BatchRefusal(
+                "verify_running",
+                f"{profile} task {job_id} is still {waited.get('phase')} after "
+                f"{int(ran)}s of its {timeout_seconds:g}s budget; "
+                "landing again waits for the same task",
+            )
+        wait_for = limit - ran
 
 
 def _worktree_attestation(path: Path) -> dict[str, Any]:
@@ -943,31 +1005,14 @@ def _verify(
     job_id = started.get("job_id")
     if not isinstance(job_id, int):
         raise JobError(f"verification {profile} returned no task id")
-    waited = launch.wait(
-        job_id,
-        timeout_seconds=operation.timeout_seconds,
-        reference=started.get("reference"),
+    waited = _await_verification(
+        profile, job_id, started.get("reference"), operation.timeout_seconds
     )
-    # `launch.wait` can return the last non-terminal view at the exact instant
-    # the wrapper's descriptor timeout expires.  Reconcile against pueue's
-    # current record before deciding, so a terminal timeout is reported as such
-    # instead of being mislabelled `running`.
-    try:
-        task = launch.find_task(
-            pueue.tasks(), waited.get("job_id", job_id), started.get("reference")
-        )
-    except PueueError:
-        task = None
-    if task is not None and (
-        task.terminal or waited.get("phase") in {"running", "queued", "stashed"}
-    ):
-        waited = {**waited, **launch.job_view(task)}
     if waited.get("phase") != "succeeded":
         raise BatchRefusal(
             "verify_failed",
             _verification_failure_detail(profile, waited, operation.timeout_seconds),
-            timed_out=waited.get("phase") == "timeout"
-            or waited.get("wait_timed_out") is True,
+            timed_out=waited.get("phase") == "timeout",
         )
     after = _worktree_attestation(path)
     clean_candidate = (
