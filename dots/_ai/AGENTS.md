@@ -54,11 +54,9 @@ instructions, skills, and memory.
   a sentence or short paragraph on how it applied to this change, with evidence
   where there is any (a command and its result line, `path:line`, a grep
   count). Considering each item is the point; a bare tick records nothing.
-- Before compaction or stopping mid-work, leave a handoff: active job IDs and
-  worktrees, Bead IDs and claims, exact Git state, open PRs with their head and
-  unresolved-thread count, changed files, verification already run, and the
-  single next action. On re-entry, verify those records instead of trusting a
-  summary.
+- Before compaction or stopping mid-work, leave a handoff, and on re-entry
+  verify its records against their owners instead of trusting a summary. Load
+  `handoff` for both checklists.
 
 ## Filesystem and private data
 

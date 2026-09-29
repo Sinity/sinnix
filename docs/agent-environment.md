@@ -105,6 +105,7 @@ Servers: context7, github, lynchpin, sinex.
 | `enrichment-pass` | Process a Sinnix runtime, shell, session, Lynchpin, and journal state bundle into a versioned narrative and structured state delta for headless enrichment. |
 | `grilling` | Grill the user relentlessly about a plan or design. Use when the user wants to stress-test a plan before building, or uses any 'grill' trigger phrases. |
 | `grok` | Audit an entire codebase systematically by measuring and partitioning it, dispatching tiered review lanes, triaging recurring defect patterns, and filing concrete findings when one context cannot cover the target. |
+| `handoff` | Leave or resume a handoff when stopping mid-work, before compaction, passing work to another agent, or re-entering after one — job IDs, worktrees, Git and PR state, next action. |
 | `html-report` | Produce self-contained interactive HTML reports, reviews, censuses, dashboards, plans, incident timelines, or comparisons for human readers. |
 | `investigate` | Diagnose a bug, regression, flaky test, performance problem, incident, or missing artifact, or verify a contested claim, through reproduction, measurement, and preserved evidence. |
 | `lynchpin` | Query or develop Lynchpin evidence sources, materialization, DuckDB substrate generations, graphs, analyses, Chisel reports, Polylogue boundaries, and MCP evidence products. |

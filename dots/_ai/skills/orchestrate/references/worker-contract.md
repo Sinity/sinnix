@@ -30,8 +30,8 @@ names, and exits with one result document.
    Work exhaustively and batch greedily: when a test, your review, or reading
    the code shows a defect, first find every sibling of it (the same class on
    other routes, callers, and records, and inside your own fixes), then fix
-   them all together. On earlier PRs, most findings after the first review
-   round were bugs inside a fix or the same class at a site the fix missed.
+   them all together. Most findings in later review rounds are a bug inside a
+   fix or the same class at a site the fix missed.
 3. **Verify the change.** Run the snapshot's `verification_commands` when the
    task names them, through the route in step 7, after the owned source patch
    is coherent. Run a shared selector once for all assigned Beads that name
