@@ -89,7 +89,7 @@ def build_tool(action: Action, runtime: Runtime) -> Tool:
         **dict.fromkeys(action.Input.model_fields, (Any, None)),
     )
 
-    async def invoke(**kwargs: Any) -> Any:
+    async def invoke(sinnix_context: Any = None, **kwargs: Any) -> Any:
         remote = runtime.transport == REMOTE_TRANSPORT
         record = calllog.CallRecord(
             action=action.name,
@@ -97,6 +97,7 @@ def build_tool(action: Action, runtime: Runtime) -> Tool:
             arguments={
                 key: value for key, value in kwargs.items() if value is not None
             },
+            http=calllog.http_request(sinnix_context),
         )
         if remote:
             kwargs = _clamp_remote_wait(action, kwargs, record)
@@ -214,7 +215,9 @@ def build_tool(action: Action, runtime: Runtime) -> Tool:
         parameters=action.input_schema(),
         fn_metadata=metadata,
         is_async=True,
-        context_kwarg=None,
+        # The SDK passes its request context here; the call log reads the
+        # HTTP request's arrival time and correlation headers from it.
+        context_kwarg="sinnix_context",
         annotations=action.annotations,
         meta={
             "sinnix.family": action.family.value,

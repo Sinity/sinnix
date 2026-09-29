@@ -13,7 +13,6 @@ the full request and response stay in the audit and result stores.
 
 from __future__ import annotations
 
-import contextvars
 import json
 import sys
 import time
@@ -36,59 +35,51 @@ _SUMMARY_LIMIT = 4_096
 
 @dataclass(frozen=True)
 class HttpRequest:
-    """What the ASGI layer knows about the request carrying a call."""
+    """What the HTTP request carrying a call says about it."""
 
-    received: float
+    received: float | None
     request_id: str | None
     session_id: str | None
-    task_id: int
 
 
-_HTTP_REQUEST: contextvars.ContextVar[HttpRequest | None] = contextvars.ContextVar(
-    "sinnix_gateway_http_request", default=None
-)
-
-
-def current_http_request() -> HttpRequest | None:
-    """The HTTP request this task is serving, if the call runs inside it.
-
-    Per-request (2026-07-28) calls, which the tunnel sends, run in the ASGI
-    request task. A 2025 session runs tools in a task spawned from its first
-    request, which would inherit that request's context; such calls report
-    no request rather than another one's.
-    """
-    request = _HTTP_REQUEST.get()
-    if request is None or request.task_id != anyio.get_current_task().id:
-        return None
-    return request
+# The ASGI scope key under which the middleware stamps a request's arrival.
+_RECEIVED = "sinnix.received"
 
 
 class RequestContextMiddleware:
-    """Expose arrival time and correlation headers to the call that follows."""
+    """Stamp each HTTP request's arrival time into its scope.
+
+    The MCP SDK hands every tool call its own HTTP request (in both the
+    per-request and the session protocols), so the call reads its arrival
+    time and correlation headers from that request, not from whichever task
+    happens to run it.
+    """
 
     def __init__(self, app: Callable[..., Any]):
         self.app = app
 
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
-        if scope.get("type") != "http":
-            await self.app(scope, receive, send)
-            return
-        headers = {
-            key.decode("latin-1").lower(): value.decode("latin-1")
-            for key, value in scope.get("headers", [])
-        }
-        token = _HTTP_REQUEST.set(
-            HttpRequest(
-                received=time.monotonic(),
-                request_id=_bounded(headers.get("x-request-id")),
-                session_id=_bounded(headers.get("mcp-session-id")),
-                task_id=anyio.get_current_task().id,
-            )
-        )
-        try:
-            await self.app(scope, receive, send)
-        finally:
-            _HTTP_REQUEST.reset(token)
+        if scope.get("type") == "http":
+            scope[_RECEIVED] = time.monotonic()
+        await self.app(scope, receive, send)
+
+
+def http_request(context: Any) -> HttpRequest | None:
+    """The HTTP request behind an MCP tool context, if the call came over HTTP."""
+    try:
+        request = context.request_context.request
+    except (AttributeError, ValueError):
+        return None
+    scope = getattr(request, "scope", None)
+    headers = getattr(request, "headers", None)
+    if not isinstance(scope, Mapping) or headers is None:
+        return None
+    received = scope.get(_RECEIVED)
+    return HttpRequest(
+        received=received if isinstance(received, float) else None,
+        request_id=_bounded(headers.get("x-request-id")),
+        session_id=_bounded(headers.get("mcp-session-id")),
+    )
 
 
 def _bounded(value: str | None, limit: int = 256) -> str | None:
@@ -166,7 +157,7 @@ class CallRecord:
     effect: str
     arguments: Mapping[str, Any]
     started: float = field(default_factory=time.monotonic)
-    http: HttpRequest | None = field(default_factory=current_http_request)
+    http: HttpRequest | None = None
     thread_started: float | None = None
     budget_seconds: float | None = None
     budget_exceeded: bool = False

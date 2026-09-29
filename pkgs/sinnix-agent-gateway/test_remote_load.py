@@ -467,3 +467,30 @@ def test_serve_http_logs_the_tunnel_request_id_and_drains_on_sigterm(
         event.get("event") == "gateway.shutdown" and event["phase"] == "draining"
         for event in events
     )
+
+
+def test_call_correlation_comes_from_the_calls_own_http_request() -> None:
+    """Fails if a call's request id depends on which task runs the tool.
+
+    A 2025 session runs tools outside the ASGI request task, so a live
+    session call logged request_id null. The id and arrival time now come
+    from the HTTP request the SDK hands the tool context.
+    """
+    from types import SimpleNamespace
+
+    from starlette.requests import Request
+
+    scope = {
+        "type": "http",
+        "headers": [(b"x-request-id", b"wfr_run/7"), (b"mcp-session-id", b"s-1")],
+        calllog._RECEIVED: 12.5,
+    }
+    context = SimpleNamespace(request_context=SimpleNamespace(request=Request(scope)))
+
+    http = calllog.http_request(context)
+
+    assert http == calllog.HttpRequest(
+        received=12.5, request_id="wfr_run/7", session_id="s-1"
+    )
+    assert calllog.http_request(None) is None
+    assert calllog.http_request(SimpleNamespace(request_context=None)) is None
