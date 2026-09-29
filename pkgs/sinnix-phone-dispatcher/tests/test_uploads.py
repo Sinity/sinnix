@@ -200,3 +200,24 @@ def test_repair_rejects_changed_destination_and_invalid_source(monkeypatch, tmp_
 def test_repair_rejects_active_or_future_day(tmp_path):
     with pytest.raises(ValueError, match="closed UTC day"):
         uploads_mod.repair_event_day("99991231", tmp_path / "source", "0" * 64)
+
+
+def test_a_read_back_mismatch_is_not_acknowledged(monkeypatch, tmp_path) -> None:
+    """Anti-vacuity: the ack must come from the retained file, so a store that
+    keeps different bytes than it was handed must answer ok:false."""
+    monkeypatch.setattr(uploads_mod, "UPLOAD_LANES", _lanes(tmp_path))
+    monkeypatch.setattr(
+        uploads_mod, "AMBIENT_PROGRESS_MARKER", tmp_path / "ambient-progress"
+    )
+    real = uploads_mod.atomic_publish
+
+    def lossy(target, body, **kw):
+        return real(target, body[:-1], **kw)
+
+    monkeypatch.setattr(uploads_mod, "atomic_publish", lossy)
+    body = b"chunk bytes"
+    status, payload = uploads_mod.store_upload(
+        "ambient", "clip.m4a", body, hashlib.sha256(body).hexdigest()
+    )
+    assert status == HTTPStatus.INTERNAL_SERVER_ERROR and payload["ok"] is False
+    assert not (tmp_path / "ambient-progress").exists()

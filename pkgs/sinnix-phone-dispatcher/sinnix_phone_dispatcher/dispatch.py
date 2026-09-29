@@ -20,8 +20,12 @@ from .state import ensure_dirs, notify_phone
 def cmd_dispatch(args: argparse.Namespace) -> int:
     """Execute every intent the drain collected.
 
-    Intents are deleted only after execution, and execution is idempotent, so
-    the failure mode of a crash mid-sweep is a repeat rather than a loss.
+    A file is deleted only when execute() answers `ok`: a completed effect,
+    this time or an earlier one under the same token. Every other outcome --
+    failed, partial, indeterminate, a token conflict -- keeps the file and
+    fails the run, because the file is the only record of what was asked.
+    A crash mid-sweep therefore repeats a request rather than losing it, and
+    the token ledger decides whether a repeat may act.
     """
     ensure_dirs()
     outbox = Path(args.outbox)
@@ -42,16 +46,17 @@ def cmd_dispatch(args: argparse.Namespace) -> int:
             failed += 1
             continue
         result = execute(intent)
-        if result.get("ok") or result.get("duplicate"):
+        if result.get("ok"):
             path.unlink(missing_ok=True)
             executed += 1
         else:
             print(
-                f"dispatch: {path.name} failed: {result.get('detail')}", file=sys.stderr
+                f"dispatch: {path.name} {result.get('outcome')}: {result.get('detail')}",
+                file=sys.stderr,
             )
             failed += 1
-    print(f"dispatch: executed {executed}, failed {failed}")
-    return 0
+    print(f"dispatch: executed {executed}, kept {failed}")
+    return 1 if failed else 0
 
 
 def cmd_notify(args: argparse.Namespace) -> int:

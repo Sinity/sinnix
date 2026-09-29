@@ -2,7 +2,7 @@
 guard (only voice_note/trace intents score; every other recorded kind must
 not).
 
-Mutations that would fail these: removing the `seen_token` check at the top
+Mutations that would fail these: removing the token-record check at the top
 of execute() (so a re-drained intent runs its side effect twice) fails
 test_second_execution_with_same_token_is_a_noop_duplicate; moving
 trigger_score() outside the `if kind in ("voice_note", "trace")` guard (so
@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 
+import pytest
 import sinnix_phone_dispatcher.execute as execute_mod
 
 
@@ -36,7 +37,7 @@ def test_second_execution_with_same_token_is_a_noop_duplicate(monkeypatch) -> No
     second = execute_mod.execute(dict(intent))
 
     assert first.get("duplicate") is not True
-    assert second == {"ok": True, "duplicate": True, "kind": "steering_resolve"}
+    assert second == {**first, "duplicate": True}
     # The steer subprocess ran exactly once: the duplicate branch returns
     # before the kind dispatch, so a re-drained intent never re-executes the
     # outward action.
@@ -133,3 +134,174 @@ def test_job_answer_is_private_and_rejects_path_traversal(
         is False
     )
     assert not (tmp_path / "escape.json").exists()
+
+
+def _resolve(token: str, item: str = "a") -> dict:
+    return {
+        "kind": "steering_resolve",
+        "id": item,
+        "outcome": "done",
+        "send_token": token,
+    }
+
+
+def test_token_is_bound_to_content_and_a_failure_stays_retryable(monkeypatch):
+    """Anti-vacuity: the conflicting call must not reach steer (calls stays 2),
+    and the failed-then-retried token must reach it again (not return the
+    recorded failure)."""
+    calls = []
+
+    def steer(*args):
+        calls.append(args)
+        return (2, "store busy") if len(calls) == 1 else (0, "done")
+
+    monkeypatch.setattr(execute_mod, "steer", steer)
+    intent = _resolve("retry")
+
+    failed = execute_mod.execute(intent)
+    assert failed["ok"] is False and failed["outcome"] == "failed"
+    conflict = execute_mod.execute(_resolve("retry", item="b"))
+    assert conflict["ok"] is False and conflict["outcome"] == "conflict"
+    retried = execute_mod.execute(intent)
+    assert retried["ok"] is True and retried["outcome"] == "completed"
+    repeat = execute_mod.execute(intent)
+    assert repeat["duplicate"] is True and repeat["ok"] is True
+    assert len(calls) == 2
+
+
+def test_an_interrupted_effect_is_not_replayed(monkeypatch):
+    """Anti-vacuity: a second call that re-ran steer would make calls == 2."""
+    calls = []
+
+    def uncertain(*args):
+        calls.append(args)
+        raise TimeoutError("steer did not answer")
+
+    monkeypatch.setattr(execute_mod, "steer", uncertain)
+    intent = {"kind": "ready_send", "id": "a", "send_token": "uncertain"}
+    first = execute_mod.execute(intent)
+    second = execute_mod.execute(intent)
+    assert first["outcome"] == second["outcome"] == "indeterminate"
+    assert first["ok"] is second["ok"] is False
+    assert second.get("duplicate") is not True
+    assert len(calls) == 1
+
+
+def test_an_in_flight_record_left_by_a_dead_process_is_indeterminate(
+    monkeypatch, isolated_state_dirs
+):
+    """Anti-vacuity: steer is never called, so a replay of the stale slot fails."""
+    monkeypatch.setattr(
+        execute_mod, "steer", lambda *a: pytest.fail("replayed an in-flight effect")
+    )
+    intent = _resolve("crashed")
+    isolated_state_dirs["tokens_dir"].mkdir(parents=True)
+    execute_mod._record("crashed", execute_mod._content_digest(intent), "in_flight")
+    assert execute_mod.execute(intent)["outcome"] == "indeterminate"
+
+
+def test_a_legacy_token_record_is_not_guessed_at(monkeypatch, isolated_state_dirs):
+    monkeypatch.setattr(
+        execute_mod, "steer", lambda *a: pytest.fail("acted on an unmatched token")
+    )
+    isolated_state_dirs["tokens_dir"].mkdir(parents=True)
+    (isolated_state_dirs["tokens_dir"] / "old").write_text("2026-09-01T00:00:00Z ok\n")
+    result = execute_mod.execute(_resolve("old"))
+    assert result["ok"] is False and result["outcome"] == "indeterminate"
+
+
+def test_a_malformed_token_is_refused_and_no_token_runs_unkeyed(
+    monkeypatch, tmp_path, isolated_state_dirs
+):
+    """The live /job-answer route sends no token; it must still deliver."""
+    monkeypatch.setattr(
+        execute_mod, "steer", lambda *a: pytest.fail("ran under a refused token")
+    )
+    for bad in ("..", ".hidden", "a/b", 7):
+        refused = execute_mod.execute(_resolve(bad))
+        assert refused["ok"] is False and refused["outcome"] == "refused"
+
+    monkeypatch.setenv("SINNIX_AGENT_ANSWER_DIR", str(tmp_path / "answers"))
+    answered = execute_mod.execute({"kind": "job_answer", "job_id": "7", "answer": "y"})
+    assert answered["ok"] is True and answered["outcome"] == "completed"
+    assert (tmp_path / "answers" / "7.json").is_file()
+    assert not isolated_state_dirs["tokens_dir"].exists() or not any(
+        p for p in isolated_state_dirs["tokens_dir"].iterdir() if p.name[0] != "."
+    )
+
+
+def test_ritual_forecasts_keep_zero_and_default_only_the_absent(monkeypatch):
+    """Anti-vacuity: `probability or 0.5` turns the explicit 0 into "0.5"."""
+    forecasts = []
+    monkeypatch.setattr(
+        execute_mod, "steer", lambda *a: forecasts.append(a[-1]) or (0, "ok")
+    )
+    result = execute_mod.execute(
+        {
+            "kind": "steering_ritual",
+            "send_token": "forecasts",
+            "intentions": [
+                {"id": "a", "probability": 0},
+                {"id": "b"},
+                {"id": "c", "probability": None},
+                {"id": "d", "probability": 0.9},
+            ],
+        }
+    )
+    assert forecasts == ["0", "0.5", "0.5", "0.9"]
+    assert result["ok"] is True and result["outcome"] == "completed"
+    assert result["added"] == result["total"] == 4
+
+
+def test_a_partial_ritual_is_not_success_and_not_replayed(
+    monkeypatch, isolated_state_dirs
+):
+    """Anti-vacuity: a replay would append to forecasts; a success receipt or
+    a `duplicate` marker would let the phone forget an unfinished request."""
+    forecasts = []
+
+    def steer(*args):
+        forecasts.append(args[-1])
+        return (0, "ok") if len(forecasts) == 1 else (2, "rejected")
+
+    monkeypatch.setattr(execute_mod, "steer", steer)
+    intent = {
+        "kind": "steering_ritual",
+        "send_token": "ritual",
+        "intentions": [{"id": "a", "probability": 0}, {"id": "b"}],
+    }
+    result = execute_mod.execute(intent)
+    assert result["ok"] is False and result["outcome"] == "partial"
+    assert (result["added"], result["total"]) == (1, 2)
+    again = execute_mod.execute(intent)
+    assert again["ok"] is False and again["outcome"] == "partial"
+    assert again.get("duplicate") is not True
+    assert len(forecasts) == 2
+    (receipt,) = [
+        json.loads(p.read_text()) for p in isolated_state_dirs["receipts_dir"].iterdir()
+    ]
+    assert receipt["title"] == "Intentions incomplete"
+    assert receipt["body"] == "1 of 2 committed for today"
+
+
+def test_an_all_failed_ritual_is_a_retryable_failure(monkeypatch, isolated_state_dirs):
+    calls = []
+    monkeypatch.setattr(
+        execute_mod, "steer", lambda *a: calls.append(a) or (2, "rejected")
+    )
+    intent = {
+        "kind": "steering_ritual",
+        "send_token": "all-failed",
+        "intentions": [{"id": "a"}, {"id": "b", "probability": 2}],
+    }
+    first = execute_mod.execute(intent)
+    second = execute_mod.execute(intent)
+    assert first["ok"] is False and first["outcome"] == "failed"
+    assert second["ok"] is False and second["outcome"] == "failed"
+    # The out-of-range forecast never reaches steer; the valid row is retried.
+    assert len(calls) == 2
+    titles = {
+        json.loads(p.read_text())["title"]
+        for p in isolated_state_dirs["receipts_dir"].iterdir()
+    }
+    assert titles == {"Intentions not recorded"}
