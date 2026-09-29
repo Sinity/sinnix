@@ -1,11 +1,11 @@
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: de9a940956a1c8be24adc564cd477c30163c0f2209568ddac2936341e1420a1c -->
+<!-- gateway-catalog-sha256: 5d5402ee2cde38b45c16a660d5b45ab2678230f221f5f5a9fac059aa0e22e8ad -->
 # Sinnix Agent Gateway reference
 
 Generated from `sinnix_agent_gateway.actions`. Every action is one MCP tool whose `tools/list` input schema is the one below; the catalog hash changes when any principal-visible action catalog row changes, including its schema, principal set, example or affordance.
 
-Revision: `v3-typed-actions`. Catalog SHA-256: `de9a940956a1c8be24adc564cd477c30163c0f2209568ddac2936341e1420a1c`.
+Revision: `v3-typed-actions`. Catalog SHA-256: `5d5402ee2cde38b45c16a660d5b45ab2678230f221f5f5a9fac059aa0e22e8ad`.
 
 ## Invocation
 
@@ -26886,8 +26886,8 @@ Input schema:
       "default": null,
       "description": "Unix timestamp after which the call is refused."
     },
-    "idempotency_key": {
-      "description": "The key that call carried. It is the operation's handle.",
+    "key": {
+      "description": "The idempotency_key that call carried: the operation's handle.",
       "maxLength": 256,
       "minLength": 1,
       "type": "string"
@@ -26921,7 +26921,7 @@ Input schema:
   },
   "required": [
     "action",
-    "idempotency_key"
+    "key"
   ],
   "type": "object"
 }
@@ -26936,7 +26936,7 @@ After a lost response:
 ```json
 {
   "action": "beads.changeset",
-  "idempotency_key": "curation-2026-09-29-creates"
+  "key": "curation-2026-09-29-creates"
 }
 ```
 

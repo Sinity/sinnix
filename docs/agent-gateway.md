@@ -36,7 +36,7 @@ owner-only (0700), and launch inputs are excluded from backups.
 
 Actions are declared once in `sinnix_agent_gateway/actions/` as an `Action` with an `Input` model, an `Output` model, a handler, a verb family, principals, aliases, affordances and examples. The family (`status`, `catalog`, `query`, `get`, `context`, `events`, `wait`, `change`, `operate`, `run`) drives the MCP annotations and the effect class: read families are audited reads; `change`, `operate` and `run` require an `idempotency_key`, accept `preconditions`, and replay a confirmed response for a repeated key. The durable outcome is pending, confirmed or indeterminate. A concurrent pending call is refused; interruption leaves an indeterminate outcome and never triggers an automatic effect retry. `operations.run` reconciles an interrupted call with agentctl through a durable owner launch identity. Reducer-backed machine actions and process stop recover only exact confirmed owner receipts, including parameters and target identity; other interrupted mutations remain indeterminate. Gateway response replay does not imply owner deduplication or atomic preconditions. Preconditions are best-effort checks unless an owner explicitly guarantees atomic comparison and mutation.
 
-A mutation's handle is its action and the `idempotency_key` the caller chose before sending it. When a response is lost in transit (a tunnel 502 or deadline), `audit.operation` reads the durable outcome by that handle without the request body and without running anything: `confirmed` returns the committed response with its created ids, `pending` is still running, `indeterminate` ended without a confirmed outcome, and `unknown` never reached the gateway.
+A mutation's handle is its action and the `idempotency_key` the caller chose before sending it. When a response is lost in transit (a tunnel 502 or deadline), `audit.operation` reads the durable outcome by that handle (`action` and `key`) without the request body and without running anything: `confirmed` returns the committed response with its created ids, `pending` is still running, `indeterminate` ended without a confirmed outcome, and `unknown` never reached the gateway.
 
 Row revisions are signed 64-bit integers that exceed what a double-decoding JSON client keeps exactly. Every `revision`, `*_revision` and `expected_version` the gateway returns is a decimal string, and `expected_version` accepts that string back unchanged. Beads orders name their direction: `created`, `updated` and `closed` take `newest_first` (the default) or `oldest_first`; other fields take `ascending` or `descending`.
 
@@ -184,7 +184,7 @@ changing the gateway action family cannot suppress a client-side approval policy
 
 ## Generated reference
 
-This section is generated from the action set. Revision `v3-typed-actions`, catalog SHA-256 `de9a940956a1c8be24adc564cd477c30163c0f2209568ddac2936341e1420a1c`.
+This section is generated from the action set. Revision `v3-typed-actions`, catalog SHA-256 `5d5402ee2cde38b45c16a660d5b45ab2678230f221f5f5a9fac059aa0e22e8ad`.
 
 The full schemas and examples are in [the generated gateway reference](generated/agent-gateway-reference.md). The matching agent skill is [agent-gateway](../dots/_ai/skills/agent-gateway/SKILL.md).
 

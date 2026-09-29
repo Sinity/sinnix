@@ -281,7 +281,8 @@ def test_query_sections_and_actions_revision(tmp_path: Path) -> None:
     assert units["available"] and units["total"] == 3 and units["next_cursor"] == 2
     assert units["rows"][0]["unit"] == "beta.service"
     revision = call(runtime, "machine.query", {"operation": "actions"})["data"]
-    assert revision["revision"] == 17 and revision["schema_name"] == "sinnix-ops-v1"
+    # Revisions leave as exact decimal strings (sinnix_agent_gateway.revisions).
+    assert revision["revision"] == "17" and revision["schema_name"] == "sinnix-ops-v1"
     bad = call(runtime, "machine.query", {"operation": "actions", "cursor": 3})
     assert bad["error"]["code"] == "invalid_request"
 
@@ -296,7 +297,7 @@ def test_snapshot_composes_sections_with_availability(tmp_path: Path) -> None:
     assert [row["unit"] for row in data["units"]["data"]["notable"]] == ["beta.service"]
     assert data["gpu"]["available"] is False and data["network"]["available"] is False
     assert data["incidents"]["data"][-1] == {"unit": "alpha.service", "to": "active"}
-    assert data["ops_revision"]["data"]["revision"] == 17
+    assert data["ops_revision"]["data"]["revision"] == "17"
 
 
 def test_operate_and_units_operate_go_through_reducer(tmp_path: Path) -> None:

@@ -1,5 +1,5 @@
 {
-  "action_catalog_hash": "de9a940956a1c8be24adc564cd477c30163c0f2209568ddac2936341e1420a1c",
+  "action_catalog_hash": "5d5402ee2cde38b45c16a660d5b45ab2678230f221f5f5a9fac059aa0e22e8ad",
   "examples": [
     {
       "action": "gateway.status",
@@ -2223,7 +2223,7 @@
       "family": "get",
       "input": {
         "action": "beads.changeset",
-        "idempotency_key": "curation-2026-09-29-creates"
+        "key": "curation-2026-09-29-creates"
       },
       "title": "After a lost response"
     },

@@ -1558,16 +1558,13 @@ class Runtime:
         raise ProtocolError(
             "conflict",
             "matching idempotency request is pending; read audit.operation "
-            "with this action and idempotency_key until it is confirmed, or "
+            "with this action and its idempotency_key as key until it is confirmed, or "
             "retry this exact request with the same key, to receive its "
             "committed result",
             details={
                 "idempotency_key": context.idempotency_key,
                 "idempotency_state": "pending",
-                "operation": {
-                    "action": action.name,
-                    "idempotency_key": context.idempotency_key,
-                },
+                "operation": {"action": action.name, "key": context.idempotency_key},
                 "retry_same_request": True,
             },
         )

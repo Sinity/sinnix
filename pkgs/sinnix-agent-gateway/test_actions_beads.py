@@ -198,7 +198,7 @@ def test_a_lost_changeset_response_is_recovered_by_its_key(tmp_path):
     assert committed["result"]["outcome"] == "ok", committed
     owner_calls = len(commands(log))
 
-    lookup = {"action": "beads.changeset", "idempotency_key": "curation-creates"}
+    lookup = {"action": "beads.changeset", "key": "curation-creates"}
     recovered = call(server, "audit.operation", lookup)
     assert recovered["result"]["outcome"] == "ok", recovered
     data = recovered["data"]
@@ -207,9 +207,7 @@ def test_a_lost_changeset_response_is_recovered_by_its_key(tmp_path):
     assert data["receipt_ref"] == committed["receipt"]["ref"]
     assert len(commands(log)) == owner_calls
 
-    never = call(
-        server, "audit.operation", {**lookup, "idempotency_key": "never-sent"}
-    )["data"]
+    never = call(server, "audit.operation", {**lookup, "key": "never-sent"})["data"]
     assert never["state"] == "unknown" and never["response"] is None
 
 
