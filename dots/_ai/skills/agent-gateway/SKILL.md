@@ -5,7 +5,7 @@ description: Use when invoking, inspecting, or documenting Sinnix Agent Gateway 
 
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: cff2988265e21bd3255fcf6ea6f8fd7d77e89b728e09e22ad8e5715ed619cf2e -->
+<!-- gateway-catalog-sha256: de9a940956a1c8be24adc564cd477c30163c0f2209568ddac2936341e1420a1c -->
 
 # Agent Gateway
 
@@ -111,6 +111,7 @@ Effectful actions (families change, operate, run) require `idempotency_key`. Con
 - `processes.get` — Describe one process: cmdline, cwd, exe, redacted env, cgroup/unit, parent, children, sockets, cpu and memory.
 - `artifacts.get` — Metadata of one artifact without its bytes.
 - `audit.receipt` — Read one principal-scoped audit receipt by ref or id.
+- `audit.operation` — Every change, operate or run call is addressed by the idempotency_key its caller chose before sending it. When the response was lost (a tunnel 502 or deadline), read the outcome here instead of sending the mutation again: a confirmed operation returns its committed response with the created ids, and nothing runs twice.
 - `results.get` — Read one immutable stored response snapshot by ref or id.
 
 ### context
@@ -179,4 +180,4 @@ Effectful actions (families change, operate, run) require `idempotency_key`. Con
 
 The complete schemas and examples are in `docs/generated/agent-gateway-reference.md`.
 
-Catalog revision: `v3-typed-actions`. Catalog SHA-256: `cff2988265e21bd3255fcf6ea6f8fd7d77e89b728e09e22ad8e5715ed619cf2e`.
+Catalog revision: `v3-typed-actions`. Catalog SHA-256: `de9a940956a1c8be24adc564cd477c30163c0f2209568ddac2936341e1420a1c`.

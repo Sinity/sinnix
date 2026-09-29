@@ -157,23 +157,37 @@ def test_native_mutation_preserves_body_and_owner_preconditions(tmp_path):
     assert raised.value.details["owner_error"]["detail"] == "row revision changed"
 
 
-def test_date_order_lists_newest_first_and_reverse_lists_oldest(tmp_path):
-    """Fails if a created-order listing puts old tasks first by default.
+def test_date_order_is_named_newest_or_oldest_first(tmp_path):
+    """Fails if a created order can list the oldest tasks without asking.
 
-    A ChatGPT curation session read reverse=true as "newest first" and got
-    the oldest tasks; the direction is part of the documented contract.
+    A ChatGPT curation session sent {field: created, reverse: true} meaning
+    "newest first" and got July records. The public order names its
+    direction, and the ambiguous flag is refused rather than guessed.
     """
+    from pydantic import ValidationError
+    from sinnix_agent_gateway.actions.beads import Order
+
     beads, _ = beads_service(tmp_path, "operator")
     state = tmp_path / "owner-state.json"
     value = json.loads(state.read_text())
-    value["items"][0]["created_at"] = "2026-09-01T00:00:00Z"
+    value["items"][0]["created_at"] = "2026-07-01T00:00:00Z"
     value["items"][1]["created_at"] = "2026-09-28T00:00:00Z"
     state.write_text(json.dumps(value))
 
-    newest = beads.query(project_ids=["fixture"], order={"field": "created"})
-    oldest = beads.query(
-        project_ids=["fixture"], order={"field": "created", "reverse": True}
-    )
+    def listed(order: Order) -> list[str]:
+        rows = beads.query(project_ids=["fixture"], order=order.owner_order())
+        return [row["id"] for row in rows["items"]]
 
-    assert [row["id"] for row in newest["items"]] == ["fixture-2", "fixture-1"]
-    assert [row["id"] for row in oldest["items"]] == ["fixture-1", "fixture-2"]
+    assert listed(Order(field="created")) == ["fixture-2", "fixture-1"]
+    assert listed(Order(field="created", direction="newest_first")) == [
+        "fixture-2",
+        "fixture-1",
+    ]
+    assert listed(Order(field="created", direction="oldest_first")) == [
+        "fixture-1",
+        "fixture-2",
+    ]
+    with pytest.raises(ValidationError):
+        Order.model_validate({"field": "created", "reverse": True})
+    with pytest.raises(ValidationError):
+        Order(field="created", direction="ascending")

@@ -62,22 +62,46 @@ _BEAD_ID = Field(min_length=1, max_length=128)
 _KINDS = ("project", "bead", "task_authority")
 
 
-class Order(GatewayModel):
-    """Result order, as Beads applies it to its own reads."""
+_NEWEST_FIRST_FIELDS = frozenset({"created", "updated", "closed"})
 
-    field: OrderField = Field(
+
+class Order(GatewayModel):
+    """Result order. The direction is named, never inferred from "reverse"."""
+
+    field: OrderField
+    direction: (
+        Literal["newest_first", "oldest_first", "ascending", "descending"] | None
+    ) = Field(
+        default=None,
         description=(
-            "created, updated and closed sort newest first; the other fields "
-            "sort ascending (priority 0 first)."
-        )
-    )
-    reverse: bool = Field(
-        default=False,
-        description=(
-            "Invert that order. For created, updated or closed, reverse=true "
-            "lists the OLDEST first; omit it for the newest."
+            "created, updated and closed take newest_first (the default) or "
+            "oldest_first; the other fields take ascending (the default; "
+            "priority 0 first) or descending."
         ),
     )
+
+    @model_validator(mode="after")
+    def direction_fits_field(self) -> Order:
+        dated = self.field in _NEWEST_FIRST_FIELDS
+        if self.direction is not None and dated != (
+            self.direction in {"newest_first", "oldest_first"}
+        ):
+            raise ValueError(
+                f"order {self.field!r} takes "
+                + (
+                    "newest_first or oldest_first"
+                    if dated
+                    else "ascending or descending"
+                )
+            )
+        return self
+
+    def owner_order(self) -> dict[str, Any]:
+        """Beads' own order: dates run newest first, the rest ascending."""
+        return {
+            "field": self.field,
+            "reverse": self.direction in {"oldest_first", "descending"},
+        }
 
 
 class GraphQuery(GatewayModel):
@@ -232,7 +256,7 @@ def _query(runtime: Runtime, inp: QueryInput) -> BeadQuery:
         filters=inp.filters,
         expression=inp.expression,
         native_filters=inp.native_filters,
-        order=inp.order.model_dump() if inp.order else None,
+        order=inp.order.owner_order() if inp.order else None,
         includes=list(inp.includes),
         limit=inp.limit,
         cursor=inp.cursor,

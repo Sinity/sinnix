@@ -76,6 +76,54 @@ def _receipt(runtime: Runtime, inp: ReceiptInput) -> Receipt:
     return Receipt(ref=f"sinnix://receipts/{raw['receipt_id']}", **raw)
 
 
+class OperationInput(RequestControls):
+    action: str = Field(
+        min_length=3,
+        max_length=128,
+        description="The mutating action that was called, e.g. beads.changeset.",
+    )
+    idempotency_key: str = Field(
+        min_length=1,
+        max_length=256,
+        description="The key that call carried. It is the operation's handle.",
+    )
+
+
+class Operation(GatewayModel):
+    action: str
+    idempotency_key: str
+    state: Literal["unknown", "pending", "confirmed", "indeterminate"] = Field(
+        description=(
+            "unknown: the call never reached the gateway, so it did nothing. "
+            "pending: it is still running; read again. confirmed: it "
+            "committed, and response is its complete answer. indeterminate: "
+            "it ended without a confirmed outcome; check the owner before any "
+            "new effect."
+        )
+    )
+    response: dict[str, Any] | None = Field(
+        default=None,
+        description="The committed response envelope, created ids included.",
+    )
+    receipt_ref: str | None = None
+    request_sha256: str | None = None
+    created_at: float | None = None
+    updated_at: float | None = None
+    affordances: list[str] = Field(default_factory=list)
+
+
+def _operation(runtime: Runtime, inp: OperationInput) -> Operation:
+    row = runtime.audit.operation(inp.action, inp.idempotency_key)
+    receipt_id = row.pop("receipt_id", None)
+    return Operation(
+        action=inp.action,
+        idempotency_key=inp.idempotency_key,
+        receipt_ref=f"sinnix://receipts/{receipt_id}" if receipt_id else None,
+        affordances=["audit.receipt"] if receipt_id else [],
+        **row,
+    )
+
+
 class ResultInput(RequestControls):
     ref: str | None = Field(
         default=None, pattern=r"^sinnix://(?:results|contexts)/[^/]{1,128}$"
@@ -210,6 +258,36 @@ ACTIONS: tuple[Action, ...] = (
             Example(
                 title="By ref",
                 input={"ref": "sinnix://receipts/00000000-0000-0000-0000-000000000000"},
+            ),
+        ),
+    ),
+    Action(
+        name="audit.operation",
+        family=VerbFamily.GET,
+        owner="audit",
+        summary="Read one mutation's durable outcome by its action and idempotency key.",
+        documentation=(
+            "Every change, operate or run call is addressed by the "
+            "idempotency_key its caller chose before sending it. When the "
+            "response was lost (a tunnel 502 or deadline), read the outcome "
+            "here instead of sending the mutation again: a confirmed "
+            "operation returns its committed response with the created ids, "
+            "and nothing runs twice."
+        ),
+        Input=OperationInput,
+        Output=Operation,
+        handler=_operation,
+        principals=ALL_PRINCIPALS,
+        resource_kinds=("receipt",),
+        affordances=("audit.receipt",),
+        aliases=("lost response", "did my write commit", "operation status"),
+        examples=(
+            Example(
+                title="After a lost response",
+                input={
+                    "action": "beads.changeset",
+                    "idempotency_key": "curation-2026-09-29-creates",
+                },
             ),
         ),
     ),

@@ -1,5 +1,5 @@
 {
-  "action_catalog_hash": "cff2988265e21bd3255fcf6ea6f8fd7d77e89b728e09e22ad8e5715ed619cf2e",
+  "action_catalog_hash": "de9a940956a1c8be24adc564cd477c30163c0f2209568ddac2936341e1420a1c",
   "examples": [
     {
       "action": "gateway.status",
@@ -2217,6 +2217,15 @@
         "ref": "sinnix://receipts/00000000-0000-0000-0000-000000000000"
       },
       "title": "By ref"
+    },
+    {
+      "action": "audit.operation",
+      "family": "get",
+      "input": {
+        "action": "beads.changeset",
+        "idempotency_key": "curation-2026-09-29-creates"
+      },
+      "title": "After a lost response"
     },
     {
       "action": "results.get",

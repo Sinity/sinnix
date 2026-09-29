@@ -26,6 +26,7 @@ from .contracts import (
     StorageEffect,
     VerbFamily,
 )
+from .revisions import token_input_schema
 from .schemas import GatewayModel, V2ToolEnvelope
 
 ALL_PRINCIPALS = KNOWN_PRINCIPALS
@@ -232,7 +233,9 @@ class Action:
         return inspect.iscoroutinefunction(self.handler)
 
     def input_schema(self) -> dict[str, Any]:
-        return strip_titles(self.Input.model_json_schema(by_alias=True))
+        return token_input_schema(
+            strip_titles(self.Input.model_json_schema(by_alias=True))
+        )
 
     def envelope_model(self) -> type[V2ToolEnvelope]:
         """The typed response envelope: ``data`` is this action's Output."""

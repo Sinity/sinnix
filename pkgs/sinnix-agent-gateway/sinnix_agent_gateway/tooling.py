@@ -16,6 +16,7 @@ from . import calllog
 from .action import Action, ActionResult
 from .contracts import EffectMode
 from .results import ProtocolError
+from .revisions import lossless_revisions
 
 # The transport served to the OpenAI tunnel. Its control plane drops any
 # response later than TUNNEL_RESPONSE_DEADLINE_SECONDS after the tunnel polled
@@ -190,6 +191,9 @@ def build_tool(action: Action, runtime: Runtime) -> Tool:
         return await runtime.execute_v2_async(action, callback, request), blocks
 
     def _project(response: dict[str, Any], blocks: list[Any]) -> CallToolResult:
+        # Revisions leave as exact strings: a double-decoding client would
+        # otherwise round a 64-bit row revision and fail its next guard.
+        response = lossless_revisions(response)
         ok = response["result"]["outcome"] == "ok"
         return CallToolResult(
             content=[_text_block(response), *(blocks if ok else [])],

@@ -7,6 +7,7 @@ import os
 import sqlite3
 import time
 import uuid
+from pathlib import Path
 from typing import Any, Mapping
 
 from .capabilities import Capability, Principal
@@ -131,11 +132,8 @@ class AuditService:
             raise ValueError("action and idempotency key are required")
         now = time.time()
         identity = (action, idempotency_key)
-        lock_name = hashlib.sha256(
-            _canonical([self.principal.name, *identity])
-        ).hexdigest()
         descriptor = os.open(
-            self.path.parent / f"{lock_name}.lock", os.O_CREAT | os.O_RDWR, 0o600
+            self._lock_path(action, idempotency_key), os.O_CREAT | os.O_RDWR, 0o600
         )
         try:
             try:
@@ -245,6 +243,66 @@ class AuditService:
         descriptor = self._claims.pop((action, idempotency_key), None)
         if descriptor is not None:
             os.close(descriptor)
+
+    def _lock_path(self, action: str, idempotency_key: str) -> Path:
+        lock_name = hashlib.sha256(
+            _canonical([self.principal.name, action, idempotency_key])
+        ).hexdigest()
+        return self.path.parent / f"{lock_name}.lock"
+
+    def _claim_is_live(self, action: str, idempotency_key: str) -> bool:
+        """Whether the call holding this key's claim is still running."""
+        try:
+            descriptor = os.open(self._lock_path(action, idempotency_key), os.O_RDWR)
+        except FileNotFoundError:
+            return False
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+        finally:
+            os.close(descriptor)
+        return False
+
+    def operation(self, action: str, idempotency_key: str) -> dict[str, Any]:
+        """The durable outcome of one mutation, addressed by its own key.
+
+        The caller chose the key before it sent the call, so a response lost
+        in transit (a tunnel 502) is still addressable: ``confirmed`` returns
+        the committed response, created ids included, without the request
+        body and without running anything. ``pending`` is still running,
+        ``indeterminate`` ended without a confirmed outcome, and ``unknown``
+        never reached the gateway. Reading never changes the row.
+        """
+        self.principal.require(Capability.AUDIT_READ)
+        with self._connect() as connection:
+            row = connection.execute(
+                "select request_sha256,state,response_json,receipt_id,created_at,updated_at from idempotency where principal = ? and action = ? and idempotency_key = ?",
+                (self.principal.name, action, idempotency_key),
+            ).fetchone()
+        if row is None:
+            return {"state": "unknown"}
+        state = row[1]
+        if state in {"complete", "confirmed"} and row[2] is not None:
+            state, response = "confirmed", json.loads(row[2])
+        else:
+            response = None
+            if state in {"pending", "in_progress"} and not self._claim_is_live(
+                action, idempotency_key
+            ):
+                # The claimant ended (a restart, a kill) without recording an
+                # outcome; the owner may or may not have applied the effect.
+                state = "indeterminate"
+            elif state == "in_progress":
+                state = "pending"
+        return {
+            "state": state,
+            "request_sha256": row[0],
+            "receipt_id": row[3],
+            "created_at": row[4],
+            "updated_at": row[5],
+            "response": response,
+        }
 
     def receipt(self, receipt_id: str) -> dict[str, Any]:
         """Return one principal-scoped audit event as a canonical receipt."""

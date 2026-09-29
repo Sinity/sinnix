@@ -1,11 +1,11 @@
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: cff2988265e21bd3255fcf6ea6f8fd7d77e89b728e09e22ad8e5715ed619cf2e -->
+<!-- gateway-catalog-sha256: de9a940956a1c8be24adc564cd477c30163c0f2209568ddac2936341e1420a1c -->
 # Sinnix Agent Gateway reference
 
 Generated from `sinnix_agent_gateway.actions`. Every action is one MCP tool whose `tools/list` input schema is the one below; the catalog hash changes when any principal-visible action catalog row changes, including its schema, principal set, example or affordance.
 
-Revision: `v3-typed-actions`. Catalog SHA-256: `cff2988265e21bd3255fcf6ea6f8fd7d77e89b728e09e22ad8e5715ed619cf2e`.
+Revision: `v3-typed-actions`. Catalog SHA-256: `de9a940956a1c8be24adc564cd477c30163c0f2209568ddac2936341e1420a1c`.
 
 ## Invocation
 
@@ -22,7 +22,7 @@ MCP: call the tool named after the action. CLI: `sinnix-agent-gateway call <acti
 | `run`               | `batches`          | `sinnix://projects/{project_id}/runs/{run_id}`           | `batches.land`, `batches.list`, `batches.resume`, `batches.start`, `batches.status`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `job`               | `jobs`             | `sinnix://jobs/{job_id}`                                 | `batches.land`, `batches.list`, `batches.resume`, `batches.start`, `batches.status`, `context.compose`, `events.tail`, `jobs.cancel`, `jobs.clean`, `jobs.get`, `jobs.list`, `jobs.logs`, `jobs.retry`, `jobs.wait`, `machine.operate`, `machine.prepare`, `operations.run`, `shell.run`, `wait.for`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `artifact`          | `artifacts`        | `sinnix://artifacts/{artifact_id}`                       | `artifacts.get`, `artifacts.list`, `artifacts.read`, `browser.screenshot`, `desktop.screenshot`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `receipt`           | `audit`            | `sinnix://receipts/{receipt_id}`                         | `audit.receipt`, `audit.verify`, `events.tail`, `wait.for`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `receipt`           | `audit`            | `sinnix://receipts/{receipt_id}`                         | `audit.operation`, `audit.receipt`, `audit.verify`, `events.tail`, `wait.for`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `result`            | `results`          | `sinnix://results/{result_id}`                           | `results.get`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `machine_unit`      | `machine`          | `sinnix://machine/units/{manager}/{unit}`                | `machine.operate`, `machine.prepare`, `machine.query`, `machine.snapshot`, `machine.units.get`, `machine.units.list`, `machine.units.logs`, `machine.units.operate`, `wait.for`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `browser_page`      | `browser`          | `sinnix://browser/pages/{page_id}`                       | `browser.operate`, `browser.page`, `browser.pages`, `browser.screenshot`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
@@ -164,6 +164,7 @@ MCP: call the tool named after the action. CLI: `sinnix-agent-gateway call <acti
 | `sessions.orchestration`     | `query`   | `polylogue`        | `operator` | Native parent, model and token fields remain unknown when absent from stored evidence. Each owner product retains its coverage, provenance and ingestion watermark.                                                                                                                                                                              |
 | `audit.verify`               | `status`  | `audit`            | `operator` | Verify the tamper-evident audit hash chain end to end.                                                                                                                                                                                                                                                                                           |
 | `audit.receipt`              | `get`     | `audit`            | `operator` | Read one principal-scoped audit receipt by ref or id.                                                                                                                                                                                                                                                                                            |
+| `audit.operation`            | `get`     | `audit`            | `operator` | Every change, operate or run call is addressed by the idempotency_key its caller chose before sending it. When the response was lost (a tunnel 502 or deadline), read the outcome here instead of sending the mutation again: a confirmed operation returns its committed response with the created ids, and nothing runs twice.                 |
 | `results.get`                | `get`     | `results`          | `operator` | Read one immutable stored response snapshot by ref or id.                                                                                                                                                                                                                                                                                        |
 | `capabilities.query`         | `catalog` | `capability-index` | `operator` | Search the generated machine capability index or describe one capability exactly.                                                                                                                                                                                                                                                                |
 
@@ -4405,10 +4406,27 @@ Input schema:
     },
     "Order": {
       "additionalProperties": false,
-      "description": "Result order, as Beads applies it to its own reads.",
+      "description": "Result order. The direction is named, never inferred from \"reverse\".",
       "properties": {
+        "direction": {
+          "anyOf": [
+            {
+              "enum": [
+                "newest_first",
+                "oldest_first",
+                "ascending",
+                "descending"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "created, updated and closed take newest_first (the default) or oldest_first; the other fields take ascending (the default; priority 0 first) or descending."
+        },
         "field": {
-          "description": "created, updated and closed sort newest first; the other fields sort ascending (priority 0 first).",
           "enum": [
             "priority",
             "created",
@@ -4421,11 +4439,6 @@ Input schema:
             "assignee"
           ],
           "type": "string"
-        },
-        "reverse": {
-          "default": false,
-          "description": "Invert that order. For created, updated or closed, reverse=true lists the OLDEST first; omit it for the newest.",
-          "type": "boolean"
         }
       },
       "required": [
@@ -5987,8 +6000,16 @@ Input schema:
       "description": "Closes one existing issue, under `POST /v0/beads/issues/{id}:close`'s rules including first-close-wins.",
       "properties": {
         "expected_version": {
-          "description": "Requires the row's `revision` to equal this value, evaluated as-modified and checked before the idempotent close. A miss refuses the whole request with `409 precondition_failed`, and `ApplyUpdateItem.expected_version`'s already-written rule applies here identically.\n\nTHERE IS DELIBERATELY NO `expected_status` HERE. A close is idempotent \u2014 re-closing a closed issue is `changed: false` \u2014 so a guard spelled to refuse an already-closed row is asking for a REFUSAL where this verb answers with a no-op. That belongs on an `update` item whose `patch.status` crosses into the done category.\n\nDECODE IT AS A 64-BIT INTEGER, on `ApplyUpdateItem.expected_version`'s terms, including its note that a corrupted token here costs the whole plan.",
-          "type": "integer"
+          "anyOf": [
+            {
+              "pattern": "^-?[0-9]{1,20}$",
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            }
+          ],
+          "description": "Send the revision exactly as a read or write returned it: the decimal string, not a number. Requires the row's `revision` to equal this value, evaluated as-modified and checked before the idempotent close. A miss refuses the whole request with `409 precondition_failed`, and `ApplyUpdateItem.expected_version`'s already-written rule applies here identically.\n\nTHERE IS DELIBERATELY NO `expected_status` HERE. A close is idempotent \u2014 re-closing a closed issue is `changed: false` \u2014 so a guard spelled to refuse an already-closed row is asking for a REFUSAL where this verb answers with a no-op. That belongs on an `update` item whose `patch.status` crosses into the done category.\n\nDECODE IT AS A 64-BIT INTEGER, on `ApplyUpdateItem.expected_version`'s terms, including its note that a corrupted token here costs the whole plan."
         },
         "force": {
           "default": false,
@@ -6399,8 +6420,16 @@ Input schema:
           "type": "string"
         },
         "expected_version": {
-          "description": "Requires the row's `revision` to equal this value before the patch. A miss refuses the WHOLE request with `409 precondition_failed`.\n\nIT IS A `400`, NOT A `409`, ON A ROW THIS REQUEST HAS ALREADY WRITTEN \u2014 including one an earlier item created. The token is minted by the write, so mid-request there is no value a caller could send: the pre-request token is stale by construction and a row this request just created never had one the caller could read. Refusing statically says so; answering with a mismatch would send the caller looking for a concurrent writer that does not exist.\n\n`expected_status` and `expected_assignee` carry no such rule, because a caller CAN know what its own earlier item set them to.\n\nDECODE IT AS A 64-BIT INTEGER, for the reason `UpdateIssueRequest.expected_version` spells out. It bites harder here than anywhere else on the surface: a corrupted token refuses the WHOLE plan rather than one write, so a client with a lossy parser loses every item of every batch it guards.",
-          "type": "integer"
+          "anyOf": [
+            {
+              "pattern": "^-?[0-9]{1,20}$",
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            }
+          ],
+          "description": "Send the revision exactly as a read or write returned it: the decimal string, not a number. Requires the row's `revision` to equal this value before the patch. A miss refuses the WHOLE request with `409 precondition_failed`.\n\nIT IS A `400`, NOT A `409`, ON A ROW THIS REQUEST HAS ALREADY WRITTEN \u2014 including one an earlier item created. The token is minted by the write, so mid-request there is no value a caller could send: the pre-request token is stale by construction and a row this request just created never had one the caller could read. Refusing statically says so; answering with a mismatch would send the caller looking for a concurrent writer that does not exist.\n\n`expected_status` and `expected_assignee` carry no such rule, because a caller CAN know what its own earlier item set them to.\n\nDECODE IT AS A 64-BIT INTEGER, for the reason `UpdateIssueRequest.expected_version` spells out. It bites harder here than anywhere else on the surface: a corrupted token refuses the WHOLE plan rather than one write, so a client with a lossy parser loses every item of every batch it guards."
         },
         "force_assignee_transfer": {
           "default": false,
@@ -7674,8 +7703,16 @@ Input schema:
           "type": "string"
         },
         "expected_version": {
-          "description": "Requires the row's revision to equal this value BEFORE the close. A miss refuses the whole request with `409 precondition_failed` and writes nothing \u2014 `UpdateIssueRequest.expected_version`'s contract, on the operation that closes one row.\n\nIT IS CHECKED BEFORE THE IDEMPOTENT RE-CLOSE, which is the one place this guard differs from the update's. A re-close of a row somebody else has moved since the caller read it is a `409` and not the 200-with-`already_closed` the same body earns without a guard: a replay whose premise has expired is a refusal the caller wants to see, and it is the only way `already_closed` can be trusted as \"nothing has happened here since\".\n\nThe token is the `revision` this operation's own response carries. Compose the next expectation from the value a write ANSWERED with, never from a number the client incremented itself: the token is OPAQUE and compared for equality alone, so it has no predecessor a client can compute. A first guarded close seeds itself from `GET /v0/beads/issues/{id}`'s `revision` \u2014 the read that sources a guard \u2014 or, for a chain already mid-flight, from an unguarded lifecycle write or `POST /v0/beads/issues:batchApply`'s `ApplyItemResult.revision`.\n\nDECODE IT AS A 64-BIT INTEGER, for the reason `UpdateIssueRequest.expected_version` spells out: an IEEE-754-double parser corrupts it silently, and the corruption only surfaces as a `precondition_failed` on the NEXT request.",
-          "type": "integer"
+          "anyOf": [
+            {
+              "pattern": "^-?[0-9]{1,20}$",
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            }
+          ],
+          "description": "Send the revision exactly as a read or write returned it: the decimal string, not a number. Requires the row's revision to equal this value BEFORE the close. A miss refuses the whole request with `409 precondition_failed` and writes nothing \u2014 `UpdateIssueRequest.expected_version`'s contract, on the operation that closes one row.\n\nIT IS CHECKED BEFORE THE IDEMPOTENT RE-CLOSE, which is the one place this guard differs from the update's. A re-close of a row somebody else has moved since the caller read it is a `409` and not the 200-with-`already_closed` the same body earns without a guard: a replay whose premise has expired is a refusal the caller wants to see, and it is the only way `already_closed` can be trusted as \"nothing has happened here since\".\n\nThe token is the `revision` this operation's own response carries. Compose the next expectation from the value a write ANSWERED with, never from a number the client incremented itself: the token is OPAQUE and compared for equality alone, so it has no predecessor a client can compute. A first guarded close seeds itself from `GET /v0/beads/issues/{id}`'s `revision` \u2014 the read that sources a guard \u2014 or, for a chain already mid-flight, from an unguarded lifecycle write or `POST /v0/beads/issues:batchApply`'s `ApplyItemResult.revision`.\n\nDECODE IT AS A 64-BIT INTEGER, for the reason `UpdateIssueRequest.expected_version` spells out: an IEEE-754-double parser corrupts it silently, and the corruption only surfaces as a `precondition_failed` on the NEXT request."
         },
         "force": {
           "default": false,
@@ -10743,8 +10780,16 @@ Input schema:
           "type": "string"
         },
         "expected_version": {
-          "description": "Requires the row's revision to equal this value BEFORE the reopen. A miss refuses the whole request with `409 precondition_failed` and writes nothing \u2014 `CloseIssueRequest.expected_version`'s contract, on the close's mirror.\n\nIT IS CHECKED BEFORE THE NON-DONE NO-OP, the mirror of the close's check-before-the-idempotent-re-close, and for the same reason: a reopen of a row somebody else has moved is a `409` rather than the 200-with-`already_open` the same body earns unguarded, which is what lets `already_open` be read as \"nothing has happened here since\".\n\nThe token is the `revision` this operation's own response carries; compose the next expectation from a value a write ANSWERED with and never from one the client computed. DECODE IT AS A 64-BIT INTEGER, for the reason `UpdateIssueRequest.expected_version` spells out.",
-          "type": "integer"
+          "anyOf": [
+            {
+              "pattern": "^-?[0-9]{1,20}$",
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            }
+          ],
+          "description": "Send the revision exactly as a read or write returned it: the decimal string, not a number. Requires the row's revision to equal this value BEFORE the reopen. A miss refuses the whole request with `409 precondition_failed` and writes nothing \u2014 `CloseIssueRequest.expected_version`'s contract, on the close's mirror.\n\nIT IS CHECKED BEFORE THE NON-DONE NO-OP, the mirror of the close's check-before-the-idempotent-re-close, and for the same reason: a reopen of a row somebody else has moved is a `409` rather than the 200-with-`already_open` the same body earns unguarded, which is what lets `already_open` be read as \"nothing has happened here since\".\n\nThe token is the `revision` this operation's own response carries; compose the next expectation from a value a write ANSWERED with and never from one the client computed. DECODE IT AS A 64-BIT INTEGER, for the reason `UpdateIssueRequest.expected_version` spells out."
         },
         "reason": {
           "description": "Why the issue is being reopened. Recorded on the `reopened` EVENT this move records \u2014 not on a field of the issue, and not carried in the response, so a caller that wants it back reads the issue's events. Refused for control characters, and bounded by what the column holds rather than by the number above.",
@@ -11168,8 +11213,16 @@ Input schema:
           "type": "string"
         },
         "expected_version": {
-          "description": "Requires the row's revision to equal this value before the patch. A miss refuses the WHOLE request with `409 precondition_failed` and writes nothing \u2014 `ApplyUpdateItem.expected_version`'s contract, on the operation that patches one row.\n\nThe token is the `revision` this operation's own response carries, and the same one `GET /v0/beads/issues/{id}` publishes \u2014 which is where a first guarded write seeds itself, rather than from an unguarded one or from `POST /v0/beads/issues:batchApply`'s `ApplyItemResult.revision`. Compose the next expectation from the value the write ANSWERED with, never from a number the client incremented itself: the token is OPAQUE and compared for equality alone, so it has no predecessor a client can compute.\n\nDECODE IT AS A 64-BIT INTEGER. Live tokens run past 5e17, where an IEEE-754 double's ulp is already 64, so a parser that decodes JSON numbers as doubles \u2014 JavaScript's `JSON.parse`, Go's `any`, Python's `float` \u2014 hands back a value NEAR the token that is not it, and the guard is refused against a row nothing else touched.",
-          "type": "integer"
+          "anyOf": [
+            {
+              "pattern": "^-?[0-9]{1,20}$",
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            }
+          ],
+          "description": "Send the revision exactly as a read or write returned it: the decimal string, not a number. Requires the row's revision to equal this value before the patch. A miss refuses the WHOLE request with `409 precondition_failed` and writes nothing \u2014 `ApplyUpdateItem.expected_version`'s contract, on the operation that patches one row.\n\nThe token is the `revision` this operation's own response carries, and the same one `GET /v0/beads/issues/{id}` publishes \u2014 which is where a first guarded write seeds itself, rather than from an unguarded one or from `POST /v0/beads/issues:batchApply`'s `ApplyItemResult.revision`. Compose the next expectation from the value the write ANSWERED with, never from a number the client incremented itself: the token is OPAQUE and compared for equality alone, so it has no predecessor a client can compute.\n\nDECODE IT AS A 64-BIT INTEGER. Live tokens run past 5e17, where an IEEE-754 double's ulp is already 64, so a parser that decodes JSON numbers as doubles \u2014 JavaScript's `JSON.parse`, Go's `any`, Python's `float` \u2014 hands back a value NEAR the token that is not it, and the guard is refused against a row nothing else touched."
         },
         "force_assignee_transfer": {
           "default": false,
@@ -26783,6 +26836,107 @@ By ref:
 ```json
 {
   "ref": "sinnix://receipts/00000000-0000-0000-0000-000000000000"
+}
+```
+
+### `audit.operation`
+
+Every change, operate or run call is addressed by the idempotency_key its caller chose before sending it. When the response was lost (a tunnel 502 or deadline), read the outcome here instead of sending the mutation again: a confirmed operation returns its committed response with the created ids, and nothing runs twice.
+
+Family: `get`. Owner: `audit`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+
+Aliases: lost response, did my write commit, operation status.
+
+Follow-up actions: `audit.receipt`.
+
+Input schema:
+
+```json
+{
+  "additionalProperties": false,
+  "properties": {
+    "action": {
+      "description": "The mutating action that was called, e.g. beads.changeset.",
+      "maxLength": 128,
+      "minLength": 3,
+      "type": "string"
+    },
+    "actor": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "deadline_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Unix timestamp after which the call is refused."
+    },
+    "idempotency_key": {
+      "description": "The key that call carried. It is the operation's handle.",
+      "maxLength": 256,
+      "minLength": 1,
+      "type": "string"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Caller-chosen correlation id."
+    }
+  },
+  "required": [
+    "action",
+    "idempotency_key"
+  ],
+  "type": "object"
+}
+```
+
+Output: the response envelope's `data` field is `Operation`; the full envelope schema is the `sinnix://gateway/v2/actions/audit.operation` resource and `sinnix-agent-gateway catalog audit.operation --schema`.
+
+Examples:
+
+After a lost response:
+
+```json
+{
+  "action": "beads.changeset",
+  "idempotency_key": "curation-2026-09-29-creates"
 }
 ```
 
