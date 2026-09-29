@@ -468,7 +468,7 @@ assert lib.assertMsg (
         }
         {
           from = "tmp/sentinel-polylogue-root";
-          to = "realm/state/polylogue";
+          to = "$TMPDIR/live-polylogue";
         }
       ];
 

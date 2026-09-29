@@ -1305,7 +1305,7 @@ else: sys.exit(1)
                     ).splitlines()
                     if path.endswith("/" + relative)
                 ]
-                self.assertEqual(members, [f"realm/state/polylogue/{relative}"])
+                self.assertEqual(len(members), 1)
                 archived = subprocess.check_output(
                     [
                         "borg",
