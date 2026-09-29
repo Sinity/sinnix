@@ -189,3 +189,48 @@ def test_a_mirroring_failure_does_not_fail_the_upload(
     assert status == HTTPStatus.OK
     assert payload["duplicate"] is False
     assert _day_file(isolated_state_dirs).read_bytes() == body
+
+
+def test_a_conflicting_overlap_is_refused_without_a_cursor(isolated_state_dirs):
+    """Anti-vacuity: the old length-only check acknowledged this batch as a
+    duplicate; a cursor in the refusal would make the phone skip past it."""
+    original = b"abcdefgh"
+    assert uploads_mod.append_events("20260818", 0, original, _sha(original))[0] == (
+        HTTPStatus.OK
+    )
+    for offset, body in ((3, b"XYZ123"), (2, b"cX")):
+        status, payload = uploads_mod.append_events(
+            "20260818", offset, body, _sha(body)
+        )
+        assert status == HTTPStatus.CONFLICT and payload["ok"] is False
+        assert "expected_offset" not in payload
+    assert _day_file(isolated_state_dirs).read_bytes() == original
+
+
+def test_short_pwrites_are_completed(isolated_state_dirs, monkeypatch):
+    """Deterministic partial-write injection: every pwrite writes at most two
+    bytes. Anti-vacuity: a single pwrite would land "ab" and still ack."""
+    real = uploads_mod.os.pwrite
+    calls = []
+
+    def short(fd, data, offset):
+        calls.append(offset)
+        return real(fd, data[:2], offset)
+
+    monkeypatch.setattr(uploads_mod.os, "pwrite", short)
+    first = b"abc\n"
+    uploads_mod.append_events("20260818", 0, first, _sha(first))
+    body = b"abc\ndefg\n"  # overlaps the first batch, extends it
+    status, payload = uploads_mod.append_events("20260818", 0, body, _sha(body))
+    assert status == HTTPStatus.OK and payload["cursor"] == len(body)
+    assert calls == [0, 2, 4, 6, 8]
+    assert _day_file(isolated_state_dirs).read_bytes() == body
+
+
+def test_a_pwrite_that_makes_no_progress_fails_visibly(
+    isolated_state_dirs, monkeypatch
+):
+    monkeypatch.setattr(uploads_mod.os, "pwrite", lambda fd, data, offset: 0)
+    body = b"abc\n"
+    status, payload = uploads_mod.append_events("20260818", 0, body, _sha(body))
+    assert status == HTTPStatus.INTERNAL_SERVER_ERROR and payload["ok"] is False

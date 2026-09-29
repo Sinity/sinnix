@@ -8,6 +8,12 @@ they share is the part that matters -- the sender declares a sha256 over the
 bytes it still holds, prime verifies before the write is visible, and a
 repeat of something already landed answers ok rather than a conflict, because
 the phone deletes its copy on an ok and retries on anything else.
+
+An ok therefore describes bytes read back from where they were retained, never
+the request that carried them. This service is the only writer of the upload
+lanes and the event day files, so a lock per shape, held across the
+check-write-verify of one request, is what keeps two concurrent deliveries
+from both deciding the destination is theirs.
 """
 
 from __future__ import annotations
@@ -38,6 +44,39 @@ AMBIENT_PROGRESS_MARKER = Path(
     )
 )
 _AMBIENT_PROGRESS_LOCK = Lock()
+_UPLOAD_LOCK = Lock()
+_EVENTS_LOCK = Lock()
+
+
+def _retained_digest(target: Path) -> tuple[int, str] | None:
+    """Size and sha256 of what the destination holds, or None if nothing."""
+    size = 0
+    digest = hashlib.sha256()
+    try:
+        with target.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1 << 20), b""):
+                size += len(chunk)
+                digest.update(chunk)
+    except FileNotFoundError:
+        return None
+    return size, digest.hexdigest()
+
+
+def _retain(target: Path, body: bytes, digest: str) -> tuple[HTTPStatus, dict] | None:
+    """Publish *body* at an empty *target* and read it back.
+
+    None on success; otherwise the refusal to send. A read-back that differs
+    from what was sent is a storage fault, answered 500 so the phone keeps its
+    copy.
+    """
+    atomic_publish(target, body, fsync=True, mode=0o660)
+    if _retained_digest(target) != (len(body), digest):
+        return HTTPStatus.INTERNAL_SERVER_ERROR, {
+            "ok": False,
+            "detail": "retained upload failed read-back verification",
+            "path": str(target),
+        }
+    return None
 
 
 def _record_ambient_progress(target: Path) -> None:
@@ -124,7 +163,8 @@ def store_upload(
 
     Re-uploading a chunk already here is a success, not a conflict. The phone
     legitimately retries when an ok is lost on the way back, and a retry that
-    answered 409 would strand the file on the device forever.
+    answered 409 would strand the file on the device forever. "Already here"
+    means the same bytes, compared by digest, not a file of the same length.
     """
     directory = UPLOAD_LANES.get(lane)
     if directory is None:
@@ -145,23 +185,65 @@ def store_upload(
             "bytes": len(body),
         }
 
-    if target.exists() and target.stat().st_size == len(body):
-        return HTTPStatus.OK, {
-            "ok": True,
-            "duplicate": True,
-            "bytes": len(body),
-            "sha256": digest,
-            "path": str(target),
-        }
-
     try:
         # The lane's own subdirectory, when the name carried one: the camera
         # mirror keeps `Camera/`, `Screenshots/` and `Pictures/` because the
         # rsync that filled it did.
         target.parent.mkdir(parents=True, exist_ok=True)
-        atomic_publish(target, body, fsync=True, mode=0o660)
+        with _UPLOAD_LOCK:
+            status, payload = _store_locked(lane, target, body, digest)
     except OSError as exc:
         return HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "detail": str(exc)}
+    return status, payload
+
+
+def _store_locked(
+    lane: str, target: Path, body: bytes, digest: str
+) -> tuple[HTTPStatus, dict]:
+    """The check-write-verify of one upload, under the upload lock.
+
+    A name already holding these exact bytes is a retry and answers ok. A name
+    holding OTHER bytes -- a camera file edited in place, a sender that reused
+    a name -- keeps what it holds, and the new payload is retained beside it
+    under a name derived from its own digest. Refusing it instead would leave
+    the phone re-offering the same file at the head of its queue forever;
+    overwriting would destroy a copy the phone was already told was safe to
+    delete. The answer names the conflict and the path the bytes went to.
+    """
+    retained = _retained_digest(target)
+    conflict_with: str | None = None
+    if retained is not None:
+        if retained == (len(body), digest):
+            return HTTPStatus.OK, {
+                "ok": True,
+                "duplicate": True,
+                "bytes": retained[0],
+                "sha256": retained[1],
+                "path": str(target),
+            }
+        conflict_with = retained[1]
+        target = target.with_name(f"{target.name}.conflict-{digest}")
+        retained = _retained_digest(target)
+        if retained is not None:
+            if retained == (len(body), digest):
+                return HTTPStatus.OK, {
+                    "ok": True,
+                    "duplicate": True,
+                    "conflict": True,
+                    "conflicts_with": conflict_with,
+                    "bytes": retained[0],
+                    "sha256": retained[1],
+                    "path": str(target),
+                }
+            return HTTPStatus.INTERNAL_SERVER_ERROR, {
+                "ok": False,
+                "detail": "the digest-named conflict copy holds other bytes",
+                "path": str(target),
+            }
+
+    refusal = _retain(target, body, digest)
+    if refusal is not None:
+        return refusal
 
     if lane == "ambient":
         try:
@@ -175,7 +257,7 @@ def store_upload(
                 "detail": f"ambient progress marker could not be written: {exc}",
             }
 
-    return HTTPStatus.OK, {
+    payload = {
         "ok": True,
         "duplicate": False,
         "bytes": len(body),
@@ -183,6 +265,10 @@ def store_upload(
         "path": str(target),
         "at": utc_ts(),
     }
+    if conflict_with is not None:
+        payload["conflict"] = True
+        payload["conflicts_with"] = conflict_with
+    return HTTPStatus.OK, payload
 
 
 def _day_file(day: str) -> Path:
@@ -221,7 +307,7 @@ def append_events(
     of the file, by contrast, would turn every lost acknowledgement into a
     duplicated stretch of the log.
 
-    Two disagreements are possible and neither is silently absorbed:
+    Three disagreements are possible and none is silently absorbed:
 
     * the batch lies entirely behind prime's cursor -- a pure retry, answered
       ok with `duplicate`, and the phone advances;
@@ -232,6 +318,13 @@ def append_events(
       cursor, and the phone rewinds to it; the phone still holds the whole day
       file until prime has all of it, so a rewind always has something to
       re-send.
+    * the batch overlaps bytes prime holds and they differ -- the phone's day
+      file is append-only, so this is a fault on one side. It is answered 409
+      WITHOUT a cursor: a cursor would tell the phone to skip ahead past the
+      disagreement, which would acknowledge bytes prime does not hold.
+
+    The write loops until every byte is down (a short `pwrite` is legal), and
+    the whole batch's range is read back before it is acknowledged.
     """
     if not EVENTS_DAY_RE.match(day):
         return HTTPStatus.BAD_REQUEST, {"ok": False, "detail": "day must be YYYYMMDD"}
@@ -255,28 +348,50 @@ def append_events(
     target = _day_file(day)
     try:
         EVENTS_DIR.mkdir(parents=True, exist_ok=True)
-        size = target.stat().st_size if target.is_file() else 0
-        if offset > size:
-            return HTTPStatus.CONFLICT, {
-                "ok": False,
-                "detail": "prime is missing the bytes before this batch",
-                "expected_offset": size,
-                "day": day,
-            }
-        if offset + len(body) <= size:
-            return HTTPStatus.OK, {
-                "ok": True,
-                "duplicate": True,
-                "day": day,
-                "bytes": len(body),
-                "cursor": size,
-            }
-        fd = os.open(target, os.O_WRONLY | os.O_CREAT, 0o660)
-        try:
-            os.pwrite(fd, body, offset)
-            os.fsync(fd)
-        finally:
-            os.close(fd)
+        with _EVENTS_LOCK:
+            size = target.stat().st_size if target.is_file() else 0
+            if offset > size:
+                return HTTPStatus.CONFLICT, {
+                    "ok": False,
+                    "detail": "prime is missing the bytes before this batch",
+                    "expected_offset": size,
+                    "day": day,
+                }
+            overlap = min(len(body), size - offset)
+            if overlap and _read_range(target, offset, overlap) != body[:overlap]:
+                return HTTPStatus.CONFLICT, {
+                    "ok": False,
+                    "conflict": "range_differs",
+                    "detail": "prime holds different bytes in this batch's range",
+                    "day": day,
+                    "offset": offset,
+                }
+            if overlap == len(body):
+                return HTTPStatus.OK, {
+                    "ok": True,
+                    "duplicate": True,
+                    "day": day,
+                    "bytes": len(body),
+                    "cursor": size,
+                    "sha256": digest,
+                }
+            fd = os.open(target, os.O_WRONLY | os.O_CREAT, 0o660)
+            try:
+                written = overlap
+                while written < len(body):
+                    count = os.pwrite(fd, body[written:], offset + written)
+                    if count <= 0:
+                        raise OSError(f"pwrite made no progress at byte {written}")
+                    written += count
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+            if _read_range(target, offset, len(body)) != body:
+                return HTTPStatus.INTERNAL_SERVER_ERROR, {
+                    "ok": False,
+                    "detail": "retained range failed read-back verification",
+                    "day": day,
+                }
         # O_CREAT does not apply the mode to a file that already exists, and
         # the day files the drain landed are 0660: a lane where half the files
         # are group-readable and half are not is a bug waiting for its first
@@ -291,7 +406,7 @@ def append_events(
     # notification for every retry. Advisory: a mirroring failure must never
     # turn a landed upload into one the phone believes it has to resend.
     try:
-        mirror_new_events(day, body[max(0, size - offset) :])
+        mirror_new_events(day, body[overlap:])
     except Exception as exc:  # noqa: BLE001 - the upload above already landed
         print(
             f"phone-dispatcher: notifications: mirror_new_events failed: {exc}",
@@ -307,6 +422,12 @@ def append_events(
         "sha256": digest,
         "at": utc_ts(),
     }
+
+
+def _read_range(target: Path, offset: int, length: int) -> bytes:
+    with target.open("rb") as stream:
+        stream.seek(offset)
+        return stream.read(length)
 
 
 def repair_event_day(day: str, source: Path, expected_sha256: str) -> dict:
