@@ -150,6 +150,9 @@ class Action:
     receipt_policy: str = "audit"
     storage_effects: frozenset[StorageEffect] = OBSERVABILITY_PERSISTENCE
     failure_codes: frozenset[str] | None = None
+    # The input field that bounds how long a read action blocks. The remote
+    # tunnel caps it so the answer precedes the control plane's deadline.
+    remote_wait_field: str | None = None
 
     def __post_init__(self) -> None:
         if "." not in self.name:
@@ -176,6 +179,13 @@ class Action:
             and not self.failure_codes <= KNOWN_TYPED_FAILURES
         ):
             raise ValueError(f"action {self.name!r} has unknown typed failures")
+        if self.remote_wait_field is not None and (
+            self.effect is not EffectMode.READ
+            or self.remote_wait_field not in self.Input.model_fields
+        ):
+            raise ValueError(
+                f"action {self.name!r} remote wait field must be a read input field"
+            )
         for example in self.examples:
             self.Input.model_validate(example.input)
 

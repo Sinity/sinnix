@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import functools
 import inspect
 import json
 from typing import TYPE_CHECKING, Any
@@ -13,8 +12,20 @@ from mcp.server.mcpserver.utilities.func_metadata import ArgModelBase, FuncMetad
 from mcp.types import CallToolResult, TextContent
 from pydantic import ConfigDict, ValidationError, create_model
 
+from . import calllog
 from .action import Action, ActionResult
+from .contracts import EffectMode
 from .results import ProtocolError
+
+# The transport served to the OpenAI tunnel. Its control plane drops any
+# response later than TUNNEL_RESPONSE_DEADLINE_SECONDS after the tunnel polled
+# the command, so remote calls answer inside a budget below it.
+REMOTE_TRANSPORT = "streamable_http_unix"
+# A read that has not finished by then answers with a typed deadline error;
+# the rest of the tunnel deadline covers queueing and response delivery.
+REMOTE_READ_BUDGET_SECONDS = 100
+# Waits return their own timeout outcome and continuation inside the budget.
+REMOTE_WAIT_CAP_SECONDS = 90
 
 if TYPE_CHECKING:
     from .runtime import Runtime
@@ -78,6 +89,36 @@ def build_tool(action: Action, runtime: Runtime) -> Tool:
     )
 
     async def invoke(**kwargs: Any) -> Any:
+        remote = runtime.transport == REMOTE_TRANSPORT
+        record = calllog.CallRecord(
+            action=action.name,
+            effect=action.effect.value,
+            arguments={
+                key: value for key, value in kwargs.items() if value is not None
+            },
+        )
+        if remote:
+            kwargs = _clamp_remote_wait(action, kwargs, record)
+            if action.effect is EffectMode.READ:
+                record.budget_seconds = REMOTE_READ_BUDGET_SECONDS
+        try:
+            response, blocks = await _execute(kwargs, record)
+        except BaseException as exc:
+            if remote:
+                cancelled = isinstance(exc, anyio.get_cancelled_exc_class())
+                calllog.emit(
+                    record.finish(outcome="cancelled" if cancelled else "failed")
+                )
+            raise
+        if remote:
+            calllog.emit(
+                record.finish(outcome=response["result"]["outcome"], response=response)
+            )
+        return _project(response, blocks)
+
+    async def _execute(
+        kwargs: dict[str, Any], record: calllog.CallRecord
+    ) -> tuple[dict[str, Any], list[Any]]:
         try:
             request_input = action.Input.model_validate(
                 {
@@ -92,21 +133,45 @@ def build_tool(action: Action, runtime: Runtime) -> Tool:
             async def failing() -> Any:
                 raise failure
 
-            response = await runtime.execute_v2_async(action, failing, {})
-            return _project(response, [])
+            return await runtime.execute_v2_async(action, failing, {}), []
 
         request = request_input.model_dump(mode="json")
 
         blocks: list[Any] = []
 
+        def run_sync_handler() -> Any:
+            record.mark_thread_started()
+            return action.handler(runtime, request_input)
+
+        async def run_handler() -> Any:
+            if action.is_async:
+                return await action.handler(runtime, request_input)
+            # A budgeted read may leave its worker thread running once the
+            # caller has its answer; a mutation always finishes its effect.
+            return await anyio.to_thread.run_sync(
+                run_sync_handler,
+                abandon_on_cancel=record.budget_seconds is not None,
+            )
+
         async def callback() -> Any:
             page = None
-            if action.is_async:
-                raw = await action.handler(runtime, request_input)
+            if record.budget_seconds is None:
+                raw = await run_handler()
             else:
-                raw = await anyio.to_thread.run_sync(
-                    functools.partial(action.handler, runtime, request_input)
-                )
+                with anyio.move_on_after(record.budget_seconds) as scope:
+                    raw = await run_handler()
+                if scope.cancelled_caught:
+                    record.budget_exceeded = True
+                    raise ProtocolError(
+                        "deadline",
+                        f"{action.name} did not finish within the "
+                        f"{record.budget_seconds} s remote response budget; the "
+                        "tunnel drops responses after about "
+                        f"{calllog.TUNNEL_RESPONSE_DEADLINE_SECONDS} s. Narrow the "
+                        "request, or start the work as a job and follow it with "
+                        "jobs.wait.",
+                        details={"budget_seconds": record.budget_seconds},
+                    )
             if isinstance(raw, ActionResult):
                 blocks.extend(raw.blocks)
                 page = raw.page
@@ -122,8 +187,7 @@ def build_tool(action: Action, runtime: Runtime) -> Tool:
             data = validated.model_dump(mode="json", by_alias=True)
             return ActionResult(data, page=page) if page is not None else data
 
-        response = await runtime.execute_v2_async(action, callback, request)
-        return _project(response, blocks)
+        return await runtime.execute_v2_async(action, callback, request), blocks
 
     def _project(response: dict[str, Any], blocks: list[Any]) -> CallToolResult:
         ok = response["result"]["outcome"] == "ok"
@@ -157,10 +221,37 @@ def build_tool(action: Action, runtime: Runtime) -> Tool:
     return tool
 
 
+def _clamp_remote_wait(
+    action: Action, kwargs: dict[str, Any], record: calllog.CallRecord
+) -> dict[str, Any]:
+    """Keep a remote wait inside the tunnel deadline; its timeout says so."""
+    name = action.remote_wait_field
+    if name is None:
+        return kwargs
+    requested = kwargs.get(name)
+    if (
+        isinstance(requested, (int, float))
+        and not isinstance(requested, bool)
+        and requested > REMOTE_WAIT_CAP_SECONDS
+    ):
+        record.clamped = {
+            name: {"requested": requested, "used": REMOTE_WAIT_CAP_SECONDS}
+        }
+        return {**kwargs, name: REMOTE_WAIT_CAP_SECONDS}
+    return kwargs
+
+
 def _description(action: Action) -> str:
     lines = [action.summary]
     if action.documentation:
         lines.append(action.documentation)
+    if action.remote_wait_field is not None:
+        lines.append(
+            f"Through the remote tunnel, {action.remote_wait_field} above "
+            f"{REMOTE_WAIT_CAP_SECONDS} is reduced to {REMOTE_WAIT_CAP_SECONDS} so "
+            "the answer arrives before the tunnel's response deadline; a timeout "
+            "returns a continuation to wait again."
+        )
     if action.examples:
         example = action.examples[0]
         lines.append(

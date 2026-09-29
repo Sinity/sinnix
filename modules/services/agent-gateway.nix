@@ -314,6 +314,19 @@ mkServiceModule {
               rationale = "Loopback MCP server for the ${name} operator tunnel.";
               processMatchers = [ "sinnix-agent-gateway" ];
             };
+            # The server runs a remote agent's tools in process: git and
+            # content reads over checkouts, owner subprocesses, and the
+            # brokered MCP children. That is agent tool work, so it shares
+            # agenttool.slice's budget instead of running unbounded in
+            # app.slice, and MemoryHigh throttles this unit first. Page cache
+            # from checkout reads is what reclaim takes: one night of
+            # all-worktree content hashing charged 9.4G here.
+            # TimeoutStopSec covers the server's own 8 s drain deadline.
+            resources = {
+              Slice = "agenttool.slice";
+              MemoryHigh = "4G";
+              TimeoutStopSec = "10s";
+            };
             activation = {
               mode = "direct";
             };
@@ -341,12 +354,17 @@ mkServiceModule {
               };
               Service = {
                 Type = "simple";
+                # The client dispatches at most this many commands to the
+                # server at once (default 10); the rest queue inside it while
+                # the control plane's per-command response deadline runs. A
+                # ChatGPT fleet of 16 tabs exceeds 10.
                 ExecStart = ''
                   ${tunnelClient}/bin/tunnel-client run \
                     --control-plane.tunnel-id ${lib.escapeShellArg endpoint.tunnelId} \
                     --control-plane.api-key file:%d/runtime-key \
                     --mcp.server-url ${lib.escapeShellArg "url=http://localhost:8000/mcp,channel=main,unix-socket=%t/sinnix-agent-gateway-${name}/mcp.sock"} \
                     --mcp.startup-wait-timeout 30s \
+                    --mcp.max-concurrent-requests 32 \
                     --health.listen-addr 127.0.0.1:${toString endpoint.healthPort} \
                     --log.format json
                 '';
@@ -358,10 +376,11 @@ mkServiceModule {
                   "-${endpoint.stateDir}"
                 ];
                 UMask = "0077";
-                Environment = [
-                  "PATH=${gatewayPath}"
-                  "GI_TYPELIB_PATH=${giTypelibPath}"
-                ];
+                # No gateway PATH or typelib path: the client execs nothing.
+                # Every input of this unit must be the tunnel's own, since
+                # Home Manager restarts a unit whose file changed and a
+                # tunnel restart drops every in-flight call. A restart of the
+                # server alone does not: the client reconnects to its socket.
               };
               Install.WantedBy = lib.optionals endpoint.autoStart [ "default.target" ];
             }
@@ -374,28 +393,34 @@ mkServiceModule {
                 StartLimitIntervalSec = 300;
                 StartLimitBurst = 8;
               };
-              Service = {
-                Type = "simple";
-                RuntimeDirectory = "sinnix-agent-gateway-${name}";
-                RuntimeDirectoryMode = "0700";
-                ExecStartPre = [
-                  endpointArtifacts.${name}.stateScaffold
-                  endpointArtifacts.${name}.approvalGate
-                  endpointArtifacts.${name}.semanticCanary
-                ];
-                ExecStart = ''
-                  ${gatewayBin} --config ${endpointConfigs.${name}} --principal ${lib.escapeShellArg endpoint.principal} serve-http --socket %t/sinnix-agent-gateway-${name}/mcp.sock
-                '';
-                Restart = "always";
-                RestartSec = "5s";
-                ProtectHome = false;
-                ReadWritePaths = [ "-${endpoint.stateDir}" ];
-                UMask = "0077";
-                Environment = [
-                  "PATH=${gatewayPath}"
-                  "GI_TYPELIB_PATH=${giTypelibPath}"
-                ];
-              };
+              Service =
+                lib.sinnix.mkRuntimeServiceConfig {
+                  runtimeInventory = config.sinnix.runtime.inventory;
+                  unit = "sinnix-agent-gateway-${name}-mcp.service";
+                  manager = "user";
+                }
+                // {
+                  Type = "simple";
+                  RuntimeDirectory = "sinnix-agent-gateway-${name}";
+                  RuntimeDirectoryMode = "0700";
+                  ExecStartPre = [
+                    endpointArtifacts.${name}.stateScaffold
+                    endpointArtifacts.${name}.approvalGate
+                    endpointArtifacts.${name}.semanticCanary
+                  ];
+                  ExecStart = ''
+                    ${gatewayBin} --config ${endpointConfigs.${name}} --principal ${lib.escapeShellArg endpoint.principal} serve-http --socket %t/sinnix-agent-gateway-${name}/mcp.sock
+                  '';
+                  Restart = "always";
+                  RestartSec = "5s";
+                  ProtectHome = false;
+                  ReadWritePaths = [ "-${endpoint.stateDir}" ];
+                  UMask = "0077";
+                  Environment = [
+                    "PATH=${gatewayPath}"
+                    "GI_TYPELIB_PATH=${giTypelibPath}"
+                  ];
+                };
               Install.WantedBy = lib.optionals endpoint.autoStart [ "default.target" ];
             }
           ) enabledEndpoints);

@@ -359,6 +359,7 @@ def _events(runtime: Runtime, inp: EventsInput) -> EventPage:
 ACTIONS: tuple[Action, ...] = (
     Action(
         name="wait.for",
+        remote_wait_field="timeout_seconds",
         family=VerbFamily.WAIT,
         owner="waits",
         summary="Poll one owner fact until it holds or the bounded timeout passes; never starts work.",

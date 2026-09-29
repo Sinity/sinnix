@@ -162,7 +162,7 @@ def main() -> None:
     if command == "serve":
         create_server(config, principal).run("stdio")
     elif command == "serve-http":
-        import uvicorn
+        from .serving import serve_unix
 
         if not arguments.socket.is_absolute():
             raise SystemExit("socket path must be absolute")
@@ -178,7 +178,7 @@ def main() -> None:
         ).streamable_http_app(json_response=True, host="localhost")
         original_umask = os.umask(0o077)
         try:
-            uvicorn.run(app, uds=str(arguments.socket), log_level="warning")
+            serve_unix(app, arguments.socket)
         finally:
             os.umask(original_umask)
     elif command == "manifest":

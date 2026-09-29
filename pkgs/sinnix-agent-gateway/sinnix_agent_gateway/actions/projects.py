@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Literal
 
+import anyio
 from pydantic import Field
 
 from ..action import (
@@ -624,7 +625,7 @@ _CONTEXT_KEYS = {
 async def _context(runtime: Runtime, inp: ContextInput) -> ProjectContext:
     from .contexts import ComposeInput, _compose
 
-    project_id = inp.target.resolve(runtime)
+    project_id = await anyio.to_thread.run_sync(inp.target.resolve, runtime)
     ref = project_ref(project_id)
     context = await _compose(
         runtime,

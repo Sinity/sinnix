@@ -258,7 +258,10 @@ def update_docs(text: str) -> str:
     else:
         before, after = text.rstrip("\n"), ""
     head = f"{before}\n\n" if before else ""
-    return f"{head}{generated}\n{after}"
+    # A blank line separates the block from the heading after it, as the
+    # Markdown formatter requires; without it the two checks disagree.
+    tail = f"\n{after}" if after else ""
+    return f"{head}{generated}\n{tail}"
 
 
 def generated_files(root: Path) -> dict[Path, str]:

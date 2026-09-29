@@ -309,8 +309,11 @@ async def _invoke_self(
         if action.is_async:
             raw = await action.handler(runtime, request_input)
         else:
+            # Read-only by construction, so an expired caller budget may
+            # leave the thread to finish on its own.
             raw = await anyio.to_thread.run_sync(
-                functools.partial(action.handler, runtime, request_input)
+                functools.partial(action.handler, runtime, request_input),
+                abandon_on_cancel=True,
             )
         if isinstance(raw, ActionResult):
             blocks.extend(raw.blocks)

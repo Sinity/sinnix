@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any, Literal, Mapping, Sequence
 
+import anyio
 from pydantic import Field, model_validator
 
 from ..action import OPERATOR_ONLY, Action, Example, RequestControls
@@ -294,8 +295,9 @@ class CampaignResult(GatewayModel):
 
 
 async def _campaign(runtime: Runtime, inp: CampaignInput) -> CampaignResult:
-    project = inp.project.resolve(runtime)
-    runtime.projects._project(project)
+    from .contexts import _resolve_project
+
+    project = await anyio.to_thread.run_sync(_resolve_project, runtime, inp.project)
     runtime.principal.require(Capability.TASK_READ)
     product = await owner_product(
         runtime,

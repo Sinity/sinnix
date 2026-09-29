@@ -451,26 +451,37 @@ class ProjectService:
         )
         for candidate in selected:
             path = Path(candidate["path"])
-            status = self._run_spooled(
-                ["git", "-C", str(path), "status", "--porcelain=v2", "--branch"],
-                project.path,
-            )
-            branch = None
-            upstream = None
-            for line in status.splitlines():
-                if line.startswith("# branch.head "):
-                    branch = line.removeprefix("# branch.head ")
-                elif line.startswith("# branch.upstream "):
-                    upstream = line.removeprefix("# branch.upstream ")
-            rows.append(
-                {
-                    **candidate,
-                    "branch": branch,
-                    "upstream": upstream,
-                    "dirty_sha256": _content_revision(path),
-                }
-            )
+            try:
+                rows.append(self._checkout_row(project, candidate))
+            except (ProjectError, subprocess.CalledProcessError):
+                # Batch workers create and remove linked worktrees all the
+                # time. One removed after the listing is simply no longer a
+                # checkout; it must not fail a read of the others.
+                if path.is_dir():
+                    raise
         return rows
+
+    def _checkout_row(
+        self, project: ProjectConfig, candidate: dict[str, Any]
+    ) -> dict[str, Any]:
+        path = Path(candidate["path"])
+        status = self._run_spooled(
+            ["git", "-C", str(path), "status", "--porcelain=v2", "--branch"],
+            project.path,
+        )
+        branch = None
+        upstream = None
+        for line in status.splitlines():
+            if line.startswith("# branch.head "):
+                branch = line.removeprefix("# branch.head ")
+            elif line.startswith("# branch.upstream "):
+                upstream = line.removeprefix("# branch.upstream ")
+        return {
+            **candidate,
+            "branch": branch,
+            "upstream": upstream,
+            "dirty_sha256": _content_revision(path),
+        }
 
     def checkouts(self, project_id: str) -> dict[str, Any]:
         project = self._project(project_id)
@@ -494,15 +505,29 @@ class ProjectService:
         project = self._project(project_id)
         return self._checkout_candidates(project)
 
+    def checkout_candidate(self, project_id: str, checkout_id: str) -> dict[str, Any]:
+        """Return one live checkout identity without status or content reads."""
+        for candidate in self.checkout_candidates(project_id):
+            if candidate["checkout_id"] == checkout_id:
+                return candidate
+        raise ProjectError("unknown configured checkout")
+
     def checkout(self, project_id: str, checkout_id: str) -> dict[str, Any]:
         project = self._project(project_id)
-        for checkout in self._checkout_rows(project):
-            if checkout["checkout_id"] == checkout_id:
-                return {
-                    "project_id": project.project_id,
-                    "available": True,
-                    "checkout": checkout,
-                }
+        # Status and the content revision read every file of a checkout, so
+        # only the requested one is read: a project with a hundred linked
+        # worktrees otherwise costs minutes per call.
+        selected = [
+            candidate
+            for candidate in self._checkout_candidates(project)
+            if candidate["checkout_id"] == checkout_id
+        ]
+        for checkout in self._checkout_rows(project, candidates=selected):
+            return {
+                "project_id": project.project_id,
+                "available": True,
+                "checkout": checkout,
+            }
         raise ProjectError("unknown configured checkout")
 
     def code_checkout(

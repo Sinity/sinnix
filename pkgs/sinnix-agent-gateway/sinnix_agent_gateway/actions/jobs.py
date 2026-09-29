@@ -242,10 +242,13 @@ def _workspace(
     from ..projects import ProjectError
 
     try:
-        row = runtime.projects.checkout(resolved.project_id, resolved.checkout_id)
+        # The path is all a job needs; status and content hashing are not.
+        row = runtime.projects.checkout_candidate(
+            resolved.project_id, resolved.checkout_id
+        )
     except ProjectError as exc:
         raise ProtocolError("not_found", str(exc)) from exc
-    return resolved.project_id, str(row["checkout"]["path"]), resolved.checkout_ref
+    return resolved.project_id, str(row["path"]), resolved.checkout_ref
 
 
 # ------------------------------------------------------------------ list
@@ -642,11 +645,11 @@ class ShellRunResult(JobView):
     continuation: JobLocator | None = None
 
 
-async def _run_shell(runtime: Runtime, inp: ShellRunInput) -> ShellRunResult:
+def _start_shell(runtime: Runtime, inp: ShellRunInput) -> dict[str, Any]:
     project_id, workspace, _ = _workspace(runtime, inp.checkout)
     if any(not argument for argument in inp.argv):
         raise ProtocolError("invalid_request", "argv entries must be non-empty")
-    result = _owner_call(
+    return _owner_call(
         runtime.v2_run_shell,
         {"project": project_id, "checkout": workspace},
         project_id=project_id,
@@ -655,6 +658,12 @@ async def _run_shell(runtime: Runtime, inp: ShellRunInput) -> ShellRunResult:
         cwd=inp.cwd,
         timeout_seconds=inp.timeout_seconds,
     )
+
+
+async def _run_shell(runtime: Runtime, inp: ShellRunInput) -> ShellRunResult:
+    # Resolving the checkout and enqueueing the job run subprocesses; on the
+    # event loop they would stall every other call the server is handling.
+    result = await anyio.to_thread.run_sync(_start_shell, runtime, inp)
     view = _job_view(result)
     if not inp.wait:
         return ShellRunResult(**view.model_dump())
@@ -748,6 +757,7 @@ ACTIONS: tuple[Action, ...] = (
     ),
     Action(
         name="jobs.wait",
+        remote_wait_field="timeout_seconds",
         family=VerbFamily.WAIT,
         owner="systemd-jobs",
         summary="Block until one job reaches a terminal phase or the bounded timeout passes.",

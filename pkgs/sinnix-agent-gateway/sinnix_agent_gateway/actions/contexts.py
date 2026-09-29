@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Literal, Mapping
 
+import anyio
 from pydantic import Field, model_validator
 
 from ..action import ALL_PRINCIPALS, Action, Example, RequestControls
@@ -99,6 +100,12 @@ _AFFORDANCES: dict[str, list[str]] = {
 }
 
 
+def _resolve_project(runtime: Runtime, locator: Any) -> str:
+    project = locator.resolve(runtime)
+    runtime.projects._project(project)
+    return project
+
+
 async def _compose(runtime: Runtime, inp: ComposeInput) -> ComposedContext:
     from ..capabilities import Capability
     from ..contexts import source_revision
@@ -118,7 +125,7 @@ async def _compose(runtime: Runtime, inp: ComposeInput) -> ComposedContext:
         if launch_reference is not None:
             identity["launch_reference"] = launch_reference
         try:
-            value = runtime._job("job.result", identity)
+            value = await anyio.to_thread.run_sync(runtime._job, "job.result", identity)
         except ProtocolError as exc:
             if exc.code not in {"owner_failed", "unavailable", "deadline"}:
                 raise
@@ -141,8 +148,7 @@ async def _compose(runtime: Runtime, inp: ComposeInput) -> ComposedContext:
 
     else:
         assert inp.project is not None
-        project = inp.project.resolve(runtime)
-        runtime.projects._project(project)
+        project = await anyio.to_thread.run_sync(_resolve_project, runtime, inp.project)
         ref = project_ref(project)
     if inp.intent == "job.review":
         pass
@@ -198,7 +204,9 @@ async def _compose(runtime: Runtime, inp: ComposeInput) -> ComposedContext:
         )
     elif inp.intent == "incident":
         runtime.principal.require(Capability.MACHINE_READ)
-        value = runtime.observe.machine_query("overview")
+        value = await anyio.to_thread.run_sync(
+            runtime.observe.machine_query, "overview"
+        )
         product = OwnerProduct(
             owner="sinnix-observe",
             availability="unavailable"
@@ -228,7 +236,8 @@ async def _compose(runtime: Runtime, inp: ComposeInput) -> ComposedContext:
     # coverage and the owner's terminal state remain exactly as the owner
     # returned them; the snapshot holds the complete product whatever its
     # size, and `_within_budget` bounds only the copy returned in band.
-    context = runtime.persist_context(
+    context = await anyio.to_thread.run_sync(
+        runtime.persist_context,
         {
             "schema": "sinnix.owner-context.v2",
             "ref": ref,
@@ -247,7 +256,7 @@ async def _compose(runtime: Runtime, inp: ComposeInput) -> ComposedContext:
                     "component_failures": dict(product.component_failures),
                 }
             ],
-        }
+        },
     )
     bounded = _within_budget(context)
     return ComposedContext(

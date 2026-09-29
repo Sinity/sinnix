@@ -114,6 +114,21 @@ Every enabled endpoint receives its own generated config, private-socket MCP ser
 4. Verify `/healthz` and `/readyz` on the configured loopback health port.
 5. Refresh the ChatGPT connector, approve its tool snapshot, and run `gateway.status`, `gateway.catalog` and one `files.read` of an image; record the observed manifest hash in `connector-snapshot.json`.
 
+## Remote calls and their deadline
+
+OpenAI's control plane gives each tunnelled command a response deadline of about 120 s, counted from the tunnel-client's poll. It sends the deadline with the command, and the client has no setting for it. A response later than that is dropped: the tunnel logs `command response deadline reached; dropping without posting a response`, and ChatGPT sees a failed call. The gateway keeps remote answers inside that deadline:
+
+- Handlers never block the event loop. Synchronous owner work, audit receipts and result snapshots run in worker threads, so one slow call cannot hold up the others. The tunnel-client dispatches up to 32 commands at once.
+- A remote read that has not finished within 100 s answers with the typed `deadline` error. Its worker thread may finish in the background.
+- `jobs.wait`, `wait.for`, `processes.wait` and `terminals.wait` reduce a remote `timeout_seconds` above 90 to 90. A timeout returns their continuation.
+- Long work runs as a job: `shell.run` and `operations.run` enqueue it and return the job handle, and `shell.run` waits at most 30 s for output.
+
+Each remote call writes one `gateway.call` JSON line to the MCP unit's journal. The line holds the action, effect, outcome and error code, the redacted and bounded arguments, `queue_ms` (HTTP arrival to tool start), `thread_wait_ms`, `duration_ms`, `total_ms`, the remote budget and whether it was exceeded, `tunnel_deadline`, and the audit `receipt_id`. `request_id` is the control plane's `X-Request-Id`, which is the tunnel's `cmd_request_id`. It joins the line to the tunnel's own line for the same command, and its `wfr_…` prefix groups the calls of one ChatGPT run. Only the tunnel's line shows its own queueing before the call reached the gateway. A `gateway.loop_stall` line reports any second or more in which the event loop could not run.
+
+On SIGTERM the server stops accepting requests and gives in-flight calls 5 s to answer. The lifespan then closes the brokered MCP children, and a timer ends the process 8 s after the signal whatever is still running. The unit's `TimeoutStopSec` is 10 s. `gateway.shutdown` lines record the drain and any forced exit.
+
+The MCP unit runs in `agenttool.slice` with `MemoryHigh=4G`, so remote tool work shares the agent tool budget. The tunnel unit's inputs are only the tunnel client and endpoint settings. Activation therefore restarts the tunnel only when those change. Gateway code, its in-process AgentCTL and library dependencies, and the owner tools on its PATH restart only the MCP unit, and the tunnel reconnects to its socket.
+
 ## ChatGPT and Chisel compatibility
 
 The gateway is the primary project interface: use `projects.get`, `projects.read_many`,

@@ -813,6 +813,7 @@ ACTIONS: tuple[Action, ...] = (
     ),
     Action(
         name="terminals.wait",
+        remote_wait_field="timeout_seconds",
         family=VerbFamily.WAIT,
         summary="Wait until a terminal is at its prompt, shows a regex, finishes a process, or changes title.",
         Input=WaitInput,

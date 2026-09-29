@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import time
@@ -258,15 +259,20 @@ class Runtime:
         action_catalog_hash: str,
         catalog_revision: str,
     ) -> dict[str, Any]:
-        status = self.observe.gateway_status(
-            self.principal_name,
-            principal_contract_hash,
-            manifest_hash,
-            action_catalog_hash,
-            catalog_revision,
-            transport=self.transport,
+        # Both run owner subprocesses (seconds in total); on the event loop
+        # they would stall every concurrent call for as long.
+        status = await anyio.to_thread.run_sync(
+            functools.partial(
+                self.observe.gateway_status,
+                self.principal_name,
+                principal_contract_hash,
+                manifest_hash,
+                action_catalog_hash,
+                catalog_revision,
+                transport=self.transport,
+            )
         )
-        preflight = self.route_preflight.run()
+        preflight = await anyio.to_thread.run_sync(self.route_preflight.run)
         if Capability.MCP_READ in self.principal.capabilities:
             broker_catalog = await self.mcp_broker.catalog()
             broker_routes = []
@@ -1363,6 +1369,9 @@ class Runtime:
             enforce_action_failure_codes
             and action.failure_codes is not None
             and error["code"] not in action.typed_failures
+            # Every request carries deadline controls, and the remote budget
+            # can end any read, so a deadline stays typed for every action.
+            and error["code"] != "deadline"
         ):
             error = {
                 "code": "owner_failed",
@@ -1415,8 +1424,11 @@ class Runtime:
             raise ProtocolError(
                 "invalid_request", "mutating action requires idempotency_key"
             )
-        state, response = self.audit.claim_idempotency(
-            action.name, context.idempotency_key, context.request_sha256
+        state, response = await anyio.to_thread.run_sync(
+            self.audit.claim_idempotency,
+            action.name,
+            context.idempotency_key,
+            context.request_sha256,
         )
         if state == "new":
             return None
@@ -1584,10 +1596,18 @@ class Runtime:
                 if replay is not None:
                     return replay
                 reserved = action.effect is not EffectMode.READ
-                response = self._v2_success(action, await callback(), context)
+                result = await callback()
+                # Receipts and result snapshots are fsynced SQLite and file
+                # writes; every concurrent call would wait behind them on
+                # the event loop.
+                response = await anyio.to_thread.run_sync(
+                    self._v2_success, action, result, context
+                )
             except Exception as exc:
-                response = self._v2_failure(
-                    action, exc, context, effect_started=reserved
+                response = await anyio.to_thread.run_sync(
+                    functools.partial(
+                        self._v2_failure, action, exc, context, effect_started=reserved
+                    )
                 )
             except BaseException:
                 if reserved and context.idempotency_key is not None:
@@ -1597,9 +1617,15 @@ class Runtime:
                 if (response.get("error") or {}).get("details", {}).get(
                     "mutation_outcome"
                 ) == "indeterminate":
-                    self.audit.abandon_idempotency(action.name, context.idempotency_key)
+                    await anyio.to_thread.run_sync(
+                        self.audit.abandon_idempotency,
+                        action.name,
+                        context.idempotency_key,
+                    )
                 else:
-                    response = self._complete_v2_idempotency(action, context, response)
+                    response = await anyio.to_thread.run_sync(
+                        self._complete_v2_idempotency, action, context, response
+                    )
             return response
         finally:
             if reserved and context.idempotency_key is not None:

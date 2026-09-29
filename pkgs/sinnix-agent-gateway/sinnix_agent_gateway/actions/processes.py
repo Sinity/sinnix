@@ -700,6 +700,7 @@ ACTIONS: tuple[Action, ...] = (
     ),
     Action(
         name="processes.wait",
+        remote_wait_field="timeout_seconds",
         family=VerbFamily.WAIT,
         owner="machine",
         summary="Wait until a process (same pid and start ticks) exits, or the bounded timeout elapses.",

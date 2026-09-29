@@ -19,6 +19,7 @@ from mcp.types import (
 )
 
 from . import actions as action_set
+from . import calllog
 from .actions import visible as visible_actions
 from .config import GatewayConfig
 from .prompts import PROMPT_SPECS, PromptGenerator
@@ -31,7 +32,7 @@ from .subscriptions import (
     EventSpoolPublisher,
     OwnerRevisionPublisher,
 )
-from .tooling import build_tool
+from .tooling import REMOTE_TRANSPORT, build_tool
 
 
 def _bounded_resource_json(runtime: Runtime, payload: Any, kind: str) -> str:
@@ -78,6 +79,8 @@ def create_server(
             async with anyio.create_task_group() as task_group:
                 task_group.start_soon(revision_publisher.run, 1.0)
                 task_group.start_soon(event_publisher.run, 1.0)
+                if runtime.transport == REMOTE_TRANSPORT:
+                    task_group.start_soon(calllog.watch_event_loop)
                 yield {}
                 task_group.cancel_scope.cancel()
 
