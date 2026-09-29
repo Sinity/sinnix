@@ -344,7 +344,7 @@ def test_shell_wait_preserves_job_identity_and_returns_output(
     assert result["result"]["outcome"] == "ok", result
     data = result["data"]
     assert data["job_id"] == 44
-    assert data["outcome"] == ("terminal" if terminal else "timeout")
+    assert data["outcome"] == ("terminal" if terminal else "running")
     assert data["output"]["content"] == "output"
     wait_call = next(c for c in fake.calls if c.operation == "job.wait")
     assert wait_call.arguments["timeout_seconds"] == 5

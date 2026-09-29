@@ -114,7 +114,9 @@ def build_tool(action: Action, runtime: Runtime) -> Tool:
             raise
         if remote:
             calllog.emit(
-                record.finish(outcome=response["result"]["outcome"], response=response)
+                record.finish(
+                    outcome=_call_outcome(action, response), response=response
+                )
             )
         return _project(response, blocks)
 
@@ -226,6 +228,27 @@ def build_tool(action: Action, runtime: Runtime) -> Tool:
         },
     )
     return tool
+
+
+# The states in which a call answered with a continuation rather than a result.
+CONTINUATION_OUTCOMES = frozenset({"running", "queued"})
+
+
+def _call_outcome(action: Action, response: dict[str, Any]) -> str:
+    """The call log's outcome: the envelope's, or the state of unfinished work.
+
+    A shell that is still running when its call answers is not an `ok` call to
+    a reader of the journal; logging it as one hid a lane full of long jobs
+    behind a column of successes.
+    """
+    outcome = response["result"]["outcome"]
+    field = action.progress_field
+    data = response.get("data")
+    if outcome == "ok" and field is not None and isinstance(data, dict):
+        state = data.get(field)
+        if state in CONTINUATION_OUTCOMES:
+            return str(state)
+    return outcome
 
 
 def _clamp_remote_wait(

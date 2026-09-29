@@ -214,9 +214,23 @@ class CallRecord:
             if isinstance(receipt, Mapping)
             else None,
         }
+        job = _job(response)
+        if job is not None:
+            record["job_id"] = job.get("job_id")
+            record["group"] = job.get("group")
         if self.clamped:
             record["clamped"] = self.clamped
         return record
+
+
+def _job(response: Mapping[str, Any] | None) -> Mapping[str, Any] | None:
+    """The job a call started or followed, when its data names one."""
+    data = (response or {}).get("data")
+    if not isinstance(data, Mapping):
+        return None
+    nested = data.get("job")
+    job = nested if isinstance(nested, Mapping) else data
+    return job if job.get("job_id") is not None else None
 
 
 async def watch_event_loop(

@@ -1,5 +1,5 @@
 {
-  "action_catalog_hash": "5d5402ee2cde38b45c16a660d5b45ab2678230f221f5f5a9fac059aa0e22e8ad",
+  "action_catalog_hash": "dd692e2c15d63bbd68dc191baba53a9b29fc398ec96b1f386388724132f6ccae",
   "examples": [
     {
       "action": "gateway.status",
@@ -1053,6 +1053,19 @@
       "action": "jobs.wait",
       "family": "wait",
       "input": {
+        "output_offset": 4096,
+        "target": {
+          "job_id": 41,
+          "launch_reference": "sinnix-shell-3f9a21c8"
+        },
+        "timeout_seconds": 20
+      },
+      "title": "Continue a shell's output"
+    },
+    {
+      "action": "jobs.wait",
+      "family": "wait",
+      "input": {
         "target": {
           "job_id": 41,
           "launch_reference": "sinnix-check-3f9a21c8"
@@ -1060,6 +1073,23 @@
         "timeout_seconds": 60
       },
       "title": "Wait on the job, not the queue position"
+    },
+    {
+      "action": "jobs.queues",
+      "family": "query",
+      "input": {},
+      "title": "Every group"
+    },
+    {
+      "action": "jobs.queues",
+      "family": "query",
+      "input": {
+        "groups": [
+          "shell-quick",
+          "shell-long"
+        ]
+      },
+      "title": "The shell lanes"
     },
     {
       "action": "jobs.cancel",
@@ -1132,9 +1162,26 @@
           "project": "sinnix"
         },
         "idempotency_key": "status-1",
-        "timeout_seconds": 300
+        "wait": true
       },
       "title": "git status in sinnix"
+    },
+    {
+      "action": "shell.run",
+      "family": "run",
+      "input": {
+        "argv": [
+          "claude",
+          "-p",
+          "Summarize docs/agent-gateway.md"
+        ],
+        "checkout": {
+          "project": "sinnix"
+        },
+        "idempotency_key": "summary-1",
+        "lane": "long"
+      },
+      "title": "A long agent run"
     },
     {
       "action": "batches.list",

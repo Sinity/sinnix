@@ -86,6 +86,7 @@ class DirectJobs:
         "retry": "job.retry",
         "clean": "job.clean",
         "shell_start": "job.shell.start",
+        "queues": "job.queues",
         "batch_list": "batch.list",
         "batch_start": "batch.start",
         "batch_status": "batch.status",

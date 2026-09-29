@@ -249,7 +249,7 @@ def test_a_remote_wait_is_capped_below_the_tunnel_deadline(
     )
 
     assert waited["result"]["outcome"] == "ok", waited
-    assert waited["data"]["outcome"] == "timeout"
+    assert waited["data"]["outcome"] == "terminal"
     assert fake.calls[-1].arguments == {
         "job_id": 41,
         "timeout_seconds": tooling.REMOTE_WAIT_CAP_SECONDS,
@@ -494,3 +494,102 @@ def test_call_correlation_comes_from_the_calls_own_http_request() -> None:
     )
     assert calllog.http_request(None) is None
     assert calllog.http_request(SimpleNamespace(request_context=None)) is None
+
+
+def test_a_remote_shell_still_running_is_logged_as_running(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Red if the call log writes `ok` for a shell whose work is unfinished.
+
+    A lane full of long jobs showed up in the journal as a column of `ok`
+    calls about 30 s long; the running state is what a reader needs.
+    """
+    server, runtime, fake = make_server(tmp_path, "operator", monkeypatch)
+    runtime.transport = tooling.REMOTE_TRANSPORT
+    running = {
+        **DONE,
+        "job_id": "53",
+        "group": "shell-long",
+        "state": {"phase": "running", "terminal": False, "exit_code": None},
+    }
+    fake.responses["job.shell.start"] = running
+
+    started = call(
+        server,
+        "shell.run",
+        {
+            "checkout": {"project": "fixture"},
+            "argv": ["claude", "-p", "long"],
+            "idempotency_key": "log-running",
+        },
+    )
+
+    assert started["result"]["outcome"] == "ok", started
+    assert started["data"]["outcome"] == "running"
+    (line,) = [
+        json.loads(text)
+        for text in capsys.readouterr().err.splitlines()
+        if "gateway.call" in text
+    ]
+    assert line["outcome"] == "running"
+    assert (line["job_id"], line["group"]) == (53, "shell-long")
+
+    fake.responses["job.shell.start"] = {**DONE, "job_id": "54", "group": "shell-quick"}
+    call(
+        server,
+        "shell.run",
+        {
+            "checkout": {"project": "fixture"},
+            "argv": ["true"],
+            "idempotency_key": "log-done",
+        },
+    )
+    (done,) = [
+        json.loads(text)
+        for text in capsys.readouterr().err.splitlines()
+        if "gateway.call" in text
+    ]
+    assert done["outcome"] == "ok" and done["job_id"] == 54
+
+
+def test_a_catalog_call_does_not_stall_the_event_loop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Red if the catalog builds or hashes every action schema on the event loop.
+
+    That held the loop for about a second per `gateway.catalog`, and every
+    concurrent call waited as long (the `gateway.loop_stall` lines of
+    2026-09-29).
+    """
+    from sinnix_agent_gateway.app import create_server
+
+    server = create_server(
+        GatewayConfig(state_dir=tmp_path / "state", projects={}), "operator"
+    )
+    stalls: list[dict[str, Any]] = []
+
+    async def scenario() -> None:
+        async with anyio.create_task_group() as group:
+            group.start_soon(
+                lambda: calllog.watch_event_loop(
+                    interval=0.02, threshold=0.25, sink=stalls.append
+                )
+            )
+            await anyio.sleep(0.05)
+            for query in ("shell", "jobs", "files"):
+                result = await server.call_tool(
+                    "gateway.catalog",
+                    {
+                        "query": query,
+                        "include_schemas": True,
+                        "include_mcp_tools": False,
+                    },
+                )
+                assert result.structured_content["result"]["outcome"] == "ok"
+            await anyio.sleep(0.05)
+            group.cancel_scope.cancel()
+
+    anyio.run(scenario)
+    assert stalls == []

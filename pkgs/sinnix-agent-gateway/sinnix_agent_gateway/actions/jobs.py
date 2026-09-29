@@ -7,12 +7,15 @@ beads, checkout, pueue task id, and a typed next action on refusal.
 
 from __future__ import annotations
 
+import shlex
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any, Literal
 
 import anyio
+from agentctl.limits import MAX_AGENT_TIMEOUT_SECONDS
 from pydantic import Field
 
+from .. import shell_lanes
 from ..action import (
     ALL_PRINCIPALS,
     OPERATOR_ONLY,
@@ -32,6 +35,7 @@ from ..locators import (
     job_ref,
     project_ref,
 )
+from ..redaction import redact
 from ..results import ProtocolError
 from ..schemas import GatewayModel
 
@@ -89,6 +93,135 @@ class JobView(GatewayModel):
     ended_at: str | None = None
     binding: JobBinding | None = None
     affordances: list[str] = Field(default_factory=list)
+
+
+# A queue entry's command is a one-line summary for telling slots apart; the
+# full argv stays in the job's launch input (jobs.get).
+_COMMAND_SUMMARY_CHARS = 240
+
+
+class QueueEntry(GatewayModel):
+    """One job holding or awaiting a slot in its group."""
+
+    ref: str
+    job_id: int
+    launch_reference: str | None = None
+    label: str | None = None
+    command: str | None = Field(
+        default=None, description="The job's argv as one redacted line."
+    )
+    since: str | None = Field(
+        default=None, description="When it started (running) or was queued."
+    )
+    seconds: int | None = Field(
+        default=None, description="How long it has been running or waiting."
+    )
+    promoted: bool | None = Field(
+        default=None,
+        description="Running past the pool's promotion horizon: it no longer "
+        "holds a slot against new work.",
+    )
+    dependencies: list[int] = Field(default_factory=list)
+
+
+class QueueState(GatewayModel):
+    """One pueue group's occupancy: who holds each slot and who waits."""
+
+    group: str
+    known: bool = Field(description="False when pueue has no such group.")
+    status: str | None = Field(default=None, description="Running or Paused.")
+    parallel: int | None = None
+    promote_after_seconds: int | None = None
+    running: list[QueueEntry] = Field(default_factory=list)
+    running_count: int = 0
+    holding_count: int = Field(
+        default=0, description="Running jobs that still hold a slot."
+    )
+    queued: list[QueueEntry] = Field(default_factory=list)
+    queued_count: int = 0
+    held_count: int = Field(default=0, description="Stashed or paused jobs.")
+    oldest_queued_seconds: int | None = None
+
+
+class JobQueue(QueueState):
+    """Where one unfinished job stands in its group."""
+
+    position: int | None = Field(
+        default=None, description="1-based place among the group's queued jobs."
+    )
+    ahead: list[int] = Field(default_factory=list)
+    waiting_for: list[int] = Field(
+        default_factory=list, description="Unfinished dependencies it waits on."
+    )
+    occupied_by: list[QueueEntry] = Field(
+        default_factory=list,
+        description="The running jobs holding the slots a queued job needs.",
+    )
+
+
+def _command(argv: Any) -> str | None:
+    if not isinstance(argv, list) or not argv:
+        return None
+    line = redact(shlex.join(str(word) for word in argv))
+    if len(line) <= _COMMAND_SUMMARY_CHARS:
+        return line
+    return line[: _COMMAND_SUMMARY_CHARS - 1] + "…"
+
+
+def _entry(raw: Mapping[str, Any]) -> QueueEntry:
+    job_id = int(raw["job_id"])
+    return QueueEntry(
+        ref=job_ref(job_id),
+        job_id=job_id,
+        launch_reference=raw.get("reference"),
+        label=raw.get("label"),
+        command=_command(raw.get("argv")),
+        since=raw.get("since"),
+        seconds=raw.get("seconds"),
+        promoted=raw.get("promoted"),
+        dependencies=[int(item) for item in raw.get("dependencies") or []],
+    )
+
+
+def _queue_fields(raw: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "group": str(raw.get("group") or ""),
+        "known": bool(raw.get("known")),
+        "status": raw.get("status"),
+        "parallel": raw.get("parallel"),
+        "promote_after_seconds": raw.get("promote_after_seconds"),
+        "running": [_entry(row) for row in raw.get("running") or []],
+        "running_count": int(raw.get("running_count") or 0),
+        "holding_count": int(raw.get("holding_count") or 0),
+        "queued": [_entry(row) for row in raw.get("queued") or []],
+        "queued_count": int(raw.get("queued_count") or 0),
+        "held_count": int(raw.get("held_count") or 0),
+        "oldest_queued_seconds": raw.get("oldest_queued_seconds"),
+    }
+
+
+def _job_queue(payload: Mapping[str, Any]) -> JobQueue | None:
+    """The owner's queue state for an unfinished job, or None when terminal."""
+    raw = payload.get("queue")
+    if not isinstance(raw, Mapping):
+        return None
+    return JobQueue(
+        **_queue_fields(raw),
+        position=raw.get("position"),
+        ahead=[int(item) for item in raw.get("ahead") or []],
+        waiting_for=[int(item) for item in raw.get("waiting_for") or []],
+        occupied_by=[_entry(row) for row in raw.get("occupied_by") or []],
+    )
+
+
+Progress = Literal["terminal", "running", "queued"]
+
+
+def _progress(view: JobView) -> Progress:
+    """What a caller should do next: read the result, keep waiting, or both."""
+    if view.state.terminal:
+        return "terminal"
+    return "running" if view.state.phase in {"running", "paused"} else "queued"
 
 
 def _binding(payload: Mapping[str, Any]) -> JobBinding | None:
@@ -329,6 +462,12 @@ class JobResult(GatewayModel):
 
 class JobDetail(JobView):
     projection: Literal["summary", "log", "result"] = "summary"
+    queue: JobQueue | None = Field(
+        default=None, description="Set while the job is unfinished."
+    )
+    queue_unavailable: str | None = Field(
+        default=None, description="Why the unfinished job's queue could not be read."
+    )
     log: JobLog | None = None
     result: JobResult | None = None
 
@@ -383,8 +522,14 @@ def _get(runtime: Runtime, inp: GetInput) -> JobDetail:
         selectors.update(
             attempt_offset=inp.attempt_offset, attempt_limit=inp.attempt_limit
         )
-    view = _job_view(_job(runtime, "job.get", job_id, reference, **selectors))
-    detail = JobDetail(**view.model_dump(), projection=inp.projection)
+    raw = _job(runtime, "job.get", job_id, reference, **selectors)
+    view = _job_view(raw)
+    detail = JobDetail(
+        **view.model_dump(),
+        projection=inp.projection,
+        queue=_job_queue(raw),
+        queue_unavailable=raw.get("queue_unavailable"),
+    )
     if inp.projection == "log":
         detail.log = _log(
             runtime, job_id, inp.offset, inp.max_bytes, reference, inp.attempt
@@ -424,14 +569,30 @@ def _logs(runtime: Runtime, inp: LogsInput) -> JobLog:
 class JobWaitInput(RequestControls):
     target: JobLocator
     timeout_seconds: int = Field(default=30, ge=1, le=300)
+    output_offset: int | None = Field(
+        default=None,
+        ge=0,
+        description="Also return the log from this byte offset; pass the "
+        "previous answer's output.next_offset to read only what is new.",
+    )
+    max_output_bytes: int = Field(default=64_000, ge=1, le=262_144)
 
 
 class JobWait(GatewayModel):
     ref: str
     job_id: int
-    outcome: Literal["terminal", "timeout"]
-    timed_out: bool
+    outcome: Progress = Field(
+        description="terminal, or the job is still running or queued; a "
+        "running or queued answer is a continuation, not a failure."
+    )
     job: JobView
+    queue: JobQueue | None = Field(
+        default=None,
+        description="Set while unfinished: the group's occupancy and this "
+        "job's place in it.",
+    )
+    queue_unavailable: str | None = None
+    output: JobLog | None = None
     detail: str | None = None
     affordances: list[str] = Field(default_factory=list)
 
@@ -450,19 +611,74 @@ async def _wait(runtime: Runtime, inp: JobWaitInput) -> JobWait:
         ),
         abandon_on_cancel=True,
     )
-    timed_out = bool(raw.get("timed_out"))
     view = _job_view(raw)
+    outcome = _progress(view)
+    output = None
+    if inp.output_offset is not None:
+        output = await anyio.to_thread.run_sync(
+            lambda: _log(
+                runtime,
+                view.job_id,
+                inp.output_offset or 0,
+                inp.max_output_bytes,
+                view.launch_reference,
+            ),
+            abandon_on_cancel=True,
+        )
+        if outcome != "terminal" and output.next_offset is None:
+            # Caught up with a job that is still writing: the next poll
+            # resumes where this one ended, not from the start.
+            output.next_offset = output.offset + output.returned_bytes
     # Where the job is now, which a reorder may have moved since it started.
     return JobWait(
         ref=view.ref,
         job_id=view.job_id,
-        outcome="timeout" if timed_out else "terminal",
-        timed_out=timed_out,
+        outcome=outcome,
         job=view,
+        queue=_job_queue(raw),
+        queue_unavailable=raw.get("queue_unavailable"),
+        output=output,
         detail=raw.get("detail"),
         affordances=(
-            ["jobs.wait", "jobs.cancel"] if timed_out else ["jobs.get", "jobs.logs"]
+            ["jobs.get", "jobs.logs"]
+            if outcome == "terminal"
+            else ["jobs.wait", "jobs.queues", "jobs.cancel"]
         ),
+    )
+
+
+# ---------------------------------------------------------------- queues
+
+
+class QueuesInput(RequestControls):
+    groups: list[str] | None = Field(
+        default=None,
+        max_length=64,
+        description="Only these pueue groups; omitted, every group pueue has.",
+    )
+
+
+class QueuePage(GatewayModel):
+    queues: list[QueueState]
+    affordances: list[str] = Field(default_factory=list)
+
+
+def _queues(runtime: Runtime, inp: QueuesInput) -> QueuePage:
+    runtime.principal.require(Capability.JOB_READ)
+    arguments: dict[str, Any] = {}
+    if inp.groups is not None:
+        if any(not group or len(group) > 128 for group in inp.groups):
+            raise ProtocolError(
+                "invalid_request", "group names must be 1-128 characters"
+            )
+        arguments["groups"] = list(inp.groups)
+    page = runtime._job("job.queues", arguments)
+    rows = page.get("queues")
+    if not isinstance(rows, list):
+        raise ProtocolError("owner_failed", "job owner queue response is malformed")
+    return QueuePage(
+        queues=[QueueState(**_queue_fields(row)) for row in rows],
+        affordances=["jobs.get", "jobs.wait", "jobs.cancel"],
     )
 
 
@@ -633,19 +849,43 @@ class ShellRunInput(MutationControls):
         max_length=4_096,
         description="Relative to the checkout; may not leave it.",
     )
-    timeout_seconds: int = Field(default=3_600, ge=1, le=3_600)
+    lane: Literal["auto", "quick", "long"] = Field(
+        default="auto",
+        description="quick for reads and short commands, long for agent CLIs "
+        "and anything that runs for minutes. auto sends agent CLI launches "
+        "(claude, codex, ...) to long and the rest to quick.",
+    )
+    timeout_seconds: int | None = Field(
+        default=None,
+        ge=1,
+        le=MAX_AGENT_TIMEOUT_SECONDS,
+        description="A runtime ceiling that kills the job. Omitted, it runs "
+        "until it finishes (a 7-day watchdog).",
+    )
     wait: bool = False
     wait_timeout_seconds: int = Field(default=5, ge=1, le=30)
     max_output_bytes: int = Field(default=64_000, ge=1, le=262_144)
 
 
 class ShellRunResult(JobView):
-    outcome: Literal["queued", "terminal", "timeout"] = "queued"
+    outcome: Progress = Field(
+        default="queued",
+        description="terminal, or still running or queued; running and queued "
+        "carry a continuation to pass to jobs.wait.",
+    )
+    lane: Literal["quick", "long"]
+    lane_reason: str = Field(
+        description="declared, default, or agent-cli:<name> for an automatic long lane."
+    )
+    queue: JobQueue | None = Field(
+        default=None, description="Set while unfinished: the lane's occupancy."
+    )
+    queue_unavailable: str | None = None
     output: JobLog | None = None
     continuation: JobLocator | None = None
 
 
-def _start_shell(runtime: Runtime, inp: ShellRunInput) -> dict[str, Any]:
+def _start_shell(runtime: Runtime, inp: ShellRunInput, lane: str) -> dict[str, Any]:
     project_id, workspace, _ = _workspace(runtime, inp.checkout)
     if any(not argument for argument in inp.argv):
         raise ProtocolError("invalid_request", "argv entries must be non-empty")
@@ -656,36 +896,52 @@ def _start_shell(runtime: Runtime, inp: ShellRunInput) -> dict[str, Any]:
         checkout_id=workspace or "default",
         argv=inp.argv,
         cwd=inp.cwd,
+        group=shell_lanes.GROUPS[lane],
         timeout_seconds=inp.timeout_seconds,
     )
 
 
 async def _run_shell(runtime: Runtime, inp: ShellRunInput) -> ShellRunResult:
+    lane, reason = shell_lanes.choose(inp.argv, inp.lane)
     # Resolving the checkout and enqueueing the job run subprocesses; on the
     # event loop they would stall every other call the server is handling.
-    result = await anyio.to_thread.run_sync(_start_shell, runtime, inp)
+    result = await anyio.to_thread.run_sync(_start_shell, runtime, inp, lane)
     view = _job_view(result)
     if not inp.wait:
-        return ShellRunResult(**view.model_dump())
+        return ShellRunResult(
+            **view.model_dump(),
+            outcome=_progress(view),
+            lane=lane,
+            lane_reason=reason,
+            queue=_job_queue(result),
+            queue_unavailable=result.get("queue_unavailable"),
+            continuation=None
+            if view.state.terminal
+            else JobLocator(job_id=view.job_id, launch_reference=view.launch_reference),
+        )
     target = JobLocator(job_id=view.job_id, launch_reference=view.launch_reference)
     waited = await _wait(
-        runtime, JobWaitInput(target=target, timeout_seconds=inp.wait_timeout_seconds)
+        runtime,
+        JobWaitInput(
+            target=target,
+            timeout_seconds=inp.wait_timeout_seconds,
+            output_offset=0,
+            max_output_bytes=inp.max_output_bytes,
+        ),
     )
     view = waited.job
-    output = await anyio.to_thread.run_sync(
-        lambda: _log(
-            runtime, view.job_id, 0, inp.max_output_bytes, view.launch_reference
-        ),
-        abandon_on_cancel=True,
-    )
     return ShellRunResult(
         **view.model_dump(),
         outcome=waited.outcome,
-        output=output,
+        lane=lane,
+        lane_reason=reason,
+        queue=waited.queue,
+        queue_unavailable=waited.queue_unavailable,
+        output=waited.output,
         continuation=(
-            JobLocator(job_id=view.job_id, launch_reference=view.launch_reference)
-            if waited.timed_out
-            else None
+            None
+            if waited.outcome == "terminal"
+            else JobLocator(job_id=view.job_id, launch_reference=view.launch_reference)
         ),
     )
 
@@ -758,6 +1014,7 @@ ACTIONS: tuple[Action, ...] = (
     Action(
         name="jobs.wait",
         remote_wait_field="timeout_seconds",
+        progress_field="outcome",
         family=VerbFamily.WAIT,
         owner="systemd-jobs",
         summary="Block until one job reaches a terminal phase or the bounded timeout passes.",
@@ -766,13 +1023,24 @@ ACTIONS: tuple[Action, ...] = (
         handler=_wait,
         principals=ALL_PRINCIPALS,
         resource_kinds=("job",),
-        affordances=("jobs.get", "jobs.logs", "jobs.cancel"),
-        aliases=("wait for job", "block", "until done"),
-        documentation="The wait runs in a worker thread; cancelling the MCP request abandons it without stopping the job. A task id is a queue position: pass the launch_reference the start returned and the wait follows its job across a reorder, answering with the id it is at now.",
+        affordances=("jobs.get", "jobs.logs", "jobs.queues", "jobs.cancel"),
+        aliases=("wait for job", "block", "until done", "continue"),
+        documentation="outcome is terminal, running or queued; running and queued are continuations, never failures, and carry queue: the group's occupancy and the job's place in it. Pass output_offset (the previous output.next_offset) to receive only new log bytes. The wait runs in a worker thread; cancelling the MCP request abandons it without stopping the job. A task id is a queue position: pass the launch_reference the start returned and the wait follows its job across a reorder, answering with the id it is at now.",
         examples=(
             Example(
                 title="Wait a minute",
                 input={"target": {"job_id": 41}, "timeout_seconds": 60},
+            ),
+            Example(
+                title="Continue a shell's output",
+                input={
+                    "target": {
+                        "job_id": 41,
+                        "launch_reference": "sinnix-shell-3f9a21c8",
+                    },
+                    "timeout_seconds": 20,
+                    "output_offset": 4_096,
+                },
             ),
             Example(
                 title="Wait on the job, not the queue position",
@@ -783,6 +1051,27 @@ ACTIONS: tuple[Action, ...] = (
                     },
                     "timeout_seconds": 60,
                 },
+            ),
+        ),
+    ),
+    Action(
+        name="jobs.queues",
+        family=VerbFamily.QUERY,
+        owner="systemd-jobs",
+        summary="Each pueue group's width, the jobs holding its slots and for how long, and what waits.",
+        Input=QueuesInput,
+        Output=QueuePage,
+        handler=_queues,
+        principals=ALL_PRINCIPALS,
+        resource_kinds=("job",),
+        affordances=("jobs.get", "jobs.wait", "jobs.cancel"),
+        aliases=("lanes", "occupancy", "queue length", "what is running", "backlog"),
+        documentation="shell-quick and shell-long are the shell.run lanes. A running job marked promoted has outlived its pool's promotion horizon and no longer holds a slot against new work. Reads only unfinished tasks, so it stays cheap however long the queue history is.",
+        examples=(
+            Example(title="Every group", input={}),
+            Example(
+                title="The shell lanes",
+                input={"groups": ["shell-quick", "shell-long"]},
             ),
         ),
     ),
@@ -883,25 +1172,35 @@ ACTIONS: tuple[Action, ...] = (
     ),
     Action(
         name="shell.run",
+        progress_field="outcome",
         family=VerbFamily.RUN,
         owner="systemd-jobs",
-        summary="Queue one argv in the interactive pool inside a checkout's declared environment.",
+        summary="Run one argv in a shell lane (quick or long) inside a checkout's declared environment.",
         Input=ShellRunInput,
         Output=ShellRunResult,
         handler=_run_shell,
         principals=OPERATOR_ONLY,
         resource_kinds=("project", "checkout", "job"),
-        affordances=("jobs.wait", "jobs.logs", "jobs.cancel"),
+        affordances=("jobs.wait", "jobs.logs", "jobs.queues", "jobs.cancel"),
         aliases=("exec", "command", "bash", "run command"),
-        documentation="cwd is confined to the checkout. Default execution is asynchronous. wait=true waits up to wait_timeout_seconds (default 5, maximum 30) on the same job and returns bounded output; a timeout returns a continuation locator without cancelling the job.",
+        documentation="cwd is confined to the checkout. lane=auto sends agent CLI launches (claude, codex, ...) to the long lane and everything else to the quick lane, which long work never occupies: a quick-lane command still running after the pool's promotion horizon stops holding its slot (jobs.queues shows it as promoted). Default execution is asynchronous. wait=true waits up to wait_timeout_seconds (default 5, maximum 30) and returns output; outcome running or queued is a continuation with queue occupancy, never a failure: pass continuation and output.next_offset to jobs.wait. timeout_seconds is an optional kill ceiling; omitted, the job runs until it finishes.",
         examples=(
             Example(
                 title="git status in sinnix",
                 input={
                     "checkout": {"project": "sinnix"},
                     "argv": ["git", "status", "--short"],
-                    "timeout_seconds": 300,
+                    "wait": True,
                     "idempotency_key": "status-1",
+                },
+            ),
+            Example(
+                title="A long agent run",
+                input={
+                    "checkout": {"project": "sinnix"},
+                    "argv": ["claude", "-p", "Summarize docs/agent-gateway.md"],
+                    "lane": "long",
+                    "idempotency_key": "summary-1",
                 },
             ),
         ),

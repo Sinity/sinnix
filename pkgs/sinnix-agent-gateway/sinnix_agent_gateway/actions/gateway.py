@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Literal
 
+import anyio
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..action import ALL_PRINCIPALS, Action, Example, RequestControls
@@ -46,7 +47,10 @@ async def _status(runtime: Runtime, inp: StatusInput) -> GatewayStatus:
     from .. import actions as action_set
 
     manifest = await runtime.tool_manifest()
-    catalog_hash = action_set.catalog_hash(runtime.principal_name)
+    # Hashing the catalog serializes every schema; off the event loop.
+    catalog_hash = await anyio.to_thread.run_sync(
+        action_set.catalog_hash, runtime.principal_name
+    )
     status = await runtime.gateway_status(
         runtime.principal_contract_hash(),
         manifest["sha256"],
@@ -119,7 +123,13 @@ class Catalog(GatewayModel):
     truncated: bool = False
 
 
-async def _catalog(runtime: Runtime, inp: CatalogInput) -> Catalog:
+def _action_matches(
+    runtime: Runtime, inp: CatalogInput
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], str]:
+    """The matching action and resource rows and the catalog digest.
+
+    Pure CPU over every action's schema, so it runs in a worker thread.
+    """
     from .. import actions as action_set
 
     rows = []
@@ -161,6 +171,15 @@ async def _catalog(runtime: Runtime, inp: CatalogInput) -> Catalog:
     selected = search_rows(rows, inp.query, fields)
     resources = action_set.resource_rows(runtime.principal_name)
     resources = search_rows(resources, inp.query, ("kind", "owner", "actions"))
+    return selected, resources, action_set.catalog_hash(runtime.principal_name)
+
+
+async def _catalog(runtime: Runtime, inp: CatalogInput) -> Catalog:
+    from .. import actions as action_set
+
+    selected, resources, catalog_sha256 = await anyio.to_thread.run_sync(
+        _action_matches, runtime, inp
+    )
     mcp_tools: list[dict[str, Any]] = []
     unavailable: list[str] = []
     incomplete: dict[str, str] = {}
@@ -204,7 +223,7 @@ async def _catalog(runtime: Runtime, inp: CatalogInput) -> Catalog:
     total = len(selected) + len(resources) + len(mcp_tools)
     return Catalog(
         revision=action_set.REVISION,
-        catalog_sha256=action_set.catalog_hash(runtime.principal_name),
+        catalog_sha256=catalog_sha256,
         actions=[
             CatalogAction(**{k: v for k, v in row.items() if k != "documentation"})
             for row in selected[: inp.limit]

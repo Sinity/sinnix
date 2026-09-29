@@ -69,6 +69,10 @@ def create_server(
 ) -> MCPServer:
     runtime = Runtime.create(config, principal_name)
     runtime.transport = transport
+    # Build every action schema now, before serving: the first catalog,
+    # status or manifest call would otherwise build them on the event loop
+    # and stall every concurrent call for about a second.
+    action_set.catalog_hash(principal_name)
     subscription_bus = DemandAwareSubscriptionBus(InMemorySubscriptionBus())
     revision_publisher = OwnerRevisionPublisher(runtime, subscription_bus)
     event_publisher = EventSpoolPublisher(config.event_spool, subscription_bus)

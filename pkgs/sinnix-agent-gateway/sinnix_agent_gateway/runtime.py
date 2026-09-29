@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Mapping
 
 import anyio
+from agentctl.limits import MAX_AGENT_TIMEOUT_SECONDS
 
 from .action import Action, ActionResult
 from .actions import BY_NAME as ACTIONS_BY_NAME
@@ -408,6 +409,7 @@ class Runtime:
                 "job.retry": "retry",
                 "job.clean": "clean",
                 "job.shell.start": "shell_start",
+                "job.queues": "queues",
                 "batch.list": "batch_list",
                 "batch.start": "batch_start",
                 "batch.status": "batch_status",
@@ -540,7 +542,8 @@ class Runtime:
         checkout_id: str,
         argv: list[str],
         cwd: str,
-        timeout_seconds: int,
+        group: str,
+        timeout_seconds: int | None,
     ) -> dict[str, Any]:
         self.principal.require(Capability.SHELL_RUN)
         if self.principal.name != "operator":
@@ -560,13 +563,14 @@ class Runtime:
             raise ProtocolError("invalid_request", "argv is malformed")
         if not isinstance(cwd, str) or not 1 <= len(cwd) <= 4_096:
             raise ProtocolError("invalid_request", "cwd is malformed")
-        if (
+        if timeout_seconds is not None and (
             not isinstance(timeout_seconds, int)
             or isinstance(timeout_seconds, bool)
-            or not 1 <= timeout_seconds <= 3_600
+            or not 1 <= timeout_seconds <= MAX_AGENT_TIMEOUT_SECONDS
         ):
             raise ProtocolError(
-                "invalid_request", "run timeout_seconds must be between 1 and 3600"
+                "invalid_request",
+                f"run timeout_seconds must be between 1 and {MAX_AGENT_TIMEOUT_SECONDS}",
             )
         result = self._job(
             "job.shell.start",
@@ -575,6 +579,7 @@ class Runtime:
                 "checkout_id": checkout_id,
                 "argv": argv,
                 "cwd": cwd,
+                "group": group,
                 "timeout_seconds": timeout_seconds,
                 "result": "exit-status",
             },

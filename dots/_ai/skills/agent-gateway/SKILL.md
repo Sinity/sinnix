@@ -5,7 +5,7 @@ description: Use when invoking, inspecting, or documenting Sinnix Agent Gateway 
 
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: 5d5402ee2cde38b45c16a660d5b45ab2678230f221f5f5a9fac059aa0e22e8ad -->
+<!-- gateway-catalog-sha256: dd692e2c15d63bbd68dc191baba53a9b29fc398ec96b1f386388724132f6ccae -->
 
 # Agent Gateway
 
@@ -65,6 +65,7 @@ Effectful actions (families change, operate, run) require `idempotency_key`. Con
 - `beads.memories` — The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
 - `beads.related` — The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
 - `jobs.list` — List queued jobs (pueue tasks) newest first, optionally for one project.
+- `jobs.queues` — shell-quick and shell-long are the shell.run lanes. A running job marked promoted has outlived its pool's promotion horizon and no longer holds a slot against new work. Reads only unfinished tasks, so it stays cheap however long the queue history is.
 - `batches.list` — List batch runs newest first, with each worker's stage and task.
 - `desktop.screenshot` — full captures the focused output through the HDR-aware screenshot owner; window/rect/monitor targets capture with grim. On HDR outputs a corrected SDR variant is produced and preferred for the image block.
 - `desktop.tree` — Walks the AT-SPI tree through pyatspi in the gateway environment; Chromium apps expose a tree only when launched with accessibility forced on.
@@ -125,7 +126,7 @@ Effectful actions (families change, operate, run) require `idempotency_key`. Con
 
 ### wait
 
-- `jobs.wait` — The wait runs in a worker thread; cancelling the MCP request abandons it without stopping the job. A task id is a queue position: pass the launch_reference the start returned and the wait follows its job across a reorder, answering with the id it is at now.
+- `jobs.wait` — outcome is terminal, running or queued; running and queued are continuations, never failures, and carry queue: the group's occupancy and the job's place in it. Pass output_offset (the previous output.next_offset) to receive only new log bytes. The wait runs in a worker thread; cancelling the MCP request abandons it without stopping the job. A task id is a queue position: pass the launch_reference the start returned and the wait follows its job across a reorder, answering with the id it is at now.
 - `wait.for` — Conditions: job_terminal, bead_status, bead_revision, unit_state, file_hash, file_exists, capture_freshness, receipt_appearance, terminal_output. A timeout returns the current evidence and a continuation token.
 - `terminals.wait` — Wait until a terminal is at its prompt, shows a regex, finishes a process, or changes title.
 - `processes.wait` — Wait until a process (same pid and start ticks) exits, or the bounded timeout elapses.
@@ -172,7 +173,7 @@ Effectful actions (families change, operate, run) require `idempotency_key`. Con
 ### run
 
 - `operations.run` — Queue one project-declared operation in its declared pool on the root or a worktree.
-- `shell.run` — cwd is confined to the checkout. Default execution is asynchronous. wait=true waits up to wait_timeout_seconds (default 5, maximum 30) on the same job and returns bounded output; a timeout returns a continuation locator without cancelling the job.
+- `shell.run` — cwd is confined to the checkout. lane=auto sends agent CLI launches (claude, codex, ...) to the long lane and everything else to the quick lane, which long work never occupies: a quick-lane command still running after the pool's promotion horizon stops holding its slot (jobs.queues shows it as promoted). Default execution is asynchronous. wait=true waits up to wait_timeout_seconds (default 5, maximum 30) and returns output; outcome running or queued is a continuation with queue occupancy, never a failure: pass continuation and output.next_offset to jobs.wait. timeout_seconds is an optional kill ceiling; omitted, the job runs until it finishes.
 - `batches.start` — backend, model and effort default to the project descriptor's packet defaults. Refused when a bead is claimed or already in a live run. The landing task is queued behind the workers and runs itself.
 - `batches.land` — batches.start already queues the first landing behind the workers; this re-queues one after a landing failed. The landing runs as a job, so wait on landing_job_id rather than on this call.
 - `batches.resume` — backend, model and effort default to the worker's own. Refused while the worker's task is still queued or running.
@@ -180,4 +181,4 @@ Effectful actions (families change, operate, run) require `idempotency_key`. Con
 
 The complete schemas and examples are in `docs/generated/agent-gateway-reference.md`.
 
-Catalog revision: `v3-typed-actions`. Catalog SHA-256: `5d5402ee2cde38b45c16a660d5b45ab2678230f221f5f5a9fac059aa0e22e8ad`.
+Catalog revision: `v3-typed-actions`. Catalog SHA-256: `dd692e2c15d63bbd68dc191baba53a9b29fc398ec96b1f386388724132f6ccae`.

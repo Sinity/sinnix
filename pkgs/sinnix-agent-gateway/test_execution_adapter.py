@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 from agentctl import batch, launch, pueue
 from agentctl.config import Config
+from agentctl.limits import MAX_AGENT_TIMEOUT_SECONDS
 from sinnix_agent_gateway.execution import JobOwnerError, LocalJobs
 from sinnix_agent_gateway.owner_errors import ErrorCode
 
@@ -53,6 +54,7 @@ def _call(
         "job.retry": adapter.retry,
         "job.clean": adapter.clean,
         "job.shell.start": adapter.shell_start,
+        "job.queues": adapter.queues,
         "batch.list": adapter.batch_list,
         "batch.start": adapter.batch_start,
         "batch.status": adapter.batch_status,
@@ -60,6 +62,15 @@ def _call(
         "batch.resume": adapter.batch_resume,
     }
     return methods[operation](**arguments)
+
+
+EMPTY_QUEUE = pueue.Status({}, {"normal": {"status": "Running", "parallel_tasks": 3}})
+
+
+@pytest.fixture(autouse=True)
+def _no_live_queue(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An unfinished job's queue read must never reach the operator's pueued."""
+    monkeypatch.setattr(pueue, "live", lambda: EMPTY_QUEUE)
 
 
 @pytest.fixture
@@ -148,7 +159,7 @@ def test_shell_start_queues_the_argv_inside_the_checkout(
     adapter: LocalJobs, root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Red if a shell command escapes the checkout, skips the project
-    environment, or lands outside the interactive pool."""
+    environment, or lands outside the lane it was routed to."""
     seen: dict[str, Any] = {}
 
     def fake_enqueue(config, **kwargs):
@@ -164,10 +175,11 @@ def test_shell_start_queues_the_argv_inside_the_checkout(
             "checkout_id": "default",
             "argv": ["printf", "fixture"],
             "cwd": "sub",
+            "group": "shell-quick",
             "timeout_seconds": 60,
         },
     )
-    assert payload["group"] == "interactive"
+    assert payload["group"] == "shell-quick"
     assert seen["label"] == "fixture:shell"
     assert seen["working_directory"] == (root / "sub").resolve()
     assert seen["argv"] == ("/bin/sh", "-c", "printf", "fixture")
@@ -183,11 +195,39 @@ def test_shell_start_queues_the_argv_inside_the_checkout(
                 "checkout_id": "default",
                 "argv": ["true"],
                 "cwd": "../..",
+                "group": "shell-quick",
                 "timeout_seconds": 60,
             },
         )
     assert escaped.value.code is ErrorCode.POLICY_DENIED
     assert len(seen) == 9
+
+    long = _call(
+        adapter,
+        "job.shell.start",
+        {
+            "project_id": "fixture",
+            "checkout_id": "default",
+            "argv": ["claude", "-p", "work"],
+            "group": "shell-long",
+        },
+    )
+    assert long["group"] == "shell-long"
+    # No ceiling asked for: the unit gets the agent watchdog, not an hour.
+    assert seen["timeout_seconds"] == MAX_AGENT_TIMEOUT_SECONDS
+
+    with pytest.raises(JobOwnerError) as foreign:
+        _call(
+            adapter,
+            "job.shell.start",
+            {
+                "project_id": "fixture",
+                "checkout_id": "default",
+                "argv": ["true"],
+                "group": "bulk",
+            },
+        )
+    assert foreign.value.code is ErrorCode.INVALID_ARGUMENT
 
 
 def test_job_list_cursor_is_bound_to_the_project_filter(
@@ -464,10 +504,80 @@ def test_job_logs_reads_the_log_of_the_job_the_reference_addresses(
     mine = task(44, reference)
     occupant = task(44, "fixture-other-0badc0de")
 
-    monkeypatch.setattr(launch.pueue, "tasks", lambda: {44: mine, 45: occupant})
+    # Id 41 names nothing now; the reference finds its job by the one command
+    # that names its launch input, never through the whole history.
+    monkeypatch.setattr(
+        launch.pueue, "task", lambda task_id: {45: occupant}.get(task_id)
+    )
+    monkeypatch.setattr(
+        launch.pueue,
+        "tasks_by_command",
+        lambda fragment: {
+            candidate.task_id: candidate
+            for candidate in (mine, occupant)
+            if fragment in candidate.command
+        },
+    )
     monkeypatch.setattr(launch.pueue, "log", lambda _task_id: "")
 
     answer = _call(adapter, "job.logs", {"job_id": 41, "launch_reference": reference})
     assert answer["launch_reference"] == reference
     assert answer["job_id"] == "44"
     assert answer["content"] == f"log of {reference}"
+
+
+def _task(
+    task_id: int, status: str, *, group: str, started: str | None = None
+) -> pueue.Task:
+    return pueue.Task(
+        task_id=task_id,
+        label="fixture:shell",
+        group=group,
+        status=status,
+        result=None,
+        exit_code=None,
+        path="/fixture",
+        dependencies=(),
+        enqueued_at="2026-09-29T10:00:00+00:00",
+        started_at=started,
+    )
+
+
+def test_an_unfinished_job_answers_with_its_place_in_the_queue(
+    adapter: LocalJobs, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Red if a queued job's answer omits who holds its group's slots."""
+    busy = pueue.Status(
+        {
+            40: _task(
+                40, "Running", group="shell-long", started="2026-09-29T09:00:00+00:00"
+            ),
+            41: _task(41, "Queued", group="shell-long"),
+        },
+        {"shell-long": {"status": "Running", "parallel_tasks": 1}},
+    )
+    monkeypatch.setattr(pueue, "live", lambda: busy)
+    queued = {**JOB_ROW, "group": "shell-long", "job_id": 41}
+    monkeypatch.setattr(launch, "get_job", lambda *args, **kwargs: queued)
+
+    answer = _call(adapter, "job.get", {"job_id": 41})
+
+    queue = answer["queue"]
+    assert queue["group"] == "shell-long" and queue["parallel"] == 1
+    assert queue["position"] == 1 and queue["queued_count"] == 1
+    assert [entry["job_id"] for entry in queue["occupied_by"]] == [40]
+    assert queue["occupied_by"][0]["seconds"] > 0
+
+    rows = _call(adapter, "job.queues", {"groups": ["shell-long"]})["queues"]
+    assert [row["group"] for row in rows] == ["shell-long"]
+    assert rows[0]["running_count"] == 1 and rows[0]["queued_count"] == 1
+
+    def unavailable() -> pueue.Status:
+        raise pueue.PueueError("daemon unreachable")
+
+    monkeypatch.setattr(pueue, "live", unavailable)
+    degraded = _call(adapter, "job.get", {"job_id": 41})
+    # The job's own answer stands; the missing queue is named, not fatal.
+    assert "queue" not in degraded
+    assert degraded["queue_unavailable"] == "daemon unreachable"
+    assert degraded["job_id"] == "41"

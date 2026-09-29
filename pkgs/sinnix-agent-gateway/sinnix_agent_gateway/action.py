@@ -9,7 +9,9 @@ the schema the handler validates against.
 
 from __future__ import annotations
 
+import functools
 import inspect
+import json
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any, Literal
@@ -154,6 +156,10 @@ class Action:
     # The input field that bounds how long a read action blocks. The remote
     # tunnel caps it so the answer precedes the control plane's deadline.
     remote_wait_field: str | None = None
+    # The output field that says whether the work the call started or
+    # followed is still `running` or `queued`; the call log records that
+    # state as the call's outcome instead of `ok`.
+    progress_field: str | None = None
 
     def __post_init__(self) -> None:
         if "." not in self.name:
@@ -186,6 +192,13 @@ class Action:
         ):
             raise ValueError(
                 f"action {self.name!r} remote wait field must be a read input field"
+            )
+        if (
+            self.progress_field is not None
+            and self.progress_field not in self.Output.model_fields
+        ):
+            raise ValueError(
+                f"action {self.name!r} progress field must be an output field"
             )
         for example in self.examples:
             self.Input.model_validate(example.input)
@@ -233,20 +246,14 @@ class Action:
         return inspect.iscoroutinefunction(self.handler)
 
     def input_schema(self) -> dict[str, Any]:
-        return token_input_schema(
-            strip_titles(self.Input.model_json_schema(by_alias=True))
-        )
+        return json.loads(_input_schema_text(self.Input))
 
     def envelope_model(self) -> type[V2ToolEnvelope]:
         """The typed response envelope: ``data`` is this action's Output."""
-        return create_model(
-            f"{self.Output.__name__}Envelope",
-            __base__=V2ToolEnvelope,
-            data=(self.Output | TruncatedData | None, None),
-        )
+        return _envelope_model(self.Output)
 
     def output_schema(self) -> dict[str, Any]:
-        return self.envelope_model().model_json_schema(by_alias=True)
+        return json.loads(_output_schema_text(self.Output))
 
     def catalog_row(self) -> dict[str, Any]:
         return {
@@ -273,6 +280,31 @@ class Action:
             "examples": [example.model_dump() for example in self.examples],
             "documentation": self.documentation or self.summary,
         }
+
+
+# Schemas are pure functions of their model classes, which are fixed at import.
+# Generating them is the expensive part of every catalog, manifest and hash
+# (about a second for the whole action set), so each is built once per
+# process and handed out as a fresh copy.
+@functools.cache
+def _input_schema_text(model: type[BaseModel]) -> str:
+    return json.dumps(
+        token_input_schema(strip_titles(model.model_json_schema(by_alias=True)))
+    )
+
+
+@functools.cache
+def _envelope_model(output: type[BaseModel]) -> type[V2ToolEnvelope]:
+    return create_model(
+        f"{output.__name__}Envelope",
+        __base__=V2ToolEnvelope,
+        data=(output | TruncatedData | None, None),
+    )
+
+
+@functools.cache
+def _output_schema_text(output: type[BaseModel]) -> str:
+    return json.dumps(_envelope_model(output).model_json_schema(by_alias=True))
 
 
 def strip_titles(schema: Any) -> Any:

@@ -13,18 +13,20 @@ from typing import Any, Callable, Mapping
 
 from agentctl import batch, launch
 from agentctl.config import Config, ConfigError, load_config, resolve_project
+from agentctl.limits import MAX_AGENT_TIMEOUT_SECONDS
 from agentctl.projects import ProjectConfigError
 from agentctl.prompts import PromptError
 from agentctl.pueue import PueueError
 from agentctl.worktrunk import WorktrunkError
 
+from . import shell_lanes
 from .owner_errors import ErrorCode
 
 OWNER = "systemd-jobs"
 JOB_LIST_ORDERING = "created_at_desc_job_id_desc"
 DEFAULT_CHECKOUT = "default"
 SHELL_OPERATION = "shell"
-SHELL_GROUP = "interactive"
+SHELL_GROUPS = frozenset(shell_lanes.GROUPS.values())
 MAX_LOG_BYTES = 262_144
 
 
@@ -166,6 +168,8 @@ def job_payload(job: Mapping[str, Any]) -> dict[str, Any]:
                 "queue_present",
                 "outcome",
                 "reused",
+                "queue",
+                "queue_unavailable",
             )
             if key in job
         },
@@ -341,6 +345,9 @@ class LocalJobs:
     def clean(self, **arguments: Any) -> dict[str, Any]:
         return self._call(self._clean, arguments)
 
+    def queues(self, **arguments: Any) -> dict[str, Any]:
+        return self._call(self._queues, arguments)
+
     def shell_start(self, **arguments: Any) -> dict[str, Any]:
         arguments.pop("principal", None)
         arguments.pop("result", None)
@@ -415,17 +422,32 @@ class LocalJobs:
         )
         return job_payload(job)
 
+    def _with_queue(self, job: Mapping[str, Any]) -> dict[str, Any]:
+        """The job, and while it is unfinished, where it stands in its group.
+
+        The job answer stands without it: a queue read that fails is named in
+        ``queue_unavailable`` instead of failing a start or a wait that
+        already has its result.
+        """
+        try:
+            queue = launch.job_queue(self.config, job)
+        except PueueError as error:
+            return {**job, "queue_unavailable": str(error)}
+        return {**job, "queue": queue} if queue is not None else dict(job)
+
     def _get(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         return job_payload(
-            launch.get_job(
-                _require_int(arguments, "job_id"),
-                self.config,
-                _launch_reference(arguments),
-                **{
-                    key: arguments[key]
-                    for key in ("attempt", "attempt_offset", "attempt_limit")
-                    if arguments.get(key) is not None
-                },
+            self._with_queue(
+                launch.get_job(
+                    _require_int(arguments, "job_id"),
+                    self.config,
+                    _launch_reference(arguments),
+                    **{
+                        key: arguments[key]
+                        for key in ("attempt", "attempt_offset", "attempt_limit")
+                        if arguments.get(key) is not None
+                    },
+                )
             )
         )
 
@@ -436,8 +458,24 @@ class LocalJobs:
             job_id,
             timeout_seconds=float(timeout_seconds),
             reference=_launch_reference(arguments),
+            config=self.config,
         )
-        return {**job_payload(job), "timed_out": bool(job.get("wait_timed_out"))}
+        return {
+            **job_payload(self._with_queue(job)),
+            "timed_out": bool(job.get("wait_timed_out")),
+        }
+
+    def _queues(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        groups = arguments.get("groups")
+        if groups is not None and (
+            not isinstance(groups, list)
+            or any(not isinstance(group, str) or not group for group in groups)
+        ):
+            raise _Refusal(
+                ErrorCode.INVALID_ARGUMENT, "groups must be a list of group names"
+            )
+        states = launch.queue_state(self.config, groups)
+        return {"queues": [states[name] for name in sorted(states)]}
 
     def _logs(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         job_id = _require_int(arguments, "job_id")
@@ -654,7 +692,7 @@ class LocalJobs:
         }
 
     def _shell_start(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
-        """One argv queued in the interactive pool, inside the project's environment."""
+        """One argv queued in a shell lane, inside the project's environment."""
         project = self._project(_require_str(arguments, "project_id"))
         worktree = self._worktree(project, arguments.get("checkout_id"))
         argv = arguments.get("argv")
@@ -669,16 +707,29 @@ class LocalJobs:
             raise _Refusal(ErrorCode.POLICY_DENIED, "cwd must stay inside the checkout")
         if not cwd.is_dir():
             raise _Refusal(ErrorCode.INVALID_ARGUMENT, f"cwd does not exist: {cwd}")
+        group = _require_str(arguments, "group")
+        if group not in SHELL_GROUPS:
+            raise _Refusal(
+                ErrorCode.INVALID_ARGUMENT,
+                f"group must be one of {sorted(SHELL_GROUPS)}",
+            )
+        # No ceiling requested: the job runs until it finishes, under the same
+        # week-long watchdog an agent worker's unit gets.
+        timeout_seconds = (
+            MAX_AGENT_TIMEOUT_SECONDS
+            if arguments.get("timeout_seconds") is None
+            else _require_int(arguments, "timeout_seconds")
+        )
         job = launch.enqueue(
             self.config,
             project=project,
             operation=SHELL_OPERATION,
             label=launch.label_for(project.project_id, SHELL_OPERATION),
-            group=SHELL_GROUP,
+            group=group,
             argv=project.environment.command_for(argv),
             working_directory=cwd,
-            timeout_seconds=_require_int(arguments, "timeout_seconds"),
+            timeout_seconds=timeout_seconds,
             result_kind="exit",
             environment=project.environment.values(),
         )
-        return job_payload(job)
+        return job_payload(self._with_queue(job))

@@ -220,7 +220,7 @@ def test_get_returns_summary_log_range_and_result(
     assert mismatch["error"]["code"] == "owner_failed"
 
 
-def test_wait_reports_terminal_or_timeout_from_the_queue(
+def test_wait_reports_terminal_running_or_queued_from_the_queue(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     server, _, fake = make_server(tmp_path, "operator", monkeypatch)
@@ -232,11 +232,19 @@ def test_wait_reports_terminal_or_timeout_from_the_queue(
     waited = call(
         server, "jobs.wait", {"target": {"job_id": 41}, "timeout_seconds": 5}
     )["data"]
-    assert waited["outcome"] == "timeout" and waited["timed_out"] is True
+    assert waited["outcome"] == "running"
     assert (
         waited["detail"] == "still running" and "jobs.cancel" in waited["affordances"]
     )
     assert fake.calls[-1].arguments == {"job_id": 41, "timeout_seconds": 5}
+
+    fake.responses["job.wait"] = {
+        **RUNNING,
+        "state": {"phase": "queued", "terminal": False, "exit_code": None},
+        "timed_out": True,
+    }
+    queued = call(server, "jobs.wait", {"target": {"job_id": 41}})["data"]
+    assert queued["outcome"] == "queued"
 
     fake.responses["job.wait"] = DONE
     done = call(server, "jobs.wait", {"target": {"job_id": 41}})["data"]
@@ -493,7 +501,7 @@ def test_shell_run_is_operator_only_and_keeps_cwd_inside_the_checkout(
         "job_id": "51",
         "label": "fixture:shell",
         "operation": "shell",
-        "group": "interactive",
+        "group": "shell-quick",
     }
     started = call(
         server,
@@ -507,12 +515,15 @@ def test_shell_run_is_operator_only_and_keeps_cwd_inside_the_checkout(
         },
     )
     assert started["result"]["outcome"] == "ok", started
-    assert started["data"]["group"] == "interactive"
+    assert started["data"]["group"] == "shell-quick"
+    assert started["data"]["lane"] == "quick"
+    assert started["data"]["outcome"] == "terminal"
     assert fake.calls[-1].arguments == {
         "project_id": "fixture",
         "checkout_id": "default",
         "argv": ["git", "status"],
         "cwd": "sub",
+        "group": "shell-quick",
         "timeout_seconds": 60,
         "result": "exit-status",
     }
@@ -531,3 +542,198 @@ def test_shell_run_is_operator_only_and_keeps_cwd_inside_the_checkout(
         },
     )
     assert escaped["error"]["code"] == "policy_denied"
+
+
+QUEUE = {
+    "group": "shell-long",
+    "known": True,
+    "status": "Running",
+    "parallel": 1,
+    "promote_after_seconds": None,
+    "running": [
+        {
+            "job_id": 60,
+            "label": "fixture:shell",
+            "reference": "fixture-shell-aaaa1111",
+            "argv": ["/bin/sh", "-c", "claude", "-p", "long work"],
+            "since": "2026-09-29T10:00:00+00:00",
+            "seconds": 1_800,
+            "promoted": False,
+        }
+    ],
+    "running_count": 1,
+    "holding_count": 1,
+    "queued": [
+        {
+            "job_id": 61,
+            "label": "fixture:shell",
+            "reference": "fixture-shell-bbbb2222",
+            "argv": None,
+            "since": "2026-09-29T10:20:00+00:00",
+            "seconds": 600,
+            "dependencies": [],
+        }
+    ],
+    "queued_count": 1,
+    "held_count": 0,
+    "oldest_queued_seconds": 600,
+}
+QUEUED_SHELL = {
+    **RUNNING,
+    "job_id": "61",
+    "launch_reference": "fixture-shell-bbbb2222",
+    "label": "fixture:shell",
+    "kind": "declared-operation",
+    "operation": "shell",
+    "binding": None,
+    "group": "shell-long",
+    "state": {"phase": "queued", "terminal": False, "exit_code": None},
+    "queue": {
+        **QUEUE,
+        "position": 1,
+        "ahead": [],
+        "waiting_for": [],
+        "occupied_by": QUEUE["running"],
+    },
+}
+
+
+def test_shell_run_starts_agent_clis_in_the_long_lane_and_reads_in_the_quick_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Red if an agent launch lands in the lane quick reads use."""
+    server, _, fake = make_server(tmp_path, "operator", monkeypatch)
+    fake.responses["job.shell.start"] = lambda arguments: {
+        **DONE,
+        "job_id": "70",
+        "label": "fixture:shell",
+        "operation": "shell",
+        "group": arguments["group"],
+    }
+    cases = (
+        (
+            ["bash", "-lc", "claude -p 'review' > out.log"],
+            "auto",
+            "shell-long",
+            "agent-cli:claude",
+        ),
+        (["rg", "claude", "."], "auto", "shell-quick", "default"),
+        (["make", "all"], "long", "shell-long", "declared"),
+    )
+    for index, (argv, lane, group, reason) in enumerate(cases):
+        started = call(
+            server,
+            "shell.run",
+            {
+                "checkout": {"project": "fixture"},
+                "argv": argv,
+                "lane": lane,
+                "idempotency_key": f"lane-{index}",
+            },
+        )
+        assert started["result"]["outcome"] == "ok", started
+        assert fake.calls[-1].arguments["group"] == group
+        # No ceiling requested: none is sent, and the owner applies its watchdog.
+        assert fake.calls[-1].arguments["timeout_seconds"] is None
+        assert started["data"]["lane_reason"] == reason
+
+
+def test_a_shell_still_queued_answers_with_its_place_and_what_holds_the_lane(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Red if a continuation looks like a timeout or hides the lane occupancy."""
+    server, _, fake = make_server(tmp_path, "operator", monkeypatch)
+    fake.responses["job.shell.start"] = QUEUED_SHELL
+    fake.responses["job.wait"] = {**QUEUED_SHELL, "timed_out": True}
+    fake.responses["job.logs"] = {
+        **QUEUED_SHELL,
+        "content": "",
+        "returned_bytes": 0,
+        "truncated": False,
+        "next_offset": None,
+    }
+    started = call(
+        server,
+        "shell.run",
+        {
+            "checkout": {"project": "fixture"},
+            "argv": ["claude", "-p", "more"],
+            "wait": True,
+            "wait_timeout_seconds": 2,
+            "idempotency_key": "queued-1",
+        },
+    )
+    data = started["data"]
+    assert started["result"]["outcome"] == "ok", started
+    assert data["outcome"] == "queued"
+    assert data["continuation"] == {
+        "ref": None,
+        "job_id": 61,
+        "launch_reference": "fixture-shell-bbbb2222",
+    }
+    queue = data["queue"]
+    assert queue["position"] == 1 and queue["oldest_queued_seconds"] == 600
+    holder = queue["occupied_by"][0]
+    assert holder["ref"] == "sinnix://jobs/60" and holder["seconds"] == 1_800
+    assert holder["command"] == "/bin/sh -c claude -p 'long work'"
+    assert data["output"]["offset"] == 0
+    assert [c.operation for c in fake.calls][-3:] == [
+        "job.shell.start",
+        "job.wait",
+        "job.logs",
+    ]
+
+    waited = call(
+        server,
+        "jobs.wait",
+        {
+            "target": {"job_id": 61, "launch_reference": "fixture-shell-bbbb2222"},
+            "timeout_seconds": 2,
+            "output_offset": 4_096,
+        },
+    )["data"]
+    assert waited["outcome"] == "queued" and waited["queue"]["position"] == 1
+    assert fake.calls[-1].operation == "job.logs"
+    assert fake.calls[-1].arguments["offset"] == 4_096
+
+    # Caught up with a running job's log: the owner says there is nothing
+    # further yet, and the answer still names where the next poll resumes.
+    fake.responses["job.wait"] = {
+        **QUEUED_SHELL,
+        "state": {"phase": "running", "terminal": False, "exit_code": None},
+        "timed_out": True,
+    }
+    fake.responses["job.logs"] = {
+        **QUEUED_SHELL,
+        "content": "abc",
+        "returned_bytes": 3,
+        "truncated": False,
+        "next_offset": None,
+    }
+    resumed = call(
+        server,
+        "jobs.wait",
+        {
+            "target": {"job_id": 61, "launch_reference": "fixture-shell-bbbb2222"},
+            "timeout_seconds": 2,
+            "output_offset": 4_096,
+        },
+    )["data"]
+    assert resumed["outcome"] == "running"
+    assert resumed["output"]["content"] == "abc"
+    assert resumed["output"]["next_offset"] == 4_099
+    assert "jobs.queues" in waited["affordances"]
+
+
+def test_queues_report_each_groups_occupancy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    server, _, fake = make_server(tmp_path, "operator", monkeypatch)
+    fake.responses["job.queues"] = {"queues": [QUEUE]}
+    page = call(server, "jobs.queues", {"groups": ["shell-long"]})
+    assert page["result"]["outcome"] == "ok", page
+    (row,) = page["data"]["queues"]
+    assert row["group"] == "shell-long" and row["holding_count"] == 1
+    assert row["running"][0]["command"].endswith("'long work'")
+    assert row["queued"][0]["ref"] == "sinnix://jobs/61"
+    assert fake.calls[-1].arguments == {"groups": ["shell-long"]}
