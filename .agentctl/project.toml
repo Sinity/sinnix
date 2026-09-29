@@ -52,6 +52,11 @@ pool = "bulk"
 result = "exit"
 cache = "tree+environment"
 timeout_seconds = 7200
+# One nix process evaluates every check's derivation, including several full
+# NixOS systems, and the evaluator never returns memory: journal peaks
+# 2026-09-27..29 were 6.7-10.1 GiB. Admission must reserve that, or a check
+# lands beside pytest jobs and agents and exhausts the host.
+admission = { memory_mib = 11264 }
 
 [operations.check_focused]
 description = "Build explicitly selected Sinnix flake checks"
