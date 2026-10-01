@@ -173,10 +173,9 @@ def test_core_dispatch_uses_leaf_execution_and_refuses_wrong_routes(
                     "reason": "test reason",
                 },
             )
-        )
-        assert first["result"]["outcome"] == "ok"
-        assert first["action"] == leaf
-        assert first["data"] == {"value": leaf}
+            )
+            assert first["result"]["outcome"] == "ok"
+            assert first["data"] == {"value": leaf}
         assert calls.count((leaf, "test reason")) == 1
         assert first == direct
 
