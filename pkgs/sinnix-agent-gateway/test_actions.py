@@ -6,6 +6,7 @@ import base64
 import json
 import os
 import struct
+import time
 import zlib
 from dataclasses import replace
 from pathlib import Path
@@ -536,6 +537,100 @@ def test_unknown_input_field_is_typed_before_file_mutation(tmp_path: Path) -> No
 
     assert result["result"]["outcome"] == "error"
     assert result["error"]["code"] == "invalid_request"
+    assert target.read_text() == "before\n"
+
+
+def test_mcp_adapter_distinguishes_omitted_fields_from_explicit_null(
+    tmp_path: Path,
+) -> None:
+    server = create_server(config(tmp_path), "operator")
+    target = tmp_path / "sample.txt"
+    target.write_text("sample\n")
+    request = {"target": {"path": str(target)}}
+
+    omitted = structured(call(server, "files.read", request))
+    nullable = structured(call(server, "files.read", {**request, "line_start": None}))
+    nonnullable = structured(call(server, "files.read", {**request, "offset": None}))
+
+    assert omitted["result"]["outcome"] == "ok"
+    assert nullable["result"]["outcome"] == "ok"
+    assert nonnullable["error"]["code"] == "invalid_request"
+    assert "offset" in {
+        problem["field"] for problem in nonnullable["error"]["details"]["problems"]
+    }
+
+
+def test_validation_failure_keeps_only_valid_request_controls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    server = create_server(config(tmp_path), "operator")
+    runtime = server._sinnix_revision_publisher.runtime
+    target = tmp_path / "protected.txt"
+    target.write_text("before\n")
+    seen: list[dict] = []
+    execute = runtime.execute_v2_async
+
+    async def capture(action, callback, request, **kwargs):
+        seen.append(dict(request))
+        return await execute(action, callback, request, **kwargs)
+
+    monkeypatch.setattr(runtime, "execute_v2_async", capture)
+    base = {
+        "target": {"path": str(target)},
+        "edit": {
+            "mode": "range",
+            "start_line": 1,
+            "end_line": 1,
+            "replacement": "after",
+        },
+        "idempotency_key": "invalid-effect",
+        "unexpected": True,
+    }
+    deadline = time.time() + 3600
+    valid = structured(
+        call(
+            server,
+            "files.patch",
+            {
+                **base,
+                "request_id": "correlated-call",
+                "reason": "test attribution",
+                "deadline_at": deadline,
+            },
+        )
+    )
+    assert valid["error"]["code"] == "invalid_request"
+    assert "unexpected" in {
+        problem["field"] for problem in valid["error"]["details"]["problems"]
+    }
+    assert valid["result"]["request_id"] == "correlated-call"
+    assert seen.pop() == {
+        "request_id": "correlated-call",
+        "reason": "test attribution",
+        "deadline_at": deadline,
+    }
+    receipt = runtime.audit.receipt(valid["receipt"]["receipt_id"])
+    assert receipt["payload"]["reason"] == "test attribution"
+
+    malformed = structured(
+        call(
+            server,
+            "files.patch",
+            {
+                **base,
+                "request_id": 7,
+                "reason": "",
+                "deadline_at": "tomorrow",
+            },
+        )
+    )
+    assert malformed["error"]["code"] == "invalid_request"
+    assert {"request_id", "reason", "deadline_at"} <= {
+        problem["field"]
+        for problem in malformed["error"]["details"]["problems"]
+    }
+    assert seen.pop() == {}
+    assert malformed["result"]["request_id"] != "7"
     assert target.read_text() == "before\n"
 
 
