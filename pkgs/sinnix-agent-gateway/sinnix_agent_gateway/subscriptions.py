@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -38,7 +39,50 @@ class DemandAwareSubscriptionBus:
         return self._subscriber_count > 0
 
 
-class OwnerRevisionPublisher:
+class SupervisedPublisher:
+    """Keep optional notification failures outside the server task group."""
+
+    def __init__(self) -> None:
+        self.last_success_at: float | None = None
+        self.last_error: str | None = None
+        self.consecutive_failures = 0
+
+    def status(self) -> dict[str, Any]:
+        return {
+            "state": (
+                "degraded"
+                if self.last_error
+                else "ready" if self.last_success_at is not None else "pending"
+            ),
+            "last_success_age_seconds": (
+                max(0.0, time.monotonic() - self.last_success_at)
+                if self.last_success_at is not None
+                else None
+            ),
+            "last_error": self.last_error,
+            "consecutive_failures": self.consecutive_failures,
+        }
+
+    async def run(self, interval_seconds: float) -> None:
+        while True:
+            try:
+                await self.poll_once()
+            except Exception as exc:
+                # AnyIO cancellation derives from BaseException and must escape.
+                self.last_error = type(exc).__name__
+                self.consecutive_failures += 1
+                delay = min(
+                    30.0, interval_seconds * 2 ** min(self.consecutive_failures, 5)
+                )
+            else:
+                self.last_success_at = time.monotonic()
+                self.last_error = None
+                self.consecutive_failures = 0
+                delay = interval_seconds
+            await anyio.sleep(delay)
+
+
+class OwnerRevisionPublisher(SupervisedPublisher):
     """Publish resource updates from owner revision observations, not responses."""
 
     def __init__(
@@ -48,6 +92,7 @@ class OwnerRevisionPublisher:
         *,
         should_poll: Callable[[], bool] | None = None,
     ) -> None:
+        super().__init__()
         self.runtime = runtime
         self.bus = bus
         self._revisions: dict[str, str] = {}
@@ -63,17 +108,11 @@ class OwnerRevisionPublisher:
                 await self.bus.publish(ResourceUpdated(uri=reference))
             self._revisions[reference] = revision
 
-    async def run(self, interval_seconds: float) -> None:
-        await self.poll_once()
-        while True:
-            await anyio.sleep(interval_seconds)
-            await self.poll_once()
-
 
 EVENTS_RESOURCE_URI = "sinnix://gateway/v2/events"
 
 
-class EventSpoolPublisher:
+class EventSpoolPublisher(SupervisedPublisher):
     """Turn new rows of agentctl's event spool into MCP resource-update pushes.
 
     This publisher only keeps a best-effort cursor over the spool: a missed
@@ -88,6 +127,7 @@ class EventSpoolPublisher:
         *,
         should_poll: Callable[[], bool] | None = None,
     ) -> None:
+        super().__init__()
         self.spool = spool
         self.bus = bus
         self._identity: tuple[int, int] | None = None
@@ -122,14 +162,17 @@ class EventSpoolPublisher:
                 if not line or not line.endswith(b"\n"):
                     self._offset = start
                     break
-                self._offset = handle.tell()
+                end = handle.tell()
                 try:
                     event = json.loads(line)
                 except (UnicodeDecodeError, json.JSONDecodeError):
+                    self._offset = end
                     continue
                 if not isinstance(event, dict):
+                    self._offset = end
                     continue
                 await self.bus.publish(ResourceUpdated(uri=EVENTS_RESOURCE_URI))
+                self._offset = end
                 published += 1
         return published
 
@@ -143,9 +186,3 @@ class EventSpoolPublisher:
             return
         self._identity = (stat.st_dev, stat.st_ino)
         self._offset = stat.st_size
-
-    async def run(self, interval_seconds: float) -> None:
-        await self.poll_once()
-        while True:
-            await anyio.sleep(interval_seconds)
-            await self.poll_once()
