@@ -13,7 +13,7 @@ from mcp.types import CallToolResult, TextContent
 from pydantic import ConfigDict, ValidationError, create_model
 
 from . import calllog
-from .action import Action, ActionResult
+from .action import Action, ActionResult, RequestControls
 from .contracts import EffectMode
 from .results import ProtocolError
 from .revisions import lossless_revisions
@@ -45,7 +45,21 @@ class _GatewayArgModel(ArgModelBase):
     def model_dump_one_level(self) -> dict[str, Any]:
         values = super().model_dump_one_level()
         values.update(self.model_extra or {})
-        return values
+        return {key: value for key, value in values.items() if key in self.model_fields_set}
+
+
+def _safe_failure_controls(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Retain only independently valid attribution after action input fails."""
+    safe: dict[str, Any] = {}
+    for key in RequestControls.model_fields:
+        if key not in arguments:
+            continue
+        try:
+            control = RequestControls.model_validate({key: arguments[key]})
+        except ValidationError:
+            continue
+        safe[key] = control.model_dump(mode="json")[key]
+    return safe
 
 
 def _validation_error(exc: ValidationError, action: Action) -> ProtocolError:
@@ -94,9 +108,7 @@ def build_tool(action: Action, runtime: Runtime) -> Tool:
         record = calllog.CallRecord(
             action=action.name,
             effect=action.effect.value,
-            arguments={
-                key: value for key, value in kwargs.items() if value is not None
-            },
+            arguments=kwargs,
             http=calllog.http_request(sinnix_context),
         )
         if remote:
@@ -124,20 +136,16 @@ def build_tool(action: Action, runtime: Runtime) -> Tool:
         kwargs: dict[str, Any], record: calllog.CallRecord
     ) -> tuple[dict[str, Any], list[Any]]:
         try:
-            request_input = action.Input.model_validate(
-                {
-                    key: value
-                    for key, value in kwargs.items()
-                    if value is not None or key not in action.Input.model_fields
-                }
-            )
+            request_input = action.Input.model_validate(kwargs)
         except ValidationError as exc:
             failure = _validation_error(exc, action)
 
             async def failing() -> Any:
                 raise failure
 
-            return await runtime.execute_v2_async(action, failing, {}), []
+            return await runtime.execute_v2_async(
+                action, failing, _safe_failure_controls(kwargs)
+            ), []
 
         request = request_input.model_dump(mode="json")
 
