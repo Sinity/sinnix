@@ -682,6 +682,7 @@ def _search(runtime: Runtime, inp: SearchInput) -> SearchResult:
         spill_path: Path | None = None
         spill: Any = None
         spilled = 0
+        inband_bytes = 0
 
         def overflow(path_text: str, line: MatchLine) -> None:
             nonlocal spill_path, spill, spilled
@@ -733,7 +734,7 @@ def _search(runtime: Runtime, inp: SearchInput) -> SearchResult:
             return decoded
 
         def consume_record(raw: bytes) -> None:
-            nonlocal limit_reached
+            nonlocal limit_reached, inband_bytes
             if not raw:
                 return
             try:
@@ -796,8 +797,13 @@ def _search(runtime: Runtime, inp: SearchInput) -> SearchResult:
                 text=line.rstrip("\n"),
                 is_match=kind == "match",
             )
-            if len(entry.lines) < INBAND_LINES_PER_FILE:
+            row_bytes = len(row.model_dump_json().encode("utf-8"))
+            if (
+                len(entry.lines) < INBAND_LINES_PER_FILE
+                and inband_bytes + row_bytes <= runtime.config.max_result_bytes
+            ):
                 entry.lines.append(row)
+                inband_bytes += row_bytes
             else:
                 overflow(path_text, row)
                 entry.overflow_lines += 1
