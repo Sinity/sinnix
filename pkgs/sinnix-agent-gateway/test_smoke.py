@@ -764,7 +764,8 @@ def test_machine_query_selects_and_pages_large_collector_report(tmp_path: Path) 
         "sinex_xtask_history": {"available": False},
     }
     collector = tmp_path / "observe-fixture"
-    collector.write_text(f"""#!{sys.executable}
+    collector.write_text(
+        f"""#!{sys.executable}
 import json
 import sys
 
@@ -782,7 +783,8 @@ if section == "units":
         "rows": rows[cursor : cursor + page_limit],
     }}
 print(json.dumps(report))
-""")
+"""
+    )
     collector.chmod(0o700)
     cfg = GatewayConfig(
         state_dir=tmp_path / "state",
