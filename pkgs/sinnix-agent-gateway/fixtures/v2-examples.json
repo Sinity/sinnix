@@ -1,6 +1,43 @@
 {
-  "action_catalog_hash": "22d9e4ad5e2a32be131be4ba0dc348d949b857bc459689783402633a4cd78cd1",
+  "action_catalog_hash": "f675f4b922a0ece676d9cbfe14b2b23454f981e2b39ec65f29ac5ceb9c8a7782",
   "examples": [
+    {
+      "action": "gateway.describe",
+      "family": "get",
+      "input": {
+        "action": "files.read"
+      },
+      "title": "Describe"
+    },
+    {
+      "action": "gateway.read",
+      "family": "get",
+      "input": {
+        "action": "projects.list",
+        "arguments": {}
+      },
+      "title": "Read"
+    },
+    {
+      "action": "gateway.change",
+      "family": "change",
+      "input": {
+        "action": "files.change",
+        "arguments": {},
+        "idempotency_key": "example"
+      },
+      "title": "Change"
+    },
+    {
+      "action": "gateway.run",
+      "family": "run",
+      "input": {
+        "action": "operations.run",
+        "arguments": {},
+        "idempotency_key": "example"
+      },
+      "title": "Run"
+    },
     {
       "action": "gateway.status",
       "family": "status",

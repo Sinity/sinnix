@@ -14,7 +14,7 @@ import anyio
 import pytest
 from mcp.types import CallToolResult, ImageContent, ResourceLink
 from sinnix_agent_gateway.action import Action, MutationControls, RequestControls
-from sinnix_agent_gateway.actions import ALL_ACTIONS, files
+from sinnix_agent_gateway.actions import ALL_ACTIONS, BY_NAME, files
 from sinnix_agent_gateway.app import create_server
 from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
 from sinnix_agent_gateway.contracts import VerbFamily
@@ -68,6 +68,156 @@ def tiny_png() -> bytes:
         + chunk(b"IDAT", zlib.compress(raw))
         + chunk(b"IEND", b"")
     )
+
+
+def test_core_dispatch_uses_leaf_execution_and_refuses_wrong_routes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    server = create_server(config(tmp_path), "operator")
+    runtime = server._sinnix_revision_publisher.runtime
+    calls: list[tuple[str, str | None]] = []
+
+    class Input(MutationControls):
+        value: str
+
+    class Output(GatewayModel):
+        value: str
+
+    def handler(_runtime, inp: Input) -> Output:
+        calls.append((inp.value, inp.reason))
+        return Output(value=inp.value)
+
+    for name, family in (
+        ("fixture.change", VerbFamily.CHANGE),
+        ("fixture.run", VerbFamily.RUN),
+    ):
+        monkeypatch.setitem(
+            BY_NAME,
+            name,
+            Action(
+                name=name,
+                family=family,
+                owner="fixture",
+                summary="Fixture effect.",
+                Input=Input,
+                Output=Output,
+                handler=handler,
+            ),
+        )
+
+    read = structured(call(server, "projects.list", {}))
+    core_read = structured(call(server, "gateway.read", {"action": "projects.list"}))
+    assert core_read["data"] == read["data"]
+    assert core_read["result"]["outcome"] == "ok"
+    description = structured(
+        call(server, "gateway.describe", {"action": "projects.list"})
+    )["data"]
+    assert description["action"]["name"] == "projects.list"
+    assert description["action"]["effect"] == "read"
+    assert len(description["structural_sha256"]) == 64
+    assert (
+        description
+        == structured(call(server, "gateway.describe", {"action": "projects.list"}))[
+            "data"
+        ]
+    )
+
+    change_args = {
+        "target": {"path": str(tmp_path / "core.txt")},
+        "change": {"operation": "create", "content": "core\n"},
+    }
+    direct_change = structured(
+        call(
+            server,
+            "files.change",
+            {
+                **change_args,
+                "idempotency_key": "core-real-change",
+                "reason": "test reason",
+            },
+        )
+    )
+    core_change = structured(
+        call(
+            server,
+            "gateway.change",
+            {
+                "action": "files.change",
+                "arguments": change_args,
+                "idempotency_key": "core-real-change",
+                "reason": "test reason",
+            },
+        )
+    )
+    assert direct_change == core_change
+    assert (tmp_path / "core.txt").read_text() == "core\n"
+
+    for core, leaf in (
+        ("gateway.change", "fixture.change"),
+        ("gateway.run", "fixture.run"),
+    ):
+        args = {"value": leaf, "idempotency_key": leaf, "reason": "test reason"}
+
+        async def invoke_direct():
+            return await build_tool(BY_NAME[leaf], runtime).fn(**args)
+
+        direct = structured(anyio.run(invoke_direct))
+        first = structured(
+            call(
+                server,
+                core,
+                {
+                    "action": leaf,
+                    "arguments": {"value": leaf},
+                    "idempotency_key": leaf,
+                    "reason": "test reason",
+                },
+            )
+        )
+        assert first["result"]["outcome"] == "ok"
+        assert first["data"] == {"value": leaf}
+        assert calls.count((leaf, "test reason")) == 1
+        assert first == direct
+
+    for route, leaf, expected in (
+        ("gateway.read", "fixture.change", "policy_denied"),
+        ("gateway.change", "fixture.run", "policy_denied"),
+        ("gateway.run", "fixture.change", "policy_denied"),
+        ("gateway.read", "missing.action", "not_found"),
+        ("gateway.read", "gateway.read", "invalid_request"),
+    ):
+        request = {"action": leaf, "arguments": {}}
+        if route != "gateway.read":
+            request["idempotency_key"] = f"refusal-{route}-{leaf}"
+        refused = structured(call(server, route, request))
+        assert refused["error"]["code"] == expected
+    duplicate = structured(
+        call(
+            server,
+            "gateway.change",
+            {
+                "action": "fixture.change",
+                "arguments": {"value": "bad", "reason": "hidden"},
+                "reason": "visible",
+                "idempotency_key": "duplicate-controls",
+            },
+        )
+    )
+    assert duplicate["error"]["code"] == "invalid_request"
+    expired = structured(
+        call(
+            server,
+            "gateway.run",
+            {
+                "action": "fixture.run",
+                "arguments": {"value": "late"},
+                "deadline_at": 1,
+                "idempotency_key": "expired-core",
+            },
+        )
+    )
+    assert expired["error"]["code"] == "deadline"
+    assert len(calls) == 2
 
 
 def test_every_action_publishes_its_model_schema(tmp_path: Path) -> None:

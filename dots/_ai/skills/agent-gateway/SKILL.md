@@ -5,7 +5,7 @@ description: Use when invoking, inspecting, or documenting Sinnix Agent Gateway 
 
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: 22d9e4ad5e2a32be131be4ba0dc348d949b857bc459689783402633a4cd78cd1 -->
+<!-- gateway-catalog-sha256: f675f4b922a0ece676d9cbfe14b2b23454f981e2b39ec65f29ac5ceb9c8a7782 -->
 
 # Agent Gateway
 
@@ -100,6 +100,8 @@ Effectful actions (families change, operate, run) require `idempotency_key`. Con
 
 ### get
 
+- `gateway.describe` — Describe one exact visible action and its structural schema hash.
+- `gateway.read` — Pass the exact action name and its ordinary input in arguments. The response is the selected action's native envelope and content blocks.
 - `projects.get` — The checkout row carries head and dirty_sha256, the preconditions projects.change requires.
 - `beads.get` — Read one bead by ref, id or title fragment, with optional comments, history, dependencies or graph.
 - `jobs.get` — One job's state and bead binding, with its log range or typed result on request.
@@ -133,6 +135,7 @@ Effectful actions (families change, operate, run) require `idempotency_key`. Con
 
 ### change
 
+- `gateway.change` — Pass controls at the top level and ordinary action input in arguments. The response is the selected action's native envelope and receipt. Change and operate effects are admitted.
 - `files.patch` — Pass expected_sha256 from the prior read so a concurrent change is refused instead of overwritten. Unified hunks are applied individually; rejected hunks are reported.
 - `files.change` — Copy and move never overwrite an existing destination. Remove supports regular files only.
 - `files.changeset` — All planned sources, destinations and parents are revalidated before the first mutation. Transfers never overwrite. Results are honest about partial completion and no global atomicity is claimed.
@@ -172,6 +175,7 @@ Effectful actions (families change, operate, run) require `idempotency_key`. Con
 
 ### run
 
+- `gateway.run` — Pass controls at the top level and ordinary action input in arguments. The response is the selected action's native envelope and receipt.
 - `operations.run` — Queue one project-declared operation in its declared pool on the root or a worktree.
 - `shell.run` — cwd is confined to the checkout. lane=auto sends agent CLI launches (claude, codex, ...) to the long lane and everything else to the quick lane, which long work never occupies: a quick-lane command still running after the pool's promotion horizon stops holding its slot (jobs.queues shows it as promoted). Default execution is asynchronous. wait=true waits up to wait_timeout_seconds (default 5, maximum 30) and returns output; outcome running or queued is a continuation with queue occupancy, never a failure: pass continuation and output.next_offset to jobs.wait. timeout_seconds is an optional kill ceiling; omitted, the job runs until it finishes.
 - `batches.start` — backend, model and effort default to the project descriptor's packet defaults. Refused when a bead is claimed or already in a live run. The landing task is queued behind the workers and runs itself.
@@ -181,4 +185,4 @@ Effectful actions (families change, operate, run) require `idempotency_key`. Con
 
 The complete schemas and examples are in `docs/generated/agent-gateway-reference.md`.
 
-Catalog revision: `v3-typed-actions`. Catalog SHA-256: `22d9e4ad5e2a32be131be4ba0dc348d949b857bc459689783402633a4cd78cd1`.
+Catalog revision: `v3-typed-actions`. Catalog SHA-256: `f675f4b922a0ece676d9cbfe14b2b23454f981e2b39ec65f29ac5ceb9c8a7782`.

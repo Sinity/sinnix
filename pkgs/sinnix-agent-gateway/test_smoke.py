@@ -269,6 +269,7 @@ def test_gateway_status_reports_distinct_manifest_provenance(tmp_path: Path) -> 
         "v2-test",
     )
     assert status["principal_contract_hash"] == "capability-hash"
+    assert status["current_model_visibility"] == "unknown"
     assert status["transport"] == "stdio"
     assert (
         runtime.observe.gateway_status(
@@ -320,12 +321,18 @@ def test_gateway_status_reports_distinct_manifest_provenance(tmp_path: Path) -> 
         "v2-test",
     )
     assert set(status["manifests"]["comparisons"].values()) == {"match"}
-    assert status["catalog"]["chatgpt_observed"] == {
-        "principal": "operator",
-        "sha256": "catalog-hash",
-        "observed_at": 1788828936.1,
-    }
+    recorded = status["catalog"]["chatgpt_observed"]
+    assert recorded["principal"] == "operator"
+    assert recorded["sha256"] == "catalog-hash"
+    assert recorded["observed_at"] == 1788828936.1
+    assert recorded["source"] == "last_recorded_client_snapshot"
+    assert recorded["current_model_visibility"] == "unknown"
+    assert recorded["age_seconds"] >= 0
+    assert recorded["freshness"] == "older_than_24h"
     assert status["manifests"]["chatgpt_observed"]["observed_at"] == 1788828936.1
+    assert (
+        status["manifests"]["chatgpt_observed"]["current_model_visibility"] == "unknown"
+    )
     assert set(status["catalog"]["comparisons"].values()) == {"match"}
 
     snapshot.write_text(
@@ -349,6 +356,7 @@ def test_gateway_status_reports_distinct_manifest_provenance(tmp_path: Path) -> 
         "live_to_chatgpt_observed": "mismatch",
         "package_generated_to_chatgpt_observed": "mismatch",
     }
+    assert status["manifests"]["chatgpt_observed"]["freshness"] == "unknown"
 
 
 @pytest.mark.parametrize("malformed", ([], "snapshot", None))

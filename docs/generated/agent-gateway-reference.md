@@ -1,11 +1,11 @@
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: 22d9e4ad5e2a32be131be4ba0dc348d949b857bc459689783402633a4cd78cd1 -->
+<!-- gateway-catalog-sha256: f675f4b922a0ece676d9cbfe14b2b23454f981e2b39ec65f29ac5ceb9c8a7782 -->
 # Sinnix Agent Gateway reference
 
 Generated from `sinnix_agent_gateway.actions`. Every action is one MCP tool whose `tools/list` input schema is the one below; the catalog hash changes when any principal-visible action catalog row changes, including its schema, principal set, example or affordance.
 
-Revision: `v3-typed-actions`. Catalog SHA-256: `22d9e4ad5e2a32be131be4ba0dc348d949b857bc459689783402633a4cd78cd1`.
+Revision: `v3-typed-actions`. Catalog SHA-256: `f675f4b922a0ece676d9cbfe14b2b23454f981e2b39ec65f29ac5ceb9c8a7782`.
 
 ## Invocation
 
@@ -40,6 +40,10 @@ MCP: call the tool named after the action. CLI: `sinnix-agent-gateway call <acti
 
 | Action                       | Family    | Owner              | Principals | Summary                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | ---------------------------- | --------- | ------------------ | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `gateway.describe`           | `get`     | `gateway`          | `operator` | Describe one exact visible action and its structural schema hash.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `gateway.read`               | `get`     | `gateway`          | `operator` | Pass the exact action name and its ordinary input in arguments. The response is the selected action's native envelope and content blocks.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `gateway.change`             | `change`  | `gateway`          | `operator` | Pass controls at the top level and ordinary action input in arguments. The response is the selected action's native envelope and receipt. Change and operate effects are admitted.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `gateway.run`                | `run`     | `gateway`          | `operator` | Pass controls at the top level and ordinary action input in arguments. The response is the selected action's native envelope and receipt.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `gateway.status`             | `status`  | `gateway`          | `operator` | Report the principal, contract hashes, tool count and per-route availability.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `gateway.catalog`            | `catalog` | `gateway`          | `operator` | Every action is also an MCP tool with its full schema in tools/list; the catalog adds aliases, affordances, resource kinds and the brokered MCP tool inventory (lynchpin, sinex, polylogue).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `files.stat`                 | `query`   | `files`            | `operator` | Describe one host path: kind, size, mode, owner, timestamps, MIME, hash.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
@@ -168,6 +172,415 @@ MCP: call the tool named after the action. CLI: `sinnix-agent-gateway call <acti
 | `audit.operation`            | `get`     | `audit`            | `operator` | Every change, operate or run call is addressed by the idempotency_key its caller chose before sending it. When the response was lost (a tunnel 502 or deadline), read the outcome here instead of sending the mutation again: a confirmed operation returns its committed response with the created ids, and nothing runs twice.                                                                                                                                                                                                                                                                                                                                            |
 | `results.get`                | `get`     | `results`          | `operator` | Read one immutable stored response snapshot by ref or id.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `capabilities.query`         | `catalog` | `capability-index` | `operator` | Search the generated machine capability index or describe one capability exactly.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+
+### `gateway.describe`
+
+Describe one exact visible action and its structural schema hash.
+
+Family: `get`. Owner: `gateway`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+
+Input schema:
+
+```json
+{
+  "additionalProperties": false,
+  "properties": {
+    "action": {
+      "maxLength": 256,
+      "minLength": 1,
+      "type": "string"
+    },
+    "actor": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "deadline_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Unix timestamp after which the call is refused."
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Caller-chosen correlation id."
+    }
+  },
+  "required": [
+    "action"
+  ],
+  "type": "object"
+}
+```
+
+Output: the response envelope's `data` field is `Description`; the full envelope schema is the `sinnix://gateway/v2/actions/gateway.describe` resource and `sinnix-agent-gateway catalog gateway.describe --schema`.
+
+Examples:
+
+Describe:
+
+```json
+{
+  "action": "files.read"
+}
+```
+
+### `gateway.read`
+
+Pass the exact action name and its ordinary input in arguments. The response is the selected action's native envelope and content blocks.
+
+Family: `get`. Owner: `gateway`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+
+Input schema:
+
+```json
+{
+  "additionalProperties": false,
+  "properties": {
+    "action": {
+      "maxLength": 256,
+      "minLength": 1,
+      "type": "string"
+    },
+    "actor": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "arguments": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "deadline_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Unix timestamp after which the call is refused."
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Caller-chosen correlation id."
+    }
+  },
+  "required": [
+    "action"
+  ],
+  "type": "object"
+}
+```
+
+Output: the response envelope's `data` field is `Dispatched`; the full envelope schema is the `sinnix://gateway/v2/actions/gateway.read` resource and `sinnix-agent-gateway catalog gateway.read --schema`.
+
+Examples:
+
+Read:
+
+```json
+{
+  "action": "projects.list",
+  "arguments": {}
+}
+```
+
+### `gateway.change`
+
+Pass controls at the top level and ordinary action input in arguments. The response is the selected action's native envelope and receipt. Change and operate effects are admitted.
+
+Family: `change`. Owner: `gateway`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+
+Input schema:
+
+```json
+{
+  "additionalProperties": false,
+  "properties": {
+    "action": {
+      "maxLength": 256,
+      "minLength": 1,
+      "type": "string"
+    },
+    "actor": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "arguments": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "deadline_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Unix timestamp after which the call is refused."
+    },
+    "idempotency_key": {
+      "description": "Gateway response replay key. Confirmed responses replay unchanged; interrupted effects require owner reconciliation and are never automatically retried.",
+      "maxLength": 256,
+      "minLength": 1,
+      "type": "string"
+    },
+    "preconditions": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Owner-specific checks; a mismatch fails with precondition_failed. Checks are best effort unless the owner explicitly guarantees an atomic compare and mutation."
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Caller-chosen correlation id."
+    }
+  },
+  "required": [
+    "idempotency_key",
+    "action"
+  ],
+  "type": "object"
+}
+```
+
+Output: the response envelope's `data` field is `Dispatched`; the full envelope schema is the `sinnix://gateway/v2/actions/gateway.change` resource and `sinnix-agent-gateway catalog gateway.change --schema`.
+
+Examples:
+
+Change:
+
+```json
+{
+  "action": "files.change",
+  "arguments": {},
+  "idempotency_key": "example"
+}
+```
+
+### `gateway.run`
+
+Pass controls at the top level and ordinary action input in arguments. The response is the selected action's native envelope and receipt.
+
+Family: `run`. Owner: `gateway`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
+
+Input schema:
+
+```json
+{
+  "additionalProperties": false,
+  "properties": {
+    "action": {
+      "maxLength": 256,
+      "minLength": 1,
+      "type": "string"
+    },
+    "actor": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "arguments": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "deadline_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Unix timestamp after which the call is refused."
+    },
+    "idempotency_key": {
+      "description": "Gateway response replay key. Confirmed responses replay unchanged; interrupted effects require owner reconciliation and are never automatically retried.",
+      "maxLength": 256,
+      "minLength": 1,
+      "type": "string"
+    },
+    "preconditions": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Owner-specific checks; a mismatch fails with precondition_failed. Checks are best effort unless the owner explicitly guarantees an atomic compare and mutation."
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Caller-chosen correlation id."
+    }
+  },
+  "required": [
+    "idempotency_key",
+    "action"
+  ],
+  "type": "object"
+}
+```
+
+Output: the response envelope's `data` field is `Dispatched`; the full envelope schema is the `sinnix://gateway/v2/actions/gateway.run` resource and `sinnix-agent-gateway catalog gateway.run --schema`.
+
+Examples:
+
+Run:
+
+```json
+{
+  "action": "operations.run",
+  "arguments": {},
+  "idempotency_key": "example"
+}
+```
 
 ### `gateway.status`
 

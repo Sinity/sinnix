@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import TYPE_CHECKING, Any, Literal
 
 import anyio
 from pydantic import BaseModel, ConfigDict, Field
 
-from ..action import ALL_PRINCIPALS, Action, Example, RequestControls
+from ..action import ALL_PRINCIPALS, Action, Example, MutationControls, RequestControls
 from ..capabilities import Capability
 from ..catalog import search_rows
 from ..contracts import VerbFamily
 from ..schemas import GatewayModel
+from ..results import ProtocolError
 
 if TYPE_CHECKING:
     from ..runtime import Runtime
@@ -123,6 +126,48 @@ class Catalog(GatewayModel):
     truncated: bool = False
 
 
+class DescribeInput(RequestControls):
+    action: str = Field(min_length=1, max_length=256)
+
+
+class Description(GatewayModel):
+    action: dict[str, Any]
+    structural_sha256: str
+
+
+async def _describe(runtime: Runtime, inp: DescribeInput) -> Description:
+    from .. import actions as action_set
+
+    action = action_set.BY_NAME.get(inp.action)
+    if action is None or runtime.principal_name not in action.principals:
+        raise ProtocolError("not_found", "action is not visible to this principal")
+    row = action.catalog_row()
+    digest = hashlib.sha256(
+        json.dumps(row, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    return Description(action=row, structural_sha256=digest)
+
+
+class ReadInput(RequestControls):
+    action: str = Field(min_length=1, max_length=256)
+    arguments: dict[str, Any] = Field(default_factory=dict)
+
+
+class EffectInput(MutationControls):
+    action: str = Field(min_length=1, max_length=256)
+    arguments: dict[str, Any] = Field(default_factory=dict)
+
+
+class Dispatched(GatewayModel):
+    """The tool wrapper returns the selected action's native envelope instead."""
+
+
+def _dispatch_only(_runtime: Runtime, _inp: ReadInput | EffectInput) -> Dispatched:
+    raise ProtocolError(
+        "invalid_request", "core dispatch requires the action tool wrapper"
+    )
+
+
 def _action_matches(
     runtime: Runtime, inp: CatalogInput
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], str]:
@@ -214,9 +259,11 @@ async def _catalog(runtime: Runtime, inp: CatalogInput) -> Catalog:
                         "name": tool.get("name", ""),
                         "description": tool.get("description"),
                         "effect": tool.get("effect"),
-                        "invoke": "mcp.call"
-                        if tool.get("effect", "read") == "read"
-                        else "mcp.change",
+                        "invoke": (
+                            "mcp.call"
+                            if tool.get("effect", "read") == "read"
+                            else "mcp.change"
+                        ),
                     }
                 )
         mcp_tools = search_rows(mcp_tools, inp.query, ("server", "name", "description"))
@@ -239,6 +286,73 @@ async def _catalog(runtime: Runtime, inp: CatalogInput) -> Catalog:
 
 
 ACTIONS: tuple[Action, ...] = (
+    Action(
+        name="gateway.describe",
+        family=VerbFamily.GET,
+        owner="gateway",
+        summary="Describe one exact visible action and its structural schema hash.",
+        Input=DescribeInput,
+        Output=Description,
+        handler=_describe,
+        principals=ALL_PRINCIPALS,
+        examples=(Example(title="Describe", input={"action": "files.read"}),),
+    ),
+    Action(
+        name="gateway.read",
+        family=VerbFamily.GET,
+        owner="gateway",
+        summary="Invoke one exact authorized read action with its native result.",
+        Input=ReadInput,
+        Output=Dispatched,
+        handler=_dispatch_only,
+        principals=ALL_PRINCIPALS,
+        documentation="Pass the exact action name and its ordinary input in arguments. The response is the selected action's native envelope and content blocks.",
+        examples=(
+            Example(title="Read", input={"action": "projects.list", "arguments": {}}),
+        ),
+    ),
+    Action(
+        name="gateway.change",
+        family=VerbFamily.CHANGE,
+        owner="gateway",
+        summary="Invoke one exact authorized change or operate action with its native receipt.",
+        Input=EffectInput,
+        Output=Dispatched,
+        handler=_dispatch_only,
+        principals=ALL_PRINCIPALS,
+        documentation="Pass controls at the top level and ordinary action input in arguments. The response is the selected action's native envelope and receipt. Change and operate effects are admitted.",
+        examples=(
+            Example(
+                title="Change",
+                input={
+                    "action": "files.change",
+                    "arguments": {},
+                    "idempotency_key": "example",
+                },
+            ),
+        ),
+    ),
+    Action(
+        name="gateway.run",
+        family=VerbFamily.RUN,
+        owner="gateway",
+        summary="Invoke one exact authorized run action with its native receipt.",
+        Input=EffectInput,
+        Output=Dispatched,
+        handler=_dispatch_only,
+        principals=ALL_PRINCIPALS,
+        documentation="Pass controls at the top level and ordinary action input in arguments. The response is the selected action's native envelope and receipt.",
+        examples=(
+            Example(
+                title="Run",
+                input={
+                    "action": "operations.run",
+                    "arguments": {},
+                    "idempotency_key": "example",
+                },
+            ),
+        ),
+    ),
     Action(
         name="gateway.status",
         family=VerbFamily.STATUS,
