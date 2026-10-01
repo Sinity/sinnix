@@ -73,6 +73,8 @@ Collection surveys can include `facets` (string-valued topic, role, maintenance_
 
 Optional `coverage` records have status (`sampled`, `metadata_only`, `complete`, `native_boundary`, or `unavailable`), a nonempty scope and unit, discovered_count (nonnegative integer or null), inspected_count (nonnegative integer), and optional string exclusions. Complete coverage requires a known denominator equal to the inspected count within the stated scope. Coverage without an explicit record is `unrecorded`; taxonomy inheritance never establishes inspection completion. The coverage command counts catalog records by kind, status and proposed action. It does not sum overlapping collection populations or imply a filesystem-wide denominator.
 
+The production ownership and invalidation design for incremental extraction is in [Incremental file enrichment](file-enrichment.md). It is a contract for later implementation, not an installed queue.
+
 This catalog remains a curated observation store. Batch import avoids repeated whole-catalog writes and lookup rebuilding, but publication still serializes one JSON document. Extraction caches and native application records remain with their owners; a corpus-scale search database is not implied by the catalog report.
 
 ## Readable enrichment in the offline report
