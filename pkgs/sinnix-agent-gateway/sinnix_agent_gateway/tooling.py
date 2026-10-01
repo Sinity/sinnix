@@ -144,7 +144,10 @@ def build_tool(action: Action, runtime: Runtime) -> Tool:
                 raise failure
 
             return await runtime.execute_v2_async(
-                action, failing, _safe_failure_controls(kwargs)
+                action,
+                failing,
+                _safe_failure_controls(kwargs),
+                validation_failure=failure,
             ), []
 
         request = request_input.model_dump(mode="json")

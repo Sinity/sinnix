@@ -420,9 +420,9 @@ def test_validation_failure_keeps_only_valid_request_controls(
     seen: list[dict] = []
     execute = runtime.execute_v2_async
 
-    async def capture(action, callback, request):
+    async def capture(action, callback, request, **kwargs):
         seen.append(dict(request))
-        return await execute(action, callback, request)
+        return await execute(action, callback, request, **kwargs)
 
     monkeypatch.setattr(runtime, "execute_v2_async", capture)
     base = {

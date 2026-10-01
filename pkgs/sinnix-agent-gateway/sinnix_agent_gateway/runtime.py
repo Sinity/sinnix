@@ -1591,6 +1591,8 @@ class Runtime:
         action: Action,
         callback: Callable[[], Awaitable[Any]],
         request: Mapping[str, Any],
+        *,
+        validation_failure: ProtocolError | None = None,
     ) -> dict[str, Any]:
         context = RequestContext.create(hashlib.sha256(b"{}").hexdigest())
         reserved = False
@@ -1601,6 +1603,8 @@ class Runtime:
                     raise PolicyError(
                         f"principal {self.principal_name!r} cannot invoke action {action.name!r}"
                     )
+                if validation_failure is not None:
+                    raise validation_failure
                 if context.preconditions and not action.supports_precondition:
                     raise ProtocolError(
                         "invalid_request", "action does not support preconditions"
