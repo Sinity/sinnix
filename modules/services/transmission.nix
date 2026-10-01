@@ -38,12 +38,13 @@ mkServiceModule {
       ...
     }:
     let
-      inherit (config.sinnix.paths) torrentInbox neoOuterRealm;
+      inherit (config.sinnix.paths) torrentInbox neoOuterRealm realmRoot;
       username = config.sinnix.user.name;
       neoOuterRealmMount = "neo\\x2douter\\x2drealm.mount";
       transmissionConfigDir = "/var/lib/transmission/.config/transmission-daemon";
       torrentDownloadDir = "${torrentInbox}/tdown";
       torrentPartialDir = "${torrentInbox}/tdown_partial";
+      torrentMoveDir = "${realmRoot}/inbox";
     in
     {
       sinnix.persistence.system.directories = [
@@ -90,6 +91,7 @@ mkServiceModule {
       systemd.tmpfiles.rules = lib.mkAfter [
         "d /var/lib/transmission/.config 0750 ${username} users -"
         "d ${transmissionConfigDir} 0750 ${username} users -"
+        "d ${torrentMoveDir} 0755 ${username} users -"
         "d ${torrentInbox} 2775 ${username} users -"
         "d ${torrentDownloadDir} 2775 ${username} users -"
         "d ${torrentPartialDir} 2775 ${username} users -"
@@ -104,6 +106,7 @@ mkServiceModule {
         wantedBy = lib.mkForce (lib.optionals cfg.autoStart [ "sinnix-background.target" ]);
         unitConfig.RequiresMountsFor = lib.unique [
           torrentInbox
+          torrentMoveDir
           neoOuterRealm
         ];
         unitConfig.PartOf = [ neoOuterRealmMount ];
@@ -140,11 +143,14 @@ mkServiceModule {
             ];
             ReadWritePaths = [
               torrentInbox
+              torrentMoveDir
               torrentPartialDir
               "/var/lib/transmission"
             ];
             ReadOnlyPaths = [ ];
-            BindPaths = [ ];
+            # The upstream RootDirectory exposes only configured download
+            # paths. RPC moves into the workstation inbox need this host bind.
+            BindPaths = [ torrentMoveDir ];
           }
           {
             # Transmission 4.1.1 uses RPC/session-info paths that are killed by
