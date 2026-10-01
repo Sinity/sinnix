@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import math
+import time
+from datetime import datetime
 from typing import Any
 
 from .artifacts import ArtifactService
@@ -85,6 +88,30 @@ class ObserveService:
         if left is None or right is None:
             return "unobserved"
         return "match" if left == right else "mismatch"
+
+    @staticmethod
+    def _snapshot_freshness(snapshot: dict[str, Any] | None) -> dict[str, Any]:
+        observed = snapshot.get("observed_at") if snapshot else None
+        try:
+            if isinstance(observed, str):
+                parsed = datetime.fromisoformat(observed.replace("Z", "+00:00"))
+                if parsed.tzinfo is None:
+                    raise ValueError("snapshot time requires a timezone")
+                timestamp = parsed.timestamp()
+            elif isinstance(observed, (int, float)) and not isinstance(observed, bool):
+                timestamp = float(observed)
+            else:
+                raise ValueError("snapshot time is missing")
+            age = time.time() - timestamp
+            if not math.isfinite(age) or age < -60:
+                raise ValueError("snapshot time is outside the observed clock")
+            age = max(0, age)
+        except (TypeError, ValueError, OverflowError):
+            return {"age_seconds": None, "freshness": "unknown"}
+        return {
+            "age_seconds": round(age),
+            "freshness": "within_24h" if age <= 86400 else "older_than_24h",
+        }
 
     def _collector_bound(self) -> int:
         return min(max(self.config.max_result_bytes * 8, 1_048_576), 8_388_608)
@@ -237,9 +264,9 @@ class ObserveService:
                     "source": source,
                     "total": total,
                     "cursor": cursor,
-                    "next_cursor": selected_next_cursor
-                    if selected_next_cursor < total
-                    else None,
+                    "next_cursor": (
+                        selected_next_cursor if selected_next_cursor < total else None
+                    ),
                     "rows": rows[:count],
                 }
 
@@ -317,9 +344,15 @@ class ObserveService:
             if snapshot is not None and snapshot["principal"] == principal_name
             else None
         )
+        snapshot_metadata = {
+            "source": "last_recorded_client_snapshot",
+            "current_model_visibility": "unknown",
+            **self._snapshot_freshness(snapshot),
+        }
         return {
             "status": "ready",
             "principal": principal_name,
+            "current_model_visibility": "unknown",
             "principal_contract_hash": capability_contract_hash,
             "tool_manifest_hash": live_manifest_hash,
             "action_catalog_hash": action_catalog_hash,
@@ -331,6 +364,7 @@ class ObserveService:
                 },
                 "chatgpt_observed": (
                     {
+                        **snapshot_metadata,
                         "principal": principal_name,
                         "sha256": observed_catalog_hash,
                         **(
@@ -364,6 +398,7 @@ class ObserveService:
                 ),
                 "chatgpt_observed": (
                     {
+                        **snapshot_metadata,
                         "principal": principal_name,
                         "sha256": observed_hash,
                         **(

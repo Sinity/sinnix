@@ -14,6 +14,7 @@ from pydantic import ConfigDict, ValidationError, create_model
 
 from . import calllog
 from .action import Action, ActionResult
+from .actions import BY_NAME
 from .contracts import EffectMode
 from .results import ProtocolError
 from .revisions import lossless_revisions
@@ -90,6 +91,8 @@ def build_tool(action: Action, runtime: Runtime) -> Tool:
     )
 
     async def invoke(sinnix_context: Any = None, **kwargs: Any) -> Any:
+        if action.name in {"gateway.read", "gateway.change", "gateway.run"}:
+            return await _dispatch_core(action, runtime, kwargs, sinnix_context)
         remote = runtime.transport == REMOTE_TRANSPORT
         record = calllog.CallRecord(
             action=action.name,
@@ -228,6 +231,71 @@ def build_tool(action: Action, runtime: Runtime) -> Tool:
         },
     )
     return tool
+
+
+async def _dispatch_core(
+    core: Action, runtime: Runtime, arguments: dict[str, Any], context: Any
+) -> CallToolResult:
+    """Select a leaf, then enter its ordinary tool path exactly once."""
+    try:
+        try:
+            request = core.Input.model_validate(
+                {
+                    key: value
+                    for key, value in arguments.items()
+                    if value is not None or key not in core.Input.model_fields
+                }
+            )
+        except ValidationError as exc:
+            raise _validation_error(exc, core) from exc
+        leaf = BY_NAME.get(request.action)
+        if leaf is None or runtime.principal_name not in leaf.principals:
+            raise ProtocolError("not_found", "action is not visible to this principal")
+        if leaf.name in {"gateway.read", "gateway.change", "gateway.run"}:
+            raise ProtocolError("invalid_request", "recursive core dispatch is refused")
+        admitted = (
+            leaf.effect is EffectMode.READ
+            if core.name == "gateway.read"
+            else (
+                leaf.effect in {EffectMode.CHANGE, EffectMode.OPERATE}
+                if core.name == "gateway.change"
+                else leaf.effect is EffectMode.RUN
+            )
+        )
+        if not admitted:
+            raise ProtocolError(
+                "policy_denied", "action effect does not match core route"
+            )
+        controls = {
+            key: value
+            for key, value in request.model_dump(mode="json").items()
+            if key not in {"action", "arguments"} and value is not None
+        }
+        if set(request.arguments) & (
+            set(core.Input.model_fields) - {"action", "arguments"}
+        ):
+            raise ProtocolError(
+                "invalid_request", "request controls must be top level only"
+            )
+        # The selected wrapper performs its own Input/Output checks, runtime
+        # admission, idempotency, auditing and native content projection.
+        return await build_tool(leaf, runtime).fn(
+            sinnix_context=context, **{**request.arguments, **controls}
+        )
+    except ProtocolError as failure:
+
+        async def failing() -> Any:
+            raise failure
+
+        refusal_context = {
+            key: value
+            for key, value in arguments.items()
+            if key in core.Input.model_fields and key not in {"action", "arguments"}
+        }
+        envelope = await runtime.execute_v2_async(core, failing, refusal_context)
+        return CallToolResult(
+            content=[_text_block(envelope)], structured_content=envelope, is_error=True
+        )
 
 
 # The states in which a call answered with a continuation rather than a result.
