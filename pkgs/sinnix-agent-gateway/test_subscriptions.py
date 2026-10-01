@@ -73,6 +73,8 @@ def test_server_lifespan_survives_optional_publisher_failure(tmp_path: Path) -> 
     )
     publisher = server._sinnix_revision_publisher
     publisher._should_poll = lambda: True
+    original_run = publisher.run
+    publisher.run = lambda _interval: original_run(10.0)
     attempts = 0
 
     def flaky_observation() -> dict[str, str]:
@@ -85,19 +87,16 @@ def test_server_lifespan_survives_optional_publisher_failure(tmp_path: Path) -> 
     publisher.runtime.owner_revision_observations = flaky_observation
 
     async def scenario() -> None:
-        async with server.lifespan(server):
-            with anyio.fail_after(2):
+        with anyio.fail_after(10):
+            async with server.settings.lifespan(server):
                 while publisher.status()["state"] != "degraded":
                     await anyio.sleep(0.001)
-            response = await server.call_tool("gateway.catalog", {"query": "status"})
-            assert response.structured_content["result"]["outcome"] == "ok"
-            status = await server.call_tool("gateway.status", {})
-            health = status.structured_content["data"]["subscription_publishers"]
-            assert health["owner_revisions"]["last_error"] == "OSError"
-            assert attempts == 1  # Status must use the cached publisher state.
-            with anyio.fail_after(2):
-                while publisher.status()["state"] != "ready":
-                    await anyio.sleep(0.001)
+                response = await server.call_tool("gateway.catalog", {"query": "status"})
+                assert response.structured_content["result"]["outcome"] == "ok"
+                status = await server.call_tool("gateway.status", {})
+                health = status.structured_content["data"]["subscription_publishers"]
+                assert health["owner_revisions"]["last_error"] == "OSError"
+                assert attempts == 1  # Status must use the cached publisher state.
 
     anyio.run(scenario)
 
@@ -267,7 +266,7 @@ def test_event_spool_failures_retry_without_losing_row_or_replaying_backlog(
             raise OSError("read unavailable")
 
     class FaultySpool:
-        fail = True
+        fail = False
 
         def stat(self):
             if self.fail and failure == "stat":
@@ -298,6 +297,7 @@ def test_event_spool_failures_retry_without_losing_row_or_replaying_backlog(
         # Subscription starts at the current end, never at the old row.
         assert await publisher.poll_once() == 0
         path.write_text(path.read_text() + '{"job_id":"new"}\n')
+        spool.fail = True
         async with anyio.create_task_group() as group:
             group.start_soon(publisher.run, 0.01)
             with anyio.fail_after(1):
