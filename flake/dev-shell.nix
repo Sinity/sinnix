@@ -112,13 +112,22 @@
       # Keep package-specific Python test dependencies out of the general
       # development shell.  This shell is the lightweight source-test entry
       # point for focused gateway tests; inputsFrom carries the gateway
-      # package's runtime and native check inputs (including mcp and pytest).
+      # package's runtime and native check inputs. The runner uses one Python
+      # environment so pytest can import the gateway's runtime dependencies.
+      gatewayTestPython = pkgs.python3.withPackages (ps: [
+        ps.pytest
+        scriptPkgs.sinnix-agent-gateway-tooling
+      ]);
+      gatewayTestRunner = pkgs.writeShellScriptBin "gateway-pytest" ''
+        exec ${gatewayTestPython}/bin/python -m pytest "$@"
+      '';
       gatewayTestShell = pkgs.mkShellNoCC {
         name = "sinnix-agent-gateway-tests";
-        inputsFrom = [ scriptPkgs.sinnix-agent-gateway ];
+        inputsFrom = [ scriptPkgs.sinnix-agent-gateway-tooling ];
+        packages = [ gatewayTestRunner ];
         shellHook = ''
-          _gateway_source="''${PRJ_ROOT:-$(${pkgs.git}/bin/git rev-parse --show-toplevel 2>/dev/null || pwd)}/pkgs/sinnix-agent-gateway"
-          export PYTHONPATH="$_gateway_source:''${PYTHONPATH:-}"
+          _gateway_root="''${PRJ_ROOT:-$(${pkgs.git}/bin/git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+          export PYTHONPATH="$_gateway_root/pkgs/sinnix-lib:$_gateway_root/pkgs/agentctl:$_gateway_root/pkgs/sinnix-agent-gateway:''${PYTHONPATH:-}"
         '';
       };
     in

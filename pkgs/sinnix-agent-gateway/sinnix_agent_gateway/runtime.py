@@ -544,6 +544,8 @@ class Runtime:
         cwd: str,
         group: str,
         timeout_seconds: int | None,
+        owner_request_key: str | None = None,
+        request_digest: str | None = None,
     ) -> dict[str, Any]:
         self.principal.require(Capability.SHELL_RUN)
         if self.principal.name != "operator":
@@ -572,17 +574,21 @@ class Runtime:
                 "invalid_request",
                 f"run timeout_seconds must be between 1 and {MAX_AGENT_TIMEOUT_SECONDS}",
             )
+        arguments: dict[str, Any] = {
+            "project_id": project_id,
+            "checkout_id": checkout_id,
+            "argv": argv,
+            "cwd": cwd,
+            "group": group,
+            "timeout_seconds": timeout_seconds,
+            "result": "exit-status",
+        }
+        if owner_request_key is not None:
+            arguments["owner_request_key"] = owner_request_key
+            arguments["request_digest"] = request_digest
         result = self._job(
             "job.shell.start",
-            {
-                "project_id": project_id,
-                "checkout_id": checkout_id,
-                "argv": argv,
-                "cwd": cwd,
-                "group": group,
-                "timeout_seconds": timeout_seconds,
-                "result": "exit-status",
-            },
+            arguments,
             principal="operator",
         )
         job_id = result.get("job_id")
@@ -1186,7 +1192,7 @@ class Runtime:
             "response_replay": "confirmed_responses_only",
             "owner_deduplication": (
                 "durable_launch_identity"
-                if action.name == "operations.run"
+                if action.name in {"operations.run", "shell.run"}
                 else "not_guaranteed"
             ),
             "before_refs": before_refs,
@@ -1545,14 +1551,44 @@ class Runtime:
                             self.owner_request_key(action.name, context.idempotency_key)
                         )
                     )
-                except Exception:
-                    job = None
-                if job is not None:
-                    response = self._v2_success(
-                        action, _job_view(job).model_dump(mode="json"), context
+                    recovered = (
+                        _job_view(job).model_dump(mode="json")
+                        if job is not None
+                        else None
                     )
+                except Exception:
+                    recovered = None
+                if recovered is not None:
+                    response = self._v2_success(action, recovered, context)
                     response = self._complete_v2_idempotency(action, context, response)
                     return response
+            if action.name == "shell.run":
+                from . import shell_lanes
+                from .actions.jobs import (
+                    ShellRunInput,
+                    _shell_request_digest,
+                    _shell_result,
+                )
+
+                inp = ShellRunInput.model_validate(request)
+                lane, reason = shell_lanes.choose(inp.argv, inp.lane)
+                try:
+                    job = await anyio.to_thread.run_sync(
+                        lambda: self.jobs.reconcile_shell_start(
+                            self.owner_request_key(action.name, context.idempotency_key),
+                            _shell_request_digest(inp),
+                        )
+                    )
+                    recovered = (
+                        _shell_result(job, lane, reason).model_dump(mode="json")
+                        if job is not None
+                        else None
+                    )
+                except Exception:
+                    recovered = None
+                if recovered is not None:
+                    response = self._v2_success(action, recovered, context)
+                    return self._complete_v2_idempotency(action, context, response)
             raise ProtocolError(
                 "indeterminate",
                 "Previous invocation ended without a confirmed outcome; reconcile with the owner before any new effect. This key will not execute again.",

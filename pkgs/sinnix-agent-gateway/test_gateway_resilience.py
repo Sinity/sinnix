@@ -172,7 +172,10 @@ def test_owner_product_availability_is_independent_of_presentation_budget(
     assert product.data == data
 
 
-def test_interrupted_launch_reconciles_owner_identity_without_running_again(tmp_path):
+@pytest.mark.parametrize("malformed", [False, True])
+def test_interrupted_launch_reconciles_owner_identity_without_running_again(
+    tmp_path, malformed
+):
     from types import SimpleNamespace
 
     from sinnix_agent_gateway.actions import BY_NAME
@@ -190,6 +193,8 @@ def test_interrupted_launch_reconciles_owner_identity_without_running_again(tmp_
 
     def reconcile(key):
         seen.append(key)
+        if malformed:
+            return {"launch_reference": "retained-launch"}
         return {
             "job_id": "7",
             "launch_reference": "retained-launch",
@@ -207,10 +212,93 @@ def test_interrupted_launch_reconciles_owner_identity_without_running_again(tmp_
         )
 
     response = anyio.run(invoke)
-    assert response["result"]["outcome"] == "ok", response
-    assert response["data"]["launch_reference"] == "retained-launch"
+    if malformed:
+        assert response["error"]["code"] == "indeterminate", response
+    else:
+        assert response["result"]["outcome"] == "ok", response
+        assert response["data"]["launch_reference"] == "retained-launch"
     assert seen == [runtime.owner_request_key("operations.run", "launch-key")]
-    assert anyio.run(invoke) == response
+    if not malformed:
+        assert anyio.run(invoke) == response
+        assert len(seen) == 1
+
+
+@pytest.mark.parametrize("evidence", ["valid", "missing", "malformed"])
+def test_interrupted_shell_launch_recovers_exact_job_or_stays_indeterminate(
+    tmp_path, evidence
+):
+    from types import SimpleNamespace
+
+    from sinnix_agent_gateway.actions import BY_NAME
+    from sinnix_agent_gateway.actions.jobs import ShellRunInput, _shell_request_digest
+    from sinnix_agent_gateway.runtime import Runtime
+    from test_actions_machine import call
+
+    runtime = Runtime.create(GatewayConfig(projects={}, state_dir=tmp_path), "operator")
+    request = {
+        "checkout": {"project": "fixture"},
+        "argv": ["git", "status"],
+        "lane": "long",
+        "timeout_seconds": 60,
+        "idempotency_key": "shell-key",
+    }
+    context = runtime._request_context(request)
+    runtime.audit.claim_idempotency("shell.run", "shell-key", context.request_sha256)
+    runtime.audit.abandon_idempotency("shell.run", "shell-key")
+    seen = []
+
+    def reconcile(key, digest):
+        seen.append((key, digest))
+        if evidence == "missing":
+            return None
+        if evidence == "malformed":
+            return {"launch_reference": "request-retained", "state": {"phase": "running"}}
+        return {
+            "job_id": "71",
+            "launch_reference": "request-retained",
+            "group": "shell-long",
+            "state": {"phase": "running", "terminal": False, "exit_code": None},
+        }
+
+    runtime.jobs = SimpleNamespace(reconcile_shell_start=reconcile)
+
+    async def forbidden():
+        pytest.fail("replay must never launch another shell job")
+
+    async def invoke(body):
+        return await runtime.execute_v2_async(BY_NAME["shell.run"], forbidden, body)
+
+    response = anyio.run(invoke, request)
+    assert seen == [
+        (
+            runtime.owner_request_key("shell.run", "shell-key"),
+            _shell_request_digest(ShellRunInput.model_validate(request)),
+        )
+    ]
+    if evidence != "valid":
+        assert response["error"]["code"] == "indeterminate"
+    else:
+        assert response["data"]["job_id"] == 71
+        assert response["data"]["launch_reference"] == "request-retained"
+        assert response["data"]["outcome"] == "running"
+        assert anyio.run(invoke, request) == response
+        assert len(seen) == 1
+        audited = call(
+            runtime, "audit.operation", {"action": "shell.run", "key": "shell-key"},
+            BY_NAME,
+        )
+        assert audited["data"]["state"] == "confirmed"
+        assert audited["data"]["response"] == response
+        assert anyio.run(invoke, {**request, "request_id": "new-correlation"}) == response
+    for changed in (
+        {"argv": ["git", "log"]},
+        {"checkout": {"project": "other"}},
+        {"cwd": "sub"},
+        {"lane": "quick"},
+        {"timeout_seconds": 30},
+    ):
+        conflict = anyio.run(invoke, {**request, **changed})
+        assert conflict["error"]["code"] == "idempotency_conflict"
     assert len(seen) == 1
 
 

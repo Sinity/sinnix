@@ -196,6 +196,67 @@ def test_durable_owner_request_reconciles_acceptance_and_survives_clean(
         )
 
 
+def test_keyed_shell_launch_reuses_exact_job_and_refuses_changed_request(
+    config: Config, fake_pueue: FakePueue, project_root: Path
+):
+    project = load_project_adapter(project_root)
+    arguments = dict(
+        project=project,
+        operation="shell",
+        label="fixture:shell",
+        group="pytest",
+        argv=["echo", "fixture"],
+        working_directory=project_root,
+        timeout_seconds=30,
+        result_kind="exit",
+        environment={},
+    )
+    first = launch.enqueue_request(
+        config, owner_request_key="shell-key", request_digest="original", **arguments
+    )
+    again = launch.enqueue_request(
+        config, owner_request_key="shell-key", request_digest="original", **arguments
+    )
+    assert again["reference"] == first["reference"]
+    assert len(fake_pueue.added) == 1
+    with pytest.raises(launch.JobError, match="identity mismatch"):
+        launch.enqueue_request(
+            config, owner_request_key="shell-key", request_digest="changed", **arguments
+        )
+    assert len(fake_pueue.added) == 1
+
+
+def test_keyed_shell_launch_recovers_lost_queue_ack_without_duplicate(
+    config: Config, fake_pueue: FakePueue, project_root: Path, monkeypatch
+):
+    project = load_project_adapter(project_root)
+    real_add = pueue.add
+
+    def uncertain(**kwargs):
+        real_add(**kwargs)
+        raise pueue.PueueError("acknowledgement lost")
+
+    monkeypatch.setattr(pueue, "add", uncertain)
+    arguments = dict(
+        owner_request_key="shell-accepted",
+        request_digest="original",
+        project=project,
+        operation="shell",
+        label="fixture:shell",
+        group="pytest",
+        argv=["echo", "fixture"],
+        working_directory=project_root,
+        timeout_seconds=30,
+        result_kind="exit",
+        environment={},
+    )
+    with pytest.raises(launch.EnqueueUncertain):
+        launch.enqueue_request(config, **arguments)
+    recovered = launch.enqueue_request(config, **arguments)
+    assert recovered["reused"] and recovered["job_id"] == 1
+    assert len(fake_pueue.added) == 1
+
+
 def test_owner_request_does_not_repeat_an_uncertain_submission(
     config: Config,
     fake_pueue: FakePueue,
