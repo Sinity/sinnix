@@ -165,7 +165,10 @@ mkFeatureModule {
               "--force-renderer-accessibility"
             ]
             ++ lib.optionals nixosConfig.sinnix.services.proton-openai.enable [
-              "--proxy-pac-url=file:///etc/sinnix/openai-proxy.pac"
+              (lib.escapeShellArg (
+                "--proxy-pac-url=data:application/x-ns-proxy-autoconfig,"
+                + lib.escapeURL nixosConfig.sinnix.services.proton-openai.pacScript
+              ))
             ]
           );
           chromePkg = pkgs.google-chrome.override {

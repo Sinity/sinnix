@@ -24,6 +24,12 @@ mkServiceModule {
       default = "/run/agenix/proton-openai-wireguard";
       description = "Runtime path to a Proton-generated WireGuard .conf file.";
     };
+    pacScript = lib.mkOption {
+      type = lib.types.str;
+      internal = true;
+      readOnly = true;
+      description = "Rendered OpenAI proxy selection script.";
+    };
     proxyPort = lib.mkOption {
       type = lib.types.port;
       default = 8119;
@@ -215,7 +221,7 @@ mkServiceModule {
         '';
       };
 
-      pac = pkgs.writeText "openai-proxy.pac" ''
+      pac = ''
         function openaiHost(host) {
           return host === "chatgpt.com"
               || dnsDomainIs(host, ".chatgpt.com")
@@ -236,7 +242,8 @@ mkServiceModule {
       '';
     in
     {
-      environment.etc."sinnix/openai-proxy.pac".source = pac;
+      sinnix.services.proton-openai.pacScript = pac;
+      environment.etc."sinnix/openai-proxy.pac".text = pac;
       environment.etc."sinnix/openai-proxy-url".text = "${proxyUrl}\n";
 
       systemd.services.proton-openai-wg = {

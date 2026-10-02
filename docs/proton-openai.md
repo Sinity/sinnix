@@ -16,7 +16,8 @@ Consumers:
   Electron/Chromium with `--proxy-server`.
 - The default subscription-authenticated `codex` wrapper exports HTTP(S)
   proxy variables. `codex-deepseek` and `codex-local` remain direct.
-- Chrome uses `/etc/sinnix/openai-proxy.pac`; only ChatGPT/OpenAI origins are
+- Chrome receives an inline data URL rendered from the same script as
+  `/etc/sinnix/openai-proxy.pac`; only ChatGPT/OpenAI origins are
   proxied and every other site is `DIRECT`.
 
 The lane is fail-closed for participating clients: if the tunnel/proxy is down,
