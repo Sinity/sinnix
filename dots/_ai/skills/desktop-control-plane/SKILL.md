@@ -132,10 +132,18 @@ sinnix-chrome-control list-tabs
 sinnix-chrome-control wait-selector <page_id> --selector 'main'
 sinnix-chrome-control get-text <page_id>
 
+# Insert a whole prompt without per-character typing or clipboard changes
+sinnix-chrome-control inject-text <page_id> \
+  --selector '[role="textbox"][contenteditable="true"]' --text-file /path/to/prompt.txt
+
 # Attach local context without a file-picker dialog
 sinnix-chrome-control upload-files <page_id> \
   --selector 'input[type=file]' --file /path/to/context.md
 ```
+
+For ChatGPT prompts, model selection, video uploads and Deep Research, use
+[the ChatGPT workflow](references/chatgpt.md). Complete conversation reads
+belong to [chatgpt-conversations](../chatgpt-conversations/SKILL.md).
 
 ### Browser Focus Safety
 

@@ -46,6 +46,11 @@ let
   # the defaults below (owner = username, mode = "0400", exportEnv = true).
   # Add a special-cased secret by adding one attrset entry -- no control flow.
   secretMeta = {
+    "proton-openai-wireguard" = {
+      owner = "root";
+      group = "root";
+      exportEnv = false;
+    };
     "github-token" = {
       group = "nixbld";
       mode = "0440";

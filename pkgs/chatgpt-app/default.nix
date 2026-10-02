@@ -126,7 +126,16 @@ let
         cat "$state/current/resources/linux-package-metadata.json"
         exit "$update_failed"
       fi
-      exec "$state/current/ChatGPT" --ozone-platform=wayland "$@"
+      proxy_args=()
+      if [ -r /etc/sinnix/openai-proxy-url ]; then
+        read -r proxy_url </etc/sinnix/openai-proxy-url
+        proxy_args+=(--proxy-server="$proxy_url")
+        export HTTP_PROXY="$proxy_url" HTTPS_PROXY="$proxy_url"
+        export http_proxy="$proxy_url" https_proxy="$proxy_url"
+        export NO_PROXY="127.0.0.1,localhost,::1" no_proxy="127.0.0.1,localhost,::1"
+        export NODE_USE_ENV_PROXY=1
+      fi
+      exec "$state/current/ChatGPT" --ozone-platform=wayland "''${proxy_args[@]}" "$@"
     '';
   };
   desktop = runCommand "chatgpt-desktop" { } ''

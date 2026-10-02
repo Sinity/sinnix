@@ -94,8 +94,8 @@ Commands:
   navigate <page_id> --url <url>  Navigate a page to a new URL
   reload <page_id>                Reload a page
 
-  inject-text <page_id> --text <text> [--selector <css>]
-                                  Type text into the focused element or a specific selector
+  inject-text <page_id> (--text <text> | --text-file <path>) [--selector <css>]
+                                  Insert UTF-8 text in one CDP operation, without changing the clipboard
 
   click <page_id> --selector <css>   Click an element matching CSS selector
   get-text <page_id> [--selector <css>]
@@ -123,6 +123,7 @@ Examples:
   sinnix-chrome-control new-tab --background --url https://example.com
   sinnix-chrome-control upload-files <id> --selector 'input[type=file]' --file /path/to/report.md
   sinnix-chrome-control fill-form <id> --selector '#search' --value 'my query'
+  sinnix-chrome-control inject-text <id> --selector '[contenteditable=true]' --text-file /path/to/prompt.txt
   sinnix-chrome-control click <id> --selector 'button.submit'
   sinnix-chrome-control navigate <id> --url 'https://example.com'
   sinnix-chrome-control load-extension --path /realm/project/polylogue/browser-extension
@@ -1269,11 +1270,18 @@ reload)
 inject-text)
   page_id=""
   text=""
+  text_file=""
+  text_provided=false
   selector=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
     --text)
       text="${2:?missing text}"
+      text_provided=true
+      shift 2
+      ;;
+    --text-file)
+      text_file="${2:?missing text file}"
       shift 2
       ;;
     --selector)
@@ -1291,10 +1299,19 @@ inject-text)
       ;;
     esac
   done
-  [[ -n $page_id && -n $text ]] || {
-    echo "inject-text requires page_id and --text" >&2
+  [[ -n $page_id ]] && { [[ $text_provided == true && -z $text_file ]] || [[ $text_provided == false && -n $text_file ]]; } || {
+    echo "inject-text requires page_id and exactly one of --text or --text-file" >&2
     exit 2
   }
+  if [[ -n $text_file ]]; then
+    [[ -f $text_file && -r $text_file && -s $text_file ]] || {
+      echo "text file must be a readable, nonempty file: $text_file" >&2
+      exit 2
+    }
+    type_params=$(jq -nc --rawfile text "$text_file" '{text: $text}')
+  else
+    type_params=$(jq -nc --arg text "$text" '{text: $text}')
+  fi
   page_id=$(resolve_page_id "$page_id")
   ws_url=$(get_ws_url "$page_id")
   [[ -n $ws_url ]] || {
@@ -1302,19 +1319,19 @@ inject-text)
     exit 1
   }
 
-  # If selector given, focus it first
+  # Fail before insertion if the requested field cannot receive focus.
   if [[ -n $selector ]]; then
-    focus_params=$(jq -nc --arg sel "$selector" '{expression: "document.querySelector(\($sel|tojson)).focus()", returnByValue: true}')
-    cdp_send "$ws_url" "Runtime.evaluate" "$focus_params" >/dev/null 2>&1 || true
+    focus_params=$(jq -nc --arg sel "$selector" '{expression: "(()=>{const e=document.querySelector(\($sel|tojson));if(!e)return false;e.focus();return document.activeElement===e||e.contains(document.activeElement);})()", returnByValue: true}')
+    focus_result=$(cdp_send_with_result "$ws_url" "Runtime.evaluate" "$focus_params")
+    jq -e '.result.value == true and (.exceptionDetails == null)' >/dev/null <<<"$focus_result" || {
+      echo "text target could not be focused: $selector" >&2
+      exit 1
+    }
   fi
 
-  # Use Input.dispatchKeyEvent for each character (handles React/Vue)
-  for ((i = 0; i < ${#text}; i++)); do
-    char="${text:i:1}"
-    # Send char event
-    type_params=$(jq -nc --arg c "$char" '{type: "char", text: $c, unmodifiedText: $c}')
-    cdp_send "$ws_url" "Input.dispatchKeyEvent" "$type_params" >/dev/null 2>&1 || true
-  done
+  # Browser-native editing preserves input events, Unicode and newlines without
+  # a WebSocket transaction per character or an OS clipboard/focus dependency.
+  cdp_send_with_result "$ws_url" "Input.insertText" "$type_params" >/dev/null
   echo "ok"
   ;;
 
