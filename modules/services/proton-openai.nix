@@ -45,7 +45,7 @@ mkServiceModule {
     };
   };
   configFn =
-    { cfg, pkgs, ... }:
+    { cfg, pkgs, config, ... }:
     let
       runtimeDir = "/run/sinnix/proton-openai";
       proxyUrl = "http://127.0.0.1:${toString cfg.proxyPort}";
@@ -129,13 +129,14 @@ mkServiceModule {
 
           ip -4 route replace unreachable default metric 32767 table "$table"
           ip -4 route replace default dev "$ifname" metric 10 table "$table"
-          ip -6 route replace default dev "$ifname" table "$table" 2>/dev/null || true
+          ip -6 route replace unreachable default metric 32767 table "$table"
+          ip -6 route replace default dev "$ifname" metric 10 table "$table"
 
           while IFS= read -r address; do
             source="''${address%/*}"
             case "$address" in
-              *:*) ip -6 rule add from "$source" table "$table" priority 120 2>/dev/null || true ;;
-              *)   ip -4 rule add from "$source" table "$table" priority 120 2>/dev/null || true ;;
+              *:*) ip -6 rule add from "$source" table "$table" priority 120 ;;
+              *)   ip -4 rule add from "$source" table "$table" priority 120 ;;
             esac
           done <<<"$addresses"
 
@@ -169,14 +170,14 @@ mkServiceModule {
           ifname=${lib.escapeShellArg interfaceName}
           table=${toString routingTable}
 
-          while ip -4 rule show | grep -q "lookup $table"; do
-            priority="$(ip -4 rule show | awk -v t="$table" '$0 ~ "lookup " t { sub(/:.*/, "", $1); print $1; exit }')"
+          while ip -4 rule show | grep -qE "lookup $table([[:space:]]|$)"; do
+            priority="$(ip -4 rule show | awk -v t="$table" '$0 ~ "lookup " t "([[:space:]]|$)" { sub(/:.*/, "", $1); print $1; exit }')"
             [ -n "$priority" ] || break
             ip -4 rule del priority "$priority" 2>/dev/null || break
           done
 
-          while ip -6 rule show | grep -q "lookup $table"; do
-            priority="$(ip -6 rule show | awk -v t="$table" '$0 ~ "lookup " t { sub(/:.*/, "", $1); print $1; exit }')"
+          while ip -6 rule show | grep -qE "lookup $table([[:space:]]|$)"; do
+            priority="$(ip -6 rule show | awk -v t="$table" '$0 ~ "lookup " t "([[:space:]]|$)" { sub(/:.*/, "", $1); print $1; exit }')"
             [ -n "$priority" ] || break
             ip -6 rule del priority "$priority" 2>/dev/null || break
           done
@@ -252,6 +253,8 @@ mkServiceModule {
         before = [ "proton-openai-proxy.service" ];
         after = [ "network-online.target" ];
         wants = [ "network-online.target" ];
+        restartTriggers = lib.optional (config.age.secrets ? proton-openai-wireguard)
+          config.age.secrets.proton-openai-wireguard.file;
         serviceConfig = {
           Type = "oneshot";
           RemainAfterExit = true;
