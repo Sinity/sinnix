@@ -59,12 +59,14 @@ fi
 id="$(jq -r '.id' <<<"$request")"
 method="$(jq -r '.method' <<<"$request")"
 printf '%s\t%s\n' "$id" "$method" >>"$state/request-ids"
+printf '%s\n' "$request" >>"$state/requests.jsonl"
 
 respond() {
   jq -nc --argjson id "$id" --arg method "$method" '
     if $method == "Target.createTarget" then {id: $id, result: {targetId: "agent-target"}}
     elif $method == "Page.navigate" then {id: $id, result: {frameId: "frame-agent"}}
     elif $method == "Target.closeTarget" then {id: $id, result: {success: true}}
+    elif $method == "Runtime.evaluate" then {id: $id, result: {result: {type: "boolean", value: (env.FAKE_FOCUS_RESULT != "false")}}}
     else {id: $id, result: {}}
     end'
 }
@@ -96,6 +98,13 @@ Target.closeTarget)
   ;;
 Page.navigate)
   jq -r '.params.url' <<<"$request" >"$state/navigated-url"
+  ;;
+Input.insertText)
+  if [[ ${FAKE_INSERT_ERROR:-false} == true ]]; then
+    jq -nc --argjson id "$id" '{id: $id, error: {code: -32000, message: "fixture insertion rejected"}}'
+    exit 0
+  fi
+  jq -j '.params.text' <<<"$request" >"$state/inserted-text"
   ;;
 esac
 
@@ -320,12 +329,75 @@ assert_activation_before_park_reproduced() {
   test "$(cat "$state/focus-workspace-actions")" = activation-before-park
 }
 
+assert_bulk_text() {
+  local state="$fixture_root/bulk-text" status
+  mkdir -p "$state"
+  touch "$state/agent-target"
+  printf '%s\n' '<title>agent-target</title>' >"$state/marker-url"
+  printf 'Unicode: żółw 🤖; quotes: "hello"; literal: $() `cmd`\n' >"$state/prompt.txt"
+  printf '%06000d\n\n' 0 >>"$state/prompt.txt"
+  env PATH="$fixture_root/bin:$PATH" FAKE_STATE="$state" FAKE_CDP_SCENARIO=match \
+    "$helper" inject-text agent-target --selector '[contenteditable=true]' --text-file "$state/prompt.txt" \
+    >"$state/stdout" 2>"$state/stderr" || {
+    cat "$state/stderr" >&2
+    return 1
+  }
+  cmp "$state/prompt.txt" "$state/inserted-text"
+  jq -se 'length == 2 and .[0].method == "Runtime.evaluate" and .[1].method == "Input.insertText"' \
+    "$state/requests.jsonl" >/dev/null
+
+  : >"$state/requests.jsonl"
+  env PATH="$fixture_root/bin:$PATH" FAKE_STATE="$state" FAKE_CDP_SCENARIO=match \
+    "$helper" inject-text agent-target --text $'direct: żółw 🤖\n' >"$state/stdout" 2>"$state/stderr"
+  cmp <(printf 'direct: żółw 🤖\n') "$state/inserted-text"
+  jq -se 'length == 1 and .[0].method == "Input.insertText"' "$state/requests.jsonl" >/dev/null
+
+  : >"$state/requests.jsonl"
+  status=0
+  env PATH="$fixture_root/bin:$PATH" FAKE_STATE="$state" FAKE_CDP_SCENARIO=match FAKE_FOCUS_RESULT=false \
+    "$helper" inject-text agent-target --selector '#missing' --text test \
+    >"$state/stdout" 2>"$state/stderr" || status=$?
+  test "$status" = 1
+  jq -se 'length == 1 and .[0].method == "Runtime.evaluate"' "$state/requests.jsonl" >/dev/null
+  grep -Fq 'text target could not be focused' "$state/stderr"
+
+  status=0
+  env PATH="$fixture_root/bin:$PATH" FAKE_STATE="$state" FAKE_CDP_SCENARIO=match FAKE_INSERT_ERROR=true \
+    "$helper" inject-text agent-target --text test >"$state/stdout" 2>"$state/stderr" || status=$?
+  test "$status" = 1
+  test ! -s "$state/stdout"
+  grep -Fq 'fixture insertion rejected' "$state/stderr"
+
+  for invalid in both missing empty; do
+    local -a args
+    case "$invalid" in
+    both) args=(--text test --text-file "$state/prompt.txt") ;;
+    missing) args=(--text-file "$state/not-found") ;;
+    empty)
+      : >"$state/empty.txt"
+      args=(--text-file "$state/empty.txt")
+      ;;
+    esac
+    : >"$state/requests.jsonl"
+    status=0
+    env PATH="$fixture_root/bin:$PATH" FAKE_STATE="$state" FAKE_CDP_SCENARIO=match \
+      "$helper" inject-text agent-target "${args[@]}" >"$state/stdout" 2>"$state/stderr" || status=$?
+    test "$status" = 2
+    test ! -s "$state/requests.jsonl"
+  done
+  printf 'bulk text: exact Unicode/newlines, single insertion, focus guard, visible CDP errors, invalid inputs passed\n'
+}
+
 mode="${1:-final}"
 case "$mode" in
+input-text)
+  assert_bulk_text
+  ;;
 reproduce)
   assert_activation_before_park_reproduced
   ;;
 final)
+  assert_bulk_text
   assert_fake_wire_rejects_out_of_range_id
   assert_activation_before_park_reproduced
 
@@ -406,7 +478,7 @@ final)
   assert_rules_cleaned "$state"
   ;;
 *)
-  printf 'usage: %s [reproduce|final]\n' "$0" >&2
+  printf 'usage: %s [input-text|reproduce|final]\n' "$0" >&2
   exit 2
   ;;
 esac
