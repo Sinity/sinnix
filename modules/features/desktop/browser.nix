@@ -39,6 +39,7 @@ mkFeatureModule {
       ...
     }:
     let
+      nixosConfig = config;
       repoRoot = config.sinnix.paths.projectRoot;
       activityRoot = config.sinnix.paths.activityRoot;
       navigationPort = helpers.data.ports.browserNavigation;
@@ -150,18 +151,23 @@ mkFeatureModule {
           # Side effect: loopback-only debug port allows local processes to
           # read cookies via CDP. Acceptable on this single-user machine.
           chromeUserDataDir = "${config.home.homeDirectory}/.config/chrome-ws";
-          chromeArgs = lib.concatStringsSep " " [
-            "--disable-features=WaylandWpColorManagerV1"
-            "--remote-debugging-port=9222"
-            "--remote-debugging-address=127.0.0.1"
-            "--user-data-dir=${chromeUserDataDir}"
-            # Chrome-family apps register with AT-SPI but expose an empty tree
-            # unless renderer accessibility is forced on. Without it the
-            # capture-a11y lane sees focus events from Chrome windows with no
-            # readable content -- and Chrome is where most of the readable
-            # content on this desktop lives. See modules/services/capture-a11y.nix.
-            "--force-renderer-accessibility"
-          ];
+          chromeArgs = lib.concatStringsSep " " (
+            [
+              "--disable-features=WaylandWpColorManagerV1"
+              "--remote-debugging-port=9222"
+              "--remote-debugging-address=127.0.0.1"
+              "--user-data-dir=${chromeUserDataDir}"
+              # Chrome-family apps register with AT-SPI but expose an empty tree
+              # unless renderer accessibility is forced on. Without it the
+              # capture-a11y lane sees focus events from Chrome windows with no
+              # readable content -- and Chrome is where most of the readable
+              # content on this desktop lives. See modules/services/capture-a11y.nix.
+              "--force-renderer-accessibility"
+            ]
+            ++ lib.optionals nixosConfig.sinnix.services.proton-openai.enable [
+              "--proxy-pac-url=file:///etc/sinnix/openai-proxy.pac"
+            ]
+          );
           chromePkg = pkgs.google-chrome.override {
             commandLineArgs = chromeArgs;
           };

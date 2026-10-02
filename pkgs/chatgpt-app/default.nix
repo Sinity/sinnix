@@ -126,7 +126,12 @@ let
         cat "$state/current/resources/linux-package-metadata.json"
         exit "$update_failed"
       fi
-      exec "$state/current/ChatGPT" --ozone-platform=wayland "$@"
+      proxy_args=()
+      if [ -r /etc/sinnix/openai-proxy-url ]; then
+        read -r proxy_url </etc/sinnix/openai-proxy-url
+        proxy_args+=(--proxy-server="$proxy_url")
+      fi
+      exec "$state/current/ChatGPT" --ozone-platform=wayland "''${proxy_args[@]}" "$@"
     '';
   };
   desktop = runCommand "chatgpt-desktop" { } ''

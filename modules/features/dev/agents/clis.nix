@@ -398,8 +398,20 @@ mkFeatureModule {
                     (lib.optionalAttrs (lane ? env) {
                       profile = lane.mcpProfile;
                     })
-                    // lib.optionalAttrs (lane ? env) {
-                      extraEnv = mkCodexBackendEnv ({ inherit name; } // lane.env);
+                    // {
+                      extraEnv =
+                        if lane ? env then
+                          mkCodexBackendEnv ({ inherit name; } // lane.env)
+                        else
+                          ''
+                            if [ -r /etc/sinnix/openai-proxy-url ]; then
+                              read -r proxy_url </etc/sinnix/openai-proxy-url
+                              export HTTP_PROXY="$proxy_url" HTTPS_PROXY="$proxy_url"
+                              export http_proxy="$proxy_url" https_proxy="$proxy_url"
+                              export NO_PROXY="127.0.0.1,localhost,::1"
+                              export no_proxy="$NO_PROXY"
+                            fi
+                          '';
                     }
                   )
                 )
