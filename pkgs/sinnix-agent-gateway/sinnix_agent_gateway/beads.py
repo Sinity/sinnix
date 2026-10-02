@@ -4,12 +4,13 @@ import hashlib
 import json
 import os
 import re
+import sqlite3
 import tempfile
 import time
 from dataclasses import replace
 from difflib import unified_diff
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
 
 from .capabilities import Capability, Principal
 from .config import GatewayConfig, ProjectConfig, TaskAuthorityConfig
@@ -418,7 +419,7 @@ class BeadsService:
         self,
         key: str,
         source_revision: str,
-        rows: list[dict[str, Any]],
+        rows: Iterable[dict[str, Any]],
         limit: int,
         cursor: str | None,
         metadata: dict[str, Any] | None = None,
@@ -530,65 +531,97 @@ class BeadsService:
             rows, page = self._snapshot_page(key, "", [], page_limit, cursor)
             metadata = page.pop("metadata")
             return {"kind": "bead_query", "items": rows, "page": page, **metadata}
-        rows, coverage, revisions, temporals = [], {}, {}, {}
+        coverage, revisions, temporals = {}, {}, {}
+        with tempfile.TemporaryDirectory() as scratch:
+            database = sqlite3.connect(Path(scratch) / "rows.sqlite")
+            try:
+                return self._collect_query_pages(
+                    database, projects, key, page_limit, view, filters,
+                    expression, native_filters, order, includes, at, projection,
+                    aggregate, coverage, revisions, temporals,
+                )
+            finally:
+                database.close()
+
+    def _collect_query_pages(
+        self, database: sqlite3.Connection, projects: list[str],
+        key: str, page_limit: int, view: str, filters: Mapping[str, Any] | None,
+        expression: str | None, native_filters: Mapping[str, Any] | None,
+        order: Mapping[str, Any] | None, includes: list[str] | None,
+        at: str | None, projection: str, aggregate: Mapping[str, Any] | None,
+        coverage: dict[str, Any], revisions: dict[str, str],
+        temporals: dict[str, Any],
+    ) -> dict[str, Any]:
+        database.execute(
+            "CREATE TABLE rows (seq INTEGER PRIMARY KEY, project TEXT, bead_id TEXT, "
+            "present INTEGER, sort_value, body TEXT)"
+        )
+        field = (order or {}).get("field", "updated" if view == "recent" else "priority")
+        column = {"type": "issue_type", "created": "created_at", "updated": "updated_at", "closed": "closed_at"}.get(field, field)
         for project_id in sorted(projects):
             try:
+                database.execute("SAVEPOINT project_read")
                 project, _ = self._attest(project_id, False)
-                owner = self._run(
-                    project,
-                    ["owner", "read"],
-                    False,
-                    payload={
+                offset = 0
+                revision = None
+                returned = 0
+                while True:
+                    owner = self._run(project, ["owner", "read"], False, payload={
                         "view": view,
                         "filters": filters or {},
                         "native_filters": native_filters or {},
                         "order": order or {},
                         "include": includes or [],
-                        "limit": 0,
+                        "limit": _MAX_PAGE,
+                        "offset": offset,
                         "projection": projection,
                         **({"expression": expression} if expression else {}),
                         **({"at": at} if at else {}),
                         **({"aggregate": aggregate} if aggregate is not None else {}),
-                    },
-                )
-                revision = owner["revision"]
+                    })
+                    if revision is not None and owner["revision"] != revision:
+                        raise BeadsError("Beads changed during paged read", "source_changed")
+                    revision = owner["revision"]
+                    native_rows = owner["items"]
+                    if not isinstance(native_rows, list) or (owner["has_more"] and not native_rows):
+                        raise BeadsError("Beads returned an invalid page", "owner_failed")
+                    for row in native_rows:
+                        normalized = (
+                            {"project_id": project_id, "fields": row, "task_revision": revision}
+                            if aggregate is not None else
+                            {**self._normalize(project_id, row, revision), "includes": row.get("includes", {})}
+                        )
+                        value = normalized["id"] if field == "id" and aggregate is None else normalized["fields"].get(column)
+                        database.execute(
+                            "INSERT INTO rows (project, bead_id, present, sort_value, body) VALUES (?, ?, ?, ?, ?)",
+                            (project_id, normalized.get("id", ""), int(value is not None),
+                             value if isinstance(value, (int, float, str)) else str(value) if value is not None else "",
+                             json.dumps(normalized, separators=(",", ":"))),
+                        )
+                    returned += len(native_rows)
+                    offset += len(native_rows)
+                    if not owner["has_more"]:
+                        break
                 temporal = owner.get("temporal")
-                native_rows = owner["items"]
                 details = {
                     "truncated": owner["has_more"],
                     "total": owner["total"],
                     "total_exact": owner["total_exact"],
                     "owner_coverage": owner.get("closure"),
                 }
-                normalized = (
-                    [
-                        {
-                            "project_id": project_id,
-                            "fields": row,
-                            "task_revision": revision,
-                        }
-                        for row in native_rows
-                    ]
-                    if aggregate is not None
-                    else [
-                        {
-                            **self._normalize(project_id, row, revision),
-                            "includes": row.get("includes", {}),
-                        }
-                        for row in native_rows
-                    ]
-                )
-                rows.extend(normalized)
                 revisions[project_id] = revision
                 temporals[project_id] = temporal
                 coverage[project_id] = {
                     "state": "partial" if details["truncated"] else "complete",
-                    "returned": len(normalized),
+                    "returned": returned,
                     "revision": revision,
                     **details,
                 }
+                database.execute("RELEASE SAVEPOINT project_read")
             except BeadsError as exc:
-                if exc.code == "invalid_request" and project_id in self.config.projects:
+                database.execute("ROLLBACK TO SAVEPOINT project_read")
+                database.execute("RELEASE SAVEPOINT project_read")
+                if exc.code in {"invalid_request", "source_changed"} and project_id in self.config.projects:
                     raise
                 coverage[project_id] = {
                     "state": "partial",
@@ -597,31 +630,20 @@ class BeadsService:
                     "total_exact": False,
                 }
         if aggregate is None:
-            field = (order or {}).get(
-                "field", "updated" if view == "recent" else "priority"
-            )
-            column = {
-                "type": "issue_type",
-                "created": "created_at",
-                "updated": "updated_at",
-                "closed": "closed_at",
-            }.get(field, field)
-            rows.sort(key=lambda row: (row["project_id"], row["id"]))
             reverse = (field in {"created", "updated", "closed"}) != bool(
                 (order or {}).get("reverse", False)
             )
-
-            def sort_value(row: dict[str, Any]) -> tuple[bool, Any]:
-                value = row["id"] if field == "id" else row["fields"].get(column)
-                return value is not None, value if value is not None else ""
-
-            rows.sort(key=sort_value, reverse=reverse)
+            direction = "DESC" if reverse else "ASC"
+            ordering = f"present {direction}, sort_value {direction}, project ASC, bead_id ASC"
+        else:
+            ordering = "seq ASC"
+        total_rows = database.execute("SELECT COUNT(*) FROM rows").fetchone()[0]
         metadata = {
             "coverage": coverage,
             "source_revisions": revisions,
             "temporal": temporals,
             "totals": {
-                "returned": len(rows),
+                "returned": total_rows,
                 "matched": sum(item.get("total", 0) for item in coverage.values()),
                 "projects": len(projects),
                 "healthy_projects": sum(
@@ -638,7 +660,7 @@ class BeadsService:
             "owner_capabilities": {
                 "native_expression_parse": True,
                 "native_owner_read": True,
-                "native_offset_paging": False,
+                "native_offset_paging": True,
                 "exact_query_total": True,
                 "server_projection": True,
             },
@@ -652,7 +674,9 @@ class BeadsService:
             json.dumps(revisions, sort_keys=True).encode()
         ).hexdigest()
         page_rows, page = self._snapshot_page(
-            key, revision_key, rows, page_limit, None, metadata
+            key, revision_key,
+            (json.loads(body) for (body,) in database.execute(f"SELECT body FROM rows ORDER BY {ordering}")),
+            page_limit, None, metadata
         )
         page.pop("metadata")
         return {"kind": "bead_query", "items": page_rows, "page": page, **metadata}

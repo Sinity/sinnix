@@ -89,19 +89,26 @@ def test_query_over_ten_thousand_rows_preserves_requested_immutable_pages(
         for i in range(10001)
     ]
 
+    requests = []
+
     def read(_project, command, write, **kwargs):
         assert command == ["owner", "read"] and not write
+        request = kwargs["payload"]
+        requests.append((request["offset"], request["limit"]))
+        offset, limit = request["offset"], request["limit"]
         return {
             "revision": REVISION,
-            "items": rows,
+            "items": rows[offset : offset + limit],
             "total": len(rows),
             "total_exact": True,
-            "has_more": False,
+            "has_more": offset + limit < len(rows),
         }
 
     monkeypatch.setattr(service, "_run", read)
     first = service.query(project_ids=["fixture"], view="all", limit=10000)
     assert len(first["items"]) == 10000 and first["page"]["total"] == 10001
+    assert requests[0] == (0, 200)
+    assert requests[-1] == (10000, 200)
     monkeypatch.setattr(
         service, "_run", lambda *a, **kw: pytest.fail("continuation reread the owner")
     )
@@ -113,3 +120,28 @@ def test_query_over_ten_thousand_rows_preserves_requested_immutable_pages(
     )
     assert len(last["items"]) == 1
     assert last["items"][0]["id"] == "fixture-10000"
+
+
+def test_paged_query_rejects_revision_change(tmp_path, monkeypatch):
+    service, _ = beads_service(tmp_path)
+    project = service.config.projects["fixture"]
+    monkeypatch.setattr(service, "_attest", lambda *_: (project, {"revision": REVISION}))
+
+    def read(_project, command, write, **kwargs):
+        assert command == ["owner", "read"] and not write
+        offset = kwargs["payload"]["offset"]
+        return {
+            "revision": REVISION if offset == 0 else "changed-revision",
+            "items": [
+                {"id": f"fixture-{number:03d}", "title": "item", "status": "open"}
+                for number in range(offset, min(offset + 200, 201))
+            ],
+            "total": 201,
+            "total_exact": True,
+            "has_more": offset == 0,
+        }
+
+    monkeypatch.setattr(service, "_run", read)
+    with pytest.raises(BeadsError) as caught:
+        service.query(project_ids=["fixture"], view="all", limit=2)
+    assert caught.value.code == "source_changed"

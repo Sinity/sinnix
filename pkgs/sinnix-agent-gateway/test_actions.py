@@ -694,7 +694,7 @@ def test_files_search_paths_and_content(tmp_path: Path) -> None:
     assert limited["data"]["returned"] == 1 and limited["data"]["truncated"] is True
 
 
-def test_files_search_streams_long_matches_to_the_result_artifact(
+def test_files_search_streams_long_matches_to_the_overflow_artifact(
     tmp_path: Path,
 ) -> None:
     server = create_server(config(tmp_path), "operator")
@@ -718,12 +718,12 @@ def test_files_search_streams_long_matches_to_the_result_artifact(
             },
         )
     )
-    artifact_id = response["data"]["artifact"]["artifact_id"]
+    assert response["data"]["truncated"] is False
+    assert response["data"]["matches"][0]["match_count"] == 1
+    artifact_id = response["data"]["overflow"]["artifact_id"]
     source = runtime.artifacts._metadata(artifact_id)["_source"]
-    payload = json.loads(source.read_text())
-
-    assert payload["truncated"] is False
-    assert payload["matches"][0]["lines"][0]["text"] == long_line
+    payload = json.loads(source.read_text().splitlines()[0])
+    assert payload["text"] == long_line
 
 
 def test_files_search_timeout_reports_the_complete_streamed_prefix(
@@ -1329,6 +1329,25 @@ def test_files_search_keeps_a_bounded_page_of_one_huge_file_and_spills_the_rest(
     tail = base64.b64decode(page["base64"]).decode().splitlines()[-1]
     assert json.loads(tail)["text"] == "needle 10000"
     assert json.loads(tail)["line_number"] == 10_000
+
+
+def test_files_search_spills_lines_across_files_after_inline_budget(tmp_path: Path) -> None:
+    cfg = replace(config(tmp_path), max_result_bytes=1_024)
+    runtime = create_server(cfg, "operator")._sinnix_revision_publisher.runtime
+    root = tmp_path / "many-matches"
+    root.mkdir()
+    for number in range(12):
+        (root / f"{number:02d}.txt").write_text("needle " + "x" * 200 + "\n")
+
+    result = files._search(
+        runtime,
+        files.SearchInput(roots=[{"path": str(root)}], content_regex="needle", limit=12),
+    )
+    assert result.returned == 12
+    assert sum(len(match.lines) + match.overflow_lines for match in result.matches) == 12
+    assert result.overflow is not None
+    assert result.overflow.lines == sum(match.overflow_lines for match in result.matches)
+    assert result.overflow.lines > 0
 
 
 def test_files_search_reports_malformed_records_but_not_valid_summaries(
