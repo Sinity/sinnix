@@ -45,7 +45,12 @@ mkServiceModule {
     };
   };
   configFn =
-    { cfg, pkgs, config, ... }:
+    {
+      cfg,
+      pkgs,
+      config,
+      ...
+    }:
     let
       runtimeDir = "/run/sinnix/proton-openai";
       proxyUrl = "http://127.0.0.1:${toString cfg.proxyPort}";
@@ -253,8 +258,9 @@ mkServiceModule {
         before = [ "proton-openai-proxy.service" ];
         after = [ "network-online.target" ];
         wants = [ "network-online.target" ];
-        restartTriggers = lib.optional (config.age.secrets ? proton-openai-wireguard)
-          config.age.secrets.proton-openai-wireguard.file;
+        restartTriggers = lib.optional (
+          config.age.secrets ? proton-openai-wireguard
+        ) config.age.secrets.proton-openai-wireguard.file;
         serviceConfig = {
           Type = "oneshot";
           RemainAfterExit = true;
