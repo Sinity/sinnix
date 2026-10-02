@@ -140,6 +140,7 @@ let
     sinnix-lib = externalPackages.sinnix-lib;
     beads = externalPackages.beads;
   };
+  agentctlToolingPackage = agentctlPackage.overridePythonAttrs (_: { doCheck = false; });
   agentGatewayPackage = pkgs.callPackage ../pkgs/sinnix-agent-gateway/pkg.nix {
     polylogue-contract-source = inputs.polylogue;
     lynchpin-contract-source = inputs.lynchpin;
@@ -147,6 +148,13 @@ let
     sinnix-lib = externalPackages.sinnix-lib;
     agentctl = agentctlPackage;
   };
+  agentGatewayToolingPackage = (pkgs.callPackage ../pkgs/sinnix-agent-gateway/pkg.nix {
+    polylogue-contract-source = inputs.polylogue;
+    lynchpin-contract-source = inputs.lynchpin;
+    beads-owner = externalPackages.beads;
+    sinnix-lib = externalPackages.sinnix-lib;
+    agentctl = agentctlToolingPackage;
+  }).overridePythonAttrs (_: { doCheck = false; });
 
   mkSanitizedPythonWrapper =
     {
@@ -373,10 +381,9 @@ let
     # stays on `agentctl` for the suite check and the deployed service; a
     # worktree with red work-in-progress tests must still produce a usable
     # environment or continuation lanes can never start to fix it.
-    agentctl-tooling = agentctlPackage.overridePythonAttrs (_: {
-      doCheck = false;
-    });
+    agentctl-tooling = agentctlToolingPackage;
     sinnix-agent-gateway = agentGatewayPackage;
+    sinnix-agent-gateway-tooling = agentGatewayToolingPackage;
     tunnel-client = pkgs.callPackage ../pkgs/tunnel-client { };
 
     chatgpt-app = pkgs.callPackage ../pkgs/chatgpt-app { };

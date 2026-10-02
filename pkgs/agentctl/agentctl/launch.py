@@ -854,7 +854,7 @@ def _owner_reference(key: str) -> str:
 
 
 def lookup_operation_request(
-    config: Config, owner_request_key: str
+    config: Config, owner_request_key: str, request_digest: str | None = None
 ) -> dict[str, Any] | None:
     """Reconcile the owner key against retained input and pueue; never submit.
 
@@ -875,6 +875,10 @@ def lookup_operation_request(
     if (
         not isinstance(document, dict)
         or document.get("owner_request_key") != owner_request_key
+        or (
+            request_digest is not None
+            and document.get("request_digest") != request_digest
+        )
     ):
         raise JobError(f"owner launch identity mismatch for {reference}")
     task = find_task(pueue.tasks(), document.get("queue_task_id", -1), reference)
@@ -888,6 +892,30 @@ def lookup_operation_request(
     raise EnqueueUncertain(
         reference, PueueError("retained launch has no acknowledged queue task")
     )
+
+
+def enqueue_request(
+    config: Config,
+    *,
+    owner_request_key: str,
+    request_digest: str,
+    **arguments: Any,
+) -> dict[str, Any]:
+    """Submit one keyed job, or read its exact retained launch under the key lock."""
+    reference = _owner_reference(owner_request_key)
+    config.inputs_dir.mkdir(parents=True, exist_ok=True)
+    with (config.inputs_dir / f"{reference}.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        existing = lookup_operation_request(config, owner_request_key, request_digest)
+        if existing is not None:
+            return existing
+        return enqueue(
+            config,
+            reference=reference,
+            owner_request_key=owner_request_key,
+            request_digest=request_digest,
+            **arguments,
+        )
 
 
 def start_operation(

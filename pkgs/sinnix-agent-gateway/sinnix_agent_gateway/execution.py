@@ -321,6 +321,14 @@ class LocalJobs:
         job = launch.lookup_operation_request(self.config, owner_request_key)
         return job_payload(job) if job is not None else None
 
+    def reconcile_shell_start(
+        self, owner_request_key: str, request_digest: str
+    ) -> dict[str, Any] | None:
+        job = launch.lookup_operation_request(
+            self.config, owner_request_key, request_digest
+        )
+        return job_payload(self._with_queue(job)) if job is not None else None
+
     def get(self, **arguments: Any) -> dict[str, Any]:
         return self._call(self._get, arguments)
 
@@ -720,16 +728,25 @@ class LocalJobs:
             if arguments.get("timeout_seconds") is None
             else _require_int(arguments, "timeout_seconds")
         )
-        job = launch.enqueue(
-            self.config,
-            project=project,
-            operation=SHELL_OPERATION,
-            label=launch.label_for(project.project_id, SHELL_OPERATION),
-            group=group,
-            argv=project.environment.command_for(argv),
-            working_directory=cwd,
-            timeout_seconds=timeout_seconds,
-            result_kind="exit",
-            environment=project.environment.values(),
-        )
+        owner_request_key = arguments.get("owner_request_key")
+        submission = {
+            "project": project,
+            "operation": SHELL_OPERATION,
+            "label": launch.label_for(project.project_id, SHELL_OPERATION),
+            "group": group,
+            "argv": project.environment.command_for(argv),
+            "working_directory": cwd,
+            "timeout_seconds": timeout_seconds,
+            "result_kind": "exit",
+            "environment": project.environment.values(),
+        }
+        if owner_request_key is not None:
+            job = launch.enqueue_request(
+                self.config,
+                owner_request_key=owner_request_key,
+                request_digest=_require_str(arguments, "request_digest"),
+                **submission,
+            )
+        else:
+            job = launch.enqueue(self.config, **submission)
         return job_payload(self._with_queue(job))

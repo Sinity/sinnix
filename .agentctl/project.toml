@@ -65,6 +65,20 @@ pool = "bulk"
 result = "exit"
 timeout_seconds = 1800
 
+[operations.pytest_focused]
+description = "Run selected AgentCTL and gateway Python tests"
+exec = ["nix", "develop", ".#gateway-tests", "--command", "gateway-pytest", "-q"]
+pool = "normal"
+result = "exit"
+timeout_seconds = 1800
+
+[operations.gateway_codegen]
+description = "Render the generated gateway catalog and skill from their source"
+exec = ["nix", "develop", ".#gateway-tests", "--command", "sinnix-agent-gateway-generate", "--root", ".", "--write"]
+pool = "normal"
+result = "exit"
+timeout_seconds = 1800
+
 [operations.verify_quick]
 description = "Run maintained lint and formatting checks before lane publication"
 exec = ["lint"]

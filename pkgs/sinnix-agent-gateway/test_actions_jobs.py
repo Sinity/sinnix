@@ -495,7 +495,7 @@ def test_operations_run_targets_the_root_or_a_linked_worktree(
 def test_shell_run_is_operator_only_and_keeps_cwd_inside_the_checkout(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    server, _, fake = make_server(tmp_path, "operator", monkeypatch)
+    server, runtime, fake = make_server(tmp_path, "operator", monkeypatch)
     fake.responses["job.shell.start"] = {
         **DONE,
         "job_id": "51",
@@ -518,7 +518,9 @@ def test_shell_run_is_operator_only_and_keeps_cwd_inside_the_checkout(
     assert started["data"]["group"] == "shell-quick"
     assert started["data"]["lane"] == "quick"
     assert started["data"]["outcome"] == "terminal"
-    assert fake.calls[-1].arguments == {
+    submitted = fake.calls[-1].arguments
+    assert len(submitted.pop("request_digest")) == 64
+    assert submitted == {
         "project_id": "fixture",
         "checkout_id": "default",
         "argv": ["git", "status"],
@@ -526,6 +528,7 @@ def test_shell_run_is_operator_only_and_keeps_cwd_inside_the_checkout(
         "group": "shell-quick",
         "timeout_seconds": 60,
         "result": "exit-status",
+        "owner_request_key": runtime.owner_request_key("shell.run", "sh-1"),
     }
     fake.errors["job.shell.start"] = (
         ErrorCode.POLICY_DENIED,

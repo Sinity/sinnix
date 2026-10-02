@@ -7,6 +7,8 @@ beads, checkout, pueue task id, and a typed next action on refusal.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import shlex
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any, Literal
@@ -885,6 +887,16 @@ class ShellRunResult(JobView):
     continuation: JobLocator | None = None
 
 
+def _shell_request_digest(inp: ShellRunInput) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            inp.model_dump(mode="json", exclude={"request_id"}),
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+
+
 def _start_shell(runtime: Runtime, inp: ShellRunInput, lane: str) -> dict[str, Any]:
     project_id, workspace, _ = _workspace(runtime, inp.checkout)
     if any(not argument for argument in inp.argv):
@@ -898,6 +910,23 @@ def _start_shell(runtime: Runtime, inp: ShellRunInput, lane: str) -> dict[str, A
         cwd=inp.cwd,
         group=shell_lanes.GROUPS[lane],
         timeout_seconds=inp.timeout_seconds,
+        owner_request_key=runtime.owner_request_key("shell.run", inp.idempotency_key),
+        request_digest=_shell_request_digest(inp),
+    )
+
+
+def _shell_result(result: Mapping[str, Any], lane: str, reason: str) -> ShellRunResult:
+    view = _job_view(result)
+    return ShellRunResult(
+        **view.model_dump(),
+        outcome=_progress(view),
+        lane=lane,
+        lane_reason=reason,
+        queue=_job_queue(result),
+        queue_unavailable=result.get("queue_unavailable"),
+        continuation=None
+        if view.state.terminal
+        else JobLocator(job_id=view.job_id, launch_reference=view.launch_reference),
     )
 
 
@@ -908,17 +937,7 @@ async def _run_shell(runtime: Runtime, inp: ShellRunInput) -> ShellRunResult:
     result = await anyio.to_thread.run_sync(_start_shell, runtime, inp, lane)
     view = _job_view(result)
     if not inp.wait:
-        return ShellRunResult(
-            **view.model_dump(),
-            outcome=_progress(view),
-            lane=lane,
-            lane_reason=reason,
-            queue=_job_queue(result),
-            queue_unavailable=result.get("queue_unavailable"),
-            continuation=None
-            if view.state.terminal
-            else JobLocator(job_id=view.job_id, launch_reference=view.launch_reference),
-        )
+        return _shell_result(result, lane, reason)
     target = JobLocator(job_id=view.job_id, launch_reference=view.launch_reference)
     waited = await _wait(
         runtime,
