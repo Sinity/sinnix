@@ -176,6 +176,7 @@ class Runtime:
     normalized_events: NormalizedEventService | None = None
     waits: BoundedWaitService | None = None
     tool_manifest: Callable[[], Awaitable[dict[str, Any]]] | None = None
+    publisher_status: Callable[[], dict[str, Any]] | None = None
 
     def principal_contract_hash(self) -> str:
         return _principal_contract(self.principal_name)
@@ -224,33 +225,25 @@ class Runtime:
         """Read real owner revisions used by the subscription publisher."""
         observations: dict[str, str] = {}
         for project_id in self.config.projects:
-            try:
-                summary = self.projects.summary(project_id)
-                latest = (
-                    summary.get("latest_commit")
-                    if isinstance(summary, Mapping)
-                    else None
-                )
-                revision = latest.get("id") if isinstance(latest, Mapping) else None
-                if isinstance(revision, str) and revision:
-                    observations[
-                        REGISTRY.reference("project", {"project_id": project_id})
-                    ] = revision
-            except Exception:
-                continue
-            try:
-                authority = self.beads.task_authority_status(project_id)
-                revision = (
-                    authority.get("revision")
-                    if isinstance(authority, Mapping)
-                    else None
-                )
-                if isinstance(revision, str) and revision:
-                    observations[f"sinnix://projects/{project_id}/task-authority"] = (
-                        revision
-                    )
-            except Exception:
-                continue
+            summary = self.projects.summary(project_id)
+            latest = (
+                summary.get("latest_commit")
+                if isinstance(summary, Mapping)
+                else None
+            )
+            revision = latest.get("id") if isinstance(latest, Mapping) else None
+            if isinstance(revision, str) and revision:
+                observations[
+                    REGISTRY.reference("project", {"project_id": project_id})
+                ] = revision
+            authority = self.beads.task_authority_status(project_id)
+            revision = (
+                authority.get("revision")
+                if isinstance(authority, Mapping)
+                else None
+            )
+            if isinstance(revision, str) and revision:
+                observations[f"sinnix://projects/{project_id}/task-authority"] = revision
         return observations
 
     async def gateway_status(
@@ -299,6 +292,8 @@ class Runtime:
                 else "degraded"
             )
         status["route_preflight"] = preflight
+        if self.publisher_status is not None:
+            status["subscription_publishers"] = self.publisher_status()
         return status
 
     def project_authority(

@@ -76,6 +76,10 @@ def create_server(
     subscription_bus = DemandAwareSubscriptionBus(InMemorySubscriptionBus())
     revision_publisher = OwnerRevisionPublisher(runtime, subscription_bus)
     event_publisher = EventSpoolPublisher(config.event_spool, subscription_bus)
+    runtime.publisher_status = lambda: {
+        "owner_revisions": revision_publisher.status(),
+        "event_spool": event_publisher.status(),
+    }
 
     @asynccontextmanager
     async def gateway_lifespan(_server: MCPServer):
