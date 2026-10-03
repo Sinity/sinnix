@@ -540,17 +540,24 @@ def test_unknown_input_field_is_typed_before_file_mutation(tmp_path: Path) -> No
     assert target.read_text() == "before\n"
 
 
+@pytest.mark.parametrize("via_core", [False, True])
 def test_mcp_adapter_distinguishes_omitted_fields_from_explicit_null(
-    tmp_path: Path,
+    tmp_path: Path, via_core: bool,
 ) -> None:
     server = create_server(config(tmp_path), "operator")
     target = tmp_path / "sample.txt"
     target.write_text("sample\n")
     request = {"target": {"path": str(target)}}
 
-    omitted = structured(call(server, "files.read", request))
-    nullable = structured(call(server, "files.read", {**request, "line_start": None}))
-    nonnullable = structured(call(server, "files.read", {**request, "offset": None}))
+    def read(arguments):
+        return structured(call(
+            server, "gateway.read" if via_core else "files.read",
+            {"action": "files.read", "arguments": arguments} if via_core else arguments,
+        ))
+
+    omitted = read(request)
+    nullable = read({**request, "line_start": None})
+    nonnullable = read({**request, "offset": None})
 
     assert omitted["result"]["outcome"] == "ok"
     assert nullable["result"]["outcome"] == "ok"
@@ -558,6 +565,25 @@ def test_mcp_adapter_distinguishes_omitted_fields_from_explicit_null(
     assert "offset" in {
         problem["field"] for problem in nonnullable["error"]["details"]["problems"]
     }
+
+
+def test_core_rejects_explicit_null_arguments_without_claiming_key(tmp_path: Path) -> None:
+    server = create_server(config(tmp_path), "operator")
+    invalid = structured(call(server, "gateway.change", {
+        "action": "files.change", "arguments": None,
+        "idempotency_key": "core-null", "request_id": "core-correlation",
+    }))
+    assert invalid["error"]["code"] == "invalid_request"
+    assert invalid["result"]["request_id"] == "core-correlation"
+    target = tmp_path / "after-invalid.txt"
+    valid = structured(call(server, "gateway.change", {
+        "action": "files.change",
+        "arguments": {"target": {"path": str(target)},
+                      "change": {"operation": "create", "content": "valid\n"}},
+        "idempotency_key": "core-null",
+    }))
+    assert valid["result"]["outcome"] == "ok"
+    assert target.read_text() == "valid\n"
 
 
 def test_validation_failure_keeps_only_valid_request_controls(

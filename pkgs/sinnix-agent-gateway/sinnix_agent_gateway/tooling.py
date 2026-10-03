@@ -250,13 +250,7 @@ async def _dispatch_core(
     """Select a leaf, then enter its ordinary tool path exactly once."""
     try:
         try:
-            request = core.Input.model_validate(
-                {
-                    key: value
-                    for key, value in arguments.items()
-                    if value is not None or key not in core.Input.model_fields
-                }
-            )
+            request = core.Input.model_validate(arguments)
         except ValidationError as exc:
             raise _validation_error(exc, core) from exc
         leaf = BY_NAME.get(request.action)
@@ -298,12 +292,12 @@ async def _dispatch_core(
         async def failing() -> Any:
             raise failure
 
-        refusal_context = {
-            key: value
-            for key, value in arguments.items()
-            if key in core.Input.model_fields and key not in {"action", "arguments"}
-        }
-        envelope = await runtime.execute_v2_async(core, failing, refusal_context)
+        envelope = await runtime.execute_v2_async(
+            core,
+            failing,
+            _safe_failure_controls(arguments),
+            validation_failure=failure,
+        )
         return CallToolResult(
             content=[_text_block(envelope)], structured_content=envelope, is_error=True
         )
